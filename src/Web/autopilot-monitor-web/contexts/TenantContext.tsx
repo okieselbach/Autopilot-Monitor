@@ -26,9 +26,10 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
   // Update tenant ID from authenticated user
   useEffect(() => {
     if (!isLoading && isAuthenticated && user) {
-      // Use tenant ID from authenticated user
+      // Use tenant ID from authenticated user's token
+      // This is the APPLICATION tenant ID, not the Azure AD tenant ID
       if (user.tenantId && user.tenantId !== tenantId) {
-        console.log(`[TenantContext] Setting tenant ID from auth: ${user.tenantId}`);
+        console.log(`[TenantContext] Setting application tenant ID from auth: ${user.tenantId}`);
         setTenantId(user.tenantId);
       }
     } else if (!isLoading && !isAuthenticated) {

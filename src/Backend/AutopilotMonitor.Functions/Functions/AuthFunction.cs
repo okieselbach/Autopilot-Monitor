@@ -64,8 +64,7 @@ public class AuthFunction
             upn,
             displayName,
             objectId,
-            isGalacticAdmin,
-            claims = principal.GetAllClaims() // For debugging
+            isGalacticAdmin
         };
 
         var response = req.CreateResponse(HttpStatusCode.OK);

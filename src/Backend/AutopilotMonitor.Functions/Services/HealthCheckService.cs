@@ -1,3 +1,5 @@
+using System.Security.Cryptography.X509Certificates;
+using AutopilotMonitor.Functions.Security;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
@@ -39,7 +41,8 @@ public class HealthCheckService
             CheckTableStorageAsync(),
             CheckConfigurationAsync(),
             CheckAuthenticationAsync(),
-            CheckSignalRAsync()
+            CheckSignalRAsync(),
+            CheckCertificateValidationAsync()
         };
 
         var completedChecks = await Task.WhenAll(checks);
@@ -241,6 +244,100 @@ public class HealthCheckService
         }
 
         return Task.FromResult(check);
+    }
+
+    /// <summary>
+    /// Checks certificate validation with test self-signed certificate
+    /// Demonstrates that self-signed certificates are properly rejected
+    /// </summary>
+    private Task<HealthCheck> CheckCertificateValidationAsync()
+    {
+        var check = new HealthCheck
+        {
+            Name = "Certificate Validation",
+            Description = "X.509 chain validation and security checks"
+        };
+
+        try
+        {
+            // Create a test self-signed certificate that mimics an attack
+            using var testCert = CreateTestSelfSignedCertificate();
+            var testCertBase64 = Convert.ToBase64String(testCert.Export(X509ContentType.Cert));
+
+            // Validate the test certificate - should FAIL
+            var validationResult = CertificateValidator.ValidateCertificate(testCertBase64, _logger);
+
+            if (!validationResult.IsValid)
+            {
+                // Expected: Self-signed certificate should be rejected
+                check.Status = "healthy";
+                check.Message = "Certificate validation properly rejects self-signed certificates";
+                check.Details = new Dictionary<string, object>
+                {
+                    { "ChainValidation", "Enabled (X509Chain.Build)" },
+                    { "RevocationCheck", "Online (OCSP/CRL)" },
+                    { "TestResult", "Self-signed cert rejected ✓" },
+                    { "RejectionReason", validationResult.ErrorMessage ?? "Unknown" },
+                    { "SecurityLevel", "High - Chain validation active" }
+                };
+            }
+            else
+            {
+                // Unexpected: Self-signed certificate should NOT pass
+                check.Status = "unhealthy";
+                check.Message = "WARNING: Certificate validation accepted self-signed certificate!";
+                check.Details = new Dictionary<string, object>
+                {
+                    { "SecurityIssue", "Self-signed certificates are being accepted" },
+                    { "Recommendation", "Review CertificateValidator implementation" },
+                    { "TestCertThumbprint", validationResult.Thumbprint ?? "N/A" }
+                };
+                _logger.LogError("Certificate validation security check failed - self-signed cert was accepted!");
+            }
+        }
+        catch (Exception ex)
+        {
+            check.Status = "warning";
+            check.Message = $"Certificate validation check error: {ex.Message}";
+            check.Details = new Dictionary<string, object>
+            {
+                { "Note", "Check may fail if certificate creation is not supported on this platform" }
+            };
+            _logger.LogWarning(ex, "Certificate validation health check encountered an error");
+        }
+
+        return Task.FromResult(check);
+    }
+
+    /// <summary>
+    /// Creates a test self-signed certificate that mimics an attack scenario
+    /// </summary>
+    private X509Certificate2 CreateTestSelfSignedCertificate()
+    {
+        // Create a self-signed certificate with fake Microsoft Intune issuer
+        // This simulates the attack described in the security audit
+        using var rsa = System.Security.Cryptography.RSA.Create(2048);
+        var certRequest = new CertificateRequest(
+            "CN=FakeDevice, O=AttackerOrg",
+            rsa,
+            System.Security.Cryptography.HashAlgorithmName.SHA256,
+            System.Security.Cryptography.RSASignaturePadding.Pkcs1);
+
+        // Add EKU for Client Authentication (like a real MDM cert)
+        certRequest.CertificateExtensions.Add(
+            new X509EnhancedKeyUsageExtension(
+                new System.Security.Cryptography.OidCollection
+                {
+                    new System.Security.Cryptography.Oid("1.3.6.1.5.5.7.3.2") // Client Authentication
+                },
+                false));
+
+        // Create self-signed certificate with fake issuer name
+        var cert = certRequest.CreateSelfSigned(
+            DateTimeOffset.UtcNow.AddDays(-1),
+            DateTimeOffset.UtcNow.AddYears(1));
+
+        return cert;
     }
 }
 

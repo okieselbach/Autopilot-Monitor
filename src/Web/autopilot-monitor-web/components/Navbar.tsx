@@ -246,6 +246,20 @@ export default function Navbar() {
                       </Link>
                     </div>
 
+                    {/* Admin Configuration - Galactic Admin Only */}
+                    {galacticAdminMode && (
+                      <div className="border-t border-purple-200 pt-3">
+                        <Link href="/admin-configuration" className="block w-full p-3 text-left rounded-lg hover:bg-purple-50 transition-colors" onClick={() => setShowSettings(false)}>
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm font-medium text-purple-700">Admin Configuration</span>
+                            <svg className="h-5 w-5 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+                            </svg>
+                          </div>
+                        </Link>
+                      </div>
+                    )}
+
                     {/* Platform Usage Metrics - Galactic Admin Only */}
                     {galacticAdminMode && (
                       <div className="border-t border-purple-200 pt-3">

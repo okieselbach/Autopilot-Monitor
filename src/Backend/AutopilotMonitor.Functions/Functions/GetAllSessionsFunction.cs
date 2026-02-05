@@ -1,4 +1,5 @@
 using System.Net;
+using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Services;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -10,11 +11,16 @@ namespace AutopilotMonitor.Functions.Functions
     {
         private readonly ILogger<GetAllSessionsFunction> _logger;
         private readonly TableStorageService _storageService;
+        private readonly GalacticAdminService _galacticAdminService;
 
-        public GetAllSessionsFunction(ILogger<GetAllSessionsFunction> logger, TableStorageService storageService)
+        public GetAllSessionsFunction(
+            ILogger<GetAllSessionsFunction> logger,
+            TableStorageService storageService,
+            GalacticAdminService galacticAdminService)
         {
             _logger = logger;
             _storageService = storageService;
+            _galacticAdminService = galacticAdminService;
         }
 
         [Function("GetAllSessions")]
@@ -25,7 +31,37 @@ namespace AutopilotMonitor.Functions.Functions
 
             try
             {
-                _logger.LogInformation("Fetching all sessions across all tenants");
+                // Validate authentication and Galactic Admin role
+                var httpContext = req.FunctionContext.GetHttpContext();
+                if (httpContext?.User?.Identity?.IsAuthenticated != true)
+                {
+                    _logger.LogWarning("Unauthenticated GetAllSessions attempt");
+                    var unauthorizedResponse = req.CreateResponse(HttpStatusCode.Unauthorized);
+                    await unauthorizedResponse.WriteAsJsonAsync(new
+                    {
+                        success = false,
+                        message = "Authentication required. Please provide a valid JWT token."
+                    });
+                    return unauthorizedResponse;
+                }
+
+                // Check if user is Galactic Admin via GalacticAdminService (Azure Table Storage)
+                var userEmail = TenantHelper.GetUserIdentifier(req);
+                var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userEmail);
+
+                if (!isGalacticAdmin)
+                {
+                    _logger.LogWarning($"Non-Galactic Admin user {userEmail} attempted to access GetAllSessions");
+                    var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
+                    await forbiddenResponse.WriteAsJsonAsync(new
+                    {
+                        success = false,
+                        message = "Access denied. Galactic Admin role required."
+                    });
+                    return forbiddenResponse;
+                }
+
+                _logger.LogInformation($"Fetching all sessions across all tenants (User: {userEmail})");
 
                 // Get all sessions from storage (no tenant filter)
                 var sessions = await _storageService.GetAllSessionsAsync(maxResults: 100);

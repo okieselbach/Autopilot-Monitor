@@ -1,4 +1,5 @@
 using System.Net;
+using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Services;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Azure.Functions.Worker;
@@ -28,10 +29,26 @@ namespace AutopilotMonitor.Functions.Functions
 
             try
             {
-                // Get tenant ID from query parameter (for now, default to demo GUID)
-                var tenantId = req.Query["tenantId"] ?? "deadbeef-dead-beef-dead-beefdeadbeef";
+                string tenantId;
+                string userIdentifier;
+                try
+                {
+                    tenantId = TenantHelper.GetTenantId(req);
+                    userIdentifier = TenantHelper.GetUserIdentifier(req);
+                }
+                catch (UnauthorizedAccessException ex)
+                {
+                    _logger.LogWarning($"Unauthorized mark-failed attempt for session {sessionId}: {ex.Message}");
+                    var unauthorizedResponse = req.CreateResponse(HttpStatusCode.Unauthorized);
+                    await unauthorizedResponse.WriteAsJsonAsync(new
+                    {
+                        success = false,
+                        message = "Authentication required. Please provide a valid JWT token."
+                    });
+                    return new MarkSessionFailedOutput { HttpResponse = unauthorizedResponse };
+                }
 
-                _logger.LogInformation($"Marking session {sessionId} as failed for tenant {tenantId}");
+                _logger.LogInformation($"Marking session {sessionId} as failed for tenant {tenantId} by user {userIdentifier}");
 
                 // Update session status to Failed with manual failure reason
                 var success = await _storageService.UpdateSessionStatusAsync(
@@ -44,13 +61,13 @@ namespace AutopilotMonitor.Functions.Functions
 
                 if (success)
                 {
-                    // Log audit entry
+                    // Log audit entry with actual user identifier
                     await _storageService.LogAuditEntryAsync(
                         tenantId,
                         "UPDATE",
                         "Session",
                         sessionId,
-                        "Admin", // TODO: Get from authenticated user
+                        userIdentifier,
                         new Dictionary<string, string>
                         {
                             { "Action", "MarkAsFailed" },

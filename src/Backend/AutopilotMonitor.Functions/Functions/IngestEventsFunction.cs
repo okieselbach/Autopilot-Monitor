@@ -53,7 +53,13 @@ namespace AutopilotMonitor.Functions.Functions
                 {
                     // New format: NDJSON + gzip
                     _logger.LogDebug("Parsing gzip-compressed NDJSON request");
-                    request = await ParseNdjsonGzipRequest(req.Body);
+
+                    // Extract tenantId from header to get config (for payload size limit)
+                    var tenantIdHeader = req.Headers.Contains("X-Tenant-Id")
+                        ? req.Headers.GetValues("X-Tenant-Id").FirstOrDefault()
+                        : null;
+
+                    request = await ParseNdjsonGzipRequest(req.Body, tenantIdHeader);
                 }
                 else
                 {
@@ -230,13 +236,41 @@ namespace AutopilotMonitor.Functions.Functions
         /// Parses NDJSON + gzip compressed request
         /// Format: First line is metadata (sessionId, tenantId), subsequent lines are events
         /// </summary>
-        private async Task<IngestEventsRequest> ParseNdjsonGzipRequest(Stream body)
+        private async Task<IngestEventsRequest> ParseNdjsonGzipRequest(Stream body, string? tenantId = null)
         {
-            // Decompress gzip
+            // Get configuration for payload size limit (use default if tenantId not available yet)
+            var config = !string.IsNullOrEmpty(tenantId)
+                ? await _configService.GetConfigurationAsync(tenantId)
+                : null;
+
+            var maxPayloadSizeBytes = (config?.MaxNdjsonPayloadSizeMB ?? 5) * 1024 * 1024;
+
+            // Decompress gzip with size limit protection
             using var decompressed = new MemoryStream();
             using (var gzip = new GZipStream(body, CompressionMode.Decompress, leaveOpen: true))
             {
-                await gzip.CopyToAsync(decompressed);
+                // Copy with size limit to prevent memory exhaustion attacks
+                var buffer = new byte[8192];
+                int bytesRead;
+                long totalBytesRead = 0;
+
+                while ((bytesRead = await gzip.ReadAsync(buffer, 0, buffer.Length)) > 0)
+                {
+                    totalBytesRead += bytesRead;
+
+                    // Check if we've exceeded the maximum payload size
+                    if (totalBytesRead > maxPayloadSizeBytes)
+                    {
+                        throw new InvalidOperationException(
+                            $"NDJSON payload size exceeds maximum allowed size of {config?.MaxNdjsonPayloadSizeMB ?? 5} MB (decompressed). " +
+                            $"Current size: {totalBytesRead / 1024.0 / 1024.0:F2} MB"
+                        );
+                    }
+
+                    await decompressed.WriteAsync(buffer, 0, bytesRead);
+                }
+
+                _logger.LogDebug($"NDJSON payload decompressed: {totalBytesRead / 1024.0:F2} KB (limit: {maxPayloadSizeBytes / 1024.0 / 1024.0} MB)");
             }
 
             decompressed.Position = 0;

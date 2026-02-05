@@ -1,4 +1,5 @@
 using System.Net;
+using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Services;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -13,13 +14,16 @@ namespace AutopilotMonitor.Functions.Functions
     {
         private readonly ILogger<PlatformUsageMetricsFunction> _logger;
         private readonly UsageMetricsService _usageMetricsService;
+        private readonly GalacticAdminService _galacticAdminService;
 
         public PlatformUsageMetricsFunction(
             ILogger<PlatformUsageMetricsFunction> logger,
-            UsageMetricsService usageMetricsService)
+            UsageMetricsService usageMetricsService,
+            GalacticAdminService galacticAdminService)
         {
             _logger = logger;
             _usageMetricsService = usageMetricsService;
+            _galacticAdminService = galacticAdminService;
         }
 
         /// <summary>
@@ -31,18 +35,41 @@ namespace AutopilotMonitor.Functions.Functions
             [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "platform/usage-metrics")]
             HttpRequestData req)
         {
-            _logger.LogInformation("Usage metrics requested");
+            _logger.LogInformation("Platform usage metrics requested");
 
             try
             {
-                // TODO: Add Entra ID authentication check here (Galactic Admin role required)
-                // When Entra ID is implemented:
-                // 1. Extract JWT token from Authorization header
-                // 2. Validate token with Azure AD
-                // 3. Check user has "GalacticAdmin" role
-                // 4. Return 403 Forbidden if not authorized
-                //
-                // For now, anyone can access (will be restricted with Entra ID later)
+                // Validate authentication
+                var httpContext = req.FunctionContext.GetHttpContext();
+                if (httpContext?.User?.Identity?.IsAuthenticated != true)
+                {
+                    _logger.LogWarning("Unauthenticated platform usage metrics attempt");
+                    var unauthorizedResponse = req.CreateResponse(HttpStatusCode.Unauthorized);
+                    await unauthorizedResponse.WriteAsJsonAsync(new
+                    {
+                        success = false,
+                        message = "Authentication required. Please provide a valid JWT token."
+                    });
+                    return unauthorizedResponse;
+                }
+
+                // Check if user is Galactic Admin via GalacticAdminService (Azure Table Storage)
+                var userEmail = TenantHelper.GetUserIdentifier(req);
+                var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userEmail);
+
+                if (!isGalacticAdmin)
+                {
+                    _logger.LogWarning($"Non-Galactic Admin user {userEmail} attempted to access platform usage metrics");
+                    var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
+                    await forbiddenResponse.WriteAsJsonAsync(new
+                    {
+                        success = false,
+                        message = "Access denied. Galactic Admin role required."
+                    });
+                    return forbiddenResponse;
+                }
+
+                _logger.LogInformation($"Platform usage metrics accessed by Galactic Admin: {userEmail}");
 
                 var metrics = await _usageMetricsService.ComputeUsageMetricsAsync();
 

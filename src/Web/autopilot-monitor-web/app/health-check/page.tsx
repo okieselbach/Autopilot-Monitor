@@ -73,6 +73,8 @@ export default function HealthCheckPage() {
         return 'text-green-600 bg-green-50 border-green-200';
       case 'unhealthy':
         return 'text-red-600 bg-red-50 border-red-200';
+      case 'warning':
+        return 'text-yellow-600 bg-yellow-50 border-yellow-200';
       default:
         return 'text-gray-600 bg-gray-50 border-gray-200';
     }
@@ -84,6 +86,8 @@ export default function HealthCheckPage() {
         return '✅';
       case 'unhealthy':
         return '❌';
+      case 'warning':
+        return '⚠️';
       default:
         return '❓';
     }
@@ -182,7 +186,11 @@ export default function HealthCheckPage() {
                   </div>
 
                   <div className="mb-4">
-                    <p className={`text-sm font-medium ${check.status === 'healthy' ? 'text-green-700' : 'text-red-700'}`}>
+                    <p className={`text-sm font-medium ${
+                      check.status === 'healthy' ? 'text-green-700' :
+                      check.status === 'warning' ? 'text-yellow-700' :
+                      'text-red-700'
+                    }`}>
                       {check.message}
                     </p>
                   </div>
@@ -244,6 +252,10 @@ export default function HealthCheckPage() {
                 <li className="flex items-start gap-2">
                   <span className="text-blue-600 mt-0.5">•</span>
                   <span><strong>SignalR:</strong> Azure SignalR Service configuration and endpoint</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-blue-600 mt-0.5">•</span>
+                  <span><strong>Certificate Validation:</strong> X.509 chain validation and self-signed certificate rejection</span>
                 </li>
               </ul>
             </div>

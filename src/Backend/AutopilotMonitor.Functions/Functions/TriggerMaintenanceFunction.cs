@@ -2,8 +2,8 @@ using System;
 using System.Net;
 using System.Threading.Tasks;
 using AutopilotMonitor.Functions.Extensions;
+using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Services;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
@@ -37,29 +37,43 @@ namespace AutopilotMonitor.Functions.Functions
         /// - aggregateOnly: If true, only runs aggregation (skips timeout and cleanup)
         /// </summary>
         [Function("TriggerMaintenance")]
-        [Authorize]
         public async Task<HttpResponseData> Run(
             [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "maintenance/trigger")] HttpRequestData req,
             FunctionContext context)
         {
             _logger.LogInformation("Manual maintenance trigger requested");
 
-            // Check if user is galactic admin
-            var principal = context.GetUser();
-            if (principal == null)
+            // Validate authentication
+            var httpContext = req.FunctionContext.GetHttpContext();
+            if (httpContext?.User?.Identity?.IsAuthenticated != true)
             {
-                return req.CreateResponse(HttpStatusCode.Unauthorized);
+                _logger.LogWarning("Unauthenticated maintenance trigger attempt");
+                var unauthorizedResponse = req.CreateResponse(HttpStatusCode.Unauthorized);
+                await unauthorizedResponse.WriteAsJsonAsync(new
+                {
+                    success = false,
+                    message = "Authentication required. Please provide a valid JWT token."
+                });
+                return unauthorizedResponse;
             }
 
-            var upn = principal.GetUserPrincipalName();
-            var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(upn);
+            // Check if user is Galactic Admin via GalacticAdminService (Azure Table Storage)
+            var userEmail = TenantHelper.GetUserIdentifier(req);
+            var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userEmail);
 
             if (!isGalacticAdmin)
             {
+                _logger.LogWarning($"Non-Galactic Admin user {userEmail} attempted to trigger maintenance");
                 var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-                await forbiddenResponse.WriteAsJsonAsync(new { error = "Only Galactic Admins can trigger maintenance tasks" });
+                await forbiddenResponse.WriteAsJsonAsync(new
+                {
+                    success = false,
+                    message = "Access denied. Galactic Admin role required."
+                });
                 return forbiddenResponse;
             }
+
+            _logger.LogInformation($"Maintenance trigger initiated by Galactic Admin: {userEmail}");
 
             try
             {
@@ -86,7 +100,7 @@ namespace AutopilotMonitor.Functions.Functions
                 bool aggregateOnly = aggregateOnlyParam?.ToLower() == "true";
 
                 // Execute maintenance tasks
-                var result = await _maintenanceFunction.RunManualAsync(targetDate, aggregateOnly, upn);
+                var result = await _maintenanceFunction.RunManualAsync(targetDate, aggregateOnly, userEmail);
 
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(new
@@ -94,7 +108,7 @@ namespace AutopilotMonitor.Functions.Functions
                     success = true,
                     message = "Maintenance tasks completed",
                     result = result,
-                    triggeredBy = upn,
+                    triggeredBy = userEmail,
                     triggeredAt = DateTime.UtcNow
                 });
 

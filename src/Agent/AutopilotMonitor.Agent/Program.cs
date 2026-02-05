@@ -6,6 +6,7 @@ using System.ServiceProcess;
 using AutopilotMonitor.Agent.Core.Configuration;
 using AutopilotMonitor.Agent.Core.Logging;
 using AutopilotMonitor.Agent.Core.Monitoring;
+using Microsoft.Win32;
 using Newtonsoft.Json;
 
 namespace AutopilotMonitor.Agent
@@ -92,6 +93,60 @@ namespace AutopilotMonitor.Agent
         {
             var service = new AutopilotMonitorService();
             ServiceBase.Run(service);
+        }
+
+        /// <summary>
+        /// Reads the Azure AD Tenant ID from the Windows Registry.
+        /// Looks for enrollments with EnrollmentType = 6 (AAD Join).
+        /// </summary>
+        /// <returns>The AAD Tenant ID if found, otherwise null.</returns>
+        static string GetTenantIdFromRegistry()
+        {
+            try
+            {
+                const string enrollmentsKeyPath = @"SOFTWARE\Microsoft\Enrollments";
+
+                using (var enrollmentsKey = Registry.LocalMachine.OpenSubKey(enrollmentsKeyPath))
+                {
+                    if (enrollmentsKey == null)
+                    {
+                        Console.WriteLine("Registry key not found: HKLM\\" + enrollmentsKeyPath);
+                        return null;
+                    }
+
+                    // Iterate through all enrollment GUIDs
+                    foreach (var enrollmentGuid in enrollmentsKey.GetSubKeyNames())
+                    {
+                        using (var enrollmentKey = enrollmentsKey.OpenSubKey(enrollmentGuid))
+                        {
+                            if (enrollmentKey == null)
+                                continue;
+
+                            // Check if this is an AAD Join enrollment (EnrollmentType = 6)
+                            var enrollmentType = enrollmentKey.GetValue("EnrollmentType");
+                            if (enrollmentType != null && Convert.ToInt32(enrollmentType) == 6)
+                            {
+                                // Try to get AADTenantID
+                                var tenantId = enrollmentKey.GetValue("AADTenantID");
+                                if (tenantId != null)
+                                {
+                                    var tenantIdString = tenantId.ToString();
+                                    Console.WriteLine($"Found AAD Tenant ID in registry: {tenantIdString} (Enrollment: {enrollmentGuid})");
+                                    return tenantIdString;
+                                }
+                            }
+                        }
+                    }
+
+                    Console.WriteLine("No AAD Join enrollment (EnrollmentType=6) with AADTenantID found in registry.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error reading Tenant ID from registry: {ex.Message}");
+            }
+
+            return null;
         }
 
         static AgentConfiguration LoadConfiguration(string[] args = null)
@@ -188,12 +243,32 @@ namespace AutopilotMonitor.Agent
                 selfDestructOnComplete = false;
             }
 
+            // Determine TenantId: Command-line arg > Registry > Fallback
+            string tenantId;
+            if (!string.IsNullOrEmpty(tenantIdOverride))
+            {
+                // Command-line argument takes precedence
+                tenantId = tenantIdOverride;
+                Console.WriteLine($"Using Tenant ID from command-line argument: {tenantId}");
+            }
+            else
+            {
+                // Try to read from registry
+                tenantId = GetTenantIdFromRegistry();
+
+                if (string.IsNullOrEmpty(tenantId))
+                {
+                    // Fallback to default (for testing/development)
+                    tenantId = "b54dc1af-5320-4f60-b5d4-821e0cf2a359";
+                    Console.WriteLine($"Using fallback Tenant ID: {tenantId}");
+                }
+            }
+
             return new AgentConfiguration
             {
                 ApiBaseUrl = apiBaseUrl,
                 SessionId = Guid.NewGuid().ToString(),
-                //TenantId = "deadbeef-dead-beef-dead-beefdeadbeef",
-                TenantId = tenantIdOverride ?? "b54dc1af-5320-4f60-b5d4-821e0cf2a359",
+                TenantId = tenantId,
                 SpoolDirectory = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor\Spool"),
                 LogDirectory = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor\Logs"),
                 UploadIntervalSeconds = uploadIntervalSeconds,

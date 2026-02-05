@@ -1,4 +1,5 @@
 using System.Net;
+using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Services;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -34,8 +35,7 @@ namespace AutopilotMonitor.Functions.Functions
 
             try
             {
-                // Get tenant ID from query parameter (for now, default to demo GUID)
-                var tenantId = req.Query["tenantId"] ?? "deadbeef-dead-beef-dead-beefdeadbeef";
+                var tenantId = TenantHelper.GetTenantId(req);
 
                 // Get events from storage
                 var events = await _storageService.GetSessionEventsAsync(tenantId, sessionId);

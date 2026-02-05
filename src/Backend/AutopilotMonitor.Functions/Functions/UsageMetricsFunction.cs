@@ -1,4 +1,5 @@
 using System.Net;
+using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Services;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -35,28 +36,26 @@ namespace AutopilotMonitor.Functions.Functions
 
             try
             {
-                // Get tenant ID from query parameter
-                var tenantId = req.Query["tenantId"];
-
-                if (string.IsNullOrEmpty(tenantId))
+                string tenantId;
+                string userIdentifier;
+                try
                 {
-                    var badRequest = req.CreateResponse(HttpStatusCode.BadRequest);
-                    await badRequest.WriteAsJsonAsync(new
+                    tenantId = TenantHelper.GetTenantId(req);
+                    userIdentifier = TenantHelper.GetUserIdentifier(req);
+                }
+                catch (UnauthorizedAccessException ex)
+                {
+                    _logger.LogWarning($"Unauthorized usage metrics attempt: {ex.Message}");
+                    var unauthorizedResponse = req.CreateResponse(HttpStatusCode.Unauthorized);
+                    await unauthorizedResponse.WriteAsJsonAsync(new
                     {
                         success = false,
-                        message = "tenantId query parameter is required"
+                        message = "Authentication required. Please provide a valid JWT token."
                     });
-                    return badRequest;
+                    return unauthorizedResponse;
                 }
 
-                // TODO: Add Entra ID authentication check here (Tenant Admin role required)
-                // When Entra ID is implemented:
-                // 1. Extract JWT token from Authorization header
-                // 2. Validate token with Azure AD
-                // 3. Check user has "TenantAdmin" role for the requested tenantId
-                // 4. Return 403 Forbidden if not authorized
-                //
-                // For now, anyone can access (will be restricted with Entra ID later)
+                _logger.LogInformation($"Fetching usage metrics for tenant {tenantId} by user {userIdentifier}");
 
                 var metrics = await _usageMetricsService.ComputeTenantUsageMetricsAsync(tenantId);
 

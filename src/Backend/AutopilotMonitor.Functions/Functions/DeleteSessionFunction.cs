@@ -1,4 +1,5 @@
 using System.Net;
+using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Services;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -26,10 +27,10 @@ namespace AutopilotMonitor.Functions.Functions
 
             try
             {
-                // Get tenant ID from query parameter (for now, default to demo GUID)
-                var tenantId = req.Query["tenantId"] ?? "deadbeef-dead-beef-dead-beefdeadbeef";
+                var tenantId = TenantHelper.GetTenantId(req);
+                var userIdentifier = TenantHelper.GetUserIdentifier(req);
 
-                _logger.LogInformation($"Deleting session {sessionId} for tenant {tenantId}");
+                _logger.LogInformation($"Deleting session {sessionId} for tenant {tenantId} by user {userIdentifier}");
 
                 // Delete all events for this session
                 var eventsDeleted = await _storageService.DeleteSessionEventsAsync(tenantId, sessionId);
@@ -40,13 +41,13 @@ namespace AutopilotMonitor.Functions.Functions
 
                 if (sessionDeleted)
                 {
-                    // Log audit entry
+                    // Log audit entry with actual user identifier
                     await _storageService.LogAuditEntryAsync(
                         tenantId,
                         "DELETE",
                         "Session",
                         sessionId,
-                        "Admin", // TODO: Get from authenticated user
+                        userIdentifier,
                         new Dictionary<string, string>
                         {
                             { "EventsDeleted", eventsDeleted.ToString() }

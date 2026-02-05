@@ -1,4 +1,5 @@
 using System.Net;
+using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Services;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -25,10 +26,26 @@ namespace AutopilotMonitor.Functions.Functions
 
             try
             {
-                // Get tenant ID from query parameter (for now, default to demo GUID)
-                var tenantId = req.Query["tenantId"] ?? "deadbeef-dead-beef-dead-beefdeadbeef";
+                string tenantId;
+                string userIdentifier;
+                try
+                {
+                    tenantId = TenantHelper.GetTenantId(req);
+                    userIdentifier = TenantHelper.GetUserIdentifier(req);
+                }
+                catch (UnauthorizedAccessException ex)
+                {
+                    _logger.LogWarning($"Unauthorized audit logs attempt: {ex.Message}");
+                    var unauthorizedResponse = req.CreateResponse(HttpStatusCode.Unauthorized);
+                    await unauthorizedResponse.WriteAsJsonAsync(new
+                    {
+                        success = false,
+                        message = "Authentication required. Please provide a valid JWT token."
+                    });
+                    return unauthorizedResponse;
+                }
 
-                _logger.LogInformation($"Fetching audit logs for tenant {tenantId}");
+                _logger.LogInformation($"Fetching audit logs for tenant {tenantId} by user {userIdentifier}");
 
                 // Get audit logs from storage
                 var logs = await _storageService.GetAuditLogsAsync(tenantId, maxResults: 100);

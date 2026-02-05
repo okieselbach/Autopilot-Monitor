@@ -1,4 +1,5 @@
 using System.Net;
+using AutopilotMonitor.Functions.Helpers;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Azure.Functions.Worker.Extensions.SignalRService;
@@ -22,6 +23,16 @@ namespace AutopilotMonitor.Functions.Functions
         {
             try
             {
+                // Validate authentication
+                var httpContext = req.FunctionContext.GetHttpContext();
+                if (httpContext?.User?.Identity?.IsAuthenticated != true)
+                {
+                    _logger.LogWarning("Unauthenticated RemoveFromGroup attempt");
+                    var unauthorizedResponse = req.CreateResponse(HttpStatusCode.Unauthorized);
+                    await unauthorizedResponse.WriteAsJsonAsync(new { success = false, message = "Authentication required" });
+                    return new RemoveFromGroupOutput { HttpResponse = unauthorizedResponse };
+                }
+
                 // Parse request
                 var requestBody = await new StreamReader(req.Body).ReadToEndAsync();
                 var request = JsonConvert.DeserializeObject<RemoveFromGroupRequest>(requestBody);
@@ -33,9 +44,11 @@ namespace AutopilotMonitor.Functions.Functions
                     return new RemoveFromGroupOutput { HttpResponse = errorResponse };
                 }
 
+                var userEmail = TenantHelper.GetUserIdentifier(req);
+
                 // Extract session ID from group name if it's a session-specific group
                 var logPrefix = ExtractLogPrefix(request.GroupName);
-                _logger.LogInformation($"{logPrefix} RemoveFromGroup: {request.GroupName}");
+                _logger.LogInformation($"{logPrefix} RemoveFromGroup: {request.GroupName} (User: {userEmail})");
 
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(new

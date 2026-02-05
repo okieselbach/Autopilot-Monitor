@@ -75,6 +75,15 @@ namespace AutopilotMonitor.Shared.Models
         /// </summary>
         public int SessionTimeoutHours { get; set; } = 5;
 
+        // ===== PAYLOAD SETTINGS =====
+
+        /// <summary>
+        /// Maximum decompressed NDJSON payload size in MB
+        /// Protects against memory exhaustion and denial-of-service attacks
+        /// Default: 5 MB
+        /// </summary>
+        public int MaxNdjsonPayloadSizeMB { get; set; } = 5;
+
         // ===== FUTURE SETTINGS (Extensible) =====
 
         /// <summary>
@@ -122,7 +131,8 @@ namespace AutopilotMonitor.Shared.Models
                 ModelWhitelist = "*",
                 ValidateSerialNumber = false,
                 DataRetentionDays = 90,
-                SessionTimeoutHours = 5
+                SessionTimeoutHours = 5,
+                MaxNdjsonPayloadSizeMB = 5
             };
         }
     }

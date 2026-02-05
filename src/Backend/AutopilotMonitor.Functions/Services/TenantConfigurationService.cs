@@ -150,6 +150,9 @@ namespace AutopilotMonitor.Functions.Services
                 { "ManufacturerWhitelist", config.ManufacturerWhitelist },
                 { "ModelWhitelist", config.ModelWhitelist },
                 { "ValidateSerialNumber", config.ValidateSerialNumber },
+                { "DataRetentionDays", config.DataRetentionDays },
+                { "SessionTimeoutHours", config.SessionTimeoutHours },
+                { "MaxNdjsonPayloadSizeMB", config.MaxNdjsonPayloadSizeMB },
                 { "CustomSettings", config.CustomSettings }
             };
 
@@ -168,6 +171,9 @@ namespace AutopilotMonitor.Functions.Services
                 ManufacturerWhitelist = entity.GetString("ManufacturerWhitelist") ?? "Dell*,HP*,Lenovo*,Microsoft Corporation",
                 ModelWhitelist = entity.GetString("ModelWhitelist") ?? "*",
                 ValidateSerialNumber = entity.GetBoolean("ValidateSerialNumber") ?? false,
+                DataRetentionDays = entity.GetInt32("DataRetentionDays") ?? 90,
+                SessionTimeoutHours = entity.GetInt32("SessionTimeoutHours") ?? 5,
+                MaxNdjsonPayloadSizeMB = entity.GetInt32("MaxNdjsonPayloadSizeMB") ?? 5,
                 CustomSettings = entity.GetString("CustomSettings")
             };
         }

@@ -1,3 +1,5 @@
+using System.Net;
+using AutopilotMonitor.Functions.Helpers;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Azure.Functions.Worker.Extensions.SignalRService;
@@ -21,7 +23,20 @@ namespace AutopilotMonitor.Functions.Functions
         {
             _logger.LogInformation("SignalR negotiate request");
 
-            var response = req.CreateResponse(System.Net.HttpStatusCode.OK);
+            // Validate authentication (middleware already validated JWT)
+            var httpContext = req.FunctionContext.GetHttpContext();
+            if (httpContext?.User?.Identity?.IsAuthenticated != true)
+            {
+                _logger.LogWarning("Unauthenticated SignalR negotiate attempt");
+                var unauthorizedResponse = req.CreateResponse(HttpStatusCode.Unauthorized);
+                unauthorizedResponse.WriteAsJsonAsync(new { success = false, message = "Authentication required" });
+                return unauthorizedResponse;
+            }
+
+            var userEmail = TenantHelper.GetUserIdentifier(req);
+            _logger.LogInformation($"SignalR connection negotiated for user: {userEmail}");
+
+            var response = req.CreateResponse(HttpStatusCode.OK);
             response.WriteAsJsonAsync(connectionInfo);
 
             return response;

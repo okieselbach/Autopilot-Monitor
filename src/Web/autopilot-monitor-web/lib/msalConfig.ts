@@ -19,7 +19,7 @@ export const msalConfig: Configuration = {
     navigateToLoginRequestUrl: true,
   },
   cache: {
-    cacheLocation: "localStorage", // "sessionStorage" or "localStorage"
+    cacheLocation: "sessionStorage", // Using sessionStorage for better XSS protection
     storeAuthStateInCookie: false, // Set to true for IE11 or Edge legacy
   },
   system: {

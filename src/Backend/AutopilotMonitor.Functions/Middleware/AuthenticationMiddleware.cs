@@ -31,8 +31,8 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
         _configuration = configuration;
         _tokenHandler = new JsonWebTokenHandler();
 
-        // Enable PII logging to see detailed error messages (for debugging only!)
-        Microsoft.IdentityModel.Logging.IdentityModelEventSource.ShowPII = true;
+        // Disable PII logging in production for security
+        Microsoft.IdentityModel.Logging.IdentityModelEventSource.ShowPII = false;
 
         // Set up OpenID Connect configuration manager to get signing keys
         var authority = "https://login.microsoftonline.com/organizations/v2.0";

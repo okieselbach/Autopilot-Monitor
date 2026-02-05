@@ -1,6 +1,7 @@
 using System;
 using System.Net;
 using System.Threading.Tasks;
+using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Services;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -28,7 +29,40 @@ namespace AutopilotMonitor.Functions.Functions
         {
             try
             {
-                _logger.LogInformation($"GetTenantConfiguration: {tenantId}");
+                // Get tenant ID from JWT token and validate access
+                string authenticatedTenantId;
+                string userIdentifier;
+                try
+                {
+                    authenticatedTenantId = TenantHelper.GetTenantId(req);
+                    userIdentifier = TenantHelper.GetUserIdentifier(req);
+                }
+                catch (UnauthorizedAccessException ex)
+                {
+                    _logger.LogWarning($"Unauthorized get tenant configuration attempt for tenant {tenantId}: {ex.Message}");
+                    var unauthorizedResponse = req.CreateResponse(HttpStatusCode.Unauthorized);
+                    await unauthorizedResponse.WriteAsJsonAsync(new
+                    {
+                        success = false,
+                        message = "Authentication required. Please provide a valid JWT token."
+                    });
+                    return unauthorizedResponse;
+                }
+
+                // Validate tenant access: User can only access their own tenant's configuration
+                if (authenticatedTenantId != tenantId)
+                {
+                    _logger.LogWarning($"User {userIdentifier} from tenant {authenticatedTenantId} attempted to access configuration for tenant {tenantId}");
+                    var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
+                    await forbiddenResponse.WriteAsJsonAsync(new
+                    {
+                        success = false,
+                        message = "Access denied. You can only access your own tenant's configuration."
+                    });
+                    return forbiddenResponse;
+                }
+
+                _logger.LogInformation($"GetTenantConfiguration: {tenantId} by user {userIdentifier}");
 
                 var config = await _configService.GetConfigurationAsync(tenantId);
 
