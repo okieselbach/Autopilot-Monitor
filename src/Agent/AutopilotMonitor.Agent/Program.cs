@@ -6,6 +6,7 @@ using System.ServiceProcess;
 using AutopilotMonitor.Agent.Core.Configuration;
 using AutopilotMonitor.Agent.Core.Logging;
 using AutopilotMonitor.Agent.Core.Monitoring;
+using AutopilotMonitor.Agent.Core.Storage;
 using Microsoft.Win32;
 using Newtonsoft.Json;
 
@@ -264,10 +265,20 @@ namespace AutopilotMonitor.Agent
                 }
             }
 
+            // Load or create persisted session ID
+            var dataDirectory = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor");
+            var sessionPersistence = new SessionPersistence(dataDirectory);
+            var sessionId = sessionPersistence.LoadOrCreateSessionId();
+
+            var sessionStatus = sessionPersistence.SessionExists() && File.GetCreationTime(Path.Combine(dataDirectory, "session.id")) < DateTime.Now.AddMinutes(-1)
+                ? "Restored from previous session"
+                : "New session created";
+            Console.WriteLine($"Session ID: {sessionId} ({sessionStatus})");
+
             return new AgentConfiguration
             {
                 ApiBaseUrl = apiBaseUrl,
-                SessionId = Guid.NewGuid().ToString(),
+                SessionId = sessionId,
                 TenantId = tenantId,
                 SpoolDirectory = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor\Spool"),
                 LogDirectory = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor\Logs"),

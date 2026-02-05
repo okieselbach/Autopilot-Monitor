@@ -3,6 +3,7 @@ using System.ServiceProcess;
 using AutopilotMonitor.Agent.Core.Configuration;
 using AutopilotMonitor.Agent.Core.Logging;
 using AutopilotMonitor.Agent.Core.Monitoring;
+using AutopilotMonitor.Agent.Core.Storage;
 
 namespace AutopilotMonitor.Agent
 {
@@ -61,12 +62,15 @@ namespace AutopilotMonitor.Agent
 
         private AgentConfiguration LoadConfiguration()
         {
-            // TODO: Load from registry or config file
-            // For now, return a default configuration
+            // Load or create persisted session ID
+            var dataDirectory = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor");
+            var sessionPersistence = new SessionPersistence(dataDirectory);
+            var sessionId = sessionPersistence.LoadOrCreateSessionId();
+
             return new AgentConfiguration
             {
                 ApiBaseUrl = Environment.GetEnvironmentVariable("AUTOPILOT_MONITOR_API") ?? "http://localhost:7071",
-                SessionId = Guid.NewGuid().ToString(),
+                SessionId = sessionId,
                 TenantId = "default-tenant",
                 SpoolDirectory = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor\Spool"),
                 LogDirectory = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor\Logs"),

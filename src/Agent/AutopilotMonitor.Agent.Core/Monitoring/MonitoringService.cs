@@ -403,12 +403,20 @@ namespace AutopilotMonitor.Agent.Core.Monitoring
             }
 
             // Check for enrollment completion events
-            if (_configuration.SelfDestructOnComplete &&
-                (evt.EventType == "enrollment_complete" || evt.EventType == "enrollment_failed"))
+            if (evt.EventType == "enrollment_complete" || evt.EventType == "enrollment_failed")
             {
                 _logger.Info($"Enrollment completion detected: {evt.EventType}");
-                Task.Run(() => HandleEnrollmentComplete());
-                return; // Don't continue with normal event processing
+
+                // ALWAYS delete session ID when enrollment is complete/failed
+                // This ensures a new session will be created on next enrollment
+                DeleteSessionId();
+
+                // Only trigger self-destruct if configured
+                if (_configuration.SelfDestructOnComplete)
+                {
+                    Task.Run(() => HandleEnrollmentComplete());
+                    return; // Don't continue with normal event processing
+                }
             }
 
             // Immediate upload for:
@@ -500,6 +508,26 @@ namespace AutopilotMonitor.Agent.Core.Monitoring
         }
 
         /// <summary>
+        /// Deletes the persisted session ID file
+        /// Should be called when enrollment is complete/failed
+        /// </summary>
+        private void DeleteSessionId()
+        {
+            _logger.Info("Deleting persisted session ID...");
+            try
+            {
+                var dataDirectory = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor");
+                var sessionPersistence = new SessionPersistence(dataDirectory);
+                sessionPersistence.DeleteSession();
+                _logger.Info("Session ID deleted successfully");
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"Failed to delete session ID: {ex.Message}");
+            }
+        }
+
+        /// <summary>
         /// Handles enrollment completion and triggers self-destruct sequence
         /// </summary>
         private async Task HandleEnrollmentComplete()
@@ -520,7 +548,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring
                 // Give a moment for final upload to complete
                 await Task.Delay(2000);
 
-                // Step 3: Execute self-destruct
+                // Step 3: Execute self-destruct or cleanup
                 if (_configuration.SelfDestructOnComplete)
                 {
                     ExecuteSelfDestruct();
