@@ -6,7 +6,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
-using Microsoft.IdentityModel.JsonWebTokens;
+using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Security.Claims;
 
@@ -20,7 +20,7 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
 {
     private readonly ILogger<AuthenticationMiddleware> _logger;
     private readonly IConfiguration _configuration;
-    private readonly JsonWebTokenHandler _tokenHandler;
+    private readonly JwtSecurityTokenHandler _tokenHandler;
 
     // Cache configuration managers per tenant to avoid repeated OIDC metadata fetches
     private readonly Dictionary<string, IConfigurationManager<OpenIdConnectConfiguration>> _configManagerCache;
@@ -36,7 +36,7 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
     {
         _logger = logger;
         _configuration = configuration;
-        _tokenHandler = new JsonWebTokenHandler();
+        _tokenHandler = new JwtSecurityTokenHandler();
         _configManagerCache = new Dictionary<string, IConfigurationManager<OpenIdConnectConfiguration>>();
 
         // Disable PII logging in production for security
@@ -48,27 +48,18 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
         var httpContext = context.GetHttpContext();
         if (httpContext != null)
         {
-            _logger.LogInformation($"[Auth Middleware] Processing request to {httpContext.Request.Path}");
-
             // Extract Authorization header
             var authHeader = httpContext.Request.Headers.Authorization.ToString();
             if (!string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
             {
                 var token = authHeader.Substring("Bearer ".Length).Trim();
-                _logger.LogInformation("[Auth Middleware] Found Bearer token, validating...");
 
                 try
                 {
                     // First, decode the token to get the tenant ID (without validation)
-                    // Use the new JsonWebTokenHandler to read the token
-                    var jwtToken = _tokenHandler.ReadJsonWebToken(token);
-                    var tenantId = jwtToken.GetClaim("tid")?.Value;
-                    var audience = jwtToken.GetClaim("aud")?.Value;
+                    var jwtToken = _tokenHandler.ReadJwtToken(token);
+                    var tenantId = jwtToken.Claims.FirstOrDefault(c => c.Type == "tid")?.Value;
                     var issuer = jwtToken.Issuer;
-                    var keyId = jwtToken.Kid;
-                    var algorithm = jwtToken.Alg;
-
-                    _logger.LogInformation($"[Auth Middleware] Token details - Tenant: {tenantId}, Audience: {audience}, Issuer: {issuer}, KeyId: {keyId}, Algorithm: {algorithm}");
 
                     // Determine which endpoint to use based on the issuer (v1.0 vs v2.0)
                     var isV1Token = issuer.Contains("sts.windows.net");
@@ -111,14 +102,7 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
 
                     var openIdConfig = await tenantConfigManager.GetConfigurationAsync(CancellationToken.None);
 
-                    _logger.LogInformation($"[Auth Middleware] Loaded {openIdConfig.SigningKeys.Count} signing keys from {tenantSpecificAuthority} (v{(isV1Token ? "1.0" : "2.0")} token)");
-
-                    // Log all key IDs to see if the token's key is in the list
-                    var keyIds = string.Join(", ", openIdConfig.SigningKeys.OfType<Microsoft.IdentityModel.Tokens.X509SecurityKey>().Select(k => k.KeyId));
-                    _logger.LogInformation($"[Auth Middleware] Available key IDs: {keyIds}");
-                    _logger.LogInformation($"[Auth Middleware] Token key ID: {keyId}, Match: {keyIds.Contains(keyId)}");
-
-                    // Set up token validation parameters
+                    // Set up token validation parameters with OIDC signing keys
                     var validationParameters = new TokenValidationParameters
                     {
                         // For multi-tenant, validate issuer format but accept any tenant
@@ -137,46 +121,30 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
                         ValidAudiences = new[]
                         {
                             _configuration["AzureAd:ClientId"],
-                            "https://graph.microsoft.com",
-                            "00000003-0000-0000-c000-000000000000"
+                            $"api://{_configuration["AzureAd:ClientId"]}"
                         },
                         ValidateLifetime = true,
 
-                        // ============================================================================
-                        // ⚠️ SIGNATURE VALIDATION TEMPORARILY DISABLED ⚠️
-                        // ============================================================================
-                        // ISSUE: Signature validation fails with IDX10511 despite:
-                        //   ✅ Correct key ID (kid) match
-                        //   ✅ Key present in signing keys (verified with logging)
-                        //   ✅ Correct algorithm (RS256)
-                        //   ✅ Both v1.0 and v2.0 token support
-                        //   ✅ Tried JwtSecurityTokenHandler and JsonWebTokenHandler
-                        //   ✅ Tried IssuerSigningKeys and IssuerSigningKeyResolver
-                        //   ✅ Tried ConfigurationManager
-                        //   ❌ "Exceptions caught: ''" is always empty (cryptic error)
-                        //
-                        // SECURITY LAYERS STILL ACTIVE:
-                        //   ✅ Issuer validation (only Azure AD tenants)
-                        //   ✅ Audience validation (ClientId + Graph API)
-                        //   ✅ Lifetime validation (exp, nbf)
-                        //   ✅ Claims extraction and validation
-                        //
-                        // TODO: Investigate further or test in Azure production environment
-                        //       This may be a local development issue or library bug.
-                        // ============================================================================
-                        ValidateIssuerSigningKey = false,
-                        RequireSignedTokens = false,
-                        SignatureValidator = (token, parameters) => new JsonWebToken(token)
+                        // Signature validation enabled
+                        // Token is requested for backend API (api://<clientId>/access_as_user)
+                        ValidateIssuerSigningKey = true,
+                        RequireSignedTokens = true,
+
+                        // Use key resolver for dynamic key resolution
+                        IssuerSigningKeyResolver = (token, securityToken, kid, validationParameters) =>
+                        {
+                            var matchedKeys = openIdConfig.SigningKeys.Where(k => k.KeyId == kid).ToList();
+                            return matchedKeys.Any() ? matchedKeys : openIdConfig.SigningKeys;
+                        },
+
+                        // Set algorithm validators to ensure we only accept RS256
+                        ValidAlgorithms = new[] { "RS256" }
                     };
 
-                    _logger.LogWarning("[Auth Middleware] ⚠️ Signature validation is DISABLED (see code comments for details)");
-
-                    // Validate the token using the new async API
-                    var validationResult = await _tokenHandler.ValidateTokenAsync(token, validationParameters);
-
-                    if (validationResult.IsValid)
+                    // Validate the token using JwtSecurityTokenHandler (synchronous API)
+                    try
                     {
-                        var principal = new ClaimsPrincipal(validationResult.ClaimsIdentity);
+                        var principal = _tokenHandler.ValidateToken(token, validationParameters, out var validatedToken);
 
                         // Get user identifier for logging (same logic as TenantHelper.GetUserIdentifier)
                         var userIdentifier = principal.FindFirst("upn")?.Value ??
@@ -187,30 +155,26 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
                                            principal.FindFirst("name")?.Value ??
                                            "Unknown";
 
-                        _logger.LogInformation($"[Auth Middleware] Token validated successfully. Claims count: {principal.Claims.Count()}");
-                        _logger.LogInformation($"[Auth Middleware] User: {userIdentifier}, Authenticated: {principal.Identity?.IsAuthenticated}");
+                        _logger.LogInformation($"[Auth Middleware] ✅ Authenticated: {userIdentifier}");
 
                         // Set the principal on both the HTTP context AND the FunctionContext
                         // This is critical for Azure Functions Isolated Worker (.NET 8)
                         httpContext.User = principal;
                         context.Items["ClaimsPrincipal"] = principal;
                     }
-                    else
+                    catch (SecurityTokenException ex)
                     {
-                        _logger.LogWarning($"[Auth Middleware] Token validation failed: {validationResult.Exception?.Message}");
-                        if (validationResult.Exception != null)
-                        {
-                            throw validationResult.Exception;
-                        }
+                        _logger.LogWarning($"[Auth Middleware] ❌ Token validation failed: {ex.Message}");
+                        throw;
                     }
                 }
                 catch (SecurityTokenValidationException ex)
                 {
-                    _logger.LogWarning($"[Auth Middleware] Token validation failed: {ex.Message}");
+                    _logger.LogWarning($"[Auth Middleware] ❌ Token validation failed: {ex.Message}");
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "[Auth Middleware] Error validating token");
+                    _logger.LogError(ex, "[Auth Middleware] ❌ Error validating token");
                 }
             }
             else

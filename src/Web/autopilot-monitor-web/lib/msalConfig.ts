@@ -67,12 +67,14 @@ export const loginRequest: RedirectRequest = {
 
 /**
  * Scopes for accessing the backend API
- * For now, using User.Read to get basic user info
- * TODO: Later expose an API in App Registration and use custom scopes
+ * IMPORTANT: Backend API must be exposed in Azure AD App Registration with this scope
+ * Format: api://<backend-client-id>/access_as_user
+ * For testing, you can also use User.Read but disable signature validation in backend
  */
 export const apiRequest = {
   scopes: [
-    "User.Read",
+    // Option 1 (recommended): Use backend API scope after exposing API in Azure AD
+    `api://${process.env.NEXT_PUBLIC_BACKEND_CLIENT_ID}/access_as_user`
   ],
 };
 

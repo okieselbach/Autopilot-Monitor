@@ -32,9 +32,10 @@ public static class TenantHelper
 
     /// <summary>
     /// Extracts the tenant ID from the authenticated user's JWT token claims.
-    /// Uses the Azure AD tenant ID ('tid' claim) which identifies which customer/organization owns the data.
+    /// Uses the Azure AD tenant ID claim which identifies which customer/organization owns the data.
+    /// Supports both v1.0 and v2.0 tokens.
     ///
-    /// Normal Users: Can only see sessions with their own tenant ID (from JWT 'tid' claim)
+    /// Normal Users: Can only see sessions with their own tenant ID (from JWT token)
     /// </summary>
     /// <param name="req">The HTTP request</param>
     /// <returns>The tenant ID from the JWT token</returns>
@@ -65,8 +66,12 @@ public static class TenantHelper
             throw new UnauthorizedAccessException("User is not authenticated. JWT token required.");
         }
 
-        // Extract tenant ID from JWT 'tid' claim (Azure AD tenant ID)
-        var tenantIdClaim = user.FindFirst("tid")?.Value;
+        // Extract tenant ID from JWT token
+        // v2.0 tokens: "tid" claim
+        // v1.0 tokens: "http://schemas.microsoft.com/identity/claims/tenantid" claim
+        var tenantIdClaim = user.FindFirst("tid")?.Value ??
+                           user.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
+
         if (string.IsNullOrEmpty(tenantIdClaim))
         {
             throw new UnauthorizedAccessException("Tenant ID (tid) claim not found in token");

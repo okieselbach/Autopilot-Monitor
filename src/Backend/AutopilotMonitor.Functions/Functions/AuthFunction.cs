@@ -37,23 +37,16 @@ public class AuthFunction
     {
         var principal = context.GetUser();
 
-        _logger.LogInformation($"GetCurrentUser - Principal is null: {principal == null}");
-
         if (principal == null)
         {
-            _logger.LogWarning("GetCurrentUser - No ClaimsPrincipal found, returning Unauthorized");
+            _logger.LogWarning("GetCurrentUser - No authentication found");
             return req.CreateResponse(HttpStatusCode.Unauthorized);
         }
-
-        _logger.LogInformation($"GetCurrentUser - Principal identity authenticated: {principal.Identity?.IsAuthenticated}, Claims count: {principal.Claims.Count()}");
-        _logger.LogInformation($"GetCurrentUser - All claims: {string.Join(", ", principal.Claims.Select(c => $"{c.Type}={c.Value}"))}");
 
         var tenantId = principal.GetTenantId();
         var upn = principal.GetUserPrincipalName();
         var displayName = principal.GetDisplayName();
         var objectId = principal.GetObjectId();
-
-        _logger.LogInformation($"GetCurrentUser - UPN: {upn}, ObjectId: {objectId}, TenantId: {tenantId}");
 
         // Check if user is galactic admin
         var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(upn);
