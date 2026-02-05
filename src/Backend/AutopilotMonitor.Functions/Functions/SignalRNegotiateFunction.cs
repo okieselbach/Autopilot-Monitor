@@ -17,7 +17,7 @@ namespace AutopilotMonitor.Functions.Functions
         }
 
         [Function("negotiate")]
-        public HttpResponseData Negotiate(
+        public async Task<HttpResponseData> Negotiate(
             [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "realtime/negotiate")] HttpRequestData req,
             [SignalRConnectionInfoInput(HubName = "autopilotmonitor")] SignalRConnectionInfo connectionInfo)
         {
@@ -43,7 +43,7 @@ namespace AutopilotMonitor.Functions.Functions
             {
                 _logger.LogWarning("Unauthenticated SignalR negotiate attempt");
                 var unauthorizedResponse = req.CreateResponse(HttpStatusCode.Unauthorized);
-                unauthorizedResponse.WriteAsJsonAsync(new { success = false, message = "Authentication required" });
+                await unauthorizedResponse.WriteAsJsonAsync(new { success = false, message = "Authentication required" });
                 return unauthorizedResponse;
             }
 
@@ -51,7 +51,7 @@ namespace AutopilotMonitor.Functions.Functions
             _logger.LogInformation($"SignalR connection negotiated for user: {userEmail}");
 
             var response = req.CreateResponse(HttpStatusCode.OK);
-            response.WriteAsJsonAsync(connectionInfo);
+            await response.WriteAsJsonAsync(connectionInfo);
 
             return response;
         }

@@ -97,7 +97,16 @@ namespace AutopilotMonitor.Functions.Security
                 .Replace("\\*", ".*")
                 .Replace("\\?", ".") + "$";
 
-            return Regex.IsMatch(text, regexPattern, RegexOptions.IgnoreCase);
+            try
+            {
+                // Use timeout to prevent ReDoS attacks with pathological input
+                return Regex.IsMatch(text, regexPattern, RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(100));
+            }
+            catch (RegexMatchTimeoutException)
+            {
+                // Timeout indicates potential ReDoS attempt - treat as non-match
+                return false;
+            }
         }
     }
 
