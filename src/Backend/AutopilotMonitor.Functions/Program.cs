@@ -92,6 +92,7 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<TableStorageService>();
 builder.Services.AddSingleton<TenantConfigurationService>();
+builder.Services.AddSingleton<AdminConfigurationService>();
 builder.Services.AddSingleton<RateLimitService>();
 builder.Services.AddSingleton<UsageMetricsService>();
 builder.Services.AddSingleton<GalacticAdminService>();

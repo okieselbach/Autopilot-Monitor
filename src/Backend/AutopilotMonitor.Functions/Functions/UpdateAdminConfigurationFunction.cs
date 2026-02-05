@@ -12,30 +12,32 @@ using Newtonsoft.Json;
 
 namespace AutopilotMonitor.Functions.Functions
 {
-    public class UpdateTenantConfigurationFunction
+    public class UpdateAdminConfigurationFunction
     {
-        private readonly ILogger<UpdateTenantConfigurationFunction> _logger;
-        private readonly TenantConfigurationService _configService;
+        private readonly ILogger<UpdateAdminConfigurationFunction> _logger;
+        private readonly AdminConfigurationService _adminConfigService;
+        private readonly GalacticAdminService _galacticAdminService;
 
-        public UpdateTenantConfigurationFunction(
-            ILogger<UpdateTenantConfigurationFunction> logger,
-            TenantConfigurationService configService)
+        public UpdateAdminConfigurationFunction(
+            ILogger<UpdateAdminConfigurationFunction> logger,
+            AdminConfigurationService adminConfigService,
+            GalacticAdminService galacticAdminService)
         {
             _logger = logger;
-            _configService = configService;
+            _adminConfigService = adminConfigService;
+            _galacticAdminService = galacticAdminService;
         }
 
-        [Function("UpdateTenantConfiguration")]
+        [Function("UpdateAdminConfiguration")]
         public async Task<HttpResponseData> Run(
-            [HttpTrigger(AuthorizationLevel.Anonymous, "put", "post", Route = "config/{tenantId}")] HttpRequestData req,
-            string tenantId)
+            [HttpTrigger(AuthorizationLevel.Anonymous, "put", "post", Route = "global/config")] HttpRequestData req)
         {
             try
             {
                 // Validate authentication
                 if (!TenantHelper.IsAuthenticated(req))
                 {
-                    _logger.LogWarning($"Unauthenticated UpdateTenantConfiguration attempt for tenant {tenantId}");
+                    _logger.LogWarning("Unauthenticated UpdateAdminConfiguration attempt");
                     var unauthorizedResponse = req.CreateResponse(HttpStatusCode.Unauthorized);
                     await unauthorizedResponse.WriteAsJsonAsync(new
                     {
@@ -45,28 +47,28 @@ namespace AutopilotMonitor.Functions.Functions
                     return unauthorizedResponse;
                 }
 
-                // Get tenant ID from JWT token and validate access
-                string authenticatedTenantId = TenantHelper.GetTenantId(req);
+                // Get tenant ID and user identifier from JWT token
+                string tenantId = TenantHelper.GetTenantId(req);
                 string userIdentifier = TenantHelper.GetUserIdentifier(req);
 
-                // Validate tenant access: User can only update their own tenant's configuration
-                if (authenticatedTenantId != tenantId)
+                // Validate Galactic Admin role
+                if (!await _galacticAdminService.IsGalacticAdminAsync(userIdentifier))
                 {
-                    _logger.LogWarning($"User {userIdentifier} from tenant {authenticatedTenantId} attempted to update configuration for tenant {tenantId}");
+                    _logger.LogWarning($"Non-Galactic Admin user {userIdentifier} from tenant {tenantId} attempted to update admin configuration");
                     var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
                     await forbiddenResponse.WriteAsJsonAsync(new
                     {
                         success = false,
-                        message = "Access denied. You can only update your own tenant's configuration."
+                        message = "Access denied. Only Galactic Admins can modify global configuration."
                     });
                     return forbiddenResponse;
                 }
 
-                _logger.LogInformation($"UpdateTenantConfiguration: {tenantId} by user {userIdentifier}");
+                _logger.LogInformation($"UpdateAdminConfiguration by Galactic Admin user {userIdentifier}");
 
                 // Parse request body
                 var requestBody = await new StreamReader(req.Body).ReadToEndAsync();
-                var config = JsonConvert.DeserializeObject<TenantConfiguration>(requestBody);
+                var config = JsonConvert.DeserializeObject<AdminConfiguration>(requestBody);
 
                 if (config == null)
                 {
@@ -75,27 +77,28 @@ namespace AutopilotMonitor.Functions.Functions
                     return badRequest;
                 }
 
-                // Ensure tenant ID matches
-                config.TenantId = tenantId;
-
                 // Set the actual user identifier for audit logging
                 config.UpdatedBy = userIdentifier;
 
+                // Ensure PartitionKey and RowKey are correct
+                config.PartitionKey = "GlobalConfig";
+                config.RowKey = "config";
+
                 // Save configuration
-                await _configService.SaveConfigurationAsync(config);
+                await _adminConfigService.SaveConfigurationAsync(config);
 
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(new
                 {
                     success = true,
-                    message = "Configuration updated successfully",
+                    message = "Admin configuration updated successfully",
                     config = config
                 });
                 return response;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"Error updating configuration for tenant {tenantId}");
+                _logger.LogError(ex, "Error updating admin configuration");
                 var response = req.CreateResponse(HttpStatusCode.InternalServerError);
                 await response.WriteAsJsonAsync(new { error = "Internal server error" });
                 return response;

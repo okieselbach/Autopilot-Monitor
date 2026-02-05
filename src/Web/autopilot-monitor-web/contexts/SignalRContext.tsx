@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import * as signalR from '@microsoft/signalr';
 import { API_BASE_URL } from '@/lib/config';
+import { useAuth } from './AuthContext';
 
 interface SignalRContextType {
   connection: signalR.HubConnection | null;
@@ -18,6 +19,7 @@ interface SignalRContextType {
 const SignalRContext = createContext<SignalRContextType | undefined>(undefined);
 
 export function SignalRProvider({ children }: { children: React.ReactNode }) {
+  const { getAccessToken, isAuthenticated } = useAuth();
   const [connection, setConnection] = useState<signalR.HubConnection | null>(null);
   const [connectionState, setConnectionState] = useState<signalR.HubConnectionState>(signalR.HubConnectionState.Disconnected);
   const connectionRef = useRef<signalR.HubConnection | null>(null);
@@ -26,6 +28,11 @@ export function SignalRProvider({ children }: { children: React.ReactNode }) {
   const maxRetries = 3;
 
   useEffect(() => {
+    // Only create connection if authenticated
+    if (!isAuthenticated) {
+      return;
+    }
+
     // Only create connection once
     if (connectionRef.current) {
       return;
@@ -33,7 +40,12 @@ export function SignalRProvider({ children }: { children: React.ReactNode }) {
 
     const hubUrl = `${API_BASE_URL}/api/realtime`;
     const newConnection = new signalR.HubConnectionBuilder()
-      .withUrl(hubUrl)
+      .withUrl(hubUrl, {
+        accessTokenFactory: async () => {
+          const token = await getAccessToken();
+          return token || '';
+        }
+      })
       .withAutomaticReconnect({
         nextRetryDelayInMilliseconds: (retryContext) => {
           // Exponential backoff: 0s, 2s, 10s, 30s, then 30s thereafter
@@ -95,7 +107,7 @@ export function SignalRProvider({ children }: { children: React.ReactNode }) {
         connectionRef.current = null;
       }
     };
-  }, []);
+  }, [isAuthenticated, getAccessToken]);
 
   const on = (eventName: string, callback: (...args: any[]) => void) => {
     if (connectionRef.current) {
@@ -136,9 +148,13 @@ export function SignalRProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
+      const token = await getAccessToken();
       const response = await fetch(`${API_BASE_URL}/api/realtime/groups/join`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({ connectionId, groupName })
       });
 
@@ -151,7 +167,7 @@ export function SignalRProvider({ children }: { children: React.ReactNode }) {
       // Remove from Set if API call failed (so we can retry)
       joinedGroupsRef.current.delete(groupName);
     }
-  }, [connection, connectionState]);
+  }, [connection, connectionState, getAccessToken]);
 
   const leaveGroup = useCallback(async (groupName: string) => {
     if (!connection || connectionState !== signalR.HubConnectionState.Connected) {
@@ -172,9 +188,13 @@ export function SignalRProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
+      const token = await getAccessToken();
       const response = await fetch(`${API_BASE_URL}/api/realtime/groups/leave`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({ connectionId, groupName })
       });
 
@@ -187,7 +207,7 @@ export function SignalRProvider({ children }: { children: React.ReactNode }) {
       // Re-add to Set if API call failed (so we can retry)
       joinedGroupsRef.current.add(groupName);
     }
-  }, [connection, connectionState]);
+  }, [connection, connectionState, getAccessToken]);
 
   return (
     <SignalRContext.Provider

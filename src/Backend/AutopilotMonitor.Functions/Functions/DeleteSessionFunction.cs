@@ -27,6 +27,19 @@ namespace AutopilotMonitor.Functions.Functions
 
             try
             {
+                // Validate authentication
+                if (!TenantHelper.IsAuthenticated(req))
+                {
+                    _logger.LogWarning($"Unauthenticated DeleteSession attempt for session {sessionId}");
+                    var unauthorizedResponse = req.CreateResponse(HttpStatusCode.Unauthorized);
+                    await unauthorizedResponse.WriteAsJsonAsync(new
+                    {
+                        success = false,
+                        message = "Authentication required. Please provide a valid JWT token."
+                    });
+                    return unauthorizedResponse;
+                }
+
                 var tenantId = TenantHelper.GetTenantId(req);
                 var userIdentifier = TenantHelper.GetUserIdentifier(req);
 

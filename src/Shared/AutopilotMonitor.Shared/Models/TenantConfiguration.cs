@@ -28,15 +28,18 @@ namespace AutopilotMonitor.Shared.Models
         // ===== SECURITY SETTINGS =====
 
         /// <summary>
-        /// Whether request security validation is enabled
-        /// </summary>
-        public bool SecurityEnabled { get; set; } = true;
-
-        /// <summary>
         /// Rate limit: Maximum requests per minute per device
+        /// This value is synchronized from the global AdminConfiguration
         /// Default: 100
         /// </summary>
         public int RateLimitRequestsPerMinute { get; set; } = 100;
+
+        /// <summary>
+        /// Optional custom rate limit for this tenant (overrides RateLimitRequestsPerMinute)
+        /// If set (not null), this custom value takes precedence over the global default
+        /// Note: This is only configurable by Galactic Admins directly in the database
+        /// </summary>
+        public int? CustomRateLimitRequestsPerMinute { get; set; } = null;
 
         /// <summary>
         /// Hardware whitelist: Allowed manufacturers (supports wildcards like "Dell*")
@@ -125,8 +128,8 @@ namespace AutopilotMonitor.Shared.Models
                 TenantId = tenantId,
                 LastUpdated = DateTime.UtcNow,
                 UpdatedBy = "System",
-                SecurityEnabled = true,
                 RateLimitRequestsPerMinute = 100,
+                CustomRateLimitRequestsPerMinute = null,
                 ManufacturerWhitelist = "Dell*,HP*,Lenovo*,Microsoft Corporation",
                 ModelWhitelist = "*",
                 ValidateSerialNumber = false,

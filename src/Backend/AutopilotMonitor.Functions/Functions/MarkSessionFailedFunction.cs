@@ -29,16 +29,10 @@ namespace AutopilotMonitor.Functions.Functions
 
             try
             {
-                string tenantId;
-                string userIdentifier;
-                try
+                // Validate authentication
+                if (!TenantHelper.IsAuthenticated(req))
                 {
-                    tenantId = TenantHelper.GetTenantId(req);
-                    userIdentifier = TenantHelper.GetUserIdentifier(req);
-                }
-                catch (UnauthorizedAccessException ex)
-                {
-                    _logger.LogWarning($"Unauthorized mark-failed attempt for session {sessionId}: {ex.Message}");
+                    _logger.LogWarning($"Unauthenticated MarkSessionFailed attempt for session {sessionId}");
                     var unauthorizedResponse = req.CreateResponse(HttpStatusCode.Unauthorized);
                     await unauthorizedResponse.WriteAsJsonAsync(new
                     {
@@ -47,6 +41,9 @@ namespace AutopilotMonitor.Functions.Functions
                     });
                     return new MarkSessionFailedOutput { HttpResponse = unauthorizedResponse };
                 }
+
+                string tenantId = TenantHelper.GetTenantId(req);
+                string userIdentifier = TenantHelper.GetUserIdentifier(req);
 
                 _logger.LogInformation($"Marking session {sessionId} as failed for tenant {tenantId} by user {userIdentifier}");
 
@@ -86,22 +83,26 @@ namespace AutopilotMonitor.Functions.Functions
                         message = $"Session {sessionId} marked as failed"
                     });
 
-                    // Send SignalR notification to update all clients
-                    var signalRMessage = new SignalRMessageAction("newevents")
+                    var messagePayload = new {
+                        sessionId = sessionId,
+                        tenantId = tenantId,
+                        eventCount = 0,
+                        session = updatedSession
+                    };
+
+                    // Send SignalR notification to update all clients in the tenant
+                    // Only sent to tenant-specific group (not galactic-admins) to avoid flooding
+                    // Galactic Admins can refresh or view session details to see status changes
+                    var tenantMessage = new SignalRMessageAction("newevents")
                     {
                         GroupName = $"tenant-{tenantId}",
-                        Arguments = new[] { new {
-                            sessionId = sessionId,
-                            tenantId = tenantId,
-                            eventCount = 0,
-                            session = updatedSession
-                        } }
+                        Arguments = new[] { messagePayload }
                     };
 
                     return new MarkSessionFailedOutput
                     {
                         HttpResponse = response,
-                        SignalRMessages = new[] { signalRMessage }
+                        SignalRMessages = new[] { tenantMessage }
                     };
                 }
                 else

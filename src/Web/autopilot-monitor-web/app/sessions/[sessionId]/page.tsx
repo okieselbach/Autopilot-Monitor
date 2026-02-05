@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useSignalR } from "../../../contexts/SignalRContext";
 import { useTenant } from "../../../contexts/TenantContext";
+import { useAuth } from "../../../contexts/AuthContext";
 import { ProtectedRoute } from '../../../components/ProtectedRoute';
 import { API_BASE_URL } from "@/lib/config";
 
@@ -83,6 +84,7 @@ export default function SessionDetailPage() {
   // Use global contexts
   const { on, off, isConnected, joinGroup, leaveGroup } = useSignalR();
   const { tenantId } = useTenant();
+  const { getAccessToken } = useAuth();
 
   // Initial data fetch
   useEffect(() => {
@@ -199,7 +201,19 @@ export default function SessionDetailPage() {
         ? `${API_BASE_URL}/api/galactic/sessions`
         : `${API_BASE_URL}/api/sessions?tenantId=${tenantId}`;
 
-      const response = await fetch(endpoint);
+
+      // Get access token and include Authorization header
+      const token = await getAccessToken();
+
+      if (!token) {
+        console.error('Failed to get access token for session details');
+        return;
+      }
+      const response = await fetch(endpoint, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
       if (response.ok) {
         const data = await response.json();
         const foundSession = data.sessions?.find((s: Session) => s.sessionId === sessionId);
@@ -219,7 +233,19 @@ export default function SessionDetailPage() {
     const effectiveTenantId = sessionTenantId || tenantId;
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/sessions/${sessionId}/events?tenantId=${effectiveTenantId}`);
+      // Get access token and include Authorization header
+      const token = await getAccessToken();
+
+      if (!token) {
+        console.error('Failed to get access token for events');
+        setLoading(false);
+        return;
+      }
+      const response = await fetch(`${API_BASE_URL}/api/sessions/${sessionId}/events?tenantId=${effectiveTenantId}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
       if (response.ok) {
         const data = await response.json();
         const eventsWithPhaseNames = data.events.map((e: EnrollmentEvent) => ({
@@ -244,8 +270,18 @@ export default function SessionDetailPage() {
     const effectiveTenantId = sessionTenantId || tenantId;
 
     try {
+      // Get access token and include Authorization header
+      const token = await getAccessToken();
+
+      if (!token) {
+        console.error('Failed to get access token for mark failed');
+        return;
+      }
       const response = await fetch(`${API_BASE_URL}/api/sessions/${sessionId}/mark-failed?tenantId=${effectiveTenantId}`, {
         method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
       });
 
       if (response.ok) {

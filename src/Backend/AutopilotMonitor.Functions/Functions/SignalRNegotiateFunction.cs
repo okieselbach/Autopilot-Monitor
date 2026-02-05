@@ -24,8 +24,22 @@ namespace AutopilotMonitor.Functions.Functions
             _logger.LogInformation("SignalR negotiate request");
 
             // Validate authentication (middleware already validated JWT)
-            var httpContext = req.FunctionContext.GetHttpContext();
-            if (httpContext?.User?.Identity?.IsAuthenticated != true)
+            // Azure Functions Isolated Worker: Check FunctionContext.Items first
+            bool isAuthenticated = false;
+
+            if (req.FunctionContext.Items.TryGetValue("ClaimsPrincipal", out var principalObj)
+                && principalObj is System.Security.Claims.ClaimsPrincipal principal)
+            {
+                isAuthenticated = principal.Identity?.IsAuthenticated == true;
+            }
+            else
+            {
+                // Fallback to HTTP context
+                var httpContext = req.FunctionContext.GetHttpContext();
+                isAuthenticated = httpContext?.User?.Identity?.IsAuthenticated == true;
+            }
+
+            if (!isAuthenticated)
             {
                 _logger.LogWarning("Unauthenticated SignalR negotiate attempt");
                 var unauthorizedResponse = req.CreateResponse(HttpStatusCode.Unauthorized);

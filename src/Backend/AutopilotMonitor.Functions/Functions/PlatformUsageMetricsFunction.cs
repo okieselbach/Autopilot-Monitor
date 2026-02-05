@@ -40,8 +40,7 @@ namespace AutopilotMonitor.Functions.Functions
             try
             {
                 // Validate authentication
-                var httpContext = req.FunctionContext.GetHttpContext();
-                if (httpContext?.User?.Identity?.IsAuthenticated != true)
+                if (!TenantHelper.IsAuthenticated(req))
                 {
                     _logger.LogWarning("Unauthenticated platform usage metrics attempt");
                     var unauthorizedResponse = req.CreateResponse(HttpStatusCode.Unauthorized);

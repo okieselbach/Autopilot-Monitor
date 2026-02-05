@@ -13,7 +13,15 @@ public static class ClaimsPrincipalExtensions
     /// </summary>
     public static ClaimsPrincipal? GetUser(this FunctionContext context)
     {
-        // Try to get ClaimsPrincipal from HTTP context
+        // Azure Functions Isolated Worker: Try FunctionContext.Items first
+        // This is set by AuthenticationMiddleware and is more reliable than httpContext.User
+        if (context.Items.TryGetValue("ClaimsPrincipal", out var principalObj)
+            && principalObj is ClaimsPrincipal principal)
+        {
+            return principal;
+        }
+
+        // Fallback to HTTP context (may not work reliably in isolated worker)
         var httpContext = context.GetHttpContext();
         return httpContext?.User;
     }

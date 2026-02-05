@@ -10,6 +10,27 @@ namespace AutopilotMonitor.Functions.Helpers;
 public static class TenantHelper
 {
     /// <summary>
+    /// Checks if the request has an authenticated user
+    /// Azure Functions Isolated Worker compatible
+    /// </summary>
+    /// <param name="req">The HTTP request</param>
+    /// <returns>True if user is authenticated, false otherwise</returns>
+    public static bool IsAuthenticated(HttpRequestData req)
+    {
+        // Azure Functions Isolated Worker: Try FunctionContext.Items first
+        // This is set by AuthenticationMiddleware and is more reliable than httpContext.User
+        if (req.FunctionContext.Items.TryGetValue("ClaimsPrincipal", out var principalObj)
+            && principalObj is ClaimsPrincipal principal)
+        {
+            return principal.Identity?.IsAuthenticated == true;
+        }
+
+        // Fallback to HTTP context (may not work reliably in isolated worker)
+        var httpContext = req.FunctionContext.GetHttpContext();
+        return httpContext?.User?.Identity?.IsAuthenticated == true;
+    }
+
+    /// <summary>
     /// Extracts the tenant ID from the authenticated user's JWT token claims.
     /// Uses the Azure AD tenant ID ('tid' claim) which identifies which customer/organization owns the data.
     ///
@@ -20,15 +41,29 @@ public static class TenantHelper
     /// <exception cref="UnauthorizedAccessException">Thrown when user is not authenticated or tenant ID is missing</exception>
     public static string GetTenantId(HttpRequestData req)
     {
-        var httpContext = req.FunctionContext.GetHttpContext();
-        var isAuthenticated = httpContext?.User?.Identity?.IsAuthenticated == true;
+        // Azure Functions Isolated Worker: Try FunctionContext.Items first
+        // This is set by AuthenticationMiddleware and is more reliable than httpContext.User
+        ClaimsPrincipal? user = null;
 
-        if (!isAuthenticated)
+        if (req.FunctionContext.Items.TryGetValue("ClaimsPrincipal", out var principalObj)
+            && principalObj is ClaimsPrincipal principal)
+        {
+            user = principal;
+        }
+        else
+        {
+            // Fallback to HTTP context (may not work reliably in isolated worker)
+            var httpContext = req.FunctionContext.GetHttpContext();
+            if (httpContext?.User?.Identity?.IsAuthenticated == true)
+            {
+                user = httpContext.User;
+            }
+        }
+
+        if (user?.Identity?.IsAuthenticated != true)
         {
             throw new UnauthorizedAccessException("User is not authenticated. JWT token required.");
         }
-
-        var user = httpContext!.User;
 
         // Extract tenant ID from JWT 'tid' claim (Azure AD tenant ID)
         var tenantIdClaim = user.FindFirst("tid")?.Value;
@@ -48,16 +83,34 @@ public static class TenantHelper
     /// <returns>User email or name, or "Anonymous" if not authenticated</returns>
     public static string GetUserIdentifier(HttpRequestData req)
     {
-        var httpContext = req.FunctionContext.GetHttpContext();
-        if (httpContext?.User?.Identity?.IsAuthenticated != true)
+        // Azure Functions Isolated Worker: Try FunctionContext.Items first
+        ClaimsPrincipal? user = null;
+
+        if (req.FunctionContext.Items.TryGetValue("ClaimsPrincipal", out var principalObj)
+            && principalObj is ClaimsPrincipal principal)
+        {
+            user = principal;
+        }
+        else
+        {
+            // Fallback to HTTP context
+            var httpContext = req.FunctionContext.GetHttpContext();
+            if (httpContext?.User?.Identity?.IsAuthenticated == true)
+            {
+                user = httpContext.User;
+            }
+        }
+
+        if (user?.Identity?.IsAuthenticated != true)
         {
             return "Anonymous";
         }
 
-        var user = httpContext.User;
-
-        // Try to get email first, then preferred_username, then name
-        return user.FindFirst(ClaimTypes.Email)?.Value ??
+        // Try to get UPN first (Azure AD User Principal Name - most reliable identifier)
+        // Then fall back to email, preferred_username, and finally name
+        return user.FindFirst("upn")?.Value ??
+               user.FindFirst(ClaimTypes.Upn)?.Value ??
+               user.FindFirst(ClaimTypes.Email)?.Value ??
                user.FindFirst("preferred_username")?.Value ??
                user.FindFirst(ClaimTypes.Name)?.Value ??
                user.FindFirst("name")?.Value ??

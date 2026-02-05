@@ -26,16 +26,10 @@ namespace AutopilotMonitor.Functions.Functions
 
             try
             {
-                string tenantId;
-                string userIdentifier;
-                try
+                // Validate authentication
+                if (!TenantHelper.IsAuthenticated(req))
                 {
-                    tenantId = TenantHelper.GetTenantId(req);
-                    userIdentifier = TenantHelper.GetUserIdentifier(req);
-                }
-                catch (UnauthorizedAccessException ex)
-                {
-                    _logger.LogWarning($"Unauthorized audit logs attempt: {ex.Message}");
+                    _logger.LogWarning("Unauthenticated GetAuditLogs attempt");
                     var unauthorizedResponse = req.CreateResponse(HttpStatusCode.Unauthorized);
                     await unauthorizedResponse.WriteAsJsonAsync(new
                     {
@@ -44,6 +38,9 @@ namespace AutopilotMonitor.Functions.Functions
                     });
                     return unauthorizedResponse;
                 }
+
+                string tenantId = TenantHelper.GetTenantId(req);
+                string userIdentifier = TenantHelper.GetUserIdentifier(req);
 
                 _logger.LogInformation($"Fetching audit logs for tenant {tenantId} by user {userIdentifier}");
 

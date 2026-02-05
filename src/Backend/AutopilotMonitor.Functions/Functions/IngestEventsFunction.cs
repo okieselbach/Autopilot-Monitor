@@ -193,17 +193,21 @@ namespace AutopilotMonitor.Functions.Functions
                 // Send SignalR notifications using Groups for multi-tenancy and cost optimization
                 // Include session data so frontend doesn't need to fetch it (cost optimization)
 
-                // 1. Summary notification for session list updates (tenant-specific)
+                var messagePayload = new {
+                    sessionId = request.SessionId,
+                    tenantId = request.TenantId,
+                    eventCount = processedCount,
+                    session = updatedSession // Include full session data
+                };
+
+                // 1. Summary notification for session list updates (tenant-specific only)
                 // Only sent to clients in the tenant group - prevents cross-tenant data leaks
+                // Galactic Admins only receive "newSession" events from RegisterSessionFunction,
+                // not every event batch, to avoid flooding them with updates
                 var summaryMessage = new SignalRMessageAction("newevents")
                 {
                     GroupName = $"tenant-{request.TenantId}",
-                    Arguments = new[] { new {
-                        sessionId = request.SessionId,
-                        tenantId = request.TenantId,
-                        eventCount = processedCount,
-                        session = updatedSession // Include full session data
-                    } }
+                    Arguments = new[] { messagePayload }
                 };
 
                 // 2. Detailed events for real-time event streaming on detail pages (session-specific)

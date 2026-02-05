@@ -26,7 +26,7 @@ interface Session {
 
 export default function Home() {
   const router = useRouter();
-  const { user, logout } = useAuth();
+  const { user, logout, getAccessToken } = useAuth();
   const { addNotification } = useNotifications();
   const [apiStatus, setApiStatus] = useState<"unchecked" | "checking" | "healthy" | "error">("unchecked");
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -64,17 +64,6 @@ export default function Home() {
   // Track if we've joined the tenant group to prevent duplicate joins
   const hasJoinedGroup = useRef(false);
 
-  // Manual health check function
-  const checkApiHealth = async () => {
-    setApiStatus("checking");
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/health`);
-      setApiStatus(res.ok ? "healthy" : "error");
-    } catch {
-      setApiStatus("error");
-    }
-  };
-
   const fetchSessions = async () => {
     try {
       // Use different endpoint based on galactic admin mode
@@ -82,7 +71,20 @@ export default function Home() {
         ? `${API_BASE_URL}/api/galactic/sessions`
         : `${API_BASE_URL}/api/sessions?tenantId=${tenantId}`;
 
-      const response = await fetch(endpoint);
+      // Get access token and include Authorization header
+      const token = await getAccessToken();
+
+      if (!token) {
+        addNotification('error', 'Authentication Error', 'Failed to get access token. Please try logging in again.', 'auth-error');
+        return;
+      }
+
+      const response = await fetch(endpoint, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
       if (response.ok) {
         const data = await response.json();
         const allSessions = data.sessions || [];
@@ -130,9 +132,56 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isConnected, tenantId]);
 
+  // Join/leave galactic-admins group when Galactic Admin mode changes
+  useEffect(() => {
+    if (!isConnected) return;
+
+    if (galacticAdminMode) {
+      console.log('[Home] Galactic Admin mode enabled: joining galactic-admins group');
+      joinGroup('galactic-admins');
+    } else {
+      console.log('[Home] Galactic Admin mode disabled: leaving galactic-admins group');
+      leaveGroup('galactic-admins');
+    }
+
+    return () => {
+      // Clean up galactic-admins group on unmount if currently in Galactic Admin mode
+      if (galacticAdminMode) {
+        console.log('[Home] Component unmounting: leaving galactic-admins group');
+        leaveGroup('galactic-admins');
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isConnected, galacticAdminMode]);
+
   // Setup SignalR listener - re-register when connection changes
   useEffect(() => {
-    // Listen for real-time updates via SignalR (no more polling or HTTP requests!)
+    // Listen for real-time updates via SignalR
+    // - "newSession" events: Sent when a session is first registered (new session notification)
+    // - "newevents" events: Sent when events are ingested (status updates for existing sessions)
+    // Both are important for keeping the session list up-to-date
+
+    const handleNewSession = (data: { sessionId: string; tenantId: string; session: Session }) => {
+      console.log('New session registered', data);
+
+      // Add new session to the list (at the beginning - most recent first)
+      if (data.session) {
+        setSessions(prevSessions => {
+          // Check if session already exists (shouldn't happen, but be defensive)
+          const sessionIndex = prevSessions.findIndex(s => s.sessionId === data.session.sessionId);
+          if (sessionIndex >= 0) {
+            // Update existing session (just in case)
+            const updated = [...prevSessions];
+            updated[sessionIndex] = data.session;
+            return updated;
+          } else {
+            // Add new session at the beginning (most recent first)
+            return [data.session, ...prevSessions];
+          }
+        });
+      }
+    };
+
     const handleNewEvents = (data: { sessionId: string; tenantId: string; eventCount: number; session: Session }) => {
       console.log('New events notification received on home page', data);
 
@@ -146,16 +195,19 @@ export default function Home() {
             updated[sessionIndex] = data.session;
             return updated;
           } else {
-            // Add new session at the beginning (most recent first)
+            // Session not in list yet - this can happen if we missed the newSession event
+            // Add it to the list anyway
             return [data.session, ...prevSessions];
           }
         });
       }
     };
 
+    on('newSession', handleNewSession);
     on('newevents', handleNewEvents);
 
     return () => {
+      off('newSession', handleNewSession);
       off('newevents', handleNewEvents);
     };
   }, [on, off]); // Re-register when SignalR connection changes
@@ -237,8 +289,19 @@ export default function Home() {
     if (!sessionToDelete) return;
 
     try {
+      // Get access token and include Authorization header
+      const token = await getAccessToken();
+
+      if (!token) {
+        alert('Authentication error: Failed to get access token. Please try logging in again.');
+        return;
+      }
+
       const response = await fetch(`${API_BASE_URL}/api/sessions/${sessionToDelete.sessionId}?tenantId=${sessionToDelete.tenantId}`, {
         method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
       });
 
       if (response.ok) {
@@ -774,11 +837,25 @@ function SettingsMenu({
   const [loadingLogs, setLoadingLogs] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const { tenantId } = useTenant();
+  const { getAccessToken } = useAuth(); // Add this line to get getAccessToken
 
   const fetchAuditLogs = async () => {
     setLoadingLogs(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/api/audit/logs?tenantId=${tenantId}`);
+      // Get access token and include Authorization header
+      const token = await getAccessToken();
+
+      if (!token) {
+        console.error('Failed to get access token for audit logs');
+        return;
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/audit/logs?tenantId=${tenantId}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
       if (response.ok) {
         const data = await response.json();
         setAuditLogs(data.logs || []);

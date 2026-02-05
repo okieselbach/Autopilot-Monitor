@@ -58,8 +58,7 @@ namespace AutopilotMonitor.Functions.Functions
             _logger.LogInformation("Detailed health check requested");
 
             // Validate authentication
-            var httpContext = req.FunctionContext.GetHttpContext();
-            if (httpContext?.User?.Identity?.IsAuthenticated != true)
+            if (!TenantHelper.IsAuthenticated(req))
             {
                 _logger.LogWarning("Unauthenticated detailed health check attempt");
                 var unauthorizedResponse = req.CreateResponse(HttpStatusCode.Unauthorized);

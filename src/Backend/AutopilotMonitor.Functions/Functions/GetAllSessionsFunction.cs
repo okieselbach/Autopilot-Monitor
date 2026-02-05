@@ -32,8 +32,7 @@ namespace AutopilotMonitor.Functions.Functions
             try
             {
                 // Validate authentication and Galactic Admin role
-                var httpContext = req.FunctionContext.GetHttpContext();
-                if (httpContext?.User?.Identity?.IsAuthenticated != true)
+                if (!TenantHelper.IsAuthenticated(req))
                 {
                     _logger.LogWarning("Unauthenticated GetAllSessions attempt");
                     var unauthorizedResponse = req.CreateResponse(HttpStatusCode.Unauthorized);

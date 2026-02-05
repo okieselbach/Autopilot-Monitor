@@ -21,7 +21,14 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
     private readonly ILogger<AuthenticationMiddleware> _logger;
     private readonly IConfiguration _configuration;
     private readonly JsonWebTokenHandler _tokenHandler;
-    private readonly IConfigurationManager<OpenIdConnectConfiguration> _configurationManager;
+
+    // Cache configuration managers per tenant to avoid repeated OIDC metadata fetches
+    private readonly Dictionary<string, IConfigurationManager<OpenIdConnectConfiguration>> _configManagerCache;
+    private readonly SemaphoreSlim _cacheLock = new SemaphoreSlim(1, 1);
+
+    // Track if we're currently initializing a tenant to prevent race conditions
+    private readonly HashSet<string> _initializingTenants = new HashSet<string>();
+    private readonly object _initLock = new object();
 
     public AuthenticationMiddleware(
         ILogger<AuthenticationMiddleware> logger,
@@ -30,16 +37,10 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
         _logger = logger;
         _configuration = configuration;
         _tokenHandler = new JsonWebTokenHandler();
+        _configManagerCache = new Dictionary<string, IConfigurationManager<OpenIdConnectConfiguration>>();
 
         // Disable PII logging in production for security
         Microsoft.IdentityModel.Logging.IdentityModelEventSource.ShowPII = false;
-
-        // Set up OpenID Connect configuration manager to get signing keys
-        var authority = "https://login.microsoftonline.com/organizations/v2.0";
-        var metadataAddress = $"{authority}/.well-known/openid-configuration";
-        _configurationManager = new ConfigurationManager<OpenIdConnectConfiguration>(
-            metadataAddress,
-            new OpenIdConnectConfigurationRetriever());
     }
 
     public async Task Invoke(FunctionContext context, FunctionExecutionDelegate next)
@@ -77,13 +78,37 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
                             : $"https://login.microsoftonline.com/{tenantId}/v2.0")  // v2.0
                         : "https://login.microsoftonline.com/common/v2.0";
 
-                    var tenantMetadataAddress = $"{tenantSpecificAuthority}/.well-known/openid-configuration";
-                    var tenantConfigManager = new ConfigurationManager<OpenIdConnectConfiguration>(
-                        tenantMetadataAddress,
-                        new OpenIdConnectConfigurationRetriever());
+                    // Get or create cached configuration manager for this tenant
+                    IConfigurationManager<OpenIdConnectConfiguration>? tenantConfigManager = null;
+                    await _cacheLock.WaitAsync();
+                    try
+                    {
+                        if (!_configManagerCache.TryGetValue(tenantSpecificAuthority, out tenantConfigManager))
+                        {
+                            var tenantMetadataAddress = $"{tenantSpecificAuthority}/.well-known/openid-configuration";
+                            tenantConfigManager = new ConfigurationManager<OpenIdConnectConfiguration>(
+                                tenantMetadataAddress,
+                                new OpenIdConnectConfigurationRetriever(),
+                                new HttpDocumentRetriever() { RequireHttps = true })
+                            {
+                                // Cache configuration for 24 hours (signing keys rarely change)
+                                AutomaticRefreshInterval = TimeSpan.FromHours(24),
+                                RefreshInterval = TimeSpan.FromHours(24)
+                            };
+                            _configManagerCache[tenantSpecificAuthority] = tenantConfigManager;
+                            _logger.LogInformation($"[Auth Middleware] Created new config manager for {tenantSpecificAuthority}");
+                        }
+                    }
+                    finally
+                    {
+                        _cacheLock.Release();
+                    }
 
-                    // Request refresh to ensure we get the latest signing keys
-                    tenantConfigManager.RequestRefresh();
+                    if (tenantConfigManager == null)
+                    {
+                        throw new InvalidOperationException("Failed to get or create configuration manager");
+                    }
+
                     var openIdConfig = await tenantConfigManager.GetConfigurationAsync(CancellationToken.None);
 
                     _logger.LogInformation($"[Auth Middleware] Loaded {openIdConfig.SigningKeys.Count} signing keys from {tenantSpecificAuthority} (v{(isV1Token ? "1.0" : "2.0")} token)");
@@ -153,11 +178,22 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
                     {
                         var principal = new ClaimsPrincipal(validationResult.ClaimsIdentity);
 
-                        _logger.LogInformation($"[Auth Middleware] Token validated successfully. Claims count: {principal.Claims.Count()}");
-                        _logger.LogInformation($"[Auth Middleware] User: {principal.Identity?.Name}, Authenticated: {principal.Identity?.IsAuthenticated}");
+                        // Get user identifier for logging (same logic as TenantHelper.GetUserIdentifier)
+                        var userIdentifier = principal.FindFirst("upn")?.Value ??
+                                           principal.FindFirst(ClaimTypes.Upn)?.Value ??
+                                           principal.FindFirst(ClaimTypes.Email)?.Value ??
+                                           principal.FindFirst("preferred_username")?.Value ??
+                                           principal.FindFirst(ClaimTypes.Name)?.Value ??
+                                           principal.FindFirst("name")?.Value ??
+                                           "Unknown";
 
-                        // Set the principal on the HTTP context
+                        _logger.LogInformation($"[Auth Middleware] Token validated successfully. Claims count: {principal.Claims.Count()}");
+                        _logger.LogInformation($"[Auth Middleware] User: {userIdentifier}, Authenticated: {principal.Identity?.IsAuthenticated}");
+
+                        // Set the principal on both the HTTP context AND the FunctionContext
+                        // This is critical for Azure Functions Isolated Worker (.NET 8)
                         httpContext.User = principal;
+                        context.Items["ClaimsPrincipal"] = principal;
                     }
                     else
                     {

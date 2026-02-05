@@ -4,14 +4,13 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ProtectedRoute } from "../../components/ProtectedRoute";
 import { useTenant } from "../../contexts/TenantContext";
+import { useAuth } from "../../contexts/AuthContext";
 import { API_BASE_URL } from "@/lib/config";
 
 interface TenantConfiguration {
   tenantId: string;
   lastUpdated: string;
   updatedBy: string;
-  securityEnabled: boolean;
-  rateLimitRequestsPerMinute: number;
   manufacturerWhitelist: string;
   modelWhitelist: string;
   validateSerialNumber: boolean;
@@ -23,6 +22,7 @@ interface TenantConfiguration {
 export default function SettingsPage() {
   const router = useRouter();
   const { tenantId } = useTenant();
+  const { getAccessToken } = useAuth();
   const [config, setConfig] = useState<TenantConfiguration | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -30,8 +30,6 @@ export default function SettingsPage() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   // Form state
-  const [securityEnabled, setSecurityEnabled] = useState(true);
-  const [rateLimitRequestsPerMinute, setRateLimitRequestsPerMinute] = useState(100);
   const [manufacturerWhitelist, setManufacturerWhitelist] = useState("Dell*,HP*,Lenovo*,Microsoft Corporation");
   const [modelWhitelist, setModelWhitelist] = useState("*");
   const [validateSerialNumber, setValidateSerialNumber] = useState(false);
@@ -48,7 +46,17 @@ export default function SettingsPage() {
         setLoading(true);
         setError(null);
 
-        const response = await fetch(`${API_BASE_URL}/api/config/${tenantId}`);
+        
+        const token = await getAccessToken();
+        if (!token) {
+          throw new Error('Failed to get access token');
+        }
+
+        const response = await fetch(`${API_BASE_URL}/api/config/${tenantId}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
 
         if (!response.ok) {
           throw new Error(`Failed to load configuration: ${response.statusText}`);
@@ -58,8 +66,6 @@ export default function SettingsPage() {
         setConfig(data);
 
         // Update form state
-        setSecurityEnabled(data.securityEnabled);
-        setRateLimitRequestsPerMinute(data.rateLimitRequestsPerMinute);
         setManufacturerWhitelist(data.manufacturerWhitelist);
         setModelWhitelist(data.modelWhitelist);
         setValidateSerialNumber(data.validateSerialNumber);
@@ -86,8 +92,6 @@ export default function SettingsPage() {
 
       const updatedConfig: TenantConfiguration = {
         ...config,
-        securityEnabled,
-        rateLimitRequestsPerMinute,
         manufacturerWhitelist,
         modelWhitelist,
         validateSerialNumber,
@@ -95,10 +99,16 @@ export default function SettingsPage() {
         sessionTimeoutHours,
       };
 
+      const token = await getAccessToken();
+      if (!token) {
+        throw new Error('Failed to get access token');
+      }
+
       const response = await fetch(`${API_BASE_URL}/api/config/${tenantId}`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
+          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify(updatedConfig),
       });
@@ -124,8 +134,6 @@ export default function SettingsPage() {
   const handleReset = () => {
     if (!config) return;
 
-    setSecurityEnabled(config.securityEnabled);
-    setRateLimitRequestsPerMinute(config.rateLimitRequestsPerMinute);
     setManufacturerWhitelist(config.manufacturerWhitelist);
     setModelWhitelist(config.modelWhitelist);
     setValidateSerialNumber(config.validateSerialNumber);
@@ -191,68 +199,6 @@ export default function SettingsPage() {
               </div>
             )}
 
-            {/* Security Toggle */}
-            <div className="bg-white rounded-lg shadow">
-              <div className="p-6 border-b border-gray-200">
-                <h2 className="text-xl font-semibold text-gray-900">Security</h2>
-                <p className="text-sm text-gray-500 mt-1">Enable or disable security validation for this tenant</p>
-              </div>
-              <div className="p-6">
-                <label className="flex items-center justify-between cursor-pointer">
-                  <div>
-                    <p className="font-medium text-gray-900">Enable Security Validation</p>
-                    <p className="text-sm text-gray-500">
-                      When enabled, all API requests will be validated (certificate, rate limit, hardware whitelist)
-                    </p>
-                  </div>
-                  <div className="relative">
-                    <input
-                      type="checkbox"
-                      className="sr-only"
-                      checked={securityEnabled}
-                      onChange={(e) => setSecurityEnabled(e.target.checked)}
-                    />
-                    <div
-                      onClick={() => setSecurityEnabled(!securityEnabled)}
-                      className={`w-14 h-8 rounded-full transition-colors ${
-                        securityEnabled ? "bg-indigo-600" : "bg-gray-300"
-                      }`}
-                    >
-                      <div
-                        className={`absolute top-1 left-1 w-6 h-6 bg-white rounded-full transition-transform ${
-                          securityEnabled ? "transform translate-x-6" : ""
-                        }`}
-                      ></div>
-                    </div>
-                  </div>
-                </label>
-              </div>
-            </div>
-
-            {/* Rate Limiting */}
-            <div className="bg-white rounded-lg shadow">
-              <div className="p-6 border-b border-gray-200">
-                <h2 className="text-xl font-semibold text-gray-900">Rate Limiting</h2>
-                <p className="text-sm text-gray-500 mt-1">Configure DoS protection limits per device</p>
-              </div>
-              <div className="p-6">
-                <label className="block">
-                  <span className="text-gray-700 font-medium">Maximum Requests per Minute (per Device)</span>
-                  <p className="text-sm text-gray-500 mb-2">
-                    Default: 100. Normal enrollment generates ~2-3 requests/min. Lower values provide stricter protection.
-                  </p>
-                  <input
-                    type="number"
-                    min="1"
-                    max="1000"
-                    value={rateLimitRequestsPerMinute}
-                    onChange={(e) => setRateLimitRequestsPerMinute(parseInt(e.target.value) || 100)}
-                    className="mt-1 block w-full px-4 py-2 border border-gray-300 rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                  />
-                </label>
-              </div>
-            </div>
-
             {/* Hardware Whitelist */}
             <div className="bg-white rounded-lg shadow">
               <div className="p-6 border-b border-gray-200">
@@ -316,7 +262,7 @@ export default function SettingsPage() {
                   <div>
                     <p className="font-medium text-gray-500">Enable Serial Number Validation</p>
                     <p className="text-sm text-gray-400">
-                      Requires Graph API integration with Multi-Tenant support
+                      Requires Graph API permission
                     </p>
                   </div>
                   <div className="relative">

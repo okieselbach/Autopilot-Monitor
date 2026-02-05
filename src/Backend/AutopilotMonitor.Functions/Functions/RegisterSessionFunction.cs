@@ -4,6 +4,7 @@ using AutopilotMonitor.Functions.Services;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
+using Microsoft.Azure.Functions.Worker.Extensions.SignalRService;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 
@@ -29,7 +30,7 @@ namespace AutopilotMonitor.Functions.Functions
         }
 
         [Function("RegisterSession")]
-        public async Task<HttpResponseData> Run(
+        public async Task<RegisterSessionOutput> Run(
             [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "sessions/register")] HttpRequestData req)
         {
             _logger.LogInformation("RegisterSession function processing request");
@@ -42,22 +43,23 @@ namespace AutopilotMonitor.Functions.Functions
 
                 if (request?.Registration == null)
                 {
-                    return await CreateErrorResponse(req, HttpStatusCode.BadRequest, "Invalid request payload");
+                    var errorResponse = await CreateErrorResponse(req, HttpStatusCode.BadRequest, "Invalid request payload");
+                    return new RegisterSessionOutput { HttpResponse = errorResponse };
                 }
 
                 var registration = request.Registration;
 
                 // Validate request security (certificate, rate limit, hardware whitelist)
-                var (validation, errorResponse) = await req.ValidateSecurityAsync(
+                var (validation, errorResponse2) = await req.ValidateSecurityAsync(
                     registration.TenantId,
                     _configService,
                     _rateLimitService,
                     _logger
                 );
 
-                if (errorResponse != null)
+                if (errorResponse2 != null)
                 {
-                    return errorResponse;
+                    return new RegisterSessionOutput { HttpResponse = errorResponse2 };
                 }
 
                 _logger.LogInformation($"Registering session {registration.SessionId} for tenant {registration.TenantId} (Device: {validation.CertificateThumbprint})");
@@ -67,8 +69,12 @@ namespace AutopilotMonitor.Functions.Functions
 
                 if (!stored)
                 {
-                    return await CreateErrorResponse(req, HttpStatusCode.InternalServerError, "Failed to store session");
+                    var errorResponse = await CreateErrorResponse(req, HttpStatusCode.InternalServerError, "Failed to store session");
+                    return new RegisterSessionOutput { HttpResponse = errorResponse };
                 }
+
+                // Retrieve the stored session to include full data in SignalR message
+                var session = await _storageService.GetSessionAsync(registration.TenantId, registration.SessionId);
 
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 var responseData = new RegisterSessionResponse
@@ -80,12 +86,42 @@ namespace AutopilotMonitor.Functions.Functions
                 };
 
                 await response.WriteAsJsonAsync(responseData);
-                return response;
+
+                // Send SignalR notification for new session registration
+                // This is sent to BOTH tenant-specific group AND galactic-admins group
+                // so Galactic Admins can see new sessions from all tenants without being
+                // flooded with every single event update
+                var messagePayload = new {
+                    sessionId = registration.SessionId,
+                    tenantId = registration.TenantId,
+                    session = session
+                };
+
+                // 1. Tenant-specific notification (normal users)
+                var tenantMessage = new SignalRMessageAction("newSession")
+                {
+                    GroupName = $"tenant-{registration.TenantId}",
+                    Arguments = new[] { messagePayload }
+                };
+
+                // 2. Galactic Admins notification (cross-tenant visibility)
+                var galacticAdminMessage = new SignalRMessageAction("newSession")
+                {
+                    GroupName = "galactic-admins",
+                    Arguments = new[] { messagePayload }
+                };
+
+                return new RegisterSessionOutput
+                {
+                    HttpResponse = response,
+                    SignalRMessages = new[] { tenantMessage, galacticAdminMessage }
+                };
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error registering session");
-                return await CreateErrorResponse(req, HttpStatusCode.InternalServerError, "Internal server error");
+                var errorResponse = await CreateErrorResponse(req, HttpStatusCode.InternalServerError, "Internal server error");
+                return new RegisterSessionOutput { HttpResponse = errorResponse };
             }
         }
 
@@ -101,5 +137,14 @@ namespace AutopilotMonitor.Functions.Functions
             await response.WriteAsJsonAsync(errorResponse);
             return response;
         }
+    }
+
+    public class RegisterSessionOutput
+    {
+        [HttpResult]
+        public HttpResponseData? HttpResponse { get; set; }
+
+        [SignalROutput(HubName = "autopilotmonitor")]
+        public SignalRMessageAction[]? SignalRMessages { get; set; }
     }
 }

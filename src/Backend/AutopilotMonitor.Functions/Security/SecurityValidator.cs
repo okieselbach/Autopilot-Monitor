@@ -40,12 +40,7 @@ namespace AutopilotMonitor.Functions.Security
             // Load tenant configuration
             var config = await _configService.GetConfigurationAsync(tenantId);
 
-            // If security is disabled for this tenant, allow all requests
-            if (!config.SecurityEnabled)
-            {
-                _logger.LogWarning($"Security validation disabled for tenant {tenantId}");
-                return new SecurityValidationResult { IsValid = true };
-            }
+            // Security validation is always enforced (no longer configurable per tenant)
 
             // 1. Validate client certificate
             var certHeader = req.Headers.Contains("X-Client-Certificate")
@@ -65,9 +60,12 @@ namespace AutopilotMonitor.Functions.Security
             }
 
             // 2. Check rate limit (DoS protection)
+            // Use custom tenant rate limit if set, otherwise use the synced global rate limit
+            var rateLimitValue = config.CustomRateLimitRequestsPerMinute ?? config.RateLimitRequestsPerMinute;
+
             var rateLimitResult = _rateLimitService.CheckRateLimit(
                 certValidation.Thumbprint!,
-                config.RateLimitRequestsPerMinute
+                rateLimitValue
             );
 
             if (!rateLimitResult.IsAllowed)

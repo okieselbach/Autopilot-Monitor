@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { API_BASE_URL } from '@/lib/config';
 import { ProtectedRoute } from '../../components/ProtectedRoute';
+import { useAuth } from '../../contexts/AuthContext';
 
 interface SessionMetrics {
   total: number;
@@ -61,6 +62,7 @@ interface PlatformUsageMetrics {
 
 export default function PlatformUsageMetricsPage() {
   const router = useRouter();
+  const { getAccessToken } = useAuth();
   const [metrics, setMetrics] = useState<PlatformUsageMetrics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -76,7 +78,17 @@ export default function PlatformUsageMetricsPage() {
       setError(null);
 
       // Platform-wide metrics - cross-tenant (Galactic Admin only)
-      const response = await fetch(`${API_BASE_URL}/api/platform/usage-metrics`);
+      
+      const token = await getAccessToken();
+      if (!token) {
+        throw new Error('Failed to get access token');
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/platform/usage-metrics`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
 
       if (!response.ok) {
         throw new Error(`Failed to fetch platform usage metrics: ${response.statusText}`);

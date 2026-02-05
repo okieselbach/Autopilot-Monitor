@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTenant } from '../../contexts/TenantContext';
+import { useAuth } from '../../contexts/AuthContext';
 import { ProtectedRoute } from '../../components/ProtectedRoute';
 import { API_BASE_URL } from '@/lib/config';
 
@@ -63,6 +64,7 @@ interface PlatformUsageMetrics {
 export default function UsageMetricsPage() {
   const router = useRouter();
   const { tenantId } = useTenant();
+  const { getAccessToken } = useAuth();
   const [metrics, setMetrics] = useState<PlatformUsageMetrics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -78,7 +80,17 @@ export default function UsageMetricsPage() {
       setError(null);
 
       // Tenant-specific metrics - using tenantId
-      const response = await fetch(`${API_BASE_URL}/api/usage-metrics?tenantId=${tenantId}`);
+      
+      const token = await getAccessToken();
+      if (!token) {
+        throw new Error('Failed to get access token');
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/usage-metrics?tenantId=${tenantId}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
 
       if (!response.ok) {
         throw new Error(`Failed to fetch usage metrics: ${response.statusText}`);

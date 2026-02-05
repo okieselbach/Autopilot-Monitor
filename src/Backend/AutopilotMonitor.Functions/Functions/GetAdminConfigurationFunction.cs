@@ -9,30 +9,32 @@ using Microsoft.Extensions.Logging;
 
 namespace AutopilotMonitor.Functions.Functions
 {
-    public class GetTenantConfigurationFunction
+    public class GetAdminConfigurationFunction
     {
-        private readonly ILogger<GetTenantConfigurationFunction> _logger;
-        private readonly TenantConfigurationService _configService;
+        private readonly ILogger<GetAdminConfigurationFunction> _logger;
+        private readonly AdminConfigurationService _adminConfigService;
+        private readonly GalacticAdminService _galacticAdminService;
 
-        public GetTenantConfigurationFunction(
-            ILogger<GetTenantConfigurationFunction> logger,
-            TenantConfigurationService configService)
+        public GetAdminConfigurationFunction(
+            ILogger<GetAdminConfigurationFunction> logger,
+            AdminConfigurationService adminConfigService,
+            GalacticAdminService galacticAdminService)
         {
             _logger = logger;
-            _configService = configService;
+            _adminConfigService = adminConfigService;
+            _galacticAdminService = galacticAdminService;
         }
 
-        [Function("GetTenantConfiguration")]
+        [Function("GetAdminConfiguration")]
         public async Task<HttpResponseData> Run(
-            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "config/{tenantId}")] HttpRequestData req,
-            string tenantId)
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "global/config")] HttpRequestData req)
         {
             try
             {
                 // Validate authentication
                 if (!TenantHelper.IsAuthenticated(req))
                 {
-                    _logger.LogWarning($"Unauthenticated GetTenantConfiguration attempt for tenant {tenantId}");
+                    _logger.LogWarning("Unauthenticated GetAdminConfiguration attempt");
                     var unauthorizedResponse = req.CreateResponse(HttpStatusCode.Unauthorized);
                     await unauthorizedResponse.WriteAsJsonAsync(new
                     {
@@ -42,26 +44,26 @@ namespace AutopilotMonitor.Functions.Functions
                     return unauthorizedResponse;
                 }
 
-                // Get tenant ID from JWT token and validate access
-                string authenticatedTenantId = TenantHelper.GetTenantId(req);
+                // Get tenant ID and user identifier from JWT token
+                string tenantId = TenantHelper.GetTenantId(req);
                 string userIdentifier = TenantHelper.GetUserIdentifier(req);
 
-                // Validate tenant access: User can only access their own tenant's configuration
-                if (authenticatedTenantId != tenantId)
+                // Validate Galactic Admin role
+                if (!await _galacticAdminService.IsGalacticAdminAsync(userIdentifier))
                 {
-                    _logger.LogWarning($"User {userIdentifier} from tenant {authenticatedTenantId} attempted to access configuration for tenant {tenantId}");
+                    _logger.LogWarning($"Non-Galactic Admin user {userIdentifier} from tenant {tenantId} attempted to access admin configuration");
                     var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
                     await forbiddenResponse.WriteAsJsonAsync(new
                     {
                         success = false,
-                        message = "Access denied. You can only access your own tenant's configuration."
+                        message = "Access denied. Only Galactic Admins can access global configuration."
                     });
                     return forbiddenResponse;
                 }
 
-                _logger.LogInformation($"GetTenantConfiguration: {tenantId} by user {userIdentifier}");
+                _logger.LogInformation($"GetAdminConfiguration by Galactic Admin user {userIdentifier}");
 
-                var config = await _configService.GetConfigurationAsync(tenantId);
+                var config = await _adminConfigService.GetConfigurationAsync();
 
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(config);
@@ -69,7 +71,7 @@ namespace AutopilotMonitor.Functions.Functions
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"Error getting configuration for tenant {tenantId}");
+                _logger.LogError(ex, "Error getting admin configuration");
                 var response = req.CreateResponse(HttpStatusCode.InternalServerError);
                 await response.WriteAsJsonAsync(new { error = "Internal server error" });
                 return response;

@@ -1,5 +1,6 @@
 using System.Net;
 using AutopilotMonitor.Functions.Helpers;
+using AutopilotMonitor.Functions.Services;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Azure.Functions.Worker.Extensions.SignalRService;
@@ -11,10 +12,14 @@ namespace AutopilotMonitor.Functions.Functions
     public class SignalRAddToGroupFunction
     {
         private readonly ILogger<SignalRAddToGroupFunction> _logger;
+        private readonly GalacticAdminService _galacticAdminService;
 
-        public SignalRAddToGroupFunction(ILogger<SignalRAddToGroupFunction> logger)
+        public SignalRAddToGroupFunction(
+            ILogger<SignalRAddToGroupFunction> logger,
+            GalacticAdminService galacticAdminService)
         {
             _logger = logger;
+            _galacticAdminService = galacticAdminService;
         }
 
         [Function("AddToGroup")]
@@ -24,8 +29,7 @@ namespace AutopilotMonitor.Functions.Functions
             try
             {
                 // Validate authentication
-                var httpContext = req.FunctionContext.GetHttpContext();
-                if (httpContext?.User?.Identity?.IsAuthenticated != true)
+                if (!TenantHelper.IsAuthenticated(req))
                 {
                     _logger.LogWarning("Unauthenticated AddToGroup attempt");
                     var unauthorizedResponse = req.CreateResponse(HttpStatusCode.Unauthorized);
@@ -50,17 +54,27 @@ namespace AutopilotMonitor.Functions.Functions
 
                 // Validate tenant access
                 // Group names are in format: "tenant-{tenantId}" or "session-{tenantId}-{sessionId}"
-                // Users can only join groups for their own tenant
+                // Users can only join groups for their own tenant (unless they are Galactic Admin)
                 var requestedTenantId = ExtractTenantIdFromGroupName(request.GroupName);
                 if (!string.IsNullOrEmpty(requestedTenantId))
                 {
                     // Check if user is allowed to join this tenant's group
                     if (requestedTenantId != userTenantId)
                     {
-                        _logger.LogWarning($"User {userEmail} (tenant {userTenantId}) attempted to join group for tenant {requestedTenantId}");
-                        var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-                        await forbiddenResponse.WriteAsJsonAsync(new { success = false, message = "Access denied: You can only join groups for your own tenant" });
-                        return new AddToGroupOutput { HttpResponse = forbiddenResponse };
+                        // Check if user is Galactic Admin (they can join any tenant's group)
+                        var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userEmail);
+
+                        if (!isGalacticAdmin)
+                        {
+                            _logger.LogWarning($"User {userEmail} (tenant {userTenantId}) attempted to join group for tenant {requestedTenantId}");
+                            var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
+                            await forbiddenResponse.WriteAsJsonAsync(new { success = false, message = "Access denied: You can only join groups for your own tenant" });
+                            return new AddToGroupOutput { HttpResponse = forbiddenResponse };
+                        }
+                        else
+                        {
+                            _logger.LogInformation($"Galactic Admin {userEmail} joining cross-tenant group: {request.GroupName}");
+                        }
                     }
                 }
 

@@ -93,3 +93,6 @@ appsettings.*.json
 *.local.*
 temp/
 tmp/
+
+# Claude Code temporary files
+tmpclaude-*-cwd
