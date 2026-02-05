@@ -33,6 +33,7 @@ interface Session {
   currentPhase: number;
   eventCount: number;
   durationSeconds: number;
+  failureReason?: string;
 }
 
 const phaseNames: Record<number, string> = {
@@ -356,7 +357,7 @@ export default function SessionDetailPage() {
                 <InfoItem label="Model" value={`${session.manufacturer} ${session.model}`} />
                 <InfoItem label="Serial Number" value={session.serialNumber} />
                 <InfoItem label="Session ID" value={session.sessionId} />
-                <InfoItem label="Status" value={<StatusBadge status={session.status} />} />
+                <InfoItem label="Status" value={<StatusBadge status={session.status} failureReason={session.failureReason} />} />
                 <InfoItem label="Events" value={session.eventCount.toString()} />
                 <InfoItem label="Duration" value={`${Math.round(session.durationSeconds / 60)} min`} />
               </div>
@@ -640,7 +641,7 @@ function SeverityBadge({ severity }: { severity: string }) {
   );
 }
 
-function StatusBadge({ status }: { status: string }) {
+function StatusBadge({ status, failureReason }: { status: string; failureReason?: string }) {
   const statusConfig = {
     InProgress: { color: "bg-blue-100 text-blue-800", text: "In Progress" },
     Succeeded: { color: "bg-green-100 text-green-800", text: "Succeeded" },
@@ -650,9 +651,19 @@ function StatusBadge({ status }: { status: string }) {
 
   const config = statusConfig[status as keyof typeof statusConfig] || statusConfig.Unknown;
 
+  const isTimeout = status === "Failed" && failureReason && failureReason.toLowerCase().includes("timed out");
+
   return (
-    <span className={`px-2 inline-block text-xs leading-5 font-semibold rounded-full ${config.color}`}>
+    <span
+      className={`px-2 inline-flex items-center gap-1 text-xs leading-5 font-semibold rounded-full ${config.color}`}
+      title={failureReason || undefined}
+    >
       {config.text}
+      {isTimeout && (
+        <span title={failureReason} className="inline-flex items-center">
+          ⏱️
+        </span>
+      )}
     </span>
   );
 }

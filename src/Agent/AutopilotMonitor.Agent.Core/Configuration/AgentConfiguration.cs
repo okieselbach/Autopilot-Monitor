@@ -45,7 +45,7 @@ namespace AutopilotMonitor.Agent.Core.Configuration
         /// <summary>
         /// Whether to use client certificate authentication
         /// </summary>
-        public bool UseClientCertAuth { get; set; } = false;
+        public bool UseClientCertAuth { get; set; } = true;
 
         /// <summary>
         /// Client certificate thumbprint (if using cert auth)
@@ -86,6 +86,16 @@ namespace AutopilotMonitor.Agent.Core.Configuration
         /// Name of the Scheduled Task to remove during self-destruct
         /// </summary>
         public string ScheduledTaskName { get; set; } = "AutopilotMonitor-Agent";
+
+        /// <summary>
+        /// Whether to reboot the device after enrollment completes
+        /// </summary>
+        public bool RebootOnComplete { get; set; } = false;
+
+        /// <summary>
+        /// Whether to enable geo-location detection (queries external IP services)
+        /// </summary>
+        public bool EnableGeoLocation { get; set; } = false;
 
         /// <summary>
         /// Validates the configuration

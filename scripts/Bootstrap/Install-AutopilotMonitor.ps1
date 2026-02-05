@@ -38,7 +38,10 @@ param(
     [string]$ApiBaseUrl = "http://localhost:7071",
 
     [Parameter(Mandatory = $false)]
-    [string]$AgentDownloadUrl = "https://yourcdn.blob.core.windows.net/agent/AutopilotMonitor-Agent.zip"
+    [string]$AgentDownloadUrl = "https://yourcdn.blob.core.windows.net/agent/AutopilotMonitor-Agent.zip",
+
+    [Parameter(Mandatory = $false)]
+    [int]$MaxOsAgeHours = 5
 )
 
 # Configuration - Everything in ProgramData for easy cleanup
@@ -70,6 +73,49 @@ function Write-Log {
 try {
     Write-Log "===== Autopilot Monitor Bootstrap Started ====="
     Write-Log "API Base URL: $ApiBaseUrl"
+
+    # ── Pre-flight: Skip installation on already-enrolled devices ──
+
+    # Check 1: OS install date must be within threshold (fresh device)
+    $osInstallDate = (Get-CimInstance Win32_OperatingSystem).InstallDate
+    $osAge = (Get-Date) - $osInstallDate
+    Write-Log "OS install date: $osInstallDate (age: $([math]::Round($osAge.TotalHours, 1))h)"
+
+    if ($osAge.TotalHours -gt $MaxOsAgeHours) {
+        Write-Log "SKIP: OS was installed $([math]::Round($osAge.TotalHours, 1))h ago (threshold: ${MaxOsAgeHours}h). Device is not freshly provisioned."
+        exit 0
+    }
+
+    # Check 2: MDM enrollment must not be completed yet
+    $enrollmentPath = "HKLM:\SOFTWARE\Microsoft\Enrollments"
+    $mdmEnrolled = $false
+
+    if (Test-Path $enrollmentPath) {
+        $enrollmentEntries = Get-ChildItem -Path $enrollmentPath -ErrorAction SilentlyContinue |
+            Where-Object { $_.PSChildName -match '^[0-9A-Fa-f\-]{36}$' }
+
+        foreach ($entry in $enrollmentEntries) {
+            $providerID = (Get-ItemProperty -Path $entry.PSPath -Name "ProviderID" -ErrorAction SilentlyContinue).ProviderID
+            if ($providerID) {
+                $mdmEnrolled = $true
+                Write-Log "Found MDM enrollment: ProviderID=$providerID (EnrollmentID=$($entry.PSChildName))"
+                break
+            }
+        }
+    }
+
+    if ($mdmEnrolled) {
+        # Double-check: Is enrollment status tracking showing completed?
+        $espPath = "HKLM:\SOFTWARE\Microsoft\Windows\Autopilot\EnrollmentStatusTracking\Device\Setup"
+        $hasCompleted = (Get-ItemProperty -Path $espPath -Name "HasProvisioningCompleted" -ErrorAction SilentlyContinue).HasProvisioningCompleted
+
+        if ($hasCompleted -eq 1) {
+            Write-Log "SKIP: Autopilot enrollment already completed (HasProvisioningCompleted=1). Device is already enrolled."
+            exit 0
+        }
+    }
+
+    Write-Log "Pre-flight checks passed - device is freshly provisioned and enrollment in progress"
 
     # Create agent configuration (JSON - NO REGISTRY!)
     Write-Log "Creating agent configuration..."

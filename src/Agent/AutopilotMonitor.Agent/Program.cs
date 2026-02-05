@@ -39,6 +39,7 @@ namespace AutopilotMonitor.Agent
 
                 logger.Info("Agent starting in console mode");
                 Console.WriteLine($"Session ID: {config.SessionId}");
+                Console.WriteLine($"Tenant ID: {config.TenantId}");
                 Console.WriteLine($"API URL: {config.ApiBaseUrl}");
                 Console.WriteLine($"Log Directory: {logDir}");
 
@@ -46,6 +47,16 @@ namespace AutopilotMonitor.Agent
                 {
                     Console.WriteLine($"Simulator Mode: ENABLED");
                     Console.WriteLine($"Simulate Failure: {(config.SimulateFailure ? "YES" : "NO")}");
+                }
+
+                if (config.RebootOnComplete)
+                {
+                    Console.WriteLine($"Reboot on Complete: ENABLED");
+                }
+
+                if (config.EnableGeoLocation)
+                {
+                    Console.WriteLine($"GeoLocation Detection: ENABLED");
                 }
 
                 if (config.UseClientCertAuth)
@@ -88,17 +99,26 @@ namespace AutopilotMonitor.Agent
             // Parse command-line arguments
             var enableSimulator = args?.Contains("--simulator") ?? false;
             var simulateFailure = args?.Contains("--simulate-failure") ?? false;
-            var useAuth = args?.Contains("--use-auth") ?? false;
+            var noAuth = args?.Contains("--no-auth") ?? false;
             var noCleanup = args?.Contains("--no-cleanup") ?? false;
+            var rebootOnComplete = args?.Contains("--reboot-on-complete") ?? false;
+            var enableGeoLocation = args?.Contains("--enable-geolocation") ?? false;
 
             // Parse certificate thumbprint if provided
             string certThumbprint = null;
+            string tenantIdOverride = null;
             if (args != null)
             {
                 var thumbprintIndex = Array.IndexOf(args, "--cert-thumbprint");
                 if (thumbprintIndex >= 0 && thumbprintIndex + 1 < args.Length)
                 {
                     certThumbprint = args[thumbprintIndex + 1];
+                }
+
+                var tenantIdIndex = Array.IndexOf(args, "--tenant-id");
+                if (tenantIdIndex >= 0 && tenantIdIndex + 1 < args.Length)
+                {
+                    tenantIdOverride = args[tenantIdIndex + 1];
                 }
             }
 
@@ -107,6 +127,9 @@ namespace AutopilotMonitor.Agent
             int uploadIntervalSeconds = 30;
             bool cleanupOnExit = true;
             bool selfDestructOnComplete = true;
+            bool rebootOnCompleteConfig = false;
+            bool enableGeoLocationConfig = false;
+            bool useClientCertAuthConfig = true;
 
             // Try to load configuration from JSON file (written by PowerShell bootstrap script)
             var configFilePath = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor\Config\agent-config.json");
@@ -130,6 +153,15 @@ namespace AutopilotMonitor.Agent
 
                         if (configDict.ContainsKey("selfDestructOnComplete") && configDict["selfDestructOnComplete"] != null)
                             selfDestructOnComplete = Convert.ToBoolean(configDict["selfDestructOnComplete"]);
+
+                        if (configDict.ContainsKey("rebootOnComplete") && configDict["rebootOnComplete"] != null)
+                            rebootOnCompleteConfig = Convert.ToBoolean(configDict["rebootOnComplete"]);
+
+                        if (configDict.ContainsKey("enableGeoLocation") && configDict["enableGeoLocation"] != null)
+                            enableGeoLocationConfig = Convert.ToBoolean(configDict["enableGeoLocation"]);
+
+                        if (configDict.ContainsKey("useClientCertAuth") && configDict["useClientCertAuth"] != null)
+                            useClientCertAuthConfig = Convert.ToBoolean(configDict["useClientCertAuth"]);
 
                         Console.WriteLine($"Loaded configuration from {configFilePath}");
                     }
@@ -161,7 +193,7 @@ namespace AutopilotMonitor.Agent
                 ApiBaseUrl = apiBaseUrl,
                 SessionId = Guid.NewGuid().ToString(),
                 //TenantId = "deadbeef-dead-beef-dead-beefdeadbeef",
-                TenantId = "b54dc1af-5320-4f60-b5d4-821e0cf2a359",
+                TenantId = tenantIdOverride ?? "b54dc1af-5320-4f60-b5d4-821e0cf2a359",
                 SpoolDirectory = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor\Spool"),
                 LogDirectory = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor\Logs"),
                 UploadIntervalSeconds = uploadIntervalSeconds,
@@ -169,10 +201,12 @@ namespace AutopilotMonitor.Agent
                 EnableDebugLogging = true,
                 EnableSimulator = enableSimulator,
                 SimulateFailure = simulateFailure,
-                UseClientCertAuth = useAuth,
+                UseClientCertAuth = !noAuth && useClientCertAuthConfig,
                 ClientCertThumbprint = certThumbprint,
                 CleanupOnExit = cleanupOnExit,
-                SelfDestructOnComplete = selfDestructOnComplete
+                SelfDestructOnComplete = selfDestructOnComplete,
+                RebootOnComplete = rebootOnComplete || rebootOnCompleteConfig,
+                EnableGeoLocation = enableGeoLocation || enableGeoLocationConfig
             };
         }
     }

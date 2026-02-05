@@ -7,6 +7,7 @@ using AutopilotMonitor.Agent.Core.Api;
 using AutopilotMonitor.Agent.Core.Configuration;
 using AutopilotMonitor.Agent.Core.EventCollection;
 using AutopilotMonitor.Agent.Core.Logging;
+using AutopilotMonitor.Agent.Core.Network;
 using AutopilotMonitor.Agent.Core.Storage;
 using AutopilotMonitor.Shared.Models;
 
@@ -31,6 +32,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring
         private EventLogWatcher _eventLogWatcher;
         private RegistryMonitor _registryMonitor;
         private PhaseDetector _phaseDetector;
+        private HelloDetector _helloDetector;
         private AutopilotSimulator _simulator;
 
         public MonitoringService(AgentConfiguration configuration, AgentLogger logger)
@@ -96,10 +98,42 @@ namespace AutopilotMonitor.Agent.Core.Monitoring
                 Message = "Autopilot Monitor Agent started"
             });
 
+            // Collect and emit device geo-location (if enabled)
+            if (_configuration.EnableGeoLocation)
+            {
+                EmitGeoLocationEvent();
+            }
+
             // Start event collectors
             StartEventCollectors();
 
             _logger.Info("Monitoring service started");
+        }
+
+        private void EmitGeoLocationEvent()
+        {
+            try
+            {
+                var location = GeoLocationService.GetLocationAsync(_logger).Result;
+                if (location != null)
+                {
+                    EmitEvent(new EnrollmentEvent
+                    {
+                        SessionId = _configuration.SessionId,
+                        TenantId = _configuration.TenantId,
+                        EventType = "device_location",
+                        Severity = EventSeverity.Info,
+                        Source = "Network",
+                        Phase = EnrollmentPhase.PreFlight,
+                        Message = $"Device location: {location.City}, {location.Region}, {location.Country} (via {location.Source})",
+                        Data = location.ToDictionary()
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"Failed to collect geo-location: {ex.Message}");
+            }
         }
 
         /// <summary>
@@ -137,6 +171,15 @@ namespace AutopilotMonitor.Agent.Core.Monitoring
                     _logger
                 );
                 _phaseDetector.Start();
+
+                // Start Hello detector (WHfB provisioning tracking)
+                _helloDetector = new HelloDetector(
+                    _configuration.SessionId,
+                    _configuration.TenantId,
+                    EmitEvent,
+                    _logger
+                );
+                _helloDetector.Start();
 
                 // Start Autopilot Simulator if enabled
                 if (_configuration.EnableSimulator)
@@ -238,6 +281,21 @@ namespace AutopilotMonitor.Agent.Core.Monitoring
         {
             try
             {
+                var manufacturer = GetManufacturer();
+                if (manufacturer.IndexOf("lenovo", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    // Lenovo stores the friendly model name (e.g. "ThinkPad X1 Carbon Gen 9")
+                    // in Win32_ComputerSystemProduct.Version instead of Win32_ComputerSystem.Model
+                    // which only contains the internal type number (e.g. "20Y3S0FP00")
+                    using (var searcher = new System.Management.ManagementObjectSearcher("SELECT Version FROM Win32_ComputerSystemProduct"))
+                    {
+                        foreach (var obj in searcher.Get())
+                        {
+                            return obj["Version"]?.ToString() ?? "Unknown";
+                        }
+                    }
+                }
+
                 using (var searcher = new System.Management.ManagementObjectSearcher("SELECT Model FROM Win32_ComputerSystem"))
                 {
                     foreach (var obj in searcher.Get())
@@ -311,6 +369,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring
 
                 _phaseDetector?.Stop();
                 _phaseDetector?.Dispose();
+
+                _helloDetector?.Stop();
+                _helloDetector?.Dispose();
 
                 _simulator?.Stop();
                 _simulator?.Dispose();
@@ -468,6 +529,18 @@ namespace AutopilotMonitor.Agent.Core.Monitoring
                 {
                     ExecuteCleanup();
                 }
+                else if (_configuration.RebootOnComplete)
+                {
+                    _logger.Info("Reboot on complete enabled - initiating reboot");
+                    var psi = new ProcessStartInfo
+                    {
+                        FileName = "shutdown.exe",
+                        Arguments = "/r /t 10 /c \"Autopilot enrollment completed - rebooting\"",
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    };
+                    Process.Start(psi);
+                }
 
                 _logger.Info("Self-destruct sequence initiated. Agent will now exit.");
 
@@ -488,7 +561,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring
         {
             try
             {
-                _logger.Info("Executing FULL SELF-DESTRUCT (Scheduled Task + Files)");
+                _logger.Info($"Executing FULL SELF-DESTRUCT (Scheduled Task + Files{(_configuration.RebootOnComplete ? " + Reboot" : "")})");
 
                 var currentProcessId = Process.GetCurrentProcess().Id;
                 var agentBasePath = Path.GetFullPath(Path.Combine(
@@ -522,6 +595,11 @@ try {{
 }}
 
 Write-Host 'AutopilotMonitor Agent self-destruct complete'
+{(_configuration.RebootOnComplete ? @"
+# Reboot the device
+Write-Host 'Initiating reboot...'
+Restart-Computer -Force
+" : "")}
 ";
 
                 // Write cleanup script to temp location (outside of agent folder)
@@ -554,7 +632,7 @@ Write-Host 'AutopilotMonitor Agent self-destruct complete'
         {
             try
             {
-                _logger.Info("Executing CLEANUP (Files only, keeping Scheduled Task)");
+                _logger.Info($"Executing CLEANUP (Files only, keeping Scheduled Task{(_configuration.RebootOnComplete ? " + Reboot" : "")})");
 
                 var currentProcessId = Process.GetCurrentProcess().Id;
                 var agentBasePath = Path.GetFullPath(Path.Combine(
@@ -578,6 +656,11 @@ try {{
 }}
 
 Write-Host 'AutopilotMonitor Agent cleanup complete'
+{(_configuration.RebootOnComplete ? @"
+# Reboot the device
+Write-Host 'Initiating reboot...'
+Restart-Computer -Force
+" : "")}
 ";
 
                 // Write cleanup script to temp location
@@ -612,6 +695,7 @@ Write-Host 'AutopilotMonitor Agent cleanup complete'
             _eventLogWatcher?.Dispose();
             _registryMonitor?.Dispose();
             _phaseDetector?.Dispose();
+            _helloDetector?.Dispose();
             _simulator?.Dispose();
         }
     }
