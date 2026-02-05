@@ -1,0 +1,37 @@
+{
+    "version": "2.0",
+    "logging": {
+        "logLevel": {
+            "default": "Warning",
+            "Function": "Information",
+            "Host": "Error",
+            "Host.Aggregator": "Error",
+            "Host.Results": "Error",
+            "Host.Startup": "Error",
+            "Microsoft.Azure.WebJobs": "Error",
+            "Microsoft.Azure.WebJobs.Host": "Error",
+            "Microsoft.Azure.WebJobs.Script": "Error",
+            "Azure.Core": "Error",
+            "System": "Error"
+        },
+        "applicationInsights": {
+            "samplingSettings": {
+                "isEnabled": true,
+                "excludedTypes": "Request"
+            },
+            "enableLiveMetricsFilters": true
+        }
+    },
+    "extensions": {
+        "http": {
+            "routePrefix": "api"
+        }
+    },
+    "cors": {
+        "allowedOrigins": [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000"
+        ],
+        "supportCredentials": false
+    }
+}

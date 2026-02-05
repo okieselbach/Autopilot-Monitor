@@ -1,0 +1,96 @@
+using System.Net;
+using AutopilotMonitor.Functions.Extensions;
+using AutopilotMonitor.Functions.Services;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.Azure.Functions.Worker;
+using Microsoft.Azure.Functions.Worker.Http;
+using Microsoft.Extensions.Logging;
+
+namespace AutopilotMonitor.Functions.Functions
+{
+    public class HealthCheckFunction
+    {
+        private readonly ILogger<HealthCheckFunction> _logger;
+        private readonly HealthCheckService _healthCheckService;
+        private readonly GalacticAdminService _galacticAdminService;
+
+        public HealthCheckFunction(
+            ILogger<HealthCheckFunction> logger,
+            HealthCheckService healthCheckService,
+            GalacticAdminService galacticAdminService)
+        {
+            _logger = logger;
+            _healthCheckService = healthCheckService;
+            _galacticAdminService = galacticAdminService;
+        }
+
+        /// <summary>
+        /// GET /api/health
+        /// Basic health check endpoint (anonymous access)
+        /// </summary>
+        [Function("HealthCheck")]
+        public async Task<HttpResponseData> Run(
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "health")] HttpRequestData req)
+        {
+            _logger.LogInformation("Basic health check requested");
+
+            var response = req.CreateResponse(HttpStatusCode.OK);
+            await response.WriteAsJsonAsync(new
+            {
+                status = "healthy",
+                service = "Autopilot Monitor API",
+                version = "1.0.0-phase1",
+                timestamp = DateTime.UtcNow
+            });
+
+            return response;
+        }
+
+        /// <summary>
+        /// GET /api/health/detailed
+        /// Detailed health check with comprehensive system checks (Galactic Admin only)
+        /// </summary>
+        [Function("DetailedHealthCheck")]
+        [Authorize]
+        public async Task<HttpResponseData> GetDetailedHealthCheck(
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "health/detailed")] HttpRequestData req,
+            FunctionContext context)
+        {
+            _logger.LogInformation("Detailed health check requested");
+
+            // Check if user is galactic admin
+            var principal = context.GetUser();
+            if (principal == null)
+            {
+                return req.CreateResponse(HttpStatusCode.Unauthorized);
+            }
+
+            var upn = principal.GetUserPrincipalName();
+            var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(upn);
+
+            if (!isGalacticAdmin)
+            {
+                var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
+                await forbiddenResponse.WriteAsJsonAsync(new { error = "Only Galactic Admins can access detailed health checks" });
+                return forbiddenResponse;
+            }
+
+            // Perform comprehensive health checks
+            var healthCheckResult = await _healthCheckService.PerformAllChecksAsync();
+
+            // Always return 200 OK with the health status in the body
+            // This allows the frontend to properly display the results even if some checks fail
+            var response = req.CreateResponse(HttpStatusCode.OK);
+            await response.WriteAsJsonAsync(new
+            {
+                service = "Autopilot Monitor API",
+                version = "1.0.0-phase1",
+                timestamp = healthCheckResult.Timestamp,
+                overallStatus = healthCheckResult.OverallStatus,
+                checks = healthCheckResult.Checks
+            });
+
+            return response;
+        }
+    }
+}

@@ -1,0 +1,144 @@
+using System;
+using System.Collections.Generic;
+
+namespace AutopilotMonitor.Shared.Models
+{
+    /// <summary>
+    /// Request to register a new session
+    /// </summary>
+    public class RegisterSessionRequest
+    {
+        public SessionRegistration Registration { get; set; }
+    }
+
+    /// <summary>
+    /// Response from session registration
+    /// </summary>
+    public class RegisterSessionResponse
+    {
+        public string SessionId { get; set; }
+        public bool Success { get; set; }
+        public string Message { get; set; }
+        public DateTime RegisteredAt { get; set; }
+    }
+
+    /// <summary>
+    /// Request to ingest events (batched)
+    /// </summary>
+    public class IngestEventsRequest
+    {
+        public string SessionId { get; set; }
+        public string TenantId { get; set; }
+        public List<EnrollmentEvent> Events { get; set; }
+        public bool IsCompressed { get; set; }
+
+        public IngestEventsRequest()
+        {
+            Events = new List<EnrollmentEvent>();
+        }
+    }
+
+    /// <summary>
+    /// Response from event ingestion
+    /// </summary>
+    public class IngestEventsResponse
+    {
+        public bool Success { get; set; }
+        public int EventsReceived { get; set; }
+        public int EventsProcessed { get; set; }
+        public string Message { get; set; }
+        public DateTime ProcessedAt { get; set; }
+
+        /// <summary>
+        /// Whether the request was rejected due to rate limiting
+        /// </summary>
+        public bool RateLimitExceeded { get; set; }
+
+        /// <summary>
+        /// Rate limit details (only populated if RateLimitExceeded is true)
+        /// </summary>
+        public RateLimitInfo RateLimitInfo { get; set; }
+    }
+
+    /// <summary>
+    /// Rate limit information for UI display
+    /// </summary>
+    public class RateLimitInfo
+    {
+        /// <summary>
+        /// Number of requests in current window
+        /// </summary>
+        public int RequestsInWindow { get; set; }
+
+        /// <summary>
+        /// Maximum allowed requests
+        /// </summary>
+        public int MaxRequests { get; set; }
+
+        /// <summary>
+        /// Window duration in seconds
+        /// </summary>
+        public int WindowDurationSeconds { get; set; }
+
+        /// <summary>
+        /// Seconds to wait before retrying
+        /// </summary>
+        public int RetryAfterSeconds { get; set; }
+    }
+
+    /// <summary>
+    /// Request to upload a troubleshooting bundle
+    /// </summary>
+    public class UploadBundleRequest
+    {
+        public string SessionId { get; set; }
+        public string TenantId { get; set; }
+        public string BundleFileName { get; set; }
+    }
+
+    /// <summary>
+    /// Response with SAS URL for bundle upload
+    /// </summary>
+    public class UploadBundleResponse
+    {
+        public bool Success { get; set; }
+        public string SasUrl { get; set; }
+        public string BlobPath { get; set; }
+        public DateTime ExpiresAt { get; set; }
+        public string Message { get; set; }
+    }
+
+    /// <summary>
+    /// Session summary for UI display
+    /// </summary>
+    public class SessionSummary
+    {
+        public string SessionId { get; set; }
+        public string TenantId { get; set; }
+        public string SerialNumber { get; set; }
+        public string DeviceName { get; set; }
+        public string Manufacturer { get; set; }
+        public string Model { get; set; }
+        public DateTime StartedAt { get; set; }
+        public DateTime? CompletedAt { get; set; }
+
+        // Serialize as integer (0-7) not string for frontend compatibility
+        public int CurrentPhase { get; set; }
+        public string CurrentPhaseDetail { get; set; }
+        public SessionStatus Status { get; set; }
+        public string FailureReason { get; set; }
+        public int EventCount { get; set; }
+        public int? DurationSeconds { get; set; }
+    }
+
+    /// <summary>
+    /// Status of an enrollment session
+    /// </summary>
+    public enum SessionStatus
+    {
+        InProgress,
+        Succeeded,
+        Failed,
+        Unknown
+    }
+}
