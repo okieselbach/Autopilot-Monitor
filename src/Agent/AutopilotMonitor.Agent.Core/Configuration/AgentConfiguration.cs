@@ -95,7 +95,7 @@ namespace AutopilotMonitor.Agent.Core.Configuration
         /// <summary>
         /// Whether to enable geo-location detection (queries external IP services)
         /// </summary>
-        public bool EnableGeoLocation { get; set; } = false;
+        public bool EnableGeoLocation { get; set; } = true;
 
         /// <summary>
         /// Validates the configuration

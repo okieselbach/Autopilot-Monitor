@@ -102,7 +102,7 @@ namespace AutopilotMonitor.Agent
             var noAuth = args?.Contains("--no-auth") ?? false;
             var noCleanup = args?.Contains("--no-cleanup") ?? false;
             var rebootOnComplete = args?.Contains("--reboot-on-complete") ?? false;
-            var enableGeoLocation = args?.Contains("--enable-geolocation") ?? false;
+            var disableGeoLocation = args?.Contains("--disable-geolocation") ?? false;
 
             // Parse certificate thumbprint if provided
             string certThumbprint = null;
@@ -128,7 +128,7 @@ namespace AutopilotMonitor.Agent
             bool cleanupOnExit = true;
             bool selfDestructOnComplete = true;
             bool rebootOnCompleteConfig = false;
-            bool enableGeoLocationConfig = false;
+            bool enableGeoLocationConfig = true;
             bool useClientCertAuthConfig = true;
 
             // Try to load configuration from JSON file (written by PowerShell bootstrap script)
@@ -206,7 +206,7 @@ namespace AutopilotMonitor.Agent
                 CleanupOnExit = cleanupOnExit,
                 SelfDestructOnComplete = selfDestructOnComplete,
                 RebootOnComplete = rebootOnComplete || rebootOnCompleteConfig,
-                EnableGeoLocation = enableGeoLocation || enableGeoLocationConfig
+                EnableGeoLocation = !disableGeoLocation && enableGeoLocationConfig
             };
         }
     }
