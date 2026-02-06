@@ -18,17 +18,20 @@ public class AuthFunction
     private readonly GalacticAdminService _galacticAdminService;
     private readonly TenantConfigurationService _tenantConfigService;
     private readonly TenantAdminsService _tenantAdminsService;
+    private readonly TableStorageService _storageService;
 
     public AuthFunction(
         ILogger<AuthFunction> logger,
         GalacticAdminService galacticAdminService,
         TenantConfigurationService tenantConfigService,
-        TenantAdminsService tenantAdminsService)
+        TenantAdminsService tenantAdminsService,
+        TableStorageService storageService)
     {
         _logger = logger;
         _galacticAdminService = galacticAdminService;
         _tenantConfigService = tenantConfigService;
         _tenantAdminsService = tenantAdminsService;
+        _storageService = storageService;
     }
 
     /// <summary>
@@ -115,6 +118,9 @@ public class AuthFunction
                 isTenantAdmin = true;
             }
         }
+
+        // Record user login activity for metrics tracking
+        _ = _storageService.RecordUserLoginAsync(tenantId, upn, displayName, objectId);
 
         var userInfo = new
         {

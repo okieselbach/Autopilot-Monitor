@@ -48,6 +48,9 @@ namespace AutopilotMonitor.Shared
             public const string RegisterSession = "/api/sessions/register";
             public const string IngestEvents = "/api/events/ingest";
             public const string UploadBundle = "/api/bundles/upload";
+            public const string GetAgentConfig = "/api/agent/config";
+            public const string GatherRules = "/api/gather-rules";
+            public const string AnalyzeRules = "/api/analyze-rules";
         }
 
         /// <summary>
@@ -64,6 +67,10 @@ namespace AutopilotMonitor.Shared
             public const string PerformanceSnapshot = "performance_snapshot";
             public const string LogEntry = "log_entry";
             public const string EspStateChange = "esp_state_change";
+            public const string DownloadProgress = "download_progress";
+            public const string CertValidation = "cert_validation";
+            public const string EspUiState = "esp_ui_state";
+            public const string GatherResult = "gather_result";
         }
 
         /// <summary>
@@ -96,6 +103,8 @@ namespace AutopilotMonitor.Shared
             public const string Sessions = "sessions";
             public const string Events = "events";
             public const string RuleResults = "ruleresults";
+            public const string GatherRules = "gatherrules";
+            public const string AnalyzeRules = "analyzerules";
         }
 
         /// <summary>

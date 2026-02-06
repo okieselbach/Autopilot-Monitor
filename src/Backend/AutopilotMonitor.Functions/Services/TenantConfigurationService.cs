@@ -183,7 +183,14 @@ namespace AutopilotMonitor.Functions.Services
                 { "DataRetentionDays", config.DataRetentionDays },
                 { "SessionTimeoutHours", config.SessionTimeoutHours },
                 { "MaxNdjsonPayloadSizeMB", config.MaxNdjsonPayloadSizeMB },
-                { "CustomSettings", config.CustomSettings }
+                { "CustomSettings", config.CustomSettings },
+                { "EnablePerformanceCollector", config.EnablePerformanceCollector },
+                { "PerformanceCollectorIntervalSeconds", config.PerformanceCollectorIntervalSeconds },
+                { "EnableDownloadProgressCollector", config.EnableDownloadProgressCollector },
+                { "DownloadProgressCollectorIntervalSeconds", config.DownloadProgressCollectorIntervalSeconds },
+                { "EnableCertValidationCollector", config.EnableCertValidationCollector },
+                { "EnableEspUiStateCollector", config.EnableEspUiStateCollector },
+                { "EspUiStateCollectorIntervalSeconds", config.EspUiStateCollectorIntervalSeconds }
             };
 
             return entity;
@@ -208,7 +215,14 @@ namespace AutopilotMonitor.Functions.Services
                 DataRetentionDays = entity.GetInt32("DataRetentionDays") ?? 90,
                 SessionTimeoutHours = entity.GetInt32("SessionTimeoutHours") ?? 5,
                 MaxNdjsonPayloadSizeMB = entity.GetInt32("MaxNdjsonPayloadSizeMB") ?? 5,
-                CustomSettings = entity.GetString("CustomSettings")
+                CustomSettings = entity.GetString("CustomSettings"),
+                EnablePerformanceCollector = entity.GetBoolean("EnablePerformanceCollector") ?? false,
+                PerformanceCollectorIntervalSeconds = entity.GetInt32("PerformanceCollectorIntervalSeconds") ?? 30,
+                EnableDownloadProgressCollector = entity.GetBoolean("EnableDownloadProgressCollector") ?? false,
+                DownloadProgressCollectorIntervalSeconds = entity.GetInt32("DownloadProgressCollectorIntervalSeconds") ?? 10,
+                EnableCertValidationCollector = entity.GetBoolean("EnableCertValidationCollector") ?? false,
+                EnableEspUiStateCollector = entity.GetBoolean("EnableEspUiStateCollector") ?? false,
+                EspUiStateCollectorIntervalSeconds = entity.GetInt32("EspUiStateCollectorIntervalSeconds") ?? 15
             };
         }
 

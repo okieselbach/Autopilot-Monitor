@@ -18,17 +18,20 @@ namespace AutopilotMonitor.Functions.Functions
         private readonly TableStorageService _storageService;
         private readonly TenantConfigurationService _configService;
         private readonly RateLimitService _rateLimitService;
+        private readonly AnalyzeRuleService _analyzeRuleService;
 
         public IngestEventsFunction(
             ILogger<IngestEventsFunction> logger,
             TableStorageService storageService,
             TenantConfigurationService configService,
-            RateLimitService rateLimitService)
+            RateLimitService rateLimitService,
+            AnalyzeRuleService analyzeRuleService)
         {
             _logger = logger;
             _storageService = storageService;
             _configService = configService;
             _rateLimitService = rateLimitService;
+            _analyzeRuleService = analyzeRuleService;
         }
 
         [Function("IngestEvents")]
@@ -175,6 +178,29 @@ namespace AutopilotMonitor.Functions.Functions
                     );
                 }
 
+                // Run analyze rules against new events
+                var newRuleResults = new List<AutopilotMonitor.Shared.Models.RuleResult>();
+                try
+                {
+                    var ruleEngine = new RuleEngine(_analyzeRuleService, _storageService, _logger);
+                    var allEvents = await _storageService.GetSessionEventsAsync(request.TenantId, request.SessionId);
+                    newRuleResults = await ruleEngine.EvaluateRulesAsync(request.TenantId, request.SessionId, storedEvents, allEvents);
+
+                    foreach (var result in newRuleResults)
+                    {
+                        await _storageService.StoreRuleResultAsync(result);
+                    }
+
+                    if (newRuleResults.Count > 0)
+                    {
+                        _logger.LogInformation($"{sessionPrefix} Rule engine: {newRuleResults.Count} new issue(s) detected");
+                    }
+                }
+                catch (Exception ruleEx)
+                {
+                    _logger.LogWarning(ruleEx, $"{sessionPrefix} Rule engine evaluation failed (non-fatal)");
+                }
+
                 // Retrieve updated session data to include in SignalR messages
                 var updatedSession = await _storageService.GetSessionAsync(request.TenantId, request.SessionId);
 
@@ -197,7 +223,8 @@ namespace AutopilotMonitor.Functions.Functions
                     sessionId = request.SessionId,
                     tenantId = request.TenantId,
                     eventCount = processedCount,
-                    session = updatedSession // Include full session data
+                    session = updatedSession, // Include full session data
+                    newRuleResults = newRuleResults.Count > 0 ? newRuleResults : null
                 };
 
                 // 1. Summary notification for session list updates (tenant-specific only)
@@ -219,7 +246,8 @@ namespace AutopilotMonitor.Functions.Functions
                         sessionId = request.SessionId,
                         tenantId = request.TenantId,
                         events = storedEvents,
-                        session = updatedSession // Include full session data
+                        session = updatedSession, // Include full session data
+                        newRuleResults = newRuleResults.Count > 0 ? newRuleResults : null
                     } }
                 };
 

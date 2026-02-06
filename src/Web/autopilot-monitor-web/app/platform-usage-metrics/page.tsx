@@ -278,14 +278,56 @@ export default function PlatformUsageMetricsPage() {
           {/* Users */}
           <div>
             <h2 className="text-xl font-semibold text-gray-900 mb-4">Users</h2>
-            <div className="bg-white rounded-lg shadow p-6">
-              <div className="text-center py-8">
-                <svg className="h-16 w-16 text-gray-300 mx-auto mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
-                </svg>
-                <p className="text-gray-600 text-sm">{metrics.users.note}</p>
+            {metrics.users.total > 0 || metrics.users.dailyLogins > 0 || metrics.users.active7Days > 0 || metrics.users.active30Days > 0 ? (
+              <div className="space-y-4">
+                <div className="bg-white rounded-lg shadow p-6">
+                  <div className="text-sm text-gray-500 mb-1">Total Users</div>
+                  <div className="text-3xl font-bold text-gray-900">{metrics.users.total.toLocaleString()}</div>
+                </div>
+                <div className="bg-white rounded-lg shadow p-6">
+                  <div className="text-sm text-gray-500 mb-1">Daily Logins</div>
+                  <div className="text-3xl font-bold text-blue-600">{metrics.users.dailyLogins.toLocaleString()}</div>
+                </div>
+                <div className="bg-white rounded-lg shadow p-6">
+                  <div className="text-sm text-gray-500 mb-1">Active (Last 7 Days)</div>
+                  <div className="text-3xl font-bold text-indigo-600">{metrics.users.active7Days.toLocaleString()}</div>
+                </div>
+                <div className="bg-white rounded-lg shadow p-6">
+                  <div className="text-sm text-gray-500 mb-1">Active (Last 30 Days)</div>
+                  <div className="text-3xl font-bold text-purple-600">{metrics.users.active30Days.toLocaleString()}</div>
+                </div>
+                {metrics.users.note && (
+                  <p className="text-xs text-gray-500">{metrics.users.note}</p>
+                )}
               </div>
-            </div>
+            ) : (
+              <div className="bg-white rounded-lg shadow p-6">
+                <div className="space-y-4 mb-4 opacity-40">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-500">Total Users</span>
+                    <span className="text-xl font-bold text-gray-400">--</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-500">Daily Logins</span>
+                    <span className="text-xl font-bold text-gray-400">--</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-500">Active (7 Days)</span>
+                    <span className="text-xl font-bold text-gray-400">--</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-500">Active (30 Days)</span>
+                    <span className="text-xl font-bold text-gray-400">--</span>
+                  </div>
+                </div>
+                <div className="flex items-center space-x-3 pt-3 border-t border-gray-100">
+                  <svg className="h-5 w-5 text-amber-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <p className="text-sm text-gray-600">{metrics.users.note || 'User metrics will be available when Entra ID authentication tracking is enabled.'}</p>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

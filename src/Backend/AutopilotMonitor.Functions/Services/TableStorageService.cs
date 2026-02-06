@@ -18,6 +18,10 @@ namespace AutopilotMonitor.Functions.Services
         private const string EventsTableName = "Events";
         private const string AuditLogsTableName = "AuditLogs";
         private const string UsageMetricsTableName = "UsageMetrics";
+        private const string RuleResultsTableName = "RuleResults";
+        private const string GatherRulesTableName = "GatherRules";
+        private const string AnalyzeRulesTableName = "AnalyzeRules";
+        private const string UserActivityTableName = "UserActivity";
 
         public TableStorageService(IConfiguration configuration, ILogger<TableStorageService> logger)
         {
@@ -37,6 +41,10 @@ namespace AutopilotMonitor.Functions.Services
                 await _tableServiceClient.CreateTableIfNotExistsAsync(EventsTableName);
                 await _tableServiceClient.CreateTableIfNotExistsAsync(AuditLogsTableName);
                 await _tableServiceClient.CreateTableIfNotExistsAsync(UsageMetricsTableName);
+                await _tableServiceClient.CreateTableIfNotExistsAsync(RuleResultsTableName);
+                await _tableServiceClient.CreateTableIfNotExistsAsync(GatherRulesTableName);
+                await _tableServiceClient.CreateTableIfNotExistsAsync(AnalyzeRulesTableName);
+                await _tableServiceClient.CreateTableIfNotExistsAsync(UserActivityTableName);
                 _logger.LogInformation("Tables initialized successfully");
             }
             catch (Exception ex)
@@ -110,7 +118,10 @@ namespace AutopilotMonitor.Functions.Services
                     ["Source"] = evt.Source ?? string.Empty,
                     ["Phase"] = (int)evt.Phase,
                     ["Message"] = evt.Message ?? string.Empty,
-                    ["Sequence"] = evt.Sequence
+                    ["Sequence"] = evt.Sequence,
+                    ["DataJson"] = evt.Data != null && evt.Data.Count > 0
+                        ? JsonConvert.SerializeObject(evt.Data)
+                        : string.Empty
                 };
 
                 await tableClient.UpsertEntityAsync(entity);
@@ -658,6 +669,539 @@ namespace AutopilotMonitor.Functions.Services
                 return new List<string>();
             }
         }
+
+        // ===== RULE RESULTS METHODS =====
+
+        /// <summary>
+        /// Stores a rule evaluation result
+        /// PartitionKey: {TenantId}_{SessionId}, RowKey: RuleId
+        /// </summary>
+        public async Task<bool> StoreRuleResultAsync(RuleResult result)
+        {
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(RuleResultsTableName);
+                var partitionKey = $"{result.TenantId}_{result.SessionId}";
+
+                var entity = new TableEntity(partitionKey, result.RuleId)
+                {
+                    ["ResultId"] = result.ResultId,
+                    ["SessionId"] = result.SessionId,
+                    ["TenantId"] = result.TenantId,
+                    ["RuleId"] = result.RuleId,
+                    ["RuleTitle"] = result.RuleTitle ?? string.Empty,
+                    ["Severity"] = result.Severity ?? string.Empty,
+                    ["Category"] = result.Category ?? string.Empty,
+                    ["ConfidenceScore"] = result.ConfidenceScore,
+                    ["Explanation"] = result.Explanation ?? string.Empty,
+                    ["RemediationJson"] = JsonConvert.SerializeObject(result.Remediation ?? new List<RemediationStep>()),
+                    ["RelatedDocsJson"] = JsonConvert.SerializeObject(result.RelatedDocs ?? new List<RelatedDoc>()),
+                    ["MatchedConditionsJson"] = JsonConvert.SerializeObject(result.MatchedConditions ?? new Dictionary<string, object>()),
+                    ["DetectedAt"] = result.DetectedAt
+                };
+
+                await tableClient.UpsertEntityAsync(entity);
+                _logger.LogInformation($"Stored rule result {result.RuleId} for session {result.SessionId}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to store rule result {result.RuleId}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Gets all rule results for a session
+        /// </summary>
+        public async Task<List<RuleResult>> GetRuleResultsAsync(string tenantId, string sessionId)
+        {
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(RuleResultsTableName);
+                var partitionKey = $"{tenantId}_{sessionId}";
+                var query = tableClient.QueryAsync<TableEntity>(filter: $"PartitionKey eq '{partitionKey}'");
+
+                var results = new List<RuleResult>();
+                await foreach (var entity in query)
+                {
+                    results.Add(new RuleResult
+                    {
+                        ResultId = entity.GetString("ResultId") ?? string.Empty,
+                        SessionId = entity.GetString("SessionId") ?? string.Empty,
+                        TenantId = entity.GetString("TenantId") ?? string.Empty,
+                        RuleId = entity.GetString("RuleId") ?? entity.RowKey,
+                        RuleTitle = entity.GetString("RuleTitle") ?? string.Empty,
+                        Severity = entity.GetString("Severity") ?? string.Empty,
+                        Category = entity.GetString("Category") ?? string.Empty,
+                        ConfidenceScore = entity.GetInt32("ConfidenceScore") ?? 0,
+                        Explanation = entity.GetString("Explanation") ?? string.Empty,
+                        Remediation = DeserializeJson<List<RemediationStep>>(entity.GetString("RemediationJson")),
+                        RelatedDocs = DeserializeJson<List<RelatedDoc>>(entity.GetString("RelatedDocsJson")),
+                        MatchedConditions = DeserializeJson<Dictionary<string, object>>(entity.GetString("MatchedConditionsJson")),
+                        DetectedAt = entity.GetDateTimeOffset("DetectedAt")?.UtcDateTime ?? DateTime.UtcNow
+                    });
+                }
+
+                return results.OrderByDescending(r => r.ConfidenceScore).ToList();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to get rule results for session {sessionId}");
+                return new List<RuleResult>();
+            }
+        }
+
+        // ===== GATHER RULES METHODS =====
+
+        /// <summary>
+        /// Stores or updates a gather rule
+        /// PartitionKey: TenantId (or "global" for built-in), RowKey: RuleId
+        /// </summary>
+        public async Task<bool> StoreGatherRuleAsync(GatherRule rule, string tenantId = "global")
+        {
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(GatherRulesTableName);
+
+                var entity = new TableEntity(tenantId, rule.RuleId)
+                {
+                    ["Title"] = rule.Title ?? string.Empty,
+                    ["Description"] = rule.Description ?? string.Empty,
+                    ["Category"] = rule.Category ?? string.Empty,
+                    ["Version"] = rule.Version ?? "1.0.0",
+                    ["Author"] = rule.Author ?? "Autopilot Monitor",
+                    ["Enabled"] = rule.Enabled,
+                    ["IsBuiltIn"] = rule.IsBuiltIn,
+                    ["IsCommunity"] = rule.IsCommunity,
+                    ["CollectorType"] = rule.CollectorType ?? string.Empty,
+                    ["Target"] = rule.Target ?? string.Empty,
+                    ["ParametersJson"] = JsonConvert.SerializeObject(rule.Parameters ?? new Dictionary<string, string>()),
+                    ["Trigger"] = rule.Trigger ?? string.Empty,
+                    ["IntervalSeconds"] = rule.IntervalSeconds,
+                    ["TriggerPhase"] = rule.TriggerPhase ?? string.Empty,
+                    ["TriggerEventType"] = rule.TriggerEventType ?? string.Empty,
+                    ["OutputEventType"] = rule.OutputEventType ?? string.Empty,
+                    ["OutputSeverity"] = rule.OutputSeverity ?? "Info",
+                    ["TagsJson"] = JsonConvert.SerializeObject(rule.Tags ?? new string[0]),
+                    ["CreatedAt"] = rule.CreatedAt,
+                    ["UpdatedAt"] = rule.UpdatedAt
+                };
+
+                await tableClient.UpsertEntityAsync(entity);
+                _logger.LogDebug($"Stored gather rule {rule.RuleId} for {tenantId}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to store gather rule {rule.RuleId}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Gets gather rules for a partition (tenant or "global")
+        /// </summary>
+        public async Task<List<GatherRule>> GetGatherRulesAsync(string partitionKey)
+        {
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(GatherRulesTableName);
+                var query = tableClient.QueryAsync<TableEntity>(filter: $"PartitionKey eq '{partitionKey}'");
+
+                var rules = new List<GatherRule>();
+                await foreach (var entity in query)
+                {
+                    rules.Add(MapToGatherRule(entity));
+                }
+
+                return rules;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to get gather rules for {partitionKey}");
+                return new List<GatherRule>();
+            }
+        }
+
+        /// <summary>
+        /// Deletes a gather rule
+        /// </summary>
+        public async Task<bool> DeleteGatherRuleAsync(string tenantId, string ruleId)
+        {
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(GatherRulesTableName);
+                await tableClient.DeleteEntityAsync(tenantId, ruleId);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to delete gather rule {ruleId}");
+                return false;
+            }
+        }
+
+        private GatherRule MapToGatherRule(TableEntity entity)
+        {
+            return new GatherRule
+            {
+                RuleId = entity.RowKey,
+                Title = entity.GetString("Title") ?? string.Empty,
+                Description = entity.GetString("Description") ?? string.Empty,
+                Category = entity.GetString("Category") ?? string.Empty,
+                Version = entity.GetString("Version") ?? "1.0.0",
+                Author = entity.GetString("Author") ?? "Autopilot Monitor",
+                Enabled = entity.GetBoolean("Enabled") ?? true,
+                IsBuiltIn = entity.GetBoolean("IsBuiltIn") ?? false,
+                IsCommunity = entity.GetBoolean("IsCommunity") ?? false,
+                CollectorType = entity.GetString("CollectorType") ?? string.Empty,
+                Target = entity.GetString("Target") ?? string.Empty,
+                Parameters = DeserializeJson<Dictionary<string, string>>(entity.GetString("ParametersJson")),
+                Trigger = entity.GetString("Trigger") ?? string.Empty,
+                IntervalSeconds = entity.GetInt32("IntervalSeconds"),
+                TriggerPhase = entity.GetString("TriggerPhase") ?? string.Empty,
+                TriggerEventType = entity.GetString("TriggerEventType") ?? string.Empty,
+                OutputEventType = entity.GetString("OutputEventType") ?? string.Empty,
+                OutputSeverity = entity.GetString("OutputSeverity") ?? "Info",
+                Tags = DeserializeJsonArray(entity.GetString("TagsJson")),
+                CreatedAt = entity.GetDateTimeOffset("CreatedAt")?.UtcDateTime ?? DateTime.UtcNow,
+                UpdatedAt = entity.GetDateTimeOffset("UpdatedAt")?.UtcDateTime ?? DateTime.UtcNow
+            };
+        }
+
+        // ===== ANALYZE RULES METHODS =====
+
+        /// <summary>
+        /// Stores or updates an analyze rule
+        /// PartitionKey: TenantId (or "global" for built-in), RowKey: RuleId
+        /// </summary>
+        public async Task<bool> StoreAnalyzeRuleAsync(AnalyzeRule rule, string tenantId = "global")
+        {
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(AnalyzeRulesTableName);
+
+                var entity = new TableEntity(tenantId, rule.RuleId)
+                {
+                    ["Title"] = rule.Title ?? string.Empty,
+                    ["Description"] = rule.Description ?? string.Empty,
+                    ["Severity"] = rule.Severity ?? string.Empty,
+                    ["Category"] = rule.Category ?? string.Empty,
+                    ["Version"] = rule.Version ?? "1.0.0",
+                    ["Author"] = rule.Author ?? "Autopilot Monitor",
+                    ["Enabled"] = rule.Enabled,
+                    ["IsBuiltIn"] = rule.IsBuiltIn,
+                    ["IsCommunity"] = rule.IsCommunity,
+                    ["ConditionsJson"] = JsonConvert.SerializeObject(rule.Conditions ?? new List<RuleCondition>()),
+                    ["BaseConfidence"] = rule.BaseConfidence,
+                    ["ConfidenceFactorsJson"] = JsonConvert.SerializeObject(rule.ConfidenceFactors ?? new List<ConfidenceFactor>()),
+                    ["ConfidenceThreshold"] = rule.ConfidenceThreshold,
+                    ["Explanation"] = rule.Explanation ?? string.Empty,
+                    ["RemediationJson"] = JsonConvert.SerializeObject(rule.Remediation ?? new List<RemediationStep>()),
+                    ["RelatedDocsJson"] = JsonConvert.SerializeObject(rule.RelatedDocs ?? new List<RelatedDoc>()),
+                    ["TagsJson"] = JsonConvert.SerializeObject(rule.Tags ?? new string[0]),
+                    ["CreatedAt"] = rule.CreatedAt,
+                    ["UpdatedAt"] = rule.UpdatedAt
+                };
+
+                await tableClient.UpsertEntityAsync(entity);
+                _logger.LogDebug($"Stored analyze rule {rule.RuleId} for {tenantId}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to store analyze rule {rule.RuleId}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Gets analyze rules for a partition (tenant or "global")
+        /// </summary>
+        public async Task<List<AnalyzeRule>> GetAnalyzeRulesAsync(string partitionKey)
+        {
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(AnalyzeRulesTableName);
+                var query = tableClient.QueryAsync<TableEntity>(filter: $"PartitionKey eq '{partitionKey}'");
+
+                var rules = new List<AnalyzeRule>();
+                await foreach (var entity in query)
+                {
+                    rules.Add(MapToAnalyzeRule(entity));
+                }
+
+                return rules;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to get analyze rules for {partitionKey}");
+                return new List<AnalyzeRule>();
+            }
+        }
+
+        /// <summary>
+        /// Deletes an analyze rule
+        /// </summary>
+        public async Task<bool> DeleteAnalyzeRuleAsync(string tenantId, string ruleId)
+        {
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(AnalyzeRulesTableName);
+                await tableClient.DeleteEntityAsync(tenantId, ruleId);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to delete analyze rule {ruleId}");
+                return false;
+            }
+        }
+
+        private AnalyzeRule MapToAnalyzeRule(TableEntity entity)
+        {
+            return new AnalyzeRule
+            {
+                RuleId = entity.RowKey,
+                Title = entity.GetString("Title") ?? string.Empty,
+                Description = entity.GetString("Description") ?? string.Empty,
+                Severity = entity.GetString("Severity") ?? string.Empty,
+                Category = entity.GetString("Category") ?? string.Empty,
+                Version = entity.GetString("Version") ?? "1.0.0",
+                Author = entity.GetString("Author") ?? "Autopilot Monitor",
+                Enabled = entity.GetBoolean("Enabled") ?? true,
+                IsBuiltIn = entity.GetBoolean("IsBuiltIn") ?? false,
+                IsCommunity = entity.GetBoolean("IsCommunity") ?? false,
+                Conditions = DeserializeJson<List<RuleCondition>>(entity.GetString("ConditionsJson")),
+                BaseConfidence = entity.GetInt32("BaseConfidence") ?? 50,
+                ConfidenceFactors = DeserializeJson<List<ConfidenceFactor>>(entity.GetString("ConfidenceFactorsJson")),
+                ConfidenceThreshold = entity.GetInt32("ConfidenceThreshold") ?? 40,
+                Explanation = entity.GetString("Explanation") ?? string.Empty,
+                Remediation = DeserializeJson<List<RemediationStep>>(entity.GetString("RemediationJson")),
+                RelatedDocs = DeserializeJson<List<RelatedDoc>>(entity.GetString("RelatedDocsJson")),
+                Tags = DeserializeJsonArray(entity.GetString("TagsJson")),
+                CreatedAt = entity.GetDateTimeOffset("CreatedAt")?.UtcDateTime ?? DateTime.UtcNow,
+                UpdatedAt = entity.GetDateTimeOffset("UpdatedAt")?.UtcDateTime ?? DateTime.UtcNow
+            };
+        }
+
+        // ===== USER ACTIVITY METHODS =====
+
+        /// <summary>
+        /// Records a user login activity
+        /// PartitionKey: TenantId, RowKey: {invertedTicks}_{Guid} for reverse-chronological ordering
+        /// </summary>
+        public async Task RecordUserLoginAsync(string tenantId, string upn, string? displayName, string? objectId)
+        {
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(UserActivityTableName);
+                var now = DateTime.UtcNow;
+                var invertedTicks = (DateTime.MaxValue.Ticks - now.Ticks).ToString("D20");
+
+                var entity = new TableEntity(tenantId, $"{invertedTicks}_{Guid.NewGuid():N}")
+                {
+                    ["Upn"] = upn ?? string.Empty,
+                    ["DisplayName"] = displayName ?? string.Empty,
+                    ["ObjectId"] = objectId ?? string.Empty,
+                    ["LoginAt"] = now
+                };
+
+                await tableClient.AddEntityAsync(entity);
+                _logger.LogDebug($"Recorded login for {upn} in tenant {tenantId}");
+            }
+            catch (Exception ex)
+            {
+                // Don't fail the login if activity recording fails
+                _logger.LogWarning(ex, $"Failed to record login activity for {upn}");
+            }
+        }
+
+        /// <summary>
+        /// Gets user activity metrics for a specific tenant
+        /// </summary>
+        public async Task<UserActivityMetrics> GetUserActivityMetricsAsync(string tenantId)
+        {
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(UserActivityTableName);
+                var query = tableClient.QueryAsync<TableEntity>(filter: $"PartitionKey eq '{tenantId}'");
+
+                var now = DateTime.UtcNow;
+                var today = now.Date;
+                var last7Days = now.AddDays(-7);
+                var last30Days = now.AddDays(-30);
+
+                var allUpns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var todayUpns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var last7Upns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var last30Upns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                int todayLogins = 0;
+
+                await foreach (var entity in query)
+                {
+                    var upn = entity.GetString("Upn") ?? string.Empty;
+                    var loginAt = entity.GetDateTime("LoginAt") ?? DateTime.MinValue;
+
+                    if (string.IsNullOrEmpty(upn)) continue;
+
+                    allUpns.Add(upn);
+
+                    if (loginAt >= last30Days) last30Upns.Add(upn);
+                    if (loginAt >= last7Days) last7Upns.Add(upn);
+                    if (loginAt >= today)
+                    {
+                        todayUpns.Add(upn);
+                        todayLogins++;
+                    }
+                }
+
+                return new UserActivityMetrics
+                {
+                    TotalUniqueUsers = allUpns.Count,
+                    DailyLogins = todayLogins,
+                    ActiveUsersLast7Days = last7Upns.Count,
+                    ActiveUsersLast30Days = last30Upns.Count
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to get user activity metrics for tenant {tenantId}");
+                return new UserActivityMetrics();
+            }
+        }
+
+        /// <summary>
+        /// Gets user activity metrics across all tenants (for galactic admin)
+        /// </summary>
+        public async Task<UserActivityMetrics> GetAllUserActivityMetricsAsync()
+        {
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(UserActivityTableName);
+                var query = tableClient.QueryAsync<TableEntity>();
+
+                var now = DateTime.UtcNow;
+                var today = now.Date;
+                var last7Days = now.AddDays(-7);
+                var last30Days = now.AddDays(-30);
+
+                var allUpns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var todayUpns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var last7Upns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var last30Upns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                int todayLogins = 0;
+
+                await foreach (var entity in query)
+                {
+                    var upn = entity.GetString("Upn") ?? string.Empty;
+                    var loginAt = entity.GetDateTime("LoginAt") ?? DateTime.MinValue;
+
+                    if (string.IsNullOrEmpty(upn)) continue;
+
+                    allUpns.Add(upn);
+
+                    if (loginAt >= last30Days) last30Upns.Add(upn);
+                    if (loginAt >= last7Days) last7Upns.Add(upn);
+                    if (loginAt >= today)
+                    {
+                        todayUpns.Add(upn);
+                        todayLogins++;
+                    }
+                }
+
+                return new UserActivityMetrics
+                {
+                    TotalUniqueUsers = allUpns.Count,
+                    DailyLogins = todayLogins,
+                    ActiveUsersLast7Days = last7Upns.Count,
+                    ActiveUsersLast30Days = last30Upns.Count
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to get all user activity metrics");
+                return new UserActivityMetrics();
+            }
+        }
+
+        /// <summary>
+        /// Gets user login count for a specific date range (used by daily maintenance)
+        /// </summary>
+        public async Task<(int uniqueUsers, int loginCount)> GetUserActivityForDateAsync(string? tenantId, DateTime date)
+        {
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(UserActivityTableName);
+                var startOfDay = date.Date;
+                var endOfDay = startOfDay.AddDays(1);
+
+                string filter;
+                if (!string.IsNullOrEmpty(tenantId) && tenantId != "global")
+                {
+                    filter = $"PartitionKey eq '{tenantId}' and LoginAt ge datetime'{startOfDay:yyyy-MM-ddTHH:mm:ss}Z' and LoginAt lt datetime'{endOfDay:yyyy-MM-ddTHH:mm:ss}Z'";
+                }
+                else
+                {
+                    filter = $"LoginAt ge datetime'{startOfDay:yyyy-MM-ddTHH:mm:ss}Z' and LoginAt lt datetime'{endOfDay:yyyy-MM-ddTHH:mm:ss}Z'";
+                }
+
+                var query = tableClient.QueryAsync<TableEntity>(filter: filter);
+
+                var upns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                int loginCount = 0;
+
+                await foreach (var entity in query)
+                {
+                    var upn = entity.GetString("Upn") ?? string.Empty;
+                    if (!string.IsNullOrEmpty(upn))
+                    {
+                        upns.Add(upn);
+                        loginCount++;
+                    }
+                }
+
+                return (upns.Count, loginCount);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to get user activity for date {date:yyyy-MM-dd}");
+                return (0, 0);
+            }
+        }
+
+        // ===== HELPER METHODS =====
+
+        private T DeserializeJson<T>(string? json) where T : new()
+        {
+            if (string.IsNullOrEmpty(json))
+                return new T();
+
+            try
+            {
+                return JsonConvert.DeserializeObject<T>(json) ?? new T();
+            }
+            catch
+            {
+                return new T();
+            }
+        }
+
+        private string[] DeserializeJsonArray(string? json)
+        {
+            if (string.IsNullOrEmpty(json))
+                return Array.Empty<string>();
+
+            try
+            {
+                return JsonConvert.DeserializeObject<string[]>(json) ?? Array.Empty<string>();
+            }
+            catch
+            {
+                return Array.Empty<string>();
+            }
+        }
     }
 
     public class AuditLogEntry
@@ -670,5 +1214,13 @@ namespace AutopilotMonitor.Functions.Services
         public string PerformedBy { get; set; } = string.Empty;
         public DateTime Timestamp { get; set; }
         public string Details { get; set; } = string.Empty;
+    }
+
+    public class UserActivityMetrics
+    {
+        public int TotalUniqueUsers { get; set; }
+        public int DailyLogins { get; set; }
+        public int ActiveUsersLast7Days { get; set; }
+        public int ActiveUsersLast30Days { get; set; }
     }
 }

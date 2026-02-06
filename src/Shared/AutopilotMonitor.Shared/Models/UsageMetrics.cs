@@ -93,7 +93,7 @@ namespace AutopilotMonitor.Shared.Models
         /// <summary>
         /// Note about availability
         /// </summary>
-        public string Note { get; set; } = "User metrics require Entra ID authentication (coming soon)";
+        public string Note { get; set; } = "";
     }
 
     public class PerformanceMetrics

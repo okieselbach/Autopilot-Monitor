@@ -234,14 +234,14 @@ namespace AutopilotMonitor.Functions.Functions
                 }
 
                 // Aggregate global metrics (cross-tenant)
-                var globalMetrics = ComputeUsageMetricsSnapshot(targetDateStr, "global", targetDateSessions);
+                var globalMetrics = await ComputeUsageMetricsSnapshotAsync(targetDateStr, "global", targetDateSessions);
                 await _storageService.SaveUsageMetricsSnapshotAsync(globalMetrics);
 
                 // Aggregate per-tenant metrics
                 var tenantGroups = targetDateSessions.GroupBy(s => s.TenantId);
                 foreach (var tenantGroup in tenantGroups)
                 {
-                    var tenantMetrics = ComputeUsageMetricsSnapshot(targetDateStr, tenantGroup.Key, tenantGroup.ToList());
+                    var tenantMetrics = await ComputeUsageMetricsSnapshotAsync(targetDateStr, tenantGroup.Key, tenantGroup.ToList());
                     await _storageService.SaveUsageMetricsSnapshotAsync(tenantMetrics);
                 }
 
@@ -258,7 +258,7 @@ namespace AutopilotMonitor.Functions.Functions
         /// <summary>
         /// Computes historical metrics for a specific date and tenant
         /// </summary>
-        private UsageMetricsSnapshot ComputeUsageMetricsSnapshot(string date, string tenantId, List<SessionSummary> sessions)
+        private async Task<UsageMetricsSnapshot> ComputeUsageMetricsSnapshotAsync(string date, string tenantId, List<SessionSummary> sessions)
         {
             var computeStart = Stopwatch.StartNew();
 
@@ -295,6 +295,11 @@ namespace AutopilotMonitor.Functions.Functions
                 .Take(5)
                 .ToList();
 
+            // User activity for this date
+            var targetDate = DateTime.ParseExact(date, "yyyy-MM-dd", null);
+            var (uniqueUsers, loginCount) = await _storageService.GetUserActivityForDateAsync(
+                tenantId == "global" ? null : tenantId, targetDate);
+
             computeStart.Stop();
 
             return new UsageMetricsSnapshot
@@ -313,8 +318,8 @@ namespace AutopilotMonitor.Functions.Functions
                 P95DurationMinutes = p95Duration,
                 P99DurationMinutes = p99Duration,
                 UniqueTenants = tenantId == "global" ? sessions.Select(s => s.TenantId).Distinct().Count() : 0,
-                UniqueUsers = 0, // TODO: Implement with Entra ID
-                LoginCount = 0,  // TODO: Implement with Entra ID
+                UniqueUsers = uniqueUsers,
+                LoginCount = loginCount,
                 TopManufacturers = JsonConvert.SerializeObject(manufacturers),
                 TopModels = JsonConvert.SerializeObject(models)
             };

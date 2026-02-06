@@ -28,12 +28,22 @@ namespace AutopilotMonitor.Agent.Core.Monitoring
         private long _eventSequence = 0;
         private EnrollmentPhase? _lastPhase = null;
 
-        // Event collectors
+        // Core event collectors (always on)
         private EventLogWatcher _eventLogWatcher;
         private RegistryMonitor _registryMonitor;
         private PhaseDetector _phaseDetector;
         private HelloDetector _helloDetector;
         private AutopilotSimulator _simulator;
+
+        // Optional collectors (toggled via remote config)
+        private PerformanceCollector _performanceCollector;
+        private DownloadProgressCollector _downloadProgressCollector;
+        private CertValidationCollector _certValidationCollector;
+        private EspUiStateCollector _espUiStateCollector;
+
+        // Remote config and gather rules
+        private RemoteConfigService _remoteConfigService;
+        private GatherRuleExecutor _gatherRuleExecutor;
 
         public MonitoringService(AgentConfiguration configuration, AgentLogger logger)
         {
@@ -104,8 +114,20 @@ namespace AutopilotMonitor.Agent.Core.Monitoring
                 EmitGeoLocationEvent();
             }
 
-            // Start event collectors
+            // Fetch remote config (collector toggles + gather rules) from backend
+            FetchRemoteConfig();
+
+            // Start event collectors (core + optional based on remote config)
             StartEventCollectors();
+
+            // Start optional collectors based on remote config
+            StartOptionalCollectors();
+
+            // Start gather rule executor
+            StartGatherRuleExecutor();
+
+            // Start periodic config refresh
+            _remoteConfigService?.StartPeriodicRefresh();
 
             _logger.Info("Monitoring service started");
         }
@@ -196,11 +218,179 @@ namespace AutopilotMonitor.Agent.Core.Monitoring
                     _logger.Info("Autopilot simulator started");
                 }
 
-                _logger.Info("Event collectors started successfully");
+                _logger.Info("Core event collectors started successfully");
             }
             catch (Exception ex)
             {
                 _logger.Error("Error starting event collectors", ex);
+            }
+        }
+
+        /// <summary>
+        /// Fetches remote configuration from the backend API
+        /// </summary>
+        private void FetchRemoteConfig()
+        {
+            try
+            {
+                _remoteConfigService = new RemoteConfigService(_apiClient, _configuration.TenantId, _logger);
+                _remoteConfigService.ConfigChanged += OnRemoteConfigChanged;
+                _remoteConfigService.FetchConfigAsync().Wait(TimeSpan.FromSeconds(15));
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"Failed to fetch remote config (using defaults): {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Starts optional collectors based on remote configuration
+        /// </summary>
+        private void StartOptionalCollectors()
+        {
+            var config = _remoteConfigService?.CurrentConfig;
+            var collectors = config?.Collectors;
+
+            if (collectors == null)
+            {
+                _logger.Info("No remote config available - optional collectors disabled");
+                return;
+            }
+
+            _logger.Info("Starting optional collectors based on remote config");
+
+            try
+            {
+                if (collectors.EnablePerformanceCollector)
+                {
+                    _performanceCollector = new PerformanceCollector(
+                        _configuration.SessionId,
+                        _configuration.TenantId,
+                        EmitEvent,
+                        _logger,
+                        collectors.PerformanceIntervalSeconds
+                    );
+                    _performanceCollector.Start();
+                }
+
+                if (collectors.EnableDownloadProgressCollector)
+                {
+                    _downloadProgressCollector = new DownloadProgressCollector(
+                        _configuration.SessionId,
+                        _configuration.TenantId,
+                        EmitEvent,
+                        _logger,
+                        collectors.DownloadProgressIntervalSeconds
+                    );
+                    _downloadProgressCollector.Start();
+                }
+
+                if (collectors.EnableCertValidationCollector)
+                {
+                    _certValidationCollector = new CertValidationCollector(
+                        _configuration.SessionId,
+                        _configuration.TenantId,
+                        EmitEvent,
+                        _logger
+                    );
+                    _certValidationCollector.Start();
+                }
+
+                if (collectors.EnableEspUiStateCollector)
+                {
+                    _espUiStateCollector = new EspUiStateCollector(
+                        _configuration.SessionId,
+                        _configuration.TenantId,
+                        EmitEvent,
+                        _logger,
+                        collectors.EspUiStateIntervalSeconds
+                    );
+                    _espUiStateCollector.Start();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Error("Error starting optional collectors", ex);
+            }
+        }
+
+        /// <summary>
+        /// Stops all optional collectors
+        /// </summary>
+        private void StopOptionalCollectors()
+        {
+            _performanceCollector?.Stop();
+            _performanceCollector?.Dispose();
+            _performanceCollector = null;
+
+            _downloadProgressCollector?.Stop();
+            _downloadProgressCollector?.Dispose();
+            _downloadProgressCollector = null;
+
+            _certValidationCollector?.Stop();
+            _certValidationCollector?.Dispose();
+            _certValidationCollector = null;
+
+            _espUiStateCollector?.Stop();
+            _espUiStateCollector?.Dispose();
+            _espUiStateCollector = null;
+        }
+
+        /// <summary>
+        /// Starts the gather rule executor with rules from remote config
+        /// </summary>
+        private void StartGatherRuleExecutor()
+        {
+            var config = _remoteConfigService?.CurrentConfig;
+            if (config?.GatherRules == null || config.GatherRules.Count == 0)
+            {
+                _logger.Info("No gather rules to execute");
+                return;
+            }
+
+            try
+            {
+                _gatherRuleExecutor = new GatherRuleExecutor(
+                    _configuration.SessionId,
+                    _configuration.TenantId,
+                    EmitEvent,
+                    _logger
+                );
+                _gatherRuleExecutor.UpdateRules(config.GatherRules);
+            }
+            catch (Exception ex)
+            {
+                _logger.Error("Error starting gather rule executor", ex);
+            }
+        }
+
+        /// <summary>
+        /// Called when remote configuration changes (periodic refresh detected a new version)
+        /// Dynamically starts/stops optional collectors and updates gather rules
+        /// </summary>
+        private void OnRemoteConfigChanged(object sender, AgentConfigResponse newConfig)
+        {
+            _logger.Info("Remote config changed - updating collectors and rules");
+
+            try
+            {
+                // Stop and restart optional collectors with new settings
+                StopOptionalCollectors();
+                StartOptionalCollectors();
+
+                // Update gather rules
+                if (_gatherRuleExecutor != null)
+                {
+                    _gatherRuleExecutor.UpdateRules(newConfig.GatherRules);
+                }
+                else
+                {
+                    StartGatherRuleExecutor();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Error("Error applying config changes", ex);
             }
         }
 
@@ -376,6 +566,16 @@ namespace AutopilotMonitor.Agent.Core.Monitoring
                 _simulator?.Stop();
                 _simulator?.Dispose();
 
+                // Stop optional collectors
+                StopOptionalCollectors();
+
+                // Stop gather rule executor
+                _gatherRuleExecutor?.Dispose();
+                _gatherRuleExecutor = null;
+
+                // Stop remote config refresh
+                _remoteConfigService?.StopPeriodicRefresh();
+
                 _logger.Info("Event collectors stopped");
             }
             catch (Exception ex)
@@ -400,6 +600,21 @@ namespace AutopilotMonitor.Agent.Core.Monitoring
                 _logger.Debug($"Phase transition detected: {_lastPhase?.ToString() ?? "null"} -> {evt.Phase}");
                 _lastPhase = evt.Phase;
                 isPhaseTransition = true;
+
+                // Notify gather rule executor of phase change
+                try { _gatherRuleExecutor?.OnPhaseChanged(evt.Phase); } catch { }
+
+                // Re-run cert validation on network phase completion
+                if (evt.Phase == EnrollmentPhase.Identity && _certValidationCollector != null)
+                {
+                    try { _certValidationCollector.RunValidation(); } catch { }
+                }
+            }
+
+            // Notify gather rule executor of event type (for on_event triggers)
+            if (!string.IsNullOrEmpty(evt.EventType))
+            {
+                try { _gatherRuleExecutor?.OnEvent(evt.EventType); } catch { }
             }
 
             // Check for enrollment completion events
@@ -407,9 +622,30 @@ namespace AutopilotMonitor.Agent.Core.Monitoring
             {
                 _logger.Info($"Enrollment completion detected: {evt.EventType}");
 
-                // ALWAYS delete session ID when enrollment is complete/failed
-                // This ensures a new session will be created on next enrollment
+                // Delete session ID so a new session will be created on next enrollment
                 DeleteSessionId();
+
+                // Stop ALL collectors to minimize system impact
+                _logger.Info("Stopping all collectors after enrollment completion...");
+                StopEventCollectors();
+
+                // Stop upload timers - no more periodic uploads needed
+                _uploadTimer?.Change(Timeout.Infinite, Timeout.Infinite);
+                _debounceTimer?.Change(Timeout.Infinite, Timeout.Infinite);
+
+                // Final upload to flush any remaining events
+                Task.Run(async () =>
+                {
+                    try
+                    {
+                        await UploadEventsAsync();
+                        _logger.Info("Final event upload after enrollment completion done");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Warning($"Final upload after enrollment completion failed: {ex.Message}");
+                    }
+                });
 
                 // Only trigger self-destruct if configured
                 if (_configuration.SelfDestructOnComplete)
@@ -725,6 +961,12 @@ Restart-Computer -Force
             _phaseDetector?.Dispose();
             _helloDetector?.Dispose();
             _simulator?.Dispose();
+            _performanceCollector?.Dispose();
+            _downloadProgressCollector?.Dispose();
+            _certValidationCollector?.Dispose();
+            _espUiStateCollector?.Dispose();
+            _gatherRuleExecutor?.Dispose();
+            _remoteConfigService?.Dispose();
         }
     }
 }

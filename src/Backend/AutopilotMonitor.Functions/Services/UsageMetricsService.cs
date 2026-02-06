@@ -131,14 +131,15 @@ namespace AutopilotMonitor.Functions.Services
                     .Count()
             };
 
-            // User Metrics (placeholder until Entra ID auth is implemented)
+            // User Metrics (from UserActivity table)
+            var userActivity = await _storageService.GetAllUserActivityMetricsAsync();
             var userMetrics = new UserMetrics
             {
-                Total = 0,
-                DailyLogins = 0,
-                Active7Days = 0,
-                Active30Days = 0,
-                Note = "User metrics require Entra ID authentication (coming soon)"
+                Total = userActivity.TotalUniqueUsers,
+                DailyLogins = userActivity.DailyLogins,
+                Active7Days = userActivity.ActiveUsersLast7Days,
+                Active30Days = userActivity.ActiveUsersLast30Days,
+                Note = userActivity.TotalUniqueUsers > 0 ? "" : "No user login activity recorded yet"
             };
 
             // Performance Metrics
@@ -224,14 +225,15 @@ namespace AutopilotMonitor.Functions.Services
                 Active30Days = tenantSessions.Any(s => s.StartedAt >= last30Days) ? 1 : 0
             };
 
-            // User Metrics (placeholder until Entra ID auth is implemented)
+            // User Metrics (from UserActivity table)
+            var userActivity = await _storageService.GetUserActivityMetricsAsync(tenantId);
             var userMetrics = new UserMetrics
             {
-                Total = 0,
-                DailyLogins = 0,
-                Active7Days = 0,
-                Active30Days = 0,
-                Note = "User metrics require Entra ID authentication (coming soon)"
+                Total = userActivity.TotalUniqueUsers,
+                DailyLogins = userActivity.DailyLogins,
+                Active7Days = userActivity.ActiveUsersLast7Days,
+                Active30Days = userActivity.ActiveUsersLast30Days,
+                Note = userActivity.TotalUniqueUsers > 0 ? "" : "No user login activity recorded yet"
             };
 
             // Performance Metrics

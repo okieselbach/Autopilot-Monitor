@@ -1,0 +1,639 @@
+"use client";
+
+import { useEffect, useState, useRef, useMemo } from "react";
+import { useRouter } from "next/navigation";
+import { ProtectedRoute } from "../../components/ProtectedRoute";
+import { useSignalR } from "../../contexts/SignalRContext";
+import { useTenant } from "../../contexts/TenantContext";
+import { useAuth } from "../../contexts/AuthContext";
+import { API_BASE_URL } from "@/lib/config";
+
+interface Session {
+  sessionId: string;
+  tenantId: string;
+  serialNumber: string;
+  deviceName: string;
+  manufacturer: string;
+  model: string;
+  startedAt: string;
+  status: string;
+  currentPhase: number;
+  eventCount: number;
+  durationSeconds: number;
+  failureReason?: string;
+}
+
+export default function FleetHealthPage() {
+  const router = useRouter();
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [timeRange, setTimeRange] = useState<"7d" | "30d" | "90d">("7d");
+
+  const hasInitialFetch = useRef(false);
+  const hasJoinedGroup = useRef(false);
+
+  const { on, off, isConnected, joinGroup, leaveGroup } = useSignalR();
+  const { tenantId } = useTenant();
+  const { getAccessToken } = useAuth();
+
+  const [galacticAdminMode] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("galacticAdminMode") === "true";
+    }
+    return false;
+  });
+
+  useEffect(() => {
+    if (hasInitialFetch.current) return;
+    hasInitialFetch.current = true;
+    fetchSessions();
+  }, []);
+
+  useEffect(() => {
+    if (isConnected && !hasJoinedGroup.current) {
+      joinGroup(`tenant-${tenantId}`);
+      hasJoinedGroup.current = true;
+    }
+    return () => {
+      if (hasJoinedGroup.current) {
+        leaveGroup(`tenant-${tenantId}`);
+        hasJoinedGroup.current = false;
+      }
+    };
+  }, [isConnected, tenantId]);
+
+  useEffect(() => {
+    const handleNewSession = (data: { session: Session }) => {
+      if (data.session) {
+        setSessions((prev) => {
+          const idx = prev.findIndex(
+            (s) => s.sessionId === data.session.sessionId
+          );
+          if (idx >= 0) {
+            const updated = [...prev];
+            updated[idx] = data.session;
+            return updated;
+          }
+          return [data.session, ...prev];
+        });
+      }
+    };
+    const handleNewEvents = (data: { session: Session }) => {
+      if (data.session) {
+        setSessions((prev) => {
+          const idx = prev.findIndex(
+            (s) => s.sessionId === data.session.sessionId
+          );
+          if (idx >= 0) {
+            const updated = [...prev];
+            updated[idx] = data.session;
+            return updated;
+          }
+          return [data.session, ...prev];
+        });
+      }
+    };
+    on("newSession", handleNewSession);
+    on("newevents", handleNewEvents);
+    return () => {
+      off("newSession", handleNewSession);
+      off("newevents", handleNewEvents);
+    };
+  }, [on, off]);
+
+  const fetchSessions = async () => {
+    try {
+      const endpoint = galacticAdminMode
+        ? `${API_BASE_URL}/api/galactic/sessions`
+        : `${API_BASE_URL}/api/sessions?tenantId=${tenantId}`;
+      const token = await getAccessToken();
+      if (!token) return;
+      const response = await fetch(endpoint, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setSessions(data.sessions || []);
+      }
+    } catch (error) {
+      console.error("Failed to fetch sessions:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Filter sessions by time range
+  const filteredSessions = useMemo(() => {
+    const now = new Date();
+    const days = timeRange === "7d" ? 7 : timeRange === "30d" ? 30 : 90;
+    const cutoff = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+    return sessions.filter((s) => new Date(s.startedAt) >= cutoff);
+  }, [sessions, timeRange]);
+
+  // Stats
+  const stats = useMemo(() => {
+    const total = filteredSessions.length;
+    const succeeded = filteredSessions.filter(
+      (s) => s.status === "Succeeded"
+    ).length;
+    const failed = filteredSessions.filter(
+      (s) => s.status === "Failed"
+    ).length;
+    const inProgress = filteredSessions.filter(
+      (s) => s.status === "InProgress"
+    ).length;
+    const successRate = total > 0 ? (succeeded / total) * 100 : 0;
+
+    const completedSessions = filteredSessions.filter(
+      (s) => s.status !== "InProgress" && s.durationSeconds > 0
+    );
+    const avgDuration =
+      completedSessions.length > 0
+        ? completedSessions.reduce((sum, s) => sum + s.durationSeconds, 0) /
+          completedSessions.length /
+          60
+        : 0;
+
+    return {
+      total,
+      succeeded,
+      failed,
+      inProgress,
+      successRate,
+      avgDuration: Math.round(avgDuration),
+    };
+  }, [filteredSessions]);
+
+  // Enrollments by day
+  const dailyData = useMemo(() => {
+    const days = timeRange === "7d" ? 7 : timeRange === "30d" ? 30 : 90;
+    const now = new Date();
+    const data: {
+      label: string;
+      date: string;
+      success: number;
+      failed: number;
+    }[] = [];
+
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
+      const dateStr = d.toISOString().split("T")[0];
+      const dayLabel = d.toLocaleDateString(undefined, {
+        weekday: "short",
+      });
+
+      const daySessions = filteredSessions.filter(
+        (s) =>
+          new Date(s.startedAt).toISOString().split("T")[0] === dateStr
+      );
+
+      data.push({
+        label: days <= 7 ? dayLabel : d.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+        date: dateStr,
+        success: daySessions.filter((s) => s.status === "Succeeded").length,
+        failed: daySessions.filter((s) => s.status === "Failed").length,
+      });
+    }
+
+    return data;
+  }, [filteredSessions, timeRange]);
+
+  // Top failure reasons
+  const failureReasons = useMemo(() => {
+    const reasons: Record<string, number> = {};
+    filteredSessions
+      .filter((s) => s.status === "Failed")
+      .forEach((s) => {
+        const reason = s.failureReason || "Unknown";
+        // Simplify reason for grouping
+        const simplified =
+          reason.length > 50 ? reason.substring(0, 50) + "..." : reason;
+        reasons[simplified] = (reasons[simplified] || 0) + 1;
+      });
+    return Object.entries(reasons)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 5);
+  }, [filteredSessions]);
+
+  // Health by device model
+  const modelHealth = useMemo(() => {
+    const models: Record<
+      string,
+      { total: number; succeeded: number; model: string }
+    > = {};
+    filteredSessions.forEach((s) => {
+      const key = `${s.manufacturer} ${s.model}`.trim() || "Unknown";
+      if (!models[key]) models[key] = { total: 0, succeeded: 0, model: key };
+      models[key].total++;
+      if (s.status === "Succeeded") models[key].succeeded++;
+    });
+    return Object.values(models)
+      .filter((m) => m.total >= 1)
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 6);
+  }, [filteredSessions]);
+
+  // Slowest apps - derive from session durations by model (proxy since we don't have per-app data at fleet level)
+  const slowestModels = useMemo(() => {
+    const models: Record<string, { totalDuration: number; count: number; model: string }> = {};
+    filteredSessions
+      .filter((s) => s.status === "Succeeded" && s.durationSeconds > 0)
+      .forEach((s) => {
+        const key = `${s.manufacturer} ${s.model}`.trim() || "Unknown";
+        if (!models[key])
+          models[key] = { totalDuration: 0, count: 0, model: key };
+        models[key].totalDuration += s.durationSeconds;
+        models[key].count++;
+      });
+    return Object.values(models)
+      .map((m) => ({
+        model: m.model,
+        avgMinutes: Math.round(m.totalDuration / m.count / 60),
+        count: m.count,
+      }))
+      .sort((a, b) => b.avgMinutes - a.avgMinutes)
+      .slice(0, 5);
+  }, [filteredSessions]);
+
+  const maxDaily = useMemo(() => {
+    return Math.max(
+      1,
+      ...dailyData.map((d) => d.success + d.failed)
+    );
+  }, [dailyData]);
+
+  const maxFailureCount = useMemo(() => {
+    return failureReasons.length > 0
+      ? Math.max(...failureReasons.map(([, c]) => c))
+      : 1;
+  }, [failureReasons]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-gray-600">Loading fleet health data...</div>
+      </div>
+    );
+  }
+
+  return (
+    <ProtectedRoute>
+      <div className="min-h-screen bg-gray-50">
+        <header className="bg-white shadow">
+          <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+            <div className="flex items-center justify-between">
+              <div>
+                <button
+                  onClick={() => router.push("/")}
+                  className="text-sm text-gray-600 hover:text-gray-900 mb-2 flex items-center"
+                >
+                  &larr; Back to Dashboard
+                </button>
+                <div className="flex items-center space-x-3">
+                  <svg
+                    className="w-8 h-8 text-blue-600"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+                    />
+                  </svg>
+                  <h1 className="text-3xl font-bold text-gray-900">
+                    FLEET HEALTH
+                  </h1>
+                </div>
+              </div>
+              <div className="flex items-center space-x-2">
+                {(["7d", "30d", "90d"] as const).map((range) => (
+                  <button
+                    key={range}
+                    onClick={() => setTimeRange(range)}
+                    className={`px-4 py-2 text-sm rounded-md transition-colors ${
+                      timeRange === range
+                        ? "bg-blue-600 text-white"
+                        : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                    }`}
+                  >
+                    {range === "7d"
+                      ? "Last 7 Days"
+                      : range === "30d"
+                      ? "Last 30 Days"
+                      : "Last 90 Days"}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <main className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+          {/* Top Stats */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
+            <StatCard
+              title="Success Rate"
+              value={`${stats.successRate.toFixed(1)}%`}
+              subtitle={`${stats.succeeded} of ${stats.total} enrollments`}
+              color={
+                stats.successRate >= 95
+                  ? "green"
+                  : stats.successRate >= 80
+                  ? "yellow"
+                  : "red"
+              }
+            />
+            <StatCard
+              title="Avg. Enrollment Time"
+              value={`${stats.avgDuration} min`}
+              subtitle="Completed enrollments"
+              color="blue"
+            />
+            <StatCard
+              title="Failed"
+              value={stats.failed.toString()}
+              subtitle="Needs attention"
+              color="red"
+            />
+            <StatCard
+              title="Active Now"
+              value={stats.inProgress.toString()}
+              subtitle="Currently enrolling"
+              color="blue"
+            />
+          </div>
+
+          {/* Enrollments Timeline */}
+          <div className="bg-white shadow rounded-lg p-6 mb-8">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">
+              Enrollments Timeline
+            </h2>
+            {filteredSessions.length === 0 ? (
+              <div className="text-center py-8 text-gray-500">
+                No enrollments in this time range.
+              </div>
+            ) : (
+              <div>
+                <div className="flex items-end space-x-1 h-48">
+                  {dailyData.map((day) => {
+                    const total = day.success + day.failed;
+                    const heightPct =
+                      maxDaily > 0 ? (total / maxDaily) * 100 : 0;
+                    const successPct =
+                      total > 0 ? (day.success / total) * heightPct : 0;
+                    const failedPct = heightPct - successPct;
+
+                    return (
+                      <div
+                        key={day.date}
+                        className="flex-1 flex flex-col items-center justify-end h-full group relative"
+                      >
+                        {/* Tooltip */}
+                        {total > 0 && (
+                          <div className="absolute -top-8 bg-gray-900 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
+                            {day.success} ok, {day.failed} failed
+                          </div>
+                        )}
+                        <div
+                          className="w-full flex flex-col justify-end"
+                          style={{ height: `${heightPct}%` }}
+                        >
+                          {day.failed > 0 && (
+                            <div
+                              className="w-full bg-red-400 rounded-t"
+                              style={{
+                                height: `${
+                                  heightPct > 0
+                                    ? (failedPct / heightPct) * 100
+                                    : 0
+                                }%`,
+                                minHeight:
+                                  day.failed > 0 ? "2px" : undefined,
+                              }}
+                            />
+                          )}
+                          {day.success > 0 && (
+                            <div
+                              className={`w-full bg-green-500 ${
+                                day.failed === 0 ? "rounded-t" : ""
+                              }`}
+                              style={{
+                                height: `${
+                                  heightPct > 0
+                                    ? (successPct / heightPct) * 100
+                                    : 0
+                                }%`,
+                                minHeight:
+                                  day.success > 0 ? "2px" : undefined,
+                              }}
+                            />
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                {/* X-axis labels - show subset */}
+                <div className="flex space-x-1 mt-2">
+                  {dailyData.map((day, i) => {
+                    const showLabel =
+                      dailyData.length <= 14 ||
+                      i % Math.ceil(dailyData.length / 10) === 0 ||
+                      i === dailyData.length - 1;
+                    return (
+                      <div
+                        key={day.date}
+                        className="flex-1 text-center text-[10px] text-gray-500"
+                      >
+                        {showLabel ? day.label : ""}
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="flex items-center space-x-4 mt-3 text-xs text-gray-500">
+                  <div className="flex items-center space-x-1">
+                    <div className="w-3 h-3 bg-green-500 rounded" />
+                    <span>Success ({stats.succeeded})</span>
+                  </div>
+                  <div className="flex items-center space-x-1">
+                    <div className="w-3 h-3 bg-red-400 rounded" />
+                    <span>Failed ({stats.failed})</span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Two column: Failure Reasons + Slowest Models */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+            {/* Top Failure Reasons */}
+            <div className="bg-white shadow rounded-lg p-6">
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">
+                Top Failure Reasons
+              </h2>
+              {failureReasons.length === 0 ? (
+                <div className="text-center py-6 text-gray-400 text-sm">
+                  No failures in this time range
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {failureReasons.map(([reason, count], i) => (
+                    <div key={reason} className="flex items-center space-x-3">
+                      <span className="text-xs text-gray-400 w-4">
+                        {i + 1}.
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-sm text-gray-700 truncate pr-2">
+                            {reason}
+                          </span>
+                          <span className="text-sm font-medium text-gray-900 flex-shrink-0">
+                            ({count})
+                          </span>
+                        </div>
+                        <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-red-400 rounded-full"
+                            style={{
+                              width: `${(count / maxFailureCount) * 100}%`,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Slowest Device Models */}
+            <div className="bg-white shadow rounded-lg p-6">
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">
+                Avg. Duration by Model
+              </h2>
+              {slowestModels.length === 0 ? (
+                <div className="text-center py-6 text-gray-400 text-sm">
+                  No completed enrollments in this time range
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {slowestModels.map((m, i) => (
+                    <div key={m.model} className="flex items-center space-x-3">
+                      <span className="text-xs text-gray-400 w-4">
+                        {i + 1}.
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-sm text-gray-700 truncate pr-2">
+                            {m.model}
+                          </span>
+                          <span className="text-sm font-medium text-gray-900 flex-shrink-0">
+                            {m.avgMinutes} min
+                          </span>
+                        </div>
+                        <div className="text-xs text-gray-400">
+                          {m.count} enrollments
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Health by Device Model */}
+          <div className="bg-white shadow rounded-lg p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">
+              Health by Device Model
+            </h2>
+            {modelHealth.length === 0 ? (
+              <div className="text-center py-6 text-gray-400 text-sm">
+                No data available
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {modelHealth.map((m) => {
+                  const successRate =
+                    m.total > 0
+                      ? Math.round((m.succeeded / m.total) * 100)
+                      : 0;
+                  return (
+                    <div key={m.model} className="flex items-center space-x-4">
+                      <div className="w-48 text-sm text-gray-700 truncate flex-shrink-0">
+                        {m.model}
+                      </div>
+                      <div className="flex-1">
+                        <div className="w-full h-4 bg-gray-100 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full rounded-full transition-all ${
+                              successRate >= 95
+                                ? "bg-green-500"
+                                : successRate >= 80
+                                ? "bg-yellow-500"
+                                : "bg-red-500"
+                            }`}
+                            style={{ width: `${successRate}%` }}
+                          />
+                        </div>
+                      </div>
+                      <div className="text-sm font-medium text-gray-900 w-12 text-right">
+                        {successRate}%
+                      </div>
+                      <div className="text-xs text-gray-400 w-24 text-right">
+                        ({m.total} devices)
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </main>
+      </div>
+    </ProtectedRoute>
+  );
+}
+
+function StatCard({
+  title,
+  value,
+  subtitle,
+  color,
+}: {
+  title: string;
+  value: string;
+  subtitle: string;
+  color: "green" | "blue" | "red" | "yellow";
+}) {
+  const colorClasses = {
+    green: "border-green-500 bg-green-50",
+    blue: "border-blue-500 bg-blue-50",
+    red: "border-red-500 bg-red-50",
+    yellow: "border-yellow-500 bg-yellow-50",
+  };
+
+  const valueColors = {
+    green: "text-green-700",
+    blue: "text-blue-700",
+    red: "text-red-700",
+    yellow: "text-yellow-700",
+  };
+
+  return (
+    <div
+      className={`bg-white overflow-hidden shadow rounded-lg border-l-4 ${colorClasses[color]}`}
+    >
+      <div className="p-5">
+        <div className="text-sm font-medium text-gray-500">{title}</div>
+        <div className={`text-3xl font-bold mt-1 ${valueColors[color]}`}>
+          {value}
+        </div>
+        <div className="text-xs text-gray-400 mt-1">{subtitle}</div>
+      </div>
+    </div>
+  );
+}

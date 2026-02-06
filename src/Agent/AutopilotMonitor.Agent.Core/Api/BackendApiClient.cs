@@ -117,6 +117,24 @@ namespace AutopilotMonitor.Agent.Core.Api
         }
 
         /// <summary>
+        /// Fetches the agent configuration (collector toggles + gather rules) from the backend
+        /// </summary>
+        public async Task<AgentConfigResponse> GetAgentConfigAsync(string tenantId)
+        {
+            var url = $"{_baseUrl}{Constants.ApiEndpoints.GetAgentConfig}?tenantId={Uri.EscapeDataString(tenantId)}";
+
+            var httpRequest = new HttpRequestMessage(HttpMethod.Get, url);
+            AddClientCertificateHeader(httpRequest);
+
+            var response = await _httpClient.SendAsync(httpRequest);
+            response.EnsureSuccessStatusCode();
+
+            var responseJson = await response.Content.ReadAsStringAsync();
+            var result = JsonConvert.DeserializeObject<AgentConfigResponse>(responseJson);
+            return result;
+        }
+
+        /// <summary>
         /// Gets a SAS URL for uploading a troubleshooting bundle
         /// </summary>
         public async Task<UploadBundleResponse> GetBundleUploadUrlAsync(UploadBundleRequest request)

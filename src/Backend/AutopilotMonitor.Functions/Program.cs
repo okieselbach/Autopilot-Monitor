@@ -99,5 +99,7 @@ builder.Services.AddSingleton<GalacticAdminService>();
 builder.Services.AddSingleton<TenantAdminsService>();
 builder.Services.AddSingleton<HealthCheckService>();
 builder.Services.AddSingleton<DailyMaintenanceFunction>();
+builder.Services.AddSingleton<GatherRuleService>();
+builder.Services.AddSingleton<AnalyzeRuleService>();
 
 builder.Build().Run();
