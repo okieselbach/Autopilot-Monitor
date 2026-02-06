@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace AutopilotMonitor.Shared.Models
 {
@@ -16,6 +17,12 @@ namespace AutopilotMonitor.Shared.Models
         public string TenantId { get; set; }
 
         /// <summary>
+        /// Domain name extracted from the first user's UPN
+        /// Used for display purposes (e.g., contoso.com)
+        /// </summary>
+        public string DomainName { get; set; }
+
+        /// <summary>
         /// When the configuration was last updated
         /// </summary>
         public DateTime LastUpdated { get; set; }
@@ -24,6 +31,28 @@ namespace AutopilotMonitor.Shared.Models
         /// Updated by (user email or system)
         /// </summary>
         public string UpdatedBy { get; set; }
+
+        // ===== TENANT STATUS =====
+
+        /// <summary>
+        /// Whether this tenant is disabled/suspended
+        /// If true, users from this tenant cannot log in
+        /// Default: false
+        /// </summary>
+        public bool Disabled { get; set; } = false;
+
+        /// <summary>
+        /// Optional reason why the tenant was disabled
+        /// Displayed to users attempting to log in
+        /// </summary>
+        public string DisabledReason { get; set; }
+
+        /// <summary>
+        /// Optional date/time until which the tenant is disabled
+        /// If set and in the past, the tenant can be automatically re-enabled
+        /// If null, the tenant remains disabled until manually re-enabled
+        /// </summary>
+        public DateTime? DisabledUntil { get; set; }
 
         // ===== SECURITY SETTINGS =====
 
@@ -97,6 +126,22 @@ namespace AutopilotMonitor.Shared.Models
         // ===== HELPER METHODS =====
 
         /// <summary>
+        /// Checks if the tenant is currently disabled
+        /// Takes into account DisabledUntil if set
+        /// </summary>
+        public bool IsCurrentlyDisabled()
+        {
+            if (!Disabled)
+                return false;
+
+            // If DisabledUntil is set and in the past, tenant is no longer disabled
+            if (DisabledUntil.HasValue && DisabledUntil.Value <= DateTime.UtcNow)
+                return false;
+
+            return true;
+        }
+
+        /// <summary>
         /// Gets manufacturer whitelist as array
         /// </summary>
         public string[] GetManufacturerWhitelist()
@@ -126,8 +171,12 @@ namespace AutopilotMonitor.Shared.Models
             return new TenantConfiguration
             {
                 TenantId = tenantId,
+                DomainName = "",
                 LastUpdated = DateTime.UtcNow,
                 UpdatedBy = "System",
+                Disabled = false,
+                DisabledReason = null,
+                DisabledUntil = null,
                 RateLimitRequestsPerMinute = 100,
                 CustomRateLimitRequestsPerMinute = null,
                 ManufacturerWhitelist = "Dell*,HP*,Lenovo*,Microsoft Corporation",

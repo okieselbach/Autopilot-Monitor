@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using AutopilotMonitor.Shared.Models;
 using Azure;
@@ -139,12 +141,40 @@ namespace AutopilotMonitor.Functions.Services
             _configCache.TryRemove(tenantId, out _);
         }
 
+        /// <summary>
+        /// Gets all tenant configurations (for Galactic Admin use)
+        /// </summary>
+        public async Task<List<TenantConfiguration>> GetAllConfigurationsAsync()
+        {
+            try
+            {
+                var configurations = new List<TenantConfiguration>();
+
+                await foreach (var entity in _tableClient.QueryAsync<TableEntity>(filter: "RowKey eq 'config'"))
+                {
+                    var config = ConvertFromTableEntity(entity);
+                    configurations.Add(config);
+                }
+
+                return configurations.OrderBy(c => c.TenantId).ToList();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error loading all tenant configurations");
+                throw;
+            }
+        }
+
         private TableEntity ConvertToTableEntity(TenantConfiguration config)
         {
             var entity = new TableEntity(config.TenantId, "config")
             {
+                { "DomainName", config.DomainName },
                 { "LastUpdated", config.LastUpdated },
                 { "UpdatedBy", config.UpdatedBy },
+                { "Disabled", config.Disabled },
+                { "DisabledReason", config.DisabledReason },
+                { "DisabledUntil", config.DisabledUntil },
                 { "RateLimitRequestsPerMinute", config.RateLimitRequestsPerMinute },
                 { "CustomRateLimitRequestsPerMinute", config.CustomRateLimitRequestsPerMinute },
                 { "ManufacturerWhitelist", config.ManufacturerWhitelist },
@@ -164,8 +194,12 @@ namespace AutopilotMonitor.Functions.Services
             return new TenantConfiguration
             {
                 TenantId = entity.PartitionKey,
+                DomainName = entity.GetString("DomainName") ?? "",
                 LastUpdated = entity.GetDateTime("LastUpdated") ?? DateTime.UtcNow,
                 UpdatedBy = entity.GetString("UpdatedBy") ?? "Unknown",
+                Disabled = entity.GetBoolean("Disabled") ?? false,
+                DisabledReason = entity.GetString("DisabledReason"),
+                DisabledUntil = entity.GetDateTime("DisabledUntil"),
                 RateLimitRequestsPerMinute = entity.GetInt32("RateLimitRequestsPerMinute") ?? 100,
                 CustomRateLimitRequestsPerMinute = entity.GetInt32("CustomRateLimitRequestsPerMinute"),
                 ManufacturerWhitelist = entity.GetString("ManufacturerWhitelist") ?? "Dell*,HP*,Lenovo*,Microsoft Corporation",

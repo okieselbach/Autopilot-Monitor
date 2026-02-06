@@ -23,6 +23,7 @@ interface UserInfo {
   tenantId: string;
   objectId: string;
   isGalacticAdmin: boolean;
+  isTenantAdmin: boolean;
 }
 
 interface AuthContextType {
@@ -74,6 +75,18 @@ function AuthProviderInternal({ children }: { children: React.ReactNode }) {
       });
 
       if (!response.ok) {
+        // Check for tenant suspension
+        if (response.status === 403) {
+          const errorData = await response.json();
+          if (errorData.error === 'TenantSuspended') {
+            console.error('[Auth] Tenant suspended:', errorData.message);
+            // Display error to user
+            alert(`Access Denied\n\n${errorData.message}`);
+            // Logout user
+            await instance.logoutRedirect({ account });
+            return null;
+          }
+        }
         throw new Error(`Failed to fetch user info: ${response.statusText}`);
       }
 
@@ -85,6 +98,7 @@ function AuthProviderInternal({ children }: { children: React.ReactNode }) {
         tenantId: data.tenantId || account.tenantId || '',
         objectId: data.objectId || account.homeAccountId || '',
         isGalacticAdmin: data.isGalacticAdmin || false,
+        isTenantAdmin: data.isTenantAdmin || false,
       };
     } catch (error) {
       console.error('[Auth] Failed to fetch user info:', error);
@@ -96,6 +110,7 @@ function AuthProviderInternal({ children }: { children: React.ReactNode }) {
         tenantId: account.tenantId || '',
         objectId: account.homeAccountId || '',
         isGalacticAdmin: false,
+        isTenantAdmin: false,
       };
     }
   }, [instance]);

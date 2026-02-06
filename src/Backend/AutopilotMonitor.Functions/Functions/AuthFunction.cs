@@ -16,13 +16,19 @@ public class AuthFunction
 {
     private readonly ILogger<AuthFunction> _logger;
     private readonly GalacticAdminService _galacticAdminService;
+    private readonly TenantConfigurationService _tenantConfigService;
+    private readonly TenantAdminsService _tenantAdminsService;
 
     public AuthFunction(
         ILogger<AuthFunction> logger,
-        GalacticAdminService galacticAdminService)
+        GalacticAdminService galacticAdminService,
+        TenantConfigurationService tenantConfigService,
+        TenantAdminsService tenantAdminsService)
     {
         _logger = logger;
         _galacticAdminService = galacticAdminService;
+        _tenantConfigService = tenantConfigService;
+        _tenantAdminsService = tenantAdminsService;
     }
 
     /// <summary>
@@ -48,8 +54,67 @@ public class AuthFunction
         var displayName = principal.GetDisplayName();
         var objectId = principal.GetObjectId();
 
+        // Validate required claims
+        if (string.IsNullOrEmpty(tenantId) || string.IsNullOrEmpty(upn))
+        {
+            _logger.LogWarning("Missing required claims: tenantId or upn");
+            var badRequestResponse = req.CreateResponse(HttpStatusCode.BadRequest);
+            await badRequestResponse.WriteAsJsonAsync(new { error = "Missing required claims" });
+            return badRequestResponse;
+        }
+
+        // Load tenant configuration
+        var tenantConfig = await _tenantConfigService.GetConfigurationAsync(tenantId);
+
+        // Extract and save domain name from first user if not set
+        if (string.IsNullOrEmpty(tenantConfig.DomainName) && !string.IsNullOrEmpty(upn))
+        {
+            var domain = ExtractDomainFromUpn(upn);
+            if (!string.IsNullOrEmpty(domain))
+            {
+                _logger.LogInformation($"Setting domain name for tenant {tenantId}: {domain}");
+                tenantConfig.DomainName = domain;
+                tenantConfig.UpdatedBy = upn;
+                await _tenantConfigService.SaveConfigurationAsync(tenantConfig);
+            }
+        }
+
+        // Check if tenant is disabled/suspended
+        if (tenantConfig.IsCurrentlyDisabled())
+        {
+            _logger.LogWarning($"Login attempt for suspended tenant: {tenantId} by user {upn}");
+
+            var suspendedResponse = req.CreateResponse(HttpStatusCode.Forbidden);
+            await suspendedResponse.WriteAsJsonAsync(new
+            {
+                error = "TenantSuspended",
+                message = !string.IsNullOrEmpty(tenantConfig.DisabledReason)
+                    ? tenantConfig.DisabledReason
+                    : "Your tenant has been suspended. Please contact support for more information.",
+                disabledUntil = tenantConfig.DisabledUntil?.ToString("o"),
+                contactSupport = true
+            });
+            return suspendedResponse;
+        }
+
         // Check if user is galactic admin
         var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(upn);
+
+        // Check if user is tenant admin
+        bool isTenantAdmin = await _tenantAdminsService.IsTenantAdminAsync(tenantId, upn);
+
+        // Auto-admin logic: First user becomes admin
+        if (!isTenantAdmin)
+        {
+            // Check if tenant has any admins at all
+            var existingAdmins = await _tenantAdminsService.GetTenantAdminsAsync(tenantId);
+            if (existingAdmins.Count == 0)
+            {
+                _logger.LogInformation($"First user login for tenant {tenantId}: {upn} - Auto-assigning as admin");
+                await _tenantAdminsService.AddTenantAdminAsync(tenantId, upn, "System");
+                isTenantAdmin = true;
+            }
+        }
 
         var userInfo = new
         {
@@ -57,7 +122,8 @@ public class AuthFunction
             upn,
             displayName,
             objectId,
-            isGalacticAdmin
+            isGalacticAdmin,
+            isTenantAdmin
         };
 
         var response = req.CreateResponse(HttpStatusCode.OK);
@@ -208,6 +274,23 @@ public class AuthFunction
         var response = req.CreateResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new { message = "Galactic Admin removed successfully" });
         return response;
+    }
+
+    /// <summary>
+    /// Extracts domain name from UPN (e.g., user@contoso.com -> contoso.com)
+    /// </summary>
+    private static string ExtractDomainFromUpn(string upn)
+    {
+        if (string.IsNullOrEmpty(upn))
+            return string.Empty;
+
+        var atIndex = upn.IndexOf('@');
+        if (atIndex > 0 && atIndex < upn.Length - 1)
+        {
+            return upn.Substring(atIndex + 1);
+        }
+
+        return string.Empty;
     }
 }
 

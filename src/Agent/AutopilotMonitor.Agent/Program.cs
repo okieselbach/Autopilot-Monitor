@@ -16,6 +16,13 @@ namespace AutopilotMonitor.Agent
     {
         static void Main(string[] args)
         {
+            // Check for mass rollout simulator mode
+            if (args.Contains("--simulator-mass-rollout"))
+            {
+                RunMassRolloutSimulator(args);
+                return;
+            }
+
             // Check if running in console mode (for testing)
             if (args.Contains("--console") || Environment.UserInteractive)
             {
@@ -88,6 +95,122 @@ namespace AutopilotMonitor.Agent
                 Console.WriteLine($"ERROR: {ex.Message}");
                 Console.WriteLine(ex.StackTrace);
             }
+        }
+
+        static void RunMassRolloutSimulator(string[] args)
+        {
+            Console.WriteLine("Autopilot Monitor Agent - MASS ROLLOUT SIMULATOR MODE");
+            Console.WriteLine("======================================================");
+            Console.WriteLine("Simulating 5 parallel device enrollments across 3 tenants:");
+            Console.WriteLine("  - 3x Tenant: b54dc1af-5320-4f60-b5d4-821e0cf2a359 (1 will fail)");
+            Console.WriteLine("  - 1x Tenant: a53834b7-42bc-46a3-b004-369735c3acf9");
+            Console.WriteLine("  - 1x Tenant: deadbeef-dead-beef-dead-beefdeadbeef");
+            Console.WriteLine();
+
+            // Parse base configuration from args (API URL, etc.)
+            var baseConfig = LoadConfiguration(args);
+
+            // Define the 5 device configurations
+            var deviceConfigs = new[]
+            {
+                new { TenantId = "b54dc1af-5320-4f60-b5d4-821e0cf2a359", SimulateFailure = false, DeviceName = "Device-1" },
+                new { TenantId = "b54dc1af-5320-4f60-b5d4-821e0cf2a359", SimulateFailure = true, DeviceName = "Device-2" },  // This one will fail
+                new { TenantId = "b54dc1af-5320-4f60-b5d4-821e0cf2a359", SimulateFailure = false, DeviceName = "Device-3" },
+                new { TenantId = "a53834b7-42bc-46a3-b004-369735c3acf9", SimulateFailure = false, DeviceName = "Device-4" },
+                new { TenantId = "deadbeef-dead-beef-dead-beefdeadbeef", SimulateFailure = false, DeviceName = "Device-5" }
+            };
+
+            var tasks = new List<System.Threading.Tasks.Task>();
+            var services = new List<MonitoringService>();
+
+            // Start all 5 instances in parallel
+            for (int i = 0; i < deviceConfigs.Length; i++)
+            {
+                var deviceConfig = deviceConfigs[i];
+                var instanceNumber = i + 1;
+
+                var config = new AgentConfiguration
+                {
+                    ApiBaseUrl = baseConfig.ApiBaseUrl,
+                    SessionId = Guid.NewGuid().ToString(),
+                    TenantId = deviceConfig.TenantId,
+                    SpoolDirectory = Environment.ExpandEnvironmentVariables($@"%ProgramData%\AutopilotMonitor\MassRollout\{deviceConfig.DeviceName}\Spool"),
+                    LogDirectory = Environment.ExpandEnvironmentVariables($@"%ProgramData%\AutopilotMonitor\MassRollout\{deviceConfig.DeviceName}\Logs"),
+                    UploadIntervalSeconds = 30,
+                    MaxBatchSize = 100,
+                    EnableDebugLogging = true,
+                    EnableSimulator = true,
+                    SimulateFailure = deviceConfig.SimulateFailure,
+                    UseClientCertAuth = baseConfig.UseClientCertAuth,
+                    ClientCertThumbprint = baseConfig.ClientCertThumbprint,
+                    CleanupOnExit = false, // Don't cleanup in mass rollout mode for easier inspection
+                    SelfDestructOnComplete = false, // Don't self-destruct in mass rollout mode
+                    RebootOnComplete = false, // Don't reboot in mass rollout mode
+                    EnableGeoLocation = false // Disable geo-location to reduce noise
+                };
+
+                var logDir = Environment.ExpandEnvironmentVariables(config.LogDirectory);
+
+                // Ensure directories exist
+                Directory.CreateDirectory(config.SpoolDirectory);
+                Directory.CreateDirectory(config.LogDirectory);
+
+                var logger = new AgentLogger(logDir, enableDebug: true);
+
+                Console.WriteLine($"[{deviceConfig.DeviceName}] Starting instance {instanceNumber}/5");
+                Console.WriteLine($"  Tenant ID: {deviceConfig.TenantId}");
+                Console.WriteLine($"  Session ID: {config.SessionId}");
+                Console.WriteLine($"  Simulate Failure: {(deviceConfig.SimulateFailure ? "YES" : "NO")}");
+                Console.WriteLine();
+
+                var service = new MonitoringService(config, logger);
+                services.Add(service);
+
+                // Start each service in a separate task
+                var task = System.Threading.Tasks.Task.Run(() =>
+                {
+                    try
+                    {
+                        service.Start();
+
+                        // Keep the service running until enrollment completes
+                        // The simulator will automatically complete and emit enrollment_complete or enrollment_failed
+                        while (true)
+                        {
+                            System.Threading.Thread.Sleep(1000);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.Error($"[{deviceConfig.DeviceName}] Error in monitoring service", ex);
+                        Console.WriteLine($"[{deviceConfig.DeviceName}] ERROR: {ex.Message}");
+                    }
+                });
+
+                tasks.Add(task);
+            }
+
+            Console.WriteLine("All 5 instances started in parallel.");
+            Console.WriteLine("Press Enter to stop all instances...");
+            Console.ReadLine();
+
+            // Stop all services
+            Console.WriteLine();
+            Console.WriteLine("Stopping all instances...");
+            foreach (var service in services)
+            {
+                try
+                {
+                    service.Stop();
+                    service.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Error stopping service: {ex.Message}");
+                }
+            }
+
+            Console.WriteLine("All instances stopped.");
         }
 
         static void RunService()
