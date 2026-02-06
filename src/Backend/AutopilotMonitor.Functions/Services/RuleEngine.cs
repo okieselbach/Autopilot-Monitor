@@ -5,8 +5,9 @@ using Microsoft.Extensions.Logging;
 namespace AutopilotMonitor.Functions.Services
 {
     /// <summary>
-    /// Evaluates analyze rules against session events to detect issues
-    /// Runs during event ingestion for real-time analysis
+    /// Evaluates analyze rules against session events to detect issues.
+    /// Runs once at enrollment end or on-demand via "Analyze Now" button.
+    /// All rules (single + correlation) are evaluated in a single pass over all events.
     /// </summary>
     public class RuleEngine
     {
@@ -22,24 +23,29 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
-        /// Evaluates all active analyze rules against the session's events
-        /// Returns new rule results that should be stored
+        /// Evaluates ALL active analyze rules against the full session event stream.
+        /// Called once at enrollment end or on-demand. Fetches events internally.
         /// </summary>
-        public async Task<List<RuleResult>> EvaluateRulesAsync(
-            string tenantId,
-            string sessionId,
-            List<EnrollmentEvent> newEvents,
-            List<EnrollmentEvent> allSessionEvents)
+        public async Task<List<RuleResult>> AnalyzeSessionAsync(string tenantId, string sessionId)
         {
             var results = new List<RuleResult>();
 
             try
             {
                 var activeRules = await _ruleService.GetActiveRulesForTenantAsync(tenantId);
+                var allEvents = await _storageService.GetSessionEventsAsync(tenantId, sessionId);
+
+                if (allEvents.Count == 0)
+                {
+                    _logger.LogInformation($"No events found for session {sessionId}, skipping analysis");
+                    return results;
+                }
 
                 // Get existing rule results to avoid duplicates
                 var existingResults = await _storageService.GetRuleResultsAsync(tenantId, sessionId);
                 var existingRuleIds = new HashSet<string>(existingResults.Select(r => r.RuleId));
+
+                _logger.LogInformation($"Analyzing session {sessionId}: {allEvents.Count} events, {activeRules.Count} rules ({existingRuleIds.Count} already evaluated)");
 
                 foreach (var rule in activeRules)
                 {
@@ -49,17 +55,13 @@ namespace AutopilotMonitor.Functions.Services
                         if (existingRuleIds.Contains(rule.RuleId))
                             continue;
 
-                        // Check if any new events are relevant to this rule
-                        if (!HasRelevantEvents(rule, newEvents))
-                            continue;
-
-                        var result = EvaluateRule(rule, allSessionEvents);
+                        var result = EvaluateRule(rule, allEvents);
                         if (result != null)
                         {
                             result.SessionId = sessionId;
                             result.TenantId = tenantId;
                             results.Add(result);
-                            _logger.LogInformation($"Rule {rule.RuleId} fired for session {sessionId} with confidence {result.ConfidenceScore}%");
+                            _logger.LogInformation($"Rule {rule.RuleId} ({rule.Trigger}) fired for session {sessionId} with confidence {result.ConfidenceScore}%");
                         }
                     }
                     catch (Exception ex)
@@ -70,38 +72,10 @@ namespace AutopilotMonitor.Functions.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error evaluating rules");
+                _logger.LogError(ex, "Error analyzing session");
             }
 
             return results;
-        }
-
-        /// <summary>
-        /// Checks if any new events are potentially relevant to a rule
-        /// Quick pre-filter to avoid expensive evaluation for irrelevant events
-        /// </summary>
-        private bool HasRelevantEvents(AnalyzeRule rule, List<EnrollmentEvent> newEvents)
-        {
-            foreach (var condition in rule.Conditions)
-            {
-                if (string.IsNullOrEmpty(condition.EventType))
-                    continue;
-
-                foreach (var evt in newEvents)
-                {
-                    if (MatchesEventType(evt, condition.EventType))
-                        return true;
-                }
-            }
-
-            // Also check for phase-related rules if we have phase events
-            if (rule.Conditions.Any(c => c.Source == "phase_duration"))
-            {
-                if (newEvents.Any(e => e.EventType == "phase_changed"))
-                    return true;
-            }
-
-            return false;
         }
 
         /// <summary>

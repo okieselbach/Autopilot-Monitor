@@ -59,6 +59,12 @@ namespace AutopilotMonitor.Shared.Models
         /// </summary>
         public bool IsCommunity { get; set; } = false;
 
+        /// <summary>
+        /// Rule trigger type: "single" (matches individual events) or "correlation" (combines multiple event types)
+        /// Both types run at the same time during analysis - this field is organizational/descriptive
+        /// </summary>
+        public string Trigger { get; set; } = "single";
+
         // ===== MATCHING CONDITIONS =====
 
         /// <summary>

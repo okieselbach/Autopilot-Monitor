@@ -44,7 +44,14 @@ namespace AutopilotMonitor.Functions.Services
                 // ===== DEVICE RULES =====
                 CreateDeviceTpmNotReadyRule(),
                 CreateDeviceBitlockerEscrowRule(),
-                CreateDeviceSecureBootRule()
+                CreateDeviceSecureBootRule(),
+
+                // ===== CORRELATION RULES (cross-event analysis) =====
+                CreateCorrelationProxyAuthRule(),
+                CreateCorrelationSslCertFailureRule(),
+                CreateCorrelationNetworkCausedInstallFailureRule(),
+                CreateCorrelationDiskSpaceCausedInstallFailureRule(),
+                CreateCorrelationTpmIdentityFailureRule()
             };
         }
 
@@ -524,6 +531,210 @@ namespace AutopilotMonitor.Functions.Services
                 new RemediationStep { Title = "Enable Secure Boot", Steps = new List<string> { "Enter BIOS/UEFI settings", "Enable Secure Boot", "Ensure the device boots in UEFI mode (not Legacy/CSM)" } }
             },
             Tags = new[] { "device", "secureboot" }
+        };
+
+        // ===== CORRELATION RULES =====
+        // These combine signals from multiple event types for root-cause analysis
+
+        private static AnalyzeRule CreateCorrelationProxyAuthRule() => new AnalyzeRule
+        {
+            RuleId = "ANALYZE-CORR-001",
+            Title = "Proxy Authentication Blocking Enrollment",
+            Description = "Correlates proxy configuration, HTTP 407 errors, and enrollment stall to confirm proxy authentication is the root cause.",
+            Severity = "critical",
+            Category = "network",
+            Trigger = "correlation",
+            BaseConfidence = 60,
+            Conditions = new List<RuleCondition>
+            {
+                new RuleCondition { Signal = "proxy_configured", Source = "event_type", EventType = "gather_proxy_settings", DataField = "ProxyEnable", Operator = "equals", Value = "1", Required = true },
+                new RuleCondition { Signal = "auth_error", Source = "event_type", EventType = "error_detected", DataField = "message", Operator = "regex", Value = "407|proxy.*auth|ProxyAuthenticationRequired", Required = true },
+                new RuleCondition { Signal = "enrollment_failed", Source = "event_type", EventType = "enrollment_failed", Operator = "exists", Value = "" }
+            },
+            ConfidenceFactors = new List<ConfidenceFactor>
+            {
+                new ConfidenceFactor { Signal = "enrollment_failed", Condition = "exists", Weight = 20 },
+                new ConfidenceFactor { Signal = "long_network_phase", Condition = "phase_duration > 180", Weight = 15 }
+            },
+            ConfidenceThreshold = 50,
+            Explanation = "**Root cause confirmed:** The device is behind an authenticated proxy (ProxyEnable=1) and received HTTP 407 errors during enrollment. The SYSTEM account cannot authenticate with the proxy, causing enrollment to fail.\n\nThis is a common issue in corporate environments with SSL-inspecting proxies.",
+            Remediation = new List<RemediationStep>
+            {
+                new RemediationStep { Title = "Configure proxy bypass for Microsoft endpoints", Steps = new List<string> {
+                    "Add *.manage.microsoft.com to proxy bypass list",
+                    "Add *.microsoftonline.com to proxy bypass list",
+                    "Add enterpriseregistration.windows.net to bypass list",
+                    "Add *.delivery.mp.microsoft.com to bypass list (app downloads)"
+                }},
+                new RemediationStep { Title = "Use PAC file with exceptions", Steps = new List<string> {
+                    "Create/update PAC file to bypass proxy for Microsoft endpoints",
+                    "Deploy PAC file via GPO or DHCP Option 252",
+                    "Ensure PAC file is accessible during OOBE (before user login)"
+                }}
+            },
+            RelatedDocs = new List<RelatedDoc>
+            {
+                new RelatedDoc { Title = "Autopilot networking requirements", Url = "https://learn.microsoft.com/en-us/mem/autopilot/networking-requirements" },
+                new RelatedDoc { Title = "Intune network endpoints", Url = "https://learn.microsoft.com/en-us/mem/intune/fundamentals/intune-endpoints" }
+            },
+            Tags = new[] { "correlation", "network", "proxy", "authentication", "root-cause" }
+        };
+
+        private static AnalyzeRule CreateCorrelationSslCertFailureRule() => new AnalyzeRule
+        {
+            RuleId = "ANALYZE-CORR-002",
+            Title = "SSL Inspection Breaking Certificate Enrollment",
+            Description = "Correlates SSL inspection detection with certificate validation errors and enrollment failure to confirm SSL inspection as root cause.",
+            Severity = "critical",
+            Category = "network",
+            Trigger = "correlation",
+            BaseConfidence = 65,
+            Conditions = new List<RuleCondition>
+            {
+                new RuleCondition { Signal = "ssl_inspection", Source = "event_type", EventType = "cert_validation", DataField = "ssl_inspection_detected", Operator = "equals", Value = "true", Required = true },
+                new RuleCondition { Signal = "cert_error", Source = "event_type", EventType = "error_detected", DataField = "message", Operator = "regex", Value = "certificate|SSL|TLS|trust|chain|CERT_E_|0x800b", Required = true },
+                new RuleCondition { Signal = "enrollment_failed", Source = "event_type", EventType = "enrollment_failed", Operator = "exists", Value = "" }
+            },
+            ConfidenceFactors = new List<ConfidenceFactor>
+            {
+                new ConfidenceFactor { Signal = "enrollment_failed", Condition = "exists", Weight = 20 },
+                new ConfidenceFactor { Signal = "missing_mdm_cert", Condition = "exists", Weight = 15 }
+            },
+            ConfidenceThreshold = 50,
+            Explanation = "**Root cause confirmed:** SSL/TLS inspection (MITM proxy) is intercepting connections to Microsoft enrollment endpoints. The intercepted certificates fail validation, breaking the MDM enrollment certificate chain.\n\nThe SSL inspection device replaces Microsoft's certificates with its own, which the enrollment client does not trust.",
+            Remediation = new List<RemediationStep>
+            {
+                new RemediationStep { Title = "Bypass SSL inspection for Microsoft endpoints", Steps = new List<string> {
+                    "Add *.manage.microsoft.com to SSL inspection bypass list",
+                    "Add *.microsoftonline.com to bypass list",
+                    "Add *.windows.net to bypass list",
+                    "Add *.microsoft.com to bypass list for broader coverage"
+                }},
+                new RemediationStep { Title = "Deploy inspection CA certificate", Steps = new List<string> {
+                    "Export the SSL inspection appliance's root CA certificate",
+                    "Deploy it to devices via Autopilot deployment profile or OEM provisioning",
+                    "Note: This is a workaround; bypass is the recommended approach"
+                }}
+            },
+            Tags = new[] { "correlation", "network", "ssl", "certificate", "root-cause" }
+        };
+
+        private static AnalyzeRule CreateCorrelationNetworkCausedInstallFailureRule() => new AnalyzeRule
+        {
+            RuleId = "ANALYZE-CORR-003",
+            Title = "Slow Network Causing App Installation Failure",
+            Description = "Correlates slow download speeds with app installation failures while disk space is adequate, confirming network as root cause (not disk).",
+            Severity = "high",
+            Category = "apps",
+            Trigger = "correlation",
+            BaseConfidence = 55,
+            Conditions = new List<RuleCondition>
+            {
+                new RuleCondition { Signal = "app_failed", Source = "event_type", EventType = "app_install_failed", Operator = "exists", Value = "", Required = true },
+                new RuleCondition { Signal = "download_events", Source = "event_type", EventType = "download_progress", Operator = "exists", Value = "", Required = true },
+                new RuleCondition { Signal = "disk_ok", Source = "event_type", EventType = "performance_snapshot", DataField = "disk_free_gb", Operator = "gt", Value = "10" }
+            },
+            ConfidenceFactors = new List<ConfidenceFactor>
+            {
+                new ConfidenceFactor { Signal = "disk_ok", Condition = "exists", Weight = 15 },
+                new ConfidenceFactor { Signal = "multiple_failures", Condition = "count >= 2", Weight = 15 },
+                new ConfidenceFactor { Signal = "enrollment_failed", Condition = "exists", Weight = 15 }
+            },
+            ConfidenceThreshold = 50,
+            Explanation = "App installation failed while the device has sufficient disk space (>10 GB free). Download progress events indicate network-related issues are the likely root cause.\n\nThis rules out disk space as a factor and points to network bandwidth, proxy throttling, or CDN connectivity issues.",
+            Remediation = new List<RemediationStep>
+            {
+                new RemediationStep { Title = "Investigate network throughput", Steps = new List<string> {
+                    "Check bandwidth to *.delivery.mp.microsoft.com (CDN)",
+                    "Verify proxy is not throttling large downloads",
+                    "Consider enabling Delivery Optimization for peer-to-peer caching"
+                }},
+                new RemediationStep { Title = "Reduce download load", Steps = new List<string> {
+                    "Stagger app deployments to reduce concurrent downloads",
+                    "Pre-cache large apps using Delivery Optimization or ConfigMgr",
+                    "Increase ESP timeout if downloads are slow but completing"
+                }}
+            },
+            Tags = new[] { "correlation", "apps", "network", "download", "root-cause" }
+        };
+
+        private static AnalyzeRule CreateCorrelationDiskSpaceCausedInstallFailureRule() => new AnalyzeRule
+        {
+            RuleId = "ANALYZE-CORR-004",
+            Title = "Disk Space Exhaustion Caused Installation Failure",
+            Description = "Correlates declining disk free space with app installation failure, confirming insufficient storage as root cause.",
+            Severity = "critical",
+            Category = "apps",
+            Trigger = "correlation",
+            BaseConfidence = 65,
+            Conditions = new List<RuleCondition>
+            {
+                new RuleCondition { Signal = "low_disk", Source = "event_type", EventType = "performance_snapshot", DataField = "disk_free_gb", Operator = "lt", Value = "5", Required = true },
+                new RuleCondition { Signal = "install_error", Source = "event_type", EventType = "error_detected", DataField = "message", Operator = "regex", Value = "disk space|storage|not enough space|0x80070070|0x80070008|ERROR_DISK_FULL", Required = true }
+            },
+            ConfidenceFactors = new List<ConfidenceFactor>
+            {
+                new ConfidenceFactor { Signal = "app_failed", Condition = "exists", Weight = 20 },
+                new ConfidenceFactor { Signal = "enrollment_failed", Condition = "exists", Weight = 10 }
+            },
+            ConfidenceThreshold = 50,
+            Explanation = "**Root cause confirmed:** Performance monitoring shows disk free space dropped below 5 GB during enrollment, and error events contain disk-space-related error codes. The device ran out of storage during app installation.\n\nThis is common when deploying many large Win32 apps to devices with small drives (64 GB or 128 GB).",
+            Remediation = new List<RemediationStep>
+            {
+                new RemediationStep { Title = "Reduce disk consumption during enrollment", Steps = new List<string> {
+                    "Review total size of all apps deployed during ESP",
+                    "Move non-critical apps to post-ESP deployment",
+                    "Use MSIX or Store apps instead of Win32 where possible (smaller footprint)",
+                    "Clean up IME cache: C:\\Windows\\IMECache"
+                }},
+                new RemediationStep { Title = "Use devices with larger drives", Steps = new List<string> {
+                    "Minimum 128 GB recommended for standard deployments",
+                    "256 GB recommended when deploying large app suites (Office, Visual Studio, etc.)"
+                }}
+            },
+            Tags = new[] { "correlation", "apps", "disk-space", "performance", "root-cause" }
+        };
+
+        private static AnalyzeRule CreateCorrelationTpmIdentityFailureRule() => new AnalyzeRule
+        {
+            RuleId = "ANALYZE-CORR-005",
+            Title = "TPM Issue Blocking Identity Enrollment",
+            Description = "Correlates TPM not-ready status with identity phase failure and missing device certificates to confirm TPM as root cause.",
+            Severity = "critical",
+            Category = "device",
+            Trigger = "correlation",
+            BaseConfidence = 60,
+            Conditions = new List<RuleCondition>
+            {
+                new RuleCondition { Signal = "tpm_issue", Source = "event_type", EventType = "error_detected", DataField = "message", Operator = "regex", Value = "TPM|Trusted Platform|0x80284|0x80290|attestation", Required = true },
+                new RuleCondition { Signal = "identity_stalled", Source = "phase_duration", EventType = "phase_changed", DataField = "currentPhase", Operator = "equals", Value = "Identity", Required = true }
+            },
+            ConfidenceFactors = new List<ConfidenceFactor>
+            {
+                new ConfidenceFactor { Signal = "long_identity", Condition = "phase_duration > 300", Weight = 20 },
+                new ConfidenceFactor { Signal = "enrollment_failed", Condition = "exists", Weight = 15 }
+            },
+            ConfidenceThreshold = 50,
+            Explanation = "**Root cause confirmed:** TPM-related errors occurred during the identity phase, which also took longer than expected. The TPM is either not ready, not provisioned, or malfunctioning, preventing Azure AD join and device attestation.\n\nTPM issues block the entire enrollment chain since device identity cannot be established.",
+            Remediation = new List<RemediationStep>
+            {
+                new RemediationStep { Title = "Fix TPM", Steps = new List<string> {
+                    "Enter BIOS/UEFI and verify TPM is enabled",
+                    "Update TPM firmware to latest version",
+                    "Try clearing TPM: tpm.msc > Clear TPM (WARNING: removes keys)",
+                    "Verify TPM version is 2.0 (required for Autopilot)"
+                }},
+                new RemediationStep { Title = "Pre-provision TPM", Steps = new List<string> {
+                    "Run 'Initialize-Tpm' in elevated PowerShell before enrollment",
+                    "For new devices, ensure OEM has provisioned TPM during manufacturing",
+                    "Check for known TPM firmware issues with your hardware vendor"
+                }}
+            },
+            RelatedDocs = new List<RelatedDoc>
+            {
+                new RelatedDoc { Title = "Autopilot hardware requirements", Url = "https://learn.microsoft.com/en-us/mem/autopilot/software-requirements" }
+            },
+            Tags = new[] { "correlation", "device", "tpm", "identity", "root-cause" }
         };
     }
 }

@@ -290,15 +290,16 @@ export default function SessionDetailPage() {
     }
   };
 
-  const fetchAnalysisResults = async () => {
+  const fetchAnalysisResults = async (reanalyze = false) => {
     const effectiveTenantId = sessionTenantId || tenantId;
     try {
       setLoadingAnalysis(true);
       const token = await getAccessToken();
       if (!token) return;
 
+      const reanalyzeParam = reanalyze ? '&reanalyze=true' : '';
       const response = await fetch(
-        `${API_BASE_URL}/api/sessions/${sessionId}/analysis?tenantId=${effectiveTenantId}`,
+        `${API_BASE_URL}/api/sessions/${sessionId}/analysis?tenantId=${effectiveTenantId}${reanalyzeParam}`,
         { headers: { 'Authorization': `Bearer ${token}` } }
       );
       if (response.ok) {
@@ -504,15 +505,18 @@ export default function SessionDetailPage() {
           )}
 
           {/* Analysis Results */}
-          {(analysisResults.length > 0 || loadingAnalysis) && (
-            <div className="bg-white shadow rounded-lg p-6 mb-6">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center space-x-2">
-                  <svg className="w-6 h-6 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                  </svg>
-                  <h2 className="text-xl font-semibold text-gray-900">Analysis Results</h2>
-                </div>
+          <div className="bg-white shadow rounded-lg p-6 mb-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center space-x-2">
+                <svg className="w-6 h-6 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                </svg>
+                <h2 className="text-xl font-semibold text-gray-900">Analysis Results</h2>
+                {analysisResults.length > 0 && (
+                  <span className="text-xs text-gray-400">({analysisResults.length} issues)</span>
+                )}
+              </div>
+              <div className="flex items-center space-x-3">
                 {analysisResults.length > 0 && (
                   <div className="flex items-center space-x-2 text-sm">
                     <span className="px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">
@@ -526,19 +530,46 @@ export default function SessionDetailPage() {
                     </span>
                   </div>
                 )}
+                <button
+                  onClick={() => fetchAnalysisResults(true)}
+                  disabled={loadingAnalysis}
+                  title="Runs all analyze rules (single + correlation) against the current event data. Analysis also runs automatically when enrollment completes or fails."
+                  className="px-3 py-1.5 text-sm font-medium bg-amber-50 text-amber-700 hover:bg-amber-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-1.5"
+                >
+                  {loadingAnalysis ? (
+                    <>
+                      <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                      </svg>
+                      <span>Analyzing...</span>
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                      </svg>
+                      <span>Analyze Now</span>
+                    </>
+                  )}
+                </button>
               </div>
-
-              {loadingAnalysis ? (
-                <div className="text-center py-4 text-gray-500">Loading analysis...</div>
-              ) : (
-                <div className="space-y-3">
-                  {analysisResults.map((result) => (
-                    <AnalysisResultCard key={result.ruleId} result={result} />
-                  ))}
-                </div>
-              )}
             </div>
-          )}
+
+            {loadingAnalysis && analysisResults.length === 0 ? (
+              <div className="text-center py-4 text-gray-500">Running analysis...</div>
+            ) : analysisResults.length === 0 ? (
+              <div className="text-center py-4 text-gray-400 text-sm">
+                No issues detected yet. Click &quot;Analyze Now&quot; to run analysis on the current events, or wait for enrollment to complete for automatic analysis.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {analysisResults.map((result) => (
+                  <AnalysisResultCard key={result.ruleId} result={result} />
+                ))}
+              </div>
+            )}
+          </div>
 
           {/* Performance Metrics (from performance_snapshot events) */}
           <PerformanceChart

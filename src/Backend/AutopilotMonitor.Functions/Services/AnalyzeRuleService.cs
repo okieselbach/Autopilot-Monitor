@@ -118,29 +118,57 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
-        /// Seeds built-in analyze rules if not already done
+        /// Seeds built-in analyze rules if not already done.
+        /// Also updates existing built-in rules when code definitions change.
         /// </summary>
         private async Task EnsureBuiltInRulesSeededAsync()
         {
             if (_seeded) return;
 
             var existingRules = await _storageService.GetAnalyzeRulesAsync("global");
-            if (existingRules.Count > 0)
-            {
-                _seeded = true;
-                return;
-            }
-
-            _logger.LogInformation("Seeding built-in analyze rules...");
-
             var builtInRules = BuiltInAnalyzeRules.GetAll();
-            foreach (var rule in builtInRules)
+
+            if (existingRules.Count == 0)
             {
-                await _storageService.StoreAnalyzeRuleAsync(rule, "global");
+                _logger.LogInformation("Seeding built-in analyze rules...");
+                foreach (var rule in builtInRules)
+                {
+                    await _storageService.StoreAnalyzeRuleAsync(rule, "global");
+                }
+                _logger.LogInformation($"Seeded {builtInRules.Count} built-in analyze rules");
+            }
+            else
+            {
+                // Update existing built-in rules to pick up code changes and add new rules
+                var existingLookup = existingRules.ToDictionary(r => r.RuleId, r => r);
+                var updated = 0;
+
+                foreach (var rule in builtInRules)
+                {
+                    if (existingLookup.TryGetValue(rule.RuleId, out var existing))
+                    {
+                        if (existing.Title != rule.Title || existing.Description != rule.Description
+                            || existing.Severity != rule.Severity || existing.Trigger != rule.Trigger)
+                        {
+                            await _storageService.StoreAnalyzeRuleAsync(rule, "global");
+                            updated++;
+                        }
+                    }
+                    else
+                    {
+                        // New built-in rule added in code (e.g. correlation rules)
+                        await _storageService.StoreAnalyzeRuleAsync(rule, "global");
+                        updated++;
+                    }
+                }
+
+                if (updated > 0)
+                {
+                    _logger.LogInformation($"Updated {updated} built-in analyze rules from code definitions");
+                }
             }
 
             _seeded = true;
-            _logger.LogInformation($"Seeded {builtInRules.Count} built-in analyze rules");
         }
     }
 }

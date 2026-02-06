@@ -178,27 +178,29 @@ namespace AutopilotMonitor.Functions.Functions
                     );
                 }
 
-                // Run analyze rules against new events
+                // Run full analysis when enrollment ends (cost-efficient: one pass over all events)
                 var newRuleResults = new List<AutopilotMonitor.Shared.Models.RuleResult>();
-                try
+                if (completionEvent != null || failureEvent != null)
                 {
-                    var ruleEngine = new RuleEngine(_analyzeRuleService, _storageService, _logger);
-                    var allEvents = await _storageService.GetSessionEventsAsync(request.TenantId, request.SessionId);
-                    newRuleResults = await ruleEngine.EvaluateRulesAsync(request.TenantId, request.SessionId, storedEvents, allEvents);
-
-                    foreach (var result in newRuleResults)
+                    try
                     {
-                        await _storageService.StoreRuleResultAsync(result);
-                    }
+                        var ruleEngine = new RuleEngine(_analyzeRuleService, _storageService, _logger);
+                        newRuleResults = await ruleEngine.AnalyzeSessionAsync(request.TenantId, request.SessionId);
 
-                    if (newRuleResults.Count > 0)
-                    {
-                        _logger.LogInformation($"{sessionPrefix} Rule engine: {newRuleResults.Count} new issue(s) detected");
+                        foreach (var result in newRuleResults)
+                        {
+                            await _storageService.StoreRuleResultAsync(result);
+                        }
+
+                        if (newRuleResults.Count > 0)
+                        {
+                            _logger.LogInformation($"{sessionPrefix} Enrollment-end analysis: {newRuleResults.Count} issue(s) detected");
+                        }
                     }
-                }
-                catch (Exception ruleEx)
-                {
-                    _logger.LogWarning(ruleEx, $"{sessionPrefix} Rule engine evaluation failed (non-fatal)");
+                    catch (Exception ruleEx)
+                    {
+                        _logger.LogWarning(ruleEx, $"{sessionPrefix} Enrollment-end analysis failed (non-fatal)");
+                    }
                 }
 
                 // Retrieve updated session data to include in SignalR messages
