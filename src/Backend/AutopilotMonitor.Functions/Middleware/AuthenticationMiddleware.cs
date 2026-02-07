@@ -7,6 +7,7 @@ using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
+using Microsoft.AspNetCore.Http;
 using System.Net;
 using System.Security.Claims;
 
@@ -32,6 +33,20 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
     private readonly HashSet<string> _initializingTenants = new HashSet<string>();
     private readonly object _initLock = new object();
 
+    /// <summary>
+    /// Routes that do not require JWT authentication.
+    /// Device-to-cloud routes (sessions/register, events/ingest, agent/config) use their own
+    /// certificate/hardware validation via SecurityValidator.
+    /// </summary>
+    private static readonly string[] _anonymousRoutes =
+    {
+        "/api/health",
+        "/api/platform-stats",
+        "/api/sessions/register",
+        "/api/events/ingest",
+        "/api/agent/config"
+    };
+
     public AuthenticationMiddleware(
         ILogger<AuthenticationMiddleware> logger,
         IConfiguration configuration)
@@ -48,151 +63,186 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
     public async Task Invoke(FunctionContext context, FunctionExecutionDelegate next)
     {
         var httpContext = context.GetHttpContext();
-        if (httpContext != null)
+        if (httpContext == null)
         {
-            // Extract Authorization header
-            var authHeader = httpContext.Request.Headers.Authorization.ToString();
-            if (!string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+            // Non-HTTP trigger (e.g. timer, queue) — no auth needed
+            await next(context);
+            return;
+        }
+
+        // Allow anonymous routes without JWT validation
+        var requestPath = httpContext.Request.Path.Value ?? string.Empty;
+        if (IsAnonymousRoute(requestPath))
+        {
+            _logger.LogDebug("[Auth Middleware] Anonymous route: {Path}", requestPath);
+            await next(context);
+            return;
+        }
+
+        // Extract Authorization header
+        var authHeader = httpContext.Request.Headers.Authorization.ToString();
+        if (string.IsNullOrEmpty(authHeader) || !authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning("[Auth Middleware] Blocked unauthenticated request to {Path}", requestPath);
+            httpContext.Response.StatusCode = (int)HttpStatusCode.Unauthorized;
+            httpContext.Response.ContentType = "application/json";
+            await httpContext.Response.WriteAsJsonAsync(new
             {
-                var token = authHeader.Substring("Bearer ".Length).Trim();
+                success = false,
+                message = "Authentication required. Please provide a valid JWT token."
+            });
+            return;
+        }
 
-                try
+        var token = authHeader.Substring("Bearer ".Length).Trim();
+        bool authenticated = false;
+
+        try
+        {
+            // First, decode the token to get the tenant ID (without validation)
+            var jwtToken = _tokenHandler.ReadJwtToken(token);
+            var tenantId = jwtToken.Claims.FirstOrDefault(c => c.Type == "tid")?.Value;
+            var issuer = jwtToken.Issuer;
+
+            // Determine which endpoint to use based on the issuer (v1.0 vs v2.0)
+            var isV1Token = issuer.Contains("sts.windows.net");
+            var tenantSpecificAuthority = tenantId != null
+                ? (isV1Token
+                    ? $"https://login.microsoftonline.com/{tenantId}"  // v1.0
+                    : $"https://login.microsoftonline.com/{tenantId}/v2.0")  // v2.0
+                : "https://login.microsoftonline.com/common/v2.0";
+
+            // Get or create cached configuration manager for this tenant
+            IConfigurationManager<OpenIdConnectConfiguration>? tenantConfigManager = null;
+            await _cacheLock.WaitAsync();
+            try
+            {
+                if (!_configManagerCache.TryGetValue(tenantSpecificAuthority, out tenantConfigManager))
                 {
-                    // First, decode the token to get the tenant ID (without validation)
-                    var jwtToken = _tokenHandler.ReadJwtToken(token);
-                    var tenantId = jwtToken.Claims.FirstOrDefault(c => c.Type == "tid")?.Value;
-                    var issuer = jwtToken.Issuer;
-
-                    // Determine which endpoint to use based on the issuer (v1.0 vs v2.0)
-                    var isV1Token = issuer.Contains("sts.windows.net");
-                    var tenantSpecificAuthority = tenantId != null
-                        ? (isV1Token
-                            ? $"https://login.microsoftonline.com/{tenantId}"  // v1.0
-                            : $"https://login.microsoftonline.com/{tenantId}/v2.0")  // v2.0
-                        : "https://login.microsoftonline.com/common/v2.0";
-
-                    // Get or create cached configuration manager for this tenant
-                    IConfigurationManager<OpenIdConnectConfiguration>? tenantConfigManager = null;
-                    await _cacheLock.WaitAsync();
-                    try
+                    var tenantMetadataAddress = $"{tenantSpecificAuthority}/.well-known/openid-configuration";
+                    tenantConfigManager = new ConfigurationManager<OpenIdConnectConfiguration>(
+                        tenantMetadataAddress,
+                        new OpenIdConnectConfigurationRetriever(),
+                        new HttpDocumentRetriever() { RequireHttps = true })
                     {
-                        if (!_configManagerCache.TryGetValue(tenantSpecificAuthority, out tenantConfigManager))
-                        {
-                            var tenantMetadataAddress = $"{tenantSpecificAuthority}/.well-known/openid-configuration";
-                            tenantConfigManager = new ConfigurationManager<OpenIdConnectConfiguration>(
-                                tenantMetadataAddress,
-                                new OpenIdConnectConfigurationRetriever(),
-                                new HttpDocumentRetriever() { RequireHttps = true })
-                            {
-                                // Cache configuration for 24 hours (signing keys rarely change)
-                                AutomaticRefreshInterval = TimeSpan.FromHours(24),
-                                RefreshInterval = TimeSpan.FromHours(24)
-                            };
-
-                            if (_configManagerCache.Count < MaxCacheSize)
-                            {
-                                _configManagerCache[tenantSpecificAuthority] = tenantConfigManager;
-                                _logger.LogInformation($"[Auth Middleware] Created new config manager for {tenantSpecificAuthority}");
-                            }
-                            else
-                            {
-                                _logger.LogWarning($"[Auth Middleware] Config manager cache full ({MaxCacheSize}). Tenant {tenantSpecificAuthority} not cached.");
-                            }
-                        }
-                    }
-                    finally
-                    {
-                        _cacheLock.Release();
-                    }
-
-                    if (tenantConfigManager == null)
-                    {
-                        throw new InvalidOperationException("Failed to get or create configuration manager");
-                    }
-
-                    var openIdConfig = await tenantConfigManager.GetConfigurationAsync(CancellationToken.None);
-
-                    // Set up token validation parameters with OIDC signing keys
-                    var validationParameters = new TokenValidationParameters
-                    {
-                        // For multi-tenant, validate issuer format but accept any tenant
-                        ValidateIssuer = true,
-                        IssuerValidator = (issuer, token, parameters) =>
-                        {
-                            // Accept issuers from any Azure AD tenant
-                            if (issuer.StartsWith("https://login.microsoftonline.com/") ||
-                                issuer.StartsWith("https://sts.windows.net/"))
-                            {
-                                return issuer;
-                            }
-                            throw new SecurityTokenInvalidIssuerException($"Invalid issuer: {issuer}");
-                        },
-                        ValidateAudience = true,
-                        ValidAudiences = new[]
-                        {
-                            _configuration["AzureAd:ClientId"],
-                            $"api://{_configuration["AzureAd:ClientId"]}"
-                        },
-                        ValidateLifetime = true,
-
-                        // Signature validation enabled
-                        // Token is requested for backend API (api://<clientId>/access_as_user)
-                        ValidateIssuerSigningKey = true,
-                        RequireSignedTokens = true,
-
-                        // Use key resolver for dynamic key resolution
-                        IssuerSigningKeyResolver = (token, securityToken, kid, validationParameters) =>
-                        {
-                            var matchedKeys = openIdConfig.SigningKeys.Where(k => k.KeyId == kid).ToList();
-                            return matchedKeys.Any() ? matchedKeys : openIdConfig.SigningKeys;
-                        },
-
-                        // Set algorithm validators to ensure we only accept RS256
-                        ValidAlgorithms = new[] { "RS256" }
+                        // Cache configuration for 24 hours (signing keys rarely change)
+                        AutomaticRefreshInterval = TimeSpan.FromHours(24),
+                        RefreshInterval = TimeSpan.FromHours(24)
                     };
 
-                    // Validate the token using JwtSecurityTokenHandler (synchronous API)
-                    try
+                    if (_configManagerCache.Count < MaxCacheSize)
                     {
-                        var principal = _tokenHandler.ValidateToken(token, validationParameters, out var validatedToken);
-
-                        // Get user identifier for logging (same logic as TenantHelper.GetUserIdentifier)
-                        var userIdentifier = principal.FindFirst("upn")?.Value ??
-                                           principal.FindFirst(ClaimTypes.Upn)?.Value ??
-                                           principal.FindFirst(ClaimTypes.Email)?.Value ??
-                                           principal.FindFirst("preferred_username")?.Value ??
-                                           principal.FindFirst(ClaimTypes.Name)?.Value ??
-                                           principal.FindFirst("name")?.Value ??
-                                           "Unknown";
-
-                        _logger.LogInformation($"[Auth Middleware] ✅ Authenticated: {userIdentifier}");
-
-                        // Set the principal on both the HTTP context AND the FunctionContext
-                        // This is critical for Azure Functions Isolated Worker (.NET 8)
-                        httpContext.User = principal;
-                        context.Items["ClaimsPrincipal"] = principal;
+                        _configManagerCache[tenantSpecificAuthority] = tenantConfigManager;
+                        _logger.LogInformation("[Auth Middleware] Created new config manager for {Authority}", tenantSpecificAuthority);
                     }
-                    catch (SecurityTokenException ex)
+                    else
                     {
-                        _logger.LogWarning($"[Auth Middleware] ❌ Token validation failed: {ex.Message}");
-                        throw;
+                        _logger.LogWarning("[Auth Middleware] Config manager cache full ({MaxSize}). Tenant {Authority} not cached.", MaxCacheSize, tenantSpecificAuthority);
                     }
-                }
-                catch (SecurityTokenValidationException ex)
-                {
-                    _logger.LogWarning($"[Auth Middleware] ❌ Token validation failed: {ex.Message}");
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "[Auth Middleware] ❌ Error validating token");
                 }
             }
-            else
+            finally
             {
-                _logger.LogDebug("[Auth Middleware] No Bearer token found in Authorization header");
+                _cacheLock.Release();
             }
+
+            if (tenantConfigManager == null)
+            {
+                throw new InvalidOperationException("Failed to get or create configuration manager");
+            }
+
+            var openIdConfig = await tenantConfigManager.GetConfigurationAsync(CancellationToken.None);
+
+            // Set up token validation parameters with OIDC signing keys
+            var validationParameters = new TokenValidationParameters
+            {
+                // For multi-tenant, validate issuer format but accept any tenant
+                ValidateIssuer = true,
+                IssuerValidator = (issuer, token, parameters) =>
+                {
+                    // Accept issuers from any Azure AD tenant
+                    if (issuer.StartsWith("https://login.microsoftonline.com/") ||
+                        issuer.StartsWith("https://sts.windows.net/"))
+                    {
+                        return issuer;
+                    }
+                    throw new SecurityTokenInvalidIssuerException($"Invalid issuer: {issuer}");
+                },
+                ValidateAudience = true,
+                ValidAudiences = new[]
+                {
+                    _configuration["AzureAd:ClientId"],
+                    $"api://{_configuration["AzureAd:ClientId"]}"
+                },
+                ValidateLifetime = true,
+
+                // Signature validation enabled
+                // Token is requested for backend API (api://<clientId>/access_as_user)
+                ValidateIssuerSigningKey = true,
+                RequireSignedTokens = true,
+
+                // Use key resolver for dynamic key resolution
+                IssuerSigningKeyResolver = (token, securityToken, kid, validationParameters) =>
+                {
+                    var matchedKeys = openIdConfig.SigningKeys.Where(k => k.KeyId == kid).ToList();
+                    return matchedKeys.Any() ? matchedKeys : openIdConfig.SigningKeys;
+                },
+
+                // Set algorithm validators to ensure we only accept RS256
+                ValidAlgorithms = new[] { "RS256" }
+            };
+
+            var principal = _tokenHandler.ValidateToken(token, validationParameters, out var validatedToken);
+
+            // Get user identifier for logging (same logic as TenantHelper.GetUserIdentifier)
+            var userIdentifier = principal.FindFirst("upn")?.Value ??
+                               principal.FindFirst(ClaimTypes.Upn)?.Value ??
+                               principal.FindFirst(ClaimTypes.Email)?.Value ??
+                               principal.FindFirst("preferred_username")?.Value ??
+                               principal.FindFirst(ClaimTypes.Name)?.Value ??
+                               principal.FindFirst("name")?.Value ??
+                               "Unknown";
+
+            _logger.LogInformation("[Auth Middleware] Authenticated: {User}", userIdentifier);
+
+            // Set the principal on both the HTTP context AND the FunctionContext
+            // This is critical for Azure Functions Isolated Worker (.NET 8)
+            httpContext.User = principal;
+            context.Items["ClaimsPrincipal"] = principal;
+            authenticated = true;
+        }
+        catch (SecurityTokenValidationException ex)
+        {
+            _logger.LogWarning("[Auth Middleware] Token validation failed: {Error}", ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[Auth Middleware] Error validating token");
+        }
+
+        if (!authenticated)
+        {
+            _logger.LogWarning("[Auth Middleware] Blocked request with invalid token to {Path}", requestPath);
+            httpContext.Response.StatusCode = (int)HttpStatusCode.Unauthorized;
+            httpContext.Response.ContentType = "application/json";
+            await httpContext.Response.WriteAsJsonAsync(new
+            {
+                success = false,
+                message = "Authentication required. Please provide a valid JWT token."
+            });
+            return;
         }
 
         await next(context);
+    }
+
+    private static bool IsAnonymousRoute(string path)
+    {
+        foreach (var route in _anonymousRoutes)
+        {
+            if (path.Equals(route, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
     }
 }
