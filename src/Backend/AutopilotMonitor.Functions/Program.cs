@@ -8,6 +8,7 @@ using Microsoft.Azure.Functions.Worker.Builder;
 using Microsoft.Azure.Functions.Worker.Middleware;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Identity.Web;
 
 var builder = FunctionsApplication.CreateBuilder(args);
@@ -39,15 +40,16 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         {
             OnAuthenticationFailed = context =>
             {
-                Console.WriteLine($"[Auth] Authentication failed: {context.Exception?.Message}");
+                var logger = context.HttpContext.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("Auth");
+                logger.LogWarning("Authentication failed: {Error}", context.Exception?.Message);
                 return Task.CompletedTask;
             },
             OnTokenValidated = context =>
             {
+                var logger = context.HttpContext.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("Auth");
                 var claims = context.Principal?.Claims;
                 var tenantId = claims?.FirstOrDefault(c => c.Type == "tid")?.Value;
-                var upn = claims?.FirstOrDefault(c => c.Type == "upn" || c.Type == "preferred_username")?.Value;
-                Console.WriteLine($"[Auth] Token validated for user: {upn}, tenant: {tenantId}");
+                logger.LogDebug("Token validated for tenant: {TenantId}", tenantId);
                 return Task.CompletedTask;
             }
         };
