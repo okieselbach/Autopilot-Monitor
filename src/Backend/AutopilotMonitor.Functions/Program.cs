@@ -76,9 +76,9 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             // TODO: Later expose custom API and use api://{clientId} scopes
             ValidAudiences = new[]
             {
-                builder.Configuration["AzureAd:ClientId"], // Our app's client ID
-                "https://graph.microsoft.com", // Microsoft Graph
-                "00000003-0000-0000-c000-000000000000" // Microsoft Graph App ID
+                builder.Configuration["AzureAd:ClientId"] // Our app's client ID
+                //"https://graph.microsoft.com", // Microsoft Graph
+                //"00000003-0000-0000-c000-000000000000" // Microsoft Graph App ID
             }
         };
     });
@@ -91,6 +91,7 @@ builder.Services.AddHttpContextAccessor();
 // Register our services
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<TableStorageService>();
+builder.Services.AddHostedService<TableInitializerService>(); // Initialize all tables at startup
 builder.Services.AddSingleton<TenantConfigurationService>();
 builder.Services.AddSingleton<AdminConfigurationService>();
 builder.Services.AddSingleton<RateLimitService>();
@@ -98,8 +99,8 @@ builder.Services.AddSingleton<UsageMetricsService>();
 builder.Services.AddSingleton<GalacticAdminService>();
 builder.Services.AddSingleton<TenantAdminsService>();
 builder.Services.AddSingleton<HealthCheckService>();
-builder.Services.AddSingleton<DailyMaintenanceFunction>();
 builder.Services.AddSingleton<GatherRuleService>();
 builder.Services.AddSingleton<AnalyzeRuleService>();
+builder.Services.AddSingleton<DailyMaintenanceFunction>();
 
 builder.Build().Run();
