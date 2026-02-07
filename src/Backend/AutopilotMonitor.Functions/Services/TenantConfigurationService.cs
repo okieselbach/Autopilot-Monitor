@@ -22,6 +22,7 @@ namespace AutopilotMonitor.Functions.Services
 
         // In-memory cache for configuration (to avoid table lookups on every request)
         private readonly System.Collections.Concurrent.ConcurrentDictionary<string, CachedConfig> _configCache;
+        private const int MaxCacheSize = 1000;
 
         public TenantConfigurationService(IConfiguration configuration, ILogger<TenantConfigurationService> logger)
         {
@@ -66,6 +67,7 @@ namespace AutopilotMonitor.Functions.Services
                     Configuration = config,
                     CachedAt = DateTime.UtcNow
                 };
+                EvictIfOverLimit();
 
                 return config;
             }
@@ -87,6 +89,7 @@ namespace AutopilotMonitor.Functions.Services
                         Configuration = defaultConfig,
                         CachedAt = DateTime.UtcNow
                     };
+                    EvictIfOverLimit();
 
                     _logger.LogInformation($"Default configuration created and saved for tenant {tenantId}");
                 }
@@ -225,6 +228,27 @@ namespace AutopilotMonitor.Functions.Services
                 EnableEspUiStateCollector = entity.GetBoolean("EnableEspUiStateCollector") ?? false,
                 EspUiStateCollectorIntervalSeconds = entity.GetInt32("EspUiStateCollectorIntervalSeconds") ?? 15
             };
+        }
+
+        private void EvictIfOverLimit()
+        {
+            if (_configCache.Count <= MaxCacheSize)
+                return;
+
+            // Evict oldest entries (by CachedAt) to bring cache back to 75% capacity
+            var targetSize = (int)(MaxCacheSize * 0.75);
+            var entriesToRemove = _configCache
+                .OrderBy(kvp => kvp.Value.CachedAt)
+                .Take(_configCache.Count - targetSize)
+                .Select(kvp => kvp.Key)
+                .ToList();
+
+            foreach (var key in entriesToRemove)
+            {
+                _configCache.TryRemove(key, out _);
+            }
+
+            _logger.LogInformation("Cache eviction: removed {Count} entries, cache size now {Size}", entriesToRemove.Count, _configCache.Count);
         }
 
         private class CachedConfig
