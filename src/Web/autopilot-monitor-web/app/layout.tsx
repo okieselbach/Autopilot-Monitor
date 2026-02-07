@@ -5,6 +5,7 @@ import { AuthProvider } from "../contexts/AuthContext";
 import { SignalRProvider } from "../contexts/SignalRContext";
 import { TenantProvider } from "../contexts/TenantContext";
 import { NotificationProvider } from "../contexts/NotificationContext";
+import { ThemeProvider } from "../contexts/ThemeContext";
 import Navbar from "../components/Navbar";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -22,16 +23,18 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={inter.className}>
-        <AuthProvider>
-          <NotificationProvider>
-            <TenantProvider>
-              <SignalRProvider>
-                <Navbar />
-                {children}
-              </SignalRProvider>
-            </TenantProvider>
-          </NotificationProvider>
-        </AuthProvider>
+        <ThemeProvider>
+          <AuthProvider>
+            <NotificationProvider>
+              <TenantProvider>
+                <SignalRProvider>
+                  <Navbar />
+                  {children}
+                </SignalRProvider>
+              </TenantProvider>
+            </NotificationProvider>
+          </AuthProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

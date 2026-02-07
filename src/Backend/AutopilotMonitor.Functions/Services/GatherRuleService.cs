@@ -120,6 +120,17 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
+        /// Updates a built-in gather rule globally (Galactic Admin only)
+        /// Modifies the global definition that all tenants inherit
+        /// </summary>
+        public async Task<bool> UpdateGlobalRuleAsync(GatherRule rule)
+        {
+            rule.UpdatedAt = DateTime.UtcNow;
+            rule.IsBuiltIn = true;
+            return await _storageService.StoreGatherRuleAsync(rule, "global");
+        }
+
+        /// <summary>
         /// Deletes a custom gather rule (cannot delete built-in rules)
         /// </summary>
         public async Task<bool> DeleteRuleAsync(string tenantId, string ruleId)

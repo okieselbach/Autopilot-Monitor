@@ -3,15 +3,8 @@
 @tailwind utilities;
 
 :root {
-  --background: #ffffff;
+  --background: #f9fafb;
   --foreground: #171717;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {
@@ -24,4 +17,178 @@ body {
   .text-balance {
     text-wrap: balance;
   }
+}
+
+/* ===== DARK MODE OVERRIDES =====
+   Pragmatic approach: override common Tailwind utility classes globally
+   when .dark is on <html>. This covers the entire app without adding
+   dark: prefixes to hundreds of components. */
+
+/* -- Page background -- */
+.dark body {
+  --background: #0f172a;
+  --foreground: #e2e8f0;
+}
+
+/* -- Surfaces -- */
+.dark .bg-white {
+  background-color: #1e293b !important;
+}
+.dark .bg-gray-50 {
+  background-color: #0f172a !important;
+}
+.dark .bg-gray-100 {
+  background-color: #1e293b !important;
+}
+.dark .bg-gray-200 {
+  background-color: #334155 !important;
+}
+
+/* -- Text colors -- */
+.dark .text-gray-900 {
+  color: #f1f5f9 !important;
+}
+.dark .text-gray-800 {
+  color: #e2e8f0 !important;
+}
+.dark .text-gray-700 {
+  color: #cbd5e1 !important;
+}
+.dark .text-gray-600 {
+  color: #94a3b8 !important;
+}
+.dark .text-gray-500 {
+  color: #64748b !important;
+}
+.dark .text-gray-400 {
+  color: #64748b !important;
+}
+
+/* -- Borders -- */
+.dark .border-gray-200 {
+  border-color: #334155 !important;
+}
+.dark .border-gray-300 {
+  border-color: #475569 !important;
+}
+.dark .divide-gray-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #334155 !important;
+}
+
+/* -- Shadows (softer in dark mode) -- */
+.dark .shadow,
+.dark .shadow-sm,
+.dark .shadow-md,
+.dark .shadow-lg {
+  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.4), 0 1px 2px -1px rgb(0 0 0 / 0.4) !important;
+}
+
+/* -- Navbar -- */
+.dark nav.bg-white,
+.dark nav .bg-white {
+  background-color: #1e293b !important;
+}
+.dark .border-b.border-gray-200 {
+  border-color: #334155 !important;
+}
+
+/* -- Hover states -- */
+.dark .hover\:bg-gray-50:hover {
+  background-color: #334155 !important;
+}
+.dark .hover\:bg-gray-100:hover {
+  background-color: #334155 !important;
+}
+
+/* -- Input fields -- */
+.dark input,
+.dark select,
+.dark textarea {
+  background-color: #0f172a !important;
+  color: #e2e8f0 !important;
+  border-color: #475569 !important;
+}
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: #64748b !important;
+}
+
+/* -- Cards with colored backgrounds (keep but darken) -- */
+.dark .bg-blue-50 {
+  background-color: #1e3a5f !important;
+}
+.dark .bg-blue-100 {
+  background-color: #1e3a5f !important;
+}
+.dark .bg-green-50 {
+  background-color: #14332a !important;
+}
+.dark .bg-green-100 {
+  background-color: #14332a !important;
+}
+.dark .bg-red-50 {
+  background-color: #3b1c1c !important;
+}
+.dark .bg-red-100 {
+  background-color: #3b1c1c !important;
+}
+.dark .bg-red-200 {
+  background-color: #4a2020 !important;
+}
+.dark .bg-yellow-50 {
+  background-color: #3d2e0a !important;
+}
+.dark .bg-yellow-100 {
+  background-color: #3d2e0a !important;
+}
+.dark .bg-orange-100 {
+  background-color: #3d260a !important;
+}
+.dark .bg-amber-50 {
+  background-color: #3d2e0a !important;
+}
+.dark .bg-purple-50 {
+  background-color: #2d1b4e !important;
+}
+.dark .bg-purple-100 {
+  background-color: #2d1b4e !important;
+}
+.dark .bg-indigo-50 {
+  background-color: #1e1b4b !important;
+}
+
+/* -- Colored borders in dark mode -- */
+.dark .border-blue-200 {
+  border-color: #1e3a5f !important;
+}
+.dark .border-green-200 {
+  border-color: #14532d !important;
+}
+.dark .border-red-200 {
+  border-color: #4a2020 !important;
+}
+.dark .border-yellow-200 {
+  border-color: #3d2e0a !important;
+}
+.dark .border-purple-200 {
+  border-color: #2d1b4e !important;
+}
+
+/* -- Progress bars and charts keep their vivid colors -- */
+/* (no overrides needed for bg-blue-500, bg-green-500, etc.) */
+
+/* -- Scrollbar -- */
+.dark ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.dark ::-webkit-scrollbar-track {
+  background: #1e293b;
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: #475569;
+  border-radius: 4px;
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
 }

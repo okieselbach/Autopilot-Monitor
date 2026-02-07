@@ -1,5 +1,6 @@
 using Azure;
 using Azure.Data.Tables;
+using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -14,44 +15,67 @@ namespace AutopilotMonitor.Functions.Services
     {
         private readonly TableServiceClient _tableServiceClient;
         private readonly ILogger<TableStorageService> _logger;
-        private const string SessionsTableName = "Sessions";
-        private const string EventsTableName = "Events";
-        private const string AuditLogsTableName = "AuditLogs";
-        private const string UsageMetricsTableName = "UsageMetrics";
-        private const string RuleResultsTableName = "RuleResults";
-        private const string GatherRulesTableName = "GatherRules";
-        private const string AnalyzeRulesTableName = "AnalyzeRules";
-        private const string UserActivityTableName = "UserActivity";
+        private bool _tablesInitialized = false;
+        private readonly object _initLock = new object();
 
         public TableStorageService(IConfiguration configuration, ILogger<TableStorageService> logger)
         {
             _logger = logger;
             var connectionString = configuration["AzureTableStorageConnectionString"];
             _tableServiceClient = new TableServiceClient(connectionString);
-
-            // Ensure tables exist
-            InitializeTablesAsync().GetAwaiter().GetResult();
         }
 
-        private async Task InitializeTablesAsync()
+        /// <summary>
+        /// Initializes all Azure Table Storage tables.
+        /// This method is idempotent and safe to call multiple times.
+        /// Should be called at application startup.
+        /// </summary>
+        public async Task InitializeTablesAsync()
         {
-            try
+            if (_tablesInitialized)
             {
-                await _tableServiceClient.CreateTableIfNotExistsAsync(SessionsTableName);
-                await _tableServiceClient.CreateTableIfNotExistsAsync(EventsTableName);
-                await _tableServiceClient.CreateTableIfNotExistsAsync(AuditLogsTableName);
-                await _tableServiceClient.CreateTableIfNotExistsAsync(UsageMetricsTableName);
-                await _tableServiceClient.CreateTableIfNotExistsAsync(RuleResultsTableName);
-                await _tableServiceClient.CreateTableIfNotExistsAsync(GatherRulesTableName);
-                await _tableServiceClient.CreateTableIfNotExistsAsync(AnalyzeRulesTableName);
-                await _tableServiceClient.CreateTableIfNotExistsAsync(UserActivityTableName);
-                _logger.LogInformation("Tables initialized successfully");
+                _logger.LogDebug("Tables already initialized, skipping");
+                return;
             }
-            catch (Exception ex)
+
+            lock (_initLock)
             {
-                _logger.LogError(ex, "Failed to initialize tables");
+                if (_tablesInitialized) return;
+            }
+
+            _logger.LogInformation("Initializing Azure Table Storage tables...");
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            var successCount = 0;
+            var failCount = 0;
+
+            foreach (var tableName in Constants.TableNames.All)
+            {
+                try
+                {
+                    await _tableServiceClient.CreateTableIfNotExistsAsync(tableName);
+                    _logger.LogDebug($"Table '{tableName}' initialized");
+                    successCount++;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, $"Failed to initialize table '{tableName}'");
+                    failCount++;
+                }
+            }
+
+            stopwatch.Stop();
+            _logger.LogInformation($"Table initialization completed in {stopwatch.ElapsedMilliseconds}ms: {successCount} succeeded, {failCount} failed");
+
+            lock (_initLock)
+            {
+                _tablesInitialized = failCount == 0;
             }
         }
+
+        /// <summary>
+        /// Gets the TableServiceClient for direct access (used by other services)
+        /// </summary>
+        public TableServiceClient GetTableServiceClient() => _tableServiceClient;
 
         /// <summary>
         /// Stores a session registration
@@ -60,7 +84,7 @@ namespace AutopilotMonitor.Functions.Services
         {
             try
             {
-                var tableClient = _tableServiceClient.GetTableClient(SessionsTableName);
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
 
                 var entity = new TableEntity(registration.TenantId, registration.SessionId)
                 {
@@ -100,7 +124,7 @@ namespace AutopilotMonitor.Functions.Services
         {
             try
             {
-                var tableClient = _tableServiceClient.GetTableClient(EventsTableName);
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Events);
 
                 // PartitionKey: TenantId_SessionId for efficient querying
                 // RowKey: Timestamp_Sequence for ordering
@@ -144,7 +168,7 @@ namespace AutopilotMonitor.Functions.Services
         {
             try
             {
-                var tableClient = _tableServiceClient.GetTableClient(SessionsTableName);
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
                 var sessions = new List<SessionSummary>();
 
                 // Query sessions by tenant (PartitionKey)
@@ -175,7 +199,7 @@ namespace AutopilotMonitor.Functions.Services
         {
             try
             {
-                var tableClient = _tableServiceClient.GetTableClient(SessionsTableName);
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
                 var sessions = new List<SessionSummary>();
 
                 // Query all sessions without tenant filter
@@ -204,7 +228,7 @@ namespace AutopilotMonitor.Functions.Services
         {
             try
             {
-                var tableClient = _tableServiceClient.GetTableClient(SessionsTableName);
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
                 var entity = await tableClient.GetEntityAsync<TableEntity>(tenantId, sessionId);
                 return MapToSessionSummary(entity.Value);
             }
@@ -231,7 +255,7 @@ namespace AutopilotMonitor.Functions.Services
             {
                 try
                 {
-                    var tableClient = _tableServiceClient.GetTableClient(SessionsTableName);
+                    var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
 
                     // Get the existing entity
                     var entity = await tableClient.GetEntityAsync<TableEntity>(tenantId, sessionId);
@@ -259,7 +283,7 @@ namespace AutopilotMonitor.Functions.Services
                     }
 
                     // Update event count (calculated on-demand during phase changes)
-                    var eventsTableClient = _tableServiceClient.GetTableClient(EventsTableName);
+                    var eventsTableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Events);
                     var partitionKey = $"{tenantId}_{sessionId}";
                     var eventCountFilter = $"PartitionKey eq '{partitionKey}'";
                     var eventCount = 0;
@@ -305,7 +329,7 @@ namespace AutopilotMonitor.Functions.Services
         {
             try
             {
-                var tableClient = _tableServiceClient.GetTableClient(EventsTableName);
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Events);
                 var events = new List<EnrollmentEvent>();
 
                 // Events are stored with PartitionKey = "{TenantId}_{SessionId}"
@@ -398,7 +422,7 @@ namespace AutopilotMonitor.Functions.Services
         {
             try
             {
-                var tableClient = _tableServiceClient.GetTableClient(SessionsTableName);
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
                 var response = await tableClient.DeleteEntityAsync(tenantId, sessionId);
                 _logger.LogInformation($"Deleted session {sessionId} for tenant {tenantId}");
                 return true;
@@ -417,7 +441,7 @@ namespace AutopilotMonitor.Functions.Services
         {
             try
             {
-                var tableClient = _tableServiceClient.GetTableClient(EventsTableName);
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Events);
 
                 // Query all events for this session using the same PartitionKey format as StoreEventAsync
                 var partitionKey = $"{tenantId}_{sessionId}";
@@ -448,7 +472,7 @@ namespace AutopilotMonitor.Functions.Services
         {
             try
             {
-                var tableClient = _tableServiceClient.GetTableClient(AuditLogsTableName);
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.AuditLogs);
                 var timestamp = DateTime.UtcNow;
 
                 var entity = new TableEntity(tenantId, Guid.NewGuid().ToString())
@@ -479,7 +503,7 @@ namespace AutopilotMonitor.Functions.Services
         {
             try
             {
-                var tableClient = _tableServiceClient.GetTableClient(AuditLogsTableName);
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.AuditLogs);
                 var query = tableClient.QueryAsync<TableEntity>(filter: $"PartitionKey eq '{tenantId}'");
 
                 var logs = new List<AuditLogEntry>();
@@ -519,7 +543,7 @@ namespace AutopilotMonitor.Functions.Services
         {
             try
             {
-                var tableClient = _tableServiceClient.GetTableClient(UsageMetricsTableName);
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.UsageMetrics);
 
                 var entity = new TableEntity(metrics.Date, metrics.TenantId)
                 {
@@ -559,7 +583,7 @@ namespace AutopilotMonitor.Functions.Services
         {
             try
             {
-                var tableClient = _tableServiceClient.GetTableClient(UsageMetricsTableName);
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.UsageMetrics);
 
                 // Build filter
                 var filters = new List<string>();
@@ -622,7 +646,7 @@ namespace AutopilotMonitor.Functions.Services
         {
             try
             {
-                var tableClient = _tableServiceClient.GetTableClient(SessionsTableName);
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
 
                 // Query sessions for this tenant older than cutoff date
                 var filter = $"PartitionKey eq '{tenantId}' and StartedAt lt datetime'{cutoffDate:yyyy-MM-ddTHH:mm:ss}Z'";
@@ -651,7 +675,7 @@ namespace AutopilotMonitor.Functions.Services
         {
             try
             {
-                var tableClient = _tableServiceClient.GetTableClient(SessionsTableName);
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
                 var query = tableClient.QueryAsync<TableEntity>(select: new[] { "PartitionKey" });
 
                 var tenantIds = new HashSet<string>();
@@ -680,7 +704,7 @@ namespace AutopilotMonitor.Functions.Services
         {
             try
             {
-                var tableClient = _tableServiceClient.GetTableClient(RuleResultsTableName);
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.RuleResults);
                 var partitionKey = $"{result.TenantId}_{result.SessionId}";
 
                 var entity = new TableEntity(partitionKey, result.RuleId)
@@ -718,7 +742,7 @@ namespace AutopilotMonitor.Functions.Services
         {
             try
             {
-                var tableClient = _tableServiceClient.GetTableClient(RuleResultsTableName);
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.RuleResults);
                 var partitionKey = $"{tenantId}_{sessionId}";
                 var query = tableClient.QueryAsync<TableEntity>(filter: $"PartitionKey eq '{partitionKey}'");
 
@@ -762,7 +786,7 @@ namespace AutopilotMonitor.Functions.Services
         {
             try
             {
-                var tableClient = _tableServiceClient.GetTableClient(GatherRulesTableName);
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.GatherRules);
 
                 var entity = new TableEntity(tenantId, rule.RuleId)
                 {
@@ -806,7 +830,7 @@ namespace AutopilotMonitor.Functions.Services
         {
             try
             {
-                var tableClient = _tableServiceClient.GetTableClient(GatherRulesTableName);
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.GatherRules);
                 var query = tableClient.QueryAsync<TableEntity>(filter: $"PartitionKey eq '{partitionKey}'");
 
                 var rules = new List<GatherRule>();
@@ -831,7 +855,7 @@ namespace AutopilotMonitor.Functions.Services
         {
             try
             {
-                var tableClient = _tableServiceClient.GetTableClient(GatherRulesTableName);
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.GatherRules);
                 await tableClient.DeleteEntityAsync(tenantId, ruleId);
                 return true;
             }
@@ -880,7 +904,7 @@ namespace AutopilotMonitor.Functions.Services
         {
             try
             {
-                var tableClient = _tableServiceClient.GetTableClient(AnalyzeRulesTableName);
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.AnalyzeRules);
 
                 var entity = new TableEntity(tenantId, rule.RuleId)
                 {
@@ -923,7 +947,7 @@ namespace AutopilotMonitor.Functions.Services
         {
             try
             {
-                var tableClient = _tableServiceClient.GetTableClient(AnalyzeRulesTableName);
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.AnalyzeRules);
                 var query = tableClient.QueryAsync<TableEntity>(filter: $"PartitionKey eq '{partitionKey}'");
 
                 var rules = new List<AnalyzeRule>();
@@ -948,7 +972,7 @@ namespace AutopilotMonitor.Functions.Services
         {
             try
             {
-                var tableClient = _tableServiceClient.GetTableClient(AnalyzeRulesTableName);
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.AnalyzeRules);
                 await tableClient.DeleteEntityAsync(tenantId, ruleId);
                 return true;
             }
@@ -986,6 +1010,256 @@ namespace AutopilotMonitor.Functions.Services
             };
         }
 
+        // ===== APP INSTALL SUMMARIES METHODS =====
+
+        /// <summary>
+        /// Stores or updates an app install summary
+        /// PartitionKey: TenantId, RowKey: {SessionId}_{AppName}
+        /// </summary>
+        public async Task<bool> StoreAppInstallSummaryAsync(AppInstallSummary summary)
+        {
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.AppInstallSummaries);
+                var rowKey = $"{summary.SessionId}_{summary.AppName}";
+
+                var entity = new TableEntity(summary.TenantId, rowKey)
+                {
+                    ["AppName"] = summary.AppName ?? string.Empty,
+                    ["SessionId"] = summary.SessionId ?? string.Empty,
+                    ["TenantId"] = summary.TenantId ?? string.Empty,
+                    ["Status"] = summary.Status ?? "InProgress",
+                    ["DurationSeconds"] = summary.DurationSeconds,
+                    ["DownloadBytes"] = summary.DownloadBytes,
+                    ["DownloadDurationSeconds"] = summary.DownloadDurationSeconds,
+                    ["FailureCode"] = summary.FailureCode ?? string.Empty,
+                    ["FailureMessage"] = summary.FailureMessage ?? string.Empty,
+                    ["StartedAt"] = summary.StartedAt,
+                    ["CompletedAt"] = summary.CompletedAt
+                };
+
+                await tableClient.UpsertEntityAsync(entity);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to store app install summary for {summary.AppName}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Gets all app install summaries for a tenant (fleet-level metrics)
+        /// </summary>
+        public async Task<List<AppInstallSummary>> GetAppInstallSummariesByTenantAsync(string tenantId)
+        {
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.AppInstallSummaries);
+                var query = tableClient.QueryAsync<TableEntity>(filter: $"PartitionKey eq '{tenantId}'");
+
+                var summaries = new List<AppInstallSummary>();
+                await foreach (var entity in query)
+                {
+                    summaries.Add(MapToAppInstallSummary(entity));
+                }
+
+                return summaries;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to get app install summaries for tenant {tenantId}");
+                return new List<AppInstallSummary>();
+            }
+        }
+
+        /// <summary>
+        /// Deletes all app install summaries for a session
+        /// </summary>
+        public async Task<int> DeleteSessionAppInstallSummariesAsync(string tenantId, string sessionId)
+        {
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.AppInstallSummaries);
+                var query = tableClient.QueryAsync<TableEntity>(
+                    filter: $"PartitionKey eq '{tenantId}' and SessionId eq '{sessionId}'");
+
+                int deletedCount = 0;
+                await foreach (var entity in query)
+                {
+                    await tableClient.DeleteEntityAsync(entity.PartitionKey, entity.RowKey);
+                    deletedCount++;
+                }
+
+                return deletedCount;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to delete app install summaries for session {sessionId}");
+                return 0;
+            }
+        }
+
+        /// <summary>
+        /// Deletes all rule results for a session
+        /// </summary>
+        public async Task<int> DeleteSessionRuleResultsAsync(string tenantId, string sessionId)
+        {
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.RuleResults);
+                var partitionKey = $"{tenantId}_{sessionId}";
+                var query = tableClient.QueryAsync<TableEntity>(filter: $"PartitionKey eq '{partitionKey}'");
+
+                int deletedCount = 0;
+                await foreach (var entity in query)
+                {
+                    await tableClient.DeleteEntityAsync(entity.PartitionKey, entity.RowKey);
+                    deletedCount++;
+                }
+
+                return deletedCount;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to delete rule results for session {sessionId}");
+                return 0;
+            }
+        }
+
+        private AppInstallSummary MapToAppInstallSummary(TableEntity entity)
+        {
+            return new AppInstallSummary
+            {
+                AppName = entity.GetString("AppName") ?? string.Empty,
+                SessionId = entity.GetString("SessionId") ?? string.Empty,
+                TenantId = entity.GetString("TenantId") ?? entity.PartitionKey,
+                Status = entity.GetString("Status") ?? "InProgress",
+                DurationSeconds = entity.GetInt32("DurationSeconds") ?? 0,
+                DownloadBytes = entity.GetInt64("DownloadBytes") ?? 0,
+                DownloadDurationSeconds = entity.GetInt32("DownloadDurationSeconds") ?? 0,
+                FailureCode = entity.GetString("FailureCode") ?? string.Empty,
+                FailureMessage = entity.GetString("FailureMessage") ?? string.Empty,
+                StartedAt = entity.GetDateTimeOffset("StartedAt")?.UtcDateTime ?? DateTime.MinValue,
+                CompletedAt = entity.GetDateTimeOffset("CompletedAt")?.UtcDateTime
+            };
+        }
+
+        // ===== PLATFORM STATS METHODS =====
+
+        /// <summary>
+        /// Gets the current platform stats (single row: global/current)
+        /// </summary>
+        public async Task<PlatformStats?> GetPlatformStatsAsync()
+        {
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.PlatformStats);
+                var response = await tableClient.GetEntityAsync<TableEntity>("global", "current");
+                var entity = response.Value;
+
+                return new PlatformStats
+                {
+                    TotalEnrollments = entity.GetInt64("TotalEnrollments") ?? 0,
+                    TotalUsers = entity.GetInt64("TotalUsers") ?? 0,
+                    TotalTenants = entity.GetInt64("TotalTenants") ?? 0,
+                    UniqueDeviceModels = entity.GetInt64("UniqueDeviceModels") ?? 0,
+                    TotalEventsProcessed = entity.GetInt64("TotalEventsProcessed") ?? 0,
+                    SuccessfulEnrollments = entity.GetInt64("SuccessfulEnrollments") ?? 0,
+                    IssuesDetected = entity.GetInt64("IssuesDetected") ?? 0,
+                    LastFullCompute = entity.GetDateTimeOffset("LastFullCompute")?.UtcDateTime ?? DateTime.MinValue,
+                    LastUpdated = entity.GetDateTimeOffset("LastUpdated")?.UtcDateTime ?? DateTime.MinValue
+                };
+            }
+            catch (RequestFailedException ex) when (ex.Status == 404)
+            {
+                return null;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to get platform stats");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Saves the full platform stats (upsert)
+        /// </summary>
+        public async Task<bool> SavePlatformStatsAsync(PlatformStats stats)
+        {
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.PlatformStats);
+
+                var entity = new TableEntity("global", "current")
+                {
+                    ["TotalEnrollments"] = stats.TotalEnrollments,
+                    ["TotalUsers"] = stats.TotalUsers,
+                    ["TotalTenants"] = stats.TotalTenants,
+                    ["UniqueDeviceModels"] = stats.UniqueDeviceModels,
+                    ["TotalEventsProcessed"] = stats.TotalEventsProcessed,
+                    ["SuccessfulEnrollments"] = stats.SuccessfulEnrollments,
+                    ["IssuesDetected"] = stats.IssuesDetected,
+                    ["LastFullCompute"] = stats.LastFullCompute,
+                    ["LastUpdated"] = stats.LastUpdated
+                };
+
+                await tableClient.UpsertEntityAsync(entity);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to save platform stats");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Increments a specific platform stat counter atomically.
+        /// Reads current value, increments, and writes back.
+        /// </summary>
+        public async Task IncrementPlatformStatAsync(string field, long amount = 1)
+        {
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.PlatformStats);
+
+                TableEntity entity;
+
+                try
+                {
+                    var response = await tableClient.GetEntityAsync<TableEntity>("global", "current");
+                    entity = response.Value;
+                }
+                catch (RequestFailedException ex) when (ex.Status == 404)
+                {
+                    entity = new TableEntity("global", "current")
+                    {
+                        ["TotalEnrollments"] = 0L,
+                        ["TotalUsers"] = 0L,
+                        ["TotalTenants"] = 0L,
+                        ["UniqueDeviceModels"] = 0L,
+                        ["TotalEventsProcessed"] = 0L,
+                        ["SuccessfulEnrollments"] = 0L,
+                        ["IssuesDetected"] = 0L,
+                        ["LastFullCompute"] = DateTime.MinValue,
+                        ["LastUpdated"] = DateTime.UtcNow
+                    };
+                }
+
+                var current = entity.GetInt64(field) ?? 0;
+                entity[field] = current + amount;
+                entity["LastUpdated"] = DateTime.UtcNow;
+
+                await tableClient.UpsertEntityAsync(entity);
+            }
+            catch (Exception ex)
+            {
+                // Non-fatal: don't break the caller if stats update fails
+                _logger.LogWarning(ex, $"Failed to increment platform stat {field}");
+            }
+        }
+
         // ===== USER ACTIVITY METHODS =====
 
         /// <summary>
@@ -996,7 +1270,7 @@ namespace AutopilotMonitor.Functions.Services
         {
             try
             {
-                var tableClient = _tableServiceClient.GetTableClient(UserActivityTableName);
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.UserActivity);
                 var now = DateTime.UtcNow;
                 var invertedTicks = (DateTime.MaxValue.Ticks - now.Ticks).ToString("D20");
 
@@ -1025,7 +1299,7 @@ namespace AutopilotMonitor.Functions.Services
         {
             try
             {
-                var tableClient = _tableServiceClient.GetTableClient(UserActivityTableName);
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.UserActivity);
                 var query = tableClient.QueryAsync<TableEntity>(filter: $"PartitionKey eq '{tenantId}'");
 
                 var now = DateTime.UtcNow;
@@ -1079,7 +1353,7 @@ namespace AutopilotMonitor.Functions.Services
         {
             try
             {
-                var tableClient = _tableServiceClient.GetTableClient(UserActivityTableName);
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.UserActivity);
                 var query = tableClient.QueryAsync<TableEntity>();
 
                 var now = DateTime.UtcNow;
@@ -1133,7 +1407,7 @@ namespace AutopilotMonitor.Functions.Services
         {
             try
             {
-                var tableClient = _tableServiceClient.GetTableClient(UserActivityTableName);
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.UserActivity);
                 var startOfDay = date.Date;
                 var endOfDay = startOfDay.AddDays(1);
 

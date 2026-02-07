@@ -49,12 +49,23 @@ interface HardwareMetrics {
   topModels: HardwareCount[];
 }
 
+interface PlatformStats {
+  totalEnrollments: number;
+  totalUsers: number;
+  totalTenants: number;
+  uniqueDeviceModels: number;
+  totalEventsProcessed: number;
+  successfulEnrollments: number;
+  issuesDetected: number;
+}
+
 interface PlatformUsageMetrics {
   sessions: SessionMetrics;
   tenants: TenantMetrics;
   users: UserMetrics;
   performance: PerformanceMetrics;
   hardware: HardwareMetrics;
+  platformStats?: PlatformStats;
   computedAt: string;
   computeDurationMs: number;
   fromCache: boolean;
@@ -353,6 +364,45 @@ export default function PlatformUsageMetricsPage() {
             </div>
           </div>
         </div>
+
+        {/* Platform Statistics (Cumulative Since Release) */}
+        {metrics.platformStats && (
+          <div className="mb-6">
+            <h2 className="text-xl font-semibold text-gray-900 mb-4">Platform Statistics (Since Release)</h2>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="bg-white rounded-lg shadow p-6">
+                <div className="text-sm text-gray-500 mb-1">Total Enrollments</div>
+                <div className="text-3xl font-bold text-blue-600">{metrics.platformStats.totalEnrollments.toLocaleString()}</div>
+              </div>
+              <div className="bg-white rounded-lg shadow p-6">
+                <div className="text-sm text-gray-500 mb-1">Successful Enrollments</div>
+                <div className="text-3xl font-bold text-green-600">{metrics.platformStats.successfulEnrollments.toLocaleString()}</div>
+              </div>
+              <div className="bg-white rounded-lg shadow p-6">
+                <div className="text-sm text-gray-500 mb-1">Issues Detected</div>
+                <div className="text-3xl font-bold text-red-600">{metrics.platformStats.issuesDetected.toLocaleString()}</div>
+              </div>
+              <div className="bg-white rounded-lg shadow p-6">
+                <div className="text-sm text-gray-500 mb-1">Total Events Processed</div>
+                <div className="text-3xl font-bold text-purple-600">{metrics.platformStats.totalEventsProcessed.toLocaleString()}</div>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+              <div className="bg-white rounded-lg shadow p-6">
+                <div className="text-sm text-gray-500 mb-1">Total Users</div>
+                <div className="text-3xl font-bold text-indigo-600">{metrics.platformStats.totalUsers.toLocaleString()}</div>
+              </div>
+              <div className="bg-white rounded-lg shadow p-6">
+                <div className="text-sm text-gray-500 mb-1">Total Tenants</div>
+                <div className="text-3xl font-bold text-cyan-600">{metrics.platformStats.totalTenants.toLocaleString()}</div>
+              </div>
+              <div className="bg-white rounded-lg shadow p-6">
+                <div className="text-sm text-gray-500 mb-1">Unique Device Models</div>
+                <div className="text-3xl font-bold text-amber-600">{metrics.platformStats.uniqueDeviceModels.toLocaleString()}</div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Hardware Statistics */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

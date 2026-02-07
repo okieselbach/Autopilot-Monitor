@@ -1,3 +1,4 @@
+using AutopilotMonitor.Shared;
 using Azure.Data.Tables;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
@@ -14,7 +15,6 @@ public class GalacticAdminService
     private readonly TableServiceClient _tableServiceClient;
     private readonly IMemoryCache _cache;
     private readonly ILogger<GalacticAdminService> _logger;
-    private readonly string _tableName = "GalacticAdmins";
     private readonly TimeSpan _cacheDuration = TimeSpan.FromMinutes(5);
 
     public GalacticAdminService(
@@ -26,22 +26,7 @@ public class GalacticAdminService
         _logger = logger;
         var connectionString = configuration["AzureTableStorageConnectionString"];
         _tableServiceClient = new TableServiceClient(connectionString);
-
-        // Ensure table exists
-        InitializeTableAsync().GetAwaiter().GetResult();
-    }
-
-    private async Task InitializeTableAsync()
-    {
-        try
-        {
-            await _tableServiceClient.CreateTableIfNotExistsAsync(_tableName);
-            _logger.LogInformation($"Galactic Admins table initialized: {_tableName}");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, $"Failed to initialize Galactic Admins table: {_tableName}");
-        }
+        // Table is initialized centrally by TableInitializerService at startup
     }
 
     /// <summary>
@@ -90,7 +75,7 @@ public class GalacticAdminService
     {
         try
         {
-            var tableClient = _tableServiceClient.GetTableClient(_tableName);
+            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.GalacticAdmins);
             var normalizedUpn = upn.ToLowerInvariant();
 
             _logger.LogDebug($"Querying Table Storage - PartitionKey: 'GalacticAdmins', RowKey: '{normalizedUpn}'");
@@ -137,7 +122,7 @@ public class GalacticAdminService
             AddedBy = addedBy
         };
 
-        var tableClient = _tableServiceClient.GetTableClient(_tableName);
+        var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.GalacticAdmins);
         await tableClient.UpsertEntityAsync(entity);
 
         // Invalidate cache
@@ -153,7 +138,7 @@ public class GalacticAdminService
     {
         upn = upn.ToLowerInvariant();
 
-        var tableClient = _tableServiceClient.GetTableClient(_tableName);
+        var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.GalacticAdmins);
         await tableClient.DeleteEntityAsync("GalacticAdmins", upn);
 
         // Invalidate cache
@@ -172,7 +157,7 @@ public class GalacticAdminService
         {
             admin.IsEnabled = false;
 
-            var tableClient = _tableServiceClient.GetTableClient(_tableName);
+            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.GalacticAdmins);
             await tableClient.UpdateEntityAsync(admin, Azure.ETag.All);
 
             // Invalidate cache
@@ -185,7 +170,7 @@ public class GalacticAdminService
     /// </summary>
     public async Task<List<GalacticAdminEntity>> GetAllGalacticAdminsAsync()
     {
-        var tableClient = _tableServiceClient.GetTableClient(_tableName);
+        var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.GalacticAdmins);
 
         var admins = new List<GalacticAdminEntity>();
         await foreach (var entity in tableClient.QueryAsync<GalacticAdminEntity>(

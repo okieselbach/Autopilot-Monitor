@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.Models;
 using Azure;
 using Azure.Data.Tables;
@@ -29,11 +30,9 @@ namespace AutopilotMonitor.Functions.Services
 
             var connectionString = configuration["AzureWebJobsStorage"];
             var serviceClient = new TableServiceClient(connectionString);
-            _adminTableClient = serviceClient.GetTableClient("AdminConfiguration");
-            _adminTableClient.CreateIfNotExists();
-
-            _tenantConfigTableClient = serviceClient.GetTableClient("TenantConfiguration");
-            _tenantConfigTableClient.CreateIfNotExists();
+            _adminTableClient = serviceClient.GetTableClient(Constants.TableNames.AdminConfiguration);
+            _tenantConfigTableClient = serviceClient.GetTableClient(Constants.TableNames.TenantConfiguration);
+            // Tables are initialized centrally by TableInitializerService at startup
         }
 
         /// <summary>

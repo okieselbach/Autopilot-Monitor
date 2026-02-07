@@ -57,6 +57,9 @@ namespace AutopilotMonitor.Functions.Functions
                 // Step 3: Clean up old data based on retention policies
                 await CleanupOldDataAsync();
 
+                // Step 4: Recompute platform-wide stats for landing page
+                await RecomputePlatformStatsAsync();
+
                 maintenanceStart.Stop();
                 _logger.LogInformation($"Daily maintenance completed in {maintenanceStart.ElapsedMilliseconds}ms");
             }
@@ -96,6 +99,10 @@ namespace AutopilotMonitor.Functions.Functions
                     await CleanupOldDataAsync();
                     result.DataCleanupExecuted = true;
                 }
+
+                // Step 4: Recompute platform-wide stats
+                await RecomputePlatformStatsAsync();
+                result.PlatformStatsRecomputed = true;
 
                 maintenanceStart.Stop();
                 result.DurationMs = (int)maintenanceStart.ElapsedMilliseconds;
@@ -360,15 +367,25 @@ namespace AutopilotMonitor.Functions.Functions
                             continue;
                         }
 
-                        // Delete each session and its events
+                        // Delete each session and all associated data
                         int sessionCount = 0;
                         int eventCount = 0;
+                        int ruleResultCount = 0;
+                        int appSummaryCount = 0;
 
                         foreach (var session in oldSessions)
                         {
-                            // Delete all events for this session (no date check needed!)
+                            // Delete all events for this session
                             var deletedEvents = await _storageService.DeleteSessionEventsAsync(session.TenantId, session.SessionId);
                             eventCount += deletedEvents;
+
+                            // Delete all rule results for this session
+                            var deletedRuleResults = await _storageService.DeleteSessionRuleResultsAsync(session.TenantId, session.SessionId);
+                            ruleResultCount += deletedRuleResults;
+
+                            // Delete all app install summaries for this session
+                            var deletedAppSummaries = await _storageService.DeleteSessionAppInstallSummariesAsync(session.TenantId, session.SessionId);
+                            appSummaryCount += deletedAppSummaries;
 
                             // Delete the session itself
                             await _storageService.DeleteSessionAsync(session.TenantId, session.SessionId);
@@ -389,11 +406,13 @@ namespace AutopilotMonitor.Functions.Functions
                             {
                                 { "SessionsDeleted", sessionCount.ToString() },
                                 { "EventsDeleted", eventCount.ToString() },
+                                { "RuleResultsDeleted", ruleResultCount.ToString() },
+                                { "AppSummariesDeleted", appSummaryCount.ToString() },
                                 { "RetentionDays", retentionDays.ToString() },
                                 { "CutoffDate", cutoffDate.ToString("yyyy-MM-dd") }
                             });
 
-                        _logger.LogInformation($"Tenant {tenantId}: Deleted {sessionCount} sessions and {eventCount} events (retention: {retentionDays} days)");
+                        _logger.LogInformation($"Tenant {tenantId}: Deleted {sessionCount} sessions, {eventCount} events, {ruleResultCount} rule results, {appSummaryCount} app summaries (retention: {retentionDays} days)");
                     }
                     catch (Exception ex)
                     {
@@ -407,6 +426,70 @@ namespace AutopilotMonitor.Functions.Functions
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to cleanup old data");
+            }
+        }
+
+        /// <summary>
+        /// Recomputes platform-wide stats from all tables.
+        /// Used on the public landing page (no auth required).
+        /// </summary>
+        private async Task RecomputePlatformStatsAsync()
+        {
+            _logger.LogInformation("Recomputing platform stats...");
+            var sw = Stopwatch.StartNew();
+
+            try
+            {
+                var tenantIds = await _storageService.GetAllTenantIdsAsync();
+                long totalEnrollments = 0;
+                long successfulEnrollments = 0;
+                long totalEvents = 0;
+                long totalUsers = 0;
+                var uniqueModels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                foreach (var tid in tenantIds)
+                {
+                    var sessions = await _storageService.GetSessionsAsync(tid, maxResults: 10000);
+                    totalEnrollments += sessions.Count;
+                    successfulEnrollments += sessions.Count(s => s.Status == SessionStatus.Succeeded);
+
+                    foreach (var s in sessions)
+                    {
+                        var modelKey = $"{s.Manufacturer} {s.Model}".Trim();
+                        if (!string.IsNullOrEmpty(modelKey))
+                            uniqueModels.Add(modelKey);
+                        totalEvents += s.EventCount;
+                    }
+
+                    var userMetrics = await _storageService.GetUserActivityMetricsAsync(tid);
+                    totalUsers += userMetrics.TotalUniqueUsers;
+                }
+
+                // Preserve IssuesDetected from existing stats (incremented during ingestion)
+                var existingStats = await _storageService.GetPlatformStatsAsync();
+
+                var stats = new PlatformStats
+                {
+                    TotalEnrollments = totalEnrollments,
+                    TotalUsers = totalUsers,
+                    TotalTenants = tenantIds.Count,
+                    UniqueDeviceModels = uniqueModels.Count,
+                    TotalEventsProcessed = totalEvents,
+                    SuccessfulEnrollments = successfulEnrollments,
+                    IssuesDetected = existingStats?.IssuesDetected ?? 0,
+                    LastFullCompute = DateTime.UtcNow,
+                    LastUpdated = DateTime.UtcNow
+                };
+
+                await _storageService.SavePlatformStatsAsync(stats);
+
+                sw.Stop();
+                _logger.LogInformation($"Platform stats recomputed in {sw.ElapsedMilliseconds}ms: " +
+                    $"{totalEnrollments} enrollments, {totalUsers} users, {tenantIds.Count} tenants, {uniqueModels.Count} models");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to recompute platform stats");
             }
         }
 
@@ -437,5 +520,6 @@ namespace AutopilotMonitor.Functions.Functions
         public bool MetricsAggregated { get; set; }
         public string? AggregatedDate { get; set; }
         public bool DataCleanupExecuted { get; set; }
+        public bool PlatformStatsRecomputed { get; set; }
     }
 }

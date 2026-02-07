@@ -184,13 +184,26 @@ namespace AutopilotMonitor.Functions.Services
                     .ToList()
             };
 
+            // Platform Stats (cumulative since release)
+            var platformStats = await _storageService.GetPlatformStatsAsync();
+
             return new PlatformUsageMetrics
             {
                 Sessions = sessionMetrics,
                 Tenants = tenantMetrics,
                 Users = userMetrics,
                 Performance = performanceMetrics,
-                Hardware = hardwareMetrics
+                Hardware = hardwareMetrics,
+                PlatformStats = platformStats != null ? new PlatformStats
+                {
+                    TotalEnrollments = platformStats.TotalEnrollments,
+                    TotalUsers = platformStats.TotalUsers,
+                    TotalTenants = platformStats.TotalTenants,
+                    UniqueDeviceModels = platformStats.UniqueDeviceModels,
+                    TotalEventsProcessed = platformStats.TotalEventsProcessed,
+                    SuccessfulEnrollments = platformStats.SuccessfulEnrollments,
+                    IssuesDetected = platformStats.IssuesDetected
+                } : null
             };
         }
 

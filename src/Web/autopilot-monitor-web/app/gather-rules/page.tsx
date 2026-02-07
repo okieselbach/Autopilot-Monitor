@@ -60,6 +60,14 @@ const CATEGORY_COLORS: Record<string, { bg: string; text: string }> = {
   enrollment: { bg: "bg-indigo-100", text: "text-indigo-700" },
 };
 
+const COLLECTOR_TYPE_LABELS: Record<string, string> = {
+  registry: "Registry",
+  eventlog: "Event Log",
+  wmi: "WMI Query",
+  file: "File",
+  command: "Command",
+};
+
 const EMPTY_FORM: NewRuleForm = {
   ruleId: "",
   title: "",
@@ -75,10 +83,19 @@ const EMPTY_FORM: NewRuleForm = {
   outputSeverity: "info",
 };
 
+function formatTrigger(trigger: string) {
+  switch (trigger) {
+    case "phase_change": return "Phase Change";
+    case "on_event": return "On Event";
+    default: return trigger.charAt(0).toUpperCase() + trigger.slice(1);
+  }
+}
+
 export default function GatherRulesPage() {
   const router = useRouter();
   const { tenantId } = useTenant();
-  const { getAccessToken } = useAuth();
+  const { getAccessToken, user } = useAuth();
+  const isGalacticAdmin = user?.isGalacticAdmin ?? false;
 
   const [rules, setRules] = useState<GatherRule[]>([]);
   const [loading, setLoading] = useState(true);
@@ -89,6 +106,12 @@ export default function GatherRulesPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
+
+  // Expanded / editing state
+  const [expandedRuleId, setExpandedRuleId] = useState<string | null>(null);
+  const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState<NewRuleForm>({ ...EMPTY_FORM });
+  const [saving, setSaving] = useState(false);
 
   // Create form state
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -215,6 +238,7 @@ export default function GatherRulesPage() {
       }
 
       setRules((prev) => prev.filter((r) => r.ruleId !== rule.ruleId));
+      if (expandedRuleId === rule.ruleId) setExpandedRuleId(null);
       showSuccess(`Rule "${rule.title}" deleted successfully!`);
     } catch (err) {
       console.error("Error deleting rule:", err);
@@ -288,6 +312,92 @@ export default function GatherRulesPage() {
     }
   };
 
+  // Start editing a rule (Galactic Admin for built-in, or custom rules)
+  const startEditing = (rule: GatherRule) => {
+    setEditingRuleId(rule.ruleId);
+    setEditForm({
+      ruleId: rule.ruleId,
+      title: rule.title,
+      description: rule.description || "",
+      category: rule.category,
+      collectorType: rule.collectorType,
+      target: rule.target,
+      trigger: rule.trigger,
+      intervalSeconds: rule.intervalSeconds || 60,
+      triggerPhase: rule.triggerPhase || "",
+      triggerEventType: rule.triggerEventType || "",
+      outputEventType: rule.outputEventType,
+      outputSeverity: rule.outputSeverity,
+    });
+  };
+
+  // Save edited rule
+  const handleSaveEdit = async (rule: GatherRule) => {
+    if (!editForm.title.trim() || !editForm.target.trim() || !editForm.outputEventType.trim()) {
+      showError("Title, Target, and Output Event Type are required.");
+      return;
+    }
+
+    try {
+      setSaving(true);
+      setError(null);
+
+      const token = await getAccessToken();
+      if (!token) {
+        throw new Error("Failed to get access token");
+      }
+
+      const payload: Record<string, unknown> = {
+        ...rule,
+        title: editForm.title.trim(),
+        description: editForm.description.trim(),
+        category: editForm.category,
+        collectorType: editForm.collectorType,
+        target: editForm.target.trim(),
+        trigger: editForm.trigger,
+        outputEventType: editForm.outputEventType.trim(),
+        outputSeverity: editForm.outputSeverity,
+      };
+
+      if (editForm.trigger === "interval") {
+        payload.intervalSeconds = editForm.intervalSeconds;
+      }
+      if (editForm.trigger === "phase_change") {
+        payload.triggerPhase = editForm.triggerPhase.trim();
+      }
+      if (editForm.trigger === "on_event") {
+        payload.triggerEventType = editForm.triggerEventType.trim();
+      }
+
+      // Galactic Admin editing a built-in rule = global update
+      const isGlobalEdit = rule.isBuiltIn && isGalacticAdmin;
+      const url = `${API_BASE_URL}/api/gather-rules/${encodeURIComponent(rule.ruleId)}${isGlobalEdit ? "?global=true" : ""}`;
+
+      const response = await fetch(url, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || errorData.message || `Failed to update rule: ${response.statusText}`);
+      }
+
+      setEditingRuleId(null);
+      showSuccess(`Rule "${editForm.title}" updated successfully${isGlobalEdit ? " (global)" : ""}!`);
+      await fetchRules();
+    } catch (err) {
+      console.error("Error saving rule:", err);
+      showError(err instanceof Error ? err.message : "Failed to save rule");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   // Filtered rules
   const filteredRules = rules.filter((rule) => {
     const matchesSearch =
@@ -319,6 +429,196 @@ export default function GatherRulesPage() {
       </span>
     );
   };
+
+  // Shared form fields component (used by both create and edit forms)
+  const renderFormFields = (
+    form: NewRuleForm,
+    setForm: (f: NewRuleForm) => void,
+    showRuleId: boolean
+  ) => (
+    <div className="space-y-5">
+      {/* Row 1: Rule ID (create only), Title */}
+      <div className={`grid grid-cols-1 ${showRuleId ? "sm:grid-cols-2" : ""} gap-4`}>
+        {showRuleId && (
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Rule ID <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={form.ruleId}
+              onChange={(e) => setForm({ ...form, ruleId: e.target.value })}
+              placeholder="e.g., custom-network-check"
+              autoComplete="off"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+            />
+          </div>
+        )}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Title <span className="text-red-500">*</span>
+          </label>
+          <input
+            type="text"
+            value={form.title}
+            onChange={(e) => setForm({ ...form, title: e.target.value })}
+            placeholder="e.g., Custom Network Check"
+            autoComplete="off"
+            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+          />
+        </div>
+      </div>
+
+      {/* Description */}
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+        <textarea
+          value={form.description}
+          onChange={(e) => setForm({ ...form, description: e.target.value })}
+          placeholder="Describe what this rule collects and why..."
+          rows={2}
+          className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors resize-none"
+        />
+      </div>
+
+      {/* Row 2: Category, Collector Type */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+          <select
+            value={form.category}
+            onChange={(e) => setForm({ ...form, category: e.target.value })}
+            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+          >
+            {CATEGORIES.map((cat) => (
+              <option key={cat} value={cat}>
+                {cat.charAt(0).toUpperCase() + cat.slice(1)}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Collector Type</label>
+          <select
+            value={form.collectorType}
+            onChange={(e) => setForm({ ...form, collectorType: e.target.value })}
+            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+          >
+            {COLLECTOR_TYPES.map((ct) => (
+              <option key={ct} value={ct}>
+                {ct.charAt(0).toUpperCase() + ct.slice(1)}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* Target */}
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          Target <span className="text-red-500">*</span>
+        </label>
+        <input
+          type="text"
+          value={form.target}
+          onChange={(e) => setForm({ ...form, target: e.target.value })}
+          placeholder="e.g., HKLM\SOFTWARE\Microsoft\... or Win32_OperatingSystem"
+          autoComplete="off"
+          className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+        />
+        <p className="text-xs text-gray-400 mt-1">Registry path, WMI class, event log name, file path, or command depending on collector type</p>
+      </div>
+
+      {/* Trigger */}
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">Trigger</label>
+        <select
+          value={form.trigger}
+          onChange={(e) => setForm({ ...form, trigger: e.target.value })}
+          className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+        >
+          {TRIGGERS.map((t) => (
+            <option key={t} value={t}>{formatTrigger(t)}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Conditional Trigger Fields */}
+      {form.trigger === "interval" && (
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Interval (seconds)</label>
+          <input
+            type="number"
+            min={5}
+            max={3600}
+            value={form.intervalSeconds}
+            onChange={(e) => setForm({ ...form, intervalSeconds: parseInt(e.target.value) || 60 })}
+            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+          />
+          <p className="text-xs text-gray-400 mt-1">How often to run this rule (5 - 3600 seconds)</p>
+        </div>
+      )}
+
+      {form.trigger === "phase_change" && (
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Trigger Phase</label>
+          <input
+            type="text"
+            value={form.triggerPhase}
+            onChange={(e) => setForm({ ...form, triggerPhase: e.target.value })}
+            placeholder="e.g., DeviceESP, AccountESP, DevicePreparation"
+            autoComplete="off"
+            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+          />
+        </div>
+      )}
+
+      {form.trigger === "on_event" && (
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Trigger Event Type</label>
+          <input
+            type="text"
+            value={form.triggerEventType}
+            onChange={(e) => setForm({ ...form, triggerEventType: e.target.value })}
+            placeholder="e.g., NetworkChange, PolicyApplied"
+            autoComplete="off"
+            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+          />
+        </div>
+      )}
+
+      {/* Row 3: Output Event Type, Output Severity */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Output Event Type <span className="text-red-500">*</span>
+          </label>
+          <input
+            type="text"
+            value={form.outputEventType}
+            onChange={(e) => setForm({ ...form, outputEventType: e.target.value })}
+            placeholder="e.g., CustomNetworkStatus"
+            autoComplete="off"
+            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Output Severity</label>
+          <select
+            value={form.outputSeverity}
+            onChange={(e) => setForm({ ...form, outputSeverity: e.target.value })}
+            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+          >
+            {SEVERITIES.map((s) => (
+              <option key={s} value={s}>
+                {s.charAt(0).toUpperCase() + s.slice(1)}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+    </div>
+  );
 
   return (
     <ProtectedRoute>
@@ -495,194 +795,11 @@ export default function GatherRulesPage() {
                       </div>
                     </div>
                   </div>
-                  <div className="p-6 space-y-5">
-                    {/* Row 1: Rule ID, Title */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Rule ID <span className="text-red-500">*</span>
-                        </label>
-                        <input
-                          type="text"
-                          value={newRule.ruleId}
-                          onChange={(e) => setNewRule({ ...newRule, ruleId: e.target.value })}
-                          placeholder="e.g., custom-network-check"
-                          autoComplete="off"
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Title <span className="text-red-500">*</span>
-                        </label>
-                        <input
-                          type="text"
-                          value={newRule.title}
-                          onChange={(e) => setNewRule({ ...newRule, title: e.target.value })}
-                          placeholder="e.g., Custom Network Check"
-                          autoComplete="off"
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Description */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-                      <textarea
-                        value={newRule.description}
-                        onChange={(e) => setNewRule({ ...newRule, description: e.target.value })}
-                        placeholder="Describe what this rule collects and why..."
-                        rows={2}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors resize-none"
-                      />
-                    </div>
-
-                    {/* Row 2: Category, Collector Type */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
-                        <select
-                          value={newRule.category}
-                          onChange={(e) => setNewRule({ ...newRule, category: e.target.value })}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
-                        >
-                          {CATEGORIES.map((cat) => (
-                            <option key={cat} value={cat}>
-                              {cat.charAt(0).toUpperCase() + cat.slice(1)}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Collector Type</label>
-                        <select
-                          value={newRule.collectorType}
-                          onChange={(e) => setNewRule({ ...newRule, collectorType: e.target.value })}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
-                        >
-                          {COLLECTOR_TYPES.map((ct) => (
-                            <option key={ct} value={ct}>
-                              {ct.charAt(0).toUpperCase() + ct.slice(1)}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-
-                    {/* Target */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Target <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        value={newRule.target}
-                        onChange={(e) => setNewRule({ ...newRule, target: e.target.value })}
-                        placeholder="e.g., HKLM\SOFTWARE\Microsoft\... or Win32_OperatingSystem"
-                        autoComplete="off"
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
-                      />
-                      <p className="text-xs text-gray-400 mt-1">Registry path, WMI class, event log name, file path, or command depending on collector type</p>
-                    </div>
-
-                    {/* Trigger */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Trigger</label>
-                      <select
-                        value={newRule.trigger}
-                        onChange={(e) => setNewRule({ ...newRule, trigger: e.target.value })}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
-                      >
-                        {TRIGGERS.map((t) => (
-                          <option key={t} value={t}>
-                            {t === "phase_change"
-                              ? "Phase Change"
-                              : t === "on_event"
-                              ? "On Event"
-                              : t.charAt(0).toUpperCase() + t.slice(1)}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {/* Conditional Trigger Fields */}
-                    {newRule.trigger === "interval" && (
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Interval (seconds)</label>
-                        <input
-                          type="number"
-                          min={5}
-                          max={3600}
-                          value={newRule.intervalSeconds}
-                          onChange={(e) => setNewRule({ ...newRule, intervalSeconds: parseInt(e.target.value) || 60 })}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
-                        />
-                        <p className="text-xs text-gray-400 mt-1">How often to run this rule (5 - 3600 seconds)</p>
-                      </div>
-                    )}
-
-                    {newRule.trigger === "phase_change" && (
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Trigger Phase</label>
-                        <input
-                          type="text"
-                          value={newRule.triggerPhase}
-                          onChange={(e) => setNewRule({ ...newRule, triggerPhase: e.target.value })}
-                          placeholder="e.g., DeviceESP, AccountESP, DevicePreparation"
-                          autoComplete="off"
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
-                        />
-                      </div>
-                    )}
-
-                    {newRule.trigger === "on_event" && (
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Trigger Event Type</label>
-                        <input
-                          type="text"
-                          value={newRule.triggerEventType}
-                          onChange={(e) => setNewRule({ ...newRule, triggerEventType: e.target.value })}
-                          placeholder="e.g., NetworkChange, PolicyApplied"
-                          autoComplete="off"
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
-                        />
-                      </div>
-                    )}
-
-                    {/* Row 3: Output Event Type, Output Severity */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Output Event Type <span className="text-red-500">*</span>
-                        </label>
-                        <input
-                          type="text"
-                          value={newRule.outputEventType}
-                          onChange={(e) => setNewRule({ ...newRule, outputEventType: e.target.value })}
-                          placeholder="e.g., CustomNetworkStatus"
-                          autoComplete="off"
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Output Severity</label>
-                        <select
-                          value={newRule.outputSeverity}
-                          onChange={(e) => setNewRule({ ...newRule, outputSeverity: e.target.value })}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
-                        >
-                          {SEVERITIES.map((s) => (
-                            <option key={s} value={s}>
-                              {s.charAt(0).toUpperCase() + s.slice(1)}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
+                  <div className="p-6">
+                    {renderFormFields(newRule, setNewRule, true)}
 
                     {/* Action Buttons */}
-                    <div className="flex items-center justify-end space-x-3 pt-4 border-t border-gray-200">
+                    <div className="flex items-center justify-end space-x-3 pt-4 mt-5 border-t border-gray-200">
                       <button
                         onClick={() => {
                           setShowCreateForm(false);
@@ -713,24 +830,19 @@ export default function GatherRulesPage() {
               )}
 
               {/* Rules List */}
-              <div className="bg-white rounded-lg shadow">
-                <div className="p-6 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-indigo-50">
-                  <div className="flex items-center space-x-2">
-                    <svg className="w-6 h-6 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                    </svg>
-                    <div>
-                      <h2 className="text-xl font-semibold text-gray-900">Rules</h2>
-                      <p className="text-sm text-gray-500 mt-1">
-                        {filteredRules.length} rule{filteredRules.length !== 1 ? "s" : ""} found
-                        {(searchQuery || categoryFilter !== "all" || typeFilter !== "all") && " (filtered)"}
-                      </p>
-                    </div>
-                  </div>
+              <div className="space-y-3">
+                <div className="flex items-center space-x-2 px-1">
+                  <svg className="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                  </svg>
+                  <span className="text-sm text-gray-500">
+                    {filteredRules.length} rule{filteredRules.length !== 1 ? "s" : ""} found
+                    {(searchQuery || categoryFilter !== "all" || typeFilter !== "all") && " (filtered)"}
+                  </span>
                 </div>
 
                 {filteredRules.length === 0 ? (
-                  <div className="p-8 text-center">
+                  <div className="bg-white rounded-lg shadow p-8 text-center">
                     <svg className="w-12 h-12 text-gray-300 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                     </svg>
@@ -749,116 +861,328 @@ export default function GatherRulesPage() {
                     )}
                   </div>
                 ) : (
-                  <div className="divide-y divide-gray-200">
-                    {filteredRules.map((rule) => (
+                  filteredRules.map((rule) => {
+                    const isExpanded = expandedRuleId === rule.ruleId;
+                    const isEditing = editingRuleId === rule.ruleId;
+                    const catColor = CATEGORY_COLORS[rule.category] || { bg: "bg-gray-100", text: "text-gray-700" };
+                    const canEdit = isGalacticAdmin || !rule.isBuiltIn;
+
+                    return (
                       <div
                         key={rule.ruleId}
-                        className={`p-4 hover:bg-gray-50 transition-colors ${!rule.enabled ? "opacity-60" : ""}`}
+                        className={`bg-white rounded-lg shadow border transition-all ${
+                          isExpanded ? "border-indigo-300 ring-1 ring-indigo-200" : "border-gray-200 hover:border-gray-300"
+                        } ${!rule.enabled ? "opacity-60" : ""}`}
                       >
-                        <div className="flex items-start justify-between gap-4">
-                          {/* Left: Toggle + Info */}
-                          <div className="flex items-start space-x-4 flex-1 min-w-0">
-                            {/* Toggle */}
-                            <div className="pt-1 flex-shrink-0">
-                              <button
-                                onClick={() => handleToggleRule(rule)}
-                                disabled={togglingRule === rule.ruleId}
-                                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                                  rule.enabled ? "bg-emerald-500" : "bg-gray-300"
+                        {/* Collapsed Header */}
+                        <div
+                          className="p-4 cursor-pointer select-none"
+                          onClick={() => {
+                            if (isEditing) return;
+                            setExpandedRuleId(isExpanded ? null : rule.ruleId);
+                            if (isExpanded && editingRuleId === rule.ruleId) {
+                              setEditingRuleId(null);
+                            }
+                          }}
+                        >
+                          <div className="flex items-center space-x-4">
+                            {/* Enable/Disable Toggle */}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleToggleRule(rule);
+                              }}
+                              disabled={togglingRule === rule.ruleId}
+                              className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${
+                                togglingRule === rule.ruleId
+                                  ? "opacity-50 cursor-not-allowed"
+                                  : "cursor-pointer"
+                              } ${rule.enabled ? "bg-emerald-500" : "bg-gray-300"}`}
+                              title={rule.enabled ? "Disable rule" : "Enable rule"}
+                            >
+                              <span
+                                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                                  rule.enabled ? "translate-x-6" : "translate-x-1"
                                 }`}
-                                title={rule.enabled ? "Disable rule" : "Enable rule"}
-                              >
-                                <span
-                                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                                    rule.enabled ? "translate-x-6" : "translate-x-1"
-                                  }`}
-                                />
-                              </button>
+                              />
+                            </button>
+
+                            {/* Rule ID */}
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono font-medium bg-gray-100 text-gray-600 border border-gray-200 flex-shrink-0 hidden sm:inline-flex">
+                              {rule.ruleId}
+                            </span>
+
+                            {/* Title */}
+                            <div className="flex-1 min-w-0">
+                              <h3 className="text-sm font-semibold text-gray-900 truncate">
+                                {rule.title}
+                              </h3>
                             </div>
 
-                            {/* Info */}
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center flex-wrap gap-2">
-                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono font-medium bg-gray-100 text-gray-600 border border-gray-200">
-                                  {rule.ruleId}
-                                </span>
-                                {getCategoryBadge(rule.category)}
-                                {rule.isBuiltIn && (
-                                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-600 border border-blue-200">
-                                    Built-in
+                            {/* Category Badge */}
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${catColor.bg} ${catColor.text} flex-shrink-0`}>
+                              {rule.category.charAt(0).toUpperCase() + rule.category.slice(1)}
+                            </span>
+
+                            {/* Collector Type */}
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-50 text-gray-600 flex-shrink-0 hidden md:inline-flex">
+                              {COLLECTOR_TYPE_LABELS[rule.collectorType] || rule.collectorType}
+                            </span>
+
+                            {/* Type Badge */}
+                            <span
+                              className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium flex-shrink-0 ${
+                                rule.isBuiltIn
+                                  ? "bg-blue-50 text-blue-600 border border-blue-200"
+                                  : rule.isCommunity
+                                  ? "bg-amber-50 text-amber-600 border border-amber-200"
+                                  : "bg-purple-50 text-purple-600 border border-purple-200"
+                              }`}
+                            >
+                              {rule.isBuiltIn ? "Built-in" : rule.isCommunity ? "Community" : "Custom"}
+                            </span>
+
+                            {/* Expand/Collapse Arrow */}
+                            <svg
+                              className={`w-5 h-5 text-gray-400 transition-transform flex-shrink-0 ${
+                                isExpanded ? "rotate-180" : ""
+                              }`}
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                            </svg>
+                          </div>
+                        </div>
+
+                        {/* Expanded Details */}
+                        {isExpanded && !isEditing && (
+                          <div className="border-t border-gray-200 p-6 space-y-6">
+                            {/* Meta Info Row */}
+                            <div className="flex flex-wrap items-center gap-4 text-sm text-gray-500">
+                              <span>
+                                <span className="font-medium text-gray-700">Version:</span> {rule.version}
+                              </span>
+                              <span>
+                                <span className="font-medium text-gray-700">Author:</span> {rule.author}
+                              </span>
+                              <span>
+                                <span className="font-medium text-gray-700">Created:</span>{" "}
+                                {new Date(rule.createdAt).toLocaleDateString()}
+                              </span>
+                              <span>
+                                <span className="font-medium text-gray-700">Updated:</span>{" "}
+                                {new Date(rule.updatedAt).toLocaleDateString()}
+                              </span>
+                              <span className="text-xs font-mono text-gray-400 sm:hidden">
+                                {rule.ruleId}
+                              </span>
+                            </div>
+
+                            {/* Tags */}
+                            {rule.tags && rule.tags.length > 0 && (
+                              <div className="flex flex-wrap gap-2">
+                                {rule.tags.map((tag, idx) => (
+                                  <span
+                                    key={idx}
+                                    className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-600"
+                                  >
+                                    #{tag}
                                   </span>
-                                )}
-                                {rule.isCommunity && (
-                                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-600 border border-amber-200">
-                                    Community
-                                  </span>
+                                ))}
+                              </div>
+                            )}
+
+                            {/* Description */}
+                            {rule.description && (
+                              <div>
+                                <h4 className="text-sm font-semibold text-gray-700 mb-1">Description</h4>
+                                <p className="text-sm text-gray-600 leading-relaxed">{rule.description}</p>
+                              </div>
+                            )}
+
+                            {/* Collection Details */}
+                            <div>
+                              <h4 className="text-sm font-semibold text-gray-700 mb-2">Collection Details</h4>
+                              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 space-y-3">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                                  <div>
+                                    <span className="text-gray-500 font-medium">Collector Type:</span>{" "}
+                                    <span className="text-gray-900 font-semibold">{COLLECTOR_TYPE_LABELS[rule.collectorType] || rule.collectorType}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-gray-500 font-medium">Category:</span>{" "}
+                                    {getCategoryBadge(rule.category)}
+                                  </div>
+                                </div>
+                                <div className="text-sm">
+                                  <span className="text-gray-500 font-medium">Target:</span>
+                                  <code className="ml-2 px-2 py-1 bg-gray-200 rounded text-xs font-mono text-gray-800 break-all">
+                                    {rule.target}
+                                  </code>
+                                </div>
+                                {rule.parameters && Object.keys(rule.parameters).length > 0 && (
+                                  <div className="text-sm">
+                                    <span className="text-gray-500 font-medium">Parameters:</span>
+                                    <div className="mt-1 space-y-1">
+                                      {Object.entries(rule.parameters).map(([key, value]) => (
+                                        <div key={key} className="flex items-start gap-2">
+                                          <code className="px-1.5 py-0.5 bg-indigo-100 rounded text-xs font-mono text-indigo-700">{key}</code>
+                                          <span className="text-gray-400">=</span>
+                                          <code className="px-1.5 py-0.5 bg-gray-200 rounded text-xs font-mono text-gray-700 break-all">{value}</code>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
                                 )}
                               </div>
-                              <h3 className="mt-1 text-sm font-semibold text-gray-900 truncate">{rule.title}</h3>
-                              {rule.description && (
-                                <p className="mt-0.5 text-sm text-gray-500 line-clamp-2">{rule.description}</p>
-                              )}
-                              <div className="mt-2 flex items-center flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
-                                <span className="flex items-center space-x-1">
-                                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
-                                  </svg>
-                                  <span>{rule.collectorType}</span>
-                                </span>
-                                <span className="flex items-center space-x-1">
-                                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            </div>
+
+                            {/* Trigger Details */}
+                            <div>
+                              <h4 className="text-sm font-semibold text-gray-700 mb-2">Trigger</h4>
+                              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-sm">
+                                <div className="flex items-center gap-2">
+                                  <svg className="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                                   </svg>
-                                  <span>
-                                    {rule.trigger === "phase_change"
-                                      ? "Phase Change"
-                                      : rule.trigger === "on_event"
-                                      ? "On Event"
-                                      : rule.trigger.charAt(0).toUpperCase() + rule.trigger.slice(1)}
-                                    {rule.trigger === "interval" && rule.intervalSeconds
-                                      ? ` (${rule.intervalSeconds}s)`
-                                      : ""}
-                                  </span>
-                                </span>
-                                <span className="flex items-center space-x-1">
-                                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                                  </svg>
-                                  <span>{rule.author}</span>
-                                </span>
+                                  <span className="font-semibold text-gray-900">{formatTrigger(rule.trigger)}</span>
+                                  {rule.trigger === "interval" && rule.intervalSeconds && (
+                                    <span className="text-gray-500">every {rule.intervalSeconds} seconds</span>
+                                  )}
+                                  {rule.trigger === "phase_change" && rule.triggerPhase && (
+                                    <span className="text-gray-500">
+                                      on phase: <code className="px-1 bg-gray-200 rounded text-xs">{rule.triggerPhase}</code>
+                                    </span>
+                                  )}
+                                  {rule.trigger === "on_event" && rule.triggerEventType && (
+                                    <span className="text-gray-500">
+                                      on event: <code className="px-1 bg-gray-200 rounded text-xs">{rule.triggerEventType}</code>
+                                    </span>
+                                  )}
+                                </div>
                               </div>
                             </div>
-                          </div>
 
-                          {/* Right: Delete button for custom rules */}
-                          {!rule.isBuiltIn && (
-                            <div className="flex-shrink-0">
+                            {/* Output */}
+                            <div>
+                              <h4 className="text-sm font-semibold text-gray-700 mb-2">Output</h4>
+                              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-sm">
+                                <div className="flex flex-wrap items-center gap-4">
+                                  <div>
+                                    <span className="text-gray-500 font-medium">Event Type:</span>{" "}
+                                    <code className="px-1.5 py-0.5 bg-gray-200 rounded text-xs font-mono text-gray-800">{rule.outputEventType}</code>
+                                  </div>
+                                  <div>
+                                    <span className="text-gray-500 font-medium">Severity:</span>{" "}
+                                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                                      rule.outputSeverity.toLowerCase() === "error" || rule.outputSeverity.toLowerCase() === "critical"
+                                        ? "bg-red-100 text-red-700"
+                                        : rule.outputSeverity.toLowerCase() === "warning"
+                                        ? "bg-yellow-100 text-yellow-700"
+                                        : "bg-blue-100 text-blue-700"
+                                    }`}>
+                                      {rule.outputSeverity.charAt(0).toUpperCase() + rule.outputSeverity.slice(1)}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Actions */}
+                            <div className="flex items-center justify-end space-x-3 pt-4 border-t border-gray-200">
+                              {canEdit && (
+                                <button
+                                  onClick={() => startEditing(rule)}
+                                  className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center space-x-2"
+                                  title={rule.isBuiltIn ? "Edit global rule (Galactic Admin)" : "Edit rule"}
+                                >
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                  </svg>
+                                  <span>{rule.isBuiltIn ? "Edit (Global)" : "Edit"}</span>
+                                </button>
+                              )}
+                              {!rule.isBuiltIn && (
+                                <button
+                                  onClick={() => handleDeleteRule(rule)}
+                                  disabled={deletingRule === rule.ruleId}
+                                  className="px-4 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-2"
+                                >
+                                  {deletingRule === rule.ruleId ? (
+                                    <>
+                                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                                      <span>Deleting...</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                      </svg>
+                                      <span>Delete</span>
+                                    </>
+                                  )}
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Edit Form (replaces detail view when editing) */}
+                        {isExpanded && isEditing && (
+                          <div className="border-t border-gray-200 p-6">
+                            <div className="flex items-center space-x-2 mb-4">
+                              <svg className="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                              </svg>
+                              <h4 className="text-sm font-semibold text-gray-900">
+                                Editing: {rule.ruleId}
+                                {rule.isBuiltIn && isGalacticAdmin && (
+                                  <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700 border border-amber-200">
+                                    Global Edit
+                                  </span>
+                                )}
+                              </h4>
+                            </div>
+
+                            {rule.isBuiltIn && isGalacticAdmin && (
+                              <div className="mb-4 bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800">
+                                <strong>Galactic Admin:</strong> Changes will apply globally to all tenants that haven&apos;t overridden this rule.
+                              </div>
+                            )}
+
+                            {renderFormFields(editForm, setEditForm, false)}
+
+                            {/* Action Buttons */}
+                            <div className="flex items-center justify-end space-x-3 pt-4 mt-5 border-t border-gray-200">
                               <button
-                                onClick={() => handleDeleteRule(rule)}
-                                disabled={deletingRule === rule.ruleId}
-                                className="px-3 py-1.5 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-1"
-                                title="Delete custom rule"
+                                onClick={() => setEditingRuleId(null)}
+                                disabled={saving}
+                                className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-medium"
                               >
-                                {deletingRule === rule.ruleId ? (
+                                Cancel
+                              </button>
+                              <button
+                                onClick={() => handleSaveEdit(rule)}
+                                disabled={saving}
+                                className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-2 text-sm font-medium"
+                              >
+                                {saving ? (
                                   <>
-                                    <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-white"></div>
-                                    <span>Deleting...</span>
+                                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                                    <span>Saving...</span>
                                   </>
                                 ) : (
-                                  <>
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                    </svg>
-                                    <span>Delete</span>
-                                  </>
+                                  <span>Save Changes</span>
                                 )}
                               </button>
                             </div>
-                          )}
-                        </div>
+                          </div>
+                        )}
                       </div>
-                    ))}
-                  </div>
+                    );
+                  })
                 )}
               </div>
             </div>

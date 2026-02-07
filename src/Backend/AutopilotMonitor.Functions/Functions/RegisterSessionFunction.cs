@@ -73,6 +73,9 @@ namespace AutopilotMonitor.Functions.Functions
                     return new RegisterSessionOutput { HttpResponse = errorResponse };
                 }
 
+                // Increment platform stats (fire-and-forget, non-blocking)
+                _ = _storageService.IncrementPlatformStatAsync("TotalEnrollments");
+
                 // Retrieve the stored session to include full data in SignalR message
                 var session = await _storageService.GetSessionAsync(registration.TenantId, registration.SessionId);
 

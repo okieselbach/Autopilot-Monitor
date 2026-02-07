@@ -452,9 +452,6 @@ export default function Home() {
               <h2 className="text-xl font-semibold text-gray-900 mb-2">
                 Welcome to Autopilot Monitor
               </h2>
-              <p className="text-sm text-gray-600 mb-4">
-                Real-time monitoring and troubleshooting for Windows Autopilot
-              </p>
               <p className="text-gray-600 mb-6">
                 No enrollment sessions yet. Sessions will appear below once devices start enrolling.
               </p>

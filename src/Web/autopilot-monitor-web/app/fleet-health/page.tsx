@@ -23,9 +23,30 @@ interface Session {
   failureReason?: string;
 }
 
+interface AppMetric {
+  appName: string;
+  totalInstalls: number;
+  succeeded: number;
+  failed: number;
+  failureRate: number;
+  avgDurationSeconds: number;
+  maxDurationSeconds: number;
+  avgDownloadBytes: number;
+  topFailureCodes: { code: string; count: number }[];
+}
+
+interface AppMetricsResponse {
+  success: boolean;
+  totalApps: number;
+  totalInstalls: number;
+  slowestApps: AppMetric[];
+  topFailingApps: AppMetric[];
+}
+
 export default function FleetHealthPage() {
   const router = useRouter();
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [appMetrics, setAppMetrics] = useState<AppMetricsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [timeRange, setTimeRange] = useState<"7d" | "30d" | "90d">("7d");
 
@@ -47,6 +68,7 @@ export default function FleetHealthPage() {
     if (hasInitialFetch.current) return;
     hasInitialFetch.current = true;
     fetchSessions();
+    fetchAppMetrics();
   }, []);
 
   useEffect(() => {
@@ -119,6 +141,23 @@ export default function FleetHealthPage() {
       console.error("Failed to fetch sessions:", error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchAppMetrics = async () => {
+    try {
+      const token = await getAccessToken();
+      if (!token) return;
+      const response = await fetch(
+        `${API_BASE_URL}/api/app-metrics?tenantId=${tenantId}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (response.ok) {
+        const data = await response.json();
+        setAppMetrics(data);
+      }
+    } catch (error) {
+      console.error("Failed to fetch app metrics:", error);
     }
   };
 
@@ -233,7 +272,7 @@ export default function FleetHealthPage() {
       .slice(0, 6);
   }, [filteredSessions]);
 
-  // Slowest apps - derive from session durations by model (proxy since we don't have per-app data at fleet level)
+  // Slowest models by avg enrollment duration
   const slowestModels = useMemo(() => {
     const models: Record<string, { totalDuration: number; count: number; model: string }> = {};
     filteredSessions
@@ -252,6 +291,27 @@ export default function FleetHealthPage() {
         count: m.count,
       }))
       .sort((a, b) => b.avgMinutes - a.avgMinutes)
+      .slice(0, 5);
+  }, [filteredSessions]);
+
+  // Top failing models - models with most failures
+  const topFailingModels = useMemo(() => {
+    const models: Record<string, { failed: number; total: number; model: string }> = {};
+    filteredSessions.forEach((s) => {
+      const key = `${s.manufacturer} ${s.model}`.trim() || "Unknown";
+      if (!models[key]) models[key] = { failed: 0, total: 0, model: key };
+      models[key].total++;
+      if (s.status === "Failed") models[key].failed++;
+    });
+    return Object.values(models)
+      .filter((m) => m.failed > 0)
+      .map((m) => ({
+        model: m.model,
+        failed: m.failed,
+        total: m.total,
+        failureRate: Math.round((m.failed / m.total) * 100),
+      }))
+      .sort((a, b) => b.failed - a.failed)
       .slice(0, 5);
   }, [filteredSessions]);
 
@@ -467,8 +527,8 @@ export default function FleetHealthPage() {
             )}
           </div>
 
-          {/* Two column: Failure Reasons + Slowest Models */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+          {/* Three column: Failure Reasons + Slowest Models + Top Failing Models */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
             {/* Top Failure Reasons */}
             <div className="bg-white shadow rounded-lg p-6">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">
@@ -512,11 +572,11 @@ export default function FleetHealthPage() {
             {/* Slowest Device Models */}
             <div className="bg-white shadow rounded-lg p-6">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">
-                Avg. Duration by Model
+                Slowest Models
               </h2>
               {slowestModels.length === 0 ? (
                 <div className="text-center py-6 text-gray-400 text-sm">
-                  No completed enrollments in this time range
+                  No completed enrollments
                 </div>
               ) : (
                 <div className="space-y-3">
@@ -537,6 +597,164 @@ export default function FleetHealthPage() {
                         <div className="text-xs text-gray-400">
                           {m.count} enrollments
                         </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Top Failing Models */}
+            <div className="bg-white shadow rounded-lg p-6">
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">
+                Top Failing Models
+              </h2>
+              {topFailingModels.length === 0 ? (
+                <div className="text-center py-6 text-gray-400 text-sm">
+                  No failures in this time range
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {topFailingModels.map((m, i) => (
+                    <div key={m.model} className="flex items-center space-x-3">
+                      <span className="text-xs text-gray-400 w-4">
+                        {i + 1}.
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-sm text-gray-700 truncate pr-2">
+                            {m.model}
+                          </span>
+                          <span className="text-sm font-medium text-red-600 flex-shrink-0">
+                            {m.failed} failed
+                          </span>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-red-400 rounded-full"
+                              style={{ width: `${m.failureRate}%` }}
+                            />
+                          </div>
+                          <span className="text-xs text-gray-400 flex-shrink-0">
+                            {m.failureRate}%
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Slowest Apps + Top Failing Apps */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            {/* Slowest Apps */}
+            <div className="bg-white shadow rounded-lg p-6">
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">
+                Slowest Apps
+              </h2>
+              {!appMetrics || appMetrics.slowestApps.length === 0 ? (
+                <div className="text-center py-6 text-gray-400 text-sm">
+                  No app install data available
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {appMetrics.slowestApps.map((app, i) => {
+                    const avgMinutes = Math.round(app.avgDurationSeconds / 60);
+                    const maxMinutes = Math.round(app.maxDurationSeconds / 60);
+                    const maxAvg = Math.max(
+                      ...appMetrics.slowestApps.map((a) => a.avgDurationSeconds)
+                    );
+                    return (
+                      <div
+                        key={app.appName}
+                        className="flex items-center space-x-3"
+                      >
+                        <span className="text-xs text-gray-400 w-4">
+                          {i + 1}.
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-sm text-gray-700 truncate pr-2">
+                              {app.appName}
+                            </span>
+                            <span className="text-sm font-medium text-gray-900 flex-shrink-0">
+                              {avgMinutes} min avg
+                            </span>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-amber-400 rounded-full"
+                                style={{
+                                  width: `${
+                                    maxAvg > 0
+                                      ? (app.avgDurationSeconds / maxAvg) * 100
+                                      : 0
+                                  }%`,
+                                }}
+                              />
+                            </div>
+                            <span className="text-xs text-gray-400 flex-shrink-0">
+                              max {maxMinutes}m | {app.succeeded} installs
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Top Failing Apps */}
+            <div className="bg-white shadow rounded-lg p-6">
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">
+                Top Failing Apps
+              </h2>
+              {!appMetrics || appMetrics.topFailingApps.length === 0 ? (
+                <div className="text-center py-6 text-gray-400 text-sm">
+                  No app failures recorded
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {appMetrics.topFailingApps.map((app, i) => (
+                    <div
+                      key={app.appName}
+                      className="flex items-center space-x-3"
+                    >
+                      <span className="text-xs text-gray-400 w-4">
+                        {i + 1}.
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-sm text-gray-700 truncate pr-2">
+                            {app.appName}
+                          </span>
+                          <span className="text-sm font-medium text-red-600 flex-shrink-0">
+                            {app.failed} failed
+                          </span>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-red-400 rounded-full"
+                              style={{ width: `${app.failureRate}%` }}
+                            />
+                          </div>
+                          <span className="text-xs text-gray-400 flex-shrink-0">
+                            {app.failureRate}% of {app.totalInstalls}
+                          </span>
+                        </div>
+                        {app.topFailureCodes.length > 0 && (
+                          <div className="text-xs text-gray-400 mt-1">
+                            {app.topFailureCodes
+                              .map((fc) => `${fc.code} (${fc.count}x)`)
+                              .join(", ")}
+                          </div>
+                        )}
                       </div>
                     </div>
                   ))}

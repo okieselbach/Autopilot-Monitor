@@ -110,6 +110,9 @@ namespace AutopilotMonitor.Functions.Functions
                 EnrollmentEvent? completionEvent = null;
                 EnrollmentEvent? failureEvent = null;
 
+                // Track app install events for AppInstallSummary aggregation
+                var appInstallUpdates = new Dictionary<string, AppInstallSummary>(StringComparer.OrdinalIgnoreCase);
+
                 foreach (var evt in request.Events)
                 {
                     var stored = await _storageService.StoreEventAsync(evt);
@@ -132,11 +135,20 @@ namespace AutopilotMonitor.Functions.Functions
                         {
                             failureEvent = evt;
                         }
+
+                        // Track app install events for per-app metrics
+                        AggregateAppInstallEvent(evt, request.TenantId, request.SessionId, appInstallUpdates);
                     }
                     else
                     {
                         _logger.LogWarning($"Failed to store event: {evt.EventType}");
                     }
+                }
+
+                // Store app install summaries
+                foreach (var summary in appInstallUpdates.Values)
+                {
+                    await _storageService.StoreAppInstallSummaryAsync(summary);
                 }
 
                 // Update session status based on events
@@ -202,6 +214,13 @@ namespace AutopilotMonitor.Functions.Functions
                         _logger.LogWarning(ruleEx, $"{sessionPrefix} Enrollment-end analysis failed (non-fatal)");
                     }
                 }
+
+                // Increment platform stats (fire-and-forget, non-blocking)
+                _ = _storageService.IncrementPlatformStatAsync("TotalEventsProcessed", processedCount);
+                if (newRuleResults.Count > 0)
+                    _ = _storageService.IncrementPlatformStatAsync("IssuesDetected", newRuleResults.Count);
+                if (completionEvent != null)
+                    _ = _storageService.IncrementPlatformStatAsync("SuccessfulEnrollments");
 
                 // Retrieve updated session data to include in SignalR messages
                 var updatedSession = await _storageService.GetSessionAsync(request.TenantId, request.SessionId);
@@ -342,6 +361,80 @@ namespace AutopilotMonitor.Functions.Functions
                 TenantId = metadata.TenantId,
                 Events = events
             };
+        }
+
+        /// <summary>
+        /// Aggregates app install events into AppInstallSummary records
+        /// </summary>
+        private void AggregateAppInstallEvent(EnrollmentEvent evt, string tenantId, string sessionId, Dictionary<string, AppInstallSummary> summaries)
+        {
+            string? appName = null;
+
+            if (evt.EventType == "app_install_start" || evt.EventType == "app_install_complete" ||
+                evt.EventType == "app_install_failed" || evt.EventType == "download_progress")
+            {
+                appName = evt.Data?.ContainsKey("appName") == true ? evt.Data["appName"]?.ToString() : null;
+                if (string.IsNullOrEmpty(appName)) return;
+            }
+            else
+            {
+                return;
+            }
+
+            if (!summaries.TryGetValue(appName, out var summary))
+            {
+                summary = new AppInstallSummary
+                {
+                    AppName = appName,
+                    SessionId = sessionId,
+                    TenantId = tenantId,
+                    StartedAt = evt.Timestamp
+                };
+                summaries[appName] = summary;
+            }
+
+            switch (evt.EventType)
+            {
+                case "app_install_start":
+                    summary.Status = "InProgress";
+                    summary.StartedAt = evt.Timestamp;
+                    break;
+
+                case "app_install_complete":
+                    summary.Status = "Succeeded";
+                    summary.CompletedAt = evt.Timestamp;
+                    if (summary.StartedAt != DateTime.MinValue)
+                    {
+                        summary.DurationSeconds = (int)(evt.Timestamp - summary.StartedAt).TotalSeconds;
+                    }
+                    break;
+
+                case "app_install_failed":
+                    summary.Status = "Failed";
+                    summary.CompletedAt = evt.Timestamp;
+                    if (summary.StartedAt != DateTime.MinValue)
+                    {
+                        summary.DurationSeconds = (int)(evt.Timestamp - summary.StartedAt).TotalSeconds;
+                    }
+                    summary.FailureCode = evt.Data?.ContainsKey("errorCode") == true
+                        ? evt.Data["errorCode"]?.ToString() ?? string.Empty : string.Empty;
+                    summary.FailureMessage = evt.Data?.ContainsKey("errorMessage") == true
+                        ? evt.Data["errorMessage"]?.ToString() ?? string.Empty : evt.Message ?? string.Empty;
+                    break;
+
+                case "download_progress":
+                    if (evt.Data?.ContainsKey("bytes_downloaded") == true &&
+                        long.TryParse(evt.Data["bytes_downloaded"]?.ToString(), out var bytes))
+                    {
+                        summary.DownloadBytes = Math.Max(summary.DownloadBytes, bytes);
+                    }
+                    if (evt.Data?.ContainsKey("download_duration_seconds") == true &&
+                        int.TryParse(evt.Data["download_duration_seconds"]?.ToString(), out var dlDuration))
+                    {
+                        summary.DownloadDurationSeconds = Math.Max(summary.DownloadDurationSeconds, dlDuration);
+                    }
+                    break;
+            }
         }
 
         private async Task<IngestEventsOutput> CreateErrorResponse(HttpRequestData req, HttpStatusCode statusCode, string message)

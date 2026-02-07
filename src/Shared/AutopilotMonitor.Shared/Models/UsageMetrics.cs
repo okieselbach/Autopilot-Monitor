@@ -34,6 +34,11 @@ namespace AutopilotMonitor.Shared.Models
         public HardwareMetrics Hardware { get; set; } = new();
 
         /// <summary>
+        /// Platform statistics (cumulative since release)
+        /// </summary>
+        public PlatformStats? PlatformStats { get; set; }
+
+        /// <summary>
         /// When these metrics were computed
         /// </summary>
         public DateTime ComputedAt { get; set; }

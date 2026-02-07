@@ -16,11 +16,13 @@ namespace AutopilotMonitor.Functions.Functions
     {
         private readonly ILogger<GatherRulesFunction> _logger;
         private readonly GatherRuleService _ruleService;
+        private readonly GalacticAdminService _galacticAdminService;
 
-        public GatherRulesFunction(ILogger<GatherRulesFunction> logger, GatherRuleService ruleService)
+        public GatherRulesFunction(ILogger<GatherRulesFunction> logger, GatherRuleService ruleService, GalacticAdminService galacticAdminService)
         {
             _logger = logger;
             _ruleService = ruleService;
+            _galacticAdminService = galacticAdminService;
         }
 
         [Function("GetGatherRules")]
@@ -95,11 +97,32 @@ namespace AutopilotMonitor.Functions.Functions
             }
 
             rule.RuleId = ruleId;
-            var success = await _ruleService.UpdateRuleAsync(tenantId, rule);
 
-            var response = req.CreateResponse(success ? HttpStatusCode.OK : HttpStatusCode.InternalServerError);
-            await response.WriteAsJsonAsync(new { success, message = success ? "Rule updated" : "Failed to update rule" });
-            return response;
+            // Galactic Admins can edit built-in rules globally (affects all tenants)
+            var globalEdit = req.Url.Query.Contains("global=true", StringComparison.OrdinalIgnoreCase);
+            if (globalEdit)
+            {
+                var upn = TenantHelper.GetUserIdentifier(req);
+                var isGalactic = await _galacticAdminService.IsGalacticAdminAsync(upn);
+                if (!isGalactic)
+                {
+                    var forbidden = req.CreateResponse(HttpStatusCode.Forbidden);
+                    await forbidden.WriteAsJsonAsync(new { success = false, message = "Galactic Admin privileges required for global rule edits" });
+                    return forbidden;
+                }
+
+                var success = await _ruleService.UpdateGlobalRuleAsync(rule);
+                var response = req.CreateResponse(success ? HttpStatusCode.OK : HttpStatusCode.InternalServerError);
+                await response.WriteAsJsonAsync(new { success, message = success ? "Global rule updated" : "Failed to update global rule" });
+                return response;
+            }
+            else
+            {
+                var success = await _ruleService.UpdateRuleAsync(tenantId, rule);
+                var response = req.CreateResponse(success ? HttpStatusCode.OK : HttpStatusCode.InternalServerError);
+                await response.WriteAsJsonAsync(new { success, message = success ? "Rule updated" : "Failed to update rule" });
+                return response;
+            }
         }
 
         [Function("DeleteGatherRule")]

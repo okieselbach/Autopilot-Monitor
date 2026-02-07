@@ -1,3 +1,4 @@
+using AutopilotMonitor.Shared;
 using Azure.Data.Tables;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
@@ -14,7 +15,6 @@ public class TenantAdminsService
     private readonly TableServiceClient _tableServiceClient;
     private readonly IMemoryCache _cache;
     private readonly ILogger<TenantAdminsService> _logger;
-    private readonly string _tableName = "TenantAdmins";
     private readonly TimeSpan _cacheDuration = TimeSpan.FromMinutes(5);
 
     public TenantAdminsService(
@@ -26,22 +26,7 @@ public class TenantAdminsService
         _logger = logger;
         var connectionString = configuration["AzureTableStorageConnectionString"];
         _tableServiceClient = new TableServiceClient(connectionString);
-
-        // Ensure table exists
-        InitializeTableAsync().GetAwaiter().GetResult();
-    }
-
-    private async Task InitializeTableAsync()
-    {
-        try
-        {
-            await _tableServiceClient.CreateTableIfNotExistsAsync(_tableName);
-            _logger.LogInformation($"Tenant Admins table initialized: {_tableName}");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, $"Failed to initialize Tenant Admins table: {_tableName}");
-        }
+        // Table is initialized centrally by TableInitializerService at startup
     }
 
     /// <summary>
@@ -92,7 +77,7 @@ public class TenantAdminsService
     {
         try
         {
-            var tableClient = _tableServiceClient.GetTableClient(_tableName);
+            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.TenantAdmins);
             var normalizedTenantId = tenantId.ToLowerInvariant();
             var normalizedUpn = upn.ToLowerInvariant();
 
@@ -143,7 +128,7 @@ public class TenantAdminsService
             AddedBy = addedBy
         };
 
-        var tableClient = _tableServiceClient.GetTableClient(_tableName);
+        var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.TenantAdmins);
         await tableClient.UpsertEntityAsync(entity);
 
         // Invalidate cache
@@ -162,7 +147,7 @@ public class TenantAdminsService
         tenantId = tenantId.ToLowerInvariant();
         upn = upn.ToLowerInvariant();
 
-        var tableClient = _tableServiceClient.GetTableClient(_tableName);
+        var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.TenantAdmins);
         await tableClient.DeleteEntityAsync(tenantId, upn);
 
         // Invalidate cache
@@ -184,7 +169,7 @@ public class TenantAdminsService
         {
             admin.IsEnabled = false;
 
-            var tableClient = _tableServiceClient.GetTableClient(_tableName);
+            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.TenantAdmins);
             await tableClient.UpdateEntityAsync(admin, Azure.ETag.All);
 
             // Invalidate cache
@@ -207,7 +192,7 @@ public class TenantAdminsService
         {
             admin.IsEnabled = true;
 
-            var tableClient = _tableServiceClient.GetTableClient(_tableName);
+            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.TenantAdmins);
             await tableClient.UpdateEntityAsync(admin, Azure.ETag.All);
 
             // Invalidate cache
@@ -223,7 +208,7 @@ public class TenantAdminsService
     public async Task<List<TenantAdminEntity>> GetTenantAdminsAsync(string tenantId)
     {
         tenantId = tenantId.ToLowerInvariant();
-        var tableClient = _tableServiceClient.GetTableClient(_tableName);
+        var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.TenantAdmins);
 
         var admins = new List<TenantAdminEntity>();
         await foreach (var entity in tableClient.QueryAsync<TenantAdminEntity>(

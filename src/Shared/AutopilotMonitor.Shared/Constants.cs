@@ -97,14 +97,54 @@ namespace AutopilotMonitor.Shared
 
         /// <summary>
         /// Azure Table Storage table names
+        /// All table names are defined here centrally and initialized at application startup
         /// </summary>
         public static class TableNames
         {
-            public const string Sessions = "sessions";
-            public const string Events = "events";
-            public const string RuleResults = "ruleresults";
-            public const string GatherRules = "gatherrules";
-            public const string AnalyzeRules = "analyzerules";
+            // Core data tables
+            public const string Sessions = "Sessions";
+            public const string Events = "Events";
+            public const string AuditLogs = "AuditLogs";
+            public const string UsageMetrics = "UsageMetrics";
+            public const string UserActivity = "UserActivity";
+
+            // Rules engine tables
+            public const string RuleResults = "RuleResults";
+            public const string GatherRules = "GatherRules";
+            public const string AnalyzeRules = "AnalyzeRules";
+
+            // App metrics tables
+            public const string AppInstallSummaries = "AppInstallSummaries";
+            public const string PlatformStats = "PlatformStats";
+
+            // Configuration tables
+            public const string TenantConfiguration = "TenantConfiguration";
+            public const string AdminConfiguration = "AdminConfiguration";
+
+            // Admin tables
+            public const string GalacticAdmins = "GalacticAdmins";
+            public const string TenantAdmins = "TenantAdmins";
+
+            /// <summary>
+            /// Returns all table names for initialization
+            /// </summary>
+            public static string[] All => new[]
+            {
+                Sessions,
+                Events,
+                AuditLogs,
+                UsageMetrics,
+                UserActivity,
+                RuleResults,
+                GatherRules,
+                AnalyzeRules,
+                AppInstallSummaries,
+                PlatformStats,
+                TenantConfiguration,
+                AdminConfiguration,
+                GalacticAdmins,
+                TenantAdmins
+            };
         }
 
         /// <summary>

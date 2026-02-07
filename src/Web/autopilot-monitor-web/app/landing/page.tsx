@@ -1,19 +1,30 @@
 "use client";
 
 import { useAuth } from "../../contexts/AuthContext";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect } from "react";
+
+// Static platform stats - manually updated periodically
+const PLATFORM_STATS = {
+  totalEnrollments: 123,
+  totalTenants: 2,
+  uniqueDeviceModels: 1,
+};
 
 export default function LandingPage() {
   const { login, isAuthenticated, isLoading } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
 
-  // Redirect to dashboard if already authenticated
+  // Check for preview mode (for debugging while logged in)
+  const previewMode = searchParams.get("preview") === "true";
+
+  // Redirect to dashboard if already authenticated (unless in preview mode)
   useEffect(() => {
-    if (isAuthenticated && !isLoading) {
+    if (isAuthenticated && !isLoading && !previewMode) {
       router.push("/");
     }
-  }, [isAuthenticated, isLoading, router]);
+  }, [isAuthenticated, isLoading, previewMode, router]);
 
   if (isLoading) {
     return (
@@ -77,6 +88,39 @@ export default function LandingPage() {
             <p className="mt-4 text-sm text-gray-500">
               Free to try • Enterprise-ready • Multi-tenant support
             </p>
+
+            {/* Platform Stats - Since Release (Static) - Always show, even if 0 */}
+            <div className="mt-12 pt-12 border-t border-gray-200">
+              <p className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-6">
+                Since Release
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-8">
+                <div className="text-center">
+                  <div className="text-4xl font-bold text-blue-600 mb-2">
+                    {PLATFORM_STATS.totalEnrollments.toLocaleString()}
+                  </div>
+                  <div className="text-sm text-gray-600">
+                    Enrollments Monitored
+                  </div>
+                </div>
+                <div className="text-center">
+                  <div className="text-4xl font-bold text-indigo-600 mb-2">
+                    {PLATFORM_STATS.totalTenants.toLocaleString()}
+                  </div>
+                  <div className="text-sm text-gray-600">
+                    Active Organizations
+                  </div>
+                </div>
+                <div className="text-center">
+                  <div className="text-4xl font-bold text-purple-600 mb-2">
+                    {PLATFORM_STATS.uniqueDeviceModels.toLocaleString()}
+                  </div>
+                  <div className="text-sm text-gray-600">
+                    Different Device Models
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -191,6 +235,11 @@ export default function LandingPage() {
       <footer className="border-t border-gray-200 bg-white/50 backdrop-blur-sm py-8 px-6">
         <div className="max-w-7xl mx-auto text-center text-gray-600">
           <p>&copy; 2026 Autopilot Monitor. Powered by Azure and Microsoft Identity.</p>
+          {previewMode && (
+            <p className="mt-2 text-xs text-orange-600 font-semibold">
+              🔍 Preview Mode Active - Auto-redirect disabled
+            </p>
+          )}
         </div>
       </footer>
     </div>
