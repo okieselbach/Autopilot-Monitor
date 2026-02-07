@@ -53,11 +53,33 @@ namespace AutopilotMonitor.Functions.Functions
                 var userEmail = TenantHelper.GetUserIdentifier(req);
 
                 // Validate tenant access (same logic as AddToGroup)
-                // Group names are in format: "tenant-{tenantId}" or "session-{tenantId}-{sessionId}"
+                // Group names are in format: "tenant-{tenantId}", "session-{tenantId}-{sessionId}", or "galactic-admins"
                 // Users can only leave groups for their own tenant (unless they are Galactic Admin)
-                var requestedTenantId = ExtractTenantIdFromGroupName(request.GroupName);
-                if (!string.IsNullOrEmpty(requestedTenantId))
+
+                // Explicit validation for the galactic-admins group
+                if (request.GroupName == "galactic-admins")
                 {
+                    var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userEmail);
+                    if (!isGalacticAdmin)
+                    {
+                        _logger.LogWarning($"User {userEmail} (tenant {userTenantId}) attempted to leave galactic-admins group without being a Galactic Admin");
+                        var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
+                        await forbiddenResponse.WriteAsJsonAsync(new { success = false, message = "Access denied: Only Galactic Admins can leave this group" });
+                        return new RemoveFromGroupOutput { HttpResponse = forbiddenResponse };
+                    }
+                    _logger.LogInformation($"Galactic Admin {userEmail} leaving galactic-admins group");
+                }
+                else
+                {
+                    var requestedTenantId = ExtractTenantIdFromGroupName(request.GroupName);
+                    if (string.IsNullOrEmpty(requestedTenantId))
+                    {
+                        _logger.LogWarning($"User {userEmail} attempted to leave unrecognized group format: {request.GroupName}");
+                        var badRequestResponse = req.CreateResponse(HttpStatusCode.BadRequest);
+                        await badRequestResponse.WriteAsJsonAsync(new { success = false, message = "Unrecognized group name format" });
+                        return new RemoveFromGroupOutput { HttpResponse = badRequestResponse };
+                    }
+
                     // Check if user is allowed to leave this tenant's group
                     if (requestedTenantId != userTenantId)
                     {

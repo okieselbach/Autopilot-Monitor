@@ -53,11 +53,33 @@ namespace AutopilotMonitor.Functions.Functions
                 var userEmail = TenantHelper.GetUserIdentifier(req);
 
                 // Validate tenant access
-                // Group names are in format: "tenant-{tenantId}" or "session-{tenantId}-{sessionId}"
+                // Group names are in format: "tenant-{tenantId}", "session-{tenantId}-{sessionId}", or "galactic-admins"
                 // Users can only join groups for their own tenant (unless they are Galactic Admin)
-                var requestedTenantId = ExtractTenantIdFromGroupName(request.GroupName);
-                if (!string.IsNullOrEmpty(requestedTenantId))
+
+                // Explicit validation for the galactic-admins group
+                if (request.GroupName == "galactic-admins")
                 {
+                    var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userEmail);
+                    if (!isGalacticAdmin)
+                    {
+                        _logger.LogWarning($"User {userEmail} (tenant {userTenantId}) attempted to join galactic-admins group without being a Galactic Admin");
+                        var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
+                        await forbiddenResponse.WriteAsJsonAsync(new { success = false, message = "Access denied: Only Galactic Admins can join this group" });
+                        return new AddToGroupOutput { HttpResponse = forbiddenResponse };
+                    }
+                    _logger.LogInformation($"Galactic Admin {userEmail} joining galactic-admins group");
+                }
+                else
+                {
+                    var requestedTenantId = ExtractTenantIdFromGroupName(request.GroupName);
+                    if (string.IsNullOrEmpty(requestedTenantId))
+                    {
+                        _logger.LogWarning($"User {userEmail} attempted to join unrecognized group format: {request.GroupName}");
+                        var badRequestResponse = req.CreateResponse(HttpStatusCode.BadRequest);
+                        await badRequestResponse.WriteAsJsonAsync(new { success = false, message = "Unrecognized group name format" });
+                        return new AddToGroupOutput { HttpResponse = badRequestResponse };
+                    }
+
                     // Check if user is allowed to join this tenant's group
                     if (requestedTenantId != userTenantId)
                     {
