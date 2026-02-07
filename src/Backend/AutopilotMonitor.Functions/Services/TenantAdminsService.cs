@@ -1,3 +1,4 @@
+using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Shared;
 using Azure.Data.Tables;
 using Microsoft.Extensions.Caching.Memory;
@@ -207,6 +208,8 @@ public class TenantAdminsService
     /// </summary>
     public async Task<List<TenantAdminEntity>> GetTenantAdminsAsync(string tenantId)
     {
+        SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
+
         tenantId = tenantId.ToLowerInvariant();
         var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.TenantAdmins);
 

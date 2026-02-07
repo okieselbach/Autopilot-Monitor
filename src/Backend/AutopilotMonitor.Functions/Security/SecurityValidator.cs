@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using System.Net;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using AutopilotMonitor.Functions.Services;
 using AutopilotMonitor.Shared.Models;
@@ -15,6 +16,31 @@ namespace AutopilotMonitor.Functions.Security
     /// </summary>
     public class SecurityValidator
     {
+        private static readonly Regex GuidRegex = new Regex(
+            @"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+            RegexOptions.Compiled);
+
+        /// <summary>
+        /// Validates that a string is a valid GUID format.
+        /// Use this to prevent OData filter injection in Table Storage queries.
+        /// </summary>
+        public static bool IsValidGuid(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return false;
+
+            return Guid.TryParse(value, out _) && GuidRegex.IsMatch(value);
+        }
+
+        /// <summary>
+        /// Validates that a value is a valid GUID and throws if not.
+        /// </summary>
+        public static void EnsureValidGuid(string? value, string parameterName)
+        {
+            if (!IsValidGuid(value))
+                throw new ArgumentException($"Invalid {parameterName} format. Expected a valid GUID.", parameterName);
+        }
+
         private readonly TenantConfigurationService _configService;
         private readonly RateLimitService _rateLimitService;
         private readonly ILogger _logger;

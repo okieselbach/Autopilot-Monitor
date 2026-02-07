@@ -1,5 +1,6 @@
 using Azure;
 using Azure.Data.Tables;
+using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Extensions.Configuration;
@@ -82,6 +83,9 @@ namespace AutopilotMonitor.Functions.Services
         /// </summary>
         public async Task<bool> StoreSessionAsync(SessionRegistration registration)
         {
+            SecurityValidator.EnsureValidGuid(registration.TenantId, "TenantId");
+            SecurityValidator.EnsureValidGuid(registration.SessionId, "SessionId");
+
             try
             {
                 var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
@@ -122,6 +126,9 @@ namespace AutopilotMonitor.Functions.Services
         /// </summary>
         public async Task<bool> StoreEventAsync(EnrollmentEvent evt)
         {
+            SecurityValidator.EnsureValidGuid(evt.TenantId, "TenantId");
+            SecurityValidator.EnsureValidGuid(evt.SessionId, "SessionId");
+
             try
             {
                 var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Events);
@@ -166,6 +173,8 @@ namespace AutopilotMonitor.Functions.Services
         /// </summary>
         public async Task<List<SessionSummary>> GetSessionsAsync(string tenantId, int maxResults = 100)
         {
+            SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
+
             try
             {
                 var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
@@ -248,6 +257,9 @@ namespace AutopilotMonitor.Functions.Services
         /// </summary>
         public async Task<bool> UpdateSessionStatusAsync(string tenantId, string sessionId, SessionStatus status, EnrollmentPhase? currentPhase = null, string? failureReason = null)
         {
+            SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
+            SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
+
             const int maxRetries = 3;
             int retryCount = 0;
 
@@ -327,6 +339,9 @@ namespace AutopilotMonitor.Functions.Services
         /// </summary>
         public async Task<List<EnrollmentEvent>> GetSessionEventsAsync(string tenantId, string sessionId, int maxResults = 1000)
         {
+            SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
+            SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
+
             try
             {
                 var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Events);
@@ -439,6 +454,9 @@ namespace AutopilotMonitor.Functions.Services
         /// </summary>
         public async Task<int> DeleteSessionEventsAsync(string tenantId, string sessionId)
         {
+            SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
+            SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
+
             try
             {
                 var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Events);
@@ -501,6 +519,8 @@ namespace AutopilotMonitor.Functions.Services
         /// </summary>
         public async Task<List<AuditLogEntry>> GetAuditLogsAsync(string tenantId, int maxResults = 100)
         {
+            SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
+
             try
             {
                 var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.AuditLogs);
@@ -581,6 +601,9 @@ namespace AutopilotMonitor.Functions.Services
         /// </summary>
         public async Task<List<UsageMetricsSnapshot>> GetUsageMetricsSnapshotAsync(string? tenantId = null, string? startDate = null, string? endDate = null, int maxResults = 100)
         {
+            if (!string.IsNullOrEmpty(tenantId))
+                SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
+
             try
             {
                 var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.UsageMetrics);
@@ -644,6 +667,8 @@ namespace AutopilotMonitor.Functions.Services
         /// </summary>
         public async Task<List<SessionSummary>> GetSessionsOlderThanAsync(string tenantId, DateTime cutoffDate)
         {
+            SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
+
             try
             {
                 var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
@@ -740,6 +765,9 @@ namespace AutopilotMonitor.Functions.Services
         /// </summary>
         public async Task<List<RuleResult>> GetRuleResultsAsync(string tenantId, string sessionId)
         {
+            SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
+            SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
+
             try
             {
                 var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.RuleResults);
@@ -828,6 +856,9 @@ namespace AutopilotMonitor.Functions.Services
         /// </summary>
         public async Task<List<GatherRule>> GetGatherRulesAsync(string partitionKey)
         {
+            if (partitionKey != "global")
+                SecurityValidator.EnsureValidGuid(partitionKey, nameof(partitionKey));
+
             try
             {
                 var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.GatherRules);
@@ -945,6 +976,9 @@ namespace AutopilotMonitor.Functions.Services
         /// </summary>
         public async Task<List<AnalyzeRule>> GetAnalyzeRulesAsync(string partitionKey)
         {
+            if (partitionKey != "global")
+                SecurityValidator.EnsureValidGuid(partitionKey, nameof(partitionKey));
+
             try
             {
                 var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.AnalyzeRules);
@@ -1053,6 +1087,8 @@ namespace AutopilotMonitor.Functions.Services
         /// </summary>
         public async Task<List<AppInstallSummary>> GetAppInstallSummariesByTenantAsync(string tenantId)
         {
+            SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
+
             try
             {
                 var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.AppInstallSummaries);
@@ -1078,6 +1114,9 @@ namespace AutopilotMonitor.Functions.Services
         /// </summary>
         public async Task<int> DeleteSessionAppInstallSummariesAsync(string tenantId, string sessionId)
         {
+            SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
+            SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
+
             try
             {
                 var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.AppInstallSummaries);
@@ -1105,6 +1144,9 @@ namespace AutopilotMonitor.Functions.Services
         /// </summary>
         public async Task<int> DeleteSessionRuleResultsAsync(string tenantId, string sessionId)
         {
+            SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
+            SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
+
             try
             {
                 var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.RuleResults);
@@ -1297,6 +1339,8 @@ namespace AutopilotMonitor.Functions.Services
         /// </summary>
         public async Task<UserActivityMetrics> GetUserActivityMetricsAsync(string tenantId)
         {
+            SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
+
             try
             {
                 var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.UserActivity);
@@ -1405,6 +1449,9 @@ namespace AutopilotMonitor.Functions.Services
         /// </summary>
         public async Task<(int uniqueUsers, int loginCount)> GetUserActivityForDateAsync(string? tenantId, DateTime date)
         {
+            if (!string.IsNullOrEmpty(tenantId) && tenantId != "global")
+                SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
+
             try
             {
                 var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.UserActivity);
