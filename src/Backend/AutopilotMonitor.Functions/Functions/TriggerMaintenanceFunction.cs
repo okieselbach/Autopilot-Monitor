@@ -16,16 +16,16 @@ namespace AutopilotMonitor.Functions.Functions
     public class TriggerMaintenanceFunction
     {
         private readonly ILogger<TriggerMaintenanceFunction> _logger;
-        private readonly DailyMaintenanceFunction _maintenanceFunction;
+        private readonly MaintenanceService _maintenanceService;
         private readonly GalacticAdminService _galacticAdminService;
 
         public TriggerMaintenanceFunction(
             ILogger<TriggerMaintenanceFunction> logger,
-            DailyMaintenanceFunction maintenanceFunction,
+            MaintenanceService maintenanceService,
             GalacticAdminService galacticAdminService)
         {
             _logger = logger;
-            _maintenanceFunction = maintenanceFunction;
+            _maintenanceService = maintenanceService;
             _galacticAdminService = galacticAdminService;
         }
 
@@ -99,7 +99,7 @@ namespace AutopilotMonitor.Functions.Functions
                 bool aggregateOnly = aggregateOnlyParam?.ToLower() == "true";
 
                 // Execute maintenance tasks
-                var result = await _maintenanceFunction.RunManualAsync(targetDate, aggregateOnly, userEmail);
+                var result = await _maintenanceService.RunManualAsync(targetDate, aggregateOnly, userEmail);
 
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(new

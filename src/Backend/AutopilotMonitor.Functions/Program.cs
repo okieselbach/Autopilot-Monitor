@@ -1,6 +1,5 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using AutopilotMonitor.Functions.Functions;
 using AutopilotMonitor.Functions.Middleware;
 using AutopilotMonitor.Functions.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -101,6 +100,6 @@ builder.Services.AddSingleton<TenantAdminsService>();
 builder.Services.AddSingleton<HealthCheckService>();
 builder.Services.AddSingleton<GatherRuleService>();
 builder.Services.AddSingleton<AnalyzeRuleService>();
-builder.Services.AddSingleton<DailyMaintenanceFunction>();
+builder.Services.AddSingleton<MaintenanceService>();
 
 builder.Build().Run();
