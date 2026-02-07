@@ -67,6 +67,12 @@ namespace AutopilotMonitor.Functions.Functions
                 _logger.LogInformation($"UpdateAdminConfiguration by Galactic Admin user {userIdentifier}");
 
                 // Parse request body
+                if (req.Body.Length > 1_048_576) // 1 MB limit
+                {
+                    var badRequest = req.CreateResponse(HttpStatusCode.BadRequest);
+                    await badRequest.WriteAsJsonAsync(new { success = false, message = "Request body too large" });
+                    return badRequest;
+                }
                 var requestBody = await new StreamReader(req.Body).ReadToEndAsync();
                 var config = JsonConvert.DeserializeObject<AdminConfiguration>(requestBody);
 

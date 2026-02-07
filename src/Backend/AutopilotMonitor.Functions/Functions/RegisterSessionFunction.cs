@@ -38,6 +38,11 @@ namespace AutopilotMonitor.Functions.Functions
             try
             {
                 // Parse request
+                if (req.Body.Length > 1_048_576) // 1 MB limit
+                {
+                    var errorResponse = await CreateErrorResponse(req, HttpStatusCode.BadRequest, "Request body too large");
+                    return new RegisterSessionOutput { HttpResponse = errorResponse };
+                }
                 var requestBody = await new StreamReader(req.Body).ReadToEndAsync();
                 var request = JsonConvert.DeserializeObject<RegisterSessionRequest>(requestBody);
 

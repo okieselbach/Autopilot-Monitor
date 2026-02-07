@@ -56,6 +56,12 @@ namespace AutopilotMonitor.Functions.Functions
                 return unauthorized;
             }
 
+            if (req.Body.Length > 1_048_576) // 1 MB limit
+            {
+                var badRequest = req.CreateResponse(HttpStatusCode.BadRequest);
+                await badRequest.WriteAsJsonAsync(new { success = false, message = "Request body too large" });
+                return badRequest;
+            }
             var body = await new StreamReader(req.Body).ReadToEndAsync();
             var rule = JsonConvert.DeserializeObject<AnalyzeRule>(body);
 
@@ -86,6 +92,12 @@ namespace AutopilotMonitor.Functions.Functions
                 return unauthorized;
             }
 
+            if (req.Body.Length > 1_048_576) // 1 MB limit
+            {
+                var badRequest = req.CreateResponse(HttpStatusCode.BadRequest);
+                await badRequest.WriteAsJsonAsync(new { success = false, message = "Request body too large" });
+                return badRequest;
+            }
             var body = await new StreamReader(req.Body).ReadToEndAsync();
             var rule = JsonConvert.DeserializeObject<AnalyzeRule>(body);
 

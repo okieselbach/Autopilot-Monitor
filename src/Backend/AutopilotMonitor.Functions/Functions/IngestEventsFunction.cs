@@ -68,6 +68,10 @@ namespace AutopilotMonitor.Functions.Functions
                 {
                     // Legacy format: standard JSON (backwards compatibility)
                     _logger.LogDebug("Parsing legacy JSON request");
+                    if (req.Body.Length > 1_048_576) // 1 MB limit
+                    {
+                        return await CreateErrorResponse(req, HttpStatusCode.BadRequest, "Request body too large");
+                    }
                     var requestBody = await new StreamReader(req.Body).ReadToEndAsync();
                     request = JsonConvert.DeserializeObject<IngestEventsRequest>(requestBody);
                 }
