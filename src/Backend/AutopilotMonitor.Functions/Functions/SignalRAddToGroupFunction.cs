@@ -71,7 +71,7 @@ namespace AutopilotMonitor.Functions.Functions
                 }
                 else
                 {
-                    var requestedTenantId = ExtractTenantIdFromGroupName(request.GroupName);
+                    var requestedTenantId = SignalRGroupHelper.ExtractTenantIdFromGroupName(request.GroupName);
                     if (string.IsNullOrEmpty(requestedTenantId))
                     {
                         _logger.LogWarning($"User {userEmail} attempted to join unrecognized group format: {request.GroupName}");
@@ -101,7 +101,7 @@ namespace AutopilotMonitor.Functions.Functions
                 }
 
                 // Extract session ID from group name if it's a session-specific group
-                var logPrefix = ExtractLogPrefix(request.GroupName);
+                var logPrefix = SignalRGroupHelper.ExtractLogPrefix(request.GroupName);
                 _logger.LogInformation($"{logPrefix} AddToGroup: {request.GroupName} (User: {userEmail})");
 
                 var response = req.CreateResponse(HttpStatusCode.OK);
@@ -130,46 +130,6 @@ namespace AutopilotMonitor.Functions.Functions
             }
         }
 
-        /// <summary>
-        /// Extracts tenant ID from SignalR group name
-        /// Group formats: "tenant-{tenantId}" or "session-{tenantId}-{sessionId}"
-        /// </summary>
-        private string? ExtractTenantIdFromGroupName(string groupName)
-        {
-            if (groupName.StartsWith("tenant-"))
-            {
-                // Format: "tenant-{tenantId}"
-                return groupName.Substring("tenant-".Length);
-            }
-            else if (groupName.StartsWith("session-"))
-            {
-                // Format: "session-{tenantId}-{sessionId}"
-                // Extract everything between "session-" and the last 5 GUID segments
-                var parts = groupName.Split('-');
-                if (parts.Length >= 7) // "session" + 5 GUID parts (tenant) + 5 GUID parts (session)
-                {
-                    // Reconstruct tenant GUID from parts 1-5
-                    return string.Join("-", parts.Skip(1).Take(5));
-                }
-            }
-            return null;
-        }
-
-        private string ExtractLogPrefix(string groupName)
-        {
-            // Extract session ID from group name: "session-{tenantId}-{sessionId}"
-            if (groupName.StartsWith("session-"))
-            {
-                var parts = groupName.Split('-');
-                if (parts.Length > 2)
-                {
-                    var sessionId = string.Join("-", parts.Skip(parts.Length - 5).Take(5)); // Last 5 parts form the GUID
-                    return $"[Session: {sessionId.Substring(0, Math.Min(8, sessionId.Length))}]";
-                }
-            }
-            // For tenant groups: "tenant-{tenantId}"
-            return $"[Group: {groupName.Substring(0, Math.Min(20, groupName.Length))}]";
-        }
     }
 
     public class AddToGroupRequest
