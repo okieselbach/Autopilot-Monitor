@@ -23,6 +23,8 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
     private readonly JwtSecurityTokenHandler _tokenHandler;
 
     // Cache configuration managers per tenant to avoid repeated OIDC metadata fetches
+    // Bounded to prevent memory exhaustion from malicious tenant ID flooding
+    private const int MaxCacheSize = 100;
     private readonly Dictionary<string, IConfigurationManager<OpenIdConnectConfiguration>> _configManagerCache;
     private readonly SemaphoreSlim _cacheLock = new SemaphoreSlim(1, 1);
 
@@ -86,8 +88,16 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
                                 AutomaticRefreshInterval = TimeSpan.FromHours(24),
                                 RefreshInterval = TimeSpan.FromHours(24)
                             };
-                            _configManagerCache[tenantSpecificAuthority] = tenantConfigManager;
-                            _logger.LogInformation($"[Auth Middleware] Created new config manager for {tenantSpecificAuthority}");
+
+                            if (_configManagerCache.Count < MaxCacheSize)
+                            {
+                                _configManagerCache[tenantSpecificAuthority] = tenantConfigManager;
+                                _logger.LogInformation($"[Auth Middleware] Created new config manager for {tenantSpecificAuthority}");
+                            }
+                            else
+                            {
+                                _logger.LogWarning($"[Auth Middleware] Config manager cache full ({MaxCacheSize}). Tenant {tenantSpecificAuthority} not cached.");
+                            }
                         }
                     }
                     finally
