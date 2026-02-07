@@ -56,7 +56,9 @@ namespace AutopilotMonitor.Functions.Functions
                 return unauthorized;
             }
 
-            if (req.Body.Length > 1_048_576) // 1 MB limit
+            if (req.Headers.TryGetValues("Content-Length", out var clValues)
+                && long.TryParse(clValues.FirstOrDefault(), out var contentLength)
+                && contentLength > 1_048_576) // 1 MB limit
             {
                 var badRequest = req.CreateResponse(HttpStatusCode.BadRequest);
                 await badRequest.WriteAsJsonAsync(new { success = false, message = "Request body too large" });
@@ -92,7 +94,9 @@ namespace AutopilotMonitor.Functions.Functions
                 return unauthorized;
             }
 
-            if (req.Body.Length > 1_048_576) // 1 MB limit
+            if (req.Headers.TryGetValues("Content-Length", out var clValues2)
+                && long.TryParse(clValues2.FirstOrDefault(), out var contentLength2)
+                && contentLength2 > 1_048_576) // 1 MB limit
             {
                 var badRequest = req.CreateResponse(HttpStatusCode.BadRequest);
                 await badRequest.WriteAsJsonAsync(new { success = false, message = "Request body too large" });
