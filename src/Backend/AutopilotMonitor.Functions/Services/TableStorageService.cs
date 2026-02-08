@@ -595,10 +595,20 @@ namespace AutopilotMonitor.Functions.Services
                 var events = tableClient.QueryAsync<TableEntity>(filter);
 
                 int deletedCount = 0;
+                var batch = new List<TableTransactionAction>();
                 await foreach (var eventEntity in events)
                 {
-                    await tableClient.DeleteEntityAsync(eventEntity.PartitionKey, eventEntity.RowKey);
+                    batch.Add(new TableTransactionAction(TableTransactionActionType.Delete, eventEntity));
                     deletedCount++;
+                    if (batch.Count >= 100)
+                    {
+                        await tableClient.SubmitTransactionAsync(batch);
+                        batch.Clear();
+                    }
+                }
+                if (batch.Count > 0)
+                {
+                    await tableClient.SubmitTransactionAsync(batch);
                 }
 
                 _logger.LogInformation($"Deleted {deletedCount} events for session {sessionId}");
@@ -1252,10 +1262,20 @@ namespace AutopilotMonitor.Functions.Services
                     filter: $"PartitionKey eq '{tenantId}' and SessionId eq '{sessionId}'");
 
                 int deletedCount = 0;
+                var batch = new List<TableTransactionAction>();
                 await foreach (var entity in query)
                 {
-                    await tableClient.DeleteEntityAsync(entity.PartitionKey, entity.RowKey);
+                    batch.Add(new TableTransactionAction(TableTransactionActionType.Delete, entity));
                     deletedCount++;
+                    if (batch.Count >= 100)
+                    {
+                        await tableClient.SubmitTransactionAsync(batch);
+                        batch.Clear();
+                    }
+                }
+                if (batch.Count > 0)
+                {
+                    await tableClient.SubmitTransactionAsync(batch);
                 }
 
                 return deletedCount;
@@ -1282,10 +1302,20 @@ namespace AutopilotMonitor.Functions.Services
                 var query = tableClient.QueryAsync<TableEntity>(filter: $"PartitionKey eq '{partitionKey}'");
 
                 int deletedCount = 0;
+                var batch = new List<TableTransactionAction>();
                 await foreach (var entity in query)
                 {
-                    await tableClient.DeleteEntityAsync(entity.PartitionKey, entity.RowKey);
+                    batch.Add(new TableTransactionAction(TableTransactionActionType.Delete, entity));
                     deletedCount++;
+                    if (batch.Count >= 100)
+                    {
+                        await tableClient.SubmitTransactionAsync(batch);
+                        batch.Clear();
+                    }
+                }
+                if (batch.Count > 0)
+                {
+                    await tableClient.SubmitTransactionAsync(batch);
                 }
 
                 return deletedCount;
