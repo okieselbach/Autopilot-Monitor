@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { API_BASE_URL } from "@/lib/config";
 import { useTenant } from "../../contexts/TenantContext";
 import { useAuth } from "../../contexts/AuthContext";
@@ -22,6 +22,17 @@ interface Session {
   failureReason?: string;
 }
 
+interface EnrollmentEvent {
+  eventId: string;
+  sessionId: string;
+  timestamp: string;
+  eventType: string;
+  phase: number;
+  message: string;
+  sequence: number;
+  data?: Record<string, any>;
+}
+
 const phaseSteps = [
   { id: 0, label: "Device registered", shortLabel: "Registration" },
   { id: 1, label: "Network configured", shortLabel: "Network" },
@@ -40,6 +51,8 @@ export default function ProgressPortalPage() {
   const [searching, setSearching] = useState(false);
   const [searched, setSearched] = useState(false);
   const [notFound, setNotFound] = useState(false);
+  const [headerCollapsed, setHeaderCollapsed] = useState(false);
+  const [events, setEvents] = useState<EnrollmentEvent[]>([]);
 
   const { tenantId } = useTenant();
   const { getAccessToken } = useAuth();
@@ -86,6 +99,40 @@ export default function ProgressPortalPage() {
     };
   }, [on, off]);
 
+  // Fetch events when a session is found
+  const lastFetchedSessionId = useRef<string | null>(null);
+  useEffect(() => {
+    if (!session) return;
+    if (lastFetchedSessionId.current === session.sessionId) return;
+    lastFetchedSessionId.current = session.sessionId;
+    const fetchEvents = async () => {
+      try {
+        const token = await getAccessToken();
+        if (!token) return;
+        const response = await fetch(
+          `${API_BASE_URL}/api/sessions/${session.sessionId}/events?tenantId=${tenantId}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (response.ok) {
+          const data = await response.json();
+          const fetched: EnrollmentEvent[] = data.events || [];
+          setEvents((prev) => {
+            if (prev.length === 0) return fetched;
+            const existingIds = new Set(prev.map((e) => e.eventId));
+            const newEvents = fetched.filter((e) => !existingIds.has(e.eventId));
+            if (newEvents.length === 0) return prev;
+            return [...prev, ...newEvents].sort(
+              (a, b) => a.sequence - b.sequence
+            );
+          });
+        }
+      } catch (error) {
+        console.error("Failed to fetch events:", error);
+      }
+    };
+    fetchEvents();
+  }, [session?.sessionId]);
+
   const searchBySerial = async () => {
     if (!serialInput.trim()) return;
 
@@ -93,6 +140,8 @@ export default function ProgressPortalPage() {
     setSearched(true);
     setNotFound(false);
     setSession(null);
+    setEvents([]);
+    lastFetchedSessionId.current = null;
 
     try {
       const token = await getAccessToken();
@@ -128,6 +177,7 @@ export default function ProgressPortalPage() {
 
         if (found) {
           setSession(found);
+          setHeaderCollapsed(true);
         } else {
           setNotFound(true);
         }
@@ -143,6 +193,50 @@ export default function ProgressPortalPage() {
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter") searchBySerial();
   };
+
+  // Derive app installation progress from events
+  const appProgress = useMemo(() => {
+    // Check esp_ui_state events for app progress
+    const espEvents = events.filter((e) => e.eventType === "esp_ui_state");
+    if (espEvents.length > 0) {
+      const latest = espEvents[espEvents.length - 1];
+      const d = latest.data;
+      if (d) {
+        const completed = parseInt(
+          d.blocking_apps_completed ?? d.blockingAppsCompleted ?? "0",
+          10
+        );
+        const total = parseInt(
+          d.blocking_apps_total ?? d.blockingAppsTotal ?? "0",
+          10
+        );
+        const currentItem =
+          d.current_item ?? d.currentItem ?? d.status_text ?? d.statusText ?? null;
+        if (total > 0) return { completed, total, currentItem };
+      }
+    }
+
+    // Check download_progress events for current app name
+    const downloadEvents = events.filter((e) => e.eventType === "download_progress");
+    if (downloadEvents.length > 0) {
+      const latest = downloadEvents[downloadEvents.length - 1];
+      const d = latest.data;
+      if (d) {
+        const appName = d.app_name ?? d.appName ?? null;
+        const status = d.status ?? "";
+        const isComplete =
+          status === "completed" ||
+          (parseInt(d.bytes_total ?? d.bytesTotal ?? "0", 10) > 0 &&
+            parseInt(d.bytes_downloaded ?? d.bytesDownloaded ?? "0", 10) >=
+              parseInt(d.bytes_total ?? d.bytesTotal ?? "0", 10));
+        if (appName && !isComplete) {
+          return { completed: 0, total: 0, currentItem: appName };
+        }
+      }
+    }
+
+    return null;
+  }, [events]);
 
   // Derive progress
   const overallProgress = session
@@ -175,52 +269,118 @@ export default function ProgressPortalPage() {
   return (
     <ProtectedRoute>
       <div className="min-h-screen bg-gradient-to-b from-blue-50 to-white">
-        <div className="max-w-2xl mx-auto px-4 py-12">
-          {/* Header */}
-          <div className="text-center mb-10">
-            <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-100 rounded-full mb-4">
-              <svg
-                className="w-8 h-8 text-blue-600"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
-                />
-              </svg>
-            </div>
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">
-              Device Setup Progress
-            </h1>
-            <p className="text-gray-500">
-              Enter your device serial number to check status
-            </p>
-          </div>
-
-          {/* Search */}
-          <div className="flex items-center space-x-3 mb-10">
-            <div className="flex-1 relative">
-              <input
-                type="text"
-                value={serialInput}
-                onChange={(e) => setSerialInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Enter serial number or device name..."
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-lg"
-              />
-            </div>
+        <div className="max-w-2xl mx-auto px-4 py-6 sm:py-12">
+          {/* Collapsible Header + Search */}
+          {headerCollapsed && session ? (
             <button
-              onClick={searchBySerial}
-              disabled={searching || !serialInput.trim()}
-              className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+              onClick={() => setHeaderCollapsed(false)}
+              className="w-full flex items-center justify-between bg-white rounded-xl shadow-sm border border-gray-200 px-4 py-2.5 mb-4 hover:bg-gray-50 transition-colors"
             >
-              {searching ? "Searching..." : "Check Status"}
+              <div className="flex items-center space-x-2 min-w-0">
+                <svg
+                  className="w-4 h-4 text-blue-600 flex-shrink-0"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                  />
+                </svg>
+                <span className="text-sm font-medium text-gray-700">
+                  Device Setup Progress
+                </span>
+              </div>
+              <div className="flex items-center space-x-1.5 flex-shrink-0 ml-3">
+                <span className="text-xs text-blue-600 font-medium">Change device</span>
+                <svg
+                  className="w-3.5 h-3.5 text-blue-600"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M19 9l-7 7-7-7"
+                  />
+                </svg>
+              </div>
             </button>
-          </div>
+          ) : (
+            <>
+              {/* Full Header */}
+              <div className="text-center mb-10">
+                {session && (
+                  <button
+                    onClick={() => setHeaderCollapsed(true)}
+                    className="mb-2 text-xs text-gray-400 hover:text-gray-600 transition-colors flex items-center justify-center mx-auto space-x-1"
+                  >
+                    <svg
+                      className="w-3 h-3"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M5 15l7-7 7 7"
+                      />
+                    </svg>
+                    <span>Collapse</span>
+                  </button>
+                )}
+                <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-100 rounded-full mb-4">
+                  <svg
+                    className="w-8 h-8 text-blue-600"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                    />
+                  </svg>
+                </div>
+                <h1 className="text-3xl font-bold text-gray-900 mb-2">
+                  Device Setup Progress
+                </h1>
+                <p className="text-gray-500">
+                  Enter your device serial number to check status
+                </p>
+              </div>
+
+              {/* Search */}
+              <div className="flex items-center space-x-3 mb-10">
+                <div className="flex-1 relative">
+                  <input
+                    type="text"
+                    value={serialInput}
+                    onChange={(e) => setSerialInput(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    placeholder="Enter serial number or device name..."
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-lg"
+                  />
+                </div>
+                <button
+                  onClick={searchBySerial}
+                  disabled={searching || !serialInput.trim()}
+                  className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                >
+                  {searching ? "Searching..." : "Check Status"}
+                </button>
+              </div>
+            </>
+          )}
 
           {/* Not Found */}
           {notFound && (
@@ -331,82 +491,96 @@ export default function ProgressPortalPage() {
                     const isFailed =
                       step.id === effectivePhase &&
                       session.status === "Failed";
-                    const isPending = step.id > effectivePhase;
 
                     return (
-                      <div
-                        key={step.id}
-                        className="flex items-center space-x-3"
-                      >
-                        {/* Icon */}
-                        <div className="flex-shrink-0">
-                          {isCompleted ? (
-                            <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center">
-                              <svg
-                                className="w-5 h-5 text-green-600"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke="currentColor"
-                              >
-                                <path
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  strokeWidth={3}
-                                  d="M5 13l4 4L19 7"
-                                />
-                              </svg>
-                            </div>
-                          ) : isCurrent ? (
-                            <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
-                              <div className="w-3 h-3 bg-blue-500 rounded-full animate-pulse" />
-                            </div>
-                          ) : isFailed ? (
-                            <div className="w-8 h-8 rounded-full bg-red-100 flex items-center justify-center">
-                              <svg
-                                className="w-5 h-5 text-red-600"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke="currentColor"
-                              >
-                                <path
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  strokeWidth={3}
-                                  d="M6 18L18 6M6 6l12 12"
-                                />
-                              </svg>
-                            </div>
-                          ) : (
-                            <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">
-                              <div className="w-3 h-3 bg-gray-300 rounded-full" />
-                            </div>
-                          )}
-                        </div>
+                      <div key={step.id}>
+                        <div className="flex items-center space-x-3">
+                          {/* Icon */}
+                          <div className="flex-shrink-0">
+                            {isCompleted ? (
+                              <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center">
+                                <svg
+                                  className="w-5 h-5 text-green-600"
+                                  fill="none"
+                                  viewBox="0 0 24 24"
+                                  stroke="currentColor"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={3}
+                                    d="M5 13l4 4L19 7"
+                                  />
+                                </svg>
+                              </div>
+                            ) : isCurrent ? (
+                              <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
+                                <div className="w-3 h-3 bg-blue-500 rounded-full animate-pulse" />
+                              </div>
+                            ) : isFailed ? (
+                              <div className="w-8 h-8 rounded-full bg-red-100 flex items-center justify-center">
+                                <svg
+                                  className="w-5 h-5 text-red-600"
+                                  fill="none"
+                                  viewBox="0 0 24 24"
+                                  stroke="currentColor"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={3}
+                                    d="M6 18L18 6M6 6l12 12"
+                                  />
+                                </svg>
+                              </div>
+                            ) : (
+                              <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">
+                                <div className="w-3 h-3 bg-gray-300 rounded-full" />
+                              </div>
+                            )}
+                          </div>
 
-                        {/* Label */}
-                        <span
-                          className={`text-sm ${
-                            isCompleted
-                              ? "text-green-700 font-medium"
-                              : isCurrent
-                              ? "text-blue-700 font-medium"
-                              : isFailed
-                              ? "text-red-700 font-medium"
-                              : "text-gray-400"
-                          }`}
-                        >
-                          {step.label}
-                          {isCurrent &&
-                            step.id === 5 &&
-                            ` (${session.currentPhase === 5 ? "in progress" : ""})`}
-                        </span>
+                          {/* Label */}
+                          <div className="min-w-0">
+                            <span
+                              className={`text-sm ${
+                                isCompleted
+                                  ? "text-green-700 font-medium"
+                                  : isCurrent
+                                  ? "text-blue-700 font-medium"
+                                  : isFailed
+                                  ? "text-red-700 font-medium"
+                                  : "text-gray-400"
+                              }`}
+                            >
+                              {step.label}
+                              {isCurrent &&
+                                step.id === 5 &&
+                                appProgress &&
+                                appProgress.total > 0 &&
+                                appProgress.completed > 0 &&
+                                ` (${appProgress.completed}/${appProgress.total})`}
+                            </span>
+                            {/* App install detail below the "Installing apps" step */}
+                            {isCurrent && step.id === 5 && (
+                              <div className="flex items-center space-x-1.5 mt-0.5">
+                                <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse flex-shrink-0" />
+                                <span className="text-xs text-blue-500 truncate">
+                                  {appProgress?.currentItem
+                                    ? `${appProgress.currentItem} installing...`
+                                    : "Installing applications..."}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
                       </div>
                     );
                   })}
                 </div>
 
                 {/* Estimated Time / Status */}
-                {session.status === "InProgress" && estimatedRemaining && (
+                {session.status === "InProgress" && estimatedRemaining != null && estimatedRemaining > 0 && (
                   <div className="bg-blue-50 rounded-lg p-4 text-center">
                     <div className="text-sm text-blue-700">
                       Estimated time remaining:{" "}
@@ -414,15 +588,6 @@ export default function ProgressPortalPage() {
                         ~{estimatedRemaining} minutes
                       </span>
                     </div>
-                  </div>
-                )}
-
-                {session.status === "InProgress" && (
-                  <div className="mt-6 bg-gray-50 rounded-lg p-4 text-center">
-                    <p className="text-sm text-gray-600">
-                      You can leave your device on this screen. Setup will
-                      continue automatically.
-                    </p>
                   </div>
                 )}
 
