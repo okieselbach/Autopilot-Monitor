@@ -109,9 +109,10 @@ namespace AutopilotMonitor.Functions.Functions
                 var sessionPrefix = $"[Session: {request.SessionId.Substring(0, Math.Min(8, request.SessionId.Length))}]";
                 _logger.LogInformation($"{sessionPrefix} IngestEvents: Processing {request.Events.Count} events (Device: {validation.CertificateThumbprint}, Hardware: {validation.Manufacturer} {validation.Model}, Rate: {validation.RateLimitResult?.RequestsInWindow}/{validation.RateLimitResult?.MaxRequests})");
 
-                // Store events in Azure Table Storage
-                int processedCount = 0;
-                var storedEvents = new List<EnrollmentEvent>();
+                // Store events in Azure Table Storage (batch write for efficiency)
+                var storedEvents = await _storageService.StoreEventsBatchAsync(request.Events);
+                int processedCount = storedEvents.Count;
+
                 EnrollmentEvent? lastPhaseChangeEvent = null;
                 EnrollmentEvent? completionEvent = null;
                 EnrollmentEvent? failureEvent = null;
@@ -119,36 +120,24 @@ namespace AutopilotMonitor.Functions.Functions
                 // Track app install events for AppInstallSummary aggregation
                 var appInstallUpdates = new Dictionary<string, AppInstallSummary>(StringComparer.OrdinalIgnoreCase);
 
-                foreach (var evt in request.Events)
+                foreach (var evt in storedEvents)
                 {
-                    var stored = await _storageService.StoreEventAsync(evt);
-                    if (stored)
+                    // Track special events for session status updates
+                    if (evt.EventType == "phase_changed")
                     {
-                        processedCount++;
-                        storedEvents.Add(evt);
-                        _logger.LogDebug($"Event: {evt.EventType} - {evt.Message}");
-
-                        // Track special events for session status updates
-                        if (evt.EventType == "phase_changed")
-                        {
-                            lastPhaseChangeEvent = evt;
-                        }
-                        else if (evt.EventType == "enrollment_complete")
-                        {
-                            completionEvent = evt;
-                        }
-                        else if (evt.EventType == "enrollment_failed")
-                        {
-                            failureEvent = evt;
-                        }
-
-                        // Track app install events for per-app metrics
-                        AggregateAppInstallEvent(evt, request.TenantId, request.SessionId, appInstallUpdates);
+                        lastPhaseChangeEvent = evt;
                     }
-                    else
+                    else if (evt.EventType == "enrollment_complete")
                     {
-                        _logger.LogWarning($"Failed to store event: {evt.EventType}");
+                        completionEvent = evt;
                     }
+                    else if (evt.EventType == "enrollment_failed")
+                    {
+                        failureEvent = evt;
+                    }
+
+                    // Track app install events for per-app metrics
+                    AggregateAppInstallEvent(evt, request.TenantId, request.SessionId, appInstallUpdates);
                 }
 
                 // Store app install summaries

@@ -138,6 +138,8 @@ export default function SessionDetailPage() {
   }, [sessionTenantId, sessionId]);
 
   // Join SignalR groups when connected (for multi-tenancy and cost optimization)
+  // Uses "subscribe-then-fetch" pattern: join groups first, then re-fetch events
+  // to catch anything that arrived before the group join completed.
   useEffect(() => {
     // Use the session's tenant ID if available
     const effectiveTenantId = sessionTenantId || tenantId;
@@ -148,9 +150,17 @@ export default function SessionDetailPage() {
       const tenantGroupName = `tenant-${effectiveTenantId}`;
       const sessionGroupName = `session-${effectiveTenantId}-${sessionId}`;
 
-      joinGroup(tenantGroupName);
-      joinGroup(sessionGroupName);
-      hasJoinedGroups.current = true;
+      const joinAndCatchUp = async () => {
+        await joinGroup(tenantGroupName);
+        await joinGroup(sessionGroupName);
+        hasJoinedGroups.current = true;
+
+        // Re-fetch events after group join to catch any SignalR messages
+        // that were sent before the client joined the session group.
+        // The frontend deduplicates by eventId, so no duplicates.
+        fetchEvents();
+      };
+      joinAndCatchUp();
     }
 
     return () => {
@@ -283,7 +293,16 @@ export default function SessionDetailPage() {
           ...e,
           phaseName: phaseNames[e.phase] || "Unknown"
         }));
-        setEvents(eventsWithPhaseNames);
+        // Merge with existing events (from SignalR) instead of replacing,
+        // so we don't lose events that arrived via SignalR since the last fetch.
+        // Deduplication by eventId, same as the SignalR handler.
+        setEvents(prevEvents => {
+          if (prevEvents.length === 0) return eventsWithPhaseNames;
+          const existingIds = new Set(prevEvents.map(e => e.eventId));
+          const newEvents = eventsWithPhaseNames.filter((e: EnrollmentEvent) => !existingIds.has(e.eventId));
+          if (newEvents.length === 0) return prevEvents;
+          return [...prevEvents, ...newEvents].sort((a: EnrollmentEvent, b: EnrollmentEvent) => a.sequence - b.sequence);
+        });
       }
     } catch (error) {
       console.error("Failed to fetch events:", error);
@@ -815,11 +834,18 @@ function PhaseTimeline({ currentPhase, completedPhases, events = [], sessionStat
   // Derive current activity for the active phase from events
   const getCurrentActivity = (phaseId: number): string | null => {
     if (sessionStatus === 'Succeeded' || sessionStatus === 'Failed') return null;
-    if (phaseId !== currentPhase) return null;
+    if (phaseId !== effectiveCurrentPhase) return null;
 
-    // Get events for this phase, sorted by sequence desc
+    // Event types that are not useful as activity status display
+    const ignoredEventTypes = new Set([
+      "performance_snapshot",
+      "system_info",
+      "network_info",
+    ]);
+
+    // Get events for this phase, sorted by sequence desc, excluding noise
     const phaseEvents = events
-      .filter(e => e.phase === phaseId)
+      .filter(e => e.phase === phaseId && !ignoredEventTypes.has(e.eventType))
       .sort((a, b) => b.sequence - a.sequence);
 
     if (phaseEvents.length === 0) return null;
@@ -878,22 +904,32 @@ function PhaseTimeline({ currentPhase, completedPhases, events = [], sessionStat
     return `${Math.floor(durationSec / 3600)}h ${Math.floor((durationSec % 3600) / 60)}m`;
   };
 
+  // Derive the highest real phase (0-7) seen in events, excluding phase 99 (Failed)
+  const maxEventPhase = (() => {
+    const realPhases = events
+      .filter(e => e.phase >= 0 && e.phase <= 7)
+      .map(e => e.phase);
+    if (realPhases.length === 0) return -1;
+    return Math.max(...realPhases);
+  })();
+
   // Determine the actual failure phase from events when session has failed
   // currentPhase=99 means "Failed" but we need to know WHICH phase it failed in
   const failurePhase = (() => {
     if (sessionStatus !== 'Failed' || currentPhase !== 99) return null;
-
-    // Find the highest real phase (0-7) from events, excluding phase 99
-    const realPhases = events
-      .filter(e => e.phase >= 0 && e.phase <= 7)
-      .map(e => e.phase);
-
-    if (realPhases.length === 0) return 0;
-    return Math.max(...realPhases);
+    return maxEventPhase >= 0 ? maxEventPhase : 0;
   })();
 
-  // The effective phase for timeline rendering (use failurePhase when failed)
-  const effectivePhase = failurePhase !== null ? failurePhase : currentPhase;
+  // Effective current phase: use the max of backend currentPhase and what events show.
+  // This prevents the tracker from lagging behind the timeline when events from a new
+  // phase arrive via SignalR before the backend updates session.currentPhase.
+  const effectiveCurrentPhase = (() => {
+    if (sessionStatus === 'Succeeded') return currentPhase;
+    if (sessionStatus === 'Failed') return failurePhase !== null ? failurePhase : currentPhase;
+    // In-progress: take the higher of backend phase and events phase
+    if (maxEventPhase < 0) return currentPhase;
+    return Math.max(currentPhase, maxEventPhase);
+  })();
 
   const getPhaseStatus = (phaseId: number) => {
     // If phase is completed, show as completed (green)
@@ -906,9 +942,9 @@ function PhaseTimeline({ currentPhase, completedPhases, events = [], sessionStat
       return 'pending';
     }
 
-    // Normal in-progress logic
-    if (phaseId === currentPhase) return 'current';
-    if (phaseId < currentPhase) return 'completed';
+    // Normal in-progress logic (using effectiveCurrentPhase to stay in sync with events)
+    if (phaseId === effectiveCurrentPhase) return 'current';
+    if (phaseId < effectiveCurrentPhase) return 'completed';
     return 'pending';
   };
 
@@ -986,8 +1022,8 @@ function PhaseTimeline({ currentPhase, completedPhases, events = [], sessionStat
                   <div className="mt-0.5 text-[10px] text-red-500 font-semibold">Failed</div>
                 )}
                 {status === 'current' && getCurrentActivity(phase.id) && (
-                  <div className="mt-1 max-w-[120px]">
-                    <div className="text-[10px] text-blue-600 font-medium truncate animate-pulse" title={getCurrentActivity(phase.id) || undefined}>
+                  <div className="mt-1 max-w-[140px]">
+                    <div className="text-[10px] text-blue-600 font-medium line-clamp-2 animate-pulse" title={getCurrentActivity(phase.id) || undefined}>
                       {getCurrentActivity(phase.id)}
                     </div>
                   </div>

@@ -100,13 +100,19 @@ export default function DiagnosisPage() {
     }
   }, [sessionTenantId, sessionId]);
 
-  // SignalR groups
+  // SignalR groups - subscribe-then-fetch pattern
   useEffect(() => {
     const effectiveTenantId = sessionTenantId || tenantId;
     if (!sessionId || !isConnected || !effectiveTenantId) return;
     if (!hasJoinedGroups.current) {
-      joinGroup(`session-${effectiveTenantId}-${sessionId}`);
-      hasJoinedGroups.current = true;
+      const joinAndCatchUp = async () => {
+        await joinGroup(`session-${effectiveTenantId}-${sessionId}`);
+        hasJoinedGroups.current = true;
+        // Re-fetch after group join to catch any missed during join
+        fetchEvents();
+        fetchAnalysisResults();
+      };
+      joinAndCatchUp();
     }
     return () => {
       if (hasJoinedGroups.current && effectiveTenantId) {

@@ -138,14 +138,19 @@ export default function FlightTrackerPage() {
     }
   }, [sessionTenantId, sessionId]);
 
-  // SignalR groups
+  // SignalR groups - subscribe-then-fetch pattern
   useEffect(() => {
     const effectiveTenantId = sessionTenantId || tenantId;
     if (!sessionId || !isConnected || !effectiveTenantId) return;
     if (!hasJoinedGroups.current) {
-      joinGroup(`tenant-${effectiveTenantId}`);
-      joinGroup(`session-${effectiveTenantId}-${sessionId}`);
-      hasJoinedGroups.current = true;
+      const joinAndCatchUp = async () => {
+        await joinGroup(`tenant-${effectiveTenantId}`);
+        await joinGroup(`session-${effectiveTenantId}-${sessionId}`);
+        hasJoinedGroups.current = true;
+        // Re-fetch events after group join to catch any missed during join
+        fetchEvents();
+      };
+      joinAndCatchUp();
     }
     return () => {
       if (hasJoinedGroups.current && effectiveTenantId) {
@@ -253,12 +258,18 @@ export default function FlightTrackerPage() {
       );
       if (response.ok) {
         const data = await response.json();
-        setEvents(
-          data.events.map((e: EnrollmentEvent) => ({
-            ...e,
-            phaseName: phaseNames[e.phase] || "Unknown",
-          }))
-        );
+        const eventsWithPhaseNames = data.events.map((e: EnrollmentEvent) => ({
+          ...e,
+          phaseName: phaseNames[e.phase] || "Unknown",
+        }));
+        // Merge with existing events (from SignalR) instead of replacing
+        setEvents(prev => {
+          if (prev.length === 0) return eventsWithPhaseNames;
+          const existingIds = new Set(prev.map(e => e.eventId));
+          const newEvents = eventsWithPhaseNames.filter((e: EnrollmentEvent) => !existingIds.has(e.eventId));
+          if (newEvents.length === 0) return prev;
+          return [...prev, ...newEvents].sort((a: EnrollmentEvent, b: EnrollmentEvent) => a.sequence - b.sequence);
+        });
       }
     } catch (error) {
       console.error("Failed to fetch events:", error);
@@ -364,11 +375,24 @@ export default function FlightTrackerPage() {
       .filter((e) => e.eventType !== "performance_snapshot" && e.eventType !== "download_progress");
   }, [events]);
 
+  // Derive the highest real phase (0-7) seen in events, excluding phase 99 (Failed)
+  const maxEventPhase = useMemo(() => {
+    const realPhases = events
+      .filter((e) => e.phase >= 0 && e.phase <= 7)
+      .map((e) => e.phase);
+    if (realPhases.length === 0) return -1;
+    return Math.max(...realPhases);
+  }, [events]);
+
   const estimatedCompletion = useMemo(() => {
     if (!session || session.status !== "InProgress") return null;
     // Simple estimation based on phase progress and duration so far
     const totalPhases = 7;
-    const currentPhase = Math.min(session.currentPhase, 7);
+    // Use the higher of backend phase and events phase for more accurate ETA
+    const currentPhase = Math.min(
+      Math.max(session.currentPhase, maxEventPhase >= 0 ? maxEventPhase : 0),
+      7
+    );
     if (currentPhase === 0) return null;
 
     const elapsed = session.durationSeconds;
@@ -385,20 +409,25 @@ export default function FlightTrackerPage() {
       time: completionTime,
       remainingMinutes: Math.round(estimatedRemainingSeconds / 60),
     };
-  }, [session]);
+  }, [session, maxEventPhase]);
 
   // Determine failure phase
   const failurePhase = useMemo(() => {
     if (!session || session.status !== "Failed" || session.currentPhase !== 99)
       return null;
-    const realPhases = events
-      .filter((e) => e.phase >= 0 && e.phase <= 7)
-      .map((e) => e.phase);
-    return realPhases.length > 0 ? Math.max(...realPhases) : 0;
-  }, [session, events]);
+    return maxEventPhase >= 0 ? maxEventPhase : 0;
+  }, [session, maxEventPhase]);
 
-  const effectivePhase =
-    failurePhase !== null ? failurePhase : session?.currentPhase ?? 0;
+  // Effective current phase: use the max of backend currentPhase and what events show.
+  // This prevents the tracker from lagging behind when events from a new phase arrive
+  // via SignalR before the backend updates session.currentPhase.
+  const effectiveCurrentPhase = useMemo(() => {
+    if (!session) return 0;
+    if (session.status === "Succeeded") return session.currentPhase;
+    if (session.status === "Failed") return failurePhase !== null ? failurePhase : session.currentPhase;
+    if (maxEventPhase < 0) return session.currentPhase;
+    return Math.max(session.currentPhase, maxEventPhase);
+  }, [session, failurePhase, maxEventPhase]);
 
   const getPhaseStatus = (phaseId: number) => {
     if (!session) return "pending";
@@ -408,8 +437,8 @@ export default function FlightTrackerPage() {
       if (phaseId < failurePhase) return "completed";
       return "pending";
     }
-    if (phaseId === session.currentPhase) return "current";
-    if (phaseId < session.currentPhase) return "completed";
+    if (phaseId === effectiveCurrentPhase) return "current";
+    if (phaseId < effectiveCurrentPhase) return "completed";
     return "pending";
   };
 
@@ -570,7 +599,7 @@ export default function FlightTrackerPage() {
                         ? 100
                         : Math.min(
                             100,
-                            (effectivePhase / 7) * 100
+                            (effectiveCurrentPhase / 7) * 100
                           )
                     }%`,
                   }}
@@ -744,7 +773,7 @@ export default function FlightTrackerPage() {
                 <div className="flex items-center space-x-3">
                   <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse" />
                   <span className="text-sm text-gray-400">
-                    {phaseNames[session.currentPhase] || "Processing"}...
+                    {phaseNames[effectiveCurrentPhase] || "Processing"}...
                   </span>
                 </div>
               ) : session.status === "Succeeded" ? (

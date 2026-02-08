@@ -167,6 +167,89 @@ namespace AutopilotMonitor.Functions.Services
             }
         }
 
+        /// <summary>
+        /// Stores multiple events as batch transactions (Entity Group Transactions).
+        /// All events must share the same PartitionKey (TenantId_SessionId).
+        /// Azure Table Storage allows max 100 entities per transaction.
+        /// Falls back to individual writes if a batch fails.
+        /// </summary>
+        /// <returns>List of successfully stored events</returns>
+        public async Task<List<EnrollmentEvent>> StoreEventsBatchAsync(List<EnrollmentEvent> events)
+        {
+            if (events == null || events.Count == 0)
+                return new List<EnrollmentEvent>();
+
+            // Validate all events upfront
+            foreach (var evt in events)
+            {
+                SecurityValidator.EnsureValidGuid(evt.TenantId, "TenantId");
+                SecurityValidator.EnsureValidGuid(evt.SessionId, "SessionId");
+            }
+
+            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Events);
+            var storedEvents = new List<EnrollmentEvent>();
+
+            // Group by PartitionKey (should be the same for all events in a request, but be safe)
+            var groups = events.GroupBy(e => $"{e.TenantId}_{e.SessionId}");
+
+            foreach (var group in groups)
+            {
+                // Chunk into batches of 100 (Azure Table Storage limit)
+                var chunks = group.Select((evt, index) => new { evt, index })
+                    .GroupBy(x => x.index / 100)
+                    .Select(g => g.Select(x => x.evt).ToList());
+
+                foreach (var chunk in chunks)
+                {
+                    try
+                    {
+                        var actions = chunk.Select(evt =>
+                        {
+                            var partitionKey = $"{evt.TenantId}_{evt.SessionId}";
+                            var rowKey = $"{evt.Timestamp:yyyyMMddHHmmssfff}_{evt.Sequence:D10}";
+
+                            var entity = new TableEntity(partitionKey, rowKey)
+                            {
+                                ["EventId"] = evt.EventId,
+                                ["SessionId"] = evt.SessionId,
+                                ["TenantId"] = evt.TenantId,
+                                ["Timestamp"] = evt.Timestamp,
+                                ["EventType"] = evt.EventType ?? string.Empty,
+                                ["Severity"] = (int)evt.Severity,
+                                ["Source"] = evt.Source ?? string.Empty,
+                                ["Phase"] = (int)evt.Phase,
+                                ["Message"] = evt.Message ?? string.Empty,
+                                ["Sequence"] = evt.Sequence,
+                                ["DataJson"] = evt.Data != null && evt.Data.Count > 0
+                                    ? JsonConvert.SerializeObject(evt.Data)
+                                    : string.Empty
+                            };
+
+                            return new TableTransactionAction(TableTransactionActionType.UpsertReplace, entity);
+                        }).ToList();
+
+                        await tableClient.SubmitTransactionAsync(actions);
+                        storedEvents.AddRange(chunk);
+                        _logger.LogDebug($"Batch stored {chunk.Count} events for partition {group.Key}");
+                    }
+                    catch (Exception ex)
+                    {
+                        // Batch failed - fall back to individual writes for this chunk
+                        _logger.LogWarning(ex, $"Batch write failed for {chunk.Count} events, falling back to individual writes");
+
+                        foreach (var evt in chunk)
+                        {
+                            if (await StoreEventAsync(evt))
+                            {
+                                storedEvents.Add(evt);
+                            }
+                        }
+                    }
+                }
+            }
+
+            return storedEvents;
+        }
 
         /// <summary>
         /// Gets all sessions for a tenant
