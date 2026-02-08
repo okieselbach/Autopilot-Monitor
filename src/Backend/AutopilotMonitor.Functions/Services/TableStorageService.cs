@@ -377,7 +377,7 @@ namespace AutopilotMonitor.Functions.Services
                         session["FailureReason"] = failureReason;
                     }
 
-                    // Update event count (calculated on-demand during phase changes)
+                    // Update event count (full recount for accuracy on status changes)
                     var eventsTableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Events);
                     var partitionKey = $"{tenantId}_{sessionId}";
                     var eventCountFilter = $"PartitionKey eq '{partitionKey}'";
@@ -415,6 +415,51 @@ namespace AutopilotMonitor.Functions.Services
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// Increments the session event count without touching status or phase fields.
+        /// Uses Merge mode to safely handle concurrent updates.
+        /// </summary>
+        public async Task IncrementSessionEventCountAsync(string tenantId, string sessionId, int increment)
+        {
+            SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
+            SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
+
+            const int maxRetries = 3;
+            int retryCount = 0;
+
+            while (retryCount < maxRetries)
+            {
+                try
+                {
+                    var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
+                    var entity = await tableClient.GetEntityAsync<TableEntity>(tenantId, sessionId);
+                    var currentCount = entity.Value.GetInt32("EventCount") ?? 0;
+
+                    var update = new TableEntity(tenantId, sessionId)
+                    {
+                        ["EventCount"] = currentCount + increment
+                    };
+                    await tableClient.UpdateEntityAsync(update, entity.Value.ETag, TableUpdateMode.Merge);
+                    return;
+                }
+                catch (Azure.RequestFailedException ex) when (ex.Status == 412)
+                {
+                    retryCount++;
+                    if (retryCount >= maxRetries)
+                    {
+                        _logger.LogWarning($"Failed to increment event count for session {sessionId} after {maxRetries} retries due to ETag conflicts");
+                        return;
+                    }
+                    await Task.Delay(50 * (int)Math.Pow(2, retryCount - 1));
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, $"Failed to increment event count for session {sessionId}");
+                    return;
+                }
+            }
         }
 
         /// <summary>

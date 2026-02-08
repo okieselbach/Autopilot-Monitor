@@ -184,6 +184,15 @@ namespace AutopilotMonitor.Functions.Functions
                         lastPhaseChangeEvent.Phase
                     );
                 }
+                else if (processedCount > 0)
+                {
+                    // No status change — lightweight event count increment only
+                    await _storageService.IncrementSessionEventCountAsync(
+                        request.TenantId,
+                        request.SessionId,
+                        processedCount
+                    );
+                }
 
                 // Run full analysis when enrollment ends (cost-efficient: one pass over all events)
                 var newRuleResults = new List<AutopilotMonitor.Shared.Models.RuleResult>();
