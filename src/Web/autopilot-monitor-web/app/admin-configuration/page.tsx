@@ -45,6 +45,7 @@ export default function AdminConfigurationPage() {
   const { getAccessToken } = useAuth();
   const [galacticAdminMode, setGalacticAdminMode] = useState(false);
   const [triggeringMaintenance, setTriggeringMaintenance] = useState(false);
+  const [maintenanceDate, setMaintenanceDate] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
@@ -172,7 +173,8 @@ export default function AdminConfigurationPage() {
         throw new Error('Failed to get access token');
       }
 
-      const response = await fetch(`${API_BASE_URL}/api/maintenance/trigger`, {
+      const queryParams = maintenanceDate ? `?date=${maintenanceDate}` : '';
+      const response = await fetch(`${API_BASE_URL}/api/maintenance/trigger${queryParams}`, {
         method: "POST",
         headers: {
           'Authorization': `Bearer ${token}`
@@ -184,7 +186,8 @@ export default function AdminConfigurationPage() {
       }
 
       const result = await response.json();
-      setSuccessMessage("Daily maintenance job completed successfully!");
+      const dateInfo = maintenanceDate ? ` for ${maintenanceDate}` : '';
+      setSuccessMessage(`Maintenance job completed successfully${dateInfo}!`);
 
       // Auto-hide success message after 5 seconds
       setTimeout(() => setSuccessMessage(null), 5000);
@@ -665,13 +668,29 @@ export default function AdminConfigurationPage() {
                       </li>
                       <li className="flex items-start">
                         <span className="text-purple-500 mr-2">•</span>
-                        <span>Aggregate yesterday's metrics into historical snapshots</span>
+                        <span>Aggregate metrics into historical snapshots (with automatic catch-up for missed days)</span>
                       </li>
                       <li className="flex items-start">
                         <span className="text-purple-500 mr-2">•</span>
                         <span>Clean up old data based on retention policies</span>
                       </li>
                     </ul>
+                    <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 mb-4">
+                      <label className="block text-sm font-medium text-purple-800 mb-1">
+                        Target Date (optional)
+                      </label>
+                      <input
+                        type="date"
+                        value={maintenanceDate}
+                        onChange={(e) => setMaintenanceDate(e.target.value)}
+                        max={new Date(Date.now() - 86400000).toISOString().split('T')[0]}
+                        className="w-full max-w-xs px-3 py-2 border border-purple-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                      />
+                      <p className="text-xs text-gray-500 mt-2">
+                        Leave empty to run the standard maintenance with automatic catch-up (aggregates any missed days within the last 7 days).
+                        Select a specific date to manually aggregate metrics for that day, e.g. to backfill data older than 7 days.
+                      </p>
+                    </div>
                     <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
                       <div className="flex items-start space-x-2">
                         <svg className="w-5 h-5 text-yellow-600 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">

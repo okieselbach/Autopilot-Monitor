@@ -63,7 +63,7 @@ namespace AutopilotMonitor.Functions.Services
             try
             {
                 await MarkStalledSessionsAsTimedOutAsync();
-                await AggregateYesterdayMetricsAsync();
+                await AggregateMetricsWithCatchUpAsync();
                 await CleanupOldDataAsync();
                 await RecomputePlatformStatsAsync();
 
@@ -146,10 +146,7 @@ namespace AutopilotMonitor.Functions.Services
                         var timeoutHours = config?.SessionTimeoutHours ?? 5;
                         var cutoffTime = DateTime.UtcNow.AddHours(-timeoutHours);
 
-                        var sessions = await _storageService.GetSessionsAsync(tenantId, maxResults: 1000000);
-                        var stalledSessions = sessions
-                            .Where(s => s.Status == SessionStatus.InProgress && s.StartedAt < cutoffTime)
-                            .ToList();
+                        var stalledSessions = await _storageService.GetStalledSessionsAsync(tenantId, cutoffTime);
 
                         if (stalledSessions.Count == 0)
                         {
@@ -203,12 +200,39 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
-        /// Aggregates yesterday's metrics and saves them as historical snapshots
+        /// Aggregates metrics for any missed days in the last 7 days, plus yesterday.
+        /// Checks the UsageMetrics table for existing snapshots to avoid re-aggregation.
         /// </summary>
-        private async Task AggregateYesterdayMetricsAsync()
+        private async Task AggregateMetricsWithCatchUpAsync()
         {
-            var yesterday = DateTime.UtcNow.AddDays(-1).Date;
-            await AggregateMetricsForDateAsync(yesterday);
+            const int maxCatchUpDays = 7;
+            var today = DateTime.UtcNow.Date;
+            var aggregatedCount = 0;
+
+            for (int daysBack = maxCatchUpDays; daysBack >= 1; daysBack--)
+            {
+                var date = today.AddDays(-daysBack);
+                var dateStr = date.ToString("yyyy-MM-dd");
+
+                try
+                {
+                    if (await _storageService.HasUsageMetricsSnapshotAsync(dateStr))
+                        continue;
+
+                    _logger.LogInformation($"Catch-up: Aggregating metrics for missed date {dateStr}");
+                    await AggregateMetricsForDateAsync(date);
+                    aggregatedCount++;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, $"Failed to aggregate metrics for {dateStr} during catch-up");
+                }
+            }
+
+            if (aggregatedCount > 0)
+                _logger.LogInformation($"Catch-up completed: aggregated {aggregatedCount} missed day(s)");
+            else
+                _logger.LogInformation("No missed days to catch up on");
         }
 
         /// <summary>
@@ -223,8 +247,7 @@ namespace AutopilotMonitor.Functions.Services
             {
                 var targetDateStr = targetDate.ToString("yyyy-MM-dd");
 
-                var allSessions = await _storageService.GetAllSessionsAsync(maxResults: 1000000);
-                var targetDateSessions = allSessions.Where(s => s.StartedAt.Date == targetDate).ToList();
+                var targetDateSessions = await _storageService.GetSessionsByDateRangeAsync(targetDate, targetDate.AddDays(1));
 
                 if (targetDateSessions.Count == 0)
                 {

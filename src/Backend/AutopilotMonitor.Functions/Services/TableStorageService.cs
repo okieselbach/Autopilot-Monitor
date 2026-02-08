@@ -798,6 +798,29 @@ namespace AutopilotMonitor.Functions.Services
             }
         }
 
+        /// <summary>
+        /// Checks if a global usage metrics snapshot exists for a given date.
+        /// Used by maintenance catch-up to determine which dates need aggregation.
+        /// </summary>
+        public async Task<bool> HasUsageMetricsSnapshotAsync(string date)
+        {
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.UsageMetrics);
+                await tableClient.GetEntityAsync<TableEntity>(date, "global");
+                return true;
+            }
+            catch (RequestFailedException ex) when (ex.Status == 404)
+            {
+                return false;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to check usage metrics snapshot for {date}");
+                return false;
+            }
+        }
+
         // ===== DATA RETENTION METHODS =====
 
         /// <summary>
@@ -827,6 +850,72 @@ namespace AutopilotMonitor.Functions.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, $"Failed to get old sessions for tenant {tenantId}");
+                return new List<SessionSummary>();
+            }
+        }
+
+        /// <summary>
+        /// Gets all sessions within a date range, optionally filtered by tenant.
+        /// Uses server-side filtering to avoid loading all sessions into memory.
+        /// </summary>
+        public async Task<List<SessionSummary>> GetSessionsByDateRangeAsync(DateTime startDate, DateTime endDate, string? tenantId = null)
+        {
+            if (!string.IsNullOrEmpty(tenantId))
+                SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
+
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
+
+                var filter = !string.IsNullOrEmpty(tenantId)
+                    ? $"PartitionKey eq '{tenantId}' and StartedAt ge datetime'{startDate:yyyy-MM-ddTHH:mm:ss}Z' and StartedAt lt datetime'{endDate:yyyy-MM-ddTHH:mm:ss}Z'"
+                    : $"StartedAt ge datetime'{startDate:yyyy-MM-ddTHH:mm:ss}Z' and StartedAt lt datetime'{endDate:yyyy-MM-ddTHH:mm:ss}Z'";
+
+                var query = tableClient.QueryAsync<TableEntity>(filter: filter);
+
+                var sessions = new List<SessionSummary>();
+                await foreach (var entity in query)
+                {
+                    sessions.Add(MapToSessionSummary(entity));
+                }
+
+                _logger.LogInformation($"Found {sessions.Count} sessions between {startDate:yyyy-MM-dd} and {endDate:yyyy-MM-dd}" +
+                    (tenantId != null ? $" for tenant {tenantId}" : ""));
+                return sessions;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to get sessions by date range");
+                return new List<SessionSummary>();
+            }
+        }
+
+        /// <summary>
+        /// Gets stalled sessions (InProgress status, started before cutoff time) for a tenant.
+        /// Uses server-side filtering to avoid loading all sessions into memory.
+        /// </summary>
+        public async Task<List<SessionSummary>> GetStalledSessionsAsync(string tenantId, DateTime cutoffTime)
+        {
+            SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
+
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
+
+                var filter = $"PartitionKey eq '{tenantId}' and Status eq 'InProgress' and StartedAt lt datetime'{cutoffTime:yyyy-MM-ddTHH:mm:ss}Z'";
+                var query = tableClient.QueryAsync<TableEntity>(filter: filter);
+
+                var sessions = new List<SessionSummary>();
+                await foreach (var entity in query)
+                {
+                    sessions.Add(MapToSessionSummary(entity));
+                }
+
+                return sessions;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to get stalled sessions for tenant {tenantId}");
                 return new List<SessionSummary>();
             }
         }
