@@ -28,7 +28,7 @@ namespace AutopilotMonitor.Functions.Services
         {
             _logger = logger;
 
-            var connectionString = configuration["AzureWebJobsStorage"];
+            var connectionString = configuration["AzureTableStorageConnectionString"];
             var serviceClient = new TableServiceClient(connectionString);
             _adminTableClient = serviceClient.GetTableClient(Constants.TableNames.AdminConfiguration);
             _tenantConfigTableClient = serviceClient.GetTableClient(Constants.TableNames.TenantConfiguration);

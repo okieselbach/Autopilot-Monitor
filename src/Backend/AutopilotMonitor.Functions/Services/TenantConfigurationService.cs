@@ -29,7 +29,7 @@ namespace AutopilotMonitor.Functions.Services
             _logger = logger;
             _configCache = new System.Collections.Concurrent.ConcurrentDictionary<string, CachedConfig>();
 
-            var connectionString = configuration["AzureWebJobsStorage"];
+            var connectionString = configuration["AzureTableStorageConnectionString"];
             var serviceClient = new TableServiceClient(connectionString);
             _tableClient = serviceClient.GetTableClient(Constants.TableNames.TenantConfiguration);
             // Table is initialized centrally by TableInitializerService at startup
