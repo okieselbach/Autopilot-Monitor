@@ -203,9 +203,23 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             InstallationStateLastChangedTicks = Stopwatch.GetTimestamp();
             DownloadingOrInstallingSeen |= (InstallationState >= AppInstallationState.Downloading &&
                                             InstallationState <= AppInstallationState.Installing);
-            ProgressPercent = newProgressPercent;
-            BytesDownloaded = bytesDownloaded;
-            BytesTotal = bytesTotal;
+            // For Installed state, set progress to 100% if no explicit value was given
+            if (newState == AppInstallationState.Installed && newProgressPercent == null)
+                ProgressPercent = 100;
+            else
+                ProgressPercent = newProgressPercent;
+            // Only overwrite download bytes if new values are provided (non-zero),
+            // otherwise preserve the last known download progress
+            if (bytesDownloaded > 0 || bytesTotal > 0)
+            {
+                BytesDownloaded = bytesDownloaded;
+                BytesTotal = bytesTotal;
+            }
+
+            // For successfully installed apps, ensure bytesDownloaded reflects completion.
+            // WinGet always reports "bytes 0/<total>" so bytesDownloaded stays 0 even after success.
+            if (InstallationState == AppInstallationState.Installed && BytesTotal > 0 && BytesDownloaded < BytesTotal)
+                BytesDownloaded = BytesTotal;
 
             return true;
         }

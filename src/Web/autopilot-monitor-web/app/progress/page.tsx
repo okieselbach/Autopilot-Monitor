@@ -6,7 +6,6 @@ import { useTenant } from "../../contexts/TenantContext";
 import { useAuth } from "../../contexts/AuthContext";
 import { useSignalR } from "../../contexts/SignalRContext";
 import { ProtectedRoute } from "../../components/ProtectedRoute";
-import DownloadProgress from "../../components/DownloadProgress";
 
 interface Session {
   sessionId: string;
@@ -286,11 +285,7 @@ export default function ProgressPortalPage() {
       if (d) {
         const appName = d.app_name ?? d.appName ?? null;
         const status = d.status ?? "";
-        const isComplete =
-          status === "completed" ||
-          (parseInt(d.bytes_total ?? d.bytesTotal ?? "0", 10) > 0 &&
-            parseInt(d.bytes_downloaded ?? d.bytesDownloaded ?? "0", 10) >=
-              parseInt(d.bytes_total ?? d.bytesTotal ?? "0", 10));
+        const isComplete = status === "completed" || status === "failed" || d.isCompleted === true || d.is_completed === true;
         if (appName && !isComplete) {
           return { completed: 0, total: 0, currentItem: appName };
         }
@@ -298,6 +293,50 @@ export default function ProgressPortalPage() {
     }
 
     return null;
+  }, [events]);
+
+  // Derive current active download for inline display
+  const currentDownload = useMemo(() => {
+    const downloadEvents = events.filter((e) => e.eventType === "download_progress");
+    if (downloadEvents.length === 0) return null;
+
+    // Build latest state per app (last event wins)
+    const appLatest = new Map<string, { bytesDownloaded: number; bytesTotal: number; downloadRateBps: number; isComplete: boolean }>();
+    for (const evt of downloadEvents) {
+      const d = evt.data;
+      if (!d) continue;
+      const appName = d.app_name ?? d.appName ?? d.file_name ?? d.fileName ?? null;
+      if (!appName) continue;
+      const bytesDownloaded = Number(d.bytes_downloaded ?? d.bytesDownloaded ?? 0);
+      const bytesTotal = Number(d.bytes_total ?? d.bytesTotal ?? 0);
+      const downloadRateBps = Number(d.download_rate_bps ?? d.downloadRateBps ?? 0);
+      const status = d.status ?? "";
+      // Only mark complete via explicit status — don't infer from bytes (100% downloads are still active until status arrives)
+      const isComplete = status === "completed" || status === "failed" || d.isCompleted === true || d.is_completed === true;
+      appLatest.set(appName, {
+        bytesDownloaded: isNaN(bytesDownloaded) ? 0 : bytesDownloaded,
+        bytesTotal: isNaN(bytesTotal) ? 0 : bytesTotal,
+        downloadRateBps: isNaN(downloadRateBps) ? 0 : downloadRateBps,
+        isComplete,
+      });
+    }
+
+    const completedCount = Array.from(appLatest.values()).filter((v) => v.isComplete).length;
+
+    // Walk events in reverse to find the most recently seen active app
+    for (let i = downloadEvents.length - 1; i >= 0; i--) {
+      const d = downloadEvents[i].data;
+      if (!d) continue;
+      const appName = d.app_name ?? d.appName ?? d.file_name ?? d.fileName ?? null;
+      if (!appName) continue;
+      const latest = appLatest.get(appName);
+      if (latest && !latest.isComplete) {
+        return { appName, ...latest, completedCount, active: true };
+      }
+    }
+
+    // No active download — return just the counter so it stays visible
+    return { appName: null, bytesDownloaded: 0, bytesTotal: 0, downloadRateBps: 0, isComplete: true, completedCount, active: false };
   }, [events]);
 
   // Derive progress
@@ -641,22 +680,58 @@ export default function ProgressPortalPage() {
                   })}
                 </div>
 
-                {/* Download Progress - Show during app installation phases */}
-                {session.status === "InProgress" &&
-                 (session.currentPhase === 3 || session.currentPhase === 5) &&
-                 events.filter(e => e.eventType === "download_progress").length > 0 && (
-                  <div className="mb-8">
-                    <DownloadProgress
-                      events={events.filter(e => e.eventType === "download_progress").map(e => ({
-                        timestamp: e.timestamp,
-                        data: e.data
-                      }))}
-                    />
+                {/* Estimated Time / Active Download / Status */}
+                {session.status === "InProgress" && currentDownload && (
+                  <div className="bg-blue-50 rounded-lg p-4">
+                    {currentDownload.completedCount > 0 && (
+                      <p className="text-xs text-blue-500 mb-2">
+                        {currentDownload.completedCount} App installs completed
+                      </p>
+                    )}
+                    {currentDownload.active && currentDownload.appName && (
+                      <>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-sm text-blue-700 font-medium truncate pr-2">
+                            {currentDownload.appName}
+                          </span>
+                          {currentDownload.downloadRateBps > 0 && (
+                            <span className="text-xs text-blue-500 flex-shrink-0">
+                              {currentDownload.downloadRateBps >= 1024 * 1024
+                                ? `${(currentDownload.downloadRateBps / (1024 * 1024)).toFixed(1)} MB/s`
+                                : currentDownload.downloadRateBps >= 1024
+                                ? `${(currentDownload.downloadRateBps / 1024).toFixed(1)} KB/s`
+                                : `${Math.round(currentDownload.downloadRateBps)} B/s`}
+                            </span>
+                          )}
+                        </div>
+                        {currentDownload.bytesTotal > 0 && (
+                          <>
+                            <div className="w-full h-1.5 bg-blue-200 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-blue-500 rounded-full transition-all duration-500"
+                                style={{ width: `${Math.min(100, (currentDownload.bytesDownloaded / currentDownload.bytesTotal) * 100)}%` }}
+                              />
+                            </div>
+                            <div className="flex justify-between mt-1 text-xs text-blue-400">
+                              <span>
+                                {currentDownload.bytesDownloaded >= 1024 * 1024
+                                  ? `${(currentDownload.bytesDownloaded / (1024 * 1024)).toFixed(1)} MB`
+                                  : `${(currentDownload.bytesDownloaded / 1024).toFixed(0)} KB`}
+                                {" / "}
+                                {currentDownload.bytesTotal >= 1024 * 1024
+                                  ? `${(currentDownload.bytesTotal / (1024 * 1024)).toFixed(1)} MB`
+                                  : `${(currentDownload.bytesTotal / 1024).toFixed(0)} KB`}
+                              </span>
+                              <span>{Math.round((currentDownload.bytesDownloaded / currentDownload.bytesTotal) * 100)}%</span>
+                            </div>
+                          </>
+                        )}
+                      </>
+                    )}
                   </div>
                 )}
 
-                {/* Estimated Time / Status */}
-                {session.status === "InProgress" && estimatedRemaining != null && estimatedRemaining > 0 && (
+                {session.status === "InProgress" && !currentDownload && estimatedRemaining != null && estimatedRemaining > 0 && (
                   <div className="bg-blue-50 rounded-lg p-4 text-center">
                     <div className="text-sm text-blue-700">
                       Estimated time remaining:{" "}

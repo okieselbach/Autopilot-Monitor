@@ -18,6 +18,7 @@ interface DownloadItem {
   downloadRateBps: number;
   lastUpdated: string;
   isComplete: boolean;
+  firstSeenIndex: number;
   eventData?: Record<string, any>;
 }
 
@@ -50,6 +51,7 @@ export default function DownloadProgress({ events }: DownloadProgressProps) {
     if (events.length === 0) return [];
 
     const downloadMap = new Map<string, DownloadItem>();
+    let insertionIndex = 0;
 
     for (const evt of events) {
       const d = evt.data;
@@ -79,6 +81,7 @@ export default function DownloadProgress({ events }: DownloadProgressProps) {
         continue;
       }
 
+      const existing = downloadMap.get(appName);
       downloadMap.set(appName, {
         appName,
         bytesDownloaded: isNaN(bytesDownloaded) ? 0 : bytesDownloaded,
@@ -86,6 +89,7 @@ export default function DownloadProgress({ events }: DownloadProgressProps) {
         downloadRateBps: isNaN(downloadRateBps) ? 0 : downloadRateBps,
         lastUpdated: evt.timestamp,
         isComplete,
+        firstSeenIndex: existing?.firstSeenIndex ?? insertionIndex++,
         eventData: d,
       });
     }
@@ -93,8 +97,8 @@ export default function DownloadProgress({ events }: DownloadProgressProps) {
     return Array.from(downloadMap.values()).sort((a, b) => {
       // In-progress first, then completed
       if (a.isComplete !== b.isComplete) return a.isComplete ? 1 : -1;
-      // Chronological order: oldest first (first download on top, newest at bottom)
-      return new Date(a.lastUpdated).getTime() - new Date(b.lastUpdated).getTime();
+      // Preserve first-seen order: oldest first (first download on top, newest at bottom)
+      return a.firstSeenIndex - b.firstSeenIndex;
     });
   }, [events]);
 
