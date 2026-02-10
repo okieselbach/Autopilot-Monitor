@@ -247,6 +247,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                 hive = Registry.LocalMachine;
             }
 
+            // Guard: only allow enrollment-relevant registry paths
+            if (!GatherRuleGuards.IsRegistryPathAllowed(subPath))
+                return EmitSecurityWarning(rule, "registry", path);
+
             // Determine explicit valueName from parameters
             string explicitValueName = null;
             rule.Parameters?.TryGetValue("valueName", out explicitValueName);
@@ -332,6 +336,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 
             if (string.IsNullOrEmpty(query))
                 return data;
+
+            // Guard: only allow known-safe WMI classes
+            if (!GatherRuleGuards.IsWmiQueryAllowed(query))
+                return EmitSecurityWarning(rule, "wmi", query);
 
             try
             {
@@ -481,6 +489,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 
             // Expand environment variables
             filePath = Environment.ExpandEnvironmentVariables(filePath);
+
+            // Guard: only allow enrollment-relevant file paths
+            if (!GatherRuleGuards.IsFilePathAllowed(filePath))
+                return EmitSecurityWarning(rule, "file", filePath);
 
             try
             {
@@ -758,6 +770,37 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         /// Checks if a command is on the allowlist
         /// Uses exact match comparison for security
         /// </summary>
+        /// <summary>
+        /// Emits a security_warning event and returns an empty result dictionary.
+        /// Called when a gather rule targets a path/query not on the allowlist.
+        /// </summary>
+        private Dictionary<string, object> EmitSecurityWarning(GatherRule rule, string collectorType, string target)
+        {
+            _logger.Warning($"SECURITY: {collectorType} path blocked by guard: {target} (Rule: {rule.RuleId})");
+
+            var data = new Dictionary<string, object>
+            {
+                ["blocked"] = true,
+                ["reason"] = $"{collectorType} target not on allowlist",
+                ["target"] = target,
+                ["ruleId"] = rule.RuleId,
+            };
+
+            _onEventCollected(new EnrollmentEvent
+            {
+                SessionId = _sessionId,
+                TenantId = _tenantId,
+                Timestamp = DateTime.UtcNow,
+                EventType = "security_warning",
+                Severity = EventSeverity.Warning,
+                Source = "GatherRuleExecutor",
+                Message = $"Blocked {collectorType} target not on allowlist: {target} (Rule: {rule.RuleId})",
+                Data = data
+            });
+
+            return new Dictionary<string, object>();
+        }
+
         private bool IsCommandAllowed(string command)
         {
             if (string.IsNullOrEmpty(command))
