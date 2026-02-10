@@ -9,6 +9,7 @@ using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Azure.Functions.Worker.Extensions.SignalRService;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace AutopilotMonitor.Functions.Functions
 {
@@ -76,6 +77,8 @@ namespace AutopilotMonitor.Functions.Functions
                     }
                     var requestBody = await new StreamReader(req.Body).ReadToEndAsync();
                     request = JsonConvert.DeserializeObject<IngestEventsRequest>(requestBody);
+                    if (request?.Events != null)
+                        foreach (var evt in request.Events) NormalizeEventData(evt);
                 }
 
                 if (request?.Events == null || request.Events.Count == 0)
@@ -355,6 +358,7 @@ namespace AutopilotMonitor.Functions.Functions
                 var evt = JsonConvert.DeserializeObject<EnrollmentEvent>(lines[i]);
                 if (evt != null)
                 {
+                    NormalizeEventData(evt);
                     events.Add(evt);
                 }
             }
@@ -365,6 +369,36 @@ namespace AutopilotMonitor.Functions.Functions
                 TenantId = metadata.TenantId,
                 Events = events
             };
+        }
+
+        /// <summary>
+        /// Normalizes event Data dictionary by converting Newtonsoft JToken objects to native .NET types.
+        /// Required because Newtonsoft.Json deserializes nested objects as JObject/JArray, which
+        /// System.Text.Json (used by SignalR) cannot serialize correctly - producing [[[]]] instead of real values.
+        /// </summary>
+        private static void NormalizeEventData(EnrollmentEvent evt)
+        {
+            if (evt.Data == null || evt.Data.Count == 0) return;
+            var normalized = new Dictionary<string, object>();
+            foreach (var kvp in evt.Data)
+                normalized[kvp.Key] = ConvertJTokenToNative(kvp.Value);
+            evt.Data = normalized;
+        }
+
+        private static object ConvertJTokenToNative(object value)
+        {
+            if (value is JArray jArray)
+                return jArray.Select(item => ConvertJTokenToNative(item)).ToList<object>();
+            if (value is JObject jObject)
+            {
+                var dict = new Dictionary<string, object>();
+                foreach (var prop in jObject.Properties())
+                    dict[prop.Name] = ConvertJTokenToNative(prop.Value);
+                return dict;
+            }
+            if (value is JValue jValue)
+                return jValue.Value ?? string.Empty;
+            return value;
         }
 
         /// <summary>

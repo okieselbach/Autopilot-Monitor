@@ -1452,7 +1452,7 @@ function DeviceDetailsCard({ events }: { events: EnrollmentEvent[] }) {
                     <div className="mt-1 text-xs text-gray-500">
                       {(bitLockerStatus.volumes as any[]).map((vol: any, i: number) => (
                         <div key={i}>
-                          {vol.driveLetter}: {vol.protectionStatus === "1" ? "Protected" : "Not Protected"}
+                          {vol.driveLetter} {vol.protectionStatus === "1" ? "Protected" : "Not Protected"}
                           {vol.encryptionMethod && ` (Method: ${vol.encryptionMethod})`}
                         </div>
                       ))}
