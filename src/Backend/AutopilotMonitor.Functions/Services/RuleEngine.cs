@@ -221,7 +221,7 @@ namespace AutopilotMonitor.Functions.Services
         {
             // Find phase change events to calculate phase duration
             var phaseEvents = events
-                .Where(e => e.EventType == "phase_changed")
+                .Where(e => e.EventType == "esp_phase_changed")
                 .OrderBy(e => e.Timestamp)
                 .ToList();
 
@@ -233,8 +233,8 @@ namespace AutopilotMonitor.Functions.Services
             for (int i = 0; i < phaseEvents.Count; i++)
             {
                 var phaseData = phaseEvents[i].Data;
-                var currentPhase = phaseData?.ContainsKey("currentPhase") == true
-                    ? phaseData["currentPhase"]?.ToString()
+                var currentPhase = phaseData?.ContainsKey("espPhase") == true
+                    ? phaseData["espPhase"]?.ToString()
                     : null;
 
                 if (currentPhase == targetPhase)

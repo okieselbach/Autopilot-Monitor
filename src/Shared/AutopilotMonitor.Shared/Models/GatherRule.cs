@@ -59,29 +59,38 @@ namespace AutopilotMonitor.Shared.Models
         // ===== WHAT TO COLLECT =====
 
         /// <summary>
-        /// Type of data collection: "registry", "eventlog", "wmi", "file", "command", "logparser"
+        /// Type of data collection:
+        /// - "registry": Read values from the Windows Registry
+        /// - "eventlog": Read entries from a Windows Event Log
+        /// - "wmi": Execute a WMI/CIM query
+        /// - "file": Check file/directory existence and optionally read content
+        /// - "command_allowlisted": Run a pre-approved command (PowerShell or CLI). Only commands on
+        ///   the agent's hardcoded allowlist in GatherRuleExecutor.cs are permitted. Unlisted commands
+        ///   are blocked and generate a security_warning event. See the allowlist in GatherRuleExecutor.cs
+        ///   for the full list of approved commands.
+        /// - "logparser": Parse a CMTrace-format log file using a regex pattern with named capture groups
         /// </summary>
         public string CollectorType { get; set; }
 
         /// <summary>
         /// Target for collection:
-        /// - registry: Registry path (e.g., "HKLM:\SOFTWARE\Microsoft\...")
-        /// - eventlog: Event log name (e.g., "Microsoft-Windows-DeviceManagement...")
-        /// - wmi: WMI query (e.g., "SELECT * FROM Win32_TPM")
-        /// - file: File path (e.g., "C:\Windows\INF\setupapi.dev.log")
-        /// - command: Command name from allowlist (e.g., "Get-TpmStatus")
+        /// - registry: Registry path (e.g., "HKLM\SOFTWARE\Microsoft\...")
+        /// - eventlog: Event log name (e.g., "Microsoft-Windows-DeviceManagement-Enterprise-Diagnostics-Provider/Admin")
+        /// - wmi: WMI query (e.g., "SELECT * FROM Win32_TPM WHERE __NAMESPACE='root\\CIMV2\\Security\\MicrosoftTpm'")
+        /// - file: File or directory path with env vars (e.g., "C:\Windows\INF\setupapi.dev.log")
+        /// - command_allowlisted: Exact command string as it appears in the allowlist (e.g., "Get-Tpm", "dsregcmd /status")
         /// - logparser: Log file path with env vars (e.g., "%ProgramData%\Microsoft\IntuneManagementExtension\Logs\AppWorkload.log")
         /// </summary>
         public string Target { get; set; }
 
         /// <summary>
-        /// Additional parameters for the collector
-        /// - registry: { "values": "ProxyServer,ProxyEnable" }
-        /// - eventlog: { "eventIds": "407,12029", "maxEvents": "10" }
+        /// Additional parameters for the collector:
+        /// - registry: { "valueName": "ProxyServer" } — omit to read all values
+        /// - eventlog: { "maxEntries": "10", "source": "Microsoft-Windows-DeviceManagement-Enterprise-Diagnostics" }
         /// - wmi: { "namespace": "root\\CIMV2\\Security\\MicrosoftTpm" }
-        /// - file: { "maxLines": "100", "pattern": "error|fail" }
-        /// - command: { "arguments": "-Detailed" }
-        /// - logparser: { "pattern": "regex with (?&lt;named&gt;groups)", "logFormat": "cmtrace", "trackPosition": "true", "maxLines": "1000" }
+        /// - file: { "readContent": "true" } — only reads files &lt;50 KB
+        /// - command_allowlisted: (no additional parameters — command is the full string in Target)
+        /// - logparser: { "pattern": "regex with (?&lt;namedGroups&gt;)", "trackPosition": "true", "maxLines": "1000" }
         /// </summary>
         public Dictionary<string, string> Parameters { get; set; } = new Dictionary<string, string>();
 

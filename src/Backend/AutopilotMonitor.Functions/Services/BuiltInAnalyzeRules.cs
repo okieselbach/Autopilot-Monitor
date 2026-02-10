@@ -29,9 +29,16 @@ namespace AutopilotMonitor.Functions.Services
                 CreateDeviceBitlockerEscrowRule(),
                 CreateDeviceSecureBootRule(),
 
+                // ===== DEVICE RULES (continued) =====
+                CreateDeviceAadJoinNotDetectedRule(),
+
+                // ===== APP RULES (continued) =====
+                CreateAppTrackingSummaryErrorsRule(),
+
                 // ===== CORRELATION RULES (cross-event analysis) =====
                 CreateCorrelationNetworkCausedInstallFailureRule(),
                 CreateCorrelationDiskSpaceCausedInstallFailureRule(),
+                CreateCorrelationProxyCausedDownloadFailureRule(),
             };
         }
 
@@ -151,7 +158,7 @@ namespace AutopilotMonitor.Functions.Services
             BaseConfidence = 70,
             Conditions = new List<RuleCondition>
             {
-                new RuleCondition { Signal = "reboot_loop", Source = "event_count", EventType = "app_install_start", Operator = "count_gte", Value = "3", Required = true }
+                new RuleCondition { Signal = "reboot_loop", Source = "event_count", EventType = "app_install_started", Operator = "count_gte", Value = "3", Required = true }
             },
             Explanation = "An app appears to be in a reboot loop - it has been attempted multiple times. This may indicate that the app requires a reboot that is not being honored by the ESP.",
             Remediation = new List<RemediationStep>
@@ -173,7 +180,7 @@ namespace AutopilotMonitor.Functions.Services
             BaseConfidence = 60,
             Conditions = new List<RuleCondition>
             {
-                new RuleCondition { Signal = "esp_stalled", Source = "phase_duration", EventType = "phase_changed", DataField = "currentPhase", Operator = "equals", Value = "EspDeviceSetup", Required = true }
+                new RuleCondition { Signal = "esp_stalled", Source = "phase_duration", EventType = "esp_phase_changed", DataField = "espPhase", Operator = "equals", Value = "DeviceSetup", Required = true }
             },
             ConfidenceFactors = new List<ConfidenceFactor>
             {
@@ -259,7 +266,7 @@ namespace AutopilotMonitor.Functions.Services
             BaseConfidence = 60,
             Conditions = new List<RuleCondition>
             {
-                new RuleCondition { Signal = "secureboot_disabled", Source = "event_type", EventType = "gather_secureboot_status", DataField = "UEFISecureBootEnabled", Operator = "equals", Value = "0", Required = true }
+                new RuleCondition { Signal = "secureboot_disabled", Source = "event_type", EventType = "secureboot_status", DataField = "uefiSecureBootEnabled", Operator = "equals", Value = "False", Required = true }
             },
             Explanation = "Secure Boot is disabled on this device. Some compliance policies require Secure Boot to be enabled.",
             Remediation = new List<RemediationStep>
@@ -267,6 +274,61 @@ namespace AutopilotMonitor.Functions.Services
                 new RemediationStep { Title = "Enable Secure Boot", Steps = new List<string> { "Enter BIOS/UEFI settings", "Enable Secure Boot", "Ensure the device boots in UEFI mode (not Legacy/CSM)" } }
             },
             Tags = new[] { "device", "secureboot" }
+        };
+
+        // ===== CORRELATION RULES =====
+        // These combine signals from multiple event types for root-cause analysis
+
+        private static AnalyzeRule CreateDeviceAadJoinNotDetectedRule() => new AnalyzeRule
+        {
+            RuleId = "ANALYZE-DEV-004",
+            Title = "Azure AD Join Not Detected",
+            Description = "Detects when the device is not Azure AD joined at the time of enrollment.",
+            Severity = "critical",
+            Category = "device",
+            BaseConfidence = 85,
+            Conditions = new List<RuleCondition>
+            {
+                new RuleCondition { Signal = "aad_not_joined", Source = "event_type", EventType = "aad_join_status", DataField = "joinType", Operator = "equals", Value = "Not Joined", Required = true }
+            },
+            Explanation = "The device was not Azure AD joined at the start of enrollment. Autopilot requires the device to join Azure AD. This will prevent Intune enrollment and policy delivery from succeeding.",
+            Remediation = new List<RemediationStep>
+            {
+                new RemediationStep { Title = "Verify Azure AD connectivity", Steps = new List<string> {
+                    "Ensure the device can reach login.microsoftonline.com",
+                    "Check that the Autopilot profile's tenant matches the signing-in user's tenant",
+                    "Verify the device is not already joined to an on-premises domain (Hybrid Join may be required)"
+                }}
+            },
+            Tags = new[] { "device", "aad", "join", "critical" }
+        };
+
+        private static AnalyzeRule CreateAppTrackingSummaryErrorsRule() => new AnalyzeRule
+        {
+            RuleId = "ANALYZE-APP-007",
+            Title = "Multiple App Installation Failures",
+            Description = "Detects when the app tracking summary reports multiple failed app installations.",
+            Severity = "high",
+            Category = "apps",
+            BaseConfidence = 75,
+            Conditions = new List<RuleCondition>
+            {
+                new RuleCondition { Signal = "summary_errors", Source = "event_type", EventType = "app_tracking_summary", DataField = "errorCount", Operator = "gte", Value = "2", Required = true }
+            },
+            ConfidenceFactors = new List<ConfidenceFactor>
+            {
+                new ConfidenceFactor { Signal = "enrollment_failed", Condition = "exists", Weight = 15 }
+            },
+            Explanation = "The app tracking summary reports 2 or more failed app installations during enrollment. This suggests a systemic issue rather than an isolated app failure.",
+            Remediation = new List<RemediationStep>
+            {
+                new RemediationStep { Title = "Review failed apps", Steps = new List<string> {
+                    "Check the individual app_install_failed events for specific error codes",
+                    "Look for a common pattern (all MSI apps, all large apps, all from a specific publisher)",
+                    "Consider whether a shared prerequisite or dependency is failing"
+                }}
+            },
+            Tags = new[] { "apps", "summary", "multiple-failures" }
         };
 
         // ===== CORRELATION RULES =====
@@ -346,6 +408,45 @@ namespace AutopilotMonitor.Functions.Services
                 }}
             },
             Tags = new[] { "correlation", "apps", "disk-space", "performance", "root-cause" }
+        };
+
+        private static AnalyzeRule CreateCorrelationProxyCausedDownloadFailureRule() => new AnalyzeRule
+        {
+            RuleId = "ANALYZE-CORR-005",
+            Title = "Proxy Configuration Causing Download Failure",
+            Description = "Correlates an active proxy configuration with app download failures, suggesting the proxy is blocking or throttling Intune content delivery.",
+            Severity = "high",
+            Category = "apps",
+            Trigger = "correlation",
+            BaseConfidence = 60,
+            Conditions = new List<RuleCondition>
+            {
+                new RuleCondition { Signal = "proxy_active", Source = "event_type", EventType = "proxy_configuration", DataField = "proxyType", Operator = "regex", Value = "Proxy|PAC", Required = true },
+                new RuleCondition { Signal = "app_failed", Source = "event_type", EventType = "app_install_failed", Operator = "exists", Value = "", Required = true }
+            },
+            ConfidenceFactors = new List<ConfidenceFactor>
+            {
+                new ConfidenceFactor { Signal = "download_timeout", Condition = "exists", Weight = 20 },
+                new ConfidenceFactor { Signal = "multiple_failures", Condition = "count >= 2", Weight = 15 },
+                new ConfidenceFactor { Signal = "enrollment_failed", Condition = "exists", Weight = 10 }
+            },
+            ConfidenceThreshold = 50,
+            Explanation = "A proxy (explicit or PAC-based) is configured on this device and app installations failed. Proxies can block or throttle downloads from *.delivery.mp.microsoft.com and other Intune CDN endpoints.\n\nThis is a common root cause when apps fail consistently on proxy-connected corporate networks.",
+            Remediation = new List<RemediationStep>
+            {
+                new RemediationStep { Title = "Verify proxy bypass for Intune endpoints", Steps = new List<string> {
+                    "Add *.delivery.mp.microsoft.com to proxy bypass list",
+                    "Add *.do.dsp.mp.microsoft.com (Delivery Optimization) to bypass list",
+                    "Add login.microsoftonline.com and *.manage.microsoft.com to bypass list",
+                    "Verify the PAC file is reachable at enrollment time (before user login)"
+                }},
+                new RemediationStep { Title = "Check proxy authentication", Steps = new List<string> {
+                    "Ensure the proxy does not require user authentication during OOBE/device phase",
+                    "Consider using machine certificate-based proxy authentication",
+                    "Test with proxy temporarily bypassed to confirm it is the root cause"
+                }}
+            },
+            Tags = new[] { "correlation", "apps", "proxy", "network", "download", "root-cause" }
         };
     }
 }

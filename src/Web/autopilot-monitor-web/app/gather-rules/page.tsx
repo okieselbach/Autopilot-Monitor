@@ -47,7 +47,7 @@ interface NewRuleForm {
 }
 
 const CATEGORIES = ["network", "identity", "apps", "device", "esp", "enrollment"] as const;
-const COLLECTOR_TYPES = ["registry", "eventlog", "wmi", "file", "command"] as const;
+const COLLECTOR_TYPES = ["registry", "eventlog", "wmi", "file", "command_allowlisted", "logparser"] as const;
 const TRIGGERS = ["startup", "phase_change", "interval", "on_event"] as const;
 const SEVERITIES = ["info", "warning", "error", "critical"] as const;
 
@@ -65,7 +65,9 @@ const COLLECTOR_TYPE_LABELS: Record<string, string> = {
   eventlog: "Event Log",
   wmi: "WMI Query",
   file: "File",
-  command: "Command",
+  command_allowlisted: "Command (Allowlisted)",
+  command: "Command (Allowlisted)", // legacy alias
+  logparser: "Log Parser",
 };
 
 const EMPTY_FORM: NewRuleForm = {
@@ -506,7 +508,7 @@ export default function GatherRulesPage() {
           >
             {COLLECTOR_TYPES.map((ct) => (
               <option key={ct} value={ct}>
-                {ct.charAt(0).toUpperCase() + ct.slice(1)}
+                {COLLECTOR_TYPE_LABELS[ct] || (ct.charAt(0).toUpperCase() + ct.slice(1))}
               </option>
             ))}
           </select>

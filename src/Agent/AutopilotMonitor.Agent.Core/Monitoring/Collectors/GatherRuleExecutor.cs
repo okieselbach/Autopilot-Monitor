@@ -16,8 +16,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 {
     /// <summary>
     /// Executes gather rules received from the backend API
-    /// Supports registry, eventlog, wmi, file, command (allowlisted), and logparser collector types
-    /// </summary>
+    /// Supports registry, eventlog, wmi, file, command_allowlisted, and logparser collector types
+    /// NOTE: "command" is accepted as a legacy alias for "command_allowlisted" - both enforce the allowlist
+    ///</summary>
     public class GatherRuleExecutor : IDisposable
     {
         private readonly AgentLogger _logger;
@@ -167,7 +168,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                         result = ExecuteWmiRule(rule);
                         break;
 
-                    case "command":
+                    case "command_allowlisted":
+                    case "command": // legacy alias - both enforce the allowlist
                         result = ExecuteCommandRule(rule);
                         break;
 
