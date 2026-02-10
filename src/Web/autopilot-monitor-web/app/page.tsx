@@ -100,8 +100,18 @@ export default function Home() {
     }
   };
 
-  // Initial data fetch
+  // Redirect regular users (non-admin) to progress portal – they must never see the session list
   useEffect(() => {
+    if (user && !user.isTenantAdmin && !user.isGalacticAdmin) {
+      router.replace("/progress");
+    }
+  }, [user, router]);
+
+  // Initial data fetch (only runs for admins)
+  useEffect(() => {
+    if (user && !user.isTenantAdmin && !user.isGalacticAdmin) {
+      return; // regular users are being redirected, don't fetch
+    }
     // Prevent duplicate fetches in React StrictMode (development double-mounting)
     if (hasInitialFetch.current) {
       return;
@@ -111,7 +121,7 @@ export default function Home() {
     // Only fetch sessions on load, no automatic health check
     fetchSessions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Empty deps - only run once on mount
+  }, [user]); // re-run once user is known
 
   // Join tenant group when SignalR is connected (for multi-tenancy)
   useEffect(() => {

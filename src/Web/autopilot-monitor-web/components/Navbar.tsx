@@ -104,6 +104,78 @@ export default function Navbar() {
     return `${Math.floor(diffHours / 24)}d ago`;
   };
 
+  const isTenantAdmin = user?.isTenantAdmin ?? false;
+
+  // Regular users (non-TenantAdmin): show minimal navbar with only Progress Portal
+  if (!isTenantAdmin && !user?.isGalacticAdmin) {
+    return (
+      <nav className="bg-white border-b border-gray-200 shadow-sm">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between h-16">
+            <div className="flex items-center">
+              <Link href="/progress" className="flex flex-col">
+                <span className="text-2xl font-bold text-blue-600">Autopilot Monitor</span>
+                <span className="text-xs text-gray-500">v1.0.0</span>
+              </Link>
+            </div>
+            <div className="flex items-center space-x-2">
+              {/* User Menu */}
+              <div className="relative" ref={userMenuRef}>
+                <button onClick={() => setShowUserMenu(!showUserMenu)} className="flex items-center space-x-2 p-2 rounded-lg hover:bg-gray-100 transition-colors">
+                  <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white font-semibold text-sm">
+                    {(() => {
+                      if (user?.displayName) {
+                        const names = user.displayName.split(' ');
+                        if (names.length >= 2) {
+                          return `${names[0].charAt(0)}${names[names.length - 1].charAt(0)}`.toUpperCase();
+                        }
+                        return user.displayName.charAt(0).toUpperCase();
+                      }
+                      return user?.upn?.charAt(0).toUpperCase() || 'U';
+                    })()}
+                  </div>
+                  <svg className="w-4 h-4 text-gray-600" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
+                    <path d="M19 9l-7 7-7-7"></path>
+                  </svg>
+                </button>
+                {showUserMenu && (
+                  <div className="absolute right-0 mt-2 w-80 bg-white rounded-lg shadow-lg border border-gray-200 z-50">
+                    <div className="px-4 py-3 border-b border-gray-200 flex items-start space-x-3">
+                      <div className="w-10 h-10 rounded-full bg-blue-600 flex-shrink-0 flex items-center justify-center text-white font-semibold text-sm">
+                        {(() => {
+                          if (user?.displayName) {
+                            const names = user.displayName.split(' ');
+                            if (names.length >= 2) {
+                              return `${names[0].charAt(0)}${names[names.length - 1].charAt(0)}`.toUpperCase();
+                            }
+                            return user.displayName.charAt(0).toUpperCase();
+                          }
+                          return user?.upn?.charAt(0).toUpperCase() || 'U';
+                        })()}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-gray-900">{user?.displayName || 'User'}</p>
+                        <p className="text-sm text-gray-600 truncate">{user?.upn}</p>
+                      </div>
+                    </div>
+                    <div className="py-1">
+                      <button onClick={() => { logout(); setShowUserMenu(false); }} className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center space-x-2">
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                        </svg>
+                        <span>Sign out</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </nav>
+    );
+  }
+
   return (
     <nav className="bg-white border-b border-gray-200 shadow-sm">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">

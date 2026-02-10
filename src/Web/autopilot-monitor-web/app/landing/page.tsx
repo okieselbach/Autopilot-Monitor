@@ -12,19 +12,23 @@ const PLATFORM_STATS = {
 };
 
 export default function LandingPage() {
-  const { login, isAuthenticated, isLoading } = useAuth();
+  const { login, isAuthenticated, isLoading, user } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
 
   // Check for preview mode (for debugging while logged in)
   const previewMode = searchParams.get("preview") === "true";
 
-  // Redirect to dashboard if already authenticated (unless in preview mode)
+  // Redirect after login: regular users go to /progress, admins go to dashboard
   useEffect(() => {
-    if (isAuthenticated && !isLoading && !previewMode) {
-      router.push("/");
+    if (isAuthenticated && !isLoading && !previewMode && user) {
+      if (user.isTenantAdmin || user.isGalacticAdmin) {
+        router.push("/");
+      } else {
+        router.push("/progress");
+      }
     }
-  }, [isAuthenticated, isLoading, previewMode, router]);
+  }, [isAuthenticated, isLoading, previewMode, user, router]);
 
   if (isLoading) {
     return (

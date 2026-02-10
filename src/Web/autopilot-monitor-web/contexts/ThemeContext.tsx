@@ -17,14 +17,13 @@ const ThemeContext = createContext<ThemeContextType>({
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setTheme] = useState<Theme>("light");
 
-  // Initialize from localStorage on mount
+  // Initialize from localStorage on mount, default is always "light"
   useEffect(() => {
     const stored = localStorage.getItem("theme") as Theme | null;
     if (stored === "dark" || stored === "light") {
       setTheme(stored);
-    } else if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
-      setTheme("dark");
     }
+    // No system preference fallback – default is always light
   }, []);
 
   // Apply class to <html> and persist
