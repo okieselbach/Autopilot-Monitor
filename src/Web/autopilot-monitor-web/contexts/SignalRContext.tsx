@@ -41,7 +41,6 @@ export function SignalRProvider({ children }: { children: React.ReactNode }) {
     const hubUrl = `${API_BASE_URL}/api/realtime`;
     const newConnection = new signalR.HubConnectionBuilder()
       .withUrl(hubUrl, {
-        withCredentials: false, 
         accessTokenFactory: async () => {
           const token = await getAccessToken();
           return token || '';
