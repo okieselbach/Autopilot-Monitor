@@ -210,7 +210,8 @@ export default function Home() {
       off('newSession', handleNewSession);
       off('newevents', handleNewEvents);
     };
-  }, [on, off]); // Re-register when SignalR connection changes
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isConnected]); // Re-register when SignalR connection is established
 
   // Save admin mode to localStorage when it changes
   useEffect(() => {
