@@ -406,18 +406,23 @@ namespace AutopilotMonitor.Functions.Functions
         /// </summary>
         private void AggregateAppInstallEvent(EnrollmentEvent evt, string tenantId, string sessionId, Dictionary<string, AppInstallSummary> summaries)
         {
-            string? appName = null;
+            // Agent sends: app_install_started, app_install_completed, app_install_failed, app_download_started, download_progress
+            // Support both legacy (app_install_start/complete) and current agent event types
+            bool isRelevant =
+                evt.EventType == "app_install_started" || evt.EventType == "app_install_start" ||
+                evt.EventType == "app_install_completed" || evt.EventType == "app_install_complete" ||
+                evt.EventType == "app_install_failed" ||
+                evt.EventType == "app_download_started" ||
+                evt.EventType == "app_install_skipped" ||
+                evt.EventType == "download_progress";
 
-            if (evt.EventType == "app_install_start" || evt.EventType == "app_install_complete" ||
-                evt.EventType == "app_install_failed" || evt.EventType == "download_progress")
-            {
-                appName = evt.Data?.ContainsKey("appName") == true ? evt.Data["appName"]?.ToString() : null;
-                if (string.IsNullOrEmpty(appName)) return;
-            }
-            else
-            {
-                return;
-            }
+            if (!isRelevant) return;
+
+            // Agent sends "appName" (and also "name") in the Data dictionary
+            var appName = evt.Data?.ContainsKey("appName") == true ? evt.Data["appName"]?.ToString() : null;
+            if (string.IsNullOrEmpty(appName))
+                appName = evt.Data?.ContainsKey("name") == true ? evt.Data["name"]?.ToString() : null;
+            if (string.IsNullOrEmpty(appName)) return;
 
             if (!summaries.TryGetValue(appName, out var summary))
             {
@@ -433,44 +438,49 @@ namespace AutopilotMonitor.Functions.Functions
 
             switch (evt.EventType)
             {
+                case "app_install_started":
                 case "app_install_start":
-                    summary.Status = "InProgress";
-                    summary.StartedAt = evt.Timestamp;
+                case "app_download_started":
+                    // Only set StartedAt on the very first start event
+                    if (summary.StartedAt == DateTime.MinValue || summary.StartedAt > evt.Timestamp)
+                        summary.StartedAt = evt.Timestamp;
+                    if (summary.Status == "InProgress" || summary.Status == string.Empty)
+                        summary.Status = "InProgress";
                     break;
 
+                case "app_install_completed":
                 case "app_install_complete":
                     summary.Status = "Succeeded";
                     summary.CompletedAt = evt.Timestamp;
                     if (summary.StartedAt != DateTime.MinValue)
-                    {
-                        summary.DurationSeconds = (int)(evt.Timestamp - summary.StartedAt).TotalSeconds;
-                    }
+                        summary.DurationSeconds = Math.Max(1, (int)(evt.Timestamp - summary.StartedAt).TotalSeconds);
                     break;
 
                 case "app_install_failed":
                     summary.Status = "Failed";
                     summary.CompletedAt = evt.Timestamp;
                     if (summary.StartedAt != DateTime.MinValue)
-                    {
-                        summary.DurationSeconds = (int)(evt.Timestamp - summary.StartedAt).TotalSeconds;
-                    }
+                        summary.DurationSeconds = Math.Max(1, (int)(evt.Timestamp - summary.StartedAt).TotalSeconds);
+                    // Agent does not send errorCode/errorMessage in Data — use the event message
                     summary.FailureCode = evt.Data?.ContainsKey("errorCode") == true
                         ? evt.Data["errorCode"]?.ToString() ?? string.Empty : string.Empty;
                     summary.FailureMessage = evt.Data?.ContainsKey("errorMessage") == true
                         ? evt.Data["errorMessage"]?.ToString() ?? string.Empty : evt.Message ?? string.Empty;
                     break;
 
+                case "app_install_skipped":
+                    // Mark as succeeded (skipped = already installed / not applicable) with 0 duration
+                    if (summary.Status == "InProgress")
+                        summary.Status = "Succeeded";
+                    break;
+
                 case "download_progress":
-                    if (evt.Data?.ContainsKey("bytes_downloaded") == true &&
-                        long.TryParse(evt.Data["bytes_downloaded"]?.ToString(), out var bytes))
-                    {
+                    // Agent sends "bytesDownloaded" (not "bytes_downloaded")
+                    var bytesKey = evt.Data?.ContainsKey("bytesDownloaded") == true ? "bytesDownloaded"
+                        : evt.Data?.ContainsKey("bytes_downloaded") == true ? "bytes_downloaded" : null;
+                    if (bytesKey != null && long.TryParse(evt.Data![bytesKey]?.ToString(), out var bytes))
                         summary.DownloadBytes = Math.Max(summary.DownloadBytes, bytes);
-                    }
-                    if (evt.Data?.ContainsKey("download_duration_seconds") == true &&
-                        int.TryParse(evt.Data["download_duration_seconds"]?.ToString(), out var dlDuration))
-                    {
-                        summary.DownloadDurationSeconds = Math.Max(summary.DownloadDurationSeconds, dlDuration);
-                    }
+                    // download_duration_seconds is not sent by the agent — skip
                     break;
             }
         }

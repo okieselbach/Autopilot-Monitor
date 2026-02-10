@@ -35,7 +35,17 @@ namespace AutopilotMonitor.Functions.Functions
                 var tenantId = TenantHelper.GetTenantId(req);
                 _logger.LogInformation($"Fetching app metrics for tenant {tenantId}");
 
-                var summaries = await _storageService.GetAppInstallSummariesByTenantAsync(tenantId);
+                // Optional time filter: ?days=7 (default: 30)
+                var query = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
+                var daysParam = query["days"];
+                int days = 30;
+                if (!string.IsNullOrEmpty(daysParam) && int.TryParse(daysParam, out var parsedDays) && parsedDays > 0)
+                    days = parsedDays;
+
+                var cutoff = DateTime.UtcNow.AddDays(-days);
+
+                var allSummaries = await _storageService.GetAppInstallSummariesByTenantAsync(tenantId);
+                var summaries = allSummaries.Where(s => s.StartedAt >= cutoff).ToList();
 
                 // Aggregate: slowest apps (avg duration) and top failing apps
                 var appGroups = summaries.GroupBy(s => s.AppName).Select(g =>
@@ -64,7 +74,7 @@ namespace AutopilotMonitor.Functions.Functions
                 }).ToList();
 
                 var slowestApps = appGroups
-                    .Where(a => a.avgDurationSeconds > 0)
+                    .Where(a => a.succeeded > 0)
                     .OrderByDescending(a => a.avgDurationSeconds)
                     .Take(10)
                     .ToList();

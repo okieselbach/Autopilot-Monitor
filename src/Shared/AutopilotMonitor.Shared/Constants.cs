@@ -59,9 +59,11 @@ namespace AutopilotMonitor.Shared
         public static class EventTypes
         {
             public const string PhaseTransition = "phase_transition";
-            public const string AppInstallStart = "app_install_start";
-            public const string AppInstallComplete = "app_install_complete";
+            public const string AppInstallStart = "app_install_started";
+            public const string AppInstallComplete = "app_install_completed";
             public const string AppInstallFailed = "app_install_failed";
+            public const string AppDownloadStarted = "app_download_started";
+            public const string AppInstallSkipped = "app_install_skipped";
             public const string NetworkStateChange = "network_state_change";
             public const string ErrorDetected = "error_detected";
             public const string PerformanceSnapshot = "performance_snapshot";

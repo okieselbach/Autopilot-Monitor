@@ -52,6 +52,7 @@ export default function FleetHealthPage() {
 
   const hasInitialFetch = useRef(false);
   const hasJoinedGroup = useRef(false);
+  const isTimeRangeMount = useRef(true);
 
   const { on, off, isConnected, joinGroup, leaveGroup } = useSignalR();
   const { tenantId } = useTenant();
@@ -68,8 +69,16 @@ export default function FleetHealthPage() {
     if (hasInitialFetch.current) return;
     hasInitialFetch.current = true;
     fetchSessions();
-    fetchAppMetrics();
+    fetchAppMetrics(timeRange);
   }, []);
+
+  useEffect(() => {
+    if (isTimeRangeMount.current) {
+      isTimeRangeMount.current = false;
+      return;
+    }
+    fetchAppMetrics(timeRange);
+  }, [timeRange]);
 
   useEffect(() => {
     if (isConnected && !hasJoinedGroup.current) {
@@ -144,12 +153,13 @@ export default function FleetHealthPage() {
     }
   };
 
-  const fetchAppMetrics = async () => {
+  const fetchAppMetrics = async (range: "7d" | "30d" | "90d" = timeRange) => {
     try {
       const token = await getAccessToken();
       if (!token) return;
+      const days = range === "7d" ? 7 : range === "30d" ? 30 : 90;
       const response = await fetch(
-        `${API_BASE_URL}/api/app-metrics?tenantId=${tenantId}`,
+        `${API_BASE_URL}/api/app-metrics?tenantId=${tenantId}&days=${days}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       if (response.ok) {
@@ -662,10 +672,21 @@ export default function FleetHealthPage() {
               ) : (
                 <div className="space-y-3">
                   {appMetrics.slowestApps.map((app, i) => {
-                    const avgMinutes = Math.round(app.avgDurationSeconds / 60);
-                    const maxMinutes = Math.round(app.maxDurationSeconds / 60);
+                    const avgSec = app.avgDurationSeconds;
+                    const avgLabel = avgSec >= 60
+                      ? `${Math.round(avgSec / 60)} min`
+                      : avgSec > 0
+                      ? `${Math.round(avgSec)}s`
+                      : "< 1s";
+                    const maxSec = app.maxDurationSeconds;
+                    const maxLabel = maxSec >= 60
+                      ? `${Math.round(maxSec / 60)}m`
+                      : maxSec > 0
+                      ? `${Math.round(maxSec)}s`
+                      : "< 1s";
                     const maxAvg = Math.max(
-                      ...appMetrics.slowestApps.map((a) => a.avgDurationSeconds)
+                      1,
+                      ...appMetrics!.slowestApps.map((a) => a.avgDurationSeconds)
                     );
                     return (
                       <div
@@ -681,7 +702,7 @@ export default function FleetHealthPage() {
                               {app.appName}
                             </span>
                             <span className="text-sm font-medium text-gray-900 flex-shrink-0">
-                              {avgMinutes} min avg
+                              {avgLabel} avg
                             </span>
                           </div>
                           <div className="flex items-center space-x-2">
@@ -689,16 +710,13 @@ export default function FleetHealthPage() {
                               <div
                                 className="h-full bg-amber-400 rounded-full"
                                 style={{
-                                  width: `${
-                                    maxAvg > 0
-                                      ? (app.avgDurationSeconds / maxAvg) * 100
-                                      : 0
-                                  }%`,
+                                  width: `${(avgSec / maxAvg) * 100}%`,
+                                  minWidth: avgSec > 0 ? "2px" : "0",
                                 }}
                               />
                             </div>
                             <span className="text-xs text-gray-400 flex-shrink-0">
-                              max {maxMinutes}m | {app.succeeded} installs
+                              max {maxLabel} | {app.succeeded} installs
                             </span>
                           </div>
                         </div>

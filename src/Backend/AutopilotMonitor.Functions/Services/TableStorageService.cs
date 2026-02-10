@@ -1275,7 +1275,8 @@ namespace AutopilotMonitor.Functions.Services
         // ===== APP INSTALL SUMMARIES METHODS =====
 
         /// <summary>
-        /// Stores or updates an app install summary
+        /// Stores or updates an app install summary.
+        /// Merges with any existing record so StartedAt is never overwritten with a later timestamp.
         /// PartitionKey: TenantId, RowKey: {SessionId}_{AppName}
         /// </summary>
         public async Task<bool> StoreAppInstallSummaryAsync(AppInstallSummary summary)
@@ -1284,6 +1285,29 @@ namespace AutopilotMonitor.Functions.Services
             {
                 var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.AppInstallSummaries);
                 var rowKey = $"{summary.SessionId}_{summary.AppName}";
+
+                // Merge with existing record to preserve StartedAt from a prior batch
+                try
+                {
+                    var existing = await tableClient.GetEntityAsync<TableEntity>(summary.TenantId, rowKey);
+                    var existingStartedAt = existing.Value.GetDateTimeOffset("StartedAt")?.UtcDateTime;
+                    if (existingStartedAt.HasValue && existingStartedAt.Value != DateTime.MinValue)
+                    {
+                        // Keep the earlier StartedAt; recalculate duration if CompletedAt is now known
+                        if (summary.StartedAt == DateTime.MinValue || existingStartedAt.Value < summary.StartedAt)
+                        {
+                            summary.StartedAt = existingStartedAt.Value;
+                            if (summary.CompletedAt.HasValue && summary.DurationSeconds == 0)
+                            {
+                                summary.DurationSeconds = (int)(summary.CompletedAt.Value - summary.StartedAt).TotalSeconds;
+                            }
+                        }
+                    }
+                }
+                catch (Azure.RequestFailedException ex) when (ex.Status == 404)
+                {
+                    // No existing record – nothing to merge
+                }
 
                 var entity = new TableEntity(summary.TenantId, rowKey)
                 {
