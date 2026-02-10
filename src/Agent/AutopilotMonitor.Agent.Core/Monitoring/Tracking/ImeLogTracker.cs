@@ -48,6 +48,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         // Background task
         private Task _pollingTask;
         private CancellationTokenSource _cts;
+        private bool _allAppsCompletedFired;
 
         // Standard GUID capture pattern used as {GUID} placeholder in patterns
         private const string GuidPattern = @"(?<id>[a-z0-9]{8}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{12})";
@@ -431,6 +432,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             OnImeStarted?.Invoke();
         }
 
+        private string _lastEspPhaseDetected;
+
         private void HandleEspPhaseDetected(string espPhaseString)
         {
             bool logPhaseIsCurrentPhase;
@@ -441,6 +444,22 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 logPhaseIsCurrentPhase = true; // AccountSetup is also current phase
             else
                 return; // Not a valid/relevant phase
+
+            // If the ESP phase actually changed (e.g. DeviceSetup -> AccountSetup),
+            // move all known apps into the ignore list so they won't emit events again in the new phase.
+            // The IME re-reports already-installed apps at the start of each new phase; we must silence them.
+            if (!string.Equals(_lastEspPhaseDetected, espPhaseString, StringComparison.OrdinalIgnoreCase))
+            {
+                if (_lastEspPhaseDetected != null) // Not the first phase detection
+                {
+                    _logger.Info($"ImeLogTracker: ESP phase changed from {_lastEspPhaseDetected} to {espPhaseString} - silencing {_packageStates.Count} previous-phase apps");
+                    foreach (var pkg in _packageStates)
+                        _packageStates.AddToIgnoreList(pkg.Id);
+                    _packageStates.Clear();
+                    _allAppsCompletedFired = false;
+                }
+                _lastEspPhaseDetected = espPhaseString;
+            }
 
             _logger.Info($"ImeLogTracker: ESP phase detected: {espPhaseString}");
             ActivatePatterns(logPhaseIsCurrentPhase);
@@ -519,9 +538,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 _logger.Debug($"ImeLogTracker: {pkg.Name ?? id} state: {oldState} -> {newState}");
                 OnAppStateChanged?.Invoke(pkg, oldState, newState);
 
-                // Check if all apps are now completed
-                if (_packageStates.CountAll > 0 && _packageStates.IsAllCompleted())
+                // Check if all apps are now completed - only fire once
+                if (!_allAppsCompletedFired && _packageStates.CountAll > 0 && _packageStates.IsAllCompleted())
                 {
+                    _allAppsCompletedFired = true;
                     OnAllAppsCompleted?.Invoke();
                 }
             }

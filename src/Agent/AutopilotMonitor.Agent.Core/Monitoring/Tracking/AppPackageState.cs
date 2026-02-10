@@ -194,8 +194,17 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             if (newState == AppInstallationState.Installed && !DownloadingOrInstallingSeen)
                 newState = AppInstallationState.Skipped;
 
+            // Compute the effective progress percent that will be applied
+            var effectiveProgressPercent = (newState == AppInstallationState.Installed && newProgressPercent == null) ? 100 : newProgressPercent;
+            // Compute effective bytes: only consider new values if non-zero, otherwise keep current
+            var effectiveBytesDownloaded = (bytesDownloaded > 0 || bytesTotal > 0) ? bytesDownloaded : BytesDownloaded;
+            var effectiveBytesTotal = (bytesDownloaded > 0 || bytesTotal > 0) ? bytesTotal : BytesTotal;
+            // After WinGet completion fix: if Installed and total > 0 and downloaded < total, downloaded becomes total
+            if (newState == AppInstallationState.Installed && effectiveBytesTotal > 0 && effectiveBytesDownloaded < effectiveBytesTotal)
+                effectiveBytesDownloaded = effectiveBytesTotal;
+
             // Skip if no actual change
-            if (newState == InstallationState && newProgressPercent == ProgressPercent && bytesDownloaded == BytesDownloaded && bytesTotal == BytesTotal)
+            if (newState == InstallationState && effectiveProgressPercent == ProgressPercent && effectiveBytesDownloaded == BytesDownloaded && effectiveBytesTotal == BytesTotal)
                 return false;
 
             var oldState = InstallationState;
@@ -203,23 +212,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             InstallationStateLastChangedTicks = Stopwatch.GetTimestamp();
             DownloadingOrInstallingSeen |= (InstallationState >= AppInstallationState.Downloading &&
                                             InstallationState <= AppInstallationState.Installing);
-            // For Installed state, set progress to 100% if no explicit value was given
-            if (newState == AppInstallationState.Installed && newProgressPercent == null)
-                ProgressPercent = 100;
-            else
-                ProgressPercent = newProgressPercent;
-            // Only overwrite download bytes if new values are provided (non-zero),
-            // otherwise preserve the last known download progress
-            if (bytesDownloaded > 0 || bytesTotal > 0)
-            {
-                BytesDownloaded = bytesDownloaded;
-                BytesTotal = bytesTotal;
-            }
-
-            // For successfully installed apps, ensure bytesDownloaded reflects completion.
-            // WinGet always reports "bytes 0/<total>" so bytesDownloaded stays 0 even after success.
-            if (InstallationState == AppInstallationState.Installed && BytesTotal > 0 && BytesDownloaded < BytesTotal)
-                BytesDownloaded = BytesTotal;
+            ProgressPercent = effectiveProgressPercent;
+            BytesDownloaded = effectiveBytesDownloaded;
+            BytesTotal = effectiveBytesTotal;
 
             return true;
         }
