@@ -178,14 +178,30 @@ namespace AutopilotMonitor.Functions.Services
                     var fieldValue = GetDataFieldValue(evt, condition.DataField);
                     if (fieldValue != null && MatchesOperator(fieldValue, condition.Operator, condition.Value))
                     {
-                        return (true, new { eventType = evt.EventType, field = condition.DataField, value = fieldValue });
+                        return (true, new Dictionary<string, object>
+                        {
+                            ["eventId"] = evt.EventId,
+                            ["sequence"] = evt.Sequence,
+                            ["timestamp"] = evt.Timestamp,
+                            ["eventType"] = evt.EventType,
+                            ["field"] = condition.DataField,
+                            ["value"] = fieldValue
+                        });
                     }
                 }
                 return (false, "data field not matched");
             }
 
-            // Just check if event type exists
-            return (true, new { eventType = condition.EventType, count = matchingEvents.Count });
+            // Just check if event type exists — return first matching event for reference
+            var first = matchingEvents[0];
+            return (true, new Dictionary<string, object>
+            {
+                ["eventId"] = first.EventId,
+                ["sequence"] = first.Sequence,
+                ["timestamp"] = first.Timestamp,
+                ["eventType"] = condition.EventType,
+                ["count"] = matchingEvents.Count
+            });
         }
 
         private (bool matched, object evidence) EvaluateEventDataCondition(RuleCondition condition, List<EnrollmentEvent> events)
@@ -197,7 +213,14 @@ namespace AutopilotMonitor.Functions.Services
                 var fieldValue = GetDataFieldValue(evt, condition.DataField);
                 if (fieldValue != null && MatchesOperator(fieldValue, condition.Operator, condition.Value))
                 {
-                    return (true, new { field = condition.DataField, value = fieldValue });
+                    return (true, new Dictionary<string, object>
+                    {
+                        ["eventId"] = evt.EventId,
+                        ["sequence"] = evt.Sequence,
+                        ["timestamp"] = evt.Timestamp,
+                        ["field"] = condition.DataField,
+                        ["value"] = fieldValue
+                    });
                 }
             }
 
@@ -206,18 +229,29 @@ namespace AutopilotMonitor.Functions.Services
 
         private (bool matched, object evidence) EvaluateEventCountCondition(RuleCondition condition, List<EnrollmentEvent> events)
         {
-            var count = events.Count(e => MatchesEventType(e, condition.EventType));
+            var matchingEvents = events.Where(e => MatchesEventType(e, condition.EventType)).ToList();
+            var count = matchingEvents.Count;
 
             if (condition.Operator == "count_gte" && int.TryParse(condition.Value, out var threshold))
             {
                 if (count >= threshold)
-                    return (true, new { count, threshold });
+                {
+                    var first = matchingEvents[0];
+                    return (true, new Dictionary<string, object>
+                    {
+                        ["eventId"] = first.EventId,
+                        ["sequence"] = first.Sequence,
+                        ["timestamp"] = first.Timestamp,
+                        ["count"] = count,
+                        ["threshold"] = threshold
+                    });
+                }
             }
 
-            return (false, new { count });
+            return (false, new Dictionary<string, object> { ["count"] = count });
         }
 
-        private (bool matched, object evidence) EvaluatePhaseDurationCondition(RuleCondition condition, List<EnrollmentEvent> events)
+        private static (bool matched, object evidence) EvaluatePhaseDurationCondition(RuleCondition condition, List<EnrollmentEvent> events)
         {
             // Find phase change events to calculate phase duration
             var phaseEvents = events
@@ -228,48 +262,71 @@ namespace AutopilotMonitor.Functions.Services
             if (!phaseEvents.Any())
                 return (false, "no phase events");
 
-            // Check if a specific phase took too long
+            // condition.DataField = field to look up (e.g. "espPhase"), condition.Value = target phase name (e.g. "DeviceSetup")
             var targetPhase = condition.Value;
+            var lookupField = string.IsNullOrEmpty(condition.DataField) ? "espPhase" : condition.DataField;
+
             for (int i = 0; i < phaseEvents.Count; i++)
             {
-                var phaseData = phaseEvents[i].Data;
-                var currentPhase = phaseData?.ContainsKey("espPhase") == true
-                    ? phaseData["espPhase"]?.ToString()
+                var evt = phaseEvents[i];
+                var currentPhase = evt.Data?.ContainsKey(lookupField) == true
+                    ? evt.Data[lookupField]?.ToString()
                     : null;
 
-                if (currentPhase == targetPhase)
-                {
-                    // Calculate how long this phase lasted
-                    DateTime phaseEnd;
-                    if (i + 1 < phaseEvents.Count)
-                    {
-                        phaseEnd = phaseEvents[i + 1].Timestamp;
-                    }
-                    else
-                    {
-                        phaseEnd = DateTime.UtcNow; // Phase is still active
-                    }
+                if (!string.Equals(currentPhase, targetPhase, StringComparison.OrdinalIgnoreCase))
+                    continue;
 
-                    var duration = (phaseEnd - phaseEvents[i].Timestamp).TotalSeconds;
-                    return (true, new { phase = targetPhase, durationSeconds = duration });
+                // Calculate how long this phase lasted
+                DateTime phaseEnd;
+                string? phaseEndEventId = null;
+                if (i + 1 < phaseEvents.Count)
+                {
+                    phaseEnd = phaseEvents[i + 1].Timestamp;
+                    phaseEndEventId = phaseEvents[i + 1].EventId;
                 }
+                else
+                {
+                    phaseEnd = DateTime.UtcNow; // Phase is still active
+                }
+
+                var durationSeconds = (phaseEnd - evt.Timestamp).TotalSeconds;
+
+                return (true, new Dictionary<string, object>
+                {
+                    ["eventId"] = evt.EventId,
+                    ["sequence"] = evt.Sequence,
+                    ["phaseStartTimestamp"] = evt.Timestamp,
+                    ["phaseEndEventId"] = phaseEndEventId ?? "(still active)",
+                    ["phase"] = targetPhase,
+                    ["durationSeconds"] = durationSeconds,
+                    ["durationFormatted"] = FormatDuration(durationSeconds)
+                });
             }
 
             return (false, "phase not found");
         }
 
+        private static string FormatDuration(double totalSeconds)
+        {
+            var ts = TimeSpan.FromSeconds(totalSeconds);
+            if (ts.TotalHours >= 1)
+                return $"{(int)ts.TotalHours}h {ts.Minutes}m {ts.Seconds}s";
+            if (ts.TotalMinutes >= 1)
+                return $"{ts.Minutes}m {ts.Seconds}s";
+            return $"{ts.Seconds}s";
+        }
+
         private bool EvaluateConfidenceFactor(ConfidenceFactor factor, List<EnrollmentEvent> events, Dictionary<string, object> matchedConditions)
         {
-            // Simple confidence factor evaluation
             if (factor.Condition.StartsWith("phase_duration >"))
             {
                 if (int.TryParse(factor.Condition.Replace("phase_duration >", "").Trim(), out var threshold))
                 {
                     foreach (var mc in matchedConditions.Values)
                     {
-                        if (mc is IDictionary<string, object> dict && dict.ContainsKey("durationSeconds"))
+                        if (mc is Dictionary<string, object> dict && dict.TryGetValue("durationSeconds", out var rawDuration))
                         {
-                            var duration = Convert.ToDouble(dict["durationSeconds"]);
+                            var duration = Convert.ToDouble(rawDuration);
                             return duration > threshold;
                         }
                     }

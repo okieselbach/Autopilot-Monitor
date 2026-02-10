@@ -174,19 +174,23 @@ namespace AutopilotMonitor.Functions.Services
         {
             RuleId = "ANALYZE-ESP-001",
             Title = "ESP Blocking App Timeout",
-            Description = "Detects when the ESP is waiting too long for a blocking app to install.",
+            Description = "Detects when the DeviceSetup phase of the ESP took longer than 30 minutes, indicating a stuck or very slow blocking app.",
             Severity = "high",
             Category = "esp",
-            BaseConfidence = 60,
+            // BaseConfidence is intentionally below ConfidenceThreshold so the rule only fires
+            // when the duration factor (phase_duration > 1800s) also matches.
+            BaseConfidence = 50,
             Conditions = new List<RuleCondition>
             {
                 new RuleCondition { Signal = "esp_stalled", Source = "phase_duration", EventType = "esp_phase_changed", DataField = "espPhase", Operator = "equals", Value = "DeviceSetup", Required = true }
             },
             ConfidenceFactors = new List<ConfidenceFactor>
             {
-                new ConfidenceFactor { Signal = "long_esp", Condition = "phase_duration > 1800", Weight = 30 }
+                new ConfidenceFactor { Signal = "long_esp", Condition = "phase_duration > 1800", Weight = 40 }
             },
-            Explanation = "The Enrollment Status Page has been waiting for a blocking app for an extended period. This often indicates the app is stuck installing or the ESP timeout is about to trigger.",
+            // Only fire when duration factor also matched (50 base + 40 factor = 90 > 70 threshold)
+            ConfidenceThreshold = 70,
+            Explanation = "The ESP DeviceSetup phase took more than 30 minutes. This indicates a blocking app is stuck installing, downloading very slowly, or has entered a retry loop.",
             Remediation = new List<RemediationStep>
             {
                 new RemediationStep { Title = "Investigate blocking app", Steps = new List<string> { "Identify which app is blocking (check ESP events)", "Verify app content is downloadable", "Consider reducing the number of blocking apps" } }

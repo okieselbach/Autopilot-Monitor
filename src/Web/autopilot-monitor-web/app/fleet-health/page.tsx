@@ -364,7 +364,7 @@ export default function FleetHealthPage() {
                     />
                   </svg>
                   <h1 className="text-3xl font-bold text-gray-900">
-                    FLEET HEALTH
+                    Feet Health
                   </h1>
                 </div>
               </div>

@@ -1018,7 +1018,7 @@ namespace AutopilotMonitor.Functions.Services
                         Explanation = entity.GetString("Explanation") ?? string.Empty,
                         Remediation = DeserializeJson<List<RemediationStep>>(entity.GetString("RemediationJson")),
                         RelatedDocs = DeserializeJson<List<RelatedDoc>>(entity.GetString("RelatedDocsJson")),
-                        MatchedConditions = DeserializeJson<Dictionary<string, object>>(entity.GetString("MatchedConditionsJson")),
+                        MatchedConditions = DeserializeMatchedConditions(entity.GetString("MatchedConditionsJson")),
                         DetectedAt = entity.GetDateTimeOffset("DetectedAt")?.UtcDateTime ?? DateTime.UtcNow
                     });
                 }
@@ -1755,6 +1755,52 @@ namespace AutopilotMonitor.Functions.Services
             {
                 return new T();
             }
+        }
+
+        /// <summary>
+        /// Deserializes MatchedConditions JSON and normalizes nested JObject/JArray values
+        /// to plain Dictionary/List so System.Text.Json can serialize them correctly.
+        /// </summary>
+        private Dictionary<string, object> DeserializeMatchedConditions(string? json)
+        {
+            if (string.IsNullOrEmpty(json))
+                return new Dictionary<string, object>();
+
+            try
+            {
+                var raw = JsonConvert.DeserializeObject<Dictionary<string, object>>(json)
+                          ?? new Dictionary<string, object>();
+
+                var result = new Dictionary<string, object>();
+                foreach (var kv in raw)
+                    result[kv.Key] = NormalizeJToken(kv.Value);
+                return result;
+            }
+            catch
+            {
+                return new Dictionary<string, object>();
+            }
+        }
+
+        private static object NormalizeJToken(object? value)
+        {
+            if (value is Newtonsoft.Json.Linq.JObject jObj)
+            {
+                var dict = new Dictionary<string, object>();
+                foreach (var prop in jObj.Properties())
+                    dict[prop.Name] = NormalizeJToken(prop.Value);
+                return dict;
+            }
+            if (value is Newtonsoft.Json.Linq.JArray jArr)
+            {
+                var list = new List<object>();
+                foreach (var item in jArr)
+                    list.Add(NormalizeJToken(item));
+                return list;
+            }
+            if (value is Newtonsoft.Json.Linq.JValue jVal)
+                return jVal.Value ?? string.Empty;
+            return value ?? string.Empty;
         }
 
         private string[] DeserializeJsonArray(string? json)
