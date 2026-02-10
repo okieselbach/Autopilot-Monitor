@@ -45,9 +45,15 @@ namespace AutopilotMonitor.Functions.Functions
 
                 _logger.LogInformation($"Deleting session {sessionId} for tenant {tenantId} by user {userIdentifier}");
 
-                // Delete all events for this session
+                // Delete all related data for this session
                 var eventsDeleted = await _storageService.DeleteSessionEventsAsync(tenantId, sessionId);
                 _logger.LogInformation($"Deleted {eventsDeleted} events for session {sessionId}");
+
+                var ruleResultsDeleted = await _storageService.DeleteSessionRuleResultsAsync(tenantId, sessionId);
+                _logger.LogInformation($"Deleted {ruleResultsDeleted} rule results for session {sessionId}");
+
+                var appSummariesDeleted = await _storageService.DeleteSessionAppInstallSummariesAsync(tenantId, sessionId);
+                _logger.LogInformation($"Deleted {appSummariesDeleted} app install summaries for session {sessionId}");
 
                 // Delete the session itself
                 var sessionDeleted = await _storageService.DeleteSessionAsync(tenantId, sessionId);
@@ -63,7 +69,9 @@ namespace AutopilotMonitor.Functions.Functions
                         userIdentifier,
                         new Dictionary<string, string>
                         {
-                            { "EventsDeleted", eventsDeleted.ToString() }
+                            { "EventsDeleted", eventsDeleted.ToString() },
+                            { "RuleResultsDeleted", ruleResultsDeleted.ToString() },
+                            { "AppInstallSummariesDeleted", appSummariesDeleted.ToString() }
                         }
                     );
 
@@ -72,7 +80,10 @@ namespace AutopilotMonitor.Functions.Functions
                     await response.WriteAsJsonAsync(new
                     {
                         success = true,
-                        message = $"Session {sessionId} and {eventsDeleted} events deleted successfully"
+                        message = $"Session {sessionId} deleted successfully",
+                        eventsDeleted,
+                        ruleResultsDeleted,
+                        appInstallSummariesDeleted = appSummariesDeleted
                     });
                     return response;
                 }
