@@ -1,7 +1,7 @@
 "use client";
 
 import { useAuth } from "../../contexts/AuthContext";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 
 // Static platform stats - manually updated periodically
@@ -14,21 +14,17 @@ const PLATFORM_STATS = {
 export default function LandingPage() {
   const { login, isAuthenticated, isLoading, user } = useAuth();
   const router = useRouter();
-  const searchParams = useSearchParams();
-
-  // Check for preview mode (for debugging while logged in)
-  const previewMode = searchParams.get("preview") === "true";
 
   // Redirect after login: regular users go to /progress, admins go to dashboard
   useEffect(() => {
-    if (isAuthenticated && !isLoading && !previewMode && user) {
+    if (isAuthenticated && !isLoading && user) {
       if (user.isTenantAdmin || user.isGalacticAdmin) {
         router.push("/");
       } else {
         router.push("/progress");
       }
     }
-  }, [isAuthenticated, isLoading, previewMode, user, router]);
+  }, [isAuthenticated, isLoading, user, router]);
 
   if (isLoading) {
     return (
@@ -239,11 +235,6 @@ export default function LandingPage() {
       <footer className="border-t border-gray-200 bg-white/50 backdrop-blur-sm py-8 px-6">
         <div className="max-w-7xl mx-auto text-center text-gray-600">
           <p>&copy; 2026 Autopilot Monitor. Powered by Azure and Microsoft Identity.</p>
-          {previewMode && (
-            <p className="mt-2 text-xs text-orange-600 font-semibold">
-              🔍 Preview Mode Active - Auto-redirect disabled
-            </p>
-          )}
         </div>
       </footer>
     </div>
