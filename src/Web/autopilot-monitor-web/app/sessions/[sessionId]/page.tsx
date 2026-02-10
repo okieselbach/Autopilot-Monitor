@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useSignalR } from "../../../contexts/SignalRContext";
 import { useTenant } from "../../../contexts/TenantContext";
@@ -54,14 +54,14 @@ interface Session {
 }
 
 const phaseNames: Record<number, string> = {
-  0: "PreFlight",
-  1: "Network",
-  2: "Identity",
-  3: "MDM Enrollment",
-  4: "ESP Device Setup",
-  5: "App Installation",
-  6: "ESP User Setup",
-  7: "Complete",
+  [-1]: "Unknown",
+  0: "Start",
+  1: "Device Preparation",
+  2: "Device Setup",
+  3: "Apps (Device)",
+  4: "Account Setup",
+  5: "Apps (User)",
+  6: "Complete",
   99: "Failed"
 };
 
@@ -73,8 +73,7 @@ export default function SessionDetailPage() {
   const [session, setSession] = useState<Session | null>(null);
   const [sessionTenantId, setSessionTenantId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [expandedPhases, setExpandedPhases] = useState<Set<string>>(new Set());
-  const [severityFilters, setSeverityFilters] = useState<Set<string>>(new Set(["Info", "Warning", "Error", "Critical", "Debug"]));
+  const [severityFilters, setSeverityFilters] = useState<Set<string>>(new Set(["Info", "Warning", "Error", "Critical"]));
   const [showMarkFailedConfirm, setShowMarkFailedConfirm] = useState(false);
   const [analysisResults, setAnalysisResults] = useState<RuleResult[]>([]);
   const [loadingAnalysis, setLoadingAnalysis] = useState(false);
@@ -105,7 +104,7 @@ export default function SessionDetailPage() {
   // Use global contexts
   const { on, off, isConnected, joinGroup, leaveGroup } = useSignalR();
   const { tenantId } = useTenant();
-  const { getAccessToken } = useAuth();
+  const { getAccessToken, user } = useAuth();
 
   // Initial data fetch
   useEffect(() => {
@@ -393,27 +392,63 @@ export default function SessionDetailPage() {
   };
 
   // Filter events by severity for the timeline
-  const filteredEvents = events.filter(e => severityFilters.has(e.severity));
+  const filteredEvents = useMemo(() =>
+    events.filter(e => severityFilters.has(e.severity)),
+    [events, severityFilters]
+  );
 
-  // Group filtered events by phase
-  const eventsByPhase = filteredEvents.reduce((acc, event) => {
-    const phaseName = event.phaseName || "Unknown";
-    if (!acc[phaseName]) {
-      acc[phaseName] = [];
+  // Group events by phase with memoization
+  const { eventsByPhase, orderedPhases } = useMemo(() => {
+    // Sort events by sequence (chronological order)
+    const sortedEvents = [...filteredEvents].sort((a, b) => a.sequence - b.sequence);
+
+    // Group events by phase, inserting "Unknown" events into their chronological position
+    const eventsByPhase = {} as Record<string, EnrollmentEvent[]>;
+    let currentActivePhaseName = "Start"; // Default to Start phase
+
+    for (let i = 0; i < sortedEvents.length; i++) {
+      const event = sortedEvents[i];
+      let targetPhase = event.phaseName || "Unknown";
+
+      // If event has explicit phase (not Unknown), update current active phase
+      if (targetPhase !== "Unknown") {
+        currentActivePhaseName = targetPhase;
+      } else {
+        // Unknown events go into the current active phase
+        targetPhase = currentActivePhaseName;
+      }
+
+      if (!eventsByPhase[targetPhase]) {
+        eventsByPhase[targetPhase] = [];
+      }
+      eventsByPhase[targetPhase].push(event);
     }
-    acc[phaseName].push(event);
-    return acc;
-  }, {} as Record<string, EnrollmentEvent[]>);
 
-  const phaseOrder = ["PreFlight", "Network", "Identity", "MDM Enrollment", "ESP Device Setup", "App Installation", "ESP User Setup", "Complete", "Failed"];
-  const orderedPhases = phaseOrder.filter(phase => eventsByPhase[phase]);
+    const phaseOrder = ["Start", "Device Preparation", "Device Setup", "Apps (Device)", "Account Setup", "Apps (User)", "Complete", "Failed"];
+    const orderedPhases = phaseOrder.filter(phase => eventsByPhase[phase] && eventsByPhase[phase].length > 0);
 
-  // Initialize all phases as expanded on first load
+    return { eventsByPhase, orderedPhases };
+  }, [filteredEvents, events.length]);
+
+  const [expandedPhases, setExpandedPhases] = useState<Set<string>>(new Set());
+
+  // Auto-expand new phases as they appear (keeps existing expanded/collapsed state)
   useEffect(() => {
-    if (orderedPhases.length > 0 && expandedPhases.size === 0) {
-      setExpandedPhases(new Set(orderedPhases));
-    }
-  }, [orderedPhases.length]);
+    setExpandedPhases(prev => {
+      // Add any new phases that aren't already tracked
+      const newExpanded = new Set(prev);
+      let hasChanges = false;
+
+      for (const phase of orderedPhases) {
+        if (!prev.has(phase)) {
+          newExpanded.add(phase);
+          hasChanges = true;
+        }
+      }
+
+      return hasChanges ? newExpanded : prev;
+    });
+  }, [orderedPhases]);
 
   const expandAll = () => {
     setExpandedPhases(new Set(orderedPhases));
@@ -424,13 +459,15 @@ export default function SessionDetailPage() {
   };
 
   const togglePhase = (phaseName: string) => {
-    const newExpanded = new Set(expandedPhases);
-    if (newExpanded.has(phaseName)) {
-      newExpanded.delete(phaseName);
-    } else {
-      newExpanded.add(phaseName);
-    }
-    setExpandedPhases(newExpanded);
+    setExpandedPhases(prev => {
+      const newExpanded = new Set(prev);
+      if (newExpanded.has(phaseName)) {
+        newExpanded.delete(phaseName);
+      } else {
+        newExpanded.add(phaseName);
+      }
+      return newExpanded;
+    });
   };
 
   if (loading) {
@@ -459,15 +496,6 @@ export default function SessionDetailPage() {
             </h1>
           </div>
           <div className="flex items-center gap-3">
-            <button
-              onClick={() => router.push(`/flight-tracker/${sessionId}`)}
-              className="px-4 py-2 bg-gray-800 text-white rounded-md hover:bg-gray-900 transition-colors flex items-center gap-2 text-sm"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
-              </svg>
-              Flight Tracker
-            </button>
             {session?.status === 'Failed' && (
               <button
                 onClick={() => router.push(`/diagnosis/${sessionId}`)}
@@ -512,13 +540,16 @@ export default function SessionDetailPage() {
             </div>
           )}
 
+          {/* Device Details Card (from enrollment tracker events) */}
+          <DeviceDetailsCard events={events} />
+
           {/* Phase Timeline */}
           {session && (
             <div className="bg-white shadow rounded-lg p-6 mb-6">
               <h2 className="text-xl font-semibold text-gray-900 mb-6">Enrollment Progress</h2>
               <PhaseTimeline
                 currentPhase={session.currentPhase}
-                completedPhases={session.status === 'Succeeded' ? [7] : []}
+                completedPhases={session.status === 'Succeeded' ? [6] : []}
                 events={events}
                 sessionStatus={session.status}
               />
@@ -611,9 +642,9 @@ export default function SessionDetailPage() {
             events={events.filter(e => e.eventType === "performance_snapshot")}
           />
 
-          {/* Download Progress (from download_progress events) */}
+          {/* Download Progress (from download_progress or app_tracking_summary events) */}
           <DownloadProgress
-            events={events.filter(e => e.eventType === "download_progress")}
+            events={events.filter(e => e.eventType === "download_progress" || e.eventType === "app_tracking_summary")}
           />
 
           {/* Timeline */}
@@ -681,6 +712,7 @@ export default function SessionDetailPage() {
                         events={eventsByPhase[phaseName]}
                         isExpanded={expandedPhases.has(phaseName)}
                         onToggle={() => togglePhase(phaseName)}
+                        isGalacticAdmin={user?.isGalacticAdmin}
                       />
                     ))}
                   </div>
@@ -745,12 +777,14 @@ function PhaseSection({
   phaseName,
   events,
   isExpanded,
-  onToggle
+  onToggle,
+  isGalacticAdmin
 }: {
   phaseName: string;
   events: EnrollmentEvent[];
   isExpanded: boolean;
   onToggle: () => void;
+  isGalacticAdmin?: boolean;
 }) {
   return (
     <div className="border-l-4 border-blue-500 pl-4">
@@ -767,7 +801,11 @@ function PhaseSection({
       {isExpanded && (
         <div className="space-y-3">
           {events.map((event, index) => (
-            <EventRow key={event.eventId || `${event.sessionId}-${event.sequence}`} event={event} />
+            <EventRow
+              key={event.eventId || `${event.sessionId}-${event.sequence}`}
+              event={event}
+              isGalacticAdmin={isGalacticAdmin}
+            />
           ))}
         </div>
       )}
@@ -775,8 +813,19 @@ function PhaseSection({
   );
 }
 
-function EventRow({ event }: { event: EnrollmentEvent }) {
+function EventRow({ event, isGalacticAdmin }: { event: EnrollmentEvent; isGalacticAdmin?: boolean }) {
   const [showDetails, setShowDetails] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const copyEventId = async () => {
+    try {
+      await navigator.clipboard.writeText(event.eventId);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy EventID:', err);
+    }
+  };
 
   return (
     <div className="bg-gray-50 rounded-lg p-3 hover:bg-gray-100 transition-colors">
@@ -793,6 +842,15 @@ function EventRow({ event }: { event: EnrollmentEvent }) {
           <div className="mt-1 flex items-center gap-3 text-xs text-gray-500">
             <span>Source: {event.source}</span>
             <span>Seq: {event.sequence}</span>
+            {isGalacticAdmin && (
+              <button
+                onClick={copyEventId}
+                className="font-mono hover:text-blue-600 cursor-pointer transition-colors"
+                title={copied ? 'Copied!' : `Click to copy full EventId: ${event.eventId}`}
+              >
+                EventId: {event.eventId.substring(0, 8)}... {copied && '✓'}
+              </button>
+            )}
           </div>
         </div>
         {event.data && Object.keys(event.data).length > 0 && (
@@ -821,14 +879,13 @@ function PhaseTimeline({ currentPhase, completedPhases, events = [], sessionStat
   sessionStatus?: string;
 }) {
   const phases = [
-    { id: 0, name: "PreFlight", shortName: "Pre-Flight" },
-    { id: 1, name: "Network", shortName: "Network" },
-    { id: 2, name: "Identity", shortName: "Identity" },
-    { id: 3, name: "MDM Enrollment", shortName: "MDM" },
-    { id: 4, name: "ESP Device Setup", shortName: "Device" },
-    { id: 5, name: "App Installation", shortName: "Apps" },
-    { id: 6, name: "ESP User Setup", shortName: "User" },
-    { id: 7, name: "Complete", shortName: "Complete" },
+    { id: 0, name: "Start", shortName: "Start" },
+    { id: 1, name: "Device Preparation", shortName: "Device Preparation" },
+    { id: 2, name: "Device Setup", shortName: "Device Setup" },
+    { id: 3, name: "Apps (Device)", shortName: "Apps (Device)" },
+    { id: 4, name: "Account Setup", shortName: "Account Setup" },
+    { id: 5, name: "Apps (User)", shortName: "Apps (User)" },
+    { id: 6, name: "Complete", shortName: "Complete" },
   ];
 
   // Derive current activity for the active phase from events
@@ -850,7 +907,18 @@ function PhaseTimeline({ currentPhase, completedPhases, events = [], sessionStat
 
     if (phaseEvents.length === 0) return null;
 
-    // Check for esp_ui_state events to show app install progress
+    // Check for app_tracking_summary events (new strategic events)
+    const trackingSummary = phaseEvents.find(e => e.eventType === "app_tracking_summary");
+    if (trackingSummary?.data) {
+      const d = trackingSummary.data;
+      const completed = parseInt(d.appsCompleted ?? "0", 10);
+      const total = parseInt(d.totalApps ?? "0", 10);
+      if (total > 0) {
+        return `Installing apps (${completed}/${total})`;
+      }
+    }
+
+    // Check for esp_ui_state events (legacy) to show app install progress
     const espState = phaseEvents.find(e => e.eventType === "esp_ui_state");
     if (espState?.data) {
       const d = espState.data;
@@ -865,7 +933,17 @@ function PhaseTimeline({ currentPhase, completedPhases, events = [], sessionStat
       }
     }
 
-    // Check for download_progress to show active download
+    // Check for app install events (new strategic events)
+    const appInstallEvt = phaseEvents.find(e =>
+      e.eventType === "app_download_started" || e.eventType === "app_install_started"
+    );
+    if (appInstallEvt?.data) {
+      const appName = appInstallEvt.data.appName ?? appInstallEvt.data.appId ?? "app";
+      if (appInstallEvt.eventType === "app_download_started") return `Downloading ${appName}`;
+      return `Installing ${appName}`;
+    }
+
+    // Check for download_progress to show active download (legacy)
     const downloadEvt = phaseEvents.find(e => e.eventType === "download_progress");
     if (downloadEvt?.data) {
       const d = downloadEvt.data;
@@ -932,6 +1010,10 @@ function PhaseTimeline({ currentPhase, completedPhases, events = [], sessionStat
   })();
 
   const getPhaseStatus = (phaseId: number) => {
+    // Agent starts at MDM phase (3) - Pre-Flight(0)/Network(1)/Identity(2) are inferred as completed
+    // since the machine reached MDM enrollment
+    if (phaseId >= 0 && phaseId <= 2) return 'completed'; // Pre-Flight(0), Network(1), Identity(2)
+
     // If phase is completed, show as completed (green)
     if (completedPhases.includes(phaseId)) return 'completed';
 
@@ -1160,6 +1242,246 @@ function AnalysisResultCard({ result }: { result: RuleResult }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function DeviceDetailsCard({ events }: { events: EnrollmentEvent[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const [showIpv6, setShowIpv6] = useState<Record<number, boolean>>({});
+
+  // Extract device detail events
+  const getEventData = (eventType: string): Record<string, any> | null => {
+    const evt = events.find(e => e.eventType === eventType);
+    return evt?.data ?? null;
+  };
+
+  // Helper to check if IP is IPv6
+  const isIpv6 = (ip: string): boolean => {
+    // IPv6 contains colons and has multiple segments
+    // IPv4 is like: 192.168.1.1
+    // IPv6 is like: fe80::1234:5678:abcd:ef01 or 2001:db8::1
+    if (!ip || typeof ip !== 'string') return false;
+
+    // If it contains a colon and doesn't look like IPv4, it's IPv6
+    // Simple check: IPv6 has at least 2 colons (even compressed form)
+    const colonCount = (ip.match(/:/g) || []).length;
+    return colonCount >= 2;
+  };
+
+  // Helper to split IPs into IPv4 and IPv6
+  const splitIpAddresses = (ipAddresses: string | string[]): { ipv4: string[]; ipv6: string[] } => {
+    // Handle both array and comma-separated string
+    let ips: string[];
+    if (Array.isArray(ipAddresses)) {
+      ips = ipAddresses;
+    } else if (typeof ipAddresses === 'string') {
+      // Split by comma if it's a comma-separated string
+      ips = ipAddresses.split(',').map(ip => ip.trim()).filter(ip => ip.length > 0);
+    } else {
+      ips = [];
+    }
+
+    const ipv4: string[] = [];
+    const ipv6: string[] = [];
+
+    for (const ip of ips) {
+      if (typeof ip === 'string' && ip.trim()) {
+        if (isIpv6(ip)) {
+          ipv6.push(ip);
+        } else {
+          ipv4.push(ip);
+        }
+      }
+    }
+
+    return { ipv4, ipv6 };
+  };
+
+  const agentStarted = getEventData("agent_started");
+  const networkAdapters = getEventData("network_adapters");
+  const dnsConfig = getEventData("dns_configuration");
+  const proxyConfig = getEventData("proxy_configuration");
+  const autopilotProfile = getEventData("autopilot_profile");
+  const aadJoinStatus = getEventData("aad_join_status");
+  const imeVersion = getEventData("ime_agent_version");
+  const bitLockerStatus = getEventData("bitlocker_status");
+  const secureBootStatus = getEventData("secureboot_status");
+
+  // Check if we have any device detail events at all
+  const hasData = agentStarted || networkAdapters || dnsConfig || proxyConfig || autopilotProfile ||
+                  aadJoinStatus || imeVersion || bitLockerStatus || secureBootStatus;
+
+  if (!hasData) return null;
+
+  return (
+    <div className="bg-white shadow rounded-lg p-6 mb-6">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center justify-between w-full text-left"
+      >
+        <div className="flex items-center space-x-2">
+          <svg className="w-5 h-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+          </svg>
+          <h2 className="text-xl font-semibold text-gray-900">Device Details</h2>
+        </div>
+        <span className="text-gray-400">{expanded ? '▼' : '▶'}</span>
+      </button>
+
+      {expanded && (
+        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Boot Time */}
+          {agentStarted?.bootTime && (
+            <DetailSection title="System Boot">
+              <DetailRow label="Boot Time" value={new Date(agentStarted.bootTime).toLocaleString()} />
+              {agentStarted.agentVersion && <DetailRow label="Agent Version" value={agentStarted.agentVersion} />}
+            </DetailSection>
+          )}
+
+          {/* Network */}
+          {networkAdapters && (
+            <DetailSection title="Network">
+              {networkAdapters.adapters ? (
+                (networkAdapters.adapters as any[]).map((adapter: any, i: number) => {
+                  const { ipv4, ipv6 } = adapter.ipAddresses ? splitIpAddresses(adapter.ipAddresses) : { ipv4: [], ipv6: [] };
+                  const hasIpv6 = ipv6.length > 0;
+                  const isIpv6Shown = showIpv6[i] ?? false;
+
+                  return (
+                    <div key={i} className="mb-2 last:mb-0">
+                      <div className="text-sm font-medium text-gray-700">{adapter.description || adapter.name || `Adapter ${i + 1}`}</div>
+
+                      {/* DHCP - first */}
+                      {adapter.dhcpEnabled !== undefined && <DetailRow label="DHCP" value={adapter.dhcpEnabled ? "Enabled" : "Disabled"} />}
+
+                      {/* MAC - second */}
+                      {adapter.macAddress && <DetailRow label="MAC" value={adapter.macAddress} />}
+
+                      {/* IPv4 - third */}
+                      {ipv4.length > 0 && <DetailRow label="IPv4" value={ipv4.join(", ")} />}
+
+                      {/* IPv6 - fourth (collapsible) */}
+                      {hasIpv6 && (
+                        <div className="mt-1">
+                          <button
+                            onClick={() => setShowIpv6(prev => ({ ...prev, [i]: !isIpv6Shown }))}
+                            className="text-xs text-blue-600 hover:text-blue-800 flex items-center space-x-1"
+                          >
+                            <span>{isIpv6Shown ? '▼' : '▶'}</span>
+                            <span>IPv6 ({ipv6.length})</span>
+                          </button>
+                          {isIpv6Shown && (
+                            <div className="mt-1 pl-4 text-xs text-gray-600 space-y-0.5">
+                              {ipv6.map((ip, idx) => (
+                                <div key={idx} className="font-mono">{ip}</div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              ) : (
+                <DetailRow label="Count" value={networkAdapters.adapterCount?.toString() ?? "N/A"} />
+              )}
+            </DetailSection>
+          )}
+
+          {/* DNS */}
+          {dnsConfig && (
+            <DetailSection title="DNS">
+              {dnsConfig.dnsEntries && Array.isArray(dnsConfig.dnsEntries) && dnsConfig.dnsEntries.length > 0 ? (
+                (dnsConfig.dnsEntries as any[]).map((entry: any, i: number) => (
+                  <div key={i} className="mb-1 last:mb-0">
+                    <DetailRow label={entry.adapter || `Adapter ${i + 1}`} value={entry.servers || "N/A"} />
+                  </div>
+                ))
+              ) : (
+                <div className="text-sm text-gray-500">No DNS data</div>
+              )}
+            </DetailSection>
+          )}
+
+          {/* Proxy */}
+          {proxyConfig && (
+            <DetailSection title="Proxy">
+              <DetailRow label="Type" value={proxyConfig.proxyType ?? proxyConfig.type ?? "Direct"} />
+              {proxyConfig.proxyServer && <DetailRow label="Server" value={proxyConfig.proxyServer} />}
+              {proxyConfig.autoConfigUrl && <DetailRow label="PAC URL" value={proxyConfig.autoConfigUrl} />}
+              {proxyConfig.winHttpProxy && <DetailRow label="WinHTTP" value={proxyConfig.winHttpProxy} />}
+            </DetailSection>
+          )}
+
+          {/* Autopilot Profile */}
+          {autopilotProfile && (
+            <DetailSection title="Autopilot Profile">
+              {autopilotProfile.tenantDomain && <DetailRow label="Domain" value={autopilotProfile.tenantDomain} />}
+              {autopilotProfile.deploymentProfileName && <DetailRow label="Profile" value={autopilotProfile.deploymentProfileName} />}
+              {autopilotProfile.cloudAssignedTenantId && <DetailRow label="Tenant ID" value={autopilotProfile.cloudAssignedTenantId} />}
+              {autopilotProfile.oobeConfig && <DetailRow label="OOBE Config" value={autopilotProfile.oobeConfig} />}
+            </DetailSection>
+          )}
+
+          {/* Identity */}
+          {aadJoinStatus && (
+            <DetailSection title="Identity">
+              <DetailRow label="Join Type" value={aadJoinStatus.joinType ?? "Unknown"} />
+              {aadJoinStatus.tenantId && <DetailRow label="Tenant ID" value={aadJoinStatus.tenantId} />}
+            </DetailSection>
+          )}
+
+          {/* IME */}
+          {imeVersion && (
+            <DetailSection title="IME Agent">
+              <DetailRow label="Version" value={imeVersion.version ?? imeVersion.agentVersion ?? "Unknown"} />
+            </DetailSection>
+          )}
+
+          {/* Security */}
+          {(bitLockerStatus || secureBootStatus) && (
+            <DetailSection title="Security">
+              {secureBootStatus && (
+                <DetailRow label="SecureBoot" value={secureBootStatus.uefiSecureBootEnabled ? "Enabled" : "Disabled"} />
+              )}
+              {bitLockerStatus && (
+                <>
+                  <DetailRow label="BitLocker" value={bitLockerStatus.systemDriveProtected ? "Protected" : "Not Protected"} />
+                  {bitLockerStatus.volumes && Array.isArray(bitLockerStatus.volumes) && bitLockerStatus.volumes.length > 0 && (
+                    <div className="mt-1 text-xs text-gray-500">
+                      {(bitLockerStatus.volumes as any[]).map((vol: any, i: number) => (
+                        <div key={i}>
+                          {vol.driveLetter}: {vol.protectionStatus === "1" ? "Protected" : "Not Protected"}
+                          {vol.encryptionMethod && ` (Method: ${vol.encryptionMethod})`}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </DetailSection>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DetailSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="border border-gray-200 rounded-lg p-3">
+      <h3 className="text-sm font-semibold text-gray-700 mb-2 border-b border-gray-100 pb-1">{title}</h3>
+      <div>{children}</div>
+    </div>
+  );
+}
+
+function DetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex justify-between text-xs py-0.5">
+      <span className="text-gray-500">{label}</span>
+      <span className="text-gray-900 font-mono ml-2 text-right break-all" title={value}>{value}</span>
     </div>
   );
 }

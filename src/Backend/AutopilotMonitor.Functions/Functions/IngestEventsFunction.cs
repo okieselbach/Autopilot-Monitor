@@ -123,7 +123,7 @@ namespace AutopilotMonitor.Functions.Functions
                 foreach (var evt in storedEvents)
                 {
                     // Track special events for session status updates
-                    if (evt.EventType == "phase_changed")
+                    if (evt.EventType == "phase_changed" || evt.EventType == "esp_phase_changed")
                     {
                         lastPhaseChangeEvent = evt;
                     }

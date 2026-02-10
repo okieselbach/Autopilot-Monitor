@@ -16,7 +16,7 @@ bld/
 
 # Visual Studio cache/options
 .vs/
-.vscode/
+
 *.rsuser
 *.suo
 *.user

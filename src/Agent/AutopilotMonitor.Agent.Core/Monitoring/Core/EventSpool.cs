@@ -5,7 +5,7 @@ using System.Linq;
 using AutopilotMonitor.Shared.Models;
 using Newtonsoft.Json;
 
-namespace AutopilotMonitor.Agent.Core.Storage
+namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 {
     /// <summary>
     /// Manages offline event storage (spool) for resilient uploads
@@ -79,7 +79,7 @@ namespace AutopilotMonitor.Agent.Core.Storage
         }
 
         /// <summary>
-        /// Gets a batch of events from the spool (oldest first)
+        /// Gets a batch of events from the spool (oldest first, sorted by sequence)
         /// </summary>
         public List<EnrollmentEvent> GetBatch(int maxBatchSize)
         {
@@ -87,8 +87,10 @@ namespace AutopilotMonitor.Agent.Core.Storage
             {
                 var events = new List<EnrollmentEvent>();
                 var files = Directory.GetFiles(_spoolDirectory, "event_*.json")
-                    .OrderBy(f => f)
+                    .Select(f => new { Path = f, Sequence = ExtractSequenceFromFilename(f) })
+                    .OrderBy(x => x.Sequence)
                     .Take(maxBatchSize)
+                    .Select(x => x.Path)
                     .ToList();
 
                 foreach (var file in files)
@@ -110,6 +112,29 @@ namespace AutopilotMonitor.Agent.Core.Storage
 
                 return events;
             }
+        }
+
+        /// <summary>
+        /// Extracts the sequence number from event filename
+        /// Filename format: event_{timestamp}_{sequence}.json
+        /// </summary>
+        private long ExtractSequenceFromFilename(string filePath)
+        {
+            try
+            {
+                var fileName = Path.GetFileNameWithoutExtension(filePath);
+                var parts = fileName.Split('_');
+                if (parts.Length >= 3)
+                {
+                    if (long.TryParse(parts[2], out var sequence))
+                        return sequence;
+                }
+            }
+            catch
+            {
+                // Fallback to 0 if parsing fails
+            }
+            return 0;
         }
 
         /// <summary>

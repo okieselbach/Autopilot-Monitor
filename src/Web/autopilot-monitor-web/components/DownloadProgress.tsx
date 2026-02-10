@@ -18,6 +18,7 @@ interface DownloadItem {
   downloadRateBps: number;
   lastUpdated: string;
   isComplete: boolean;
+  eventData?: Record<string, any>;
 }
 
 function formatBytes(bytes: number): string {
@@ -55,10 +56,28 @@ export default function DownloadProgress({ events }: DownloadProgressProps) {
       if (!d) continue;
 
       const appName = d.app_name ?? d.appName ?? d.file_name ?? d.fileName ?? "Unknown App";
+
+      // Skip unknown apps
+      if (appName === "Unknown App") continue;
+
       const bytesDownloaded = parseInt(d.bytes_downloaded ?? d.bytesDownloaded ?? "0", 10);
       const bytesTotal = parseInt(d.bytes_total ?? d.bytesTotal ?? "0", 10);
       const downloadRateBps = parseFloat(d.download_rate_bps ?? d.downloadRateBps ?? "0");
       const status = d.status ?? "";
+
+      // Determine if complete: explicit status or bytes comparison
+      const isComplete = status === "completed" || status === "failed" || (bytesTotal > 0 && bytesDownloaded >= bytesTotal);
+
+      // Skip if bytesTotal is too small (< 1 KB) AND not explicitly completed/failed
+      if (bytesTotal > 0 && bytesTotal < 1024 && status !== "completed" && status !== "failed") {
+        continue;
+      }
+
+      // Skip if no download activity yet (0 bytes downloaded, not completed/failed)
+      // This makes downloads appear dynamically as they start
+      if (bytesDownloaded === 0 && bytesTotal === 0 && status !== "completed" && status !== "failed") {
+        continue;
+      }
 
       downloadMap.set(appName, {
         appName,
@@ -66,14 +85,16 @@ export default function DownloadProgress({ events }: DownloadProgressProps) {
         bytesTotal: isNaN(bytesTotal) ? 0 : bytesTotal,
         downloadRateBps: isNaN(downloadRateBps) ? 0 : downloadRateBps,
         lastUpdated: evt.timestamp,
-        isComplete: status === "completed" || (bytesTotal > 0 && bytesDownloaded >= bytesTotal),
+        isComplete,
+        eventData: d,
       });
     }
 
     return Array.from(downloadMap.values()).sort((a, b) => {
       // In-progress first, then completed
       if (a.isComplete !== b.isComplete) return a.isComplete ? 1 : -1;
-      return new Date(b.lastUpdated).getTime() - new Date(a.lastUpdated).getTime();
+      // Chronological order: oldest first (first download on top, newest at bottom)
+      return new Date(a.lastUpdated).getTime() - new Date(b.lastUpdated).getTime();
     });
   }, [events]);
 
@@ -119,9 +140,18 @@ export default function DownloadProgress({ events }: DownloadProgressProps) {
             : 0;
           const bytesRemaining = dl.bytesTotal > 0 ? dl.bytesTotal - dl.bytesDownloaded : 0;
 
-          return (
+          return <DownloadItem key={dl.appName} download={dl} progressPercent={progressPercent} bytesRemaining={bytesRemaining} />;
+        })}
+      </div>}
+    </div>
+  );
+}
+
+function DownloadItem({ download: dl, progressPercent, bytesRemaining }: { download: DownloadItem; progressPercent: number; bytesRemaining: number }) {
+  const [showDetails, setShowDetails] = useState(false);
+
+  return (
             <div
-              key={dl.appName}
               className={`rounded-lg p-3 ${dl.isComplete ? "bg-green-50 border border-green-200" : "bg-gray-50 border border-gray-200"}`}
             >
               <div className="flex items-center justify-between mb-1">
@@ -143,6 +173,14 @@ export default function DownloadProgress({ events }: DownloadProgressProps) {
                   )}
                   {!dl.isComplete && dl.bytesTotal > 0 && (
                     <span>ETA: {formatEta(bytesRemaining, dl.downloadRateBps)}</span>
+                  )}
+                  {dl.eventData && Object.keys(dl.eventData).length > 0 && (
+                    <button
+                      onClick={() => setShowDetails(!showDetails)}
+                      className="text-xs text-blue-600 hover:text-blue-800"
+                    >
+                      {showDetails ? 'Hide' : 'Details'}
+                    </button>
                   )}
                 </div>
               </div>
@@ -172,10 +210,13 @@ export default function DownloadProgress({ events }: DownloadProgressProps) {
                   {dl.downloadRateBps > 0 && ` at ${formatSpeed(dl.downloadRateBps)}`}
                 </div>
               )}
+
+              {/* Event details (expandable) */}
+              {showDetails && dl.eventData && (
+                <div className="mt-3 p-2 bg-gray-900 rounded text-xs text-gray-100 font-mono overflow-x-auto">
+                  <pre>{JSON.stringify(dl.eventData, null, 2)}</pre>
+                </div>
+              )}
             </div>
-          );
-        })}
-      </div>}
-    </div>
   );
 }

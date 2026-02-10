@@ -5,8 +5,7 @@ using System.Linq;
 using System.ServiceProcess;
 using AutopilotMonitor.Agent.Core.Configuration;
 using AutopilotMonitor.Agent.Core.Logging;
-using AutopilotMonitor.Agent.Core.Monitoring;
-using AutopilotMonitor.Agent.Core.Storage;
+using AutopilotMonitor.Agent.Core.Monitoring.Core;
 using Microsoft.Win32;
 using Newtonsoft.Json;
 
@@ -56,6 +55,11 @@ namespace AutopilotMonitor.Agent
                 {
                     Console.WriteLine($"Simulator Mode: ENABLED");
                     Console.WriteLine($"Simulate Failure: {(config.SimulateFailure ? "YES" : "NO")}");
+                    if (!string.IsNullOrEmpty(config.SimulationLogDirectory))
+                    {
+                        Console.WriteLine($"Simulation Log Dir: {config.SimulationLogDirectory}");
+                        Console.WriteLine($"Simulation Speed: {config.SimulationSpeedFactor}x");
+                    }
                 }
 
                 if (config.RebootOnComplete)
@@ -282,10 +286,14 @@ namespace AutopilotMonitor.Agent
             var noCleanup = args?.Contains("--no-cleanup") ?? false;
             var rebootOnComplete = args?.Contains("--reboot-on-complete") ?? false;
             var disableGeoLocation = args?.Contains("--disable-geolocation") ?? false;
+            var newSession = args?.Contains("--new-session") ?? false;
 
             // Parse certificate thumbprint if provided
             string certThumbprint = null;
             string tenantIdOverride = null;
+            string imeLogPathOverride = null;
+            string simulationLogDirectory = null;
+            double simulationSpeedFactor = 50;
             if (args != null)
             {
                 var thumbprintIndex = Array.IndexOf(args, "--cert-thumbprint");
@@ -298,6 +306,30 @@ namespace AutopilotMonitor.Agent
                 if (tenantIdIndex >= 0 && tenantIdIndex + 1 < args.Length)
                 {
                     tenantIdOverride = args[tenantIdIndex + 1];
+                }
+
+                var imeLogPathIndex = Array.IndexOf(args, "--ime-log-path");
+                if (imeLogPathIndex >= 0 && imeLogPathIndex + 1 < args.Length)
+                {
+                    imeLogPathOverride = args[imeLogPathIndex + 1];
+                    Console.WriteLine($"Using custom IME log path: {imeLogPathOverride}");
+                }
+
+                var simLogDirIndex = Array.IndexOf(args, "--simulation-log-dir");
+                if (simLogDirIndex >= 0 && simLogDirIndex + 1 < args.Length)
+                {
+                    simulationLogDirectory = args[simLogDirIndex + 1];
+                    Console.WriteLine($"Using simulation log directory: {simulationLogDirectory}");
+                }
+
+                var simSpeedIndex = Array.IndexOf(args, "--simulation-speed-factor");
+                if (simSpeedIndex >= 0 && simSpeedIndex + 1 < args.Length)
+                {
+                    if (double.TryParse(args[simSpeedIndex + 1], out var speed))
+                    {
+                        simulationSpeedFactor = speed;
+                        Console.WriteLine($"Using simulation speed factor: {simulationSpeedFactor}x");
+                    }
                 }
             }
 
@@ -391,6 +423,14 @@ namespace AutopilotMonitor.Agent
             // Load or create persisted session ID
             var dataDirectory = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor");
             var sessionPersistence = new SessionPersistence(dataDirectory);
+
+            // Force new session if --new-session flag is set
+            if (newSession)
+            {
+                Console.WriteLine("--new-session flag detected, deleting existing session...");
+                sessionPersistence.DeleteSession();
+            }
+
             var sessionId = sessionPersistence.LoadOrCreateSessionId();
 
             var sessionStatus = sessionPersistence.SessionExists() && File.GetCreationTime(Path.Combine(dataDirectory, "session.id")) < DateTime.Now.AddMinutes(-1)
@@ -415,7 +455,10 @@ namespace AutopilotMonitor.Agent
                 CleanupOnExit = cleanupOnExit,
                 SelfDestructOnComplete = selfDestructOnComplete,
                 RebootOnComplete = rebootOnComplete || rebootOnCompleteConfig,
-                EnableGeoLocation = !disableGeoLocation && enableGeoLocationConfig
+                EnableGeoLocation = !disableGeoLocation && enableGeoLocationConfig,
+                ImeLogPathOverride = imeLogPathOverride,
+                SimulationLogDirectory = simulationLogDirectory,
+                SimulationSpeedFactor = simulationSpeedFactor
             };
         }
     }

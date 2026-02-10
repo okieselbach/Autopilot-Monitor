@@ -131,38 +131,6 @@ namespace AutopilotMonitor.Shared.Models
         /// </summary>
         public int PerformanceCollectorIntervalSeconds { get; set; } = 60;
 
-        /// <summary>
-        /// Enable Download Progress Collector (IME/Intune app download tracking)
-        /// Generates ~1 event per interval per active download
-        /// Default: false (opt-in)
-        /// </summary>
-        public bool EnableDownloadProgressCollector { get; set; } = false;
-
-        /// <summary>
-        /// Download progress collector interval in seconds
-        /// Default: 15 seconds
-        /// </summary>
-        public int DownloadProgressCollectorIntervalSeconds { get; set; } = 15;
-
-        /// <summary>
-        /// Enable Certificate Validation Collector (validates cert chains for enrollment endpoints)
-        /// Low traffic: runs at startup + on network phase change
-        /// Default: false (opt-in)
-        /// </summary>
-        public bool EnableCertValidationCollector { get; set; } = false;
-
-        /// <summary>
-        /// Enable ESP UI State Collector (captures ESP blocking apps, progress, status)
-        /// Generates ~1 event per interval during ESP phases only
-        /// Default: false (opt-in)
-        /// </summary>
-        public bool EnableEspUiStateCollector { get; set; } = false;
-
-        /// <summary>
-        /// ESP UI State collector interval in seconds
-        /// Default: 30 seconds
-        /// </summary>
-        public int EspUiStateCollectorIntervalSeconds { get; set; } = 30;
 
         // ===== FUTURE SETTINGS (Extensible) =====
 
@@ -234,12 +202,7 @@ namespace AutopilotMonitor.Shared.Models
                 SessionTimeoutHours = 5,
                 MaxNdjsonPayloadSizeMB = 5,
                 EnablePerformanceCollector = false,
-                PerformanceCollectorIntervalSeconds = 60,
-                EnableDownloadProgressCollector = false,
-                DownloadProgressCollectorIntervalSeconds = 15,
-                EnableCertValidationCollector = false,
-                EnableEspUiStateCollector = false,
-                EspUiStateCollectorIntervalSeconds = 30
+                PerformanceCollectorIntervalSeconds = 60
             };
         }
     }

@@ -5,7 +5,7 @@ using AutopilotMonitor.Agent.Core.Logging;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Win32;
 
-namespace AutopilotMonitor.Agent.Core.EventCollection
+namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 {
     /// <summary>
     /// Detects and tracks Windows Hello for Business provisioning during Autopilot enrollment.
@@ -107,7 +107,7 @@ namespace AutopilotMonitor.Agent.Core.EventCollection
                         EventType = "hello_policy_detected",
                         Severity = EventSeverity.Info,
                         Source = "HelloDetector",
-                        Phase = EnrollmentPhase.EspDeviceSetup,
+                        Phase = EnrollmentPhase.Unknown,
                         Message = $"Windows Hello for Business policy detected: {status} (via {source})",
                         Data = new Dictionary<string, object>
                         {
@@ -273,7 +273,7 @@ namespace AutopilotMonitor.Agent.Core.EventCollection
                     EventType = eventType,
                     Severity = severity,
                     Source = "HelloDetector",
-                    Phase = EnrollmentPhase.EspDeviceSetup,
+                    Phase = EnrollmentPhase.Unknown,
                     Message = message,
                     Data = new Dictionary<string, object>
                     {

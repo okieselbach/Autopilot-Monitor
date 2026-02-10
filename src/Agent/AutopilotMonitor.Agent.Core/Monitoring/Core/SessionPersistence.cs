@@ -1,7 +1,7 @@
 using System;
 using System.IO;
 
-namespace AutopilotMonitor.Agent.Core.Storage
+namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 {
     /// <summary>
     /// Manages persistent session ID storage to maintain tracking across agent restarts

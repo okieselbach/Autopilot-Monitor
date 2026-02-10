@@ -6,44 +6,44 @@ namespace AutopilotMonitor.Shared.Models
     public enum EnrollmentPhase
     {
         /// <summary>
-        /// Pre-flight: Agent deployed, session registered
+        /// Unknown: Events without explicit phase assignment (sorted chronologically into active phase)
         /// </summary>
-        PreFlight = 0,
+        Unknown = -1,
 
         /// <summary>
-        /// OOBE/Network: Network connection established
+        /// Start: Initial boot, OOBE begins
         /// </summary>
-        Network = 1,
+        Start = 0,
 
         /// <summary>
-        /// Identity: Azure AD/Entra joined, device certificate issued
+        /// Device Preparation: OOBE, network, identity, Autopilot profile applied
         /// </summary>
-        Identity = 2,
+        DevicePreparation = 1,
 
         /// <summary>
-        /// MDM Enrollment: Intune enrolled, policies starting
+        /// Device Setup: ESP Device phase, agent deployed/bootstrapped, policies applied
         /// </summary>
-        MdmEnrollment = 3,
+        DeviceSetup = 2,
 
         /// <summary>
-        /// ESP Device Setup: Device policies applied
+        /// Apps (Device): Required apps installing during device phase
         /// </summary>
-        EspDeviceSetup = 4,
+        AppsDevice = 3,
 
         /// <summary>
-        /// App Installation: Required apps installing
+        /// Account Setup: ESP User/Account phase, user sign-in
         /// </summary>
-        AppInstallation = 5,
+        AccountSetup = 4,
 
         /// <summary>
-        /// ESP User Setup: User policies and apps
+        /// Apps (User): User-targeted apps installing
         /// </summary>
-        EspUserSetup = 6,
+        AppsUser = 5,
 
         /// <summary>
-        /// Complete: Desktop reached
+        /// Complete: Desktop reached, enrollment succeeded
         /// </summary>
-        Complete = 7,
+        Complete = 6,
 
         /// <summary>
         /// Failed: Enrollment failed

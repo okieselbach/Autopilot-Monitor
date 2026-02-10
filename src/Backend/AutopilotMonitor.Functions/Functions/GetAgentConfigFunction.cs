@@ -75,16 +75,14 @@ namespace AutopilotMonitor.Functions.Functions
                 var collectors = new CollectorConfiguration
                 {
                     EnablePerformanceCollector = tenantConfig.EnablePerformanceCollector,
-                    PerformanceIntervalSeconds = tenantConfig.PerformanceCollectorIntervalSeconds,
-                    EnableDownloadProgressCollector = tenantConfig.EnableDownloadProgressCollector,
-                    DownloadProgressIntervalSeconds = tenantConfig.DownloadProgressCollectorIntervalSeconds,
-                    EnableCertValidationCollector = tenantConfig.EnableCertValidationCollector,
-                    EnableEspUiStateCollector = tenantConfig.EnableEspUiStateCollector,
-                    EspUiStateIntervalSeconds = tenantConfig.EspUiStateCollectorIntervalSeconds
+                    PerformanceIntervalSeconds = tenantConfig.PerformanceCollectorIntervalSeconds
                 };
 
-                // Get active gather rules for this tenant
+                // Get active gather rules for this tenant (user-defined ad-hoc only)
                 var gatherRules = await _gatherRuleService.GetActiveRulesForTenantAsync(tenantId);
+
+                // Get built-in IME log patterns for smart enrollment tracking
+                var imeLogPatterns = BuiltInImeLogPatterns.GetAll();
 
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(new AgentConfigResponse
@@ -93,6 +91,7 @@ namespace AutopilotMonitor.Functions.Functions
                     Message = "Configuration retrieved successfully",
                     Collectors = collectors,
                     GatherRules = gatherRules,
+                    ImeLogPatterns = imeLogPatterns,
                     ConfigVersion = 1,
                     RefreshIntervalSeconds = 300
                 });

@@ -2,8 +2,7 @@ using System;
 using System.ServiceProcess;
 using AutopilotMonitor.Agent.Core.Configuration;
 using AutopilotMonitor.Agent.Core.Logging;
-using AutopilotMonitor.Agent.Core.Monitoring;
-using AutopilotMonitor.Agent.Core.Storage;
+using AutopilotMonitor.Agent.Core.Monitoring.Core;
 
 namespace AutopilotMonitor.Agent
 {

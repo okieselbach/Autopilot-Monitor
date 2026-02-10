@@ -6,6 +6,7 @@ import { useTenant } from "../../contexts/TenantContext";
 import { useAuth } from "../../contexts/AuthContext";
 import { useSignalR } from "../../contexts/SignalRContext";
 import { ProtectedRoute } from "../../components/ProtectedRoute";
+import DownloadProgress from "../../components/DownloadProgress";
 
 interface Session {
   sessionId: string;
@@ -34,14 +35,13 @@ interface EnrollmentEvent {
 }
 
 const phaseSteps = [
-  { id: 0, label: "Device registered", shortLabel: "Registration" },
-  { id: 1, label: "Network configured", shortLabel: "Network" },
-  { id: 2, label: "Identity verified", shortLabel: "Identity" },
-  { id: 3, label: "Management enrolled", shortLabel: "Enrollment" },
-  { id: 4, label: "Security policies applied", shortLabel: "Policies" },
-  { id: 5, label: "Installing apps", shortLabel: "Apps" },
-  { id: 6, label: "User setup", shortLabel: "User Setup" },
-  { id: 7, label: "Finalizing setup", shortLabel: "Complete" },
+  { id: 0, label: "Setup start", shortLabel: "Start" },
+  { id: 1, label: "Device preparation", shortLabel: "Preparation" },
+  { id: 2, label: "Device setup", shortLabel: "Device" },
+  { id: 3, label: "Installing apps (device)", shortLabel: "Apps (D)" },
+  { id: 4, label: "Account setup", shortLabel: "Account" },
+  { id: 5, label: "Installing apps (user)", shortLabel: "Apps (U)" },
+  { id: 6, label: "Finalizing setup", shortLabel: "Complete" },
 ];
 
 export default function ProgressPortalPage() {
@@ -58,7 +58,8 @@ export default function ProgressPortalPage() {
   const { getAccessToken } = useAuth();
   const { on, off, isConnected, joinGroup, leaveGroup } = useSignalR();
 
-  const hasJoinedGroup = useRef(false);
+  const hasJoinedTenantGroup = useRef(false);
+  const hasJoinedSessionGroup = useRef(false);
   const sessionRef = useRef<Session | null>(null);
 
   // Keep ref in sync
@@ -68,34 +69,95 @@ export default function ProgressPortalPage() {
 
   // Join tenant group for real-time updates
   useEffect(() => {
-    if (isConnected && !hasJoinedGroup.current) {
+    if (isConnected && !hasJoinedTenantGroup.current) {
       joinGroup(`tenant-${tenantId}`);
-      hasJoinedGroup.current = true;
+      hasJoinedTenantGroup.current = true;
     }
     return () => {
-      if (hasJoinedGroup.current) {
+      if (hasJoinedTenantGroup.current) {
         leaveGroup(`tenant-${tenantId}`);
-        hasJoinedGroup.current = false;
+        hasJoinedTenantGroup.current = false;
       }
     };
   }, [isConnected, tenantId]);
 
+  // Join session-specific group when session is found
+  useEffect(() => {
+    if (!isConnected || !session) {
+      return;
+    }
+
+    const sessionGroup = `session-${session.tenantId}-${session.sessionId}`;
+    console.log('[Progress] Joining session group:', sessionGroup);
+    joinGroup(sessionGroup);
+    hasJoinedSessionGroup.current = true;
+
+    return () => {
+      console.log('[Progress] Leaving session group:', sessionGroup);
+      leaveGroup(sessionGroup);
+      hasJoinedSessionGroup.current = false;
+    };
+  }, [isConnected, session?.sessionId, session?.tenantId, joinGroup, leaveGroup]);
+
   // Listen for real-time session updates
   useEffect(() => {
-    const handleNewEvents = (data: { session: Session }) => {
+    const handleNewEvents = (data: { session: Session; events?: EnrollmentEvent[] }) => {
+      console.log('[Progress] Received newevents:', data);
       if (
         data.session &&
         sessionRef.current &&
         data.session.sessionId === sessionRef.current.sessionId
       ) {
+        console.log('[Progress] Updating session from newevents');
         setSession(data.session);
+
+        // Add new events to the events list
+        if (data.events && data.events.length > 0) {
+          console.log('[Progress] Adding', data.events.length, 'new events from newevents');
+          setEvents((prev) => {
+            const existingIds = new Set(prev.map((e) => e.eventId));
+            const newEvents = data.events!.filter((e) => !existingIds.has(e.eventId));
+            if (newEvents.length === 0) return prev;
+            return [...prev, ...newEvents].sort((a, b) => a.sequence - b.sequence);
+          });
+        }
       }
     };
+
+    const handleEventStream = (data: { session: Session; events?: EnrollmentEvent[] }) => {
+      console.log('[Progress] Received eventStream:', data);
+      if (
+        data.session &&
+        sessionRef.current &&
+        data.session.sessionId === sessionRef.current.sessionId
+      ) {
+        console.log('[Progress] Updating session from eventStream');
+        console.log('[Progress] Session currentPhase:', data.session.currentPhase, 'status:', data.session.status);
+        setSession(data.session);
+
+        // Add new events to the events list
+        if (data.events && data.events.length > 0) {
+          console.log('[Progress] Adding', data.events.length, 'new events from eventStream');
+          console.log('[Progress] Event types:', data.events.map(e => e.eventType).join(', '));
+          setEvents((prev) => {
+            const existingIds = new Set(prev.map((e) => e.eventId));
+            const newEvents = data.events!.filter((e) => !existingIds.has(e.eventId));
+            if (newEvents.length === 0) return prev;
+            console.log('[Progress] Actually adding', newEvents.length, 'new events');
+            console.log('[Progress] Total events after update:', prev.length + newEvents.length);
+            return [...prev, ...newEvents].sort((a, b) => a.sequence - b.sequence);
+          });
+        }
+      }
+    };
+
     on("newevents", handleNewEvents);
     on("newSession", handleNewEvents);
+    on("eventStream", handleEventStream);
     return () => {
       off("newevents", handleNewEvents);
       off("newSession", handleNewEvents);
+      off("eventStream", handleEventStream);
     };
   }, [on, off]);
 
@@ -248,20 +310,20 @@ export default function ProgressPortalPage() {
           ((session.currentPhase === 99
             ? 3
             : session.currentPhase) /
-            7) *
+            6) *
             100
         )
-      : Math.min(100, (session.currentPhase / 7) * 100)
+      : Math.min(100, (session.currentPhase / 6) * 100)
     : 0;
 
   const estimatedRemaining = session
     ? (() => {
         if (session.status !== "InProgress") return null;
-        const currentPhase = Math.min(session.currentPhase, 7);
+        const currentPhase = Math.min(session.currentPhase, 6);
         if (currentPhase === 0) return null;
         const elapsed = session.durationSeconds;
         const rate = elapsed / currentPhase;
-        const remaining = (7 - currentPhase) * rate;
+        const remaining = (6 - currentPhase) * rate;
         return Math.round(remaining / 60);
       })()
     : null;
@@ -483,7 +545,7 @@ export default function ProgressPortalPage() {
                         ? 3
                         : session.currentPhase;
                     const isCompleted =
-                      session.status === "Succeeded" ||
+                      (session.status === "Succeeded" && step.id <= 6) ||
                       step.id < effectivePhase;
                     const isCurrent =
                       step.id === effectivePhase &&
@@ -555,14 +617,14 @@ export default function ProgressPortalPage() {
                             >
                               {step.label}
                               {isCurrent &&
-                                step.id === 5 &&
+                                (step.id === 3 || step.id === 5) &&
                                 appProgress &&
                                 appProgress.total > 0 &&
                                 appProgress.completed > 0 &&
                                 ` (${appProgress.completed}/${appProgress.total})`}
                             </span>
-                            {/* App install detail below the "Installing apps" step */}
-                            {isCurrent && step.id === 5 && (
+                            {/* App install detail below the "Installing apps" steps */}
+                            {isCurrent && (step.id === 3 || step.id === 5) && (
                               <div className="flex items-center space-x-1.5 mt-0.5">
                                 <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse flex-shrink-0" />
                                 <span className="text-xs text-blue-500 truncate">
@@ -578,6 +640,20 @@ export default function ProgressPortalPage() {
                     );
                   })}
                 </div>
+
+                {/* Download Progress - Show during app installation phases */}
+                {session.status === "InProgress" &&
+                 (session.currentPhase === 3 || session.currentPhase === 5) &&
+                 events.filter(e => e.eventType === "download_progress").length > 0 && (
+                  <div className="mb-8">
+                    <DownloadProgress
+                      events={events.filter(e => e.eventType === "download_progress").map(e => ({
+                        timestamp: e.timestamp,
+                        data: e.data
+                      }))}
+                    />
+                  </div>
+                )}
 
                 {/* Estimated Time / Status */}
                 {session.status === "InProgress" && estimatedRemaining != null && estimatedRemaining > 0 && (

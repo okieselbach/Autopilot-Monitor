@@ -6,6 +6,7 @@ using AutopilotMonitor.Shared.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace AutopilotMonitor.Functions.Services
 {
@@ -105,7 +106,7 @@ namespace AutopilotMonitor.Functions.Services
                     ["IsPreProvisioned"] = registration.IsPreProvisioned,
                     ["StartedAt"] = registration.StartedAt,
                     ["AgentVersion"] = registration.AgentVersion ?? string.Empty,
-                    ["CurrentPhase"] = (int)EnrollmentPhase.PreFlight,
+                    ["CurrentPhase"] = (int)EnrollmentPhase.Start,
                     ["Status"] = SessionStatus.InProgress.ToString(),
                     ["EventCount"] = 0
                 };
@@ -515,9 +516,7 @@ namespace AutopilotMonitor.Functions.Services
                 Phase = (EnrollmentPhase)(entity.GetInt32("Phase") ?? 0),
                 Message = entity.GetString("Message") ?? string.Empty,
                 Sequence = entity.GetInt64("Sequence") ?? 0,
-                Data = entity.ContainsKey("DataJson") && entity.GetString("DataJson") != null
-                    ? JsonConvert.DeserializeObject<Dictionary<string, object>>(entity.GetString("DataJson"))
-                    : new Dictionary<string, object>()
+                Data = DeserializeEventData(entity.GetString("DataJson"))
             };
         }
 
@@ -1769,6 +1768,61 @@ namespace AutopilotMonitor.Functions.Services
             {
                 return Array.Empty<string>();
             }
+        }
+
+        /// <summary>
+        /// Deserializes event data JSON and converts JToken objects to native .NET types
+        /// </summary>
+        private Dictionary<string, object> DeserializeEventData(string? dataJson)
+        {
+            if (string.IsNullOrEmpty(dataJson))
+                return new Dictionary<string, object>();
+
+            try
+            {
+                var deserialized = JsonConvert.DeserializeObject<Dictionary<string, object>>(dataJson);
+                if (deserialized == null)
+                    return new Dictionary<string, object>();
+
+                // Convert all JToken values to native types
+                var result = new Dictionary<string, object>();
+                foreach (var kvp in deserialized)
+                {
+                    result[kvp.Key] = ConvertJTokenToNative(kvp.Value);
+                }
+                return result;
+            }
+            catch
+            {
+                return new Dictionary<string, object>();
+            }
+        }
+
+        /// <summary>
+        /// Converts JToken objects (JArray, JObject) to native .NET types
+        /// This fixes the issue where Newtonsoft.Json deserialization creates JToken objects
+        /// that get serialized incorrectly as nested empty arrays
+        /// </summary>
+        private object ConvertJTokenToNative(object value)
+        {
+            if (value is JArray jArray)
+            {
+                return jArray.Select(item => ConvertJTokenToNative(item)).ToList();
+            }
+            else if (value is JObject jObject)
+            {
+                var dict = new Dictionary<string, object>();
+                foreach (var prop in jObject.Properties())
+                {
+                    dict[prop.Name] = ConvertJTokenToNative(prop.Value);
+                }
+                return dict;
+            }
+            else if (value is JValue jValue)
+            {
+                return jValue.Value ?? string.Empty;
+            }
+            return value;
         }
     }
 

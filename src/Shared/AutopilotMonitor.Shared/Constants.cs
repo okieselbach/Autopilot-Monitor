@@ -8,7 +8,7 @@ namespace AutopilotMonitor.Shared
         /// <summary>
         /// Agent version
         /// </summary>
-        public const string AgentVersion = "1.0.0-phase1";
+        public const string AgentVersion = "1.0.0";
 
         /// <summary>
         /// Registry path for agent configuration

@@ -59,7 +59,7 @@ namespace AutopilotMonitor.Shared.Models
         // ===== WHAT TO COLLECT =====
 
         /// <summary>
-        /// Type of data collection: "registry", "eventlog", "wmi", "file", "command"
+        /// Type of data collection: "registry", "eventlog", "wmi", "file", "command", "logparser"
         /// </summary>
         public string CollectorType { get; set; }
 
@@ -70,6 +70,7 @@ namespace AutopilotMonitor.Shared.Models
         /// - wmi: WMI query (e.g., "SELECT * FROM Win32_TPM")
         /// - file: File path (e.g., "C:\Windows\INF\setupapi.dev.log")
         /// - command: Command name from allowlist (e.g., "Get-TpmStatus")
+        /// - logparser: Log file path with env vars (e.g., "%ProgramData%\Microsoft\IntuneManagementExtension\Logs\AppWorkload.log")
         /// </summary>
         public string Target { get; set; }
 
@@ -80,6 +81,7 @@ namespace AutopilotMonitor.Shared.Models
         /// - wmi: { "namespace": "root\\CIMV2\\Security\\MicrosoftTpm" }
         /// - file: { "maxLines": "100", "pattern": "error|fail" }
         /// - command: { "arguments": "-Detailed" }
+        /// - logparser: { "pattern": "regex with (?&lt;named&gt;groups)", "logFormat": "cmtrace", "trackPosition": "true", "maxLines": "1000" }
         /// </summary>
         public Dictionary<string, string> Parameters { get; set; } = new Dictionary<string, string>();
 

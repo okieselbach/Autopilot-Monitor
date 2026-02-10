@@ -20,11 +20,6 @@ interface TenantConfiguration {
   // Agent collector settings
   enablePerformanceCollector: boolean;
   performanceCollectorIntervalSeconds: number;
-  enableDownloadProgressCollector: boolean;
-  downloadProgressCollectorIntervalSeconds: number;
-  enableCertValidationCollector: boolean;
-  enableEspUiStateCollector: boolean;
-  espUiStateCollectorIntervalSeconds: number;
 }
 
 interface TenantAdmin {
@@ -63,11 +58,6 @@ export default function SettingsPage() {
   // Collector settings state
   const [enablePerformanceCollector, setEnablePerformanceCollector] = useState(false);
   const [performanceCollectorInterval, setPerformanceCollectorInterval] = useState(60);
-  const [enableDownloadProgressCollector, setEnableDownloadProgressCollector] = useState(false);
-  const [downloadProgressCollectorInterval, setDownloadProgressCollectorInterval] = useState(15);
-  const [enableCertValidationCollector, setEnableCertValidationCollector] = useState(false);
-  const [enableEspUiStateCollector, setEnableEspUiStateCollector] = useState(false);
-  const [espUiStateCollectorInterval, setEspUiStateCollectorInterval] = useState(30);
 
 
   // Fetch configuration
@@ -106,11 +96,6 @@ export default function SettingsPage() {
         setSessionTimeoutHours(data.sessionTimeoutHours ?? 5);
         setEnablePerformanceCollector(data.enablePerformanceCollector ?? false);
         setPerformanceCollectorInterval(data.performanceCollectorIntervalSeconds ?? 60);
-        setEnableDownloadProgressCollector(data.enableDownloadProgressCollector ?? false);
-        setDownloadProgressCollectorInterval(data.downloadProgressCollectorIntervalSeconds ?? 15);
-        setEnableCertValidationCollector(data.enableCertValidationCollector ?? false);
-        setEnableEspUiStateCollector(data.enableEspUiStateCollector ?? false);
-        setEspUiStateCollectorInterval(data.espUiStateCollectorIntervalSeconds ?? 30);
       } catch (err) {
         console.error("Error fetching configuration:", err);
         setError(err instanceof Error ? err.message : "Failed to load configuration");
@@ -176,11 +161,6 @@ export default function SettingsPage() {
         sessionTimeoutHours,
         enablePerformanceCollector,
         performanceCollectorIntervalSeconds: performanceCollectorInterval,
-        enableDownloadProgressCollector,
-        downloadProgressCollectorIntervalSeconds: downloadProgressCollectorInterval,
-        enableCertValidationCollector,
-        enableEspUiStateCollector,
-        espUiStateCollectorIntervalSeconds: espUiStateCollectorInterval,
       };
 
       const token = await getAccessToken();
@@ -225,11 +205,6 @@ export default function SettingsPage() {
     setSessionTimeoutHours(config.sessionTimeoutHours ?? 5);
     setEnablePerformanceCollector(config.enablePerformanceCollector ?? false);
     setPerformanceCollectorInterval(config.performanceCollectorIntervalSeconds ?? 60);
-    setEnableDownloadProgressCollector(config.enableDownloadProgressCollector ?? false);
-    setDownloadProgressCollectorInterval(config.downloadProgressCollectorIntervalSeconds ?? 15);
-    setEnableCertValidationCollector(config.enableCertValidationCollector ?? false);
-    setEnableEspUiStateCollector(config.enableEspUiStateCollector ?? false);
-    setEspUiStateCollectorInterval(config.espUiStateCollectorIntervalSeconds ?? 30);
     setSuccessMessage(null);
     setError(null);
   };
@@ -770,92 +745,13 @@ export default function SettingsPage() {
                   </button>
                 </div>
 
-                {/* Download Progress Collector */}
-                <div className="flex items-center justify-between p-4 rounded-lg border border-gray-200 hover:border-emerald-200 transition-colors">
-                  <div className="flex-1">
-                    <div className="flex items-center space-x-2">
-                      <p className="font-medium text-gray-900">Download Progress Collector</p>
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-700">High Traffic</span>
-                    </div>
-                    <p className="text-sm text-gray-500 mt-1">Tracks IME content download progress and speed</p>
-                    {enableDownloadProgressCollector && (
-                      <div className="mt-2 flex items-center space-x-2">
-                        <span className="text-sm text-gray-600">Interval:</span>
-                        <input
-                          type="number"
-                          min="5"
-                          max="120"
-                          value={downloadProgressCollectorInterval}
-                          onChange={(e) => setDownloadProgressCollectorInterval(parseInt(e.target.value) || 15)}
-                          className="w-20 px-2 py-1 border border-gray-300 rounded text-sm text-gray-900 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-                        />
-                        <span className="text-sm text-gray-500">seconds</span>
-                      </div>
-                    )}
-                  </div>
-                  <button
-                    onClick={() => setEnableDownloadProgressCollector(!enableDownloadProgressCollector)}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${enableDownloadProgressCollector ? 'bg-emerald-500' : 'bg-gray-300'}`}
-                  >
-                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${enableDownloadProgressCollector ? 'translate-x-6' : 'translate-x-1'}`} />
-                  </button>
-                </div>
-
-                {/* Certificate Validation Collector */}
-                <div className="flex items-center justify-between p-4 rounded-lg border border-gray-200 hover:border-emerald-200 transition-colors">
-                  <div className="flex-1">
-                    <div className="flex items-center space-x-2">
-                      <p className="font-medium text-gray-900">Certificate Validation Collector</p>
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700">Low Traffic</span>
-                    </div>
-                    <p className="text-sm text-gray-500 mt-1">Validates enrollment endpoint certificates, detects SSL inspection</p>
-                  </div>
-                  <button
-                    onClick={() => setEnableCertValidationCollector(!enableCertValidationCollector)}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${enableCertValidationCollector ? 'bg-emerald-500' : 'bg-gray-300'}`}
-                  >
-                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${enableCertValidationCollector ? 'translate-x-6' : 'translate-x-1'}`} />
-                  </button>
-                </div>
-
-                {/* ESP UI State Collector */}
-                <div className="flex items-center justify-between p-4 rounded-lg border border-gray-200 hover:border-emerald-200 transition-colors">
-                  <div className="flex-1">
-                    <div className="flex items-center space-x-2">
-                      <p className="font-medium text-gray-900">ESP UI State Collector</p>
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700">Medium Traffic</span>
-                    </div>
-                    <p className="text-sm text-gray-500 mt-1">Tracks ESP blocking apps progress and status text</p>
-                    {enableEspUiStateCollector && (
-                      <div className="mt-2 flex items-center space-x-2">
-                        <span className="text-sm text-gray-600">Interval:</span>
-                        <input
-                          type="number"
-                          min="10"
-                          max="120"
-                          value={espUiStateCollectorInterval}
-                          onChange={(e) => setEspUiStateCollectorInterval(parseInt(e.target.value) || 30)}
-                          className="w-20 px-2 py-1 border border-gray-300 rounded text-sm text-gray-900 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-                        />
-                        <span className="text-sm text-gray-500">seconds</span>
-                      </div>
-                    )}
-                  </div>
-                  <button
-                    onClick={() => setEnableEspUiStateCollector(!enableEspUiStateCollector)}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${enableEspUiStateCollector ? 'bg-emerald-500' : 'bg-gray-300'}`}
-                  >
-                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${enableEspUiStateCollector ? 'translate-x-6' : 'translate-x-1'}`} />
-                  </button>
-                </div>
-
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
                   <div className="flex items-start space-x-2">
                     <svg className="w-5 h-5 text-blue-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
                     <p className="text-sm text-blue-800">
-                      Changes take effect on the next agent config refresh (default: every 5 minutes). Core collectors (EventLog, Registry, Phase Detector, Hello Detector) are always active.
+                      Changes take effect on the next agent config refresh (default: every 5 minutes). Core collectors (Hello Detector) and enrollment tracking are always active.
                     </p>
                   </div>
                 </div>

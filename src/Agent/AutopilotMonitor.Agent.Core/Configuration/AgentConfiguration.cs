@@ -98,6 +98,26 @@ namespace AutopilotMonitor.Agent.Core.Configuration
         public bool EnableGeoLocation { get; set; } = true;
 
         /// <summary>
+        /// Optional custom path to IME logs directory for testing.
+        /// If set, overrides the default %ProgramData%\Microsoft\IntuneManagementExtension\Logs path.
+        /// </summary>
+        public string ImeLogPathOverride { get; set; }
+
+        /// <summary>
+        /// Path to directory with real IME log files for simulation replay.
+        /// When set (with EnableSimulator), the simulator replays these logs with time compression
+        /// instead of generating artificial events.
+        /// </summary>
+        public string SimulationLogDirectory { get; set; }
+
+        /// <summary>
+        /// Time compression factor for simulation mode.
+        /// Higher values = faster replay. Default: 50 (e.g., 50 minutes of real logs = 1 minute of replay).
+        /// Targeting 3-5 minute total enrollment replay.
+        /// </summary>
+        public double SimulationSpeedFactor { get; set; } = 50;
+
+        /// <summary>
         /// Validates the configuration
         /// </summary>
         public bool IsValid()

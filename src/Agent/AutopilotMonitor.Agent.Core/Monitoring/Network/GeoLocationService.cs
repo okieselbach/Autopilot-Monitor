@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 using AutopilotMonitor.Agent.Core.Logging;
 using Newtonsoft.Json.Linq;
 
-namespace AutopilotMonitor.Agent.Core.Network
+namespace AutopilotMonitor.Agent.Core.Monitoring.Network
 {
     public class GeoLocationResult
     {

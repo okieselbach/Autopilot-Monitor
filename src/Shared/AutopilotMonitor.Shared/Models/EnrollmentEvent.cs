@@ -53,9 +53,10 @@ namespace AutopilotMonitor.Shared.Models
 
         /// <summary>
         /// Phase during which this event occurred (internal property, not serialized)
+        /// Defaults to Unknown (chronologically sorted into active phase)
         /// </summary>
         [JsonIgnore]
-        public EnrollmentPhase Phase { get; set; }
+        public EnrollmentPhase Phase { get; set; } = EnrollmentPhase.Unknown;
 
         /// <summary>
         /// Phase as number for JSON serialization (frontend expects number)
@@ -73,13 +74,12 @@ namespace AutopilotMonitor.Shared.Models
         {
             return phase switch
             {
-                EnrollmentPhase.PreFlight => "PreFlight",
-                EnrollmentPhase.Network => "Network",
-                EnrollmentPhase.Identity => "Identity",
-                EnrollmentPhase.MdmEnrollment => "MDM Enrollment",
-                EnrollmentPhase.EspDeviceSetup => "ESP Device Setup",
-                EnrollmentPhase.AppInstallation => "App Installation",
-                EnrollmentPhase.EspUserSetup => "ESP User Setup",
+                EnrollmentPhase.Start => "Start",
+                EnrollmentPhase.DevicePreparation => "Device Preparation",
+                EnrollmentPhase.DeviceSetup => "Device Setup",
+                EnrollmentPhase.AppsDevice => "Apps (Device)",
+                EnrollmentPhase.AccountSetup => "Account Setup",
+                EnrollmentPhase.AppsUser => "Apps (User)",
                 EnrollmentPhase.Complete => "Complete",
                 EnrollmentPhase.Failed => "Failed",
                 _ => "Unknown"

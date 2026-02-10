@@ -7,7 +7,7 @@ using System.Threading;
 using AutopilotMonitor.Agent.Core.Logging;
 using AutopilotMonitor.Shared.Models;
 
-namespace AutopilotMonitor.Agent.Core.EventCollection
+namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 {
     /// <summary>
     /// Collects system performance metrics (CPU, memory, disk) on a configurable interval
@@ -139,6 +139,7 @@ namespace AutopilotMonitor.Agent.Core.EventCollection
                         EventType = "performance_snapshot",
                         Severity = EventSeverity.Debug,
                         Source = "PerformanceCollector",
+                        Phase = EnrollmentPhase.Unknown,
                         Message = $"CPU: {(data.ContainsKey("cpu_percent") ? data["cpu_percent"] : "?")}%, " +
                                   $"Memory: {(data.ContainsKey("memory_used_percent") ? data["memory_used_percent"] : "?")}%, " +
                                   $"Disk Free: {(data.ContainsKey("disk_free_gb") ? data["disk_free_gb"] : "?")} GB",

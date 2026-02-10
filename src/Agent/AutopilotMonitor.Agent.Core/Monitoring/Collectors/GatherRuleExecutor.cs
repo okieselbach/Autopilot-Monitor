@@ -4,16 +4,19 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Management;
+using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using AutopilotMonitor.Agent.Core.Logging;
+using AutopilotMonitor.Agent.Core.Monitoring.Tracking;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Win32;
 
-namespace AutopilotMonitor.Agent.Core.EventCollection
+namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 {
     /// <summary>
     /// Executes gather rules received from the backend API
-    /// Supports registry, eventlog, wmi, file, and command (allowlisted) collector types
+    /// Supports registry, eventlog, wmi, file, command (allowlisted), and logparser collector types
     /// </summary>
     public class GatherRuleExecutor : IDisposable
     {
@@ -21,10 +24,12 @@ namespace AutopilotMonitor.Agent.Core.EventCollection
         private readonly string _sessionId;
         private readonly string _tenantId;
         private readonly Action<EnrollmentEvent> _onEventCollected;
+        private readonly string _imeLogPathOverride;
 
         private List<GatherRule> _activeRules = new List<GatherRule>();
         private readonly Dictionary<string, Timer> _intervalTimers = new Dictionary<string, Timer>();
         private readonly HashSet<string> _startupRulesExecuted = new HashSet<string>();
+        private readonly LogFilePositionTracker _filePositionTracker = new LogFilePositionTracker();
 
         /// <summary>
         /// Strict command allowlist - only these commands can be executed via gather rules
@@ -59,12 +64,13 @@ namespace AutopilotMonitor.Agent.Core.EventCollection
         };
 
         public GatherRuleExecutor(string sessionId, string tenantId, Action<EnrollmentEvent> onEventCollected,
-            AgentLogger logger)
+            AgentLogger logger, string imeLogPathOverride = null)
         {
             _sessionId = sessionId ?? throw new ArgumentNullException(nameof(sessionId));
             _tenantId = tenantId ?? throw new ArgumentNullException(nameof(tenantId));
             _onEventCollected = onEventCollected ?? throw new ArgumentNullException(nameof(onEventCollected));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _imeLogPathOverride = imeLogPathOverride;
         }
 
         /// <summary>
@@ -172,6 +178,10 @@ namespace AutopilotMonitor.Agent.Core.EventCollection
                     case "eventlog":
                         result = ExecuteEventLogRule(rule);
                         break;
+
+                    case "logparser":
+                        ExecuteLogParserRule(rule);
+                        return; // Return early - logparser emits events directly
 
                     default:
                         _logger.Warning($"Unknown collector type: {rule.CollectorType} for rule {rule.RuleId}");
@@ -536,6 +546,177 @@ namespace AutopilotMonitor.Agent.Core.EventCollection
             }
 
             return data;
+        }
+
+        private void ExecuteLogParserRule(GatherRule rule)
+        {
+            var filePath = rule.Target;
+            if (string.IsNullOrEmpty(filePath))
+                return;
+
+            filePath = Environment.ExpandEnvironmentVariables(filePath);
+
+            // Apply IME log path override if set
+            if (!string.IsNullOrEmpty(_imeLogPathOverride))
+            {
+                var fileName = Path.GetFileName(filePath);
+                filePath = Path.Combine(_imeLogPathOverride, fileName);
+            }
+
+            // Get parameters
+            string patternStr;
+            if (rule.Parameters == null || !rule.Parameters.TryGetValue("pattern", out patternStr) ||
+                string.IsNullOrEmpty(patternStr))
+            {
+                _logger.Warning($"LogParser rule {rule.RuleId} has no 'pattern' parameter");
+                return;
+            }
+
+            string trackPositionStr;
+            bool trackPosition = true;
+            if (rule.Parameters.TryGetValue("trackPosition", out trackPositionStr))
+                bool.TryParse(trackPositionStr, out trackPosition);
+
+            string maxLinesStr;
+            int maxLines = 1000;
+            if (rule.Parameters.TryGetValue("maxLines", out maxLinesStr))
+                int.TryParse(maxLinesStr, out maxLines);
+
+            Regex pattern;
+            try
+            {
+                pattern = new Regex(patternStr, RegexOptions.Compiled);
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"LogParser rule {rule.RuleId} has invalid regex: {ex.Message}");
+                return;
+            }
+
+            if (!File.Exists(filePath))
+            {
+                _logger.Debug($"LogParser rule {rule.RuleId}: file not found: {filePath}");
+                return;
+            }
+
+            try
+            {
+                var fileInfo = new FileInfo(filePath);
+                long startPosition = trackPosition
+                    ? _filePositionTracker.GetSafePosition(filePath, fileInfo.Length)
+                    : 0;
+
+                // Nothing new to read
+                if (startPosition >= fileInfo.Length)
+                    return;
+
+                int matchCount = 0;
+                int linesRead = 0;
+                long endPosition = startPosition;
+
+                using (var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                {
+                    stream.Seek(startPosition, SeekOrigin.Begin);
+
+                    using (var reader = new StreamReader(stream, Encoding.UTF8))
+                    {
+                        string line;
+                        while ((line = reader.ReadLine()) != null && linesRead < maxLines)
+                        {
+                            linesRead++;
+
+                            CmTraceLogEntry entry;
+                            if (!CmTraceLogParser.TryParseLine(line, out entry))
+                                continue;
+
+                            var match = pattern.Match(entry.Message);
+                            if (!match.Success)
+                                continue;
+
+                            // Build data dictionary from named capture groups
+                            var data = new Dictionary<string, object>();
+                            foreach (var groupName in pattern.GetGroupNames())
+                            {
+                                if (groupName == "0") continue; // Skip full match group
+                                var group = match.Groups[groupName];
+                                if (group.Success)
+                                    data[groupName] = group.Value;
+                            }
+
+                            // Add CMTrace metadata
+                            data["logTimestamp"] = entry.Timestamp.ToString("o");
+                            data["logComponent"] = entry.Component;
+                            data["logType"] = entry.Type;
+                            data["logMessage"] = TruncateMessage(entry.Message, 500);
+                            data["ruleId"] = rule.RuleId;
+                            data["ruleTitle"] = rule.Title;
+
+                            var eventType = !string.IsNullOrEmpty(rule.OutputEventType)
+                                ? rule.OutputEventType
+                                : "logparser_match";
+                            var severity = MapCmTraceTypeToSeverity(entry.Type, rule.OutputSeverity);
+
+                            _onEventCollected(new EnrollmentEvent
+                            {
+                                SessionId = _sessionId,
+                                TenantId = _tenantId,
+                                Timestamp = entry.Timestamp,
+                                EventType = eventType,
+                                Severity = severity,
+                                Source = "GatherRuleExecutor",
+                                Message = $"Gather: {rule.Title}",
+                                Data = data
+                            });
+
+                            matchCount++;
+                        }
+
+                        // Capture the final stream position after reading
+                        endPosition = stream.Position;
+                    }
+                }
+
+                if (trackPosition)
+                    _filePositionTracker.SetPosition(filePath, endPosition);
+
+                if (matchCount > 0)
+                    _logger.Debug($"LogParser rule {rule.RuleId}: {matchCount} matches from {linesRead} lines in {Path.GetFileName(filePath)}");
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"LogParser rule {rule.RuleId} failed reading {filePath}: {ex.Message}");
+            }
+        }
+
+        private static EventSeverity MapCmTraceTypeToSeverity(int cmTraceType, string ruleOverride)
+        {
+            // If the rule specifies a severity, use it
+            if (!string.IsNullOrEmpty(ruleOverride))
+            {
+                switch (ruleOverride.ToLower())
+                {
+                    case "debug": return EventSeverity.Debug;
+                    case "info": return EventSeverity.Info;
+                    case "warning": return EventSeverity.Warning;
+                    case "error": return EventSeverity.Error;
+                    case "critical": return EventSeverity.Critical;
+                }
+            }
+
+            // Otherwise derive from CMTrace log type
+            switch (cmTraceType)
+            {
+                case 2: return EventSeverity.Warning;
+                case 3: return EventSeverity.Error;
+                default: return EventSeverity.Info;
+            }
+        }
+
+        private static string TruncateMessage(string message, int maxLength)
+        {
+            if (string.IsNullOrEmpty(message) || message.Length <= maxLength)
+                return message;
+            return message.Substring(0, maxLength) + "...";
         }
 
         /// <summary>

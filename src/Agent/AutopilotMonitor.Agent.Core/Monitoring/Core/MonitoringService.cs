@@ -1,17 +1,18 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using AutopilotMonitor.Agent.Core.Api;
 using AutopilotMonitor.Agent.Core.Configuration;
-using AutopilotMonitor.Agent.Core.EventCollection;
 using AutopilotMonitor.Agent.Core.Logging;
-using AutopilotMonitor.Agent.Core.Network;
-using AutopilotMonitor.Agent.Core.Storage;
+using AutopilotMonitor.Agent.Core.Monitoring.Collectors;
+using AutopilotMonitor.Agent.Core.Monitoring.Network;
+using AutopilotMonitor.Agent.Core.Monitoring.Simulation;
+using AutopilotMonitor.Agent.Core.Monitoring.Tracking;
 using AutopilotMonitor.Shared.Models;
 
-namespace AutopilotMonitor.Agent.Core.Monitoring
+namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 {
     /// <summary>
     /// Main monitoring service that collects and uploads telemetry
@@ -29,17 +30,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring
         private EnrollmentPhase? _lastPhase = null;
 
         // Core event collectors (always on)
-        private EventLogWatcher _eventLogWatcher;
-        private RegistryMonitor _registryMonitor;
-        private PhaseDetector _phaseDetector;
         private HelloDetector _helloDetector;
         private AutopilotSimulator _simulator;
 
         // Optional collectors (toggled via remote config)
         private PerformanceCollector _performanceCollector;
-        private DownloadProgressCollector _downloadProgressCollector;
-        private CertValidationCollector _certValidationCollector;
-        private EspUiStateCollector _espUiStateCollector;
+
+        // Smart enrollment tracking (replaces DownloadProgressCollector + EspUiStateCollector)
+        private EnrollmentTracker _enrollmentTracker;
 
         // Remote config and gather rules
         private RemoteConfigService _remoteConfigService;
@@ -96,7 +94,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring
             _spool.StartWatching();
             _logger.Info("FileSystemWatcher started for efficient event upload");
 
-            // Emit initial event
+            // Emit agent_started event
             EmitEvent(new EnrollmentEvent
             {
                 SessionId = _configuration.SessionId,
@@ -104,8 +102,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring
                 EventType = "agent_started",
                 Severity = EventSeverity.Info,
                 Source = "Agent",
-                Phase = EnrollmentPhase.PreFlight,
-                Message = "Autopilot Monitor Agent started"
+                Phase = EnrollmentPhase.Start,
+                Message = "Autopilot Monitor Agent started",
+                Data = new Dictionary<string, object>
+                {
+                    { "agentVersion", "1.0.0" }
+                }
             });
 
             // Collect and emit device geo-location (if enabled)
@@ -113,6 +115,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring
             {
                 EmitGeoLocationEvent();
             }
+
+            // Note: Device info (network, DNS, proxy, Autopilot profile, AAD join, etc.)
+            // is collected by EnrollmentTracker when it starts
 
             // Fetch remote config (collector toggles + gather rules) from backend
             FetchRemoteConfig();
@@ -146,7 +151,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring
                         EventType = "device_location",
                         Severity = EventSeverity.Info,
                         Source = "Network",
-                        Phase = EnrollmentPhase.PreFlight,
+                        Phase = EnrollmentPhase.Unknown,
                         Message = $"Device location: {location.City}, {location.Region}, {location.Country} (via {location.Source})",
                         Data = location.ToDictionary()
                     });
@@ -167,33 +172,6 @@ namespace AutopilotMonitor.Agent.Core.Monitoring
 
             try
             {
-                // Start EventLog watcher
-                _eventLogWatcher = new EventLogWatcher(
-                    _configuration.SessionId,
-                    _configuration.TenantId,
-                    EmitEvent,
-                    _logger
-                );
-                _eventLogWatcher.Start();
-
-                // Start Registry monitor
-                _registryMonitor = new RegistryMonitor(
-                    _configuration.SessionId,
-                    _configuration.TenantId,
-                    EmitEvent,
-                    _logger
-                );
-                _registryMonitor.Start();
-
-                // Start Phase detector
-                _phaseDetector = new PhaseDetector(
-                    _configuration.SessionId,
-                    _configuration.TenantId,
-                    EmitEvent,
-                    _logger
-                );
-                _phaseDetector.Start();
-
                 // Start Hello detector (WHfB provisioning tracking)
                 _helloDetector = new HelloDetector(
                     _configuration.SessionId,
@@ -207,12 +185,16 @@ namespace AutopilotMonitor.Agent.Core.Monitoring
                 if (_configuration.EnableSimulator)
                 {
                     _logger.Info("Simulator mode enabled - starting Autopilot simulator");
+                    var imeLogPatterns = _remoteConfigService?.CurrentConfig?.ImeLogPatterns;
                     _simulator = new AutopilotSimulator(
                         _configuration.SessionId,
                         _configuration.TenantId,
                         EmitEvent,
                         _logger,
-                        _configuration.SimulateFailure
+                        _configuration.SimulateFailure,
+                        _configuration.SimulationLogDirectory,
+                        _configuration.SimulationSpeedFactor,
+                        imeLogPatterns
                     );
                     _simulator.Start();
                     _logger.Info("Autopilot simulator started");
@@ -251,61 +233,35 @@ namespace AutopilotMonitor.Agent.Core.Monitoring
             var config = _remoteConfigService?.CurrentConfig;
             var collectors = config?.Collectors;
 
-            if (collectors == null)
-            {
-                _logger.Info("No remote config available - optional collectors disabled");
-                return;
-            }
-
-            _logger.Info("Starting optional collectors based on remote config");
+            _logger.Info("Starting collectors based on remote config");
 
             try
             {
-                if (collectors.EnablePerformanceCollector)
+                // PerformanceCollector is always on (feeds UI chart)
+                var perfInterval = collectors?.PerformanceIntervalSeconds ?? 60;
+                _performanceCollector = new PerformanceCollector(
+                    _configuration.SessionId,
+                    _configuration.TenantId,
+                    EmitEvent,
+                    _logger,
+                    perfInterval
+                );
+                _performanceCollector.Start();
+
+                // EnrollmentTracker: smart enrollment tracking with IME log parsing
+                // (replaces DownloadProgressCollector + EspUiStateCollector)
+                if (!_configuration.EnableSimulator)
                 {
-                    _performanceCollector = new PerformanceCollector(
+                    var imeLogPatterns = config?.ImeLogPatterns;
+                    _enrollmentTracker = new EnrollmentTracker(
                         _configuration.SessionId,
                         _configuration.TenantId,
                         EmitEvent,
                         _logger,
-                        collectors.PerformanceIntervalSeconds
+                        imeLogPatterns,
+                        _configuration.ImeLogPathOverride
                     );
-                    _performanceCollector.Start();
-                }
-
-                if (collectors.EnableDownloadProgressCollector)
-                {
-                    _downloadProgressCollector = new DownloadProgressCollector(
-                        _configuration.SessionId,
-                        _configuration.TenantId,
-                        EmitEvent,
-                        _logger,
-                        collectors.DownloadProgressIntervalSeconds
-                    );
-                    _downloadProgressCollector.Start();
-                }
-
-                if (collectors.EnableCertValidationCollector)
-                {
-                    _certValidationCollector = new CertValidationCollector(
-                        _configuration.SessionId,
-                        _configuration.TenantId,
-                        EmitEvent,
-                        _logger
-                    );
-                    _certValidationCollector.Start();
-                }
-
-                if (collectors.EnableEspUiStateCollector)
-                {
-                    _espUiStateCollector = new EspUiStateCollector(
-                        _configuration.SessionId,
-                        _configuration.TenantId,
-                        EmitEvent,
-                        _logger,
-                        collectors.EspUiStateIntervalSeconds
-                    );
-                    _espUiStateCollector.Start();
+                    _enrollmentTracker.Start();
                 }
             }
             catch (Exception ex)
@@ -323,17 +279,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring
             _performanceCollector?.Dispose();
             _performanceCollector = null;
 
-            _downloadProgressCollector?.Stop();
-            _downloadProgressCollector?.Dispose();
-            _downloadProgressCollector = null;
-
-            _certValidationCollector?.Stop();
-            _certValidationCollector?.Dispose();
-            _certValidationCollector = null;
-
-            _espUiStateCollector?.Stop();
-            _espUiStateCollector?.Dispose();
-            _espUiStateCollector = null;
+            _enrollmentTracker?.Stop();
+            _enrollmentTracker?.Dispose();
+            _enrollmentTracker = null;
         }
 
         /// <summary>
@@ -354,7 +302,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring
                     _configuration.SessionId,
                     _configuration.TenantId,
                     EmitEvent,
-                    _logger
+                    _logger,
+                    _configuration.ImeLogPathOverride
                 );
                 _gatherRuleExecutor.UpdateRules(config.GatherRules);
             }
@@ -374,6 +323,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring
 
             try
             {
+                // Hot-reload IME log patterns without restart
+                if (_enrollmentTracker != null && newConfig.ImeLogPatterns != null)
+                {
+                    _enrollmentTracker.UpdatePatterns(newConfig.ImeLogPatterns);
+                }
+
                 // Stop and restart optional collectors with new settings
                 StopOptionalCollectors();
                 StartOptionalCollectors();
@@ -415,7 +370,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring
                     OsEdition = GetOsEdition(),
                     OsLanguage = System.Globalization.CultureInfo.CurrentCulture.Name,
                     StartedAt = DateTime.UtcNow,
-                    AgentVersion = "1.0.0-phase1"
+                    AgentVersion = "1.0.0"
                 };
 
                 var response = await _apiClient.RegisterSessionAsync(registration);
@@ -532,7 +487,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring
                 EventType = "agent_stopped",
                 Severity = EventSeverity.Info,
                 Source = "Agent",
-                Phase = _phaseDetector?.CurrentPhase ?? EnrollmentPhase.PreFlight,
+                Phase = _lastPhase ?? EnrollmentPhase.Unknown,
                 Message = "Autopilot Monitor Agent stopped"
             });
 
@@ -551,15 +506,6 @@ namespace AutopilotMonitor.Agent.Core.Monitoring
 
             try
             {
-                _eventLogWatcher?.Stop();
-                _eventLogWatcher?.Dispose();
-
-                _registryMonitor?.Stop();
-                _registryMonitor?.Dispose();
-
-                _phaseDetector?.Stop();
-                _phaseDetector?.Dispose();
-
                 _helloDetector?.Stop();
                 _helloDetector?.Dispose();
 
@@ -603,12 +549,6 @@ namespace AutopilotMonitor.Agent.Core.Monitoring
 
                 // Notify gather rule executor of phase change
                 try { _gatherRuleExecutor?.OnPhaseChanged(evt.Phase); } catch { }
-
-                // Re-run cert validation on network phase completion
-                if (evt.Phase == EnrollmentPhase.Identity && _certValidationCollector != null)
-                {
-                    try { _certValidationCollector.RunValidation(); } catch { }
-                }
             }
 
             // Notify gather rule executor of event type (for on_event triggers)
@@ -659,11 +599,15 @@ namespace AutopilotMonitor.Agent.Core.Monitoring
             // 1. Critical events (errors) - for troubleshooting
             // 2. Phase transitions (start/end) - for real-time phase tracking in UI
             // 3. Events with "phase" in EventType - explicit phase-related events
+            // 4. App download/install events - for real-time download progress UI updates
+            var isAppEvent = evt.EventType?.StartsWith("app_", StringComparison.OrdinalIgnoreCase) == true;
+
             if (evt.Severity >= EventSeverity.Error ||
                 isPhaseTransition ||
-                evt.EventType?.Contains("phase", StringComparison.OrdinalIgnoreCase) == true)
+                evt.EventType?.Contains("phase", StringComparison.OrdinalIgnoreCase) == true ||
+                isAppEvent)
             {
-                _logger.Debug("Critical/Phase event detected, triggering immediate upload (bypassing debounce)");
+                _logger.Debug($"Critical/Phase/App event detected ({evt.EventType}), triggering immediate upload (bypassing debounce)");
                 Task.Run(() => UploadEventsAsync());
             }
         }
@@ -956,15 +900,10 @@ Restart-Computer -Force
             _debounceTimer?.Dispose();
             _apiClient?.Dispose();
             _spool?.Dispose();
-            _eventLogWatcher?.Dispose();
-            _registryMonitor?.Dispose();
-            _phaseDetector?.Dispose();
             _helloDetector?.Dispose();
             _simulator?.Dispose();
             _performanceCollector?.Dispose();
-            _downloadProgressCollector?.Dispose();
-            _certValidationCollector?.Dispose();
-            _espUiStateCollector?.Dispose();
+            _enrollmentTracker?.Dispose();
             _gatherRuleExecutor?.Dispose();
             _remoteConfigService?.Dispose();
         }

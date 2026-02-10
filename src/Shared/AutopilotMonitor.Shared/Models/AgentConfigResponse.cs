@@ -11,7 +11,18 @@ namespace AutopilotMonitor.Shared.Models
         public bool Success { get; set; }
         public string Message { get; set; }
         public CollectorConfiguration Collectors { get; set; }
+
+        /// <summary>
+        /// User-defined ad-hoc gather rules (minimal set, not for IME log parsing)
+        /// </summary>
         public List<GatherRule> GatherRules { get; set; } = new List<GatherRule>();
+
+        /// <summary>
+        /// IME log regex patterns for smart enrollment tracking.
+        /// Delivered from backend so patterns can be updated without agent rebuild.
+        /// </summary>
+        public List<ImeLogPattern> ImeLogPatterns { get; set; } = new List<ImeLogPattern>();
+
         public int ConfigVersion { get; set; }
 
         /// <summary>
@@ -23,17 +34,14 @@ namespace AutopilotMonitor.Shared.Models
 
     /// <summary>
     /// Configuration for optional agent collectors
-    /// Core collectors (EventLogWatcher, RegistryMonitor, PhaseDetector, HelloDetector) are always on
     /// </summary>
     public class CollectorConfiguration
     {
-        // ===== PERFORMANCE COLLECTOR =====
-
         /// <summary>
-        /// Enable CPU, memory, disk, network performance monitoring
+        /// Enable CPU, memory, disk, network performance monitoring (always on for UI chart)
         /// Generates traffic: ~1 event per interval
         /// </summary>
-        public bool EnablePerformanceCollector { get; set; } = false;
+        public bool EnablePerformanceCollector { get; set; } = true;
 
         /// <summary>
         /// Interval in seconds for performance snapshots
@@ -41,45 +49,8 @@ namespace AutopilotMonitor.Shared.Models
         /// </summary>
         public int PerformanceIntervalSeconds { get; set; } = 60;
 
-        // ===== DOWNLOAD PROGRESS COLLECTOR =====
-
         /// <summary>
-        /// Enable IME/Intune app download progress tracking
-        /// Generates traffic: ~1 event per interval per active download
-        /// </summary>
-        public bool EnableDownloadProgressCollector { get; set; } = false;
-
-        /// <summary>
-        /// Interval in seconds for download progress checks
-        /// Default: 15 seconds
-        /// </summary>
-        public int DownloadProgressIntervalSeconds { get; set; } = 15;
-
-        // ===== CERTIFICATE VALIDATION COLLECTOR =====
-
-        /// <summary>
-        /// Enable certificate chain validation for enrollment endpoints
-        /// Generates traffic: low (runs at startup + on network phase)
-        /// </summary>
-        public bool EnableCertValidationCollector { get; set; } = false;
-
-        // ===== ESP UI STATE COLLECTOR =====
-
-        /// <summary>
-        /// Enable ESP (Enrollment Status Page) UI state tracking
-        /// Captures blocking apps, progress, status text
-        /// Generates traffic: ~1 event per interval during ESP phases
-        /// </summary>
-        public bool EnableEspUiStateCollector { get; set; } = false;
-
-        /// <summary>
-        /// Interval in seconds for ESP UI state checks
-        /// Default: 30 seconds
-        /// </summary>
-        public int EspUiStateIntervalSeconds { get; set; } = 30;
-
-        /// <summary>
-        /// Creates default collector configuration (all optional collectors off)
+        /// Creates default collector configuration
         /// </summary>
         public static CollectorConfiguration CreateDefault()
         {

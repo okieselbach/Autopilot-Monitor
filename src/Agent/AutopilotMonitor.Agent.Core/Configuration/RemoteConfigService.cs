@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using AutopilotMonitor.Agent.Core.Api;
+using AutopilotMonitor.Agent.Core.Monitoring.Network;
 using AutopilotMonitor.Agent.Core.Logging;
 using AutopilotMonitor.Shared.Models;
 using Newtonsoft.Json;
@@ -175,9 +175,6 @@ namespace AutopilotMonitor.Agent.Core.Configuration
 
             _logger.Info("  Collector settings:");
             _logger.Info($"    Performance: {(collectors.EnablePerformanceCollector ? "ON" : "OFF")} (interval: {collectors.PerformanceIntervalSeconds}s)");
-            _logger.Info($"    Download Progress: {(collectors.EnableDownloadProgressCollector ? "ON" : "OFF")} (interval: {collectors.DownloadProgressIntervalSeconds}s)");
-            _logger.Info($"    Cert Validation: {(collectors.EnableCertValidationCollector ? "ON" : "OFF")}");
-            _logger.Info($"    ESP UI State: {(collectors.EnableEspUiStateCollector ? "ON" : "OFF")} (interval: {collectors.EspUiStateIntervalSeconds}s)");
         }
 
         private void CacheConfig(AgentConfigResponse config)
