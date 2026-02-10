@@ -370,7 +370,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     OsEdition = GetOsEdition(),
                     OsLanguage = System.Globalization.CultureInfo.CurrentCulture.Name,
                     StartedAt = DateTime.UtcNow,
-                    AgentVersion = "1.0.0"
+                    AgentVersion = "1.0.0",
+                    EnrollmentType = EnrollmentTracker.DetectEnrollmentTypeStatic()
                 };
 
                 var response = await _apiClient.RegisterSessionAsync(registration);

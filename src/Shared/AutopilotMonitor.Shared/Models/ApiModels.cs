@@ -129,6 +129,12 @@ namespace AutopilotMonitor.Shared.Models
         public string FailureReason { get; set; }
         public int EventCount { get; set; }
         public int? DurationSeconds { get; set; }
+
+        /// <summary>
+        /// Enrollment type: "v1" (Autopilot Classic/ESP) or "v2" (Windows Device Preparation).
+        /// Defaults to "v1" for sessions that predate this field.
+        /// </summary>
+        public string EnrollmentType { get; set; } = "v1";
     }
 
     /// <summary>

@@ -38,6 +38,7 @@ interface NewRuleForm {
   category: string;
   collectorType: string;
   target: string;
+  valueName: string;
   trigger: string;
   intervalSeconds: number;
   triggerPhase: string;
@@ -77,6 +78,7 @@ const EMPTY_FORM: NewRuleForm = {
   category: "device",
   collectorType: "registry",
   target: "",
+  valueName: "",
   trigger: "startup",
   intervalSeconds: 60,
   triggerPhase: "",
@@ -276,6 +278,9 @@ export default function GatherRulesPage() {
         trigger: newRule.trigger,
         outputEventType: newRule.outputEventType.trim(),
         outputSeverity: newRule.outputSeverity,
+        parameters: newRule.collectorType === "registry" && newRule.valueName.trim()
+          ? { valueName: newRule.valueName.trim() }
+          : {},
       };
 
       if (newRule.trigger === "interval") {
@@ -330,6 +335,7 @@ export default function GatherRulesPage() {
       triggerEventType: rule.triggerEventType || "",
       outputEventType: rule.outputEventType,
       outputSeverity: rule.outputSeverity,
+      valueName: rule.parameters?.valueName || "",
     });
   };
 
@@ -359,6 +365,9 @@ export default function GatherRulesPage() {
         trigger: editForm.trigger,
         outputEventType: editForm.outputEventType.trim(),
         outputSeverity: editForm.outputSeverity,
+        parameters: editForm.collectorType === "registry" && editForm.valueName.trim()
+          ? { valueName: editForm.valueName.trim() }
+          : {},
       };
 
       if (editForm.trigger === "interval") {
@@ -530,6 +539,22 @@ export default function GatherRulesPage() {
         />
         <p className="text-xs text-gray-400 mt-1">Registry path, WMI class, event log name, file path, or command depending on collector type</p>
       </div>
+
+      {/* Registry: optional Value Name */}
+      {form.collectorType === "registry" && (
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Value Name</label>
+          <input
+            type="text"
+            value={form.valueName}
+            onChange={(e) => setForm({ ...form, valueName: e.target.value })}
+            placeholder="e.g., IsRecoveryAllowed (leave empty to read all values)"
+            autoComplete="off"
+            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+          />
+          <p className="text-xs text-gray-400 mt-1">Specific registry value to read. Leave empty to read all values in the key.</p>
+        </div>
+      )}
 
       {/* Trigger */}
       <div>

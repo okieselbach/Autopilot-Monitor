@@ -247,12 +247,46 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                 hive = Registry.LocalMachine;
             }
 
+            // Determine explicit valueName from parameters
+            string explicitValueName = null;
+            rule.Parameters?.TryGetValue("valueName", out explicitValueName);
+
             try
             {
                 using (var key = hive.OpenSubKey(subPath, false))
                 {
                     if (key == null)
                     {
+                        // The key doesn't exist as a sub-key. If no explicit valueName was given,
+                        // check whether the last path segment is a value name in the parent key.
+                        // This handles the common case where the user specifies the full
+                        // "HKLM\...\KeyName\ValueName" path directly in Target.
+                        if (string.IsNullOrEmpty(explicitValueName))
+                        {
+                            var lastBackslash = subPath.LastIndexOf('\\');
+                            if (lastBackslash > 0)
+                            {
+                                var parentSubPath = subPath.Substring(0, lastBackslash);
+                                var inferredValueName = subPath.Substring(lastBackslash + 1);
+
+                                using (var parentKey = hive.OpenSubKey(parentSubPath, false))
+                                {
+                                    if (parentKey != null)
+                                    {
+                                        var valueNames = parentKey.GetValueNames();
+                                        if (Array.Exists(valueNames, n => string.Equals(n, inferredValueName, StringComparison.OrdinalIgnoreCase)))
+                                        {
+                                            var value = parentKey.GetValue(inferredValueName);
+                                            data["exists"] = true;
+                                            data["path"] = path.Substring(0, path.LastIndexOf('\\'));
+                                            data[inferredValueName] = value?.ToString();
+                                            return data;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         data["exists"] = false;
                         data["path"] = path;
                         return data;
@@ -262,11 +296,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     data["path"] = path;
 
                     // Read specific value if specified in parameters
-                    string valueName;
-                    if (rule.Parameters != null && rule.Parameters.TryGetValue("valueName", out valueName))
+                    if (!string.IsNullOrEmpty(explicitValueName))
                     {
-                        var value = key.GetValue(valueName);
-                        data[valueName] = value?.ToString();
+                        var value = key.GetValue(explicitValueName);
+                        data[explicitValueName] = value?.ToString();
                     }
                     else
                     {

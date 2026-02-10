@@ -106,6 +106,7 @@ namespace AutopilotMonitor.Functions.Services
                     ["IsPreProvisioned"] = registration.IsPreProvisioned,
                     ["StartedAt"] = registration.StartedAt,
                     ["AgentVersion"] = registration.AgentVersion ?? string.Empty,
+                    ["EnrollmentType"] = registration.EnrollmentType ?? "v1",
                     ["CurrentPhase"] = (int)EnrollmentPhase.Start,
                     ["Status"] = SessionStatus.InProgress.ToString(),
                     ["EventCount"] = 0
@@ -553,7 +554,8 @@ namespace AutopilotMonitor.Functions.Services
                 EventCount = entity.GetInt32("EventCount") ?? 0,
                 DurationSeconds = completedAt.HasValue
                     ? (int)(completedAt.Value - startedAt).TotalSeconds
-                    : (int)(DateTime.UtcNow - startedAt).TotalSeconds
+                    : (int)(DateTime.UtcNow - startedAt).TotalSeconds,
+                EnrollmentType = entity.GetString("EnrollmentType") ?? "v1"
             };
         }
 

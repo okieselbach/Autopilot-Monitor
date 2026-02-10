@@ -51,19 +51,33 @@ interface Session {
   eventCount: number;
   durationSeconds: number;
   failureReason?: string;
+  enrollmentType?: string; // "v1" | "v2" — absent for sessions before this feature
 }
 
-const phaseNames: Record<number, string> = {
-  [-1]: "Unknown",
-  0: "Start",
-  1: "Device Preparation",
-  2: "Device Setup",
-  3: "Apps (Device)",
-  4: "Account Setup",
-  5: "Apps (User)",
-  6: "Complete",
-  99: "Failed"
-};
+// Phase definitions per enrollment type
+const V1_PHASES = [
+  { id: 0, name: "Start",               shortName: "Start" },
+  { id: 1, name: "Device Preparation",  shortName: "Device Preparation" },
+  { id: 2, name: "Device Setup",        shortName: "Device Setup" },
+  { id: 3, name: "Apps (Device)",       shortName: "Apps (Device)" },
+  { id: 4, name: "Account Setup",       shortName: "Account Setup" },
+  { id: 5, name: "Apps (User)",         shortName: "Apps (User)" },
+  { id: 6, name: "Complete",            shortName: "Complete" },
+];
+
+const V2_PHASES = [
+  { id: 0, name: "Start",               shortName: "Start" },
+  { id: 1, name: "Device Preparation",  shortName: "Device Preparation" },
+  { id: 3, name: "App Installation",    shortName: "Apps" },
+  { id: 6, name: "Complete",            shortName: "Complete" },
+];
+
+const V1_PHASE_ORDER = ["Start", "Device Preparation", "Device Setup", "Apps (Device)", "Account Setup", "Apps (User)", "Complete", "Failed"];
+const V2_PHASE_ORDER = ["Start", "Device Preparation", "App Installation", "Complete", "Failed"];
+
+// Lookup by phase number — Phase 3 has different names per enrollment type
+const V1_PHASE_NAMES: Record<number, string> = { [-1]: "Unknown", 0: "Start", 1: "Device Preparation", 2: "Device Setup", 3: "Apps (Device)",    4: "Account Setup", 5: "Apps (User)", 6: "Complete", 99: "Failed" };
+const V2_PHASE_NAMES: Record<number, string> = { [-1]: "Unknown", 0: "Start", 1: "Device Preparation", 2: "Device Setup", 3: "App Installation", 4: "Account Setup", 5: "Apps (User)", 6: "Complete", 99: "Failed" };
 
 export default function SessionDetailPage() {
   const params = useParams();
@@ -183,9 +197,10 @@ export default function SessionDetailPage() {
       console.log('Event stream received via SignalR:', data);
       if (data.sessionId === sessionIdRef.current && data.events && data.events.length > 0) {
         // Add phase names to new events
+        const phaseNamesMap = data.session?.enrollmentType === "v2" ? V2_PHASE_NAMES : V1_PHASE_NAMES;
         const eventsWithPhaseNames = data.events.map((e: EnrollmentEvent) => ({
           ...e,
-          phaseName: phaseNames[e.phase] || "Unknown"
+          phaseName: phaseNamesMap[e.phase] || "Unknown"
         }));
 
         // Add new events to existing list (deduplication by eventId)
@@ -288,9 +303,10 @@ export default function SessionDetailPage() {
       });
       if (response.ok) {
         const data = await response.json();
+        const phaseNamesMap = session?.enrollmentType === "v2" ? V2_PHASE_NAMES : V1_PHASE_NAMES;
         const eventsWithPhaseNames = data.events.map((e: EnrollmentEvent) => ({
           ...e,
-          phaseName: phaseNames[e.phase] || "Unknown"
+          phaseName: phaseNamesMap[e.phase] || "Unknown"
         }));
         // Merge with existing events (from SignalR) instead of replacing,
         // so we don't lose events that arrived via SignalR since the last fetch.
@@ -424,11 +440,11 @@ export default function SessionDetailPage() {
       eventsByPhase[targetPhase].push(event);
     }
 
-    const phaseOrder = ["Start", "Device Preparation", "Device Setup", "Apps (Device)", "Account Setup", "Apps (User)", "Complete", "Failed"];
+    const phaseOrder = session?.enrollmentType === "v2" ? V2_PHASE_ORDER : V1_PHASE_ORDER;
     const orderedPhases = phaseOrder.filter(phase => eventsByPhase[phase] && eventsByPhase[phase].length > 0);
 
     return { eventsByPhase, orderedPhases };
-  }, [filteredEvents, events.length]);
+  }, [filteredEvents, events.length, session?.enrollmentType]);
 
   const [expandedPhases, setExpandedPhases] = useState<Set<string>>(new Set());
 
@@ -552,6 +568,7 @@ export default function SessionDetailPage() {
                 completedPhases={session.status === 'Succeeded' ? [6] : []}
                 events={events}
                 sessionStatus={session.status}
+                enrollmentType={session.enrollmentType}
               />
             </div>
           )}
@@ -872,21 +889,14 @@ function EventRow({ event, isGalacticAdmin }: { event: EnrollmentEvent; isGalact
   );
 }
 
-function PhaseTimeline({ currentPhase, completedPhases, events = [], sessionStatus }: {
+function PhaseTimeline({ currentPhase, completedPhases, events = [], sessionStatus, enrollmentType }: {
   currentPhase: number;
   completedPhases: number[];
   events?: EnrollmentEvent[];
   sessionStatus?: string;
+  enrollmentType?: string;
 }) {
-  const phases = [
-    { id: 0, name: "Start", shortName: "Start" },
-    { id: 1, name: "Device Preparation", shortName: "Device Preparation" },
-    { id: 2, name: "Device Setup", shortName: "Device Setup" },
-    { id: 3, name: "Apps (Device)", shortName: "Apps (Device)" },
-    { id: 4, name: "Account Setup", shortName: "Account Setup" },
-    { id: 5, name: "Apps (User)", shortName: "Apps (User)" },
-    { id: 6, name: "Complete", shortName: "Complete" },
-  ];
+  const phases = enrollmentType === "v2" ? V2_PHASES : V1_PHASES;
 
   // Derive current activity for the active phase from events
   const getCurrentActivity = (phaseId: number): string | null => {

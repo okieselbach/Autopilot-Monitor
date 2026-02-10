@@ -28,9 +28,40 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         private bool _summaryTimerActive;
         private string _lastEspPhase; // Track last ESP phase to prevent duplicate events
         private bool _hasAutoSwitchedToAppsPhase; // Track if we've already auto-switched to apps phase for current ESP phase
+        private string _enrollmentType = "v1"; // "v1" = Autopilot Classic/ESP, "v2" = Windows Device Preparation
 
         // Default IME log folder
         private const string DefaultImeLogFolder = @"%ProgramData%\Microsoft\IntuneManagementExtension\Logs";
+
+        /// <summary>
+        /// Detects whether this is an Autopilot v1 (Classic ESP) or v2 (Windows Device Preparation) enrollment
+        /// by reading the Autopilot registry keys. Safe to call before EnrollmentTracker is instantiated.
+        /// Returns "v2" if WDP indicators are present, "v1" otherwise.
+        /// </summary>
+        public static string DetectEnrollmentTypeStatic()
+        {
+            try
+            {
+                using (var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Provisioning\AutopilotSettings"))
+                {
+                    if (key != null)
+                    {
+                        // CloudAssignedDeviceRegistration=2 signals WDP provisioning flow
+                        var deviceReg = key.GetValue("CloudAssignedDeviceRegistration")?.ToString();
+                        if (deviceReg == "2")
+                            return "v2";
+
+                        // CloudAssignedEspEnabled=0 means no ESP, characteristic of WDP
+                        var espEnabled = key.GetValue("CloudAssignedEspEnabled")?.ToString();
+                        if (espEnabled == "0")
+                            return "v2";
+                    }
+                }
+            }
+            catch { }
+
+            return "v1";
+        }
 
         public EnrollmentTracker(
             string sessionId,
@@ -253,7 +284,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             {
                 var data = new Dictionary<string, object>();
 
-                // Read CloudAssigned* values from AutopilotSettings
+                // Read CloudAssigned* values from AutopilotSettings and detect enrollment type
                 using (var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Provisioning\AutopilotSettings"))
                 {
                     if (key != null)
@@ -261,6 +292,18 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                         data["cloudAssignedTenantId"] = key.GetValue("CloudAssignedTenantId")?.ToString();
                         data["cloudAssignedTenantDomain"] = key.GetValue("CloudAssignedTenantDomain")?.ToString();
                         data["cloudAssignedOobeConfig"] = key.GetValue("CloudAssignedOobeConfig")?.ToString();
+
+                        // Read WDP detection values
+                        var deviceReg = key.GetValue("CloudAssignedDeviceRegistration")?.ToString();
+                        var espEnabled = key.GetValue("CloudAssignedEspEnabled")?.ToString();
+                        data["cloudAssignedDeviceRegistration"] = deviceReg;
+                        data["cloudAssignedEspEnabled"] = espEnabled;
+
+                        // Determine enrollment type: WDP if DeviceRegistration=2 or ESP explicitly disabled
+                        if (deviceReg == "2" || espEnabled == "0")
+                            _enrollmentType = "v2";
+                        else
+                            _enrollmentType = "v1";
                     }
                 }
 
@@ -273,7 +316,27 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     }
                 }
 
+                // Include enrollment type in autopilot_profile event data
+                data["enrollmentType"] = _enrollmentType;
+
                 EmitDeviceInfoEvent("autopilot_profile", "Autopilot profile configuration", data);
+
+                // Emit dedicated enrollment_type_detected event for easy filtering
+                _emitEvent(new EnrollmentEvent
+                {
+                    SessionId = _sessionId,
+                    TenantId = _tenantId,
+                    EventType = "enrollment_type_detected",
+                    Severity = EventSeverity.Info,
+                    Source = "EnrollmentTracker",
+                    Phase = EnrollmentPhase.Start,
+                    Message = _enrollmentType == "v2"
+                        ? "Enrollment type: Autopilot v2 (Windows Device Preparation)"
+                        : "Enrollment type: Autopilot v1 (Classic ESP)",
+                    Data = new Dictionary<string, object> { { "enrollmentType", _enrollmentType } }
+                });
+
+                _logger.Info($"EnrollmentTracker: enrollment type detected: {_enrollmentType}");
             }
             catch (Exception ex)
             {
@@ -408,6 +471,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
 
         private void HandleEspPhaseChanged(string phase)
         {
+            // WDP (v2) has no ESP - skip ESP phase handling entirely
+            if (_enrollmentType == "v2")
+            {
+                _logger.Debug($"EnrollmentTracker: skipping ESP phase event in WDP enrollment (phase: {phase})");
+                return;
+            }
+
             // Only emit event if the phase has actually changed
             if (string.Equals(phase, _lastEspPhase, StringComparison.OrdinalIgnoreCase))
             {

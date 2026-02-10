@@ -82,6 +82,11 @@ namespace AutopilotMonitor.Shared.Models
         /// </summary>
         public string AgentVersion { get; set; }
 
+        /// <summary>
+        /// Enrollment type detected by the agent: "v1" (Autopilot Classic/ESP) or "v2" (Windows Device Preparation)
+        /// </summary>
+        public string EnrollmentType { get; set; } = "v1";
+
         public SessionRegistration()
         {
             SessionId = Guid.NewGuid().ToString();
