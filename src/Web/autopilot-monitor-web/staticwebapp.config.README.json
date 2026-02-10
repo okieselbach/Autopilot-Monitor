@@ -1,0 +1,12 @@
+Copy below content to `src/Web/autopilot-monitor-web/staticwebapp.config.json` to enable maintenance mode for the web application. 
+This will serve a maintenance page for all routes.
+
+{
+  "routes": [
+    {
+      "route": "/*",
+      "serve": "/maintenance.html",
+      "statusCode": 503
+    }
+  ]
+}

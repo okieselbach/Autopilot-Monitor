@@ -1,0 +1,9 @@
+{
+  "routes": [
+    {
+      "route": "/*",
+      "serve": "/maintenance.html",
+      "statusCode": 503
+    }
+  ]
+}

@@ -35,11 +35,12 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
-    [string]$ApiBaseUrl = "http://localhost:7071",
+    #[string]$ApiBaseUrl = "http://localhost:7071",
+    [string]$ApiBaseUrl = "https://autopilotmonitor-func.azurewebsites.net",
 
     [Parameter(Mandatory = $false)]
-    [string]$AgentDownloadUrl = "https://yourcdn.blob.core.windows.net/agent/AutopilotMonitor-Agent.zip",
-
+    [string]$AgentDownloadUrl = "https://autopilotmonitor.blob.core.windows.net/agent/AutopilotMonitor-Agent.zip",
+    
     [Parameter(Mandatory = $false)]
     [int]$MaxOsAgeHours = 5
 )
