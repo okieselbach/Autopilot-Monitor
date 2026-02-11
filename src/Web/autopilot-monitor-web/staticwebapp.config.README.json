@@ -10,3 +10,9 @@ This will serve a maintenance page for all routes.
     }
   ]
 }
+
+and for disabling maintenance mode, simply remove the `staticwebapp.config.json` file or update it to 
+
+{
+
+}
