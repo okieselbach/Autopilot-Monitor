@@ -45,7 +45,10 @@ namespace AutopilotMonitor.Agent
                 var logDir = Environment.ExpandEnvironmentVariables(config.LogDirectory);
                 var logger = new AgentLogger(logDir, enableDebug: true);
 
-                logger.Info("Agent starting in console mode");
+                logger.Info("");
+                logger.Info("============================================================================================================");
+                logger.Info("====================================== Agent starting in console mode ======================================");
+                logger.Info("============================================================================================================");
                 Console.WriteLine($"Session ID: {config.SessionId}");
                 Console.WriteLine($"Tenant ID: {config.TenantId}");
                 Console.WriteLine($"API URL: {config.ApiBaseUrl}");
@@ -334,7 +337,8 @@ namespace AutopilotMonitor.Agent
             }
 
             // Defaults (fallback values if no config file exists)
-            string apiBaseUrl = "http://localhost:7071";
+            //string apiBaseUrl = "http://localhost:7071";
+            string apiBaseUrl = "https://autopilotmonitor-func.azurewebsites.net";
             int uploadIntervalSeconds = 30;
             bool cleanupOnExit = true;
             bool selfDestructOnComplete = true;

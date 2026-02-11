@@ -28,4 +28,9 @@
     <ProjectReference Include="..\..\Shared\AutopilotMonitor.Shared\AutopilotMonitor.Shared.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="Security\Certificates\intune-intermediate-ca.pem" />
+    <EmbeddedResource Include="Security\Certificates\intune-root-ca.pem" />
+  </ItemGroup>
+
 </Project>

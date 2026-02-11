@@ -68,7 +68,8 @@ namespace AutopilotMonitor.Agent
 
             return new AgentConfiguration
             {
-                ApiBaseUrl = Environment.GetEnvironmentVariable("AUTOPILOT_MONITOR_API") ?? "http://localhost:7071",
+                //ApiBaseUrl = Environment.GetEnvironmentVariable("AUTOPILOT_MONITOR_API") ?? "http://localhost:7071",
+                ApiBaseUrl = Environment.GetEnvironmentVariable("AUTOPILOT_MONITOR_API") ?? "https://autopilotmonitor-func.azurewebsites.net",
                 SessionId = sessionId,
                 TenantId = "default-tenant",
                 SpoolDirectory = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor\Spool"),
