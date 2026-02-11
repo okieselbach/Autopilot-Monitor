@@ -261,6 +261,7 @@ namespace AutopilotMonitor.Agent
             string certThumbprint        = null;
             string tenantIdOverride      = null;
             string imeLogPathOverride    = null;
+            string imeMatchLogPath       = null;
             string simulationLogDir      = null;
             double simulationSpeedFactor = 50;
 
@@ -277,6 +278,10 @@ namespace AutopilotMonitor.Agent
                 var imeLogPathIndex = Array.IndexOf(args, "--ime-log-path");
                 if (imeLogPathIndex >= 0 && imeLogPathIndex + 1 < args.Length)
                     imeLogPathOverride = args[imeLogPathIndex + 1];
+
+                var imeMatchLogIndex = Array.IndexOf(args, "--ime-match-log");
+                if (imeMatchLogIndex >= 0 && imeMatchLogIndex + 1 < args.Length)
+                    imeMatchLogPath = args[imeMatchLogIndex + 1];
 
                 var simLogDirIndex = Array.IndexOf(args, "--simulation-log-dir");
                 if (simLogDirIndex >= 0 && simLogDirIndex + 1 < args.Length)
@@ -385,6 +390,7 @@ namespace AutopilotMonitor.Agent
                 RebootOnComplete      = rebootOnComplete || rebootOnCompleteConfig,
                 EnableGeoLocation     = !disableGeoLoc && enableGeoLocationConfig,
                 ImeLogPathOverride    = imeLogPathOverride,
+                ImeMatchLogPath       = imeMatchLogPath,
                 SimulationLogDirectory = simulationLogDir,
                 SimulationSpeedFactor = simulationSpeedFactor,
                 KeepLogFile           = keepLogFile

@@ -254,13 +254,18 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 if (!_configuration.EnableSimulator)
                 {
                     var imeLogPatterns = config?.ImeLogPatterns;
+                    var imeMatchLogPath = string.IsNullOrEmpty(_configuration.ImeMatchLogPath)
+                        ? null
+                        : Environment.ExpandEnvironmentVariables(_configuration.ImeMatchLogPath);
+
                     _enrollmentTracker = new EnrollmentTracker(
                         _configuration.SessionId,
                         _configuration.TenantId,
                         EmitEvent,
                         _logger,
                         imeLogPatterns,
-                        _configuration.ImeLogPathOverride
+                        _configuration.ImeLogPathOverride,
+                        imeMatchLogPath: imeMatchLogPath
                     );
                     _enrollmentTracker.Start();
                 }

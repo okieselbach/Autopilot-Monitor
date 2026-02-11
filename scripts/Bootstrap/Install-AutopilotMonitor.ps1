@@ -125,6 +125,8 @@ try {
         uploadIntervalSeconds = 30
         cleanupOnExit = $true
         selfDestructOnComplete = $true
+        keepLogFile = $true
+        imeMatchLogPath = "C:\ProgramData\AutopilotMonitor\Logs\ime_pattern_matches.log"
     }
 
     $agentConfigJson = $agentConfig | ConvertTo-Json -Depth 10

@@ -30,6 +30,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         private readonly LogFilePositionTracker _positionTracker = new LogFilePositionTracker();
         private readonly AppPackageStateList _packageStates;
         private readonly int _pollingIntervalMs;
+        private readonly string _matchLogPath; // Optional: path to write every matched raw line
+        private readonly object _matchLogLock = new object();
 
         // Compiled pattern matchers grouped by category
         private List<CompiledPattern> _patternsAlways = new List<CompiledPattern>();
@@ -77,12 +79,19 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         /// </summary>
         public AppPackageStateList PackageStates => _packageStates;
 
-        public ImeLogTracker(string logFolder, List<ImeLogPattern> patterns, AgentLogger logger, int pollingIntervalMs = 100)
+        public ImeLogTracker(string logFolder, List<ImeLogPattern> patterns, AgentLogger logger, int pollingIntervalMs = 100, string matchLogPath = null)
         {
             _logFolder = Environment.ExpandEnvironmentVariables(logFolder);
             _logger = logger;
             _pollingIntervalMs = pollingIntervalMs;
+            _matchLogPath = matchLogPath;
             _packageStates = new AppPackageStateList(logger);
+
+            if (!string.IsNullOrEmpty(_matchLogPath))
+            {
+                try { Directory.CreateDirectory(Path.GetDirectoryName(_matchLogPath)); } catch { }
+                _logger.Info($"ImeLogTracker: match log enabled -> {_matchLogPath}");
+            }
 
             CompilePatterns(patterns);
             ActivatePatterns(logPhaseIsCurrentPhase: false, force: true);
@@ -256,6 +265,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                                     var match = pattern.Regex.Match(messageToMatch);
                                     if (match.Success)
                                     {
+                                        WriteMatchLog(filePath, line, pattern.PatternId);
                                         HandlePatternMatch(pattern, match, messageToMatch);
                                     }
                                 }
@@ -606,6 +616,20 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         {
             Stop();
             _cts?.Dispose();
+        }
+
+        private void WriteMatchLog(string sourceFile, string rawLine, string patternId)
+        {
+            if (string.IsNullOrEmpty(_matchLogPath)) return;
+            try
+            {
+                var entry = $"[{Path.GetFileName(sourceFile)}] [{patternId}] {rawLine}";
+                lock (_matchLogLock)
+                {
+                    File.AppendAllText(_matchLogPath, entry + Environment.NewLine);
+                }
+            }
+            catch { }
         }
 
         /// <summary>

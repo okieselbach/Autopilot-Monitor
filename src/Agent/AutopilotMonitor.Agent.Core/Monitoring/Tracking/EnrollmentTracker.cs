@@ -71,7 +71,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             List<ImeLogPattern> imeLogPatterns,
             string imeLogFolderOverride = null,
             bool simulationMode = false,
-            double speedFactor = 50)
+            double speedFactor = 50,
+            string imeMatchLogPath = null)
         {
             _sessionId = sessionId;
             _tenantId = tenantId;
@@ -81,7 +82,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             _imeLogFolder = imeLogFolderOverride ?? DefaultImeLogFolder;
 
             // Create ImeLogTracker
-            _imeLogTracker = new ImeLogTracker(_imeLogFolder, _imeLogPatterns, _logger);
+            _imeLogTracker = new ImeLogTracker(_imeLogFolder, _imeLogPatterns, _logger, matchLogPath: imeMatchLogPath);
             _imeLogTracker.SimulationMode = simulationMode;
             _imeLogTracker.SpeedFactor = speedFactor;
 

@@ -110,6 +110,12 @@ namespace AutopilotMonitor.Agent.Core.Configuration
         public string ImeLogPathOverride { get; set; }
 
         /// <summary>
+        /// Optional path to write every IME log line that matched a pattern (for debugging).
+        /// If empty, no match log is written. Example: %ProgramData%\AutopilotMonitor\Logs\ime-matches.log
+        /// </summary>
+        public string ImeMatchLogPath { get; set; }
+
+        /// <summary>
         /// Path to directory with real IME log files for simulation replay.
         /// When set (with EnableSimulator), the simulator replays these logs with time compression
         /// instead of generating artificial events.
