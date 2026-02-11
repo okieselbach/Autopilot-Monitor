@@ -336,6 +336,9 @@ namespace AutopilotMonitor.Agent
 
                         if (configDict.ContainsKey("keepLogFile") && configDict["keepLogFile"] != null)
                             keepLogFile = keepLogFile || Convert.ToBoolean(configDict["keepLogFile"]);
+
+                        if (configDict.ContainsKey("imeMatchLogPath") && configDict["imeMatchLogPath"] != null)
+                            imeMatchLogPath = configDict["imeMatchLogPath"].ToString();
                     }
                 }
                 catch { /* use defaults */ }
