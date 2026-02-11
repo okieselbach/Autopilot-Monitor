@@ -26,6 +26,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         private readonly Timer _uploadTimer;
         private readonly Timer _debounceTimer;
         private readonly object _timerLock = new object();
+        private readonly ManualResetEventSlim _completionEvent = new(false);
         private long _eventSequence = 0;
         private EnrollmentPhase? _lastPhase = null;
 
@@ -496,6 +497,18 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             UploadEventsAsync().Wait(TimeSpan.FromSeconds(10));
 
             _logger.Info("Monitoring service stopped");
+
+            // Unblock WaitForCompletion() in background/SYSTEM mode
+            _completionEvent.Set();
+        }
+
+        /// <summary>
+        /// Blocks the calling thread until the service stops (used when running as Scheduled Task
+        /// under SYSTEM where there is no interactive Console.ReadLine() to keep the process alive).
+        /// </summary>
+        public void WaitForCompletion()
+        {
+            _completionEvent.Wait();
         }
 
         /// <summary>
@@ -778,37 +791,54 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     "AutopilotMonitor"
                 ));
 
+                var logDir = Path.GetFullPath(Path.Combine(agentBasePath, "Logs"));
+                var keepLogs = _configuration.KeepLogFile;
+
                 // Create a self-deleting PowerShell script
                 var cleanupScript = $@"
+$scriptPath = $MyInvocation.MyCommand.Path
+
 # Wait for agent process to exit
-Start-Sleep -Seconds 3
+Start-Sleep -Seconds 2
 Wait-Process -Id {currentProcessId} -ErrorAction SilentlyContinue -Timeout 30
+Start-Sleep -Seconds 1
 
 # Remove Scheduled Task
-Write-Host 'Removing Scheduled Task: {_configuration.ScheduledTaskName}'
 try {{
     Stop-ScheduledTask -TaskName '{_configuration.ScheduledTaskName}' -ErrorAction SilentlyContinue
     Unregister-ScheduledTask -TaskName '{_configuration.ScheduledTaskName}' -Confirm:$false -ErrorAction SilentlyContinue
-    Write-Host 'Scheduled Task removed successfully'
-}} catch {{
-    Write-Host ""Failed to remove Scheduled Task: $_""
-}}
+}} catch {{ }}
 
-# Delete AutopilotMonitor folder
-Write-Host 'Deleting folder: {agentBasePath}'
-try {{
-    Remove-Item -Path '{agentBasePath}' -Recurse -Force -ErrorAction Stop
-    Write-Host 'Folder deleted successfully'
-}} catch {{
-    Write-Host ""Failed to delete folder: $_""
+{(keepLogs ? $@"
+# Delete everything except Logs directory
+Get-ChildItem -Path '{agentBasePath}' -Exclude 'Logs' | ForEach-Object {{
+    $dest = $_.FullName + '.del'
+    try {{ Rename-Item -Path $_.FullName -NewName $dest -Force -ErrorAction SilentlyContinue }} catch {{ }}
+    Remove-Item -Path $dest -Recurse -Force -ErrorAction SilentlyContinue
 }}
-
-Write-Host 'AutopilotMonitor Agent self-destruct complete'
+" : $@"
+# Rename folder then delete. Retry a few times to let the OS release handles.
+$renamedPath = '{agentBasePath}.del'
+$renamed = $false
+for ($i = 1; $i -le 10; $i++) {{
+    try {{
+        Rename-Item -Path '{agentBasePath}' -NewName $renamedPath -Force -ErrorAction Stop
+        $renamed = $true
+        break
+    }} catch {{
+        Start-Sleep -Seconds 2
+    }}
+}}
+if ($renamed) {{
+    Remove-Item -Path $renamedPath -Recurse -Force -ErrorAction SilentlyContinue
+}} else {{
+    Remove-Item -Path '{agentBasePath}' -Recurse -Force -ErrorAction SilentlyContinue
+}}
+")}
 {(_configuration.RebootOnComplete ? @"
-# Reboot the device
-Write-Host 'Initiating reboot...'
-Restart-Computer -Force
+Restart-Computer -Force -Delay 10 -Comment 'Autopilot enrollment completed - Autopilot Monitor is rebooting'
 " : "")}
+Remove-Item -Path $scriptPath -Force -ErrorAction SilentlyContinue
 ";
 
                 // Write cleanup script to temp location (outside of agent folder)
@@ -816,13 +846,21 @@ Restart-Computer -Force
                 File.WriteAllText(tempScriptPath, cleanupScript);
                 _logger.Info($"Cleanup script written to {tempScriptPath}");
 
-                // Launch cleanup script in background (detached process)
+                // Change CWD to temp so this process no longer holds a reference into
+                // the AutopilotMonitor folder tree - Windows won't allow renaming a
+                // directory that any process has as its current working directory.
+                try { Directory.SetCurrentDirectory(Path.GetTempPath()); } catch { }
+
+                // Launch via cmd /c start so the powershell process is created outside the
+                // current Job Object (Scheduled Task job). cmd's 'start' command always
+                // creates a new process group that breaks job inheritance, even under SYSTEM.
                 var psi = new ProcessStartInfo
                 {
-                    FileName = "powershell.exe",
-                    Arguments = $"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"{tempScriptPath}\"",
+                    FileName = "cmd.exe",
+                    Arguments = $"/c start \"\" /b powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"{tempScriptPath}\"",
                     UseShellExecute = false,
-                    CreateNoWindow = true
+                    CreateNoWindow = true,
+                    WorkingDirectory = Path.GetTempPath()
                 };
 
                 Process.Start(psi);
@@ -849,27 +887,38 @@ Restart-Computer -Force
                     "AutopilotMonitor"
                 ));
 
-                // Create a cleanup PowerShell script
+                var logDir = Path.GetFullPath(Path.Combine(agentBasePath, "Logs"));
+                var keepLogs = _configuration.KeepLogFile;
+
+                // Create a self-deleting cleanup PowerShell script
                 var cleanupScript = $@"
-# Wait for agent process to exit
-Start-Sleep -Seconds 3
+$scriptPath = $MyInvocation.MyCommand.Path
+
+# Wait for agent process to exit. Wait-Process may fail if the process is already gone - that is fine.
+Start-Sleep -Seconds 2
 Wait-Process -Id {currentProcessId} -ErrorAction SilentlyContinue -Timeout 30
+Start-Sleep -Seconds 1
 
-# Delete AutopilotMonitor folder
-Write-Host 'Deleting folder: {agentBasePath}'
-try {{
-    Remove-Item -Path '{agentBasePath}' -Recurse -Force -ErrorAction Stop
-    Write-Host 'Folder deleted successfully'
-}} catch {{
-    Write-Host ""Failed to delete folder: $_""
+{(keepLogs ? $@"
+# Delete everything except Logs directory.
+# Rename subdirs/files first so locked EXE bytes are released, then remove.
+Get-ChildItem -Path '{agentBasePath}' -Exclude 'Logs' | ForEach-Object {{
+    $dest = $_.FullName + '.del'
+    try {{ Rename-Item -Path $_.FullName -NewName $dest -Force -ErrorAction SilentlyContinue }} catch {{ }}
+    Remove-Item -Path $dest -Recurse -Force -ErrorAction SilentlyContinue
 }}
-
-Write-Host 'AutopilotMonitor Agent cleanup complete'
+" : $@"
+# Rename the folder first (works even while EXE bytes are still mapped),
+# then delete the renamed copy - by then all handles are closed.
+$renamedPath = '{agentBasePath}.del'
+try {{ Rename-Item -Path '{agentBasePath}' -NewName $renamedPath -Force -ErrorAction Stop }} catch {{ $renamedPath = '{agentBasePath}' }}
+Remove-Item -Path $renamedPath -Recurse -Force -ErrorAction SilentlyContinue
+")}
 {(_configuration.RebootOnComplete ? @"
-# Reboot the device
-Write-Host 'Initiating reboot...'
 Restart-Computer -Force
 " : "")}
+# Delete this script
+Remove-Item -Path $scriptPath -Force -ErrorAction SilentlyContinue
 ";
 
                 // Write cleanup script to temp location
@@ -877,11 +926,13 @@ Restart-Computer -Force
                 File.WriteAllText(tempScriptPath, cleanupScript);
                 _logger.Info($"Cleanup script written to {tempScriptPath}");
 
-                // Launch cleanup script
+                // Launch via cmd /c start so the powershell process is created outside the
+                // current Job Object (Scheduled Task job). cmd's 'start' command always
+                // creates a new process group that breaks job inheritance, even under SYSTEM.
                 var psi = new ProcessStartInfo
                 {
-                    FileName = "powershell.exe",
-                    Arguments = $"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"{tempScriptPath}\"",
+                    FileName = "cmd.exe",
+                    Arguments = $"/c start \"\" /b powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"{tempScriptPath}\"",
                     UseShellExecute = false,
                     CreateNoWindow = true
                 };
@@ -907,6 +958,7 @@ Restart-Computer -Force
             _enrollmentTracker?.Dispose();
             _gatherRuleExecutor?.Dispose();
             _remoteConfigService?.Dispose();
+            _completionEvent.Dispose();
         }
     }
 }

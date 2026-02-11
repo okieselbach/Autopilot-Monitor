@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.ServiceProcess;
 using AutopilotMonitor.Agent.Core.Configuration;
 using AutopilotMonitor.Agent.Core.Logging;
 using AutopilotMonitor.Agent.Core.Monitoring.Core;
@@ -22,85 +21,97 @@ namespace AutopilotMonitor.Agent
                 return;
             }
 
-            // Check if running in console mode (for testing)
-            if (args.Contains("--console") || Environment.UserInteractive)
-            {
-                RunConsole(args);
-            }
-            else
-            {
-                RunService();
-            }
+            // Always run directly - no ServiceBase.Run.
+            // The agent is started by the Scheduled Task (SYSTEM) or manually with --console.
+            // Both paths land here and run identically; --console just enables console output.
+            RunAgent(args);
         }
 
-        static void RunConsole(string[] args)
+        static void RunAgent(string[] args)
         {
-            Console.WriteLine("Autopilot Monitor Agent - Console Mode");
-            Console.WriteLine("======================================");
-            Console.WriteLine();
+            var consoleMode = args.Contains("--console") || Environment.UserInteractive;
+
+            if (consoleMode)
+            {
+                Console.WriteLine("Autopilot Monitor Agent");
+                Console.WriteLine("=======================");
+                Console.WriteLine();
+            }
 
             try
             {
                 var config = LoadConfiguration(args);
                 var logDir = Environment.ExpandEnvironmentVariables(config.LogDirectory);
-                var logger = new AgentLogger(logDir, enableDebug: true);
+                var logger = new AgentLogger(logDir, enableDebug: config.EnableDebugLogging);
 
                 logger.Info("");
                 logger.Info("============================================================================================================");
-                logger.Info("====================================== Agent starting in console mode ======================================");
+                logger.Info($"============================== Agent starting ({(consoleMode ? "console" : "background/SYSTEM")}) ==============================");
                 logger.Info("============================================================================================================");
-                Console.WriteLine($"Session ID: {config.SessionId}");
-                Console.WriteLine($"Tenant ID: {config.TenantId}");
-                Console.WriteLine($"API URL: {config.ApiBaseUrl}");
-                Console.WriteLine($"Log Directory: {logDir}");
 
-                if (config.EnableSimulator)
+                if (consoleMode)
                 {
-                    Console.WriteLine($"Simulator Mode: ENABLED");
-                    Console.WriteLine($"Simulate Failure: {(config.SimulateFailure ? "YES" : "NO")}");
-                    if (!string.IsNullOrEmpty(config.SimulationLogDirectory))
+                    Console.WriteLine($"Session ID:  {config.SessionId}");
+                    Console.WriteLine($"Tenant ID:   {config.TenantId}");
+                    Console.WriteLine($"API URL:     {config.ApiBaseUrl}");
+                    Console.WriteLine($"Log Dir:     {logDir}");
+                    Console.WriteLine($"Keep Logs:   {config.KeepLogFile}");
+                    if (config.EnableSimulator)
                     {
-                        Console.WriteLine($"Simulation Log Dir: {config.SimulationLogDirectory}");
-                        Console.WriteLine($"Simulation Speed: {config.SimulationSpeedFactor}x");
+                        Console.WriteLine($"Simulator:   ENABLED (Failure={config.SimulateFailure})");
+                        if (!string.IsNullOrEmpty(config.SimulationLogDirectory))
+                            Console.WriteLine($"Sim Log Dir: {config.SimulationLogDirectory} ({config.SimulationSpeedFactor}x)");
                     }
-                }
-
-                if (config.RebootOnComplete)
-                {
-                    Console.WriteLine($"Reboot on Complete: ENABLED");
-                }
-
-                if (config.EnableGeoLocation)
-                {
-                    Console.WriteLine($"GeoLocation Detection: ENABLED");
-                }
-
-                if (config.UseClientCertAuth)
-                {
-                    Console.WriteLine($"Client Certificate Auth: ENABLED");
-                    if (!string.IsNullOrEmpty(config.ClientCertThumbprint))
+                    if (config.RebootOnComplete) Console.WriteLine("Reboot:      ON COMPLETE");
+                    if (config.UseClientCertAuth)
                     {
-                        Console.WriteLine($"Certificate Thumbprint: {config.ClientCertThumbprint}");
+                        Console.WriteLine($"Cert Auth:   ENABLED");
+                        if (!string.IsNullOrEmpty(config.ClientCertThumbprint))
+                            Console.WriteLine($"Thumbprint:  {config.ClientCertThumbprint}");
                     }
+                    Console.WriteLine();
                 }
-
-                Console.WriteLine();
 
                 using (var service = new MonitoringService(config, logger))
                 {
                     service.Start();
-                    Console.WriteLine("Agent is running. Press Enter to stop...");
-                    Console.ReadLine();
-                    service.Stop();
+
+                    if (consoleMode)
+                    {
+                        Console.WriteLine("Agent is running. Press Enter to stop...");
+                        Console.ReadLine();
+                        service.Stop();
+                        Console.WriteLine("Agent stopped.");
+                    }
+                    else
+                    {
+                        // Running as Scheduled Task under SYSTEM - block until the monitoring
+                        // service signals completion via self-destruct / process exit.
+                        service.WaitForCompletion();
+                    }
                 }
 
                 logger.Info("Agent stopped");
-                Console.WriteLine("Agent stopped.");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"ERROR: {ex.Message}");
-                Console.WriteLine(ex.StackTrace);
+                // Last-resort: write to a crash file next to the log directory since we
+                // cannot use the Event Log (no traces policy).
+                try
+                {
+                    var crashPath = Path.Combine(
+                        Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor\Logs"),
+                        $"crash_{DateTime.UtcNow:yyyyMMdd_HHmmss}.log");
+                    Directory.CreateDirectory(Path.GetDirectoryName(crashPath));
+                    File.WriteAllText(crashPath, $"[{DateTime.UtcNow:u}] FATAL: {ex}");
+                }
+                catch { /* nowhere left to log */ }
+
+                if (consoleMode)
+                {
+                    Console.WriteLine($"ERROR: {ex.Message}");
+                    Console.WriteLine(ex.StackTrace);
+                }
             }
         }
 
@@ -121,7 +132,7 @@ namespace AutopilotMonitor.Agent
             var deviceConfigs = new[]
             {
                 new { TenantId = "b54dc1af-5320-4f60-b5d4-821e0cf2a359", SimulateFailure = false, DeviceName = "Device-1" },
-                new { TenantId = "b54dc1af-5320-4f60-b5d4-821e0cf2a359", SimulateFailure = true, DeviceName = "Device-2" },  // This one will fail
+                new { TenantId = "b54dc1af-5320-4f60-b5d4-821e0cf2a359", SimulateFailure = true,  DeviceName = "Device-2" },
                 new { TenantId = "b54dc1af-5320-4f60-b5d4-821e0cf2a359", SimulateFailure = false, DeviceName = "Device-3" },
                 new { TenantId = "a53834b7-42bc-46a3-b004-369735c3acf9", SimulateFailure = false, DeviceName = "Device-4" },
                 new { TenantId = "deadbeef-dead-beef-dead-beefdeadbeef", SimulateFailure = false, DeviceName = "Device-5" }
@@ -130,7 +141,6 @@ namespace AutopilotMonitor.Agent
             var tasks = new List<System.Threading.Tasks.Task>();
             var services = new List<MonitoringService>();
 
-            // Start all 5 instances in parallel
             for (int i = 0; i < deviceConfigs.Length; i++)
             {
                 var deviceConfig = deviceConfigs[i];
@@ -150,15 +160,13 @@ namespace AutopilotMonitor.Agent
                     SimulateFailure = deviceConfig.SimulateFailure,
                     UseClientCertAuth = baseConfig.UseClientCertAuth,
                     ClientCertThumbprint = baseConfig.ClientCertThumbprint,
-                    CleanupOnExit = false, // Don't cleanup in mass rollout mode for easier inspection
-                    SelfDestructOnComplete = false, // Don't self-destruct in mass rollout mode
-                    RebootOnComplete = false, // Don't reboot in mass rollout mode
-                    EnableGeoLocation = false // Disable geo-location to reduce noise
+                    CleanupOnExit = false,
+                    SelfDestructOnComplete = false,
+                    RebootOnComplete = false,
+                    EnableGeoLocation = false
                 };
 
                 var logDir = Environment.ExpandEnvironmentVariables(config.LogDirectory);
-
-                // Ensure directories exist
                 Directory.CreateDirectory(config.SpoolDirectory);
                 Directory.CreateDirectory(config.LogDirectory);
 
@@ -173,19 +181,13 @@ namespace AutopilotMonitor.Agent
                 var service = new MonitoringService(config, logger);
                 services.Add(service);
 
-                // Start each service in a separate task
                 var task = System.Threading.Tasks.Task.Run(() =>
                 {
                     try
                     {
                         service.Start();
-
-                        // Keep the service running until enrollment completes
-                        // The simulator will automatically complete and emit enrollment_complete or enrollment_failed
                         while (true)
-                        {
                             System.Threading.Thread.Sleep(1000);
-                        }
                     }
                     catch (Exception ex)
                     {
@@ -201,36 +203,17 @@ namespace AutopilotMonitor.Agent
             Console.WriteLine("Press Enter to stop all instances...");
             Console.ReadLine();
 
-            // Stop all services
             Console.WriteLine();
             Console.WriteLine("Stopping all instances...");
             foreach (var service in services)
             {
-                try
-                {
-                    service.Stop();
-                    service.Dispose();
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Error stopping service: {ex.Message}");
-                }
+                try { service.Stop(); service.Dispose(); }
+                catch (Exception ex) { Console.WriteLine($"Error stopping service: {ex.Message}"); }
             }
 
             Console.WriteLine("All instances stopped.");
         }
 
-        static void RunService()
-        {
-            var service = new AutopilotMonitorService();
-            ServiceBase.Run(service);
-        }
-
-        /// <summary>
-        /// Reads the Azure AD Tenant ID from the Windows Registry.
-        /// Looks for enrollments with EnrollmentType = 6 (AAD Join).
-        /// </summary>
-        /// <returns>The AAD Tenant ID if found, otherwise null.</returns>
         static string GetTenantIdFromRegistry()
         {
             try
@@ -240,113 +223,81 @@ namespace AutopilotMonitor.Agent
                 using (var enrollmentsKey = Registry.LocalMachine.OpenSubKey(enrollmentsKeyPath))
                 {
                     if (enrollmentsKey == null)
-                    {
-                        Console.WriteLine("Registry key not found: HKLM\\" + enrollmentsKeyPath);
                         return null;
-                    }
 
-                    // Iterate through all enrollment GUIDs
                     foreach (var enrollmentGuid in enrollmentsKey.GetSubKeyNames())
                     {
                         using (var enrollmentKey = enrollmentsKey.OpenSubKey(enrollmentGuid))
                         {
-                            if (enrollmentKey == null)
-                                continue;
+                            if (enrollmentKey == null) continue;
 
-                            // Check if this is an AAD Join enrollment (EnrollmentType = 6)
                             var enrollmentType = enrollmentKey.GetValue("EnrollmentType");
                             if (enrollmentType != null && Convert.ToInt32(enrollmentType) == 6)
                             {
-                                // Try to get AADTenantID
                                 var tenantId = enrollmentKey.GetValue("AADTenantID");
                                 if (tenantId != null)
-                                {
-                                    var tenantIdString = tenantId.ToString();
-                                    Console.WriteLine($"Found AAD Tenant ID in registry: {tenantIdString} (Enrollment: {enrollmentGuid})");
-                                    return tenantIdString;
-                                }
+                                    return tenantId.ToString();
                             }
                         }
                     }
-
-                    Console.WriteLine("No AAD Join enrollment (EnrollmentType=6) with AADTenantID found in registry.");
                 }
             }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error reading Tenant ID from registry: {ex.Message}");
-            }
+            catch { }
 
             return null;
         }
 
         static AgentConfiguration LoadConfiguration(string[] args = null)
         {
-            // Parse command-line arguments
-            var enableSimulator = args?.Contains("--simulator") ?? false;
-            var simulateFailure = args?.Contains("--simulate-failure") ?? false;
-            var noAuth = args?.Contains("--no-auth") ?? false;
-            var noCleanup = args?.Contains("--no-cleanup") ?? false;
-            var rebootOnComplete = args?.Contains("--reboot-on-complete") ?? false;
-            var disableGeoLocation = args?.Contains("--disable-geolocation") ?? false;
-            var newSession = args?.Contains("--new-session") ?? false;
+            var enableSimulator   = args?.Contains("--simulator") ?? false;
+            var simulateFailure   = args?.Contains("--simulate-failure") ?? false;
+            var noAuth            = args?.Contains("--no-auth") ?? false;
+            var noCleanup         = args?.Contains("--no-cleanup") ?? false;
+            var rebootOnComplete  = args?.Contains("--reboot-on-complete") ?? false;
+            var disableGeoLoc     = args?.Contains("--disable-geolocation") ?? false;
+            var newSession        = args?.Contains("--new-session") ?? false;
+            var keepLogFile       = args?.Contains("--keep-logfile") ?? false;
 
-            // Parse certificate thumbprint if provided
-            string certThumbprint = null;
-            string tenantIdOverride = null;
-            string imeLogPathOverride = null;
-            string simulationLogDirectory = null;
+            string certThumbprint        = null;
+            string tenantIdOverride      = null;
+            string imeLogPathOverride    = null;
+            string simulationLogDir      = null;
             double simulationSpeedFactor = 50;
+
             if (args != null)
             {
                 var thumbprintIndex = Array.IndexOf(args, "--cert-thumbprint");
                 if (thumbprintIndex >= 0 && thumbprintIndex + 1 < args.Length)
-                {
                     certThumbprint = args[thumbprintIndex + 1];
-                }
 
                 var tenantIdIndex = Array.IndexOf(args, "--tenant-id");
                 if (tenantIdIndex >= 0 && tenantIdIndex + 1 < args.Length)
-                {
                     tenantIdOverride = args[tenantIdIndex + 1];
-                }
 
                 var imeLogPathIndex = Array.IndexOf(args, "--ime-log-path");
                 if (imeLogPathIndex >= 0 && imeLogPathIndex + 1 < args.Length)
-                {
                     imeLogPathOverride = args[imeLogPathIndex + 1];
-                    Console.WriteLine($"Using custom IME log path: {imeLogPathOverride}");
-                }
 
                 var simLogDirIndex = Array.IndexOf(args, "--simulation-log-dir");
                 if (simLogDirIndex >= 0 && simLogDirIndex + 1 < args.Length)
-                {
-                    simulationLogDirectory = args[simLogDirIndex + 1];
-                    Console.WriteLine($"Using simulation log directory: {simulationLogDirectory}");
-                }
+                    simulationLogDir = args[simLogDirIndex + 1];
 
                 var simSpeedIndex = Array.IndexOf(args, "--simulation-speed-factor");
                 if (simSpeedIndex >= 0 && simSpeedIndex + 1 < args.Length)
-                {
                     if (double.TryParse(args[simSpeedIndex + 1], out var speed))
-                    {
                         simulationSpeedFactor = speed;
-                        Console.WriteLine($"Using simulation speed factor: {simulationSpeedFactor}x");
-                    }
-                }
             }
 
-            // Defaults (fallback values if no config file exists)
-            //string apiBaseUrl = "http://localhost:7071";
-            string apiBaseUrl = "https://autopilotmonitor-func.azurewebsites.net";
-            int uploadIntervalSeconds = 30;
-            bool cleanupOnExit = true;
-            bool selfDestructOnComplete = true;
-            bool rebootOnCompleteConfig = false;
-            bool enableGeoLocationConfig = true;
-            bool useClientCertAuthConfig = true;
+            // Defaults
+            string apiBaseUrl             = "https://autopilotmonitor-func.azurewebsites.net";
+            int    uploadIntervalSeconds  = 30;
+            bool   cleanupOnExit          = true;
+            bool   selfDestructOnComplete = true;
+            bool   rebootOnCompleteConfig = false;
+            bool   enableGeoLocationConfig = true;
+            bool   useClientCertAuthConfig = true;
 
-            // Try to load configuration from JSON file (written by PowerShell bootstrap script)
+            // Load configuration JSON written by PowerShell bootstrap script
             var configFilePath = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor\Config\agent-config.json");
             if (File.Exists(configFilePath))
             {
@@ -378,91 +329,65 @@ namespace AutopilotMonitor.Agent
                         if (configDict.ContainsKey("useClientCertAuth") && configDict["useClientCertAuth"] != null)
                             useClientCertAuthConfig = Convert.ToBoolean(configDict["useClientCertAuth"]);
 
-                        Console.WriteLine($"Loaded configuration from {configFilePath}");
+                        if (configDict.ContainsKey("keepLogFile") && configDict["keepLogFile"] != null)
+                            keepLogFile = keepLogFile || Convert.ToBoolean(configDict["keepLogFile"]);
                     }
                 }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Warning: Failed to load configuration file: {ex.Message}");
-                    Console.WriteLine("Using default configuration");
-                }
-            }
-            else
-            {
-                Console.WriteLine($"Configuration file not found at {configFilePath}");
-                Console.WriteLine("Using default configuration");
+                catch { /* use defaults */ }
             }
 
             // Environment variable overrides config file
             apiBaseUrl = Environment.GetEnvironmentVariable("AUTOPILOT_MONITOR_API") ?? apiBaseUrl;
 
-            // Command-line arguments override everything (for --no-cleanup)
             if (noCleanup)
             {
                 cleanupOnExit = false;
                 selfDestructOnComplete = false;
             }
 
-            // Determine TenantId: Command-line arg > Registry > Fallback
+            // Determine TenantId: command-line arg > registry > fallback
             string tenantId;
             if (!string.IsNullOrEmpty(tenantIdOverride))
             {
-                // Command-line argument takes precedence
                 tenantId = tenantIdOverride;
-                Console.WriteLine($"Using Tenant ID from command-line argument: {tenantId}");
             }
             else
             {
-                // Try to read from registry
                 tenantId = GetTenantIdFromRegistry();
-
                 if (string.IsNullOrEmpty(tenantId))
-                {
-                    // Fallback to default (for testing/development)
-                    tenantId = "b54dc1af-5320-4f60-b5d4-821e0cf2a359";
-                    Console.WriteLine($"Using fallback Tenant ID: {tenantId}");
-                }
+                    tenantId = "b54dc1af-5320-4f60-b5d4-821e0cf2a359"; // fallback for dev/testing
             }
 
-            // Load or create persisted session ID
-            var dataDirectory = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor");
-            var sessionPersistence = new SessionPersistence(dataDirectory);
+            var dataDirectory    = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor");
+            var sessionPersist   = new SessionPersistence(dataDirectory);
 
-            // Force new session if --new-session flag is set
             if (newSession)
-            {
-                Console.WriteLine("--new-session flag detected, deleting existing session...");
-                sessionPersistence.DeleteSession();
-            }
+                sessionPersist.DeleteSession();
 
-            var sessionId = sessionPersistence.LoadOrCreateSessionId();
-
-            var sessionStatus = sessionPersistence.SessionExists() && File.GetCreationTime(Path.Combine(dataDirectory, "session.id")) < DateTime.Now.AddMinutes(-1)
-                ? "Restored from previous session"
-                : "New session created";
-            Console.WriteLine($"Session ID: {sessionId} ({sessionStatus})");
+            var sessionId = sessionPersist.LoadOrCreateSessionId();
 
             return new AgentConfiguration
             {
-                ApiBaseUrl = apiBaseUrl,
-                SessionId = sessionId,
-                TenantId = tenantId,
-                SpoolDirectory = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor\Spool"),
-                LogDirectory = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor\Logs"),
+                ApiBaseUrl            = apiBaseUrl,
+                SessionId             = sessionId,
+                TenantId              = tenantId,
+                SpoolDirectory        = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor\Spool"),
+                LogDirectory          = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor\Logs"),
                 UploadIntervalSeconds = uploadIntervalSeconds,
-                MaxBatchSize = 100,
-                EnableDebugLogging = true,
-                EnableSimulator = enableSimulator,
-                SimulateFailure = simulateFailure,
-                UseClientCertAuth = !noAuth && useClientCertAuthConfig,
-                ClientCertThumbprint = certThumbprint,
-                CleanupOnExit = cleanupOnExit,
+                MaxBatchSize          = 100,
+                EnableDebugLogging    = true,
+                EnableSimulator       = enableSimulator,
+                SimulateFailure       = simulateFailure,
+                UseClientCertAuth     = !noAuth && useClientCertAuthConfig,
+                ClientCertThumbprint  = certThumbprint,
+                CleanupOnExit         = cleanupOnExit,
                 SelfDestructOnComplete = selfDestructOnComplete,
-                RebootOnComplete = rebootOnComplete || rebootOnCompleteConfig,
-                EnableGeoLocation = !disableGeoLocation && enableGeoLocationConfig,
-                ImeLogPathOverride = imeLogPathOverride,
-                SimulationLogDirectory = simulationLogDirectory,
-                SimulationSpeedFactor = simulationSpeedFactor
+                RebootOnComplete      = rebootOnComplete || rebootOnCompleteConfig,
+                EnableGeoLocation     = !disableGeoLoc && enableGeoLocationConfig,
+                ImeLogPathOverride    = imeLogPathOverride,
+                SimulationLogDirectory = simulationLogDir,
+                SimulationSpeedFactor = simulationSpeedFactor,
+                KeepLogFile           = keepLogFile
             };
         }
     }

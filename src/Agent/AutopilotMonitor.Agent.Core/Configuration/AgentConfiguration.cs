@@ -93,6 +93,12 @@ namespace AutopilotMonitor.Agent.Core.Configuration
         public bool RebootOnComplete { get; set; } = false;
 
         /// <summary>
+        /// When true, the log directory is preserved after self-destruct/cleanup.
+        /// All other files (binaries, config, spool, scheduled task) are still removed.
+        /// </summary>
+        public bool KeepLogFile { get; set; } = false;
+
+        /// <summary>
         /// Whether to enable geo-location detection (queries external IP services)
         /// </summary>
         public bool EnableGeoLocation { get; set; } = true;
