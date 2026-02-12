@@ -340,7 +340,7 @@ namespace AutopilotMonitor.Functions.Services
         /// <summary>
         /// Updates the session status and current phase
         /// </summary>
-        public async Task<bool> UpdateSessionStatusAsync(string tenantId, string sessionId, SessionStatus status, EnrollmentPhase? currentPhase = null, string? failureReason = null, DateTime? completedAt = null)
+        public async Task<bool> UpdateSessionStatusAsync(string tenantId, string sessionId, SessionStatus status, EnrollmentPhase? currentPhase = null, string? failureReason = null, DateTime? completedAt = null, DateTime? earliestEventTimestamp = null)
         {
             SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
             SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
@@ -365,6 +365,16 @@ namespace AutopilotMonitor.Functions.Services
                     if (currentPhase.HasValue)
                     {
                         session["CurrentPhase"] = (int)currentPhase.Value;
+                    }
+
+                    // Update StartedAt if an earlier event timestamp is provided
+                    if (earliestEventTimestamp.HasValue)
+                    {
+                        var currentStartedAt = session.GetDateTimeOffset("StartedAt")?.UtcDateTime ?? DateTime.MaxValue;
+                        if (earliestEventTimestamp.Value < currentStartedAt)
+                        {
+                            session["StartedAt"] = earliestEventTimestamp.Value;
+                        }
                     }
 
                     // Set completion time if succeeded or failed

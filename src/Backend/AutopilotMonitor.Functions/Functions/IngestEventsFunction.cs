@@ -119,12 +119,19 @@ namespace AutopilotMonitor.Functions.Functions
                 EnrollmentEvent? lastPhaseChangeEvent = null;
                 EnrollmentEvent? completionEvent = null;
                 EnrollmentEvent? failureEvent = null;
+                DateTime? earliestEventTimestamp = null;
 
                 // Track app install events for AppInstallSummary aggregation
                 var appInstallUpdates = new Dictionary<string, AppInstallSummary>(StringComparer.OrdinalIgnoreCase);
 
                 foreach (var evt in storedEvents)
                 {
+                    // Track earliest event timestamp for accurate session StartedAt
+                    if (!earliestEventTimestamp.HasValue || evt.Timestamp < earliestEventTimestamp.Value)
+                    {
+                        earliestEventTimestamp = evt.Timestamp;
+                    }
+
                     // Track special events for session status updates
                     if (evt.EventType == "phase_changed" || evt.EventType == "esp_phase_changed")
                     {
@@ -158,7 +165,8 @@ namespace AutopilotMonitor.Functions.Functions
                         request.SessionId,
                         SessionStatus.Succeeded,
                         completionEvent.Phase,
-                        completedAt: completionEvent.Timestamp
+                        completedAt: completionEvent.Timestamp,
+                        earliestEventTimestamp: earliestEventTimestamp
                     );
                     _logger.LogInformation($"{sessionPrefix} Status: Succeeded");
                 }
@@ -175,7 +183,8 @@ namespace AutopilotMonitor.Functions.Functions
                         SessionStatus.Failed,
                         failureEvent.Phase,
                         failureReason,
-                        completedAt: failureEvent.Timestamp
+                        completedAt: failureEvent.Timestamp,
+                        earliestEventTimestamp: earliestEventTimestamp
                     );
                     _logger.LogWarning($"{sessionPrefix} Status: Failed - {failureReason}");
                 }
@@ -186,7 +195,8 @@ namespace AutopilotMonitor.Functions.Functions
                         request.TenantId,
                         request.SessionId,
                         SessionStatus.InProgress,
-                        lastPhaseChangeEvent.Phase
+                        lastPhaseChangeEvent.Phase,
+                        earliestEventTimestamp: earliestEventTimestamp
                     );
                 }
                 else if (processedCount > 0)
