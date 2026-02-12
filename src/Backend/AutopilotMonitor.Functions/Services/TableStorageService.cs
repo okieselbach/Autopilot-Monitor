@@ -434,7 +434,7 @@ namespace AutopilotMonitor.Functions.Services
         /// Increments the session event count without touching status or phase fields.
         /// Uses Merge mode to safely handle concurrent updates.
         /// </summary>
-        public async Task IncrementSessionEventCountAsync(string tenantId, string sessionId, int increment)
+        public async Task IncrementSessionEventCountAsync(string tenantId, string sessionId, int increment, DateTime? earliestEventTimestamp = null)
         {
             SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
             SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
@@ -454,6 +454,17 @@ namespace AutopilotMonitor.Functions.Services
                     {
                         ["EventCount"] = currentCount + increment
                     };
+
+                    // Update StartedAt if an earlier event timestamp is provided
+                    if (earliestEventTimestamp.HasValue)
+                    {
+                        var currentStartedAt = entity.Value.GetDateTimeOffset("StartedAt")?.UtcDateTime ?? DateTime.MaxValue;
+                        if (earliestEventTimestamp.Value < currentStartedAt)
+                        {
+                            update["StartedAt"] = earliestEventTimestamp.Value;
+                        }
+                    }
+
                     await tableClient.UpdateEntityAsync(update, entity.Value.ETag, TableUpdateMode.Merge);
                     return;
                 }

@@ -49,7 +49,6 @@ param(
 $AgentBasePath = "$env:ProgramData\AutopilotMonitor"
 $AgentBinPath = "$AgentBasePath\Agent"
 $AgentConfigPath = "$AgentBasePath\Config"
-$AgentRulesPath = "$AgentBasePath\Rules"
 $AgentSpoolPath = "$AgentBasePath\Spool"
 $AgentLogsPath = "$AgentBasePath\Logs"
 $TaskName = "AutopilotMonitor-Agent"
@@ -59,7 +58,6 @@ $LogFile = "$AgentLogsPath\Bootstrap.log"
 New-Item -Path $AgentBasePath -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
 New-Item -Path $AgentBinPath -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
 New-Item -Path $AgentConfigPath -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
-New-Item -Path $AgentRulesPath -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
 New-Item -Path $AgentSpoolPath -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
 New-Item -Path $AgentLogsPath -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
 

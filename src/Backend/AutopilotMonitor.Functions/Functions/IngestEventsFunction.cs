@@ -205,7 +205,8 @@ namespace AutopilotMonitor.Functions.Functions
                     await _storageService.IncrementSessionEventCountAsync(
                         request.TenantId,
                         request.SessionId,
-                        processedCount
+                        processedCount,
+                        earliestEventTimestamp
                     );
                 }
 

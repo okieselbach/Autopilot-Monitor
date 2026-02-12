@@ -105,6 +105,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             if (_helloDetector != null)
             {
                 _helloDetector.HelloCompleted += OnHelloCompleted;
+                _helloDetector.FinalizingSetupPhaseTriggered += OnFinalizingSetupPhaseTriggered;
             }
         }
 
@@ -781,33 +782,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             // Emit final summary
             EmitAppTrackingSummary();
 
+            // Note: Phase transition to FinalizingSetup is now handled by Shell-Core events
+            // (ESP exit or Hello wizard start) for more robust detection.
+            // We no longer automatically transition here when apps complete.
             if (_lastEspPhase != null)
             {
                 _logger.Info($"EnrollmentTracker: All apps completed while in phase '{_lastEspPhase}'");
-
-                // When all user apps complete during AccountSetup, transition to FinalizingSetup.
-                // This signals the progress portal that app installation is done and
-                // we're now waiting for final ESP steps (e.g. Windows Hello provisioning).
-                if (string.Equals(_lastEspPhase, "AccountSetup", StringComparison.OrdinalIgnoreCase))
-                {
-                    _logger.Info("EnrollmentTracker: User apps completed - transitioning to FinalizingSetup phase");
-                    _emitEvent(new EnrollmentEvent
-                    {
-                        SessionId = _sessionId,
-                        TenantId = _tenantId,
-                        EventType = "esp_phase_changed",
-                        Severity = EventSeverity.Info,
-                        Source = "EnrollmentTracker",
-                        Phase = EnrollmentPhase.FinalizingSetup,
-                        Message = "ESP phase: FinalizingSetup (all user apps completed, waiting for final steps)",
-                        Data = new Dictionary<string, object>
-                        {
-                            { "espPhase", "FinalizingSetup" },
-                            { "autoDetected", true },
-                            { "previousPhase", "AccountSetup" }
-                        }
-                    });
-                }
+                _logger.Info("EnrollmentTracker: Waiting for ESP exit or Hello wizard events to transition to FinalizingSetup");
             }
         }
 
@@ -919,6 +900,33 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             }
         }
 
+        /// <summary>
+        /// Called when ESP exit or Hello wizard start is detected (via HelloDetector Shell-Core events)
+        /// Triggers transition to FinalizingSetup phase
+        /// </summary>
+        private void OnFinalizingSetupPhaseTriggered(object sender, string reason)
+        {
+            _logger.Info($"EnrollmentTracker: FinalizingSetup phase triggered - reason: {reason}");
+
+            // Emit phase change event to FinalizingSetup
+            _emitEvent(new EnrollmentEvent
+            {
+                SessionId = _sessionId,
+                TenantId = _tenantId,
+                EventType = "esp_phase_changed",
+                Severity = EventSeverity.Info,
+                Source = "EnrollmentTracker",
+                Phase = EnrollmentPhase.FinalizingSetup,
+                Message = $"ESP phase: FinalizingSetup (triggered by {reason})",
+                Data = new Dictionary<string, object>
+                {
+                    { "espPhase", "FinalizingSetup" },
+                    { "autoDetected", true },
+                    { "triggeredBy", reason }
+                }
+            });
+        }
+
         private void SummaryTimerCallback(object state)
         {
             if (_imeLogTracker?.PackageStates?.CountAll > 0)
@@ -950,10 +958,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         {
             Stop();
 
-            // Unsubscribe from HelloDetector event
+            // Unsubscribe from HelloDetector events
             if (_helloDetector != null)
             {
                 _helloDetector.HelloCompleted -= OnHelloCompleted;
+                _helloDetector.FinalizingSetupPhaseTriggered -= OnFinalizingSetupPhaseTriggered;
             }
 
             _summaryTimer?.Dispose();

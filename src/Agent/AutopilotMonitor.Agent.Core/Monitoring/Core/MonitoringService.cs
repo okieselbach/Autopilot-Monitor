@@ -172,7 +172,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     _configuration.SessionId,
                     _configuration.TenantId,
                     EmitEvent,
-                    _logger
+                    _logger,
+                    _configuration.HelloWaitTimeoutSeconds
                 );
                 _helloDetector.Start();
 

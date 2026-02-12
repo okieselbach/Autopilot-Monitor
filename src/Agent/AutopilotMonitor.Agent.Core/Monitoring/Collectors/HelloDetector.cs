@@ -12,12 +12,16 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
     /// Monitors the "Microsoft-Windows-User Device Registration/Admin" event log channel
     /// and checks registry for WHfB policy configuration.
     ///
-    /// Key Event IDs:
+    /// Key Event IDs (User Device Registration/Admin):
     ///   358 - Prerequisites passed, provisioning will be launched
-    ///   360 - Prerequisites failed, provisioning will NOT be launched
+    ///   360 - Prerequisites failed, provisioning will NOT be launched (SNAPSHOT ONLY - not terminal)
     ///   362 - Provisioning blocked
     ///   300 - NGC key registered successfully (Hello provisioned)
     ///   301 - NGC key registration failed
+    ///
+    /// Key Event IDs (Microsoft-Windows-Shell-Core/Operational):
+    ///   62404 - CloudExperienceHost Web App Activity Started (CXID: 'AADHello' or 'NGC' - Hello wizard started)
+    ///   62407 - CloudExperienceHost Web App Event 2 (CommercialOOBE_ESPProgress_Page_Exiting - ESP exit)
     /// </summary>
     public class HelloDetector : IDisposable
     {
@@ -26,30 +30,48 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         private readonly string _tenantId;
         private readonly Action<EnrollmentEvent> _onEventCollected;
         private System.Diagnostics.Eventing.Reader.EventLogWatcher _watcher;
+        private System.Diagnostics.Eventing.Reader.EventLogWatcher _shellCoreWatcher;
         private System.Threading.Timer _policyCheckTimer;
+        private System.Threading.Timer _helloWaitTimer;
 
         private bool _isPolicyConfigured = false;
         private bool _isHelloCompleted = false;
+        private bool _espExitDetected = false;
+        private bool _helloWizardStarted = false;
         private readonly object _stateLock = new object();
 
+        private readonly int _helloWaitTimeoutSeconds;
+
         /// <summary>
-        /// Callback invoked when Hello provisioning completes (successfully, failed, skipped, or blocked)
+        /// Callback invoked when Hello provisioning completes (successfully or failed)
+        /// Based on events 300/301 only, NOT on event 360 (which is just a snapshot)
         /// </summary>
         public event EventHandler HelloCompleted;
 
+        /// <summary>
+        /// Callback invoked when ESP exit or Hello wizard start is detected
+        /// Triggers transition to FinalizingSetup phase
+        /// </summary>
+        public event EventHandler<string> FinalizingSetupPhaseTriggered;
+
         private const string EventLogChannel = "Microsoft-Windows-User Device Registration/Admin";
+        private const string ShellCoreEventLogChannel = "Microsoft-Windows-Shell-Core/Operational";
 
         // WHfB policy registry paths
         private const string CspPolicyBasePath = @"SOFTWARE\Microsoft\Policies\PassportForWork";
         private const string GpoPolicyPath = @"SOFTWARE\Policies\Microsoft\PassportForWork";
 
-        // Tracked event IDs
+        // Tracked event IDs (User Device Registration)
         private const int EventId_NgcKeyRegistered = 300;
         private const int EventId_NgcKeyRegistrationFailed = 301;
         private const int EventId_ProvisioningWillLaunch = 358;
         private const int EventId_ProvisioningWillNotLaunch = 360;
         private const int EventId_ProvisioningBlocked = 362;
         private const int EventId_PinStatus = 376;
+
+        // Tracked event IDs (Shell-Core/Operational)
+        private const int EventId_ShellCore_WebAppStarted = 62404;
+        private const int EventId_ShellCore_WebAppEvent = 62407;
 
         private static readonly HashSet<int> TrackedEventIds = new HashSet<int>
         {
@@ -61,12 +83,19 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             EventId_PinStatus
         };
 
-        public HelloDetector(string sessionId, string tenantId, Action<EnrollmentEvent> onEventCollected, AgentLogger logger)
+        private static readonly HashSet<int> TrackedShellCoreEventIds = new HashSet<int>
+        {
+            EventId_ShellCore_WebAppStarted,
+            EventId_ShellCore_WebAppEvent
+        };
+
+        public HelloDetector(string sessionId, string tenantId, Action<EnrollmentEvent> onEventCollected, AgentLogger logger, int helloWaitTimeoutSeconds = 30)
         {
             _sessionId = sessionId ?? throw new ArgumentNullException(nameof(sessionId));
             _tenantId = tenantId ?? throw new ArgumentNullException(nameof(tenantId));
             _onEventCollected = onEventCollected ?? throw new ArgumentNullException(nameof(onEventCollected));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _helloWaitTimeoutSeconds = helloWaitTimeoutSeconds;
         }
 
         /// <summary>
@@ -92,16 +121,19 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             // Check if WHfB policy is configured initially
             CheckHelloPolicy();
 
-            // Start periodic policy check (every 30 seconds) to detect policy arriving later via MDM
+            // Start periodic policy check to detect policy arriving later via MDM
             _policyCheckTimer = new System.Threading.Timer(
                 _ => CheckHelloPolicy(),
                 null,
-                TimeSpan.FromSeconds(30),
-                TimeSpan.FromSeconds(30)
+                TimeSpan.FromSeconds(30), // Initial delay before first check (to allow policies to apply during enrollment)
+                TimeSpan.FromSeconds(30)  // Subsequent checks every 15 seconds
             );
 
             // Subscribe to User Device Registration event log
             StartEventLogWatcher();
+
+            // Subscribe to Shell-Core/Operational event log for ESP exit and Hello wizard detection
+            StartShellCoreEventLogWatcher();
         }
 
         public void Stop()
@@ -122,6 +154,21 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                 }
             }
 
+            // Stop Hello wait timer
+            if (_helloWaitTimer != null)
+            {
+                try
+                {
+                    _helloWaitTimer.Dispose();
+                    _helloWaitTimer = null;
+                }
+                catch (Exception ex)
+                {
+                    _logger.Error("Error stopping Hello wait timer", ex);
+                }
+            }
+
+            // Stop User Device Registration watcher
             if (_watcher != null)
             {
                 try
@@ -134,6 +181,22 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                 catch (Exception ex)
                 {
                     _logger.Error("Error stopping Hello detector watcher", ex);
+                }
+            }
+
+            // Stop Shell-Core/Operational watcher
+            if (_shellCoreWatcher != null)
+            {
+                try
+                {
+                    _shellCoreWatcher.Enabled = false;
+                    _shellCoreWatcher.EventRecordWritten -= OnShellCoreEventRecordWritten;
+                    _shellCoreWatcher.Dispose();
+                    _shellCoreWatcher = null;
+                }
+                catch (Exception ex)
+                {
+                    _logger.Error("Error stopping Shell-Core event watcher", ex);
                 }
             }
         }
@@ -333,12 +396,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     case EventId_ProvisioningWillNotLaunch: // 360
                         eventType = "hello_provisioning_skipped";
                         severity = EventSeverity.Warning;
-                        message = "Windows Hello for Business provisioning skipped - prerequisites not met";
-                        // Mark Hello as completed (terminal event - skipped counts as completed)
-                        lock (_stateLock) { _isHelloCompleted = true; }
-                        _logger.Info("Windows Hello provisioning COMPLETED (skipped)");
-                        // Trigger HelloCompleted event for EnrollmentTracker
-                        try { HelloCompleted?.Invoke(this, EventArgs.Empty); } catch { }
+                        message = "Windows Hello for Business provisioning prerequisites not met (snapshot only, not terminal)";
+                        // DO NOT mark Hello as completed - event 360 is just a snapshot and can change
+                        // DO NOT trigger HelloCompleted event
+                        // Wait for actual terminal events: 300 (success), 301 (failed), or ESP exit + timeout
+                        _logger.Info("Windows Hello provisioning prerequisites not met (snapshot, not terminal)");
                         break;
 
                     case EventId_ProvisioningBlocked: // 362
@@ -370,7 +432,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     EventType = eventType,
                     Severity = severity,
                     Source = "HelloDetector",
-                    Phase = EnrollmentPhase.FinalizingSetup,
+                    Phase = EnrollmentPhase.Unknown, // Phase will be determined by EnrollmentTracker based on context
                     Message = message,
                     Data = new Dictionary<string, object>
                     {
@@ -385,6 +447,219 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             catch (Exception ex)
             {
                 _logger.Error("Error processing Hello event record", ex);
+            }
+        }
+
+        private void StartShellCoreEventLogWatcher()
+        {
+            try
+            {
+                // Watch for ESP exit and Hello wizard start events in Shell-Core/Operational log
+                var query = new EventLogQuery(
+                    ShellCoreEventLogChannel,
+                    PathType.LogName,
+                    "*[System[TimeCreated[timediff(@SystemTime) <= 1000]]]"
+                );
+
+                _shellCoreWatcher = new System.Diagnostics.Eventing.Reader.EventLogWatcher(query);
+                _shellCoreWatcher.EventRecordWritten += OnShellCoreEventRecordWritten;
+                _shellCoreWatcher.Enabled = true;
+
+                _logger.Info($"Started watching: {ShellCoreEventLogChannel}");
+            }
+            catch (EventLogNotFoundException)
+            {
+                _logger.Warning($"Event log not found: {ShellCoreEventLogChannel} (normal if not on a real device)");
+            }
+            catch (Exception ex)
+            {
+                _logger.Error($"Failed to start Shell-Core event log watcher", ex);
+            }
+        }
+
+        private void OnShellCoreEventRecordWritten(object sender, EventRecordWrittenEventArgs e)
+        {
+            if (e.EventRecord == null)
+                return;
+
+            try
+            {
+                var record = e.EventRecord;
+                var eventId = record.Id;
+
+                if (!TrackedShellCoreEventIds.Contains(eventId))
+                    return;
+
+                var description = record.FormatDescription() ?? $"Event ID {eventId}";
+
+                string eventType;
+                EventSeverity severity = EventSeverity.Info;
+                string message;
+                bool triggerFinalizingSetup = false;
+                string finalizingSetupReason = null;
+
+                switch (eventId)
+                {
+                    case EventId_ShellCore_WebAppStarted: // 62404
+                        // Check if this is AADHello or NGC (Hello wizard started)
+                        if (description.Contains("AADHello") || description.Contains("'NGC'"))
+                        {
+                            eventType = "hello_wizard_started";
+                            message = "Windows Hello wizard started (CloudExperienceHost)";
+                            triggerFinalizingSetup = true;
+                            finalizingSetupReason = "hello_wizard_started";
+
+                            lock (_stateLock)
+                            {
+                                _helloWizardStarted = true;
+
+                                // Stop the hello wait timer if running (Hello wizard appeared within timeout)
+                                if (_helloWaitTimer != null)
+                                {
+                                    _helloWaitTimer.Dispose();
+                                    _helloWaitTimer = null;
+                                    _logger.Info($"Hello wizard started within {_helloWaitTimeoutSeconds}s timeout - stopping wait timer");
+                                }
+                            }
+
+                            _logger.Info("Windows Hello wizard started - detected via Shell-Core event 62404");
+                        }
+                        else
+                        {
+                            // Not Hello-related, ignore
+                            return;
+                        }
+                        break;
+
+                    case EventId_ShellCore_WebAppEvent: // 62407
+                        // Check if this is ESP exit event
+                        // Use robust pattern: OOBE_ESP*Exit* instead of full string CommercialOOBE_ESPProgress_Page_Exiting
+                        if (System.Text.RegularExpressions.Regex.IsMatch(description, @"OOBE_ESP.*Exit", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                        {
+                            eventType = "esp_exiting";
+                            message = "ESP (Enrollment Status Page) is exiting - enrollment nearing completion";
+                            triggerFinalizingSetup = true;
+                            finalizingSetupReason = "esp_exiting";
+
+                            lock (_stateLock)
+                            {
+                                _espExitDetected = true;
+
+                                // Start timer to wait for Hello wizard to start
+                                _logger.Info($"ESP exit detected - starting {_helloWaitTimeoutSeconds}s wait timer for Hello wizard");
+                                _helloWaitTimer = new System.Threading.Timer(
+                                    OnHelloWaitTimeout,
+                                    null,
+                                    TimeSpan.FromSeconds(_helloWaitTimeoutSeconds),
+                                    TimeSpan.FromMilliseconds(-1) // One-shot timer
+                                );
+                            }
+
+                            _logger.Info("ESP exit detected - detected via Shell-Core event 62407");
+                        }
+                        else
+                        {
+                            // Not ESP exit, ignore
+                            return;
+                        }
+                        break;
+
+                    default:
+                        return;
+                }
+
+                _onEventCollected(new EnrollmentEvent
+                {
+                    SessionId = _sessionId,
+                    TenantId = _tenantId,
+                    Timestamp = record.TimeCreated ?? DateTime.UtcNow,
+                    EventType = eventType,
+                    Severity = severity,
+                    Source = "HelloDetector",
+                    Phase = EnrollmentPhase.Unknown, // Let EnrollmentTracker decide phase
+                    Message = message,
+                    Data = new Dictionary<string, object>
+                    {
+                        { "windowsEventId", eventId },
+                        { "providerName", record.ProviderName ?? "" },
+                        { "description", description },
+                        { "eventLogChannel", ShellCoreEventLogChannel }
+                    }
+                });
+
+                _logger.Info($"Shell-Core event detected: {eventType} (EventID {eventId})");
+
+                // Trigger FinalizingSetup phase transition
+                if (triggerFinalizingSetup)
+                {
+                    try
+                    {
+                        FinalizingSetupPhaseTriggered?.Invoke(this, finalizingSetupReason);
+                    }
+                    catch { }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Error("Error processing Shell-Core event record", ex);
+            }
+        }
+
+        /// <summary>
+        /// Called when the Hello wait timer expires after ESP exit.
+        /// If Hello wizard hasn't started by now, we assume it's not configured or was skipped.
+        /// Mark Hello as completed so enrollment can proceed.
+        /// </summary>
+        private void OnHelloWaitTimeout(object state)
+        {
+            lock (_stateLock)
+            {
+                if (_helloWizardStarted)
+                {
+                    // Hello wizard already started, this timeout is obsolete
+                    _logger.Debug("Hello wait timeout fired but wizard already started - ignoring");
+                    return;
+                }
+
+                if (_isHelloCompleted)
+                {
+                    // Hello already completed via events 300/301 - timeout is obsolete
+                    _logger.Debug("Hello wait timeout fired but Hello already completed - ignoring");
+                    return;
+                }
+
+                // Timeout expired without Hello wizard starting
+                _logger.Info($"Hello wait timeout ({_helloWaitTimeoutSeconds}s) expired without Hello wizard starting");
+                _logger.Info("Assuming Hello is not configured or was skipped - marking as completed");
+
+                _isHelloCompleted = true;
+
+                // Emit event for tracking
+                _onEventCollected(new EnrollmentEvent
+                {
+                    SessionId = _sessionId,
+                    TenantId = _tenantId,
+                    EventType = "hello_wait_timeout",
+                    Severity = EventSeverity.Info,
+                    Source = "HelloDetector",
+                    Phase = EnrollmentPhase.Unknown,
+                    Message = $"Hello wizard did not start within {_helloWaitTimeoutSeconds}s after ESP exit - assuming not configured",
+                    Data = new Dictionary<string, object>
+                    {
+                        { "timeoutSeconds", _helloWaitTimeoutSeconds },
+                        { "espExitDetected", _espExitDetected }
+                    }
+                });
+
+                // Trigger HelloCompleted so enrollment can proceed
+                try
+                {
+                    HelloCompleted?.Invoke(this, EventArgs.Empty);
+                }
+                catch (Exception ex)
+                {
+                    _logger.Error("Error invoking HelloCompleted from timeout", ex);
+                }
             }
         }
 

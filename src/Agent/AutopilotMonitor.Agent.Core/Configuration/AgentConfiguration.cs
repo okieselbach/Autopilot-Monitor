@@ -130,6 +130,14 @@ namespace AutopilotMonitor.Agent.Core.Configuration
         public double SimulationSpeedFactor { get; set; } = 50;
 
         /// <summary>
+        /// Wait time in seconds after ESP exit before marking Hello as skipped.
+        /// When ESP exits, we wait this duration for Hello wizard to start (event 62404).
+        /// Default: 30 seconds (reasonable for systems under load).
+        /// If Hello wizard starts within this window, we continue waiting for Hello completion (300/301).
+        /// </summary>
+        public int HelloWaitTimeoutSeconds { get; set; } = 30;
+
+        /// <summary>
         /// Validates the configuration
         /// </summary>
         public bool IsValid()

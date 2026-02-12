@@ -1264,8 +1264,11 @@ function DeviceDetailsCard({ events }: { events: EnrollmentEvent[] }) {
 
   // Extract device detail events
   const getEventData = (eventType: string): Record<string, any> | null => {
-    const evt = events.find(e => e.eventType === eventType);
-    return evt?.data ?? null;
+    // Find the NEWEST event of this type (last occurrence) to get the most recent state
+    const matchingEvents = events.filter(e => e.eventType === eventType);
+    if (matchingEvents.length === 0) return null;
+    const latestEvent = matchingEvents[matchingEvents.length - 1];
+    return latestEvent?.data ?? null;
   };
 
   // Helper to check if IP is IPv6
