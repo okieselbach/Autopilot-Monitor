@@ -41,9 +41,14 @@ namespace AutopilotMonitor.Shared.Models
         AppsUser = 5,
 
         /// <summary>
+        /// Finalizing Setup: All user apps completed, waiting for Windows Hello provisioning or final ESP steps
+        /// </summary>
+        FinalizingSetup = 6,
+
+        /// <summary>
         /// Complete: Desktop reached, enrollment succeeded
         /// </summary>
-        Complete = 6,
+        Complete = 7,
 
         /// <summary>
         /// Failed: Enrollment failed

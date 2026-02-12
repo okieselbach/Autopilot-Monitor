@@ -12,6 +12,7 @@ using AutopilotMonitor.Agent.Core.Monitoring.Tracking;
 using AutopilotMonitor.Agent.Core.Monitoring.Simulation;
 using AutopilotMonitor.Agent.Core.Logging;
 using AutopilotMonitor.Shared.Models;
+using Newtonsoft.Json;
 
 namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
 {
@@ -67,6 +68,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         private CancellationTokenSource _cts;
         private bool _allAppsCompletedFired;
 
+        // State persistence: saves tracker state to disk so agent restart continues
+        // from the exact log position without re-parsing or re-building ignore lists.
+        private readonly string _stateDirectory;
+        private readonly string _stateFilePath;
+        private bool _stateDirty;
+
         // Standard GUID capture pattern used as {GUID} placeholder in patterns
         private const string GuidPattern = @"(?<id>[a-z0-9]{8}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{12})";
 
@@ -94,13 +101,20 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         /// </summary>
         public AppPackageStateList PackageStates => _packageStates;
 
-        public ImeLogTracker(string logFolder, List<ImeLogPattern> patterns, AgentLogger logger, int pollingIntervalMs = 100, string matchLogPath = null)
+        public ImeLogTracker(string logFolder, List<ImeLogPattern> patterns, AgentLogger logger, int pollingIntervalMs = 100, string matchLogPath = null, string stateDirectory = null)
         {
             _logFolder = Environment.ExpandEnvironmentVariables(logFolder);
             _logger = logger;
             _pollingIntervalMs = pollingIntervalMs;
             _matchLogPath = matchLogPath;
             _packageStates = new AppPackageStateList(logger);
+
+            // State persistence setup
+            if (!string.IsNullOrEmpty(stateDirectory))
+            {
+                _stateDirectory = Environment.ExpandEnvironmentVariables(stateDirectory);
+                _stateFilePath = Path.Combine(_stateDirectory, "ime-tracker-state.json");
+            }
 
             if (!string.IsNullOrEmpty(_matchLogPath))
             {
@@ -174,6 +188,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         {
             if (_pollingTask != null) return;
 
+            // Restore persisted state from previous agent lifetime (handles agent restart mid-enrollment).
+            // This recovers phase order, ignore list, app states, and log file positions so we continue
+            // exactly where we left off — no re-parsing, no device-phase bleeding.
+            LoadState();
+
             _cts = new CancellationTokenSource();
             var token = _cts.Token;
 
@@ -194,7 +213,21 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                         try { await Task.Delay(1000, token); } catch (OperationCanceledException) { break; }
                     }
 
+                    // Persist state after each polling cycle so agent restart continues from here
+                    if (_stateDirty)
+                    {
+                        SaveState();
+                        _stateDirty = false;
+                    }
+
                     try { await Task.Delay(_pollingIntervalMs, token); } catch (OperationCanceledException) { break; }
+                }
+
+                // Final state save on shutdown
+                if (_stateDirty)
+                {
+                    SaveState();
+                    _stateDirty = false;
                 }
 
                 _logger.Info("ImeLogTracker: polling stopped");
@@ -210,6 +243,217 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             try { _pollingTask?.Wait(TimeSpan.FromSeconds(5)); } catch { }
             _pollingTask = null;
         }
+
+        #region State Persistence
+
+        /// <summary>
+        /// DTO for JSON serialization of tracker state.
+        /// </summary>
+        private class ImeTrackerStateData
+        {
+            public int CurrentPhaseOrder { get; set; }
+            public string LastEspPhaseDetected { get; set; }
+            public bool AllAppsCompletedFired { get; set; }
+            public bool LogPhaseIsCurrentPhase { get; set; }
+            public List<string> SeenAppIds { get; set; }
+            public List<string> IgnoreList { get; set; }
+            public string CurrentPackageId { get; set; }
+            public List<PackageStateData> Packages { get; set; }
+            public Dictionary<string, FilePositionData> FilePositions { get; set; }
+        }
+
+        private class PackageStateData
+        {
+            public string Id { get; set; }
+            public int ListPos { get; set; }
+            public string Name { get; set; }
+            public int RunAs { get; set; }
+            public int Intent { get; set; }
+            public int Targeted { get; set; }
+            public List<string> DependsOn { get; set; }
+            public int InstallationState { get; set; }
+            public bool DownloadingOrInstallingSeen { get; set; }
+            public int? ProgressPercent { get; set; }
+            public long BytesDownloaded { get; set; }
+            public long BytesTotal { get; set; }
+        }
+
+        private class FilePositionData
+        {
+            public long Position { get; set; }
+            public long LastKnownSize { get; set; }
+        }
+
+        /// <summary>
+        /// Loads persisted state from disk. Called on Start() to restore tracker state
+        /// after an agent restart, so parsing continues exactly where it left off.
+        /// </summary>
+        private void LoadState()
+        {
+            if (_stateFilePath == null || !File.Exists(_stateFilePath))
+            {
+                _logger.Info("ImeLogTracker: no persisted state found (fresh enrollment)");
+                return;
+            }
+
+            try
+            {
+                var json = File.ReadAllText(_stateFilePath);
+                var state = JsonConvert.DeserializeObject<ImeTrackerStateData>(json);
+                if (state == null)
+                {
+                    _logger.Warning("ImeLogTracker: persisted state file was empty or invalid");
+                    return;
+                }
+
+                // Restore phase tracking
+                _currentPhaseOrder = state.CurrentPhaseOrder;
+                _lastEspPhaseDetected = state.LastEspPhaseDetected;
+                _allAppsCompletedFired = state.AllAppsCompletedFired;
+                _logPhaseIsCurrentPhase = state.LogPhaseIsCurrentPhase;
+
+                // Restore seen app IDs
+                _seenAppIds.Clear();
+                if (state.SeenAppIds != null)
+                {
+                    foreach (var id in state.SeenAppIds)
+                        _seenAppIds.Add(id);
+                }
+
+                // Restore ignore list
+                if (state.IgnoreList != null)
+                {
+                    foreach (var id in state.IgnoreList)
+                        _packageStates.AddToIgnoreList(id);
+                }
+
+                // Restore current package ID
+                _packageStates.CurrentPackageId = state.CurrentPackageId;
+
+                // Restore package states
+                if (state.Packages != null)
+                {
+                    _packageStates.Clear();
+                    foreach (var p in state.Packages)
+                    {
+                        var pkg = AppPackageState.Restore(
+                            p.Id, p.ListPos, p.Name,
+                            (AppRunAs)p.RunAs, (AppIntent)p.Intent, (AppTargeted)p.Targeted,
+                            p.DependsOn != null ? new HashSet<string>(p.DependsOn) : new HashSet<string>(),
+                            (AppInstallationState)p.InstallationState, p.DownloadingOrInstallingSeen,
+                            p.ProgressPercent, p.BytesDownloaded, p.BytesTotal);
+                        _packageStates.Add(pkg);
+                    }
+                }
+
+                // Restore file positions
+                if (state.FilePositions != null)
+                {
+                    foreach (var kvp in state.FilePositions)
+                    {
+                        var fullPath = Path.Combine(_logFolder, kvp.Key);
+                        _positionTracker.RestorePosition(fullPath, kvp.Value.Position, kvp.Value.LastKnownSize);
+                    }
+                }
+
+                // Re-activate patterns based on restored phase state
+                ActivatePatterns(_logPhaseIsCurrentPhase, force: true);
+
+                _logger.Info($"ImeLogTracker: state restored - phase: {_lastEspPhaseDetected ?? "(none)"} (order: {_currentPhaseOrder}), " +
+                             $"ignore list: {_packageStates.IgnoreList.Count}, packages: {_packageStates.Count}, " +
+                             $"file positions: {state.FilePositions?.Count ?? 0}");
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"ImeLogTracker: failed to load persisted state, starting fresh: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Persists current tracker state to disk as JSON.
+        /// Called after each polling cycle when state has changed.
+        /// </summary>
+        private void SaveState()
+        {
+            if (_stateFilePath == null) return;
+
+            try
+            {
+                // Build state DTO
+                var state = new ImeTrackerStateData
+                {
+                    CurrentPhaseOrder = _currentPhaseOrder,
+                    LastEspPhaseDetected = _lastEspPhaseDetected,
+                    AllAppsCompletedFired = _allAppsCompletedFired,
+                    LogPhaseIsCurrentPhase = _logPhaseIsCurrentPhase,
+                    SeenAppIds = _seenAppIds.ToList(),
+                    IgnoreList = _packageStates.IgnoreList.ToList(),
+                    CurrentPackageId = _packageStates.CurrentPackageId,
+                    Packages = _packageStates.Select(p => new PackageStateData
+                    {
+                        Id = p.Id,
+                        ListPos = p.ListPos,
+                        Name = p.Name,
+                        RunAs = (int)p.RunAs,
+                        Intent = (int)p.Intent,
+                        Targeted = (int)p.Targeted,
+                        DependsOn = p.DependsOn?.ToList() ?? new List<string>(),
+                        InstallationState = (int)p.InstallationState,
+                        DownloadingOrInstallingSeen = p.DownloadingOrInstallingSeen,
+                        ProgressPercent = p.ProgressPercent,
+                        BytesDownloaded = p.BytesDownloaded,
+                        BytesTotal = p.BytesTotal
+                    }).ToList(),
+                    FilePositions = new Dictionary<string, FilePositionData>()
+                };
+
+                // Store file positions by filename only (log folder is known)
+                foreach (var kvp in _positionTracker.GetAllPositions())
+                {
+                    var fileName = Path.GetFileName(kvp.Key);
+                    state.FilePositions[fileName] = new FilePositionData
+                    {
+                        Position = kvp.Value.Position,
+                        LastKnownSize = kvp.Value.LastKnownSize
+                    };
+                }
+
+                // Write atomically: write to temp file then rename
+                Directory.CreateDirectory(_stateDirectory);
+                var tempPath = _stateFilePath + ".tmp";
+                File.WriteAllText(tempPath, JsonConvert.SerializeObject(state, Formatting.Indented));
+                File.Copy(tempPath, _stateFilePath, overwrite: true);
+                try { File.Delete(tempPath); } catch { }
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug($"ImeLogTracker: failed to save state: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Deletes persisted state file. Called on enrollment complete to ensure
+        /// a fresh state on the next enrollment cycle.
+        /// </summary>
+        public void DeleteState()
+        {
+            if (_stateFilePath == null) return;
+
+            try
+            {
+                if (File.Exists(_stateFilePath))
+                {
+                    File.Delete(_stateFilePath);
+                    _logger.Info("ImeLogTracker: persisted state deleted");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug($"ImeLogTracker: failed to delete state file: {ex.Message}");
+            }
+        }
+
+        #endregion
 
         private async Task CheckLogFilesAsync(CancellationToken token)
         {
@@ -288,6 +532,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                         }
 
                         _positionTracker.SetPosition(filePath, stream.Position);
+                        _stateDirty = true;
                     }
                 }
                 catch (FileNotFoundException) { }
@@ -550,7 +795,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         {
             try
             {
-                var policies = JsonSerializer.Deserialize<List<Dictionary<string, object>>>(policiesJson);
+                var policies = System.Text.Json.JsonSerializer.Deserialize<List<Dictionary<string, object>>>(policiesJson);
                 if (policies != null)
                 {
                     // Ignore user-targeted packages during device setup (we only track device phase in general)

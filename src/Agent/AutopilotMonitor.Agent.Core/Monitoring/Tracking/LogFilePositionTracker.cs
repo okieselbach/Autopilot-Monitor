@@ -64,9 +64,32 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 return state.Position;
             return 0;
         }
+
+        /// <summary>
+        /// Returns all tracked positions for state persistence.
+        /// Keys are full file paths.
+        /// </summary>
+        public Dictionary<string, FilePositionState> GetAllPositions()
+        {
+            return new Dictionary<string, FilePositionState>(_positions, StringComparer.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// Restores a previously persisted position for a file.
+        /// Used on agent restart to continue reading from the last known position.
+        /// </summary>
+        public void RestorePosition(string filePath, long position, long lastKnownSize)
+        {
+            _positions[filePath] = new FilePositionState
+            {
+                Position = position,
+                LastKnownSize = lastKnownSize,
+                LastReadTime = DateTime.UtcNow
+            };
+        }
     }
 
-    internal class FilePositionState
+    public class FilePositionState
     {
         public long Position { get; set; }
         public long LastKnownSize { get; set; }

@@ -113,6 +113,33 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         }
 
         /// <summary>
+        /// Restores an AppPackageState from persisted data (used on agent restart).
+        /// </summary>
+        internal static AppPackageState Restore(
+            string id, int listPos, string name,
+            AppRunAs runAs, AppIntent intent, AppTargeted targeted,
+            HashSet<string> dependsOn,
+            AppInstallationState installationState, bool downloadingOrInstallingSeen,
+            int? progressPercent, long bytesDownloaded, long bytesTotal)
+        {
+            var pkg = new AppPackageState(id, listPos)
+            {
+                Name = name,
+                RunAs = runAs,
+                Intent = intent,
+                Targeted = targeted,
+                DependsOn = dependsOn ?? new HashSet<string>(),
+                InstallationState = installationState,
+                DownloadingOrInstallingSeen = downloadingOrInstallingSeen,
+                ProgressPercent = progressPercent,
+                BytesDownloaded = bytesDownloaded,
+                BytesTotal = bytesTotal,
+                InstallationStateLastChangedTicks = Stopwatch.GetTimestamp()
+            };
+            return pkg;
+        }
+
+        /// <summary>
         /// Updates the app name. Only updates if the new name is not a truncated version of the current name.
         /// </summary>
         public bool UpdateName(string newName)

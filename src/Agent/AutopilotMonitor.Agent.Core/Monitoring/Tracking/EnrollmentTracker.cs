@@ -85,8 +85,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             _imeLogFolder = imeLogFolderOverride ?? DefaultImeLogFolder;
             _helloDetector = helloDetector;
 
-            // Create ImeLogTracker
-            _imeLogTracker = new ImeLogTracker(_imeLogFolder, _imeLogPatterns, _logger, matchLogPath: imeMatchLogPath);
+            // Create ImeLogTracker with state persistence directory
+            var stateDirectory = @"%ProgramData%\AutopilotMonitor\State";
+            _imeLogTracker = new ImeLogTracker(_imeLogFolder, _imeLogPatterns, _logger, matchLogPath: imeMatchLogPath, stateDirectory: stateDirectory);
             _imeLogTracker.SimulationMode = simulationMode;
             _imeLogTracker.SpeedFactor = speedFactor;
 
@@ -713,12 +714,33 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             // Emit final summary
             EmitAppTrackingSummary();
 
-            // If we're in AppsDevice phase, we might transition back to DeviceSetup or to AccountSetup
-            // If we're in AppsUser phase, enrollment is likely about to complete
-            // For now, just log - the IME log will show the next phase change
             if (_lastEspPhase != null)
             {
                 _logger.Info($"EnrollmentTracker: All apps completed while in phase '{_lastEspPhase}'");
+
+                // When all user apps complete during AccountSetup, transition to FinalizingSetup.
+                // This signals the progress portal that app installation is done and
+                // we're now waiting for final ESP steps (e.g. Windows Hello provisioning).
+                if (string.Equals(_lastEspPhase, "AccountSetup", StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.Info("EnrollmentTracker: User apps completed - transitioning to FinalizingSetup phase");
+                    _emitEvent(new EnrollmentEvent
+                    {
+                        SessionId = _sessionId,
+                        TenantId = _tenantId,
+                        EventType = "esp_phase_changed",
+                        Severity = EventSeverity.Info,
+                        Source = "EnrollmentTracker",
+                        Phase = EnrollmentPhase.FinalizingSetup,
+                        Message = "ESP phase: FinalizingSetup (all user apps completed, waiting for final steps)",
+                        Data = new Dictionary<string, object>
+                        {
+                            { "espPhase", "FinalizingSetup" },
+                            { "autoDetected", true },
+                            { "previousPhase", "AccountSetup" }
+                        }
+                    });
+                }
             }
         }
 
@@ -782,6 +804,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 Phase = EnrollmentPhase.Complete,
                 Message = "Autopilot enrollment completed successfully (user session completed)"
             });
+
+            // Clean up persisted tracker state so next enrollment starts fresh
+            _imeLogTracker?.DeleteState();
         }
 
         /// <summary>
@@ -808,6 +833,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     Phase = EnrollmentPhase.Complete,
                     Message = "Autopilot enrollment completed successfully (Hello provisioning completed)"
                 });
+
+                // Clean up persisted tracker state so next enrollment starts fresh
+                _imeLogTracker?.DeleteState();
             }
             else
             {
