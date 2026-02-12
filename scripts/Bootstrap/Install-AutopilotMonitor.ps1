@@ -69,6 +69,29 @@ function Write-Log {
     Add-Content -Path $LogFile -Value $logMessage -ErrorAction SilentlyContinue
 }
 
+function Get-FileMd5Base64 {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    $md5 = [System.Security.Cryptography.MD5]::Create()
+    try {
+        $stream = [System.IO.File]::OpenRead($Path)
+        try {
+            $hashBytes = $md5.ComputeHash($stream)
+        }
+        finally {
+            $stream.Dispose()
+        }
+
+        return [Convert]::ToBase64String($hashBytes)
+    }
+    finally {
+        $md5.Dispose()
+    }
+}
+
 try {
     Write-Log "===== Autopilot Monitor Bootstrap Started ====="
     Write-Log "API Base URL: $ApiBaseUrl"
@@ -78,10 +101,11 @@ try {
     # Check 1: OS install date must be within threshold (fresh device)
     $osInstallDate = (Get-CimInstance Win32_OperatingSystem).InstallDate
     $osAge = (Get-Date) - $osInstallDate
-    Write-Log "OS install date: $osInstallDate (age: $([math]::Round($osAge.TotalHours, 1))h)"
+    $osAgeHoursRounded = "{0:0.0}" -f $osAge.TotalHours
+    Write-Log "OS install date: $osInstallDate (age: ${osAgeHoursRounded}h)"
 
     if ($osAge.TotalHours -gt $MaxOsAgeHours) {
-        Write-Log "SKIP: OS was installed $([math]::Round($osAge.TotalHours, 1))h ago (threshold: ${MaxOsAgeHours}h). Device is not freshly provisioned."
+        Write-Log "SKIP: OS was installed ${osAgeHoursRounded}h ago (threshold: ${MaxOsAgeHours}h). Device is not freshly provisioned."
         exit 0
     }
 
@@ -153,8 +177,50 @@ try {
         try {
             # Download agent ZIP
             $zipPath = Join-Path $env:TEMP "AutopilotMonitor-Agent.zip"
-            Invoke-WebRequest -Uri $AgentDownloadUrl -OutFile $zipPath -UseBasicParsing -TimeoutSec 120
-            Write-Log "Downloaded agent to $zipPath"
+            $maxDownloadAttempts = 3
+            $downloadAttempt = 0
+            $downloadResponse = $null
+
+            do {
+                $downloadAttempt++
+                try {
+                    Write-Log "Download attempt ${downloadAttempt}/${maxDownloadAttempts}"
+                    $downloadResponse = Invoke-WebRequest `
+                        -Uri $AgentDownloadUrl `
+                        -OutFile $zipPath `
+                        -UseBasicParsing `
+                        -TimeoutSec 30 `
+                        -ErrorAction Stop `
+                        -PassThru
+                    Write-Log "Downloaded agent to $zipPath"
+                    break
+                }
+                catch {
+                    if ($downloadAttempt -ge $maxDownloadAttempts) {
+                        throw
+                    }
+
+                    $retryDelaysInSeconds = @(2, 4, 8)
+                    $retryDelaySeconds = $retryDelaysInSeconds[$downloadAttempt - 1]
+                    Write-Log "Download failed (attempt $downloadAttempt): $($_.Exception.Message). Retrying in ${retryDelaySeconds}s..."
+                    Start-Sleep -Seconds $retryDelaySeconds
+                }
+            } while ($downloadAttempt -lt $maxDownloadAttempts)
+
+            # Integrity check: compare HTTP Content-MD5 with local ZIP hash
+            $expectedMd5Header = $downloadResponse.Headers["Content-MD5"]
+            $expectedMd5 = if ($expectedMd5Header -is [System.Array]) { "$($expectedMd5Header[0])".Trim() } else { "$expectedMd5Header".Trim() }
+            if ($expectedMd5 -notmatch '\S') {
+                Write-Log "WARNING: Response has no Content-MD5 header - skipping MD5 integrity validation"
+            }
+            else {
+                $actualMd5 = Get-FileMd5Base64 -Path $zipPath
+                Write-Log "Validating Content-MD5 header against downloaded ZIP"
+                if ($actualMd5 -ne $expectedMd5) {
+                    throw "MD5 integrity check failed. Expected (Content-MD5)='$expectedMd5', Actual='$actualMd5'"
+                }
+                Write-Log "MD5 integrity check passed"
+            }
 
             # Extract to agent bin path
             Expand-Archive -Path $zipPath -DestinationPath $AgentBinPath -Force
