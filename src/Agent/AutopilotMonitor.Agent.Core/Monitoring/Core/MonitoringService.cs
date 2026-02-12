@@ -88,6 +88,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         {
             _logger.Info("Starting monitoring service");
 
+            // Fetch remote config (collector toggles + gather rules) from backend
+            FetchRemoteConfig();
+
             // Register session with backend
             RegisterSessionAsync().Wait();
 
@@ -117,23 +120,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 EmitGeoLocationEvent();
             }
 
-            // Note: Device info (network, DNS, proxy, Autopilot profile, AAD join, etc.)
-            // is collected by EnrollmentTracker when it starts
-
-            // Fetch remote config (collector toggles + gather rules) from backend
-            FetchRemoteConfig();
-
-            // Start event collectors (core + optional based on remote config)
+            // Start event collectors (HelloCollector + optional based on remote config)
             StartEventCollectors();
 
-            // Start optional collectors based on remote config
+            // Start optional collectors based on remote config (PerformanceCollector)
             StartOptionalCollectors();
 
             // Start gather rule executor
             StartGatherRuleExecutor();
-
-            // Start periodic config refresh
-            _remoteConfigService?.StartPeriodicRefresh();
 
             _logger.Info("Monitoring service started");
         }
@@ -217,7 +211,6 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             try
             {
                 _remoteConfigService = new RemoteConfigService(_apiClient, _configuration.TenantId, _logger);
-                _remoteConfigService.ConfigChanged += OnRemoteConfigChanged;
                 _remoteConfigService.FetchConfigAsync().Wait(TimeSpan.FromSeconds(15));
             }
             catch (Exception ex)
@@ -265,7 +258,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                         _logger,
                         imeLogPatterns,
                         _configuration.ImeLogPathOverride,
-                        imeMatchLogPath: imeMatchLogPath
+                        imeMatchLogPath: imeMatchLogPath,
+                        helloDetector: _helloDetector
                     );
                     _enrollmentTracker.Start();
                 }
@@ -316,42 +310,6 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             catch (Exception ex)
             {
                 _logger.Error("Error starting gather rule executor", ex);
-            }
-        }
-
-        /// <summary>
-        /// Called when remote configuration changes (periodic refresh detected a new version)
-        /// Dynamically starts/stops optional collectors and updates gather rules
-        /// </summary>
-        private void OnRemoteConfigChanged(object sender, AgentConfigResponse newConfig)
-        {
-            _logger.Info("Remote config changed - updating collectors and rules");
-
-            try
-            {
-                // Hot-reload IME log patterns without restart
-                if (_enrollmentTracker != null && newConfig.ImeLogPatterns != null)
-                {
-                    _enrollmentTracker.UpdatePatterns(newConfig.ImeLogPatterns);
-                }
-
-                // Stop and restart optional collectors with new settings
-                StopOptionalCollectors();
-                StartOptionalCollectors();
-
-                // Update gather rules
-                if (_gatherRuleExecutor != null)
-                {
-                    _gatherRuleExecutor.UpdateRules(newConfig.GatherRules);
-                }
-                else
-                {
-                    StartGatherRuleExecutor();
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.Error("Error applying config changes", ex);
             }
         }
 
@@ -537,9 +495,6 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 // Stop gather rule executor
                 _gatherRuleExecutor?.Dispose();
                 _gatherRuleExecutor = null;
-
-                // Stop remote config refresh
-                _remoteConfigService?.StopPeriodicRefresh();
 
                 _logger.Info("Event collectors stopped");
             }

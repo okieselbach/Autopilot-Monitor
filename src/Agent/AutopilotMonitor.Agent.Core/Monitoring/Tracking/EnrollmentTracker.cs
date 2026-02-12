@@ -22,6 +22,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         private readonly AgentLogger _logger;
         private readonly string _imeLogFolder;
         private readonly List<ImeLogPattern> _imeLogPatterns;
+        private readonly Collectors.HelloDetector _helloDetector;
 
         private ImeLogTracker _imeLogTracker;
         private Timer _summaryTimer;
@@ -29,6 +30,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         private string _lastEspPhase; // Track last ESP phase to prevent duplicate events
         private bool _hasAutoSwitchedToAppsPhase; // Track if we've already auto-switched to apps phase for current ESP phase
         private string _enrollmentType = "v1"; // "v1" = Autopilot Classic/ESP, "v2" = Windows Device Preparation
+        private bool _isWaitingForHello = false; // Track if we're waiting for Hello to complete before sending enrollment_complete
 
         // Default IME log folder
         private const string DefaultImeLogFolder = @"%ProgramData%\Microsoft\IntuneManagementExtension\Logs";
@@ -72,7 +74,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             string imeLogFolderOverride = null,
             bool simulationMode = false,
             double speedFactor = 50,
-            string imeMatchLogPath = null)
+            string imeMatchLogPath = null,
+            Collectors.HelloDetector helloDetector = null)
         {
             _sessionId = sessionId;
             _tenantId = tenantId;
@@ -80,6 +83,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             _logger = logger;
             _imeLogPatterns = imeLogPatterns ?? new List<ImeLogPattern>();
             _imeLogFolder = imeLogFolderOverride ?? DefaultImeLogFolder;
+            _helloDetector = helloDetector;
 
             // Create ImeLogTracker
             _imeLogTracker = new ImeLogTracker(_imeLogFolder, _imeLogPatterns, _logger, matchLogPath: imeMatchLogPath);
@@ -94,6 +98,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             _imeLogTracker.OnPoliciesDiscovered = HandlePoliciesDiscovered;
             _imeLogTracker.OnAllAppsCompleted = HandleAllAppsCompleted;
             _imeLogTracker.OnUserSessionCompleted = HandleUserSessionCompleted;
+
+            // Subscribe to HelloDetector completion event if available
+            if (_helloDetector != null)
+            {
+                _helloDetector.HelloCompleted += OnHelloCompleted;
+            }
         }
 
         /// <summary>
@@ -720,6 +730,47 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             _summaryTimer?.Change(Timeout.Infinite, Timeout.Infinite);
             _summaryTimerActive = false;
 
+            // Check if Windows Hello is configured but not yet completed
+            if (_helloDetector != null)
+            {
+                bool helloPolicyConfigured = _helloDetector.IsPolicyConfigured;
+                bool helloCompleted = _helloDetector.IsHelloCompleted;
+
+                if (helloPolicyConfigured && !helloCompleted)
+                {
+                    // Hello is configured but not finished yet - DO NOT mark enrollment as complete
+                    _logger.Info("EnrollmentTracker: Windows Hello policy is configured but provisioning has not completed yet.");
+                    _logger.Info("EnrollmentTracker: Waiting for Hello provisioning to finish before marking enrollment as complete.");
+
+                    _emitEvent(new EnrollmentEvent
+                    {
+                        SessionId = _sessionId,
+                        TenantId = _tenantId,
+                        EventType = "waiting_for_hello",
+                        Severity = EventSeverity.Info,
+                        Source = "EnrollmentTracker",
+                        Phase = EnrollmentPhase.AccountSetup,
+                        Message = "User apps completed - waiting for Windows Hello provisioning to finish"
+                    });
+
+                    // Set flag so we know we're waiting
+                    _isWaitingForHello = true;
+
+                    // Note: enrollment_complete will be triggered when Hello events arrive
+                    // or when the agent is stopped/times out
+                    return;
+                }
+
+                if (helloPolicyConfigured && helloCompleted)
+                {
+                    _logger.Info("EnrollmentTracker: Windows Hello provisioning has completed. Enrollment can complete.");
+                }
+                else
+                {
+                    _logger.Info("EnrollmentTracker: No Windows Hello policy detected. Enrollment can complete.");
+                }
+            }
+
             // Emit enrollment completed event
             _emitEvent(new EnrollmentEvent
             {
@@ -731,6 +782,37 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 Phase = EnrollmentPhase.Complete,
                 Message = "Autopilot enrollment completed successfully (user session completed)"
             });
+        }
+
+        /// <summary>
+        /// Called when Windows Hello provisioning completes (via HelloDetector event)
+        /// If we were waiting for Hello, now we can mark enrollment as complete
+        /// </summary>
+        private void OnHelloCompleted(object sender, EventArgs e)
+        {
+            _logger.Info("EnrollmentTracker: Received HelloCompleted event from HelloDetector");
+
+            if (_isWaitingForHello)
+            {
+                _logger.Info("EnrollmentTracker: Hello provisioning completed while waiting - marking enrollment as complete now");
+                _isWaitingForHello = false;
+
+                // Emit enrollment completed event
+                _emitEvent(new EnrollmentEvent
+                {
+                    SessionId = _sessionId,
+                    TenantId = _tenantId,
+                    EventType = "enrollment_complete",
+                    Severity = EventSeverity.Info,
+                    Source = "EnrollmentTracker",
+                    Phase = EnrollmentPhase.Complete,
+                    Message = "Autopilot enrollment completed successfully (Hello provisioning completed)"
+                });
+            }
+            else
+            {
+                _logger.Debug("EnrollmentTracker: HelloCompleted event received but not waiting - ignoring");
+            }
         }
 
         private void SummaryTimerCallback(object state)
@@ -763,6 +845,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         public void Dispose()
         {
             Stop();
+
+            // Unsubscribe from HelloDetector event
+            if (_helloDetector != null)
+            {
+                _helloDetector.HelloCompleted -= OnHelloCompleted;
+            }
+
             _summaryTimer?.Dispose();
             _imeLogTracker?.Dispose();
         }

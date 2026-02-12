@@ -19,15 +19,9 @@ namespace AutopilotMonitor.Agent.Core.Configuration
         private readonly string _tenantId;
         private readonly AgentLogger _logger;
         private readonly string _cacheFilePath;
-        private Timer _refreshTimer;
 
         private AgentConfigResponse _currentConfig;
         private readonly object _configLock = new object();
-
-        /// <summary>
-        /// Fires when the remote configuration changes
-        /// </summary>
-        public event EventHandler<AgentConfigResponse> ConfigChanged;
 
         /// <summary>
         /// Gets the current configuration (thread-safe)
@@ -99,68 +93,6 @@ namespace AutopilotMonitor.Agent.Core.Configuration
             return defaults;
         }
 
-        /// <summary>
-        /// Starts periodic config refresh
-        /// </summary>
-        public void StartPeriodicRefresh()
-        {
-            var interval = CurrentConfig?.RefreshIntervalSeconds ?? 300;
-            _logger.Info($"Starting periodic config refresh every {interval}s");
-
-            _refreshTimer = new Timer(
-                _ => RefreshConfigAsync(),
-                null,
-                TimeSpan.FromSeconds(interval),
-                TimeSpan.FromSeconds(interval)
-            );
-        }
-
-        /// <summary>
-        /// Stops periodic config refresh
-        /// </summary>
-        public void StopPeriodicRefresh()
-        {
-            _refreshTimer?.Dispose();
-            _refreshTimer = null;
-        }
-
-        private async void RefreshConfigAsync()
-        {
-            try
-            {
-                var newConfig = await _apiClient.GetAgentConfigAsync(_tenantId);
-
-                if (newConfig != null && newConfig.Success)
-                {
-                    var oldConfig = CurrentConfig;
-
-                    // Check if config actually changed
-                    if (oldConfig == null || newConfig.ConfigVersion != oldConfig.ConfigVersion)
-                    {
-                        _logger.Info($"Remote config updated: version {oldConfig?.ConfigVersion} -> {newConfig.ConfigVersion}");
-                        LogCollectorSettings(newConfig.Collectors);
-                        SetConfig(newConfig);
-                        CacheConfig(newConfig);
-                        ConfigChanged?.Invoke(this, newConfig);
-                    }
-
-                    // Update refresh interval if changed
-                    if (newConfig.RefreshIntervalSeconds != (oldConfig?.RefreshIntervalSeconds ?? 300))
-                    {
-                        _logger.Info($"Config refresh interval changed to {newConfig.RefreshIntervalSeconds}s");
-                        _refreshTimer?.Change(
-                            TimeSpan.FromSeconds(newConfig.RefreshIntervalSeconds),
-                            TimeSpan.FromSeconds(newConfig.RefreshIntervalSeconds)
-                        );
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.Debug($"Config refresh failed (will retry): {ex.Message}");
-            }
-        }
-
         private void SetConfig(AgentConfigResponse config)
         {
             lock (_configLock)
@@ -226,7 +158,7 @@ namespace AutopilotMonitor.Agent.Core.Configuration
 
         public void Dispose()
         {
-            StopPeriodicRefresh();
+            // Nothing to dispose
         }
     }
 }

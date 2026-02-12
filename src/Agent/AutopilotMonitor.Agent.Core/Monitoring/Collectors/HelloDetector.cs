@@ -26,6 +26,16 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         private readonly string _tenantId;
         private readonly Action<EnrollmentEvent> _onEventCollected;
         private System.Diagnostics.Eventing.Reader.EventLogWatcher _watcher;
+        private System.Threading.Timer _policyCheckTimer;
+
+        private bool _isPolicyConfigured = false;
+        private bool _isHelloCompleted = false;
+        private readonly object _stateLock = new object();
+
+        /// <summary>
+        /// Callback invoked when Hello provisioning completes (successfully, failed, skipped, or blocked)
+        /// </summary>
+        public event EventHandler HelloCompleted;
 
         private const string EventLogChannel = "Microsoft-Windows-User Device Registration/Admin";
 
@@ -59,12 +69,36 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
+        /// <summary>
+        /// Gets whether Windows Hello for Business policy is configured (enabled or disabled)
+        /// </summary>
+        public bool IsPolicyConfigured
+        {
+            get { lock (_stateLock) { return _isPolicyConfigured; } }
+        }
+
+        /// <summary>
+        /// Gets whether Windows Hello provisioning has completed (successfully, failed, or skipped)
+        /// </summary>
+        public bool IsHelloCompleted
+        {
+            get { lock (_stateLock) { return _isHelloCompleted; } }
+        }
+
         public void Start()
         {
             _logger.Info("Starting Hello detector");
 
-            // Check if WHfB policy is configured
+            // Check if WHfB policy is configured initially
             CheckHelloPolicy();
+
+            // Start periodic policy check (every 30 seconds) to detect policy arriving later via MDM
+            _policyCheckTimer = new System.Threading.Timer(
+                _ => CheckHelloPolicy(),
+                null,
+                TimeSpan.FromSeconds(30),
+                TimeSpan.FromSeconds(30)
+            );
 
             // Subscribe to User Device Registration event log
             StartEventLogWatcher();
@@ -73,6 +107,20 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         public void Stop()
         {
             _logger.Info("Stopping Hello detector");
+
+            // Stop periodic policy check timer
+            if (_policyCheckTimer != null)
+            {
+                try
+                {
+                    _policyCheckTimer.Dispose();
+                    _policyCheckTimer = null;
+                }
+                catch (Exception ex)
+                {
+                    _logger.Error("Error stopping Hello detector policy check timer", ex);
+                }
+            }
 
             if (_watcher != null)
             {
@@ -96,31 +144,45 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             {
                 var (isEnabled, source) = DetectHelloPolicy();
 
-                if (isEnabled.HasValue)
+                lock (_stateLock)
                 {
-                    var status = isEnabled.Value ? "enabled" : "disabled";
-
-                    _onEventCollected(new EnrollmentEvent
+                    // If policy was not configured before but is now, update state and emit event
+                    if (!_isPolicyConfigured && isEnabled.HasValue)
                     {
-                        SessionId = _sessionId,
-                        TenantId = _tenantId,
-                        EventType = "hello_policy_detected",
-                        Severity = EventSeverity.Info,
-                        Source = "HelloDetector",
-                        Phase = EnrollmentPhase.Unknown,
-                        Message = $"Windows Hello for Business policy detected: {status} (via {source})",
-                        Data = new Dictionary<string, object>
-                        {
-                            { "helloEnabled", isEnabled.Value },
-                            { "policySource", source }
-                        }
-                    });
+                        _isPolicyConfigured = true;
+                        var status = isEnabled.Value ? "enabled" : "disabled";
 
-                    _logger.Info($"WHfB policy: {status} (source: {source})");
-                }
-                else
-                {
-                    _logger.Info("No WHfB policy found in registry - Hello may use tenant default");
+                        _onEventCollected(new EnrollmentEvent
+                        {
+                            SessionId = _sessionId,
+                            TenantId = _tenantId,
+                            EventType = "hello_policy_detected",
+                            Severity = EventSeverity.Info,
+                            Source = "HelloDetector",
+                            Phase = EnrollmentPhase.Unknown,
+                            Message = $"Windows Hello for Business policy detected: {status} (via {source})",
+                            Data = new Dictionary<string, object>
+                            {
+                                { "helloEnabled", isEnabled.Value },
+                                { "policySource", source }
+                            }
+                        });
+
+                        _logger.Info($"WHfB policy detected: {status} (source: {source})");
+
+                        // Stop periodic policy check - we found what we were looking for
+                        if (_policyCheckTimer != null)
+                        {
+                            _policyCheckTimer.Dispose();
+                            _policyCheckTimer = null;
+                            _logger.Debug("Stopped periodic Hello policy check - policy has been detected");
+                        }
+                    }
+                    else if (!_isPolicyConfigured && !isEnabled.HasValue)
+                    {
+                        // Policy still not found - this is normal during early enrollment (Debug level to keep UI clean)
+                        _logger.Debug("Periodic Hello policy check: No WHfB policy found yet - will check again");
+                    }
                 }
             }
             catch (Exception ex)
@@ -132,6 +194,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         private (bool? isEnabled, string source) DetectHelloPolicy()
         {
             // 1. Check CSP/Intune-delivered policy (per-tenant paths)
+            // Policy can be device-scoped: {tenantId}\Device\Policies
+            // or user-scoped: {tenantId}\{userSid}\Policies
             try
             {
                 using (var baseCspKey = Registry.LocalMachine.OpenSubKey(CspPolicyBasePath, false))
@@ -140,14 +204,27 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     {
                         foreach (var tenantSubKey in baseCspKey.GetSubKeyNames())
                         {
-                            using (var policiesKey = baseCspKey.OpenSubKey($@"{tenantSubKey}\Device\Policies", false))
+                            using (var tenantKey = baseCspKey.OpenSubKey(tenantSubKey, false))
                             {
-                                if (policiesKey != null)
+                                if (tenantKey != null)
                                 {
-                                    var value = policiesKey.GetValue("UsePassportForWork");
-                                    if (value != null)
+                                    // Check all subkeys (Device or user SIDs like S-1-5-...)
+                                    foreach (var scopeSubKey in tenantKey.GetSubKeyNames())
                                     {
-                                        return (Convert.ToInt32(value) == 1, "CSP/Intune");
+                                        using (var policiesKey = tenantKey.OpenSubKey($@"{scopeSubKey}\Policies", false))
+                                        {
+                                            if (policiesKey != null)
+                                            {
+                                                var value = policiesKey.GetValue("UsePassportForWork");
+                                                if (value != null)
+                                                {
+                                                    var scope = scopeSubKey.Equals("Device", StringComparison.OrdinalIgnoreCase)
+                                                        ? "device"
+                                                        : "user";
+                                                    return (Convert.ToInt32(value) == 1, $"CSP/Intune ({scope}-scoped)");
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -235,24 +312,44 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                         eventType = "hello_provisioning_completed";
                         severity = EventSeverity.Info;
                         message = "Windows Hello for Business provisioned successfully - NGC key registered";
+                        // Mark Hello as completed (terminal event)
+                        lock (_stateLock) { _isHelloCompleted = true; }
+                        _logger.Info("Windows Hello provisioning COMPLETED successfully");
+                        // Trigger HelloCompleted event for EnrollmentTracker
+                        try { HelloCompleted?.Invoke(this, EventArgs.Empty); } catch { }
                         break;
 
                     case EventId_NgcKeyRegistrationFailed: // 301
                         eventType = "hello_provisioning_failed";
                         severity = EventSeverity.Error;
                         message = "Windows Hello for Business provisioning failed - NGC key registration error";
+                        // Mark Hello as completed (terminal event - failed counts as completed)
+                        lock (_stateLock) { _isHelloCompleted = true; }
+                        _logger.Info("Windows Hello provisioning COMPLETED with failure");
+                        // Trigger HelloCompleted event for EnrollmentTracker
+                        try { HelloCompleted?.Invoke(this, EventArgs.Empty); } catch { }
                         break;
 
                     case EventId_ProvisioningWillNotLaunch: // 360
                         eventType = "hello_provisioning_skipped";
                         severity = EventSeverity.Warning;
                         message = "Windows Hello for Business provisioning skipped - prerequisites not met";
+                        // Mark Hello as completed (terminal event - skipped counts as completed)
+                        lock (_stateLock) { _isHelloCompleted = true; }
+                        _logger.Info("Windows Hello provisioning COMPLETED (skipped)");
+                        // Trigger HelloCompleted event for EnrollmentTracker
+                        try { HelloCompleted?.Invoke(this, EventArgs.Empty); } catch { }
                         break;
 
                     case EventId_ProvisioningBlocked: // 362
                         eventType = "hello_provisioning_blocked";
                         severity = EventSeverity.Warning;
                         message = "Windows Hello for Business provisioning blocked";
+                        // Mark Hello as completed (terminal event - blocked counts as completed)
+                        lock (_stateLock) { _isHelloCompleted = true; }
+                        _logger.Info("Windows Hello provisioning COMPLETED (blocked)");
+                        // Trigger HelloCompleted event for EnrollmentTracker
+                        try { HelloCompleted?.Invoke(this, EventArgs.Empty); } catch { }
                         break;
 
                     case EventId_PinStatus: // 376
