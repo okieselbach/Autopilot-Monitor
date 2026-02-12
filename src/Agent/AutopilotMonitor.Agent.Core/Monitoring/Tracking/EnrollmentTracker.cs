@@ -158,7 +158,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
 
         private void CollectDeviceInfo()
         {
-            _logger.Info("EnrollmentTracker: collecting device info");
+            _logger.Info("EnrollmentTracker: collecting device info (at start)");
 
             CollectNetworkAdapters();
             CollectDnsConfiguration();
@@ -167,6 +167,20 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             CollectSecureBootStatus();
             CollectBitLockerStatus();
             CollectAadJoinStatus();
+        }
+
+        /// <summary>
+        /// Collects device info that may change during enrollment (e.g., BitLocker enabled via policy).
+        /// Called at enrollment complete to capture final state.
+        /// </summary>
+        private void CollectDeviceInfoAtEnd()
+        {
+            _logger.Info("EnrollmentTracker: collecting device info (at end)");
+
+            // BitLocker can be enabled during enrollment via policy
+            CollectBitLockerStatus();
+
+            // Add more collectors here as needed
         }
 
         private void CollectNetworkAdapters()
@@ -297,13 +311,16 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 var data = new Dictionary<string, object>();
 
                 // Read CloudAssigned* values from AutopilotSettings and detect enrollment type
-                using (var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Provisioning\AutopilotSettings"))
+                // before: using (var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Provisioning\AutopilotSettings"))
+                using (var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Provisioning\Diagnostics\AutoPilot"))
                 {
                     if (key != null)
                     {
                         data["cloudAssignedTenantId"] = key.GetValue("CloudAssignedTenantId")?.ToString();
                         data["cloudAssignedTenantDomain"] = key.GetValue("CloudAssignedTenantDomain")?.ToString();
                         data["cloudAssignedOobeConfig"] = key.GetValue("CloudAssignedOobeConfig")?.ToString();
+
+                        data["deploymentProfileName"] = key.GetValue("DeploymentProfileName")?.ToString();
 
                         // Read WDP detection values
                         var deviceReg = key.GetValue("CloudAssignedDeviceRegistration")?.ToString();
@@ -320,13 +337,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 }
 
                 // Read deployment profile name
-                using (var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Provisioning\Diagnostics\AutoPilot"))
-                {
-                    if (key != null)
-                    {
-                        data["deploymentProfileName"] = key.GetValue("DeploymentProfileName")?.ToString();
-                    }
-                }
+                // is now in the section above
+                //using (var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Provisioning\Diagnostics\AutoPilot"))
+                //{
+                //    if (key != null)
+                //    {
+                //        data["deploymentProfileName"] = key.GetValue("DeploymentProfileName")?.ToString();
+                //    }
+                //}
 
                 // Include enrollment type in autopilot_profile event data
                 data["enrollmentType"] = _enrollmentType;
@@ -804,6 +822,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 Phase = EnrollmentPhase.Complete,
                 Message = "Autopilot enrollment completed successfully (user session completed)"
             });
+
+            // Collect final device info (BitLocker may have been enabled during enrollment)
+            CollectDeviceInfoAtEnd();
 
             // Clean up persisted tracker state so next enrollment starts fresh
             _imeLogTracker?.DeleteState();
