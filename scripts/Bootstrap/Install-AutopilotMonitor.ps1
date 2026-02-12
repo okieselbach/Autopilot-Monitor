@@ -132,8 +132,8 @@ try {
     $agentConfig = @{
         apiBaseUrl = $ApiBaseUrl
         uploadIntervalSeconds = 30
-        cleanupOnExit = $true
-        selfDestructOnComplete = $true
+        cleanupOnExit = $false
+        selfDestructOnComplete = $false
         keepLogFile = $true
         imeMatchLogPath = "C:\ProgramData\AutopilotMonitor\Logs\ime_pattern_matches.log"
     }

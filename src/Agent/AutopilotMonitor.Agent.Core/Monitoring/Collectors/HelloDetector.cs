@@ -370,7 +370,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     EventType = eventType,
                     Severity = severity,
                     Source = "HelloDetector",
-                    Phase = EnrollmentPhase.Unknown,
+                    Phase = EnrollmentPhase.FinalizingSetup,
                     Message = message,
                     Data = new Dictionary<string, object>
                     {

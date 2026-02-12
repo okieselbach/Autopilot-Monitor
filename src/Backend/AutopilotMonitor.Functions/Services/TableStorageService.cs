@@ -340,7 +340,7 @@ namespace AutopilotMonitor.Functions.Services
         /// <summary>
         /// Updates the session status and current phase
         /// </summary>
-        public async Task<bool> UpdateSessionStatusAsync(string tenantId, string sessionId, SessionStatus status, EnrollmentPhase? currentPhase = null, string? failureReason = null)
+        public async Task<bool> UpdateSessionStatusAsync(string tenantId, string sessionId, SessionStatus status, EnrollmentPhase? currentPhase = null, string? failureReason = null, DateTime? completedAt = null)
         {
             SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
             SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
@@ -370,7 +370,8 @@ namespace AutopilotMonitor.Functions.Services
                     // Set completion time if succeeded or failed
                     if (status == SessionStatus.Succeeded || status == SessionStatus.Failed)
                     {
-                        session["CompletedAt"] = DateTime.UtcNow;
+                        // Use the provided completedAt timestamp (from event) if available, otherwise use current time
+                        session["CompletedAt"] = completedAt ?? DateTime.UtcNow;
                     }
 
                     // Set failure reason if failed

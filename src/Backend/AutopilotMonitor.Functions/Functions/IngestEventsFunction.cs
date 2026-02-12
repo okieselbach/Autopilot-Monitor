@@ -152,18 +152,19 @@ namespace AutopilotMonitor.Functions.Functions
                 // Update session status based on events
                 if (completionEvent != null)
                 {
-                    // Enrollment completed successfully
+                    // Enrollment completed successfully - use event timestamp for accurate duration
                     await _storageService.UpdateSessionStatusAsync(
                         request.TenantId,
                         request.SessionId,
                         SessionStatus.Succeeded,
-                        completionEvent.Phase
+                        completionEvent.Phase,
+                        completedAt: completionEvent.Timestamp
                     );
                     _logger.LogInformation($"{sessionPrefix} Status: Succeeded");
                 }
                 else if (failureEvent != null)
                 {
-                    // Enrollment failed
+                    // Enrollment failed - use event timestamp for accurate duration
                     var failureReason = failureEvent.Data?.ContainsKey("errorCode") == true
                         ? $"{failureEvent.Message} ({failureEvent.Data["errorCode"]})"
                         : failureEvent.Message;
@@ -173,7 +174,8 @@ namespace AutopilotMonitor.Functions.Functions
                         request.SessionId,
                         SessionStatus.Failed,
                         failureEvent.Phase,
-                        failureReason
+                        failureReason,
+                        completedAt: failureEvent.Timestamp
                     );
                     _logger.LogWarning($"{sessionPrefix} Status: Failed - {failureReason}");
                 }

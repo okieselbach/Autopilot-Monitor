@@ -62,22 +62,24 @@ const V1_PHASES = [
   { id: 3, name: "Apps (Device)",       shortName: "Apps (Device)" },
   { id: 4, name: "Account Setup",       shortName: "Account Setup" },
   { id: 5, name: "Apps (User)",         shortName: "Apps (User)" },
-  { id: 6, name: "Complete",            shortName: "Complete" },
+  { id: 6, name: "Finalizing Setup",    shortName: "Finalizing" },
+  { id: 7, name: "Complete",            shortName: "Complete" },
 ];
 
 const V2_PHASES = [
   { id: 0, name: "Start",               shortName: "Start" },
   { id: 1, name: "Device Preparation",  shortName: "Device Preparation" },
   { id: 3, name: "App Installation",    shortName: "Apps" },
-  { id: 6, name: "Complete",            shortName: "Complete" },
+  { id: 6, name: "Finalizing Setup",    shortName: "Finalizing" },
+  { id: 7, name: "Complete",            shortName: "Complete" },
 ];
 
-const V1_PHASE_ORDER = ["Start", "Device Preparation", "Device Setup", "Apps (Device)", "Account Setup", "Apps (User)", "Complete", "Failed"];
-const V2_PHASE_ORDER = ["Start", "Device Preparation", "App Installation", "Complete", "Failed"];
+const V1_PHASE_ORDER = ["Start", "Device Preparation", "Device Setup", "Apps (Device)", "Account Setup", "Apps (User)", "Finalizing Setup", "Complete", "Failed"];
+const V2_PHASE_ORDER = ["Start", "Device Preparation", "App Installation", "Finalizing Setup", "Complete", "Failed"];
 
 // Lookup by phase number — Phase 3 has different names per enrollment type
-const V1_PHASE_NAMES: Record<number, string> = { [-1]: "Unknown", 0: "Start", 1: "Device Preparation", 2: "Device Setup", 3: "Apps (Device)",    4: "Account Setup", 5: "Apps (User)", 6: "Complete", 99: "Failed" };
-const V2_PHASE_NAMES: Record<number, string> = { [-1]: "Unknown", 0: "Start", 1: "Device Preparation", 2: "Device Setup", 3: "App Installation", 4: "Account Setup", 5: "Apps (User)", 6: "Complete", 99: "Failed" };
+const V1_PHASE_NAMES: Record<number, string> = { [-1]: "Unknown", 0: "Start", 1: "Device Preparation", 2: "Device Setup", 3: "Apps (Device)",    4: "Account Setup", 5: "Apps (User)", 6: "Finalizing Setup", 7: "Complete", 99: "Failed" };
+const V2_PHASE_NAMES: Record<number, string> = { [-1]: "Unknown", 0: "Start", 1: "Device Preparation", 2: "Device Setup", 3: "App Installation", 4: "Account Setup", 5: "Apps (User)", 6: "Finalizing Setup", 7: "Complete", 99: "Failed" };
 
 export default function SessionDetailPage() {
   const params = useParams();
@@ -565,7 +567,7 @@ export default function SessionDetailPage() {
               <h2 className="text-xl font-semibold text-gray-900 mb-6">Enrollment Progress</h2>
               <PhaseTimeline
                 currentPhase={session.currentPhase}
-                completedPhases={session.status === 'Succeeded' ? [6] : []}
+                completedPhases={session.status === 'Succeeded' ? [7] : []}
                 events={events}
                 sessionStatus={session.status}
                 enrollmentType={session.enrollmentType}
@@ -1309,6 +1311,7 @@ function DeviceDetailsCard({ events }: { events: EnrollmentEvent[] }) {
   };
 
   const agentStarted = getEventData("agent_started");
+  const bootTime = getEventData("boot_time");
   const networkAdapters = getEventData("network_adapters");
   const dnsConfig = getEventData("dns_configuration");
   const proxyConfig = getEventData("proxy_configuration");
@@ -1319,7 +1322,7 @@ function DeviceDetailsCard({ events }: { events: EnrollmentEvent[] }) {
   const secureBootStatus = getEventData("secureboot_status");
 
   // Check if we have any device detail events at all
-  const hasData = agentStarted || networkAdapters || dnsConfig || proxyConfig || autopilotProfile ||
+  const hasData = agentStarted || bootTime || networkAdapters || dnsConfig || proxyConfig || autopilotProfile ||
                   aadJoinStatus || imeVersion || bitLockerStatus || secureBootStatus;
 
   if (!hasData) return null;
@@ -1342,10 +1345,11 @@ function DeviceDetailsCard({ events }: { events: EnrollmentEvent[] }) {
       {expanded && (
         <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* Boot Time */}
-          {agentStarted?.bootTime && (
+          {(bootTime?.bootTime || agentStarted?.bootTime) && (
             <DetailSection title="System Boot">
-              <DetailRow label="Boot Time" value={new Date(agentStarted.bootTime).toLocaleString()} />
-              {agentStarted.agentVersion && <DetailRow label="Agent Version" value={agentStarted.agentVersion} />}
+              <DetailRow label="Boot Time" value={new Date(bootTime?.bootTime || agentStarted?.bootTime).toLocaleString()} />
+              {bootTime?.uptimeMinutes && <DetailRow label="Uptime" value={`${Math.floor(bootTime.uptimeMinutes / 60)}h ${bootTime.uptimeMinutes % 60}m`} />}
+              {agentStarted?.agentVersion && <DetailRow label="Agent Version" value={agentStarted.agentVersion} />}
             </DetailSection>
           )}
 

@@ -161,6 +161,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         {
             _logger.Info("EnrollmentTracker: collecting device info (at start)");
 
+            CollectBootTime();
             CollectNetworkAdapters();
             CollectDnsConfiguration();
             CollectProxyConfiguration();
@@ -182,6 +183,53 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             CollectBitLockerStatus();
 
             // Add more collectors here as needed
+        }
+
+        private void CollectBootTime()
+        {
+            try
+            {
+                var data = new Dictionary<string, object>();
+
+                // Query WMI for OS boot time
+                using (var searcher = new ManagementObjectSearcher("SELECT LastBootUpTime FROM Win32_OperatingSystem"))
+                {
+                    foreach (ManagementObject obj in searcher.Get())
+                    {
+                        var lastBootUpTimeStr = obj["LastBootUpTime"]?.ToString();
+                        if (!string.IsNullOrEmpty(lastBootUpTimeStr))
+                        {
+                            // WMI time format: yyyyMMddHHmmss.ffffff+/-UUU
+                            var bootTime = ManagementDateTimeConverter.ToDateTime(lastBootUpTimeStr);
+                            data["bootTime"] = bootTime.ToString("o"); // ISO 8601 format
+                            data["bootTimeUtc"] = bootTime.ToUniversalTime().ToString("o");
+
+                            // Calculate uptime
+                            var uptime = DateTime.Now - bootTime;
+                            data["uptimeMinutes"] = (int)uptime.TotalMinutes;
+                            data["uptimeHours"] = uptime.TotalHours;
+
+                            _logger.Debug($"Boot time: {bootTime:o}, Uptime: {uptime.TotalMinutes:F1} minutes");
+                            break;
+                        }
+                    }
+                }
+
+                if (!data.ContainsKey("bootTime"))
+                {
+                    data["note"] = "Boot time could not be determined";
+                }
+
+                EmitDeviceInfoEvent("boot_time",
+                    data.ContainsKey("bootTime")
+                        ? $"Last boot: {data["bootTime"]}"
+                        : "Boot time unavailable",
+                    data);
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"EnrollmentTracker: failed to collect boot time: {ex.Message}");
+            }
         }
 
         private void CollectNetworkAdapters()
@@ -790,7 +838,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                         EventType = "waiting_for_hello",
                         Severity = EventSeverity.Info,
                         Source = "EnrollmentTracker",
-                        Phase = EnrollmentPhase.AccountSetup,
+                        Phase = EnrollmentPhase.FinalizingSetup,
                         Message = "User apps completed - waiting for Windows Hello provisioning to finish"
                     });
 
