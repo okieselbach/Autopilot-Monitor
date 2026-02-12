@@ -475,6 +475,28 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         }
 
         /// <summary>
+        /// Triggers cleanup without running enrollment monitoring.
+        /// Used when enrollment complete marker is detected on startup (cleanup retry).
+        /// </summary>
+        public void TriggerCleanup()
+        {
+            _logger.Info("TriggerCleanup invoked - executing cleanup without enrollment monitoring");
+
+            if (_configuration.SelfDestructOnComplete)
+            {
+                ExecuteSelfDestruct();
+            }
+            else if (_configuration.CleanupOnExit)
+            {
+                ExecuteCleanup();
+            }
+            else
+            {
+                _logger.Info("No cleanup configured - nothing to do");
+            }
+        }
+
+        /// <summary>
         /// Stops all event collection components
         /// </summary>
         private void StopEventCollectors()

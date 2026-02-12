@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using AutopilotMonitor.Agent.Core.Configuration;
@@ -31,6 +32,26 @@ namespace AutopilotMonitor.Agent
         {
             var consoleMode = args.Contains("--console") || Environment.UserInteractive;
 
+            // Process guard: prevent multiple agent instances from running
+            if (IsAnotherAgentInstanceRunning())
+            {
+                var message = "Another agent process is already running. This instance will exit.";
+                if (consoleMode)
+                    Console.WriteLine($"ERROR: {message}");
+
+                // Try to log if possible, but this might fail if logger isn't initialized yet
+                try
+                {
+                    var logDir = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor\Logs");
+                    var logger = new AgentLogger(logDir, enableDebug: false);
+                    logger.Warning(message);
+                }
+                catch { }
+
+                Environment.Exit(1);
+                return;
+            }
+
             if (consoleMode)
             {
                 Console.WriteLine("Autopilot Monitor Agent");
@@ -48,6 +69,13 @@ namespace AutopilotMonitor.Agent
                 logger.Info("============================================================================================================");
                 logger.Info($"============================== Agent starting ({(consoleMode ? "console" : "background/SYSTEM")}) ==============================");
                 logger.Info("============================================================================================================");
+
+                // Check for enrollment complete marker (handles scheduled task cleanup retry)
+                if (CheckEnrollmentCompleteMarker(config, logger, consoleMode))
+                {
+                    // Marker was found and handled (cleanup executed or skipped) - exit
+                    return;
+                }
 
                 if (consoleMode)
                 {
@@ -398,6 +426,90 @@ namespace AutopilotMonitor.Agent
                 SimulationSpeedFactor = simulationSpeedFactor,
                 KeepLogFile           = keepLogFile
             };
+        }
+
+        /// <summary>
+        /// Checks if another AutopilotMonitor.Agent.exe process is already running.
+        /// </summary>
+        static bool IsAnotherAgentInstanceRunning()
+        {
+            try
+            {
+                var currentProcess = Process.GetCurrentProcess();
+                var processes = Process.GetProcessesByName(currentProcess.ProcessName);
+
+                // If there's more than one process with our name, another instance is running
+                return processes.Length > 1;
+            }
+            catch
+            {
+                // If we can't check, assume no conflict
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Checks for enrollment complete marker and handles cleanup retry if needed.
+        /// Returns true if marker was found and agent should exit.
+        /// </summary>
+        static bool CheckEnrollmentCompleteMarker(AgentConfiguration config, AgentLogger logger, bool consoleMode)
+        {
+            var stateDirectory = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor\State");
+            var markerPath = Path.Combine(stateDirectory, "enrollment-complete.marker");
+
+            if (!File.Exists(markerPath))
+            {
+                // No marker - proceed with normal enrollment
+                return false;
+            }
+
+            logger.Info("Enrollment complete marker detected from previous session");
+
+            if (!config.CleanupOnExit && !config.SelfDestructOnComplete)
+            {
+                // No cleanup configured - just exit
+                logger.Info("Enrollment already completed (no cleanup is configured). Agent will exit.");
+                if (consoleMode)
+                    Console.WriteLine("Enrollment already completed (no cleanup is configured). Agent will exit.");
+                return true;
+            }
+
+            // Cleanup is configured - attempt it now in case scheduled task failed
+            logger.Info("Enrollment already completed. Attempting cleanup retry (scheduled task may have failed)...");
+            if (consoleMode)
+                Console.WriteLine("Enrollment already completed. Attempting cleanup retry...");
+
+            try
+            {
+                using (var service = new MonitoringService(config, logger))
+                {
+                    // Trigger cleanup directly without running enrollment
+                    if (config.SelfDestructOnComplete)
+                    {
+                        logger.Info("Executing self-destruct cleanup...");
+                        // Call the internal cleanup method via reflection or expose it
+                        // For now, we'll create a minimal service and let it clean up on dispose
+                        service.TriggerCleanup();
+                    }
+                    else if (config.CleanupOnExit)
+                    {
+                        logger.Info("Executing standard cleanup...");
+                        service.TriggerCleanup();
+                    }
+                }
+
+                logger.Info("Cleanup retry completed. Agent will exit.");
+                if (consoleMode)
+                    Console.WriteLine("Cleanup retry completed. Agent will exit.");
+            }
+            catch (Exception ex)
+            {
+                logger.Warning($"Cleanup retry failed: {ex.Message}");
+                if (consoleMode)
+                    Console.WriteLine($"WARNING: Cleanup retry failed: {ex.Message}");
+            }
+
+            return true;
         }
     }
 }

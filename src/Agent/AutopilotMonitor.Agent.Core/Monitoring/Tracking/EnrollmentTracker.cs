@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Management;
 using System.Threading;
@@ -823,6 +824,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 Message = "Autopilot enrollment completed successfully (user session completed)"
             });
 
+            // Write enrollment complete marker for cleanup retry detection
+            WriteEnrollmentCompleteMarker();
+
             // Collect final device info (BitLocker may have been enabled during enrollment)
             CollectDeviceInfoAtEnd();
 
@@ -854,6 +858,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     Phase = EnrollmentPhase.Complete,
                     Message = "Autopilot enrollment completed successfully (Hello provisioning completed)"
                 });
+
+                // Write enrollment complete marker for cleanup retry detection
+                WriteEnrollmentCompleteMarker();
 
                 // Clean up persisted tracker state so next enrollment starts fresh
                 _imeLogTracker?.DeleteState();
@@ -903,6 +910,28 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
 
             _summaryTimer?.Dispose();
             _imeLogTracker?.Dispose();
+        }
+
+        /// <summary>
+        /// Writes an enrollment complete marker to the state directory.
+        /// This marker is checked on agent restart to handle cleanup retry if scheduled task fails.
+        /// </summary>
+        private void WriteEnrollmentCompleteMarker()
+        {
+            try
+            {
+                var stateDirectory = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor\State");
+                Directory.CreateDirectory(stateDirectory);
+
+                var markerPath = Path.Combine(stateDirectory, "enrollment-complete.marker");
+                File.WriteAllText(markerPath, $"Enrollment completed at {DateTime.UtcNow:O}");
+
+                _logger.Info($"Enrollment complete marker written: {markerPath}");
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"Failed to write enrollment complete marker: {ex.Message}");
+            }
         }
     }
 }
