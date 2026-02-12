@@ -116,6 +116,15 @@ try {
         }
     }
 
+    # Check 3: Is the agent already installed? (leftover from previous run)
+    if (Test-Path $AgentBinPath) {
+        $existingAgent = Get-ChildItem -Path $AgentBinPath -Filter "AutopilotMonitor.Agent.exe" -ErrorAction SilentlyContinue
+        if ($existingAgent) {
+            Write-Log "SKIP: Agent already installed at $($existingAgent.FullName). Previous enrollment may have been in progress. Please check if enrollment completed or clean up C:\ProgramData\AutopilotMonitor before re-running."
+            exit 0
+        }
+    }
+
     Write-Log "Pre-flight checks passed - device is freshly provisioned and enrollment in progress"
 
     # Create agent configuration (JSON - NO REGISTRY!)
