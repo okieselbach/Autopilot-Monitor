@@ -125,8 +125,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             _policyCheckTimer = new System.Threading.Timer(
                 _ => CheckHelloPolicy(),
                 null,
-                TimeSpan.FromSeconds(30), // Initial delay before first check (to allow policies to apply during enrollment)
-                TimeSpan.FromSeconds(30)  // Subsequent checks every 15 seconds
+                TimeSpan.FromSeconds(10), // Initial delay before first check
+                TimeSpan.FromSeconds(10)  // Subsequent checks every 10 seconds (fast detection, low cost)
             );
 
             // Subscribe to User Device Registration event log
@@ -537,7 +537,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                         if (System.Text.RegularExpressions.Regex.IsMatch(description, @"OOBE_ESP.*Exit", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
                         {
                             eventType = "esp_exiting";
-                            message = "ESP (Enrollment Status Page) is exiting - enrollment nearing completion";
+                            message = "ESP (Enrollment Status Page) phase exiting";
                             triggerFinalizingSetup = true;
                             finalizingSetupReason = "esp_exiting";
 
@@ -545,17 +545,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                             {
                                 _espExitDetected = true;
 
-                                // Start timer to wait for Hello wizard to start
-                                _logger.Info($"ESP exit detected - starting {_helloWaitTimeoutSeconds}s wait timer for Hello wizard");
-                                _helloWaitTimer = new System.Threading.Timer(
-                                    OnHelloWaitTimeout,
-                                    null,
-                                    TimeSpan.FromSeconds(_helloWaitTimeoutSeconds),
-                                    TimeSpan.FromMilliseconds(-1) // One-shot timer
-                                );
+                                // NOTE: We do NOT start the Hello wait timer here!
+                                // Event 62407 occurs at every ESP phase transition (Device->Account, Account->End)
+                                // EnrollmentTracker will decide based on _lastEspPhase whether to start the timer
                             }
 
-                            _logger.Info("ESP exit detected - detected via Shell-Core event 62407");
+                            _logger.Info("ESP phase exit detected - detected via Shell-Core event 62407");
                         }
                         else
                         {
@@ -660,6 +655,45 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                 {
                     _logger.Error("Error invoking HelloCompleted from timeout", ex);
                 }
+            }
+        }
+
+        /// <summary>
+        /// Starts the Hello wait timer. Should be called by EnrollmentTracker when AccountSetup phase exits.
+        /// The timer waits for Hello wizard to start (event 62404) within the configured timeout.
+        /// If timeout expires without Hello wizard, marks Hello as completed so enrollment can proceed.
+        /// </summary>
+        public void StartHelloWaitTimer()
+        {
+            lock (_stateLock)
+            {
+                // Don't start if Hello already started or completed
+                if (_helloWizardStarted)
+                {
+                    _logger.Debug("StartHelloWaitTimer called but Hello wizard already started - skipping");
+                    return;
+                }
+
+                if (_isHelloCompleted)
+                {
+                    _logger.Debug("StartHelloWaitTimer called but Hello already completed - skipping");
+                    return;
+                }
+
+                // Don't start if timer already running
+                if (_helloWaitTimer != null)
+                {
+                    _logger.Debug("StartHelloWaitTimer called but timer already running - skipping");
+                    return;
+                }
+
+                _logger.Info($"Starting Hello wait timer ({_helloWaitTimeoutSeconds}s) - waiting for Hello wizard to start");
+                _helloWaitTimer = new System.Threading.Timer(
+                    OnHelloWaitTimeout,
+                    null,
+                    TimeSpan.FromSeconds(_helloWaitTimeoutSeconds),
+                    TimeSpan.FromMilliseconds(-1) // One-shot timer
+                );
             }
         }
 

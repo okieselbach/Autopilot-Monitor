@@ -906,25 +906,69 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         /// </summary>
         private void OnFinalizingSetupPhaseTriggered(object sender, string reason)
         {
-            _logger.Info($"EnrollmentTracker: FinalizingSetup phase triggered - reason: {reason}");
+            _logger.Info($"EnrollmentTracker: FinalizingSetup phase trigger received - reason: {reason}");
 
-            // Emit phase change event to FinalizingSetup
-            _emitEvent(new EnrollmentEvent
+            // If ESP exiting, check which phase we're in
+            if (reason == "esp_exiting")
             {
-                SessionId = _sessionId,
-                TenantId = _tenantId,
-                EventType = "esp_phase_changed",
-                Severity = EventSeverity.Info,
-                Source = "EnrollmentTracker",
-                Phase = EnrollmentPhase.FinalizingSetup,
-                Message = $"ESP phase: FinalizingSetup (triggered by {reason})",
-                Data = new Dictionary<string, object>
+                if (string.Equals(_lastEspPhase, "AccountSetup", StringComparison.OrdinalIgnoreCase))
                 {
-                    { "espPhase", "FinalizingSetup" },
-                    { "autoDetected", true },
-                    { "triggeredBy", reason }
+                    // AccountSetup phase exiting - this is the final ESP exit, start Hello wait timer
+                    _logger.Info("EnrollmentTracker: AccountSetup phase exiting - enrollment nearing completion, starting Hello wait timer");
+
+                    // Emit phase change event to FinalizingSetup
+                    _emitEvent(new EnrollmentEvent
+                    {
+                        SessionId = _sessionId,
+                        TenantId = _tenantId,
+                        EventType = "esp_phase_changed",
+                        Severity = EventSeverity.Info,
+                        Source = "EnrollmentTracker",
+                        Phase = EnrollmentPhase.FinalizingSetup,
+                        Message = "ESP phase: FinalizingSetup (AccountSetup completed, waiting for final steps)",
+                        Data = new Dictionary<string, object>
+                        {
+                            { "espPhase", "FinalizingSetup" },
+                            { "autoDetected", true },
+                            { "triggeredBy", reason },
+                            { "previousPhase", "AccountSetup" }
+                        }
+                    });
+
+                    // Start Hello wait timer (waits for Hello wizard to start or timeout)
+                    _helloDetector?.StartHelloWaitTimer();
                 }
-            });
+                else
+                {
+                    // DeviceSetup phase exiting - this is just transition to AccountSetup, not final
+                    _logger.Info($"EnrollmentTracker: ESP phase exiting from '{_lastEspPhase ?? "unknown"}' - intermediate transition, not starting Hello wait timer");
+
+                    // Don't emit FinalizingSetup event yet, this is not the final exit
+                    // The regular esp_phase_changed event will be emitted when we detect AccountSetup phase
+                }
+            }
+            else if (reason == "hello_wizard_started")
+            {
+                // Hello wizard started - transition to FinalizingSetup regardless of previous phase
+                _logger.Info("EnrollmentTracker: Hello wizard started - transitioning to FinalizingSetup phase");
+
+                _emitEvent(new EnrollmentEvent
+                {
+                    SessionId = _sessionId,
+                    TenantId = _tenantId,
+                    EventType = "esp_phase_changed",
+                    Severity = EventSeverity.Info,
+                    Source = "EnrollmentTracker",
+                    Phase = EnrollmentPhase.FinalizingSetup,
+                    Message = "ESP phase: FinalizingSetup (Hello wizard started)",
+                    Data = new Dictionary<string, object>
+                    {
+                        { "espPhase", "FinalizingSetup" },
+                        { "autoDetected", true },
+                        { "triggeredBy", reason }
+                    }
+                });
+            }
         }
 
         private void SummaryTimerCallback(object state)
