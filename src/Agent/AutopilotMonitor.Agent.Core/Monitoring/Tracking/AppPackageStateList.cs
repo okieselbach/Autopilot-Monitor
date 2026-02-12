@@ -18,9 +18,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         public string CurrentPackageId { get; set; }
 
         /// <summary>
-        /// Apps to ignore (e.g., user-targeted apps during device phase)
+        /// Apps to ignore (e.g., user-targeted apps during device phase).
+        /// Case-insensitive because GUIDs may appear in different casing across IME log entries and policy JSON.
         /// </summary>
-        public List<string> IgnoreList { get; } = new List<string>();
+        public HashSet<string> IgnoreList { get; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         private readonly AgentLogger _logger;
 
@@ -240,11 +241,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         /// </summary>
         public bool AddToIgnoreList(string id)
         {
-            if (string.IsNullOrEmpty(id) || IgnoreList.Contains(id))
+            if (string.IsNullOrEmpty(id))
                 return false;
 
-            IgnoreList.Add(id);
-            return true;
+            return IgnoreList.Add(id); // HashSet.Add returns false if already present (case-insensitive)
         }
 
         /// <summary>

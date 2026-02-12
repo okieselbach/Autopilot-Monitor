@@ -42,6 +42,21 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         private List<CompiledPattern> _activePatterns = new List<CompiledPattern>();
         private bool _logPhaseIsCurrentPhase = false;
 
+        // Phase isolation: track ALL app IDs seen during pattern matching in the current phase.
+        // On phase change, these are added to the ignore list to prevent device-phase apps from
+        // bleeding into AccountSetup. This is more comprehensive than only ignoring packageStates
+        // because setcurrentapp, esptrackstatus etc. see IDs that never enter packageStates.
+        private readonly HashSet<string> _seenAppIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // Forward-only phase progression: prevents accidental phase bounce (e.g. DeviceSetup
+        // re-detected during AccountSetup if IME re-evaluates device apps and logs the old phase).
+        private static readonly Dictionary<string, int> EspPhaseOrder = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+        {
+            { "DeviceSetup", 1 },
+            { "AccountSetup", 2 }
+        };
+        private int _currentPhaseOrder = 0;
+
         // Simulation mode
         public bool SimulationMode { get; set; }
         public double SpeedFactor { get; set; } = 50;
@@ -294,6 +309,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 if (useCurrentApp && string.IsNullOrEmpty(id))
                     id = _packageStates.CurrentPackageId;
 
+                // Track every app ID seen during the current phase for comprehensive ignore on phase change
+                if (!string.IsNullOrEmpty(id))
+                    _seenAppIds.Add(id);
+
                 switch (pattern.Action?.ToLower())
                 {
                     case "imestarted":
@@ -446,29 +465,56 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
 
         private void HandleEspPhaseDetected(string espPhaseString)
         {
-            bool logPhaseIsCurrentPhase;
+            // Validate phase and get its ordinal for forward-only enforcement
+            int phaseOrd;
+            if (!EspPhaseOrder.TryGetValue(espPhaseString, out phaseOrd))
+                return; // Not a recognized ESP phase
 
-            if (string.Equals(espPhaseString, "DeviceSetup", StringComparison.OrdinalIgnoreCase))
-                logPhaseIsCurrentPhase = true; // We treat DeviceSetup as current phase
-            else if (string.Equals(espPhaseString, "AccountSetup", StringComparison.OrdinalIgnoreCase))
-                logPhaseIsCurrentPhase = true; // AccountSetup is also current phase
-            else
-                return; // Not a valid/relevant phase
+            bool logPhaseIsCurrentPhase = true; // Both DeviceSetup and AccountSetup are "current"
+
+            // Forward-only phase progression: reject backward transitions.
+            // During AccountSetup, IME may re-evaluate device apps and log "In EspPhase: DeviceSetup"
+            // which would corrupt tracking if we allowed it to trigger a phase change.
+            if (phaseOrd < _currentPhaseOrder)
+            {
+                _logger.Debug($"ImeLogTracker: ignoring backward phase transition to {espPhaseString} (current phase order: {_currentPhaseOrder})");
+                return;
+            }
 
             // If the ESP phase actually changed (e.g. DeviceSetup -> AccountSetup),
-            // move all known apps into the ignore list so they won't emit events again in the new phase.
-            // The IME re-reports already-installed apps at the start of each new phase; we must silence them.
+            // move ALL known app IDs into the ignore list so they won't emit events in the new phase.
+            // We use both _packageStates (apps from policiesdiscovered) AND _seenAppIds (all IDs from
+            // any pattern match) to ensure comprehensive coverage - apps seen via setcurrentapp,
+            // esptrackstatus etc. that never entered _packageStates are also silenced.
             if (!string.Equals(_lastEspPhaseDetected, espPhaseString, StringComparison.OrdinalIgnoreCase))
             {
                 if (_lastEspPhaseDetected != null) // Not the first phase detection
                 {
-                    _logger.Info($"ImeLogTracker: ESP phase changed from {_lastEspPhaseDetected} to {espPhaseString} - silencing {_packageStates.Count} previous-phase apps");
+                    var ignoredFromStates = 0;
+                    var ignoredFromSeen = 0;
+
                     foreach (var pkg in _packageStates)
-                        _packageStates.AddToIgnoreList(pkg.Id);
+                    {
+                        if (_packageStates.AddToIgnoreList(pkg.Id))
+                            ignoredFromStates++;
+                    }
+                    foreach (var appId in _seenAppIds)
+                    {
+                        if (_packageStates.AddToIgnoreList(appId))
+                            ignoredFromSeen++;
+                    }
+
+                    _logger.Info($"ImeLogTracker: ESP phase changed from {_lastEspPhaseDetected} to {espPhaseString} - " +
+                                 $"silenced {ignoredFromStates} packages + {ignoredFromSeen} additional seen IDs " +
+                                 $"(total ignore list: {_packageStates.IgnoreList.Count})");
+
                     _packageStates.Clear();
+                    _packageStates.SetCurrent(""); // Reset current package to avoid stale device-phase reference
+                    _seenAppIds.Clear();
                     _allAppsCompletedFired = false;
                 }
                 _lastEspPhaseDetected = espPhaseString;
+                _currentPhaseOrder = phaseOrd;
             }
 
             _logger.Info($"ImeLogTracker: ESP phase detected: {espPhaseString}");
