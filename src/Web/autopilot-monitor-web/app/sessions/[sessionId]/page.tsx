@@ -1313,6 +1313,25 @@ function DeviceDetailsCard({ events }: { events: EnrollmentEvent[] }) {
     return { ipv4, ipv6 };
   };
 
+  const getBitLockerEncryptionMethodLabel = (value: unknown): string => {
+    const method = value?.toString();
+    const names: Record<string, string> = {
+      "0": "None / Unknown",
+      "1": "AES-128 mit Diffuser (legacy)",
+      "2": "AES-256 mit Diffuser (legacy)",
+      "3": "AES-128",
+      "4": "AES-256",
+      "5": "Hardware Encryption",
+      "6": "XTS-AES 256",
+      "7": "XTS-AES 128",
+      "8": "Hardware Encryption (Full Disk)",
+      "9": "Hardware Encryption (Data Only)",
+    };
+
+    if (!method) return "Unknown";
+    return names[method] ?? `Unknown (${method})`;
+  };
+
   const agentStarted = getEventData("agent_started");
   const bootTime = getEventData("boot_time");
   const osInfo = getEventData("os_info");
@@ -1367,12 +1386,12 @@ function DeviceDetailsCard({ events }: { events: EnrollmentEvent[] }) {
           )}
 
           {/* System */}
-          {(bootTime?.bootTime || agentStarted?.bootTime || agentStarted?.agentVersion || imeVersion || deviceLocation?.country || deviceLocation?.Country || deviceLocation?.timezone || deviceLocation?.Timezone) && (
+          {(bootTime?.bootTime || agentStarted?.bootTime || agentStarted?.agentVersion || imeVersion || aadJoinStatus?.joinType || deviceLocation?.country || deviceLocation?.Country || deviceLocation?.timezone || deviceLocation?.Timezone) && (
             <DetailSection title="System">
               {(bootTime?.bootTime || agentStarted?.bootTime) && (
                 <DetailRow label="Boot Time" value={new Date(bootTime?.bootTime || agentStarted?.bootTime).toLocaleString()} />
               )}
-              {bootTime?.uptimeMinutes && <DetailRow label="Uptime" value={`${Math.floor(bootTime.uptimeMinutes / 60)}h ${bootTime.uptimeMinutes % 60}m`} />}
+              {bootTime?.uptimeMinutes && <DetailRow label="Uptime until enrollment starts" value={`${Math.floor(bootTime.uptimeMinutes / 60)}h ${bootTime.uptimeMinutes % 60}m`} />}
               {agentStarted?.agentVersion && <DetailRow label="Monitor Agent Version" value={agentStarted.agentVersion} />}
               {imeVersion && <DetailRow label="IME Agent Version" value={imeVersion.version ?? imeVersion.agentVersion ?? "Unknown"} />}
               {(deviceLocation?.country || deviceLocation?.Country) && (
@@ -1465,7 +1484,7 @@ function DeviceDetailsCard({ events }: { events: EnrollmentEvent[] }) {
               {autopilotProfile.AadDeviceId && <DetailRow label="AAD Device ID" value={autopilotProfile.AadDeviceId} />}
               {autopilotProfile.CloudAssignedMdmId && <DetailRow label="MDM ID" value={autopilotProfile.CloudAssignedMdmId} />}
               {autopilotProfile.CloudAssignedDomainJoinMethod !== undefined && (
-                <DetailRow label="Domain Join Method" value={autopilotProfile.CloudAssignedDomainJoinMethod === "0" ? "AAD Join" : autopilotProfile.CloudAssignedDomainJoinMethod} />
+                <DetailRow label="Domain Join Method" value={autopilotProfile.CloudAssignedDomainJoinMethod === "0" ? "Entra Join" : autopilotProfile.CloudAssignedDomainJoinMethod} />
               )}
               {autopilotProfile.CloudAssignedForcedEnrollment !== undefined && (
                 <DetailRow label="Forced Enrollment" value={autopilotProfile.CloudAssignedForcedEnrollment === "1" ? "Yes" : "No"} />
@@ -1477,14 +1496,6 @@ function DeviceDetailsCard({ events }: { events: EnrollmentEvent[] }) {
               {!autopilotProfile.DeploymentProfileName && autopilotProfile.deploymentProfileName && <DetailRow label="Profile Name" value={autopilotProfile.deploymentProfileName} />}
               {!autopilotProfile.CloudAssignedTenantId && autopilotProfile.cloudAssignedTenantId && <DetailRow label="Tenant ID" value={autopilotProfile.cloudAssignedTenantId} />}
               {!autopilotProfile.CloudAssignedOobeConfig && autopilotProfile.oobeConfig && <DetailRow label="OOBE Config" value={autopilotProfile.oobeConfig} />}
-            </DetailSection>
-          )}
-
-          {/* Identity */}
-          {aadJoinStatus && (
-            <DetailSection title="Identity">
-              <DetailRow label="Join Type" value={aadJoinStatus.joinType ?? "Unknown"} />
-              {aadJoinStatus.tenantId && <DetailRow label="Tenant ID" value={aadJoinStatus.tenantId} />}
             </DetailSection>
           )}
 
@@ -1502,7 +1513,9 @@ function DeviceDetailsCard({ events }: { events: EnrollmentEvent[] }) {
                       {(bitLockerStatus.volumes as any[]).map((vol: any, i: number) => (
                         <div key={i}>
                           {vol.driveLetter} {vol.protectionStatus === "1" ? "Protected" : "Not Protected"}
-                          {vol.encryptionMethod && ` (Method: ${vol.encryptionMethod})`}
+                          {vol.encryptionMethod !== undefined && vol.encryptionMethod !== null && vol.encryptionMethod !== "" && (
+                            ` (Method: ${getBitLockerEncryptionMethodLabel(vol.encryptionMethod)})`
+                          )}
                         </div>
                       ))}
                     </div>
