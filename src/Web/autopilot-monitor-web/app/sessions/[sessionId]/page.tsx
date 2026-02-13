@@ -1324,10 +1324,11 @@ function DeviceDetailsCard({ events }: { events: EnrollmentEvent[] }) {
   const imeVersion = getEventData("ime_agent_version");
   const bitLockerStatus = getEventData("bitlocker_status");
   const secureBootStatus = getEventData("secureboot_status");
+  const deviceLocation = getEventData("device_location");
 
   // Check if we have any device detail events at all
   const hasData = agentStarted || bootTime || osInfo || networkAdapters || dnsConfig || proxyConfig || autopilotProfile ||
-                  aadJoinStatus || imeVersion || bitLockerStatus || secureBootStatus;
+                  aadJoinStatus || imeVersion || bitLockerStatus || secureBootStatus || deviceLocation;
 
   if (!hasData) return null;
 
@@ -1366,7 +1367,7 @@ function DeviceDetailsCard({ events }: { events: EnrollmentEvent[] }) {
           )}
 
           {/* System */}
-          {(bootTime?.bootTime || agentStarted?.bootTime || agentStarted?.agentVersion || imeVersion) && (
+          {(bootTime?.bootTime || agentStarted?.bootTime || agentStarted?.agentVersion || imeVersion || deviceLocation?.country || deviceLocation?.Country || deviceLocation?.timezone || deviceLocation?.Timezone) && (
             <DetailSection title="System">
               {(bootTime?.bootTime || agentStarted?.bootTime) && (
                 <DetailRow label="Boot Time" value={new Date(bootTime?.bootTime || agentStarted?.bootTime).toLocaleString()} />
@@ -1374,6 +1375,12 @@ function DeviceDetailsCard({ events }: { events: EnrollmentEvent[] }) {
               {bootTime?.uptimeMinutes && <DetailRow label="Uptime" value={`${Math.floor(bootTime.uptimeMinutes / 60)}h ${bootTime.uptimeMinutes % 60}m`} />}
               {agentStarted?.agentVersion && <DetailRow label="Monitor Agent Version" value={agentStarted.agentVersion} />}
               {imeVersion && <DetailRow label="IME Agent Version" value={imeVersion.version ?? imeVersion.agentVersion ?? "Unknown"} />}
+              {(deviceLocation?.country || deviceLocation?.Country) && (
+                <DetailRow label="Country" value={deviceLocation.country ?? deviceLocation.Country} />
+              )}
+              {(deviceLocation?.timezone || deviceLocation?.Timezone) && (
+                <DetailRow label="Timezone" value={deviceLocation.timezone ?? deviceLocation.Timezone} />
+              )}
             </DetailSection>
           )}
 
