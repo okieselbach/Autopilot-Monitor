@@ -241,12 +241,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
                 _logger?.Debug($"  X-Device-Model: {_model}");
             }
 
-            // TODO: Enable serial number validation when multi-tenant Graph API integration is ready
-            // This provides the strongest security by validating against Intune Autopilot registration
-            // if (!string.IsNullOrEmpty(_serialNumber))
-            // {
-            //     request.Headers.Add("X-Device-SerialNumber", _serialNumber);
-            // }
+            // Add serial number for optional backend validation against Intune Autopilot registration
+            if (!string.IsNullOrEmpty(_serialNumber))
+            {
+                request.Headers.Add("X-Device-SerialNumber", _serialNumber);
+                _logger?.Debug($"  X-Device-SerialNumber: {_serialNumber}");
+            }
         }
 
         public void Dispose()

@@ -89,6 +89,13 @@ namespace AutopilotMonitor.Shared.Models
         /// </summary>
         public bool ValidateSerialNumber { get; set; } = false;
 
+        /// <summary>
+        /// Emergency bypass for agent security gate (Galactic Admin use only).
+        /// If true, agent requests are accepted even when ValidateSerialNumber is false.
+        /// Default: false
+        /// </summary>
+        public bool AllowInsecureAgentRequests { get; set; } = false;
+
         // ===== DATA MANAGEMENT SETTINGS =====
 
         /// <summary>
@@ -198,6 +205,7 @@ namespace AutopilotMonitor.Shared.Models
                 ManufacturerWhitelist = "Dell*,HP*,Lenovo*,Microsoft Corporation",
                 ModelWhitelist = "*",
                 ValidateSerialNumber = false,
+                AllowInsecureAgentRequests = false,
                 DataRetentionDays = 90,
                 SessionTimeoutHours = 5,
                 MaxNdjsonPayloadSizeMB = 5,

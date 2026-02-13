@@ -1,33 +1,7 @@
-/*
- * SERIAL NUMBER VALIDATION AGAINST INTUNE AUTOPILOT
- *
- * This validator is prepared but commented out because it requires:
- * 1. Multi-tenant Graph API integration
- * 2. App registration with proper permissions (DeviceManagementServiceConfig.Read.All)
- * 3. Tenant-specific Graph API credentials
- *
- * SECURITY BENEFITS:
- * When enabled, this provides the strongest authentication by validating that:
- * - The serial number exists in the tenant's Autopilot registration
- * - Combined with cert thumbprint, manufacturer, and model, this makes attacks nearly impossible
- *
- * An attacker would need to:
- * 1. Obtain a valid MDM client certificate from an enrolled device
- * 2. Know the exact manufacturer and model (whitelisted)
- * 3. Know a valid serial number registered in Autopilot for that tenant
- *
- * TO ENABLE:
- * 1. Uncomment this code
- * 2. Set up multi-tenant Graph API authentication
- * 3. Uncomment the serial number header in BackendApiClient.cs
- * 4. Uncomment the validation call in IngestEventsFunction.cs
- */
-
-/*
-using System;
-using System.Net.Http;
 using System.Net.Http.Headers;
-using System.Threading.Tasks;
+using System.Text;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -35,134 +9,239 @@ using Newtonsoft.Json.Linq;
 namespace AutopilotMonitor.Functions.Security
 {
     /// <summary>
-    /// Validates device serial numbers against Intune Autopilot registration
-    /// Requires Graph API integration with DeviceManagementServiceConfig.Read.All permission
+    /// Validates serial numbers against Intune Autopilot device registration via Microsoft Graph.
+    /// Caches positive/negative lookups to reduce Graph traffic.
     /// </summary>
     public class SerialNumberValidator
     {
-        private readonly ILogger _logger;
-        private readonly HttpClient _httpClient;
+        private static readonly TimeSpan PositiveCacheTtl = TimeSpan.FromMinutes(30);
+        private static readonly TimeSpan NegativeCacheTtl = TimeSpan.FromMinutes(5);
+        private static readonly TimeSpan ConsentStatusTtl = TimeSpan.FromMinutes(2);
 
-        // TODO: Replace with proper multi-tenant token provider
-        // private readonly IGraphTokenProvider _tokenProvider;
+        private readonly ILogger<SerialNumberValidator> _logger;
+        private readonly IHttpClientFactory _httpClientFactory;
+        private readonly IMemoryCache _cache;
+        private readonly IConfiguration _configuration;
 
-        public SerialNumberValidator(ILogger logger)
+        public SerialNumberValidator(
+            ILogger<SerialNumberValidator> logger,
+            IHttpClientFactory httpClientFactory,
+            IMemoryCache cache,
+            IConfiguration configuration)
         {
             _logger = logger;
-            _httpClient = new HttpClient();
+            _httpClientFactory = httpClientFactory;
+            _cache = cache;
+            _configuration = configuration;
         }
 
-        /// <summary>
-        /// Validates that a serial number is registered in Autopilot for the given tenant
-        /// </summary>
-        /// <param name="tenantId">Tenant ID</param>
-        /// <param name="serialNumber">Device serial number</param>
-        /// <returns>Validation result</returns>
-        public async Task<SerialNumberValidationResult> ValidateSerialNumberAsync(string tenantId, string serialNumber)
+        public async Task<SerialNumberValidationResult> ValidateSerialNumberAsync(
+            string tenantId,
+            string? serialNumber,
+            string? sessionId = null)
         {
-            if (string.IsNullOrEmpty(serialNumber))
+            if (string.IsNullOrWhiteSpace(serialNumber))
             {
                 return new SerialNumberValidationResult
                 {
                     IsValid = false,
-                    ErrorMessage = "Serial number not provided"
+                    ErrorMessage = "Serial number header not provided"
                 };
+            }
+
+            var normalizedSerial = serialNumber.Trim();
+            var cacheKey = BuildCacheKey(tenantId, normalizedSerial, sessionId);
+            if (_cache.TryGetValue(cacheKey, out SerialNumberValidationResult? cached) && cached != null)
+            {
+                return cached;
             }
 
             try
             {
-                // TODO: Get Graph API access token for the tenant
-                // var accessToken = await _tokenProvider.GetTokenForTenantAsync(tenantId);
-
-                // Graph API endpoint to query Autopilot devices
-                var graphUrl = $"https://graph.microsoft.com/v1.0/deviceManagement/windowsAutopilotDeviceIdentities" +
-                              $"?$filter=serialNumber eq '{serialNumber}'";
-
-                // TODO: Add authentication header
-                // _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-
-                var response = await _httpClient.GetAsync(graphUrl);
-                response.EnsureSuccessStatusCode();
-
-                var responseJson = await response.Content.ReadAsStringAsync();
-                var data = JsonConvert.DeserializeObject<JObject>(responseJson);
-
-                var devices = data["value"] as JArray;
-                if (devices == null || devices.Count == 0)
+                var accessToken = await GetGraphAccessTokenAsync(tenantId);
+                if (string.IsNullOrEmpty(accessToken))
                 {
-                    _logger.LogWarning($"Serial number {serialNumber} not found in Autopilot for tenant {tenantId}");
-                    return new SerialNumberValidationResult
+                    return CacheAndReturn(cacheKey, new SerialNumberValidationResult
                     {
                         IsValid = false,
-                        ErrorMessage = $"Serial number '{serialNumber}' is not registered in Autopilot",
-                        SerialNumber = serialNumber
-                    };
+                        SerialNumber = normalizedSerial,
+                        ErrorMessage = "Graph access token could not be acquired"
+                    }, isPositive: false);
                 }
 
-                // Serial number found in Autopilot - device is authorized
-                _logger.LogInformation($"Serial number {serialNumber} validated successfully in Autopilot");
-                return new SerialNumberValidationResult
+                var graphClient = _httpClientFactory.CreateClient();
+                graphClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+
+                // Escape single quotes to prevent OData injection and malformed filters.
+                var escapedSerial = normalizedSerial.Replace("'", "''");
+                var filter = Uri.EscapeDataString($"serialNumber eq '{escapedSerial}'");
+                var graphUrl = $"https://graph.microsoft.com/v1.0/deviceManagement/windowsAutopilotDeviceIdentities?$top=1&$filter={filter}";
+
+                var response = await graphClient.GetAsync(graphUrl);
+                var responseBody = await response.Content.ReadAsStringAsync();
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning(
+                        "Graph serial validation failed for tenant {TenantId}. Status: {StatusCode}. Body: {ResponseBody}",
+                        tenantId,
+                        (int)response.StatusCode,
+                        responseBody);
+
+                    return CacheAndReturn(cacheKey, new SerialNumberValidationResult
+                    {
+                        IsValid = false,
+                        SerialNumber = normalizedSerial,
+                        ErrorMessage = $"Graph query failed with status {(int)response.StatusCode}"
+                    }, isPositive: false);
+                }
+
+                var data = JsonConvert.DeserializeObject<JObject>(responseBody);
+                var devices = data?["value"] as JArray;
+                if (devices == null || devices.Count == 0)
+                {
+                    return CacheAndReturn(cacheKey, new SerialNumberValidationResult
+                    {
+                        IsValid = false,
+                        SerialNumber = normalizedSerial,
+                        ErrorMessage = $"Serial number '{normalizedSerial}' is not registered in Autopilot"
+                    }, isPositive: false);
+                }
+
+                var result = new SerialNumberValidationResult
                 {
                     IsValid = true,
-                    SerialNumber = serialNumber,
-                    AutopilotDeviceId = devices[0]["id"]?.ToString()
+                    SerialNumber = normalizedSerial,
+                    AutopilotDeviceId = devices[0]?["id"]?.ToString()
                 };
+
+                _logger.LogInformation(
+                    "Serial number validation succeeded for tenant {TenantId}, session {SessionId}, serial {SerialNumber}, autopilotId {AutopilotDeviceId}",
+                    tenantId,
+                    sessionId ?? "<none>",
+                    normalizedSerial,
+                    result.AutopilotDeviceId ?? "<none>");
+
+                return CacheAndReturn(cacheKey, result, isPositive: true);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"Error validating serial number {serialNumber}");
-                return new SerialNumberValidationResult
+                _logger.LogError(
+                    ex,
+                    "Error validating serial number for tenant {TenantId}, session {SessionId}, serial {SerialNumber}",
+                    tenantId,
+                    sessionId ?? "<none>",
+                    normalizedSerial);
+
+                return CacheAndReturn(cacheKey, new SerialNumberValidationResult
                 {
                     IsValid = false,
-                    ErrorMessage = $"Error validating serial number: {ex.Message}",
-                    SerialNumber = serialNumber
-                };
+                    SerialNumber = normalizedSerial,
+                    ErrorMessage = $"Error validating serial number: {ex.Message}"
+                }, isPositive: false);
             }
+        }
+
+        public async Task<GraphConsentStatusResult> GetConsentStatusAsync(string tenantId)
+        {
+            var cacheKey = $"serial-validation-consent:{tenantId}";
+            if (_cache.TryGetValue(cacheKey, out GraphConsentStatusResult? cached) && cached != null)
+            {
+                return cached;
+            }
+
+            var accessToken = await GetGraphAccessTokenAsync(tenantId);
+            var result = new GraphConsentStatusResult
+            {
+                IsConsented = !string.IsNullOrWhiteSpace(accessToken),
+                Message = string.IsNullOrWhiteSpace(accessToken)
+                    ? "Admin consent for Graph application permissions is missing or app credentials are invalid."
+                    : "Admin consent is available for this tenant."
+            };
+
+            _cache.Set(cacheKey, result, new MemoryCacheEntryOptions
+            {
+                AbsoluteExpirationRelativeToNow = ConsentStatusTtl
+            });
+
+            return result;
+        }
+
+        private async Task<string?> GetGraphAccessTokenAsync(string tenantId)
+        {
+            var clientId = _configuration["Graph:ClientId"] ?? _configuration["AzureAd:ClientId"];
+            var clientSecret = _configuration["Graph:ClientSecret"] ?? _configuration["AzureAd:ClientSecret"];
+
+            if (string.IsNullOrWhiteSpace(clientId) || string.IsNullOrWhiteSpace(clientSecret))
+            {
+                _logger.LogError(
+                    "Serial validation is enabled but Graph app credentials are not configured. Set Graph:ClientId and Graph:ClientSecret.");
+                return null;
+            }
+
+            var tokenClient = _httpClientFactory.CreateClient();
+            var tokenUrl = $"https://login.microsoftonline.com/{tenantId}/oauth2/v2.0/token";
+            var body = new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["client_id"] = clientId,
+                ["client_secret"] = clientSecret,
+                ["scope"] = "https://graph.microsoft.com/.default",
+                ["grant_type"] = "client_credentials"
+            });
+
+            var response = await tokenClient.PostAsync(tokenUrl, body);
+            var responseBody = await response.Content.ReadAsStringAsync();
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning(
+                    "Failed to acquire Graph token for tenant {TenantId}. Status: {StatusCode}. Body: {ResponseBody}",
+                    tenantId,
+                    (int)response.StatusCode,
+                    responseBody);
+                return null;
+            }
+
+            var tokenJson = JsonConvert.DeserializeObject<JObject>(responseBody);
+            return tokenJson?["access_token"]?.ToString();
+        }
+
+        private static string BuildCacheKey(string tenantId, string serialNumber, string? sessionId)
+        {
+            if (!string.IsNullOrWhiteSpace(sessionId))
+            {
+                return $"serial-validation:{tenantId}:{sessionId}:{serialNumber}";
+            }
+
+            return $"serial-validation:{tenantId}:{serialNumber}";
+        }
+
+        private SerialNumberValidationResult CacheAndReturn(
+            string cacheKey,
+            SerialNumberValidationResult result,
+            bool isPositive)
+        {
+            var ttl = isPositive ? PositiveCacheTtl : NegativeCacheTtl;
+            _cache.Set(cacheKey, result, new MemoryCacheEntryOptions
+            {
+                AbsoluteExpirationRelativeToNow = ttl
+            });
+
+            return result;
         }
     }
 
-    /// <summary>
-    /// Result of serial number validation
-    /// </summary>
     public class SerialNumberValidationResult
     {
-        /// <summary>
-        /// Whether the serial number is registered in Autopilot
-        /// </summary>
         public bool IsValid { get; set; }
+        public string? SerialNumber { get; set; }
+        public string? AutopilotDeviceId { get; set; }
+        public string? ErrorMessage { get; set; }
+    }
 
-        /// <summary>
-        /// Device serial number
-        /// </summary>
-        public string SerialNumber { get; set; }
-
-        /// <summary>
-        /// Autopilot device ID (if found)
-        /// </summary>
-        public string AutopilotDeviceId { get; set; }
-
-        /// <summary>
-        /// Error message if validation failed
-        /// </summary>
-        public string ErrorMessage { get; set; }
+    public class GraphConsentStatusResult
+    {
+        public bool IsConsented { get; set; }
+        public string? Message { get; set; }
     }
 }
-*/
-
-// USAGE EXAMPLE (to be added to IngestEventsFunction.cs when ready):
-/*
-// TODO: Uncomment when multi-tenant Graph API integration is ready
-// Validate serial number against Intune Autopilot (strongest security check)
-// var serialNumber = req.Headers.Contains("X-Device-SerialNumber")
-//     ? req.Headers.GetValues("X-Device-SerialNumber").FirstOrDefault()
-//     : null;
-//
-// var serialNumberValidation = await _serialNumberValidator.ValidateSerialNumberAsync(request.TenantId, serialNumber);
-// if (!serialNumberValidation.IsValid)
-// {
-//     _logger.LogWarning($"Serial number validation failed: {serialNumberValidation.ErrorMessage}");
-//     return await CreateErrorResponse(req, HttpStatusCode.Forbidden, "Device not registered in Autopilot");
-// }
-//
-// _logger.LogInformation($"Serial number validated: {serialNumber} (Autopilot ID: {serialNumberValidation.AutopilotDeviceId})");
-*/

@@ -43,15 +43,18 @@ namespace AutopilotMonitor.Functions.Security
 
         private readonly TenantConfigurationService _configService;
         private readonly RateLimitService _rateLimitService;
+        private readonly SerialNumberValidator _serialNumberValidator;
         private readonly ILogger _logger;
 
         public SecurityValidator(
             TenantConfigurationService configService,
             RateLimitService rateLimitService,
+            SerialNumberValidator serialNumberValidator,
             ILogger logger)
         {
             _configService = configService;
             _rateLimitService = rateLimitService;
+            _serialNumberValidator = serialNumberValidator;
             _logger = logger;
         }
 
@@ -61,12 +64,24 @@ namespace AutopilotMonitor.Functions.Security
         /// <param name="req">HTTP request</param>
         /// <param name="tenantId">Tenant ID for configuration lookup</param>
         /// <returns>Security validation result</returns>
-        public async Task<SecurityValidationResult> ValidateRequestAsync(HttpRequestData req, string tenantId)
+        public async Task<SecurityValidationResult> ValidateRequestAsync(HttpRequestData req, string tenantId, string? sessionId = null)
         {
             // Load tenant configuration
             var config = await _configService.GetConfigurationAsync(tenantId);
 
             // Security validation is always enforced (no longer configurable per tenant)
+            // Hard gate: tenant must enable serial validation before agent traffic is accepted.
+            // Galactic Admins can set AllowInsecureAgentRequests=true in the config row for test tenants.
+            if (!config.ValidateSerialNumber && !config.AllowInsecureAgentRequests)
+            {
+                return new SecurityValidationResult
+                {
+                    IsValid = false,
+                    StatusCode = HttpStatusCode.Forbidden,
+                    ErrorMessage = "Serial number validation is required",
+                    Details = "Enable 'Validate Serial Number' in Configuration before using the agent ingestion endpoints."
+                };
+            }
 
             // 1. Validate client certificate
             var certHeader = req.Headers.Contains("X-Client-Certificate")
@@ -133,25 +148,25 @@ namespace AutopilotMonitor.Functions.Security
                 };
             }
 
-            // TODO: Serial number validation when Graph API integration is ready
-            // if (config.ValidateSerialNumber)
-            // {
-            //     var serialNumber = req.Headers.Contains("X-Device-SerialNumber")
-            //         ? req.Headers.GetValues("X-Device-SerialNumber").FirstOrDefault()
-            //         : null;
-            //
-            //     var serialValidation = await _serialNumberValidator.ValidateSerialNumberAsync(tenantId, serialNumber);
-            //     if (!serialValidation.IsValid)
-            //     {
-            //         return new SecurityValidationResult
-            //         {
-            //             IsValid = false,
-            //             StatusCode = HttpStatusCode.Forbidden,
-            //             ErrorMessage = "Device not registered in Autopilot",
-            //             Details = serialValidation.ErrorMessage
-            //         };
-            //     }
-            // }
+            // 4. Validate serial number against Intune Autopilot (optional, tenant setting)
+            if (config.ValidateSerialNumber)
+            {
+                var serialNumber = req.Headers.Contains("X-Device-SerialNumber")
+                    ? req.Headers.GetValues("X-Device-SerialNumber").FirstOrDefault()
+                    : null;
+
+                var serialValidation = await _serialNumberValidator.ValidateSerialNumberAsync(tenantId, serialNumber, sessionId);
+                if (!serialValidation.IsValid)
+                {
+                    return new SecurityValidationResult
+                    {
+                        IsValid = false,
+                        StatusCode = HttpStatusCode.Forbidden,
+                        ErrorMessage = "Device not registered in Autopilot",
+                        Details = serialValidation.ErrorMessage
+                    };
+                }
+            }
 
             // All checks passed
             return new SecurityValidationResult

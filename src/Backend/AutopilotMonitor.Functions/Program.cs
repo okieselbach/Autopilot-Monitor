@@ -91,6 +91,7 @@ builder.Services.AddHttpContextAccessor();
 
 // Register our services
 builder.Services.AddMemoryCache();
+builder.Services.AddHttpClient();
 builder.Services.AddSingleton<TableStorageService>();
 builder.Services.AddHostedService<TableInitializerService>(); // Initialize all tables at startup
 builder.Services.AddSingleton<TenantConfigurationService>();
@@ -103,5 +104,6 @@ builder.Services.AddSingleton<HealthCheckService>();
 builder.Services.AddSingleton<GatherRuleService>();
 builder.Services.AddSingleton<AnalyzeRuleService>();
 builder.Services.AddSingleton<MaintenanceService>();
+builder.Services.AddSingleton<AutopilotMonitor.Functions.Security.SerialNumberValidator>();
 
 builder.Build().Run();

@@ -80,6 +80,9 @@ try {
     # ── Pre-flight: Skip installation on already-enrolled devices ──
 
     # Check 1: OS install date must be within threshold (fresh device)
+    # TODO: issue is the OS might got installed a long time ago but the OOBE just started now (e.g. old image, or re-flash).
+    # Ideally we want to detect the OOBE start time... need to investigate if there's a reliable way to get that (event log? registry? WMI?). 
+    # For now we just check OS install date as a proxy, which should work in most cases except for old images or re-flashed devices.
     $osInstallDate = (Get-CimInstance Win32_OperatingSystem).InstallDate
     $osAge = (Get-Date) - $osInstallDate
     $osAgeMinutesRounded = [int][Math]::Round($osAge.TotalMinutes)

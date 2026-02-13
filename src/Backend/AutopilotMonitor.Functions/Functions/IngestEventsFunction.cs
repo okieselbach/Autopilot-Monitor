@@ -19,6 +19,7 @@ namespace AutopilotMonitor.Functions.Functions
         private readonly TableStorageService _storageService;
         private readonly TenantConfigurationService _configService;
         private readonly RateLimitService _rateLimitService;
+        private readonly SerialNumberValidator _serialNumberValidator;
         private readonly AnalyzeRuleService _analyzeRuleService;
 
         public IngestEventsFunction(
@@ -26,12 +27,14 @@ namespace AutopilotMonitor.Functions.Functions
             TableStorageService storageService,
             TenantConfigurationService configService,
             RateLimitService rateLimitService,
+            SerialNumberValidator serialNumberValidator,
             AnalyzeRuleService analyzeRuleService)
         {
             _logger = logger;
             _storageService = storageService;
             _configService = configService;
             _rateLimitService = rateLimitService;
+            _serialNumberValidator = serialNumberValidator;
             _analyzeRuleService = analyzeRuleService;
         }
 
@@ -96,7 +99,9 @@ namespace AutopilotMonitor.Functions.Functions
                     request.TenantId,
                     _configService,
                     _rateLimitService,
-                    _logger
+                    _serialNumberValidator,
+                    _logger,
+                    request.SessionId
                 );
 
                 if (errorResponse != null)
