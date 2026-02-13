@@ -139,7 +139,7 @@ namespace AutopilotMonitor.Shared.Models
         public string Signal { get; set; }
 
         /// <summary>
-        /// Source of the signal: "event_type", "event_data", "phase_duration", "event_count"
+        /// Source of the signal: "event_type", "event_data", "phase_duration", "event_count", "app_install_duration"
         /// </summary>
         public string Source { get; set; }
 

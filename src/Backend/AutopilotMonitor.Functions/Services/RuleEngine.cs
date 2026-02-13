@@ -158,6 +158,9 @@ namespace AutopilotMonitor.Functions.Services
                 case "phase_duration":
                     return EvaluatePhaseDurationCondition(condition, events);
 
+                case "app_install_duration":
+                    return EvaluateAppInstallDurationCondition(condition, events);
+
                 default:
                     return (false, "unknown source");
             }
@@ -417,6 +420,59 @@ namespace AutopilotMonitor.Functions.Services
                 default:
                     return false;
             }
+        }
+
+        private (bool matched, object evidence) EvaluateAppInstallDurationCondition(RuleCondition condition, List<EnrollmentEvent> events)
+        {
+            var sortedEvents = events.OrderBy(e => e.Timestamp).ThenBy(e => e.Sequence).ToList();
+
+            var completionEventTypes = string.IsNullOrWhiteSpace(condition.EventType)
+                ? new HashSet<string>(new[] { "app_install_completed", "app_install_failed" }, StringComparer.OrdinalIgnoreCase)
+                : new HashSet<string>(new[] { condition.EventType }, StringComparer.OrdinalIgnoreCase);
+
+            var completionEvents = sortedEvents
+                .Where(e => completionEventTypes.Contains(e.EventType ?? string.Empty))
+                .ToList();
+
+            foreach (var completionEvent in completionEvents)
+            {
+                var appId = GetDataFieldValue(completionEvent, "appId");
+                var appName = GetDataFieldValue(completionEvent, "appName") ?? GetDataFieldValue(completionEvent, "name");
+                var appKey = !string.IsNullOrWhiteSpace(appId) ? appId : appName;
+
+                if (string.IsNullOrWhiteSpace(appKey))
+                    continue;
+
+                var startEvent = sortedEvents.LastOrDefault(e =>
+                    (string.Equals(e.EventType, "app_install_started", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(e.EventType, "app_install_start", StringComparison.OrdinalIgnoreCase)) &&
+                    e.Timestamp <= completionEvent.Timestamp &&
+                    string.Equals(GetDataFieldValue(e, "appId") ?? GetDataFieldValue(e, "appName") ?? GetDataFieldValue(e, "name"), appKey, StringComparison.OrdinalIgnoreCase));
+
+                if (startEvent == null)
+                    continue;
+
+                var durationSeconds = Math.Max(0, (completionEvent.Timestamp - startEvent.Timestamp).TotalSeconds);
+
+                if (!MatchesOperator(durationSeconds.ToString(), condition.Operator, condition.Value))
+                    continue;
+
+                return (true, new Dictionary<string, object>
+                {
+                    ["eventId"] = completionEvent.EventId,
+                    ["sequence"] = completionEvent.Sequence,
+                    ["startEventId"] = startEvent.EventId,
+                    ["startTimestamp"] = startEvent.Timestamp,
+                    ["endTimestamp"] = completionEvent.Timestamp,
+                    ["eventType"] = completionEvent.EventType,
+                    ["appId"] = appId ?? string.Empty,
+                    ["appName"] = appName ?? appKey,
+                    ["durationSeconds"] = durationSeconds,
+                    ["durationFormatted"] = FormatDuration(durationSeconds)
+                });
+            }
+
+            return (false, "no app install duration matched");
         }
     }
 }

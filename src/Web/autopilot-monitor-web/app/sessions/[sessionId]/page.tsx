@@ -1332,13 +1332,51 @@ function DeviceDetailsCard({ events }: { events: EnrollmentEvent[] }) {
     return names[method] ?? `Unknown (${method})`;
   };
 
+  const normalizeAutopilotProfile = (profile: Record<string, any> | null): Record<string, any> | null => {
+    if (!profile) return null;
+
+    const normalized = { ...profile };
+    const policyJsonCache = normalized.PolicyJsonCache ?? normalized.policyJsonCache;
+
+    if (typeof policyJsonCache === "string" && policyJsonCache.trim()) {
+      try {
+        const parsed = JSON.parse(policyJsonCache);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          Object.assign(normalized, parsed);
+        }
+      } catch {
+        // Ignore malformed cache payload and keep original fields
+      }
+    }
+
+    const aadServerData = normalized.CloudAssignedAadServerData;
+    if (typeof aadServerData === "string" && aadServerData.trim()) {
+      try {
+        const parsed = JSON.parse(aadServerData);
+        const zeroTouchConfig = parsed?.ZeroTouchConfig;
+        if (!normalized.CloudAssignedTenantDomain && zeroTouchConfig?.CloudAssignedTenantDomain) {
+          normalized.CloudAssignedTenantDomain = zeroTouchConfig.CloudAssignedTenantDomain;
+        }
+        if (normalized.CloudAssignedForcedEnrollment === undefined && zeroTouchConfig?.ForcedEnrollment !== undefined) {
+          normalized.CloudAssignedForcedEnrollment = zeroTouchConfig.ForcedEnrollment;
+        }
+      } catch {
+        // Ignore malformed nested JSON
+      }
+    }
+
+    return normalized;
+  };
+
+  const hasValue = (value: unknown): boolean => value !== undefined && value !== null && `${value}` !== "";
+
   const agentStarted = getEventData("agent_started");
   const bootTime = getEventData("boot_time");
   const osInfo = getEventData("os_info");
   const networkAdapters = getEventData("network_adapters");
   const dnsConfig = getEventData("dns_configuration");
   const proxyConfig = getEventData("proxy_configuration");
-  const autopilotProfile = getEventData("autopilot_profile");
+  const autopilotProfile = normalizeAutopilotProfile(getEventData("autopilot_profile"));
   const aadJoinStatus = getEventData("aad_join_status");
   const imeVersion = getEventData("ime_agent_version");
   const bitLockerStatus = getEventData("bitlocker_status");
@@ -1475,27 +1513,30 @@ function DeviceDetailsCard({ events }: { events: EnrollmentEvent[] }) {
           {/* Autopilot Profile */}
           {autopilotProfile && (
             <DetailSection title="Autopilot Profile">
-              {autopilotProfile.CloudAssignedTenantDomain && <DetailRow label="Tenant Domain" value={autopilotProfile.CloudAssignedTenantDomain} />}
-              {autopilotProfile.DeploymentProfileName && <DetailRow label="Profile Name" value={autopilotProfile.DeploymentProfileName} />}
-              {autopilotProfile.CloudAssignedTenantId && <DetailRow label="Tenant ID" value={autopilotProfile.CloudAssignedTenantId} />}
-              {autopilotProfile.PolicyDownloadDate && <DetailRow label="Policy Downloaded" value={new Date(autopilotProfile.PolicyDownloadDate).toLocaleString()} />}
-              {autopilotProfile.CloudAssignedOobeConfig && <DetailRow label="OOBE Config" value={autopilotProfile.CloudAssignedOobeConfig} />}
-              {autopilotProfile.ZtdRegistrationId && <DetailRow label="ZTD Registration ID" value={autopilotProfile.ZtdRegistrationId} />}
-              {autopilotProfile.AadDeviceId && <DetailRow label="AAD Device ID" value={autopilotProfile.AadDeviceId} />}
-              {autopilotProfile.CloudAssignedMdmId && <DetailRow label="MDM ID" value={autopilotProfile.CloudAssignedMdmId} />}
+              {hasValue(autopilotProfile.CloudAssignedTenantDomain) && <DetailRow label="Tenant Domain" value={`${autopilotProfile.CloudAssignedTenantDomain}`} />}
+              {hasValue(autopilotProfile.DeploymentProfileName) && <DetailRow label="Profile Name" value={`${autopilotProfile.DeploymentProfileName}`} />}
+              {hasValue(autopilotProfile.CloudAssignedTenantId) && <DetailRow label="Tenant ID" value={`${autopilotProfile.CloudAssignedTenantId}`} />}
+              {hasValue(autopilotProfile.PolicyDownloadDate) && <DetailRow label="Policy Downloaded" value={new Date(autopilotProfile.PolicyDownloadDate).toLocaleString()} />}
+              {hasValue(autopilotProfile.CloudAssignedOobeConfig) && <DetailRow label="OOBE Config" value={`${autopilotProfile.CloudAssignedOobeConfig}`} />}
+              {hasValue(autopilotProfile.ZtdRegistrationId) && <DetailRow label="ZTD Registration ID" value={`${autopilotProfile.ZtdRegistrationId}`} />}
+              {hasValue(autopilotProfile.AadDeviceId) && <DetailRow label="AAD Device ID" value={`${autopilotProfile.AadDeviceId}`} />}
+              {hasValue(autopilotProfile.CloudAssignedMdmId) && <DetailRow label="MDM ID" value={`${autopilotProfile.CloudAssignedMdmId}`} />}
               {autopilotProfile.CloudAssignedDomainJoinMethod !== undefined && (
-                <DetailRow label="Domain Join Method" value={autopilotProfile.CloudAssignedDomainJoinMethod === "0" ? "Entra Join" : autopilotProfile.CloudAssignedDomainJoinMethod} />
+                <DetailRow label="Domain Join Method" value={`${autopilotProfile.CloudAssignedDomainJoinMethod}` === "0" ? "Entra Join" : `${autopilotProfile.CloudAssignedDomainJoinMethod}`} />
               )}
               {autopilotProfile.CloudAssignedForcedEnrollment !== undefined && (
-                <DetailRow label="Forced Enrollment" value={autopilotProfile.CloudAssignedForcedEnrollment === "1" ? "Yes" : "No"} />
+                <DetailRow label="Forced Enrollment" value={`${autopilotProfile.CloudAssignedForcedEnrollment}` === "1" ? "Yes" : "No"} />
               )}
-              {autopilotProfile.AutopilotCreationDate && <DetailRow label="Autopilot Created" value={new Date(autopilotProfile.AutopilotCreationDate).toLocaleString()} />}
+              {hasValue(autopilotProfile.AutopilotCreationDate) && <DetailRow label="Autopilot Created" value={new Date(autopilotProfile.AutopilotCreationDate).toLocaleString()} />}
+              {hasValue(autopilotProfile.ProfileAvailable) && (
+                <DetailRow label="Profile Available" value={`${autopilotProfile.ProfileAvailable}` === "1" ? "Yes" : `${autopilotProfile.ProfileAvailable}`} />
+              )}
 
               {/* Legacy fields (fallback for old data) */}
-              {!autopilotProfile.CloudAssignedTenantDomain && autopilotProfile.tenantDomain && <DetailRow label="Tenant Domain" value={autopilotProfile.tenantDomain} />}
-              {!autopilotProfile.DeploymentProfileName && autopilotProfile.deploymentProfileName && <DetailRow label="Profile Name" value={autopilotProfile.deploymentProfileName} />}
-              {!autopilotProfile.CloudAssignedTenantId && autopilotProfile.cloudAssignedTenantId && <DetailRow label="Tenant ID" value={autopilotProfile.cloudAssignedTenantId} />}
-              {!autopilotProfile.CloudAssignedOobeConfig && autopilotProfile.oobeConfig && <DetailRow label="OOBE Config" value={autopilotProfile.oobeConfig} />}
+              {!hasValue(autopilotProfile.CloudAssignedTenantDomain) && hasValue(autopilotProfile.tenantDomain) && <DetailRow label="Tenant Domain" value={`${autopilotProfile.tenantDomain}`} />}
+              {!hasValue(autopilotProfile.DeploymentProfileName) && hasValue(autopilotProfile.deploymentProfileName) && <DetailRow label="Profile Name" value={`${autopilotProfile.deploymentProfileName}`} />}
+              {!hasValue(autopilotProfile.CloudAssignedTenantId) && hasValue(autopilotProfile.cloudAssignedTenantId) && <DetailRow label="Tenant ID" value={`${autopilotProfile.cloudAssignedTenantId}`} />}
+              {!hasValue(autopilotProfile.CloudAssignedOobeConfig) && hasValue(autopilotProfile.oobeConfig) && <DetailRow label="OOBE Config" value={`${autopilotProfile.oobeConfig}`} />}
             </DetailSection>
           )}
 

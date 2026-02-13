@@ -101,7 +101,7 @@ namespace AutopilotMonitor.Agent
                     Console.WriteLine();
                 }
 
-                using (var service = new MonitoringService(config, logger))
+                using (var service = new MonitoringService(config, logger, agentVersion))
                 {
                     service.Start();
 
@@ -207,7 +207,7 @@ namespace AutopilotMonitor.Agent
                 Console.WriteLine($"  Simulate Failure: {(deviceConfig.SimulateFailure ? "YES" : "NO")}");
                 Console.WriteLine();
 
-                var service = new MonitoringService(config, logger);
+                var service = new MonitoringService(config, logger, GetAgentVersion());
                 services.Add(service);
 
                 var task = System.Threading.Tasks.Task.Run(() =>
@@ -482,7 +482,7 @@ namespace AutopilotMonitor.Agent
 
             try
             {
-                using (var service = new MonitoringService(config, logger))
+                using (var service = new MonitoringService(config, logger, GetAgentVersion()))
                 {
                     // Trigger cleanup directly without running enrollment
                     if (config.SelfDestructOnComplete)

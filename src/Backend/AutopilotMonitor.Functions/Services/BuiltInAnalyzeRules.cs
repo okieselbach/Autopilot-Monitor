@@ -18,6 +18,7 @@ namespace AutopilotMonitor.Functions.Services
                 CreateAppDependencyChainRule(),
                 CreateAppDiskSpaceRule(),
                 CreateAppDownloadTimeoutRule(),
+                CreateAppSlowInstallRule(),
                 CreateAppRebootLoopRule(),
 
                 // ===== ESP RULES =====
@@ -166,6 +167,30 @@ namespace AutopilotMonitor.Functions.Services
                 new RemediationStep { Title = "Fix reboot handling", Steps = new List<string> { "Check if the app's return code mapping includes reboot codes", "Verify ESP reboot behavior settings", "Consider setting the app to 'Hard reboot' return code" } }
             },
             Tags = new[] { "apps", "reboot", "loop" }
+        };
+
+        private static AnalyzeRule CreateAppSlowInstallRule() => new AnalyzeRule
+        {
+            RuleId = "ANALYZE-APP-008",
+            Title = "Slow App Installation",
+            Description = "Detects app installations that take longer than 2 minutes (test threshold).",
+            Severity = "warning",
+            Category = "apps",
+            BaseConfidence = 70,
+            Conditions = new List<RuleCondition>
+            {
+                new RuleCondition { Signal = "slow_app_install", Source = "app_install_duration", EventType = "app_install_completed", Operator = "gt", Value = "120", Required = true }
+            },
+            Explanation = "At least one app installation took longer than 2 minutes. This can indicate slow content delivery, installation overhead, or endpoint performance bottlenecks.",
+            Remediation = new List<RemediationStep>
+            {
+                new RemediationStep { Title = "Analyze slow app behavior", Steps = new List<string> {
+                    "Identify the affected app from matched evidence in the rule result",
+                    "Check network throughput and proxy impact during app download",
+                    "Consider moving large/non-critical apps out of ESP blocking scope"
+                }}
+            },
+            Tags = new[] { "apps", "performance", "slow-install", "warning" }
         };
 
         // ===== ESP =====

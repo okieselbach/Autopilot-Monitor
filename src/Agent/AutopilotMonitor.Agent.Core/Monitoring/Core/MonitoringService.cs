@@ -21,6 +21,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
     {
         private readonly AgentConfiguration _configuration;
         private readonly AgentLogger _logger;
+        private readonly string _agentVersion;
         private readonly EventSpool _spool;
         private readonly BackendApiClient _apiClient;
         private readonly Timer _uploadTimer;
@@ -44,10 +45,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         private RemoteConfigService _remoteConfigService;
         private GatherRuleExecutor _gatherRuleExecutor;
 
-        public MonitoringService(AgentConfiguration configuration, AgentLogger logger)
+        public MonitoringService(AgentConfiguration configuration, AgentLogger logger, string agentVersion)
         {
             _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _agentVersion = string.IsNullOrWhiteSpace(agentVersion) ? "unknown" : agentVersion;
 
             if (!_configuration.IsValid())
             {
@@ -110,7 +112,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 Message = "Autopilot Monitor Agent started",
                 Data = new Dictionary<string, object>
                 {
-                    { "agentVersion", "1.0.0" }
+                    { "agentVersion", _agentVersion }
                 }
             });
 
