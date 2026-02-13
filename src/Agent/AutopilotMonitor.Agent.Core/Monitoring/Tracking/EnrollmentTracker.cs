@@ -657,7 +657,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             });
         }
 
-        private static string TryFormatJson(string? input)
+        private static string TryFormatJson(string input)
         {
             if (string.IsNullOrWhiteSpace(input))
                 return input ?? string.Empty;
