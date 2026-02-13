@@ -61,7 +61,7 @@ public class SerialValidationConsentFunction
         }
 
         var consentUrl =
-            $"https://login.microsoftonline.com/{Uri.EscapeDataString(tenantId)}/v2.0/adminconsent" +
+            $"https://login.microsoftonline.com/{Uri.EscapeDataString(tenantId)}/adminconsent" +
             $"?client_id={Uri.EscapeDataString(validatorClientId)}" +
             $"&redirect_uri={Uri.EscapeDataString(redirectUri)}" +
             $"&state={Uri.EscapeDataString("serial-validation-enable")}";
