@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Management;
+using System.Text.Json;
 using System.Threading;
 using AutopilotMonitor.Agent.Core.Logging;
 using AutopilotMonitor.Shared.Models;
@@ -32,6 +33,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         private bool _hasAutoSwitchedToAppsPhase; // Track if we've already auto-switched to apps phase for current ESP phase
         private string _enrollmentType = "v1"; // "v1" = Autopilot Classic/ESP, "v2" = Windows Device Preparation
         private bool _isWaitingForHello = false; // Track if we're waiting for Hello to complete before sending enrollment_complete
+        private bool _finalDeviceInfoCollected = false; // Ensure final device info is emitted only once
 
         // Default IME log folder
         private const string DefaultImeLogFolder = @"%ProgramData%\Microsoft\IntuneManagementExtension\Logs";
@@ -445,7 +447,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                             if (value != null)
                             {
                                 // Store with original casing from registry
-                                data[valueName] = value.ToString();
+                                var valueAsString = value.ToString();
+                                if (string.Equals(valueName, "PolicyJsonCache", StringComparison.OrdinalIgnoreCase) ||
+                                    string.Equals(valueName, "CloudAssignedAadServerData", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    valueAsString = TryFormatJson(valueAsString);
+                                }
+
+                                data[valueName] = valueAsString;
                             }
                         }
 
@@ -646,6 +655,27 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 Message = message,
                 Data = data
             });
+        }
+
+        private static string TryFormatJson(string? input)
+        {
+            if (string.IsNullOrWhiteSpace(input))
+                return input ?? string.Empty;
+
+            try
+            {
+                using (var doc = JsonDocument.Parse(input))
+                {
+                    return JsonSerializer.Serialize(doc.RootElement, new JsonSerializerOptions
+                    {
+                        WriteIndented = true
+                    });
+                }
+            }
+            catch
+            {
+                return input;
+            }
         }
 
         // ===== ImeLogTracker Callbacks -> Strategic Events =====
@@ -957,9 +987,6 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             // Write enrollment complete marker for cleanup retry detection
             WriteEnrollmentCompleteMarker();
 
-            // Collect final device info (BitLocker may have been enabled during enrollment)
-            CollectDeviceInfoAtEnd();
-
             // Clean up persisted tracker state so next enrollment starts fresh
             _imeLogTracker?.DeleteState();
         }
@@ -1036,6 +1063,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                         }
                     });
 
+                    CollectDeviceInfoAtFinalizingSetup(reason);
+
                     // Start Hello wait timer (waits for Hello wizard to start or timeout)
                     _helloDetector?.StartHelloWaitTimer();
                 }
@@ -1069,7 +1098,22 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                         { "triggeredBy", reason }
                     }
                 });
+
+                CollectDeviceInfoAtFinalizingSetup(reason);
             }
+        }
+
+        private void CollectDeviceInfoAtFinalizingSetup(string triggerReason)
+        {
+            if (_finalDeviceInfoCollected)
+            {
+                _logger.Debug($"EnrollmentTracker: final device info already collected, skipping (trigger: {triggerReason})");
+                return;
+            }
+
+            _finalDeviceInfoCollected = true;
+            _logger.Info($"EnrollmentTracker: triggering final device info collection at FinalizingSetup (trigger: {triggerReason})");
+            CollectDeviceInfoAtEnd();
         }
 
         private void SummaryTimerCallback(object state)
