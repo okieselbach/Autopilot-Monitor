@@ -15,6 +15,13 @@ namespace AutopilotMonitor.Agent
     {
         static void Main(string[] args)
         {
+            // Install mode: ensure folders, deploy payload, create/update Scheduled Task, and start it.
+            if (args.Contains("--install"))
+            {
+                RunInstallMode(args);
+                return;
+            }
+
             // Check for mass rollout simulator mode
             if (args.Contains("--simulator-mass-rollout"))
             {
@@ -26,6 +33,86 @@ namespace AutopilotMonitor.Agent
             // The agent is started by the Scheduled Task (SYSTEM) or manually with --console.
             // Both paths land here and run identically; --console just enables console output.
             RunAgent(args);
+        }
+
+        static void RunInstallMode(string[] args)
+        {
+            var logDir = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor\Logs");
+            var logger = new AgentLogger(logDir, enableDebug: true);
+            var consoleMode = args.Contains("--console") || Environment.UserInteractive;
+
+            try
+            {
+                logger.Info("======================= Agent install mode (--install) =======================");
+
+                EnsureAgentDirectories(logger);
+
+                var sourceExePath = Assembly.GetExecutingAssembly().Location;
+                var sourceDir = Path.GetDirectoryName(sourceExePath) ?? string.Empty;
+                var targetAgentDir = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor\Agent");
+                var targetExePath = Path.Combine(targetAgentDir, "AutopilotMonitor.Agent.exe");
+
+                if (!string.Equals(
+                    Path.GetFullPath(sourceDir).TrimEnd('\\'),
+                    Path.GetFullPath(targetAgentDir).TrimEnd('\\'),
+                    StringComparison.OrdinalIgnoreCase))
+                {
+                    logger.Info($"Install mode called from '{sourceDir}'. Deploying payload to '{targetAgentDir}'.");
+                    CopyDirectory(sourceDir, targetAgentDir, logger);
+                }
+                else
+                {
+                    logger.Info("Agent already running from target install directory; payload copy not required.");
+                }
+
+                var taskName = "AutopilotMonitor-Agent";
+                var taskCommand = $"\"{targetExePath}\"";
+
+                logger.Info($"Registering Scheduled Task '{taskName}' for executable: {targetExePath}");
+
+                var createExitCode = RunProcess(
+                    "schtasks.exe",
+                    $"/Create /TN \"{taskName}\" /TR \"{taskCommand}\" /SC ONSTART /RU SYSTEM /RL HIGHEST /F",
+                    logger);
+
+                if (createExitCode != 0)
+                {
+                    throw new InvalidOperationException($"Failed to create/update Scheduled Task '{taskName}' (exit code {createExitCode})");
+                }
+
+                logger.Info($"Scheduled Task '{taskName}' created/updated successfully");
+
+                var startExitCode = RunProcess(
+                    "schtasks.exe",
+                    $"/Run /TN \"{taskName}\"",
+                    logger);
+
+                if (startExitCode != 0)
+                {
+                    throw new InvalidOperationException($"Failed to start Scheduled Task '{taskName}' (exit code {startExitCode})");
+                }
+
+                logger.Info($"Scheduled Task '{taskName}' started successfully");
+
+                if (consoleMode)
+                {
+                    Console.WriteLine("Installation completed successfully.");
+                    Console.WriteLine($"Task: {taskName}");
+                    Console.WriteLine($"Executable: {targetExePath}");
+                    Console.WriteLine($"Log: {logDir}");
+                }
+
+                Environment.Exit(0);
+            }
+            catch (Exception ex)
+            {
+                logger.Error("Registration mode failed", ex);
+                if (consoleMode)
+                {
+                    Console.WriteLine($"ERROR: {ex.Message}");
+                }
+                Environment.Exit(1);
+            }
         }
 
         static void RunAgent(string[] args)
@@ -414,6 +501,103 @@ namespace AutopilotMonitor.Agent
             }
 
             return null;
+        }
+
+        private static void EnsureAgentDirectories(AgentLogger logger)
+        {
+            var basePath = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor");
+            var paths = new[]
+            {
+                basePath,
+                Path.Combine(basePath, "Agent"),
+                Path.Combine(basePath, "Spool"),
+                Path.Combine(basePath, "Logs")
+            };
+
+            foreach (var path in paths)
+            {
+                if (!Directory.Exists(path))
+                {
+                    Directory.CreateDirectory(path);
+                    logger.Info($"Created directory: {path}");
+                }
+                else
+                {
+                    logger.Debug($"Directory already exists: {path}");
+                }
+            }
+        }
+
+        private static int RunProcess(string fileName, string arguments, AgentLogger logger)
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = fileName,
+                Arguments = arguments,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+
+            logger.Info($"Executing: {fileName} {arguments}");
+
+            using (var process = Process.Start(psi))
+            {
+                if (process == null)
+                    throw new InvalidOperationException($"Failed to start process: {fileName}");
+
+                var stdout = process.StandardOutput.ReadToEnd();
+                var stderr = process.StandardError.ReadToEnd();
+                process.WaitForExit();
+
+                if (!string.IsNullOrWhiteSpace(stdout))
+                    logger.Info($"Process output: {stdout.Trim()}");
+                if (!string.IsNullOrWhiteSpace(stderr))
+                    logger.Warning($"Process error output: {stderr.Trim()}");
+
+                logger.Info($"Process exit code: {process.ExitCode}");
+                return process.ExitCode;
+            }
+        }
+
+        private static void CopyDirectory(string sourceDir, string targetDir, AgentLogger logger)
+        {
+            if (!Directory.Exists(sourceDir))
+                throw new DirectoryNotFoundException($"Source directory not found: {sourceDir}");
+
+            Directory.CreateDirectory(targetDir);
+
+            foreach (var dir in Directory.GetDirectories(sourceDir, "*", SearchOption.AllDirectories))
+            {
+                var rel = dir.Substring(sourceDir.Length).TrimStart('\\');
+                Directory.CreateDirectory(Path.Combine(targetDir, rel));
+            }
+
+            foreach (var file in Directory.GetFiles(sourceDir, "*", SearchOption.AllDirectories))
+            {
+                var rel = file.Substring(sourceDir.Length).TrimStart('\\');
+                var dest = Path.Combine(targetDir, rel);
+                Directory.CreateDirectory(Path.GetDirectoryName(dest) ?? targetDir);
+
+                try
+                {
+                    File.Copy(file, dest, true);
+                }
+                catch (Exception ex)
+                {
+                    // If destination exists, keep going and let scheduled task use the latest available payload.
+                    if (File.Exists(dest))
+                    {
+                        logger.Warning($"Could not overwrite '{dest}': {ex.Message}. Keeping existing file.");
+                        continue;
+                    }
+
+                    throw;
+                }
+            }
+
+            logger.Info($"Payload deployment completed: '{sourceDir}' -> '{targetDir}'");
         }
 
         /// <summary>

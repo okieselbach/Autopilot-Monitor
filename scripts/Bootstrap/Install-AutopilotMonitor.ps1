@@ -37,16 +37,11 @@ param(
 # Configuration - Everything in ProgramData for easy cleanup
 $AgentBasePath = "$env:ProgramData\AutopilotMonitor"
 $AgentBinPath = "$AgentBasePath\Agent"
-$AgentSpoolPath = "$AgentBasePath\Spool"
-$AgentLogsPath = "$AgentBasePath\Logs"
-$TaskName = "AutopilotMonitor-Agent"
-$LogFile = "$AgentLogsPath\Bootstrap.log"
+$LogFile = "$AgentBasePath\Bootstrap.log"
 
 # Ensure directories exist
 New-Item -Path $AgentBasePath -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
 New-Item -Path $AgentBinPath -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
-New-Item -Path $AgentSpoolPath -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
-New-Item -Path $AgentLogsPath -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
 
 function Write-Log {
     param([string]$Message)
@@ -213,54 +208,18 @@ try {
         }
     }
 
-    # Register as Scheduled Task (survives reboots, easy to remove)
-    Write-Log "Registering Scheduled Task..."
-
-    # Check if task already exists
-    $existingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-
-    if ($null -ne $existingTask) {
-        Write-Log "Scheduled Task already exists - removing old task"
-        Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
+    # Let the agent install/deploy itself and manage its own Scheduled Task
+    Write-Log "Calling agent install mode (--install)..."
+    & $agentExePath --install
+    $installExitCode = $LASTEXITCODE
+    if ($installExitCode -ne 0) {
+        throw "Agent install failed with exit code $installExitCode"
     }
-
-    # Create action - run agent executable
-    $action = New-ScheduledTaskAction -Execute $agentExePath -WorkingDirectory $AgentBinPath
-
-    # Create trigger - run at computer startup
-    $trigger = New-ScheduledTaskTrigger -AtStartup
-
-    # Create settings - run whether user is logged on or not
-    $settings = New-ScheduledTaskSettingsSet `
-        -AllowStartIfOnBatteries `
-        -DontStopIfGoingOnBatteries `
-        -StartWhenAvailable `
-        -RunOnlyIfNetworkAvailable `
-        -ExecutionTimeLimit (New-TimeSpan -Hours 0)  # No time limit
-
-    # Create principal - run as SYSTEM
-    $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-
-    # Register the task
-    Register-ScheduledTask `
-        -TaskName $TaskName `
-        -Action $action `
-        -Trigger $trigger `
-        -Settings $settings `
-        -Principal $principal `
-        -Description "Autopilot Monitor Agent - Temporary enrollment monitoring" `
-        -Force
-
-    Write-Log "Scheduled Task registered successfully"
-
-    # Start the task immediately (don't wait for next reboot)
-    Write-Log "Starting agent task..."
-    Start-ScheduledTask -TaskName $TaskName
-    Write-Log "Agent task started"
+    Write-Log "Agent install mode completed successfully"
 
     Write-Log "===== Bootstrap Completed Successfully ====="
     Write-Log "Agent Path: $AgentBasePath"
-    Write-Log "Scheduled Task: $TaskName"
+    Write-Log "Scheduled Task: managed by agent (--install)"
     Write-Log "Agent will monitor enrollment and auto-remove when complete"
     Write-Log "Bootstrap log: $LogFile"
     Write-Log ""
