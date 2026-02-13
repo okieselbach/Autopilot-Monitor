@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using AutopilotMonitor.Agent.Core.Configuration;
 using AutopilotMonitor.Agent.Core.Logging;
 using AutopilotMonitor.Agent.Core.Monitoring.Core;
@@ -64,8 +65,10 @@ namespace AutopilotMonitor.Agent
                 var config = LoadConfiguration(args);
                 var logDir = Environment.ExpandEnvironmentVariables(config.LogDirectory);
                 var logger = new AgentLogger(logDir, enableDebug: config.EnableDebugLogging);
+                var agentVersion = GetAgentVersion();
 
                 logger.Info($"======================= Agent starting ({(consoleMode ? "console" : "background/SYSTEM")}) =======================");
+                logger.Info($"Agent version: {agentVersion}");
 
                 // Check for enrollment complete marker (handles scheduled task cleanup retry)
                 if (CheckEnrollmentCompleteMarker(config, logger, consoleMode))
@@ -76,11 +79,12 @@ namespace AutopilotMonitor.Agent
 
                 if (consoleMode)
                 {
-                    Console.WriteLine($"Session ID:  {config.SessionId}");
-                    Console.WriteLine($"Tenant ID:   {config.TenantId}");
-                    Console.WriteLine($"API URL:     {config.ApiBaseUrl}");
-                    Console.WriteLine($"Log Dir:     {logDir}");
-                    Console.WriteLine($"Keep Logs:   {config.KeepLogFile}");
+                    Console.WriteLine($"Agent Version: {agentVersion}");
+                    Console.WriteLine($"Session ID:    {config.SessionId}");
+                    Console.WriteLine($"Tenant ID:     {config.TenantId}");
+                    Console.WriteLine($"API URL:       {config.ApiBaseUrl}");
+                    Console.WriteLine($"Log Dir:       {logDir}");
+                    Console.WriteLine($"Keep Logs:     {config.KeepLogFile}");
                     if (config.EnableSimulator)
                     {
                         Console.WriteLine($"Simulator:   ENABLED (Failure={config.SimulateFailure})");
@@ -507,6 +511,33 @@ namespace AutopilotMonitor.Agent
             }
 
             return true;
+        }
+
+        static string GetAgentVersion()
+        {
+            try
+            {
+                var assembly = Assembly.GetExecutingAssembly();
+                var informationalVersion = assembly
+                    .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+                    ?.InformationalVersion;
+
+                if (!string.IsNullOrWhiteSpace(informationalVersion))
+                    return informationalVersion;
+
+                var fileVersion = assembly
+                    .GetCustomAttribute<AssemblyFileVersionAttribute>()
+                    ?.Version;
+
+                if (!string.IsNullOrWhiteSpace(fileVersion))
+                    return fileVersion;
+
+                return assembly.GetName().Version?.ToString() ?? "unknown";
+            }
+            catch
+            {
+                return "unknown";
+            }
         }
     }
 }
