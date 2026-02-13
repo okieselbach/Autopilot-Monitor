@@ -1557,7 +1557,6 @@ function DeviceDetailsCard({ events }: { events: EnrollmentEvent[] }) {
               {hasValue(autopilotProfile.CloudAssignedOobeConfig) && <DetailRow label="OOBE Config" value={`${autopilotProfile.CloudAssignedOobeConfig}`} />}
               {hasValue(autopilotProfile.ZtdRegistrationId) && <DetailRow label="ZTD Registration ID" value={`${autopilotProfile.ZtdRegistrationId}`} />}
               {hasValue(autopilotProfile.AadDeviceId) && <DetailRow label="AAD Device ID" value={`${autopilotProfile.AadDeviceId}`} />}
-              {hasValue(autopilotProfile.CloudAssignedMdmId) && <DetailRow label="MDM ID" value={`${autopilotProfile.CloudAssignedMdmId}`} />}
               {autopilotProfile.CloudAssignedDomainJoinMethod !== undefined && (
                 <DetailRow label="Domain Join Method" value={`${autopilotProfile.CloudAssignedDomainJoinMethod}` === "0" ? "Entra Join" : `${autopilotProfile.CloudAssignedDomainJoinMethod}`} />
               )}
@@ -1568,12 +1567,6 @@ function DeviceDetailsCard({ events }: { events: EnrollmentEvent[] }) {
               {hasValue(autopilotProfile.ProfileAvailable) && (
                 <DetailRow label="Profile Available" value={`${autopilotProfile.ProfileAvailable}` === "1" ? "Yes" : `${autopilotProfile.ProfileAvailable}`} />
               )}
-
-              {/* Legacy fields (fallback for old data) */}
-              {!hasValue(autopilotProfile.CloudAssignedTenantDomain) && hasValue(autopilotProfile.tenantDomain) && <DetailRow label="Tenant Domain" value={`${autopilotProfile.tenantDomain}`} />}
-              {!hasValue(autopilotProfile.DeploymentProfileName) && hasValue(autopilotProfile.deploymentProfileName) && <DetailRow label="Profile Name" value={`${autopilotProfile.deploymentProfileName}`} />}
-              {!hasValue(autopilotProfile.CloudAssignedTenantId) && hasValue(autopilotProfile.cloudAssignedTenantId) && <DetailRow label="Tenant ID" value={`${autopilotProfile.cloudAssignedTenantId}`} />}
-              {!hasValue(autopilotProfile.CloudAssignedOobeConfig) && hasValue(autopilotProfile.oobeConfig) && <DetailRow label="OOBE Config" value={`${autopilotProfile.oobeConfig}`} />}
             </DetailSection>
           )}
 
