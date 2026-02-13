@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ProtectedRoute } from "../../components/ProtectedRoute";
 import { useTenant } from "../../contexts/TenantContext";
 import { useAuth } from "../../contexts/AuthContext";
@@ -14,6 +14,7 @@ interface TenantConfiguration {
   manufacturerWhitelist: string;
   modelWhitelist: string;
   validateSerialNumber: boolean;
+  allowInsecureAgentRequests?: boolean;
   dataRetentionDays: number;
   sessionTimeoutHours: number;
   customSettings?: string;
@@ -32,6 +33,7 @@ interface TenantAdmin {
 
 export default function SettingsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { tenantId } = useTenant();
   const { getAccessToken, user, logout } = useAuth();
   const [config, setConfig] = useState<TenantConfiguration | null>(null);
@@ -64,6 +66,7 @@ export default function SettingsPage() {
   // Collector settings state
   const [enablePerformanceCollector, setEnablePerformanceCollector] = useState(false);
   const [performanceCollectorInterval, setPerformanceCollectorInterval] = useState(60);
+  const [serialConsentInProgress, setSerialConsentInProgress] = useState(false);
 
 
   // Fetch configuration
@@ -150,7 +153,7 @@ export default function SettingsPage() {
     fetchAdmins();
   }, [tenantId]);
 
-  const handleSave = async () => {
+  const saveConfiguration = async (validateSerialNumberOverride?: boolean) => {
     if (!tenantId || !config) return;
 
     try {
@@ -158,11 +161,13 @@ export default function SettingsPage() {
       setError(null);
       setSuccessMessage(null);
 
+      const serialValidationValue = validateSerialNumberOverride ?? validateSerialNumber;
+
       const updatedConfig: TenantConfiguration = {
         ...config,
         manufacturerWhitelist,
         modelWhitelist,
-        validateSerialNumber,
+        validateSerialNumber: serialValidationValue,
         dataRetentionDays,
         sessionTimeoutHours,
         enablePerformanceCollector,
@@ -184,20 +189,135 @@ export default function SettingsPage() {
       });
 
       if (!response.ok) {
-        throw new Error(`Failed to save configuration: ${response.statusText}`);
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || errorData.error || `Failed to save configuration: ${response.statusText}`);
       }
 
       const result = await response.json();
       setConfig(result.config);
+      setValidateSerialNumber(result.config.validateSerialNumber);
       setSuccessMessage("Configuration saved successfully!");
-
-      // Auto-hide success message after 3 seconds
       setTimeout(() => setSuccessMessage(null), 3000);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const beginSerialValidationEnableFlow = async () => {
+    if (!tenantId) return;
+
+    try {
+      setSerialConsentInProgress(true);
+      setError(null);
+      setSuccessMessage(null);
+
+      const token = await getAccessToken();
+      if (!token) {
+        throw new Error("Failed to get access token");
+      }
+
+      const redirectUri = `${window.location.origin}/settings`;
+      const response = await fetch(
+        `${API_BASE_URL}/api/config/${tenantId}/serial-validation/consent-url?redirectUri=${encodeURIComponent(redirectUri)}`,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Failed to start consent flow: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      if (!data.consentUrl) {
+        throw new Error("Backend did not return a consent URL.");
+      }
+
+      sessionStorage.setItem("serialValidationPending", "true");
+      window.location.href = data.consentUrl;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to start admin consent flow");
+      setSerialConsentInProgress(false);
+    }
+  };
+
+  useEffect(() => {
+    const handleConsentCallback = async () => {
+      if (!tenantId || !config) return;
+
+      const wasPending = sessionStorage.getItem("serialValidationPending") === "true";
+      if (!wasPending) return;
+
+      const adminConsent = searchParams.get("admin_consent");
+      const consentError = searchParams.get("error");
+      const consentErrorDescription = searchParams.get("error_description");
+
+      if (!adminConsent && !consentError) {
+        return;
+      }
+
+      sessionStorage.removeItem("serialValidationPending");
+
+      if (consentError) {
+        const errorText = consentErrorDescription
+          ? `${consentError}: ${decodeURIComponent(consentErrorDescription)}`
+          : consentError;
+        setError(`Admin consent failed: ${errorText}`);
+        setSerialConsentInProgress(false);
+        router.replace("/settings");
+        return;
+      }
+
+      try {
+        setSerialConsentInProgress(true);
+        const token = await getAccessToken();
+        if (!token) {
+          throw new Error("Failed to get access token");
+        }
+
+        const statusResponse = await fetch(
+          `${API_BASE_URL}/api/config/${tenantId}/serial-validation/consent-status`,
+          {
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          }
+        );
+
+        if (!statusResponse.ok) {
+          const errorData = await statusResponse.json().catch(() => ({}));
+          throw new Error(errorData.error || `Consent validation failed: ${statusResponse.statusText}`);
+        }
+
+        const statusData = await statusResponse.json();
+        if (!statusData.isConsented) {
+          throw new Error(statusData.message || "Consent is not active yet for this tenant.");
+        }
+
+        await saveConfiguration(true);
+        setSuccessMessage("Serial Number Validation enabled. Backend agent endpoints are now unlocked for this tenant.");
+        router.replace("/settings");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to verify consent");
+      } finally {
+        setSerialConsentInProgress(false);
+      }
+    };
+
+    handleConsentCallback();
+  }, [tenantId, config, searchParams, router]);
+
+  const handleSave = async () => {
+    if (!tenantId || !config) return;
+
+    try {
+      await saveConfiguration();
     } catch (err) {
       console.error("Error saving configuration:", err);
       setError(err instanceof Error ? err.message : "Failed to save configuration");
-    } finally {
-      setSaving(false);
     }
   };
 
@@ -798,39 +918,54 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            {/* Serial Number Validation (Prepared for future) */}
-            <div className="bg-white rounded-lg shadow opacity-60">
+            {/* Serial Number Validation */}
+            <div className="bg-white rounded-lg shadow">
               <div className="p-6 border-b border-gray-200">
                 <div className="flex items-center justify-between">
                   <div>
                     <h2 className="text-xl font-semibold text-gray-900">Serial Number Validation</h2>
-                    <p className="text-sm text-gray-500 mt-1">Validate devices against Intune Autopilot registration</p>
+                    <p className="text-sm text-gray-500 mt-1">Validate devices against Intune Autopilot registration (mandatory for agent ingestion)</p>
                   </div>
-                  <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                    Coming Soon
+                  <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${validateSerialNumber ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}>
+                    {validateSerialNumber ? "Enabled" : "Disabled"}
                   </span>
                 </div>
               </div>
-              <div className="p-6">
-                <label className="flex items-center justify-between cursor-not-allowed">
+              <div className="p-6 space-y-4">
+                <label className="flex items-center justify-between">
                   <div>
-                    <p className="font-medium text-gray-500">Enable Serial Number Validation</p>
-                    <p className="text-sm text-gray-400">
-                      Requires Graph API permission
+                    <p className="font-medium text-gray-900">Enable Serial Number Validation</p>
+                    <p className="text-sm text-gray-500">
+                      Enabling starts Microsoft Entra admin consent for the validator app. After consent, the setting is saved automatically.
                     </p>
                   </div>
-                  <div className="relative">
-                    <input
-                      type="checkbox"
-                      className="sr-only"
-                      checked={validateSerialNumber}
-                      disabled
-                    />
-                    <div className="w-14 h-8 bg-gray-200 rounded-full cursor-not-allowed">
-                      <div className="absolute top-1 left-1 w-6 h-6 bg-white rounded-full"></div>
-                    </div>
-                  </div>
+                  <button
+                    onClick={() => {
+                      if (validateSerialNumber) {
+                        setValidateSerialNumber(false);
+                      } else {
+                        beginSerialValidationEnableFlow();
+                      }
+                    }}
+                    disabled={saving || serialConsentInProgress}
+                    className={`relative inline-flex h-8 w-14 items-center rounded-full transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${validateSerialNumber ? 'bg-green-600' : 'bg-gray-300'}`}
+                  >
+                    <span className={`inline-block h-6 w-6 transform rounded-full bg-white transition-transform ${validateSerialNumber ? 'translate-x-7' : 'translate-x-1'}`} />
+                  </button>
                 </label>
+
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                  <p className="text-sm text-amber-900">
+                    <strong>Important:</strong> If this is disabled, backend agent endpoints reject requests for this tenant.
+                    Use this toggle and complete admin consent first.
+                  </p>
+                </div>
+
+                {serialConsentInProgress && (
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">
+                    Checking or applying admin consent...
+                  </div>
+                )}
               </div>
             </div>
 

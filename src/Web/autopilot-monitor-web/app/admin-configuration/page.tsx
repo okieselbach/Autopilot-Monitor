@@ -27,6 +27,7 @@ interface TenantConfiguration {
   manufacturerWhitelist: string;
   modelWhitelist: string;
   validateSerialNumber: boolean;
+  allowInsecureAgentRequests?: boolean;
   dataRetentionDays: number;
   sessionTimeoutHours: number;
   maxNdjsonPayloadSizeMB: number;
@@ -61,6 +62,7 @@ export default function AdminConfigurationPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [editingTenant, setEditingTenant] = useState<TenantConfiguration | null>(null);
   const [savingTenant, setSavingTenant] = useState(false);
+  const [togglingSecurityBypassTenant, setTogglingSecurityBypassTenant] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(0);
   const tenantsPerPage = 3;
 
@@ -289,6 +291,55 @@ export default function AdminConfigurationPage() {
       setError(err instanceof Error ? err.message : "Failed to save tenant configuration");
     } finally {
       setSavingTenant(false);
+    }
+  };
+
+  const handleToggleSecurityBypass = async (tenant: TenantConfiguration) => {
+    try {
+      setTogglingSecurityBypassTenant(tenant.tenantId);
+      setError(null);
+      setSuccessMessage(null);
+
+      const token = await getAccessToken();
+      if (!token) {
+        throw new Error('Failed to get access token');
+      }
+
+      const newValue = !tenant.allowInsecureAgentRequests;
+      const response = await fetch(`${API_BASE_URL}/api/config/${tenant.tenantId}/security-bypass`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ allowInsecureAgentRequests: newValue }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Failed to update security bypass: ${response.statusText}`);
+      }
+
+      setTenants(prev => prev.map(t =>
+        t.tenantId === tenant.tenantId
+          ? { ...t, allowInsecureAgentRequests: newValue }
+          : t
+      ));
+
+      setEditingTenant(prev => prev && prev.tenantId === tenant.tenantId
+        ? { ...prev, allowInsecureAgentRequests: newValue }
+        : prev);
+
+      setSuccessMessage(
+        newValue
+          ? `Security bypass enabled for tenant ${tenant.tenantId}.`
+          : `Security bypass disabled for tenant ${tenant.tenantId}.`
+      );
+      setTimeout(() => setSuccessMessage(null), 4000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update security bypass");
+    } finally {
+      setTogglingSecurityBypassTenant(null);
     }
   };
 
@@ -1072,6 +1123,33 @@ export default function AdminConfigurationPage() {
                       />
                       <span className="text-sm font-medium text-gray-700">Validate Serial Number</span>
                     </label>
+
+                    <div className="border border-amber-300 bg-amber-50 rounded-lg p-3">
+                      <p className="text-sm font-semibold text-amber-900">Galactic Admin Test Bypass</p>
+                      <p className="text-xs text-amber-800 mt-1">
+                        Allows agent requests even when serial validation is disabled. Use only for temporary test tenants.
+                      </p>
+                      <div className="mt-3 flex items-center justify-between">
+                        <span className={`text-xs font-medium ${editingTenant.allowInsecureAgentRequests ? "text-red-700" : "text-green-700"}`}>
+                          {editingTenant.allowInsecureAgentRequests ? "Bypass is ENABLED" : "Bypass is DISABLED"}
+                        </span>
+                        <button
+                          onClick={() => handleToggleSecurityBypass(editingTenant)}
+                          disabled={togglingSecurityBypassTenant === editingTenant.tenantId}
+                          className={`px-3 py-1.5 text-xs font-medium rounded-md text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                            editingTenant.allowInsecureAgentRequests
+                              ? "bg-red-600 hover:bg-red-700"
+                              : "bg-amber-600 hover:bg-amber-700"
+                          }`}
+                        >
+                          {togglingSecurityBypassTenant === editingTenant.tenantId
+                            ? "Updating..."
+                            : editingTenant.allowInsecureAgentRequests
+                            ? "Disable Bypass"
+                            : "Enable Bypass"}
+                        </button>
+                      </div>
+                    </div>
 
                     {/* Data Management */}
                     <div>

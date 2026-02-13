@@ -24,6 +24,10 @@ interface Session {
   failureReason?: string;
 }
 
+interface TenantConfigurationSummary {
+  validateSerialNumber: boolean;
+}
+
 export default function Home() {
   const router = useRouter();
   const { user, logout, getAccessToken } = useAuth();
@@ -31,6 +35,7 @@ export default function Home() {
   const [apiStatus, setApiStatus] = useState<"unchecked" | "checking" | "healthy" | "error">("unchecked");
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
+  const [serialValidationEnabled, setSerialValidationEnabled] = useState<boolean | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [sortColumn, setSortColumn] = useState<keyof Session | null>(null);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
@@ -106,6 +111,36 @@ export default function Home() {
       router.replace("/progress");
     }
   }, [user, router]);
+
+  useEffect(() => {
+    const fetchTenantSecurityConfig = async () => {
+      if (!tenantId) return;
+      if (user && !user.isTenantAdmin && !user.isGalacticAdmin) return;
+
+      try {
+        const token = await getAccessToken();
+        if (!token) return;
+
+        const response = await fetch(`${API_BASE_URL}/api/config/${tenantId}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+
+        if (!response.ok) {
+          setSerialValidationEnabled(null);
+          return;
+        }
+
+        const data: TenantConfigurationSummary = await response.json();
+        setSerialValidationEnabled(!!data.validateSerialNumber);
+      } catch {
+        setSerialValidationEnabled(null);
+      }
+    };
+
+    fetchTenantSecurityConfig();
+  }, [tenantId, user]);
 
   // Initial data fetch (only runs for admins)
   useEffect(() => {
@@ -429,6 +464,22 @@ export default function Home() {
       {/* Main content */}
       <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
         <div className="px-4 py-6 sm:px-0">
+          {serialValidationEnabled === false && (
+            <div className="mb-6 bg-red-50 border border-red-200 rounded-lg p-4">
+              <div className="flex items-start gap-3">
+                <svg className="w-5 h-5 text-red-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <div>
+                  <p className="text-sm font-semibold text-red-900">Serial Number Validation is disabled</p>
+                  <p className="text-sm text-red-800">
+                    Agent ingestion is blocked until this is enabled. Open Configuration and enable Serial Number Validation first.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Stats cards */}
           <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4 mb-8">
             <StatsCard
