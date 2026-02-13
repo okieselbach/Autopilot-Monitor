@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { ProtectedRoute } from "../../components/ProtectedRoute";
 import { useTenant } from "../../contexts/TenantContext";
 import { useAuth } from "../../contexts/AuthContext";
@@ -33,7 +33,6 @@ interface TenantAdmin {
 
 export default function SettingsPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const { tenantId } = useTenant();
   const { getAccessToken, user, logout } = useAuth();
   const [config, setConfig] = useState<TenantConfiguration | null>(null);
@@ -251,9 +250,10 @@ export default function SettingsPage() {
       const wasPending = sessionStorage.getItem("serialValidationPending") === "true";
       if (!wasPending) return;
 
-      const adminConsent = searchParams.get("admin_consent");
-      const consentError = searchParams.get("error");
-      const consentErrorDescription = searchParams.get("error_description");
+      const queryParams = new URLSearchParams(window.location.search);
+      const adminConsent = queryParams.get("admin_consent");
+      const consentError = queryParams.get("error");
+      const consentErrorDescription = queryParams.get("error_description");
 
       if (!adminConsent && !consentError) {
         return;
@@ -308,7 +308,7 @@ export default function SettingsPage() {
     };
 
     handleConsentCallback();
-  }, [tenantId, config, searchParams, router]);
+  }, [tenantId, config, router]);
 
   const handleSave = async () => {
     if (!tenantId || !config) return;
