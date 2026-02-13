@@ -832,9 +832,46 @@ function PhaseSection({
   );
 }
 
+function normalizeJsonLikeValue(value: any): any {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    const looksLikeJson =
+      (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+      (trimmed.startsWith("[") && trimmed.endsWith("]"));
+
+    if (!looksLikeJson) return value;
+
+    try {
+      return normalizeJsonLikeValue(JSON.parse(value));
+    } catch {
+      return value;
+    }
+  }
+
+  if (Array.isArray(value)) {
+    return value.map(normalizeJsonLikeValue);
+  }
+
+  if (value && typeof value === "object") {
+    const normalized: Record<string, any> = {};
+    for (const [k, v] of Object.entries(value)) {
+      normalized[k] = normalizeJsonLikeValue(v);
+    }
+    return normalized;
+  }
+
+  return value;
+}
+
+function normalizeEventDataForDisplay(data?: Record<string, any>): Record<string, any> | null {
+  if (!data) return null;
+  return normalizeJsonLikeValue(data);
+}
+
 function EventRow({ event, isGalacticAdmin }: { event: EnrollmentEvent; isGalacticAdmin?: boolean }) {
   const [showDetails, setShowDetails] = useState(false);
   const [copied, setCopied] = useState(false);
+  const detailData = useMemo(() => normalizeEventDataForDisplay(event.data), [event.data]);
 
   const copyEventId = async () => {
     try {
@@ -872,7 +909,7 @@ function EventRow({ event, isGalacticAdmin }: { event: EnrollmentEvent; isGalact
             )}
           </div>
         </div>
-        {event.data && Object.keys(event.data).length > 0 && (
+        {detailData && Object.keys(detailData).length > 0 && (
           <button
             onClick={() => setShowDetails(!showDetails)}
             className="text-xs text-blue-600 hover:text-blue-800 ml-4"
@@ -882,9 +919,9 @@ function EventRow({ event, isGalacticAdmin }: { event: EnrollmentEvent; isGalact
         )}
       </div>
 
-      {showDetails && event.data && (
+      {showDetails && detailData && (
         <div className="mt-3 p-3 bg-gray-900 rounded text-xs text-gray-100 font-mono overflow-x-auto">
-          <pre>{JSON.stringify(event.data, null, 2)}</pre>
+          <pre>{JSON.stringify(detailData, null, 2)}</pre>
         </div>
       )}
     </div>
