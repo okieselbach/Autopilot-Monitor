@@ -5,7 +5,56 @@
     <TargetFramework>net48</TargetFramework>
     <LangVersion>latest</LangVersion>
     <PlatformTarget>AnyCPU</PlatformTarget>
+
+    <!-- Version Configuration -->
+    <!-- Major.Minor version (update manually when needed) -->
+    <VersionPrefix>1.0</VersionPrefix>
+
+    <!-- Build counter file location -->
+    <BuildCounterFile>$(MSBuildProjectDirectory)\buildcounter.txt</BuildCounterFile>
+
+    <!-- Build number: Priority order:
+         1. Use BUILD_NUMBER from CI/CD environment (GitHub Actions, Azure DevOps, etc.)
+         2. Use build counter from file (incremented on each build)
+         3. Fallback to date-based build number (yyyyMMdd) -->
+    <BuildNumber Condition="'$(BUILD_NUMBER)' != ''">$(BUILD_NUMBER)</BuildNumber>
+    <BuildNumber Condition="'$(BUILD_NUMBER)' == ''">0</BuildNumber> <!-- Placeholder, will be set by target -->
+
+    <!-- Combine to full version: 1.0.BuildNumber -->
+    <Version>$(VersionPrefix).$(BuildNumber)</Version>
+    <AssemblyVersion>$(VersionPrefix).$(BuildNumber)</AssemblyVersion>
+    <FileVersion>$(VersionPrefix).$(BuildNumber)</FileVersion>
+    <InformationalVersion>$(Version)</InformationalVersion>
+
+    <!-- Show version during build -->
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
   </PropertyGroup>
+
+  <!-- Auto-increment build number if not from CI/CD -->
+  <Target Name="IncrementBuildNumber" BeforeTargets="BeforeBuild" Condition="'$(BUILD_NUMBER)' == ''">
+    <PropertyGroup>
+      <!-- Read current build number from file, or start at 1 if file doesn't exist -->
+      <CurrentBuildNumber Condition="Exists('$(BuildCounterFile)')">$([System.IO.File]::ReadAllText('$(BuildCounterFile)').Trim())</CurrentBuildNumber>
+      <CurrentBuildNumber Condition="!Exists('$(BuildCounterFile)')">0</CurrentBuildNumber>
+
+      <!-- Increment build number -->
+      <NewBuildNumber>$([MSBuild]::Add($(CurrentBuildNumber), 1))</NewBuildNumber>
+    </PropertyGroup>
+
+    <!-- Write new build number to file -->
+    <WriteLinesToFile File="$(BuildCounterFile)" Lines="$(NewBuildNumber)" Overwrite="true" />
+
+    <!-- Update the BuildNumber property -->
+    <PropertyGroup>
+      <BuildNumber>$(NewBuildNumber)</BuildNumber>
+      <Version>$(VersionPrefix).$(BuildNumber)</Version>
+      <AssemblyVersion>$(VersionPrefix).$(BuildNumber)</AssemblyVersion>
+      <FileVersion>$(VersionPrefix).$(BuildNumber)</FileVersion>
+      <InformationalVersion>$(Version)</InformationalVersion>
+    </PropertyGroup>
+
+    <Message Text="Auto-incremented build version to: $(Version)" Importance="high" />
+  </Target>
 
   <ItemGroup>
     <ProjectReference Include="..\AutopilotMonitor.Agent.Core\AutopilotMonitor.Agent.Core.csproj" />

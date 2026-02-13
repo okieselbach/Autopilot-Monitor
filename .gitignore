@@ -14,6 +14,9 @@ bld/
 [Ll]og/
 [Ll]ogs/
 
+# Build counter files (auto-incremented on each build) if ignored every dev has its own buildcounter, but I keep a global one.
+#buildcounter.txt
+
 # Visual Studio cache/options
 .vs/
 
