@@ -545,7 +545,7 @@ export default function SessionDetailPage() {
           {/* Session Info Card */}
           {session && (
             <div className="bg-white shadow rounded-lg p-6 mb-6">
-              <h2 className="text-xl font-semibold text-gray-900 mb-4">Device Information</h2>
+              <h2 className="text-xl font-semibold text-gray-900 mb-4">Session Info</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <InfoItem label="Device" value={session.deviceName || session.serialNumber} />
                 <InfoItem label="Model" value={`${session.manufacturer} ${session.model}`} />

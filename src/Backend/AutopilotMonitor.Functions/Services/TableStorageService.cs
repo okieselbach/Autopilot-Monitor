@@ -91,6 +91,35 @@ namespace AutopilotMonitor.Functions.Services
             {
                 var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
 
+                // If the agent restarts with the same session ID, preserve timeline/progress fields
+                // from the existing session row instead of resetting them to "fresh start".
+                DateTime startedAt = registration.StartedAt;
+                int currentPhase = (int)EnrollmentPhase.Start;
+                string status = SessionStatus.InProgress.ToString();
+                int eventCount = 0;
+                DateTime? completedAt = null;
+                string failureReason = string.Empty;
+
+                try
+                {
+                    var existing = await tableClient.GetEntityAsync<TableEntity>(registration.TenantId, registration.SessionId);
+                    var existingEntity = existing.Value;
+
+                    var existingStartedAt = existingEntity.GetDateTimeOffset("StartedAt")?.UtcDateTime;
+                    if (existingStartedAt.HasValue && existingStartedAt.Value < startedAt)
+                        startedAt = existingStartedAt.Value;
+
+                    currentPhase = existingEntity.GetInt32("CurrentPhase") ?? currentPhase;
+                    status = existingEntity.GetString("Status") ?? status;
+                    eventCount = existingEntity.GetInt32("EventCount") ?? eventCount;
+                    completedAt = existingEntity.GetDateTimeOffset("CompletedAt")?.UtcDateTime;
+                    failureReason = existingEntity.GetString("FailureReason") ?? string.Empty;
+                }
+                catch (RequestFailedException ex) when (ex.Status == 404)
+                {
+                    // New session row - use defaults above.
+                }
+
                 var entity = new TableEntity(registration.TenantId, registration.SessionId)
                 {
                     ["SerialNumber"] = registration.SerialNumber ?? string.Empty,
@@ -104,13 +133,19 @@ namespace AutopilotMonitor.Functions.Services
                     ["AutopilotProfileId"] = registration.AutopilotProfileId ?? string.Empty,
                     ["IsUserDriven"] = registration.IsUserDriven,
                     ["IsPreProvisioned"] = registration.IsPreProvisioned,
-                    ["StartedAt"] = registration.StartedAt,
+                    ["StartedAt"] = startedAt,
                     ["AgentVersion"] = registration.AgentVersion ?? string.Empty,
                     ["EnrollmentType"] = registration.EnrollmentType ?? "v1",
-                    ["CurrentPhase"] = (int)EnrollmentPhase.Start,
-                    ["Status"] = SessionStatus.InProgress.ToString(),
-                    ["EventCount"] = 0
+                    ["CurrentPhase"] = currentPhase,
+                    ["Status"] = status,
+                    ["EventCount"] = eventCount
                 };
+
+                if (completedAt.HasValue)
+                    entity["CompletedAt"] = completedAt.Value;
+
+                if (!string.IsNullOrWhiteSpace(failureReason))
+                    entity["FailureReason"] = failureReason;
 
                 await tableClient.UpsertEntityAsync(entity);
                 _logger.LogInformation($"Stored session {registration.SessionId}");
