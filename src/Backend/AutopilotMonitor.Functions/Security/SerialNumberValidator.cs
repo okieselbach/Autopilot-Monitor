@@ -72,10 +72,11 @@ namespace AutopilotMonitor.Functions.Security
                 var graphClient = _httpClientFactory.CreateClient();
                 graphClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
 
-                // Escape single quotes to prevent OData injection and malformed filters.
+                // For windowsAutopilotDeviceIdentities, eq on serialNumber is unreliable and often returns 400.
+                // Use contains for server-side narrowing, then perform exact match client-side.
                 var escapedSerial = normalizedSerial.Replace("'", "''");
-                var filter = Uri.EscapeDataString($"serialNumber eq '{escapedSerial}'");
-                var graphUrl = $"https://graph.microsoft.com/v1.0/deviceManagement/windowsAutopilotDeviceIdentities?$top=1&$filter={filter}";
+                var filter = Uri.EscapeDataString($"contains(serialNumber,'{escapedSerial}')");
+                var graphUrl = $"https://graph.microsoft.com/v1.0/deviceManagement/windowsAutopilotDeviceIdentities?$top=100&$filter={filter}";
 
                 var response = await graphClient.GetAsync(graphUrl);
                 var responseBody = await response.Content.ReadAsStringAsync();
@@ -108,11 +109,28 @@ namespace AutopilotMonitor.Functions.Security
                     }, isPositive: false);
                 }
 
+                // Exact-match guard to avoid false positives from contains(...)
+                var exactDevice = devices
+                    .FirstOrDefault(d => string.Equals(
+                        d?["serialNumber"]?.ToString()?.Trim(),
+                        normalizedSerial,
+                        StringComparison.OrdinalIgnoreCase));
+
+                if (exactDevice == null)
+                {
+                    return CacheAndReturn(cacheKey, new SerialNumberValidationResult
+                    {
+                        IsValid = false,
+                        SerialNumber = normalizedSerial,
+                        ErrorMessage = $"Serial number '{normalizedSerial}' is not registered in Autopilot"
+                    }, isPositive: false);
+                }
+
                 var result = new SerialNumberValidationResult
                 {
                     IsValid = true,
                     SerialNumber = normalizedSerial,
-                    AutopilotDeviceId = devices[0]?["id"]?.ToString()
+                    AutopilotDeviceId = exactDevice["id"]?.ToString()
                 };
 
                 _logger.LogInformation(
