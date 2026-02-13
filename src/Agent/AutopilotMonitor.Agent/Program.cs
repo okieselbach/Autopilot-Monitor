@@ -8,7 +8,6 @@ using AutopilotMonitor.Agent.Core.Configuration;
 using AutopilotMonitor.Agent.Core.Logging;
 using AutopilotMonitor.Agent.Core.Monitoring.Core;
 using Microsoft.Win32;
-using Newtonsoft.Json;
 
 namespace AutopilotMonitor.Agent
 {
@@ -289,6 +288,7 @@ namespace AutopilotMonitor.Agent
 
             string certThumbprint        = null;
             string tenantIdOverride      = null;
+            string apiBaseUrlOverride    = null;
             string imeLogPathOverride    = null;
             string imeMatchLogPath       = null;
             string simulationLogDir      = null;
@@ -303,6 +303,13 @@ namespace AutopilotMonitor.Agent
                 var tenantIdIndex = Array.IndexOf(args, "--tenant-id");
                 if (tenantIdIndex >= 0 && tenantIdIndex + 1 < args.Length)
                     tenantIdOverride = args[tenantIdIndex + 1];
+
+                // Local backend URL override for debugging/testing.
+                // Supported aliases:
+                // --ApiUrl https://...
+                // --api-url https://...
+                // --backend-api https://...
+                apiBaseUrlOverride = GetArgValue(args, "--ApiUrl", "--api-url", "--backend-api");
 
                 var imeLogPathIndex = Array.IndexOf(args, "--ime-log-path");
                 if (imeLogPathIndex >= 0 && imeLogPathIndex + 1 < args.Length)
@@ -325,56 +332,17 @@ namespace AutopilotMonitor.Agent
             // Defaults
             string apiBaseUrl             = "https://autopilotmonitor-func.azurewebsites.net";
             int    uploadIntervalSeconds  = 30;
-            bool   cleanupOnExit          = true;
-            bool   selfDestructOnComplete = true;
+            bool   cleanupOnExit          = false;
+            bool   selfDestructOnComplete = false;
             bool   rebootOnCompleteConfig = false;
             bool   enableGeoLocationConfig = true;
             bool   useClientCertAuthConfig = true;
 
-            // Load configuration JSON written by PowerShell bootstrap script
-            var configFilePath = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor\Config\agent-config.json");
-            if (File.Exists(configFilePath))
-            {
-                try
-                {
-                    var configJson = File.ReadAllText(configFilePath);
-                    var configDict = JsonConvert.DeserializeObject<Dictionary<string, object>>(configJson);
-
-                    if (configDict != null)
-                    {
-                        if (configDict.ContainsKey("apiBaseUrl") && configDict["apiBaseUrl"] != null)
-                            apiBaseUrl = configDict["apiBaseUrl"].ToString();
-
-                        if (configDict.ContainsKey("uploadIntervalSeconds") && configDict["uploadIntervalSeconds"] != null)
-                            uploadIntervalSeconds = Convert.ToInt32(configDict["uploadIntervalSeconds"]);
-
-                        if (configDict.ContainsKey("cleanupOnExit") && configDict["cleanupOnExit"] != null)
-                            cleanupOnExit = Convert.ToBoolean(configDict["cleanupOnExit"]);
-
-                        if (configDict.ContainsKey("selfDestructOnComplete") && configDict["selfDestructOnComplete"] != null)
-                            selfDestructOnComplete = Convert.ToBoolean(configDict["selfDestructOnComplete"]);
-
-                        if (configDict.ContainsKey("rebootOnComplete") && configDict["rebootOnComplete"] != null)
-                            rebootOnCompleteConfig = Convert.ToBoolean(configDict["rebootOnComplete"]);
-
-                        if (configDict.ContainsKey("enableGeoLocation") && configDict["enableGeoLocation"] != null)
-                            enableGeoLocationConfig = Convert.ToBoolean(configDict["enableGeoLocation"]);
-
-                        if (configDict.ContainsKey("useClientCertAuth") && configDict["useClientCertAuth"] != null)
-                            useClientCertAuthConfig = Convert.ToBoolean(configDict["useClientCertAuth"]);
-
-                        if (configDict.ContainsKey("keepLogFile") && configDict["keepLogFile"] != null)
-                            keepLogFile = keepLogFile || Convert.ToBoolean(configDict["keepLogFile"]);
-
-                        if (configDict.ContainsKey("imeMatchLogPath") && configDict["imeMatchLogPath"] != null)
-                            imeMatchLogPath = configDict["imeMatchLogPath"].ToString();
-                    }
-                }
-                catch { /* use defaults */ }
-            }
-
-            // Environment variable overrides config file
+            // Environment variable overrides built-in default
             apiBaseUrl = Environment.GetEnvironmentVariable("AUTOPILOT_MONITOR_API") ?? apiBaseUrl;
+            // CLI override wins over environment variable/default
+            if (!string.IsNullOrWhiteSpace(apiBaseUrlOverride))
+                apiBaseUrl = apiBaseUrlOverride;
 
             if (noCleanup)
             {
@@ -427,6 +395,25 @@ namespace AutopilotMonitor.Agent
                 SimulationSpeedFactor = simulationSpeedFactor,
                 KeepLogFile           = keepLogFile
             };
+        }
+
+        private static string GetArgValue(string[] args, params string[] names)
+        {
+            if (args == null || names == null || names.Length == 0)
+                return null;
+
+            for (int i = 0; i < args.Length - 1; i++)
+            {
+                foreach (var name in names)
+                {
+                    if (string.Equals(args[i], name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return args[i + 1];
+                    }
+                }
+            }
+
+            return null;
         }
 
         /// <summary>

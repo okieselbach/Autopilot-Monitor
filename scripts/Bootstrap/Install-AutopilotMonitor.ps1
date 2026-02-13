@@ -7,23 +7,16 @@
     It runs VERY EARLY in the enrollment process (first Intune action) and:
     1. Creates a unique session ID for this enrollment
     2. Downloads the monitoring agent binaries
-    3. Configures the agent (filesystem only - NO registry)
+    3. Installs agent binaries (agent uses built-in backend URL or CLI override)
     4. Registers agent as Scheduled Task (runs on computer startup)
     5. Agent self-destructs when enrollment completes
-
-.PARAMETER ApiBaseUrl
-    The base URL of the backend API (default: http://localhost:7071 for local testing)
-    Production example: https://autopilot-api.azurewebsites.net
 
 .PARAMETER AgentDownloadUrl
     URL to download the agent binaries from (ZIP file)
 
 .EXAMPLE
     .\Install-AutopilotMonitor.ps1
-    (Uses default local API for testing)
-
-.EXAMPLE
-    .\Install-AutopilotMonitor.ps1 -ApiBaseUrl "https://autopilot-api.azurewebsites.net"
+    (Uses built-in backend URL from the agent)
 
 .NOTES
     - Agent is temporary and auto-removes after enrollment
@@ -35,20 +28,15 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
-    #[string]$ApiBaseUrl = "http://localhost:7071",
-    [string]$ApiBaseUrl = "https://autopilotmonitor-func.azurewebsites.net",
-
-    [Parameter(Mandatory = $false)]
     [string]$AgentDownloadUrl = "https://autopilotmonitor.blob.core.windows.net/agent/AutopilotMonitor-Agent.zip",
     
     [Parameter(Mandatory = $false)]
-    [int]$MaxOsAgeHours = 5
+    [int]$MaxOsAgeMinutes = 60
 )
 
 # Configuration - Everything in ProgramData for easy cleanup
 $AgentBasePath = "$env:ProgramData\AutopilotMonitor"
 $AgentBinPath = "$AgentBasePath\Agent"
-$AgentConfigPath = "$AgentBasePath\Config"
 $AgentSpoolPath = "$AgentBasePath\Spool"
 $AgentLogsPath = "$AgentBasePath\Logs"
 $TaskName = "AutopilotMonitor-Agent"
@@ -57,7 +45,6 @@ $LogFile = "$AgentLogsPath\Bootstrap.log"
 # Ensure directories exist
 New-Item -Path $AgentBasePath -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
 New-Item -Path $AgentBinPath -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
-New-Item -Path $AgentConfigPath -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
 New-Item -Path $AgentSpoolPath -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
 New-Item -Path $AgentLogsPath -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
 
@@ -94,18 +81,17 @@ function Get-FileMd5Base64 {
 
 try {
     Write-Log "===== Autopilot Monitor Bootstrap Started ====="
-    Write-Log "API Base URL: $ApiBaseUrl"
 
     # ── Pre-flight: Skip installation on already-enrolled devices ──
 
     # Check 1: OS install date must be within threshold (fresh device)
     $osInstallDate = (Get-CimInstance Win32_OperatingSystem).InstallDate
     $osAge = (Get-Date) - $osInstallDate
-    $osAgeHoursRounded = "{0:0.0}" -f $osAge.TotalHours
-    Write-Log "OS install date: $osInstallDate (age: ${osAgeHoursRounded}h)"
+    $osAgeMinutesRounded = [int][Math]::Round($osAge.TotalMinutes)
+    Write-Log "OS install date: $osInstallDate (age: ${osAgeMinutesRounded}m)"
 
-    if ($osAge.TotalHours -gt $MaxOsAgeHours) {
-        Write-Log "SKIP: OS was installed ${osAgeHoursRounded}h ago (threshold: ${MaxOsAgeHours}h). Device is not freshly provisioned."
+    if ($osAge.TotalMinutes -gt $MaxOsAgeMinutes) {
+        Write-Log "SKIP: OS was installed ${osAgeMinutesRounded}m ago (threshold: ${MaxOsAgeMinutes}m). Device is not freshly provisioned."
         exit 0
     }
 
@@ -148,22 +134,6 @@ try {
     }
 
     Write-Log "Pre-flight checks passed - device is freshly provisioned and enrollment in progress"
-
-    # Create agent configuration (JSON - NO REGISTRY!)
-    Write-Log "Creating agent configuration..."
-    $agentConfig = @{
-        apiBaseUrl = $ApiBaseUrl
-        uploadIntervalSeconds = 30
-        cleanupOnExit = $false
-        selfDestructOnComplete = $false
-        keepLogFile = $true
-        imeMatchLogPath = "C:\ProgramData\AutopilotMonitor\Logs\ime_pattern_matches.log"
-    }
-
-    $agentConfigJson = $agentConfig | ConvertTo-Json -Depth 10
-    $agentConfigFile = Join-Path $AgentConfigPath "agent-config.json"
-    Set-Content -Path $agentConfigFile -Value $agentConfigJson -Force
-    Write-Log "Configuration saved to $agentConfigFile"
 
     # Download and extract agent binaries
     $agentExePath = Join-Path $AgentBinPath "AutopilotMonitor.Agent.exe"
@@ -291,7 +261,6 @@ try {
     Write-Log "===== Bootstrap Completed Successfully ====="
     Write-Log "Agent Path: $AgentBasePath"
     Write-Log "Scheduled Task: $TaskName"
-    Write-Log "API Base URL: $ApiBaseUrl"
     Write-Log "Agent will monitor enrollment and auto-remove when complete"
     Write-Log "Bootstrap log: $LogFile"
     Write-Log ""
@@ -299,7 +268,7 @@ try {
     Write-Log "  - Generate unique session ID on startup"
     Write-Log "  - Survive reboots during enrollment"
     Write-Log "  - Monitor enrollment phases in real-time"
-    Write-Log "  - Upload events to $ApiBaseUrl"
+    Write-Log "  - Upload events to built-in backend URL (or CLI override /--backend-api)"
     Write-Log "  - Self-destruct when enrollment completes"
     Write-Log "  - Clean removal: delete C:\ProgramData\AutopilotMonitor folder"
 

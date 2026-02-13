@@ -8,8 +8,37 @@ namespace AutopilotMonitor.Shared.Models
     /// </summary>
     public class AgentConfigResponse
     {
-        public bool Success { get; set; }
-        public string Message { get; set; }
+        /// <summary>
+        /// Semantic config version from backend.
+        /// Used for debugging and future schema evolution.
+        /// </summary>
+        public int ConfigVersion { get; set; }
+
+        /// <summary>
+        /// Event upload debounce interval in seconds.
+        /// </summary>
+        public int UploadIntervalSeconds { get; set; } = 30;
+
+        /// <summary>
+        /// Whether to cleanup files on exit.
+        /// </summary>
+        public bool CleanupOnExit { get; set; } = false;
+
+        /// <summary>
+        /// Whether to self-destruct after enrollment completion.
+        /// </summary>
+        public bool SelfDestructOnComplete { get; set; } = false;
+
+        /// <summary>
+        /// Preserve logs during cleanup/self-destruct.
+        /// </summary>
+        public bool KeepLogFile { get; set; } = true;
+
+        /// <summary>
+        /// Optional path to IME pattern match log file.
+        /// </summary>
+        public string ImeMatchLogPath { get; set; } = @"C:\ProgramData\AutopilotMonitor\Logs\ime_pattern_matches.log";
+
         public CollectorConfiguration Collectors { get; set; }
 
         /// <summary>
@@ -22,14 +51,6 @@ namespace AutopilotMonitor.Shared.Models
         /// Delivered from backend so patterns can be updated without agent rebuild.
         /// </summary>
         public List<ImeLogPattern> ImeLogPatterns { get; set; } = new List<ImeLogPattern>();
-
-        public int ConfigVersion { get; set; }
-
-        /// <summary>
-        /// How often the agent should re-fetch config (seconds)
-        /// Default: 300 (5 minutes)
-        /// </summary>
-        public int RefreshIntervalSeconds { get; set; } = 300;
     }
 
     /// <summary>

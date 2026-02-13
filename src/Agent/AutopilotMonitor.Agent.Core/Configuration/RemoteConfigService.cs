@@ -58,11 +58,10 @@ namespace AutopilotMonitor.Agent.Core.Configuration
                 _logger.Info("Fetching remote configuration from backend...");
                 var config = await _apiClient.GetAgentConfigAsync(_tenantId);
 
-                if (config != null && config.Success)
+                if (config != null)
                 {
                     _logger.Info($"Remote config fetched: ConfigVersion={config.ConfigVersion}, " +
-                                 $"GatherRules={config.GatherRules?.Count ?? 0}, " +
-                                 $"RefreshInterval={config.RefreshIntervalSeconds}s");
+                                 $"GatherRules={config.GatherRules?.Count ?? 0}");
 
                     LogCollectorSettings(config.Collectors);
                     SetConfig(config);
@@ -70,7 +69,7 @@ namespace AutopilotMonitor.Agent.Core.Configuration
                     return config;
                 }
 
-                _logger.Warning($"Remote config fetch returned unsuccessful: {config?.Message}");
+                _logger.Warning("Remote config fetch returned empty response");
             }
             catch (Exception ex)
             {
@@ -148,11 +147,15 @@ namespace AutopilotMonitor.Agent.Core.Configuration
         {
             return new AgentConfigResponse
             {
-                Success = true,
-                Message = "Default configuration (offline fallback)",
-                Collectors = CollectorConfiguration.CreateDefault(),
                 ConfigVersion = 0,
-                RefreshIntervalSeconds = 300
+                UploadIntervalSeconds = 30,
+                CleanupOnExit = false,
+                SelfDestructOnComplete = false,
+                KeepLogFile = true,
+                ImeMatchLogPath = @"C:\ProgramData\AutopilotMonitor\Logs\ime_pattern_matches.log",
+                Collectors = CollectorConfiguration.CreateDefault(),
+                GatherRules = new System.Collections.Generic.List<GatherRule>(),
+                ImeLogPatterns = new System.Collections.Generic.List<ImeLogPattern>()
             };
         }
 

@@ -215,11 +215,32 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             {
                 _remoteConfigService = new RemoteConfigService(_apiClient, _configuration.TenantId, _logger);
                 _remoteConfigService.FetchConfigAsync().Wait(TimeSpan.FromSeconds(15));
+                ApplyRuntimeSettingsFromRemoteConfig();
             }
             catch (Exception ex)
             {
                 _logger.Warning($"Failed to fetch remote config (using defaults): {ex.Message}");
             }
+        }
+
+        private void ApplyRuntimeSettingsFromRemoteConfig()
+        {
+            var config = _remoteConfigService?.CurrentConfig;
+            if (config == null) return;
+
+            _configuration.UploadIntervalSeconds = config.UploadIntervalSeconds;
+            _configuration.CleanupOnExit = config.CleanupOnExit;
+            _configuration.SelfDestructOnComplete = config.SelfDestructOnComplete;
+            _configuration.KeepLogFile = config.KeepLogFile;
+
+            if (!string.IsNullOrWhiteSpace(config.ImeMatchLogPath))
+            {
+                _configuration.ImeMatchLogPath = config.ImeMatchLogPath;
+            }
+
+            _logger.Info("Applied runtime settings from remote config");
+            _logger.Info($"  uploadIntervalSeconds={_configuration.UploadIntervalSeconds}, cleanupOnExit={_configuration.CleanupOnExit}, selfDestructOnComplete={_configuration.SelfDestructOnComplete}, keepLogFile={_configuration.KeepLogFile}");
+            _logger.Info($"  imeMatchLogPath={_configuration.ImeMatchLogPath ?? "(none)"}");
         }
 
         /// <summary>

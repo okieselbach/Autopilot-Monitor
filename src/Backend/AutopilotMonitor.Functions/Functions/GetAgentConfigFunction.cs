@@ -45,10 +45,9 @@ namespace AutopilotMonitor.Functions.Functions
                 if (string.IsNullOrEmpty(tenantId))
                 {
                     var badRequest = req.CreateResponse(HttpStatusCode.BadRequest);
-                    await badRequest.WriteAsJsonAsync(new AgentConfigResponse
+                    await badRequest.WriteAsJsonAsync(new
                     {
-                        Success = false,
-                        Message = "tenantId query parameter is required"
+                        error = "tenantId query parameter is required"
                     });
                     return badRequest;
                 }
@@ -87,13 +86,15 @@ namespace AutopilotMonitor.Functions.Functions
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(new AgentConfigResponse
                 {
-                    Success = true,
-                    Message = "Configuration retrieved successfully",
+                    ConfigVersion = 2,
+                    UploadIntervalSeconds = 30,
+                    CleanupOnExit = false,
+                    SelfDestructOnComplete = false,
+                    KeepLogFile = true,
+                    ImeMatchLogPath = @"C:\ProgramData\AutopilotMonitor\Logs\ime_pattern_matches.log",
                     Collectors = collectors,
                     GatherRules = gatherRules,
-                    ImeLogPatterns = imeLogPatterns,
-                    ConfigVersion = 1,
-                    RefreshIntervalSeconds = 300
+                    ImeLogPatterns = imeLogPatterns
                 });
 
                 return response;
@@ -102,10 +103,9 @@ namespace AutopilotMonitor.Functions.Functions
             {
                 _logger.LogError(ex, "Error getting agent config");
                 var errorResp = req.CreateResponse(HttpStatusCode.InternalServerError);
-                await errorResp.WriteAsJsonAsync(new AgentConfigResponse
+                await errorResp.WriteAsJsonAsync(new
                 {
-                    Success = false,
-                    Message = "Internal server error"
+                    error = "Internal server error"
                 });
                 return errorResp;
             }
