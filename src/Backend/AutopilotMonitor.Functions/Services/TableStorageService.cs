@@ -120,6 +120,14 @@ namespace AutopilotMonitor.Functions.Services
                     // New session row - use defaults above.
                 }
 
+                // If events were ingested before session registration succeeded, align StartedAt
+                // with the earliest event we already have for this session.
+                var earliestEventTimestamp = await GetEarliestSessionEventTimestampAsync(registration.TenantId, registration.SessionId);
+                if (earliestEventTimestamp.HasValue && earliestEventTimestamp.Value < startedAt)
+                {
+                    startedAt = earliestEventTimestamp.Value;
+                }
+
                 var entity = new TableEntity(registration.TenantId, registration.SessionId)
                 {
                     ["SerialNumber"] = registration.SerialNumber ?? string.Empty,
@@ -402,14 +410,21 @@ namespace AutopilotMonitor.Functions.Services
                         session["CurrentPhase"] = (int)currentPhase.Value;
                     }
 
-                    // Update StartedAt if an earlier event timestamp is provided
-                    if (earliestEventTimestamp.HasValue)
+                    var currentStartedAt = session.GetDateTimeOffset("StartedAt")?.UtcDateTime ?? DateTime.MaxValue;
+                    var effectiveEarliest = earliestEventTimestamp;
+
+                    // Self-heal StartedAt by also looking at persisted events in case an older event
+                    // arrived in a previous request/batch.
+                    var earliestStoredEventTimestamp = await GetEarliestSessionEventTimestampAsync(tenantId, sessionId);
+                    if (earliestStoredEventTimestamp.HasValue &&
+                        (!effectiveEarliest.HasValue || earliestStoredEventTimestamp.Value < effectiveEarliest.Value))
                     {
-                        var currentStartedAt = session.GetDateTimeOffset("StartedAt")?.UtcDateTime ?? DateTime.MaxValue;
-                        if (earliestEventTimestamp.Value < currentStartedAt)
-                        {
-                            session["StartedAt"] = earliestEventTimestamp.Value;
-                        }
+                        effectiveEarliest = earliestStoredEventTimestamp.Value;
+                    }
+
+                    if (effectiveEarliest.HasValue && effectiveEarliest.Value < currentStartedAt)
+                    {
+                        session["StartedAt"] = effectiveEarliest.Value;
                     }
 
                     // Set completion time if succeeded or failed
@@ -490,14 +505,20 @@ namespace AutopilotMonitor.Functions.Services
                         ["EventCount"] = currentCount + increment
                     };
 
-                    // Update StartedAt if an earlier event timestamp is provided
-                    if (earliestEventTimestamp.HasValue)
+                    var currentStartedAt = entity.Value.GetDateTimeOffset("StartedAt")?.UtcDateTime ?? DateTime.MaxValue;
+                    var effectiveEarliest = earliestEventTimestamp;
+
+                    // Self-heal StartedAt by checking already persisted events for this session.
+                    var earliestStoredEventTimestamp = await GetEarliestSessionEventTimestampAsync(tenantId, sessionId);
+                    if (earliestStoredEventTimestamp.HasValue &&
+                        (!effectiveEarliest.HasValue || earliestStoredEventTimestamp.Value < effectiveEarliest.Value))
                     {
-                        var currentStartedAt = entity.Value.GetDateTimeOffset("StartedAt")?.UtcDateTime ?? DateTime.MaxValue;
-                        if (earliestEventTimestamp.Value < currentStartedAt)
-                        {
-                            update["StartedAt"] = earliestEventTimestamp.Value;
-                        }
+                        effectiveEarliest = earliestStoredEventTimestamp.Value;
+                    }
+
+                    if (effectiveEarliest.HasValue && effectiveEarliest.Value < currentStartedAt)
+                    {
+                        update["StartedAt"] = effectiveEarliest.Value;
                     }
 
                     await tableClient.UpdateEntityAsync(update, entity.Value.ETag, TableUpdateMode.Merge);
@@ -1897,6 +1918,37 @@ namespace AutopilotMonitor.Functions.Services
             {
                 return Array.Empty<string>();
             }
+        }
+
+        /// <summary>
+        /// Returns the earliest event timestamp persisted for a session, if any.
+        /// Events are written with RowKey "{Timestamp}_{Sequence}", so querying the partition
+        /// and taking the first row yields the earliest event.
+        /// </summary>
+        private async Task<DateTime?> GetEarliestSessionEventTimestampAsync(string tenantId, string sessionId)
+        {
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Events);
+                var partitionKey = $"{tenantId}_{sessionId}";
+                var query = tableClient.QueryAsync<TableEntity>(
+                    filter: $"PartitionKey eq '{partitionKey}'",
+                    maxPerPage: 1,
+                    select: new[] { "Timestamp", "RowKey" }
+                );
+
+                await foreach (var entity in query)
+                {
+                    return entity.GetDateTimeOffset("Timestamp")?.UtcDateTime
+                           ?? entity.GetDateTime("Timestamp");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, $"Could not determine earliest event timestamp for session {sessionId}");
+            }
+
+            return null;
         }
 
         /// <summary>
