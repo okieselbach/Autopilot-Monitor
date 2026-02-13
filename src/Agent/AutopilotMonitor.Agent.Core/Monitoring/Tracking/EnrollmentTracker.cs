@@ -35,6 +35,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
 
         // Default IME log folder
         private const string DefaultImeLogFolder = @"%ProgramData%\Microsoft\IntuneManagementExtension\Logs";
+        private const string RegKeyWindowsCurrentVersion = @"HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion";
 
         /// <summary>
         /// Detects whether this is an Autopilot v1 (Classic ESP) or v2 (Windows Device Preparation) enrollment
@@ -162,6 +163,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         {
             _logger.Info("EnrollmentTracker: collecting device info (at start)");
 
+            CollectOSInfo();
             CollectBootTime();
             CollectNetworkAdapters();
             CollectDnsConfiguration();
@@ -231,6 +233,76 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             {
                 _logger.Warning($"EnrollmentTracker: failed to collect boot time: {ex.Message}");
             }
+        }
+
+        private void CollectOSInfo()
+        {
+            try
+            {
+                var data = new Dictionary<string, object>
+                {
+                    { "version", Environment.OSVersion.Version.ToString() },
+                    { "osVersion", GetOsName() },
+                    { "edition", (Registry.GetValue(RegKeyWindowsCurrentVersion, "EditionID", string.Empty) ?? string.Empty).ToString() },
+                    { "compositionEdition", (Registry.GetValue(RegKeyWindowsCurrentVersion, "CompositionEditionID", string.Empty) ?? string.Empty).ToString() },
+                    { "currentBuild", (Registry.GetValue(RegKeyWindowsCurrentVersion, "CurrentBuild", string.Empty) ?? string.Empty).ToString() },
+                    { "buildBranch", (Registry.GetValue(RegKeyWindowsCurrentVersion, "BuildBranch", string.Empty) ?? string.Empty).ToString() },
+                    { "displayVersion", (Registry.GetValue(RegKeyWindowsCurrentVersion, "DisplayVersion", string.Empty) ?? string.Empty).ToString() },
+                    { "buildRevision", (Registry.GetValue(RegKeyWindowsCurrentVersion, "UBR", string.Empty) ?? string.Empty).ToString() }
+                };
+
+                object osVersionValue;
+                object displayVersionValue;
+                object currentBuildValue;
+                object buildRevisionValue;
+
+                var osVersion = data.TryGetValue("osVersion", out osVersionValue) ? osVersionValue?.ToString() ?? string.Empty : string.Empty;
+                var displayVersion = data.TryGetValue("displayVersion", out displayVersionValue) ? displayVersionValue?.ToString() ?? string.Empty : string.Empty;
+                var currentBuild = data.TryGetValue("currentBuild", out currentBuildValue) ? currentBuildValue?.ToString() ?? string.Empty : string.Empty;
+                var buildRevision = data.TryGetValue("buildRevision", out buildRevisionValue) ? buildRevisionValue?.ToString() ?? string.Empty : string.Empty;
+
+                var message = string.IsNullOrWhiteSpace(osVersion) ? "OS information collected" : osVersion;
+                if (!string.IsNullOrWhiteSpace(displayVersion))
+                {
+                    message += $" {displayVersion}";
+                }
+
+                if (!string.IsNullOrWhiteSpace(currentBuild))
+                {
+                    message += string.IsNullOrWhiteSpace(buildRevision)
+                        ? $" (Build {currentBuild})"
+                        : $" (Build {currentBuild}.{buildRevision})";
+                }
+
+                EmitDeviceInfoEvent("os_info", message, data);
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"EnrollmentTracker: failed to collect OS info: {ex.Message}");
+            }
+        }
+
+        private string GetOsName()
+        {
+            var osName = string.Empty;
+
+            try
+            {
+                using (var searcher = new ManagementObjectSearcher("SELECT Caption FROM Win32_OperatingSystem"))
+                {
+                    foreach (ManagementObject obj in searcher.Get())
+                    {
+                        osName = obj["Caption"]?.ToString() ?? string.Empty;
+                        break;
+                    }
+                }
+            }
+            catch
+            {
+                // prevent OS info collection from failing the tracker
+            }
+
+            return osName;
         }
 
         private void CollectNetworkAdapters()
@@ -360,8 +432,47 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             {
                 var data = new Dictionary<string, object>();
 
-                // Read CloudAssigned* values from AutopilotSettings and detect enrollment type
-                // before: using (var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Provisioning\AutopilotSettings"))
+                // Read JSON from AutopilotPolicyCache registry key (contains all Autopilot profile info)
+                using (var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Provisioning\AutopilotPolicyCache"))
+                {
+                    if (key != null)
+                    {
+                        // The registry key contains individual values that together form the Autopilot profile
+                        // Read all available values and add them to data dictionary
+                        foreach (var valueName in key.GetValueNames())
+                        {
+                            var value = key.GetValue(valueName);
+                            if (value != null)
+                            {
+                                // Store with original casing from registry
+                                data[valueName] = value.ToString();
+                            }
+                        }
+
+                        // Extract key values for enrollment type detection and UI display
+                        var deviceReg = data.ContainsKey("CloudAssignedDeviceRegistration")
+                            ? data["CloudAssignedDeviceRegistration"]?.ToString()
+                            : null;
+                        var espEnabled = data.ContainsKey("CloudAssignedEspEnabled")
+                            ? data["CloudAssignedEspEnabled"]?.ToString()
+                            : null;
+
+                        // Determine enrollment type: WDP if DeviceRegistration=2 or ESP explicitly disabled
+                        if (deviceReg == "2" || espEnabled == "0")
+                            _enrollmentType = "v2";
+                        else
+                            _enrollmentType = "v1";
+
+                        _logger.Info($"EnrollmentTracker: Read {data.Count} values from AutopilotPolicyCache");
+                    }
+                    else
+                    {
+                        _logger.Warning("EnrollmentTracker: AutopilotPolicyCache registry key not found");
+                    }
+                }
+
+                // LEGACY: Old implementation reading from Diagnostics\AutoPilot (kept for reference, can be removed later)
+                /*
                 using (var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Provisioning\Diagnostics\AutoPilot"))
                 {
                     if (key != null)
@@ -369,7 +480,6 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                         data["cloudAssignedTenantId"] = key.GetValue("CloudAssignedTenantId")?.ToString();
                         data["cloudAssignedTenantDomain"] = key.GetValue("CloudAssignedTenantDomain")?.ToString();
                         data["cloudAssignedOobeConfig"] = key.GetValue("CloudAssignedOobeConfig")?.ToString();
-
                         data["deploymentProfileName"] = key.GetValue("DeploymentProfileName")?.ToString();
 
                         // Read WDP detection values
@@ -385,16 +495,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                             _enrollmentType = "v1";
                     }
                 }
-
-                // Read deployment profile name
-                // is now in the section above
-                //using (var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Provisioning\Diagnostics\AutoPilot"))
-                //{
-                //    if (key != null)
-                //    {
-                //        data["deploymentProfileName"] = key.GetValue("DeploymentProfileName")?.ToString();
-                //    }
-                //}
+                */
 
                 // Include enrollment type in autopilot_profile event data
                 data["enrollmentType"] = _enrollmentType;

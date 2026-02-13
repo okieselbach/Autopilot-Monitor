@@ -65,10 +65,7 @@ namespace AutopilotMonitor.Agent
                 var logDir = Environment.ExpandEnvironmentVariables(config.LogDirectory);
                 var logger = new AgentLogger(logDir, enableDebug: config.EnableDebugLogging);
 
-                logger.Info("");
-                logger.Info("============================================================================================================");
-                logger.Info($"============================== Agent starting ({(consoleMode ? "console" : "background/SYSTEM")}) ==============================");
-                logger.Info("============================================================================================================");
+                logger.Info($"======================= Agent starting ({(consoleMode ? "console" : "background/SYSTEM")}) =======================");
 
                 // Check for enrollment complete marker (handles scheduled task cleanup retry)
                 if (CheckEnrollmentCompleteMarker(config, logger, consoleMode))

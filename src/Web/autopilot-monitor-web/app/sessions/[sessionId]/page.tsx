@@ -1315,6 +1315,7 @@ function DeviceDetailsCard({ events }: { events: EnrollmentEvent[] }) {
 
   const agentStarted = getEventData("agent_started");
   const bootTime = getEventData("boot_time");
+  const osInfo = getEventData("os_info");
   const networkAdapters = getEventData("network_adapters");
   const dnsConfig = getEventData("dns_configuration");
   const proxyConfig = getEventData("proxy_configuration");
@@ -1325,7 +1326,7 @@ function DeviceDetailsCard({ events }: { events: EnrollmentEvent[] }) {
   const secureBootStatus = getEventData("secureboot_status");
 
   // Check if we have any device detail events at all
-  const hasData = agentStarted || bootTime || networkAdapters || dnsConfig || proxyConfig || autopilotProfile ||
+  const hasData = agentStarted || bootTime || osInfo || networkAdapters || dnsConfig || proxyConfig || autopilotProfile ||
                   aadJoinStatus || imeVersion || bitLockerStatus || secureBootStatus;
 
   if (!hasData) return null;
@@ -1347,38 +1348,59 @@ function DeviceDetailsCard({ events }: { events: EnrollmentEvent[] }) {
 
       {expanded && (
         <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Boot Time */}
-          {(bootTime?.bootTime || agentStarted?.bootTime) && (
-            <DetailSection title="System Boot">
-              <DetailRow label="Boot Time" value={new Date(bootTime?.bootTime || agentStarted?.bootTime).toLocaleString()} />
+          {/* OS Information */}
+          {osInfo && (
+            <DetailSection title="Operating System">
+              {osInfo.osVersion && <DetailRow label="Version" value={osInfo.osVersion} />}
+              {osInfo.displayVersion && <DetailRow label="Display Version" value={osInfo.displayVersion} />}
+              {osInfo.currentBuild && osInfo.buildRevision && (
+                <DetailRow label="Build" value={`${osInfo.currentBuild}.${osInfo.buildRevision}`} />
+              )}
+              {osInfo.currentBuild && !osInfo.buildRevision && (
+                <DetailRow label="Build" value={osInfo.currentBuild} />
+              )}
+              {osInfo.edition && <DetailRow label="Edition" value={osInfo.edition} />}
+              {osInfo.compositionEdition && <DetailRow label="Composition Edition" value={osInfo.compositionEdition} />}
+              {osInfo.buildBranch && <DetailRow label="Build Branch" value={osInfo.buildBranch} />}
+            </DetailSection>
+          )}
+
+          {/* System */}
+          {(bootTime?.bootTime || agentStarted?.bootTime || agentStarted?.agentVersion || imeVersion) && (
+            <DetailSection title="System">
+              {(bootTime?.bootTime || agentStarted?.bootTime) && (
+                <DetailRow label="Boot Time" value={new Date(bootTime?.bootTime || agentStarted?.bootTime).toLocaleString()} />
+              )}
               {bootTime?.uptimeMinutes && <DetailRow label="Uptime" value={`${Math.floor(bootTime.uptimeMinutes / 60)}h ${bootTime.uptimeMinutes % 60}m`} />}
-              {agentStarted?.agentVersion && <DetailRow label="Agent Version" value={agentStarted.agentVersion} />}
+              {agentStarted?.agentVersion && <DetailRow label="Monitor Agent Version" value={agentStarted.agentVersion} />}
+              {imeVersion && <DetailRow label="IME Agent Version" value={imeVersion.version ?? imeVersion.agentVersion ?? "Unknown"} />}
             </DetailSection>
           )}
 
           {/* Network */}
-          {networkAdapters && (
+          {(networkAdapters || dnsConfig || proxyConfig) && (
             <DetailSection title="Network">
-              {networkAdapters.adapters ? (
+              {/* Network Adapters */}
+              {networkAdapters && networkAdapters.adapters && (
                 (networkAdapters.adapters as any[]).map((adapter: any, i: number) => {
                   const { ipv4, ipv6 } = adapter.ipAddresses ? splitIpAddresses(adapter.ipAddresses) : { ipv4: [], ipv6: [] };
                   const hasIpv6 = ipv6.length > 0;
                   const isIpv6Shown = showIpv6[i] ?? false;
 
                   return (
-                    <div key={i} className="mb-2 last:mb-0">
-                      <div className="text-sm font-medium text-gray-700">{adapter.description || adapter.name || `Adapter ${i + 1}`}</div>
+                    <div key={i} className="mb-3 pb-3 border-b border-gray-100 last:border-b-0 last:mb-0 last:pb-0">
+                      <div className="text-sm font-medium text-gray-700 mb-1">{adapter.description || adapter.name || `Adapter ${i + 1}`}</div>
 
-                      {/* DHCP - first */}
+                      {/* DHCP */}
                       {adapter.dhcpEnabled !== undefined && <DetailRow label="DHCP" value={adapter.dhcpEnabled ? "Enabled" : "Disabled"} />}
 
-                      {/* MAC - second */}
+                      {/* MAC */}
                       {adapter.macAddress && <DetailRow label="MAC" value={adapter.macAddress} />}
 
-                      {/* IPv4 - third */}
+                      {/* IPv4 */}
                       {ipv4.length > 0 && <DetailRow label="IPv4" value={ipv4.join(", ")} />}
 
-                      {/* IPv6 - fourth (collapsible) */}
+                      {/* IPv6 (collapsible) */}
                       {hasIpv6 && (
                         <div className="mt-1">
                           <button
@@ -1397,47 +1419,57 @@ function DeviceDetailsCard({ events }: { events: EnrollmentEvent[] }) {
                           )}
                         </div>
                       )}
+
+                      {/* DNS for this adapter */}
+                      {dnsConfig?.dnsEntries && Array.isArray(dnsConfig.dnsEntries) && (
+                        (dnsConfig.dnsEntries as any[])
+                          .filter((entry: any) => entry.adapter === adapter.description || entry.adapter === adapter.name)
+                          .map((entry: any, dnsIdx: number) => (
+                            <DetailRow key={`dns-${dnsIdx}`} label="DNS" value={entry.servers || "N/A"} />
+                          ))
+                      )}
                     </div>
                   );
                 })
-              ) : (
-                <DetailRow label="Count" value={networkAdapters.adapterCount?.toString() ?? "N/A"} />
               )}
-            </DetailSection>
-          )}
 
-          {/* DNS */}
-          {dnsConfig && (
-            <DetailSection title="DNS">
-              {dnsConfig.dnsEntries && Array.isArray(dnsConfig.dnsEntries) && dnsConfig.dnsEntries.length > 0 ? (
-                (dnsConfig.dnsEntries as any[]).map((entry: any, i: number) => (
-                  <div key={i} className="mb-1 last:mb-0">
-                    <DetailRow label={entry.adapter || `Adapter ${i + 1}`} value={entry.servers || "N/A"} />
-                  </div>
-                ))
-              ) : (
-                <div className="text-sm text-gray-500">No DNS data</div>
+              {/* Proxy Configuration */}
+              {proxyConfig && (
+                <div className="mt-3 pt-3 border-t border-gray-200">
+                  <div className="text-sm font-medium text-gray-700 mb-1">Proxy</div>
+                  <DetailRow label="Type" value={proxyConfig.proxyType ?? proxyConfig.type ?? "Direct"} />
+                  {proxyConfig.proxyServer && <DetailRow label="Server" value={proxyConfig.proxyServer} />}
+                  {proxyConfig.autoConfigUrl && <DetailRow label="PAC URL" value={proxyConfig.autoConfigUrl} />}
+                  {proxyConfig.winHttpProxy && <DetailRow label="WinHTTP" value={proxyConfig.winHttpProxy} />}
+                </div>
               )}
-            </DetailSection>
-          )}
-
-          {/* Proxy */}
-          {proxyConfig && (
-            <DetailSection title="Proxy">
-              <DetailRow label="Type" value={proxyConfig.proxyType ?? proxyConfig.type ?? "Direct"} />
-              {proxyConfig.proxyServer && <DetailRow label="Server" value={proxyConfig.proxyServer} />}
-              {proxyConfig.autoConfigUrl && <DetailRow label="PAC URL" value={proxyConfig.autoConfigUrl} />}
-              {proxyConfig.winHttpProxy && <DetailRow label="WinHTTP" value={proxyConfig.winHttpProxy} />}
             </DetailSection>
           )}
 
           {/* Autopilot Profile */}
           {autopilotProfile && (
             <DetailSection title="Autopilot Profile">
-              {autopilotProfile.tenantDomain && <DetailRow label="Domain" value={autopilotProfile.tenantDomain} />}
-              {autopilotProfile.deploymentProfileName && <DetailRow label="Profile" value={autopilotProfile.deploymentProfileName} />}
-              {autopilotProfile.cloudAssignedTenantId && <DetailRow label="Tenant ID" value={autopilotProfile.cloudAssignedTenantId} />}
-              {autopilotProfile.oobeConfig && <DetailRow label="OOBE Config" value={autopilotProfile.oobeConfig} />}
+              {autopilotProfile.CloudAssignedTenantDomain && <DetailRow label="Tenant Domain" value={autopilotProfile.CloudAssignedTenantDomain} />}
+              {autopilotProfile.DeploymentProfileName && <DetailRow label="Profile Name" value={autopilotProfile.DeploymentProfileName} />}
+              {autopilotProfile.CloudAssignedTenantId && <DetailRow label="Tenant ID" value={autopilotProfile.CloudAssignedTenantId} />}
+              {autopilotProfile.PolicyDownloadDate && <DetailRow label="Policy Downloaded" value={new Date(autopilotProfile.PolicyDownloadDate).toLocaleString()} />}
+              {autopilotProfile.CloudAssignedOobeConfig && <DetailRow label="OOBE Config" value={autopilotProfile.CloudAssignedOobeConfig} />}
+              {autopilotProfile.ZtdRegistrationId && <DetailRow label="ZTD Registration ID" value={autopilotProfile.ZtdRegistrationId} />}
+              {autopilotProfile.AadDeviceId && <DetailRow label="AAD Device ID" value={autopilotProfile.AadDeviceId} />}
+              {autopilotProfile.CloudAssignedMdmId && <DetailRow label="MDM ID" value={autopilotProfile.CloudAssignedMdmId} />}
+              {autopilotProfile.CloudAssignedDomainJoinMethod !== undefined && (
+                <DetailRow label="Domain Join Method" value={autopilotProfile.CloudAssignedDomainJoinMethod === "0" ? "AAD Join" : autopilotProfile.CloudAssignedDomainJoinMethod} />
+              )}
+              {autopilotProfile.CloudAssignedForcedEnrollment !== undefined && (
+                <DetailRow label="Forced Enrollment" value={autopilotProfile.CloudAssignedForcedEnrollment === "1" ? "Yes" : "No"} />
+              )}
+              {autopilotProfile.AutopilotCreationDate && <DetailRow label="Autopilot Created" value={new Date(autopilotProfile.AutopilotCreationDate).toLocaleString()} />}
+
+              {/* Legacy fields (fallback for old data) */}
+              {!autopilotProfile.CloudAssignedTenantDomain && autopilotProfile.tenantDomain && <DetailRow label="Tenant Domain" value={autopilotProfile.tenantDomain} />}
+              {!autopilotProfile.DeploymentProfileName && autopilotProfile.deploymentProfileName && <DetailRow label="Profile Name" value={autopilotProfile.deploymentProfileName} />}
+              {!autopilotProfile.CloudAssignedTenantId && autopilotProfile.cloudAssignedTenantId && <DetailRow label="Tenant ID" value={autopilotProfile.cloudAssignedTenantId} />}
+              {!autopilotProfile.CloudAssignedOobeConfig && autopilotProfile.oobeConfig && <DetailRow label="OOBE Config" value={autopilotProfile.oobeConfig} />}
             </DetailSection>
           )}
 
@@ -1446,13 +1478,6 @@ function DeviceDetailsCard({ events }: { events: EnrollmentEvent[] }) {
             <DetailSection title="Identity">
               <DetailRow label="Join Type" value={aadJoinStatus.joinType ?? "Unknown"} />
               {aadJoinStatus.tenantId && <DetailRow label="Tenant ID" value={aadJoinStatus.tenantId} />}
-            </DetailSection>
-          )}
-
-          {/* IME */}
-          {imeVersion && (
-            <DetailSection title="IME Agent">
-              <DetailRow label="Version" value={imeVersion.version ?? imeVersion.agentVersion ?? "Unknown"} />
             </DetailSection>
           )}
 
