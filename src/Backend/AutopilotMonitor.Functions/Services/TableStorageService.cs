@@ -615,6 +615,23 @@ namespace AutopilotMonitor.Functions.Services
                 status = SessionStatus.Unknown;
             }
 
+            // CurrentPhase was previously stored as enum string, now stored as int.
+            // GetInt32 throws InvalidOperationException if the property exists but is not Int32,
+            // so fall back to parsing the string representation for legacy data.
+            int currentPhase = 0;
+            try
+            {
+                currentPhase = entity.GetInt32("CurrentPhase") ?? 0;
+            }
+            catch (InvalidOperationException)
+            {
+                var phaseString = entity.GetString("CurrentPhase");
+                if (phaseString != null && Enum.TryParse<EnrollmentPhase>(phaseString, ignoreCase: true, out var parsed))
+                {
+                    currentPhase = (int)parsed;
+                }
+            }
+
             return new SessionSummary
             {
                 SessionId = entity.RowKey,
@@ -625,7 +642,7 @@ namespace AutopilotMonitor.Functions.Services
                 Model = entity.GetString("Model") ?? string.Empty,
                 StartedAt = startedAt,
                 CompletedAt = completedAt,
-                CurrentPhase = entity.GetInt32("CurrentPhase") ?? 0, // Now int, not enum
+                CurrentPhase = currentPhase,
                 CurrentPhaseDetail = entity.GetString("CurrentPhaseDetail") ?? string.Empty,
                 Status = status,
                 FailureReason = entity.GetString("FailureReason") ?? string.Empty,
