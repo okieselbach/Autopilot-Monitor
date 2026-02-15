@@ -19,19 +19,22 @@ public class AuthFunction
     private readonly TenantConfigurationService _tenantConfigService;
     private readonly TenantAdminsService _tenantAdminsService;
     private readonly TableStorageService _storageService;
+    private readonly PreviewWhitelistService _previewWhitelistService;
 
     public AuthFunction(
         ILogger<AuthFunction> logger,
         GalacticAdminService galacticAdminService,
         TenantConfigurationService tenantConfigService,
         TenantAdminsService tenantAdminsService,
-        TableStorageService storageService)
+        TableStorageService storageService,
+        PreviewWhitelistService previewWhitelistService)
     {
         _logger = logger;
         _galacticAdminService = galacticAdminService;
         _tenantConfigService = tenantConfigService;
         _tenantAdminsService = tenantAdminsService;
         _storageService = storageService;
+        _previewWhitelistService = previewWhitelistService;
     }
 
     /// <summary>
@@ -111,8 +114,23 @@ public class AuthFunction
             await _tenantConfigService.SaveConfigurationAsync(tenantConfig);
         }
 
-        // Check if user is galactic admin
+        // Check if user is galactic admin (must happen before preview gate)
         var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(upn);
+
+        // Preview gate: only approved tenants get full portal access.
+        // Galactic Admins bypass the gate (they need access to manage the whitelist).
+        if (!isGalacticAdmin && !await _previewWhitelistService.IsApprovedAsync(tenantId))
+        {
+            _logger.LogInformation("Tenant {TenantId} blocked by preview gate (user: {Upn})", tenantId, upn);
+
+            var previewResponse = req.CreateResponse(HttpStatusCode.Forbidden);
+            await previewResponse.WriteAsJsonAsync(new
+            {
+                error = "PrivatePreview",
+                message = "Autopilot Monitor is currently in Private Preview. Your organization is on the waitlist \u2014 we'll notify you when access is granted."
+            });
+            return previewResponse;
+        }
 
         // Check if user is tenant admin
         bool isTenantAdmin = await _tenantAdminsService.IsTenantAdminAsync(tenantId, upn);

@@ -12,19 +12,21 @@ const PLATFORM_STATS = {
 };
 
 export default function LandingPage() {
-  const { login, isAuthenticated, isLoading, user } = useAuth();
+  const { login, isAuthenticated, isLoading, user, isPreviewBlocked } = useAuth();
   const router = useRouter();
 
-  // Redirect after login: regular users go to /progress, admins go to dashboard
+  // Redirect after login: preview-blocked → /preview, admins → /, users → /progress
   useEffect(() => {
     if (isAuthenticated && !isLoading && user) {
-      if (user.isTenantAdmin || user.isGalacticAdmin) {
+      if (isPreviewBlocked) {
+        router.push("/preview");
+      } else if (user.isTenantAdmin || user.isGalacticAdmin) {
         router.push("/");
       } else {
         router.push("/progress");
       }
     }
-  }, [isAuthenticated, isLoading, user, router]);
+  }, [isAuthenticated, isLoading, user, isPreviewBlocked, router]);
 
   if (isLoading) {
     return (

@@ -66,6 +66,11 @@ export default function AdminConfigurationPage() {
   const [currentPage, setCurrentPage] = useState(0);
   const tenantsPerPage = 3;
 
+  // Preview Whitelist state
+  const [previewApproved, setPreviewApproved] = useState<Set<string>>(new Set());
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [togglingPreviewTenant, setTogglingPreviewTenant] = useState<string | null>(null);
+
   // Admin Management state (for Edit Modal)
   const [tenantAdmins, setTenantAdmins] = useState<TenantAdmin[]>([]);
   const [loadingAdmins, setLoadingAdmins] = useState(false);
@@ -127,7 +132,7 @@ export default function AdminConfigurationPage() {
     fetchAdminConfig();
   }, [galacticAdminMode]);
 
-  // Fetch all tenant configurations
+  // Fetch all tenant configurations + preview whitelist
   useEffect(() => {
     if (!galacticAdminMode) return;
 
@@ -140,18 +145,29 @@ export default function AdminConfigurationPage() {
           throw new Error('Failed to get access token');
         }
 
-        const response = await fetch(`${API_BASE_URL}/api/config/all`, {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        });
+        const [tenantsRes, previewRes] = await Promise.all([
+          fetch(`${API_BASE_URL}/api/config/all`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          }),
+          fetch(`${API_BASE_URL}/api/preview-whitelist`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          })
+        ]);
 
-        if (!response.ok) {
-          throw new Error(`Failed to load tenants: ${response.statusText}`);
+        if (!tenantsRes.ok) {
+          throw new Error(`Failed to load tenants: ${tenantsRes.statusText}`);
         }
 
-        const data: TenantConfiguration[] = await response.json();
+        const data: TenantConfiguration[] = await tenantsRes.json();
         setTenants(data);
+
+        if (previewRes.ok) {
+          const previewData = await previewRes.json();
+          const approvedIds = new Set<string>(
+            (previewData.tenants || []).map((t: { partitionKey: string }) => t.partitionKey)
+          );
+          setPreviewApproved(approvedIds);
+        }
       } catch (err) {
         console.error("Error fetching tenants:", err);
         setError(err instanceof Error ? err.message : "Failed to load tenants");
@@ -340,6 +356,52 @@ export default function AdminConfigurationPage() {
       setError(err instanceof Error ? err.message : "Failed to update security bypass");
     } finally {
       setTogglingSecurityBypassTenant(null);
+    }
+  };
+
+  const handleTogglePreview = async (tenantId: string) => {
+    try {
+      setTogglingPreviewTenant(tenantId);
+      setError(null);
+      setSuccessMessage(null);
+
+      const token = await getAccessToken();
+      if (!token) {
+        throw new Error('Failed to get access token');
+      }
+
+      const isCurrentlyApproved = previewApproved.has(tenantId);
+
+      const response = await fetch(`${API_BASE_URL}/api/preview-whitelist/${tenantId}`, {
+        method: isCurrentlyApproved ? "DELETE" : "POST",
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Failed to update preview access: ${response.statusText}`);
+      }
+
+      setPreviewApproved(prev => {
+        const next = new Set(prev);
+        if (isCurrentlyApproved) {
+          next.delete(tenantId);
+        } else {
+          next.add(tenantId);
+        }
+        return next;
+      });
+
+      setSuccessMessage(
+        isCurrentlyApproved
+          ? `Preview access revoked for tenant ${tenantId}`
+          : `Preview access granted for tenant ${tenantId}`
+      );
+      setTimeout(() => setSuccessMessage(null), 4000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update preview access");
+    } finally {
+      setTogglingPreviewTenant(null);
     }
   };
 
@@ -645,20 +707,46 @@ export default function AdminConfigurationPage() {
                                         Suspended
                                       </span>
                                     )}
+                                    {previewApproved.has(tenant.tenantId) ? (
+                                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                        Preview
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
+                                        Waitlist
+                                      </span>
+                                    )}
                                   </div>
                                   <p className="text-sm text-gray-500 mt-1">
                                     Tenant ID: {tenant.tenantId}
                                   </p>
                                 </div>
-                                <button
-                                  onClick={() => {
-                                    setEditingTenant(tenant);
-                                    fetchTenantAdmins(tenant.tenantId);
-                                  }}
-                                  className="ml-4 px-4 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-                                >
-                                  Edit
-                                </button>
+                                <div className="flex items-center space-x-2 ml-4">
+                                  <button
+                                    onClick={() => handleTogglePreview(tenant.tenantId)}
+                                    disabled={togglingPreviewTenant === tenant.tenantId}
+                                    className={`px-3 py-2 text-sm rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                                      previewApproved.has(tenant.tenantId)
+                                        ? 'bg-amber-500 text-white hover:bg-amber-600'
+                                        : 'bg-blue-600 text-white hover:bg-blue-700'
+                                    }`}
+                                  >
+                                    {togglingPreviewTenant === tenant.tenantId
+                                      ? "..."
+                                      : previewApproved.has(tenant.tenantId)
+                                      ? "Revoke"
+                                      : "Approve"}
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      setEditingTenant(tenant);
+                                      fetchTenantAdmins(tenant.tenantId);
+                                    }}
+                                    className="px-4 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                                  >
+                                    Edit
+                                  </button>
+                                </div>
                               </div>
                             </div>
                           ))}

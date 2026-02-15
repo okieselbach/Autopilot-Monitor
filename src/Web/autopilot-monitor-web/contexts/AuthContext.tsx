@@ -30,6 +30,8 @@ interface AuthContextType {
   isAuthenticated: boolean;
   user: UserInfo | null;
   isLoading: boolean;
+  isPreviewBlocked: boolean;
+  previewMessage: string;
   login: () => Promise<void>;
   logout: () => Promise<void>;
   getAccessToken: () => Promise<string | null>;
@@ -47,6 +49,8 @@ function AuthProviderInternal({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useIsAuthenticated();
   const [user, setUser] = useState<UserInfo | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isPreviewBlocked, setPreviewBlocked] = useState(false);
+  const [previewMessage, setPreviewMessage] = useState('');
 
   // Handle SSR - if we're on the server, MSAL won't initialize
   // Set loading to false immediately on mount in browser
@@ -75,16 +79,27 @@ function AuthProviderInternal({ children }: { children: React.ReactNode }) {
       });
 
       if (!response.ok) {
-        // Check for tenant suspension
         if (response.status === 403) {
           const errorData = await response.json();
           if (errorData.error === 'TenantSuspended') {
             console.error('[Auth] Tenant suspended:', errorData.message);
-            // Display error to user
             alert(`Access Denied\n\n${errorData.message}`);
-            // Logout user
             await instance.logoutRedirect({ account });
             return null;
+          }
+          if (errorData.error === 'PrivatePreview') {
+            console.log('[Auth] Tenant not yet approved for preview');
+            setPreviewBlocked(true);
+            setPreviewMessage(errorData.message || 'Your organization is on the waitlist.');
+            // Return basic user info so the user stays logged in but sees the preview page
+            return {
+              displayName: account.name || '',
+              upn: account.username || '',
+              tenantId: account.tenantId || '',
+              objectId: account.homeAccountId || '',
+              isGalacticAdmin: false,
+              isTenantAdmin: false,
+            };
           }
         }
         throw new Error(`Failed to fetch user info: ${response.statusText}`);
@@ -231,6 +246,8 @@ function AuthProviderInternal({ children }: { children: React.ReactNode }) {
     isAuthenticated,
     user,
     isLoading,
+    isPreviewBlocked,
+    previewMessage,
     login,
     logout,
     getAccessToken,

@@ -99,6 +99,7 @@ builder.Services.AddSingleton<AdminConfigurationService>();
 builder.Services.AddSingleton<RateLimitService>();
 builder.Services.AddSingleton<UsageMetricsService>();
 builder.Services.AddSingleton<GalacticAdminService>();
+builder.Services.AddSingleton<PreviewWhitelistService>();
 builder.Services.AddSingleton<TenantAdminsService>();
 builder.Services.AddSingleton<HealthCheckService>();
 builder.Services.AddSingleton<GatherRuleService>();
