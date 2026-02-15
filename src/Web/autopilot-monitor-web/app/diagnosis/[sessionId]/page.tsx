@@ -316,14 +316,6 @@ export default function DiagnosisPage() {
               <div className="flex items-center space-x-3">
                 <button
                   onClick={() =>
-                    router.push(`/flight-tracker/${sessionId}`)
-                  }
-                  className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
-                >
-                  Flight Tracker
-                </button>
-                <button
-                  onClick={() =>
                     router.push(`/sessions/${sessionId}`)
                   }
                   className="px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
