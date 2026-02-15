@@ -86,7 +86,8 @@ namespace AutopilotMonitor.Functions.Functions
                 }
 
                 // Increment platform stats (fire-and-forget, non-blocking)
-                _ = _storageService.IncrementPlatformStatAsync("TotalEnrollments");
+                _ = _storageService.IncrementPlatformStatAsync("TotalEnrollments")
+                    .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException, "Fire-and-forget IncrementPlatformStatAsync failed"), TaskContinuationOptions.OnlyOnFaulted);
 
                 // Retrieve the stored session to include full data in SignalR message
                 var session = await _storageService.GetSessionAsync(registration.TenantId, registration.SessionId);

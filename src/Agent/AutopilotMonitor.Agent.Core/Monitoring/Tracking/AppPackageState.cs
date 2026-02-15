@@ -88,6 +88,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         public int? ProgressPercent { get; private set; } = null;
         public long BytesDownloaded { get; private set; } = 0;
         public long BytesTotal { get; private set; } = 0;
+        public string ErrorPatternId { get; private set; }
+        public string ErrorDetail { get; private set; }
 
         private static readonly Dictionary<Win32AppState, AppInstallationState> Win32StateMap =
             new Dictionary<Win32AppState, AppInstallationState>
@@ -120,7 +122,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             AppRunAs runAs, AppIntent intent, AppTargeted targeted,
             HashSet<string> dependsOn,
             AppInstallationState installationState, bool downloadingOrInstallingSeen,
-            int? progressPercent, long bytesDownloaded, long bytesTotal)
+            int? progressPercent, long bytesDownloaded, long bytesTotal,
+            string errorPatternId = null, string errorDetail = null)
         {
             var pkg = new AppPackageState(id, listPos)
             {
@@ -134,6 +137,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 ProgressPercent = progressPercent,
                 BytesDownloaded = bytesDownloaded,
                 BytesTotal = bytesTotal,
+                ErrorPatternId = errorPatternId,
+                ErrorDetail = errorDetail,
                 InstallationStateLastChangedTicks = Stopwatch.GetTimestamp()
             };
             return pkg;
@@ -194,6 +199,15 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             if (DependsOn.SetEquals(newDependsOn)) return false;
             DependsOn = newDependsOn;
             return true;
+        }
+
+        /// <summary>
+        /// Sets the error context for the app (called when an error pattern is matched).
+        /// </summary>
+        public void SetErrorContext(string patternId, string detail)
+        {
+            ErrorPatternId = patternId;
+            ErrorDetail = detail;
         }
 
         /// <summary>
@@ -330,7 +344,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         /// </summary>
         public Dictionary<string, object> ToEventData()
         {
-            return new Dictionary<string, object>
+            var data = new Dictionary<string, object>
             {
                 { "appId", Id },
                 { "name", Name ?? Id },
@@ -345,6 +359,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 { "isError", IsError },
                 { "isCompleted", IsCompleted }
             };
+
+            if (!string.IsNullOrEmpty(ErrorPatternId))
+                data["errorPatternId"] = ErrorPatternId;
+            if (!string.IsNullOrEmpty(ErrorDetail))
+                data["errorDetail"] = ErrorDetail;
+
+            return data;
         }
     }
 }

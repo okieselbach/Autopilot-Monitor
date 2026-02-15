@@ -6,6 +6,7 @@ using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.Models;
 using Azure;
 using Azure.Data.Tables;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
@@ -19,15 +20,14 @@ namespace AutopilotMonitor.Functions.Services
     {
         private readonly TableClient _tableClient;
         private readonly ILogger<TenantConfigurationService> _logger;
+        private readonly IMemoryCache _cache;
 
-        // In-memory cache for configuration (to avoid table lookups on every request)
-        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, CachedConfig> _configCache;
-        private const int MaxCacheSize = 1000;
+        private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(5);
 
-        public TenantConfigurationService(IConfiguration configuration, ILogger<TenantConfigurationService> logger)
+        public TenantConfigurationService(IConfiguration configuration, ILogger<TenantConfigurationService> logger, IMemoryCache cache)
         {
             _logger = logger;
-            _configCache = new System.Collections.Concurrent.ConcurrentDictionary<string, CachedConfig>();
+            _cache = cache;
 
             var connectionString = configuration["AzureTableStorageConnectionString"];
             var serviceClient = new TableServiceClient(connectionString);
@@ -46,13 +46,11 @@ namespace AutopilotMonitor.Functions.Services
                 return TenantConfiguration.CreateDefault("unknown");
             }
 
-            // Check cache first (5-minute TTL)
-            if (_configCache.TryGetValue(tenantId, out var cached))
+            var cacheKey = $"tenant-config:{tenantId}";
+
+            if (_cache.TryGetValue(cacheKey, out TenantConfiguration? cachedConfig) && cachedConfig != null)
             {
-                if (DateTime.UtcNow.Subtract(cached.CachedAt).TotalMinutes < 5)
-                {
-                    return cached.Configuration;
-                }
+                return cachedConfig;
             }
 
             try
@@ -61,13 +59,7 @@ namespace AutopilotMonitor.Functions.Services
                 var entity = await _tableClient.GetEntityAsync<TableEntity>(tenantId, "config");
                 var config = ConvertFromTableEntity(entity.Value);
 
-                // Update cache
-                _configCache[tenantId] = new CachedConfig
-                {
-                    Configuration = config,
-                    CachedAt = DateTime.UtcNow
-                };
-                EvictIfOverLimit();
+                _cache.Set(cacheKey, config, CacheDuration);
 
                 return config;
             }
@@ -83,13 +75,7 @@ namespace AutopilotMonitor.Functions.Services
                     var entity = ConvertToTableEntity(defaultConfig);
                     await _tableClient.UpsertEntityAsync(entity);
 
-                    // Update cache
-                    _configCache[tenantId] = new CachedConfig
-                    {
-                        Configuration = defaultConfig,
-                        CachedAt = DateTime.UtcNow
-                    };
-                    EvictIfOverLimit();
+                    _cache.Set(cacheKey, defaultConfig, CacheDuration);
 
                     _logger.LogInformation($"Default configuration created and saved for tenant {tenantId}");
                 }
@@ -126,7 +112,7 @@ namespace AutopilotMonitor.Functions.Services
                 await _tableClient.UpsertEntityAsync(entity);
 
                 // Invalidate cache
-                _configCache.TryRemove(config.TenantId, out _);
+                _cache.Remove($"tenant-config:{config.TenantId}");
 
                 _logger.LogInformation($"Configuration saved for tenant {config.TenantId} by {config.UpdatedBy}");
             }
@@ -142,7 +128,7 @@ namespace AutopilotMonitor.Functions.Services
         /// </summary>
         public void InvalidateCache(string tenantId)
         {
-            _configCache.TryRemove(tenantId, out _);
+            _cache.Remove($"tenant-config:{tenantId}");
         }
 
         /// <summary>
@@ -188,7 +174,6 @@ namespace AutopilotMonitor.Functions.Services
                 { "DataRetentionDays", config.DataRetentionDays },
                 { "SessionTimeoutHours", config.SessionTimeoutHours },
                 { "MaxNdjsonPayloadSizeMB", config.MaxNdjsonPayloadSizeMB },
-                { "CustomSettings", config.CustomSettings },
                 { "EnablePerformanceCollector", config.EnablePerformanceCollector },
                 { "PerformanceCollectorIntervalSeconds", config.PerformanceCollectorIntervalSeconds }
             };
@@ -216,37 +201,9 @@ namespace AutopilotMonitor.Functions.Services
                 DataRetentionDays = entity.GetInt32("DataRetentionDays") ?? 90,
                 SessionTimeoutHours = entity.GetInt32("SessionTimeoutHours") ?? 5,
                 MaxNdjsonPayloadSizeMB = entity.GetInt32("MaxNdjsonPayloadSizeMB") ?? 5,
-                CustomSettings = entity.GetString("CustomSettings"),
                 EnablePerformanceCollector = entity.GetBoolean("EnablePerformanceCollector") ?? false,
                 PerformanceCollectorIntervalSeconds = entity.GetInt32("PerformanceCollectorIntervalSeconds") ?? 30
             };
-        }
-
-        private void EvictIfOverLimit()
-        {
-            if (_configCache.Count <= MaxCacheSize)
-                return;
-
-            // Evict oldest entries (by CachedAt) to bring cache back to 75% capacity
-            var targetSize = (int)(MaxCacheSize * 0.75);
-            var entriesToRemove = _configCache
-                .OrderBy(kvp => kvp.Value.CachedAt)
-                .Take(_configCache.Count - targetSize)
-                .Select(kvp => kvp.Key)
-                .ToList();
-
-            foreach (var key in entriesToRemove)
-            {
-                _configCache.TryRemove(key, out _);
-            }
-
-            _logger.LogInformation("Cache eviction: removed {Count} entries, cache size now {Size}", entriesToRemove.Count, _configCache.Count);
-        }
-
-        private class CachedConfig
-        {
-            public TenantConfiguration Configuration { get; set; } = null!;
-            public DateTime CachedAt { get; set; }
         }
     }
 }

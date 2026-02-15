@@ -80,6 +80,7 @@ namespace AutopilotMonitor.Shared.Models
                 EnrollmentPhase.AppsDevice => "Apps (Device)",
                 EnrollmentPhase.AccountSetup => "Account Setup",
                 EnrollmentPhase.AppsUser => "Apps (User)",
+                EnrollmentPhase.FinalizingSetup => "Finalizing Setup",
                 EnrollmentPhase.Complete => "Complete",
                 EnrollmentPhase.Failed => "Failed",
                 _ => "Unknown"

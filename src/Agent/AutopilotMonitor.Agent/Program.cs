@@ -7,6 +7,7 @@ using System.Reflection;
 using AutopilotMonitor.Agent.Core.Configuration;
 using AutopilotMonitor.Agent.Core.Logging;
 using AutopilotMonitor.Agent.Core.Monitoring.Core;
+using AutopilotMonitor.Shared;
 using Microsoft.Win32;
 
 namespace AutopilotMonitor.Agent
@@ -37,7 +38,7 @@ namespace AutopilotMonitor.Agent
 
         static void RunInstallMode(string[] args)
         {
-            var logDir = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor\Logs");
+            var logDir = Environment.ExpandEnvironmentVariables(Constants.LogDirectory);
             var logger = new AgentLogger(logDir, enableDebug: true);
             var consoleMode = args.Contains("--console") || Environment.UserInteractive;
 
@@ -49,7 +50,7 @@ namespace AutopilotMonitor.Agent
 
                 var sourceExePath = Assembly.GetExecutingAssembly().Location;
                 var sourceDir = Path.GetDirectoryName(sourceExePath) ?? string.Empty;
-                var targetAgentDir = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor\Agent");
+                var targetAgentDir = Environment.ExpandEnvironmentVariables(Path.Combine(Constants.AgentDataDirectory, "Agent"));
                 var targetExePath = Path.Combine(targetAgentDir, "AutopilotMonitor.Agent.exe");
 
                 if (!string.Equals(
@@ -65,7 +66,7 @@ namespace AutopilotMonitor.Agent
                     logger.Info("Agent already running from target install directory; payload copy not required.");
                 }
 
-                var taskName = "AutopilotMonitor-Agent";
+                var taskName = Constants.ScheduledTaskName;
                 var taskCommand = $"\"{targetExePath}\"";
 
                 logger.Info($"Registering Scheduled Task '{taskName}' for executable: {targetExePath}");
@@ -129,7 +130,7 @@ namespace AutopilotMonitor.Agent
                 // Try to log if possible, but this might fail if logger isn't initialized yet
                 try
                 {
-                    var logDir = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor\Logs");
+                    var logDir = Environment.ExpandEnvironmentVariables(Constants.LogDirectory);
                     var logger = new AgentLogger(logDir, enableDebug: false);
                     logger.Warning(message);
                 }
@@ -215,7 +216,7 @@ namespace AutopilotMonitor.Agent
                 try
                 {
                     var crashPath = Path.Combine(
-                        Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor\Logs"),
+                        Environment.ExpandEnvironmentVariables(Constants.LogDirectory),
                         $"crash_{DateTime.UtcNow:yyyyMMdd_HHmmss}.log");
                     Directory.CreateDirectory(Path.GetDirectoryName(crashPath));
                     File.WriteAllText(crashPath, $"[{DateTime.UtcNow:u}] FATAL: {ex}");
@@ -268,8 +269,8 @@ namespace AutopilotMonitor.Agent
                     TenantId = deviceConfig.TenantId,
                     SpoolDirectory = Environment.ExpandEnvironmentVariables($@"%ProgramData%\AutopilotMonitor\MassRollout\{deviceConfig.DeviceName}\Spool"),
                     LogDirectory = Environment.ExpandEnvironmentVariables($@"%ProgramData%\AutopilotMonitor\MassRollout\{deviceConfig.DeviceName}\Logs"),
-                    UploadIntervalSeconds = 30,
-                    MaxBatchSize = 100,
+                    UploadIntervalSeconds = Constants.DefaultUploadIntervalSeconds,
+                    MaxBatchSize = Constants.MaxBatchSize,
                     EnableDebugLogging = true,
                     EnableSimulator = true,
                     SimulateFailure = deviceConfig.SimulateFailure,
@@ -417,8 +418,8 @@ namespace AutopilotMonitor.Agent
             }
 
             // Defaults
-            string apiBaseUrl             = "https://autopilotmonitor-func.azurewebsites.net";
-            int    uploadIntervalSeconds  = 30;
+            string apiBaseUrl            = Constants.ApiBaseUrl;
+            int    uploadIntervalSeconds = Constants.DefaultUploadIntervalSeconds;
             bool   cleanupOnExit          = false;
             bool   selfDestructOnComplete = false;
             bool   rebootOnCompleteConfig = false;
@@ -450,7 +451,7 @@ namespace AutopilotMonitor.Agent
                     tenantId = "b54dc1af-5320-4f60-b5d4-821e0cf2a359"; // fallback for dev/testing
             }
 
-            var dataDirectory    = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor");
+            var dataDirectory    = Environment.ExpandEnvironmentVariables(Constants.AgentDataDirectory);
             var sessionPersist   = new SessionPersistence(dataDirectory);
 
             if (newSession)
@@ -463,10 +464,10 @@ namespace AutopilotMonitor.Agent
                 ApiBaseUrl            = apiBaseUrl,
                 SessionId             = sessionId,
                 TenantId              = tenantId,
-                SpoolDirectory        = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor\Spool"),
-                LogDirectory          = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor\Logs"),
+                SpoolDirectory        = Environment.ExpandEnvironmentVariables(Constants.SpoolDirectory),
+                LogDirectory          = Environment.ExpandEnvironmentVariables(Constants.LogDirectory),
                 UploadIntervalSeconds = uploadIntervalSeconds,
-                MaxBatchSize          = 100,
+                MaxBatchSize          = Constants.MaxBatchSize,
                 EnableDebugLogging    = true,
                 EnableSimulator       = enableSimulator,
                 SimulateFailure       = simulateFailure,
@@ -505,13 +506,13 @@ namespace AutopilotMonitor.Agent
 
         private static void EnsureAgentDirectories(AgentLogger logger)
         {
-            var basePath = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor");
+            var basePath = Environment.ExpandEnvironmentVariables(Constants.AgentDataDirectory);
             var paths = new[]
             {
                 basePath,
                 Path.Combine(basePath, "Agent"),
-                Path.Combine(basePath, "Spool"),
-                Path.Combine(basePath, "Logs")
+                Environment.ExpandEnvironmentVariables(Constants.SpoolDirectory),
+                Environment.ExpandEnvironmentVariables(Constants.LogDirectory)
             };
 
             foreach (var path in paths)
@@ -626,7 +627,7 @@ namespace AutopilotMonitor.Agent
         /// </summary>
         static bool CheckEnrollmentCompleteMarker(AgentConfiguration config, AgentLogger logger, bool consoleMode)
         {
-            var stateDirectory = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor\State");
+            var stateDirectory = Environment.ExpandEnvironmentVariables(Constants.StateDirectory);
             var markerPath = Path.Combine(stateDirectory, "enrollment-complete.marker");
 
             if (!File.Exists(markerPath))

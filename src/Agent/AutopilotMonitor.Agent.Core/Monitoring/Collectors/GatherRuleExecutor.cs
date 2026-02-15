@@ -17,8 +17,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
     /// <summary>
     /// Executes gather rules received from the backend API
     /// Supports registry, eventlog, wmi, file, command_allowlisted, and logparser collector types
-    /// NOTE: "command" is accepted as a legacy alias for "command_allowlisted" - both enforce the allowlist
-    ///</summary>
+    /// </summary>
     public class GatherRuleExecutor : IDisposable
     {
         private readonly AgentLogger _logger;
@@ -427,10 +426,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                 ProcessStartInfo psi;
                 if (isPowerShell)
                 {
+                    // Use -EncodedCommand with Base64-encoded UTF-16LE to prevent command injection
+                    var encodedCommand = Convert.ToBase64String(Encoding.Unicode.GetBytes(command));
                     psi = new ProcessStartInfo
                     {
                         FileName = "powershell.exe",
-                        Arguments = $"-NoProfile -ExecutionPolicy Bypass -Command \"{command}\"",
+                        Arguments = $"-NoProfile -ExecutionPolicy RemoteSigned -EncodedCommand {encodedCommand}",
                         UseShellExecute = false,
                         RedirectStandardOutput = true,
                         RedirectStandardError = true,
@@ -510,8 +511,17 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     if (rule.Parameters != null && rule.Parameters.TryGetValue("readContent", out readContent) &&
                         readContent == "true" && info.Length < 50000) // Max 50KB
                     {
-                        var content = File.ReadAllText(filePath);
-                        data["content"] = content.Length > 4000 ? content.Substring(0, 4000) + "... (truncated)" : content;
+                        // Read only up to 4000 chars to avoid loading entire file into memory
+                        var buffer = new char[4000];
+                        int charsRead;
+                        using (var reader = new StreamReader(filePath))
+                        {
+                            charsRead = reader.Read(buffer, 0, buffer.Length);
+                        }
+                        var content = new string(buffer, 0, charsRead);
+                        data["content"] = charsRead == 4000 && info.Length > 4000
+                            ? content + "... (truncated)"
+                            : content;
                     }
                 }
                 else if (Directory.Exists(filePath))

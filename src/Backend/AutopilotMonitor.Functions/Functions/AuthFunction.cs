@@ -100,6 +100,17 @@ public class AuthFunction
             return suspendedResponse;
         }
 
+        // Auto-re-enable: if Disabled was true but DisabledUntil has expired, persist the re-enable
+        if (tenantConfig.Disabled && !tenantConfig.IsCurrentlyDisabled())
+        {
+            _logger.LogInformation($"Tenant {tenantId} auto-re-enabled: DisabledUntil ({tenantConfig.DisabledUntil:o}) has expired");
+            tenantConfig.Disabled = false;
+            tenantConfig.DisabledReason = null;
+            tenantConfig.DisabledUntil = null;
+            tenantConfig.UpdatedBy = "System (auto-re-enable)";
+            await _tenantConfigService.SaveConfigurationAsync(tenantConfig);
+        }
+
         // Check if user is galactic admin
         var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(upn);
 
@@ -120,7 +131,8 @@ public class AuthFunction
         }
 
         // Record user login activity for metrics tracking
-        _ = _storageService.RecordUserLoginAsync(tenantId, upn, displayName, objectId);
+        _ = _storageService.RecordUserLoginAsync(tenantId, upn, displayName, objectId)
+            .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException, "Fire-and-forget RecordUserLoginAsync failed"), TaskContinuationOptions.OnlyOnFaulted);
 
         var userInfo = new
         {

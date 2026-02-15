@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 
 namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
@@ -12,8 +13,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
     /// outside these lists are blocked and reported as security_warning events.
     ///
     /// To allow additional paths: add a prefix entry to the appropriate list.
-    /// Prefix matching is case-insensitive. Registry paths are expected without
-    /// the hive prefix (e.g. "SOFTWARE\\Microsoft\\..." not "HKLM\\...").
+    /// Segment-bounded matching is used: the path must match the prefix exactly
+    /// up to a path separator or end of string, preventing prefix spoofing.
+    /// Registry paths are expected without the hive prefix (e.g. "SOFTWARE\\Microsoft\\..." not "HKLM\\...").
     /// File paths should be expanded (no environment variables).
     /// </summary>
     public static class GatherRuleGuards
@@ -120,7 +122,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         // -----------------------------------------------------------------------
 
         /// <summary>
-        /// Returns true if the registry subPath (hive stripped) starts with an allowed prefix.
+        /// Returns true if the registry subPath (hive stripped) matches an allowed prefix
+        /// with segment-bounded matching (next char must be '\' or end of string).
         /// </summary>
         public static bool IsRegistryPathAllowed(string subPath)
         {
@@ -128,23 +131,37 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                 return false;
 
             return AllowedRegistryPrefixes.Any(prefix =>
-                subPath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+                subPath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
+                (subPath.Length == prefix.Length || subPath[prefix.Length] == '\\'));
         }
 
         /// <summary>
-        /// Returns true if the expanded file path starts with an allowed prefix.
+        /// Returns true if the expanded file path matches an allowed prefix
+        /// with segment-bounded matching and path normalization to prevent traversal.
         /// </summary>
         public static bool IsFilePathAllowed(string expandedPath)
         {
             if (string.IsNullOrEmpty(expandedPath))
                 return false;
 
+            string normalizedPath;
+            try
+            {
+                normalizedPath = Path.GetFullPath(expandedPath);
+            }
+            catch
+            {
+                return false;
+            }
+
             return AllowedFilePrefixes.Any(prefix =>
-                expandedPath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+                normalizedPath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
+                (normalizedPath.Length == prefix.Length || normalizedPath[prefix.Length] == '\\'));
         }
 
         /// <summary>
-        /// Returns true if the WMI query (trimmed) starts with an allowed prefix.
+        /// Returns true if the WMI query (trimmed) matches an allowed prefix
+        /// with boundary matching (next char must be whitespace or end of string).
         /// </summary>
         public static bool IsWmiQueryAllowed(string query)
         {
@@ -153,7 +170,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 
             var trimmed = query.Trim();
             return AllowedWmiQueryPrefixes.Any(prefix =>
-                trimmed.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+                trimmed.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
+                (trimmed.Length == prefix.Length || char.IsWhiteSpace(trimmed[prefix.Length])));
         }
     }
 }

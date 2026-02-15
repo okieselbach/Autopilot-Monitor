@@ -6,6 +6,7 @@ using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.Models;
 using Azure;
 using Azure.Data.Tables;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
@@ -19,14 +20,15 @@ namespace AutopilotMonitor.Functions.Services
         private readonly TableClient _adminTableClient;
         private readonly TableClient _tenantConfigTableClient;
         private readonly ILogger<AdminConfigurationService> _logger;
+        private readonly IMemoryCache _cache;
 
-        // In-memory cache for admin configuration (to avoid table lookups on every request)
-        private AdminConfiguration? _cachedConfig;
-        private DateTime? _cacheTime;
+        private const string CacheKey = "admin-config";
+        private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(5);
 
-        public AdminConfigurationService(IConfiguration configuration, ILogger<AdminConfigurationService> logger)
+        public AdminConfigurationService(IConfiguration configuration, ILogger<AdminConfigurationService> logger, IMemoryCache cache)
         {
             _logger = logger;
+            _cache = cache;
 
             var connectionString = configuration["AzureTableStorageConnectionString"];
             var serviceClient = new TableServiceClient(connectionString);
@@ -40,13 +42,9 @@ namespace AutopilotMonitor.Functions.Services
         /// </summary>
         public async Task<AdminConfiguration> GetConfigurationAsync()
         {
-            // Check cache first (5-minute TTL)
-            if (_cachedConfig != null && _cacheTime.HasValue)
+            if (_cache.TryGetValue(CacheKey, out AdminConfiguration? cachedConfig) && cachedConfig != null)
             {
-                if (DateTime.UtcNow.Subtract(_cacheTime.Value).TotalMinutes < 5)
-                {
-                    return _cachedConfig;
-                }
+                return cachedConfig;
             }
 
             try
@@ -55,9 +53,7 @@ namespace AutopilotMonitor.Functions.Services
                 var entity = await _adminTableClient.GetEntityAsync<TableEntity>("GlobalConfig", "config");
                 var config = ConvertFromTableEntity(entity.Value);
 
-                // Update cache
-                _cachedConfig = config;
-                _cacheTime = DateTime.UtcNow;
+                _cache.Set(CacheKey, config, CacheDuration);
 
                 return config;
             }
@@ -73,9 +69,7 @@ namespace AutopilotMonitor.Functions.Services
                     var entity = ConvertToTableEntity(defaultConfig);
                     await _adminTableClient.UpsertEntityAsync(entity);
 
-                    // Update cache
-                    _cachedConfig = defaultConfig;
-                    _cacheTime = DateTime.UtcNow;
+                    _cache.Set(CacheKey, defaultConfig, CacheDuration);
 
                     _logger.LogInformation("Default admin configuration created and saved");
                 }
@@ -112,8 +106,7 @@ namespace AutopilotMonitor.Functions.Services
                 await _adminTableClient.UpsertEntityAsync(entity);
 
                 // Invalidate cache
-                _cachedConfig = null;
-                _cacheTime = null;
+                _cache.Remove(CacheKey);
 
                 _logger.LogInformation($"Admin configuration saved by {config.UpdatedBy}");
 
@@ -178,8 +171,7 @@ namespace AutopilotMonitor.Functions.Services
         /// </summary>
         public void InvalidateCache()
         {
-            _cachedConfig = null;
-            _cacheTime = null;
+            _cache.Remove(CacheKey);
         }
 
         private TableEntity ConvertToTableEntity(AdminConfiguration config)
@@ -188,8 +180,7 @@ namespace AutopilotMonitor.Functions.Services
             {
                 { "LastUpdated", config.LastUpdated },
                 { "UpdatedBy", config.UpdatedBy },
-                { "GlobalRateLimitRequestsPerMinute", config.GlobalRateLimitRequestsPerMinute },
-                { "CustomSettings", config.CustomSettings }
+                { "GlobalRateLimitRequestsPerMinute", config.GlobalRateLimitRequestsPerMinute }
             };
 
             return entity;
@@ -203,8 +194,7 @@ namespace AutopilotMonitor.Functions.Services
                 RowKey = entity.RowKey,
                 LastUpdated = entity.GetDateTime("LastUpdated") ?? DateTime.UtcNow,
                 UpdatedBy = entity.GetString("UpdatedBy") ?? "Unknown",
-                GlobalRateLimitRequestsPerMinute = entity.GetInt32("GlobalRateLimitRequestsPerMinute") ?? 100,
-                CustomSettings = entity.GetString("CustomSettings")
+                GlobalRateLimitRequestsPerMinute = entity.GetInt32("GlobalRateLimitRequestsPerMinute") ?? 100
             };
         }
     }

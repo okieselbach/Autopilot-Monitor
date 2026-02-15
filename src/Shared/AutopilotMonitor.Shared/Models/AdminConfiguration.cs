@@ -39,13 +39,6 @@ namespace AutopilotMonitor.Shared.Models
         /// </summary>
         public int GlobalRateLimitRequestsPerMinute { get; set; } = 100;
 
-        // ===== FUTURE SETTINGS (Extensible) =====
-
-        /// <summary>
-        /// Custom settings as JSON (for future extensibility)
-        /// </summary>
-        public string CustomSettings { get; set; }
-
         /// <summary>
         /// Creates default configuration
         /// </summary>

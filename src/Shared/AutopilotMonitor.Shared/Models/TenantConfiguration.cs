@@ -139,13 +139,6 @@ namespace AutopilotMonitor.Shared.Models
         public int PerformanceCollectorIntervalSeconds { get; set; } = 60;
 
 
-        // ===== FUTURE SETTINGS (Extensible) =====
-
-        /// <summary>
-        /// Custom settings as JSON (for future extensibility)
-        /// </summary>
-        public string CustomSettings { get; set; }
-
         // ===== HELPER METHODS =====
 
         /// <summary>

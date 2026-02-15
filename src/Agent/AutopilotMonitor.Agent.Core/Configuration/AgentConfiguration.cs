@@ -1,4 +1,5 @@
 using System;
+using AutopilotMonitor.Shared;
 
 namespace AutopilotMonitor.Agent.Core.Configuration
 {
@@ -85,7 +86,7 @@ namespace AutopilotMonitor.Agent.Core.Configuration
         /// <summary>
         /// Name of the Scheduled Task to remove during self-destruct
         /// </summary>
-        public string ScheduledTaskName { get; set; } = "AutopilotMonitor-Agent";
+        public string ScheduledTaskName { get; set; } = Constants.ScheduledTaskName;
 
         /// <summary>
         /// Whether to reboot the device after enrollment completes

@@ -55,11 +55,6 @@ namespace AutopilotMonitor.Shared.Models
         public bool IsBuiltIn { get; set; } = true;
 
         /// <summary>
-        /// Whether this is a community-contributed rule (future use)
-        /// </summary>
-        public bool IsCommunity { get; set; } = false;
-
-        /// <summary>
         /// Rule trigger type: "single" (matches individual events) or "correlation" (combines multiple event types)
         /// Both types run at the same time during analysis - this field is organizational/descriptive
         /// </summary>

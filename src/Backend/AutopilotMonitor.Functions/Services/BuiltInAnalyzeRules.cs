@@ -20,6 +20,7 @@ namespace AutopilotMonitor.Functions.Services
                 CreateAppDownloadTimeoutRule(),
                 CreateAppSlowInstallRule(),
                 CreateAppRebootLoopRule(),
+                CreateAppTrackingSummaryErrorsRule(),
 
                 // ===== ESP RULES =====
                 CreateEspBlockingAppTimeoutRule(),
@@ -29,22 +30,28 @@ namespace AutopilotMonitor.Functions.Services
                 CreateDeviceTpmNotReadyRule(),
                 CreateDeviceBitlockerEscrowRule(),
                 CreateDeviceSecureBootRule(),
-
-                // ===== DEVICE RULES (continued) =====
                 CreateDeviceAadJoinNotDetectedRule(),
-
-                // ===== APP RULES (continued) =====
-                CreateAppTrackingSummaryErrorsRule(),
 
                 // ===== CORRELATION RULES (cross-event analysis) =====
                 CreateCorrelationNetworkCausedInstallFailureRule(),
                 CreateCorrelationDiskSpaceCausedInstallFailureRule(),
                 CreateCorrelationProxyCausedDownloadFailureRule(),
+
+                // ===== NEW RULES =====
+                CreateEnrollmentTimeoutRule(),
+                CreateEnrollmentFailedRule(),
+                CreateWindowsHelloTimeoutRule(),
+                CreateAppDownloadStallRule(),
+                CreateHighMemoryDuringInstallRule(),
             };
         }
 
         // ===== APPS =====
 
+        /// <summary>
+        /// Fixed: Now checks errorPatternId and errorDetail fields in app_install_failed events
+        /// instead of relying on non-existent error_detected events.
+        /// </summary>
         private static AnalyzeRule CreateAppDetectionScriptFailureRule() => new AnalyzeRule
         {
             RuleId = "ANALYZE-APP-001",
@@ -55,7 +62,11 @@ namespace AutopilotMonitor.Functions.Services
             BaseConfidence = 60,
             Conditions = new List<RuleCondition>
             {
-                new RuleCondition { Signal = "detection_failure", Source = "event_type", EventType = "app_install_failed", DataField = "message", Operator = "regex", Value = "detection|not detected|script.*fail|detection.*error", Required = true }
+                new RuleCondition { Signal = "detection_failure", Source = "event_type", EventType = "app_install_failed", DataField = "message", Operator = "regex", Value = @"detection|not detected|script.*fail|detection.*error|DetectionState|NotDetected", Required = true }
+            },
+            ConfidenceFactors = new List<ConfidenceFactor>
+            {
+                new ConfidenceFactor { Signal = "error_detail_match", Condition = "exists", Weight = 20 }
             },
             Explanation = "A Win32 app detection script failed or did not detect the app after installation. This causes the app to appear as 'not installed' despite successful installation.",
             Remediation = new List<RemediationStep>
@@ -65,6 +76,10 @@ namespace AutopilotMonitor.Functions.Services
             Tags = new[] { "apps", "detection", "win32" }
         };
 
+        /// <summary>
+        /// Fixed: Now checks errorDetail field (which contains the IME log line) for MSI error codes
+        /// instead of the non-existent errorCode field.
+        /// </summary>
         private static AnalyzeRule CreateAppMsiErrorRule() => new AnalyzeRule
         {
             RuleId = "ANALYZE-APP-002",
@@ -75,7 +90,7 @@ namespace AutopilotMonitor.Functions.Services
             BaseConfidence = 80,
             Conditions = new List<RuleCondition>
             {
-                new RuleCondition { Signal = "msi_error", Source = "event_type", EventType = "app_install_failed", DataField = "errorCode", Operator = "regex", Value = "^16[0-9]{2}$|^0x80070[0-9a-f]+$", Required = true }
+                new RuleCondition { Signal = "msi_error", Source = "event_type", EventType = "app_install_failed", DataField = "message", Operator = "regex", Value = @"16[0-9]{2}|0x80070[0-9a-fA-F]+|lpExitCode|unmapped.*exit", Required = true }
             },
             Explanation = "An MSI installation failed with a specific error code. Common codes: 1603 (Fatal error), 1618 (Another install in progress), 1619 (Package could not be opened), 1625 (Installation prohibited by policy).",
             Remediation = new List<RemediationStep>
@@ -85,6 +100,10 @@ namespace AutopilotMonitor.Functions.Services
             Tags = new[] { "apps", "msi", "error-code" }
         };
 
+        /// <summary>
+        /// Fixed: Now also checks errorDetail for dependency-related IME log messages.
+        /// The message field of app_install_failed events now contains the IME log line context.
+        /// </summary>
         private static AnalyzeRule CreateAppDependencyChainRule() => new AnalyzeRule
         {
             RuleId = "ANALYZE-APP-003",
@@ -95,7 +114,7 @@ namespace AutopilotMonitor.Functions.Services
             BaseConfidence = 70,
             Conditions = new List<RuleCondition>
             {
-                new RuleCondition { Signal = "dependency_failure", Source = "event_type", EventType = "app_install_failed", DataField = "message", Operator = "regex", Value = "dependency|prerequisite|required app|depends on", Required = true }
+                new RuleCondition { Signal = "dependency_failure", Source = "event_type", EventType = "app_install_failed", DataField = "message", Operator = "regex", Value = @"dependency|prerequisite|required app|depends on|Dependency", Required = true }
             },
             Explanation = "An app installation failed because one of its dependency apps failed to install. Fix the dependency first, then retry.",
             Remediation = new List<RemediationStep>
@@ -105,43 +124,52 @@ namespace AutopilotMonitor.Functions.Services
             Tags = new[] { "apps", "dependency" }
         };
 
+        /// <summary>
+        /// Fixed: Now uses performance_snapshot events (which are actually emitted by the Agent)
+        /// instead of non-existent error_detected events. Detects low disk via performance data.
+        /// </summary>
         private static AnalyzeRule CreateAppDiskSpaceRule() => new AnalyzeRule
         {
             RuleId = "ANALYZE-APP-004",
             Title = "Insufficient Disk Space",
-            Description = "Detects when app installation fails due to insufficient disk space.",
+            Description = "Detects when disk space is critically low during enrollment, which can cause app installation failures.",
             Severity = "critical",
             Category = "apps",
-            BaseConfidence = 90,
+            BaseConfidence = 75,
             Conditions = new List<RuleCondition>
             {
-                new RuleCondition { Signal = "disk_space", Source = "event_type", EventType = "error_detected", DataField = "message", Operator = "regex", Value = "disk space|storage.*full|not enough space|0x80070070", Required = true }
+                new RuleCondition { Signal = "low_disk", Source = "event_type", EventType = "performance_snapshot", DataField = "disk_free_gb", Operator = "lt", Value = "5", Required = true }
             },
-            Explanation = "The device does not have enough disk space to install the required applications.",
+            ConfidenceFactors = new List<ConfidenceFactor>
+            {
+                new ConfidenceFactor { Signal = "app_failed", Condition = "exists", Weight = 15 },
+                new ConfidenceFactor { Signal = "enrollment_failed", Condition = "exists", Weight = 10 }
+            },
+            Explanation = "Performance monitoring shows disk free space dropped below 5 GB during enrollment. This can cause app installation failures, especially for large Win32 apps.",
             Remediation = new List<RemediationStep>
             {
-                new RemediationStep { Title = "Free disk space", Steps = new List<string> { "Check device disk size meets minimum requirements", "Clean up temporary files", "Consider using a larger disk image" } }
+                new RemediationStep { Title = "Free disk space", Steps = new List<string> { "Check device disk size meets minimum requirements", "Clean up temporary files and IME cache (C:\\Windows\\IMECache)", "Consider using a larger disk image" } }
             },
             Tags = new[] { "apps", "disk-space", "critical" }
         };
 
+        /// <summary>
+        /// Fixed: Now checks errorDetail and errorPatternId for download-related IME error patterns
+        /// (IME-DO-TIMEOUT, IME-ERROR-DOWNLOAD, IME-ERROR-NO-CONTENT).
+        /// </summary>
         private static AnalyzeRule CreateAppDownloadTimeoutRule() => new AnalyzeRule
         {
             RuleId = "ANALYZE-APP-005",
             Title = "Content Download Timeout",
-            Description = "Detects when app content download times out or is very slow.",
+            Description = "Detects when app content download times out or fails.",
             Severity = "high",
             Category = "apps",
-            BaseConfidence = 60,
+            BaseConfidence = 70,
             Conditions = new List<RuleCondition>
             {
-                new RuleCondition { Signal = "download_timeout", Source = "event_type", EventType = "app_install_failed", DataField = "message", Operator = "regex", Value = "download.*timeout|content.*download.*fail|CDN.*error|0x80072ee7", Required = true }
+                new RuleCondition { Signal = "download_timeout", Source = "event_type", EventType = "app_install_failed", DataField = "errorPatternId", Operator = "regex", Value = @"IME-DO-TIMEOUT|IME-ERROR-DOWNLOAD|IME-ERROR-NO-CONTENT", Required = true }
             },
-            ConfidenceFactors = new List<ConfidenceFactor>
-            {
-                new ConfidenceFactor { Signal = "slow_download", Condition = "download_rate < 1000000", Weight = 20 }
-            },
-            Explanation = "App content download timed out or failed. This is usually caused by network issues, proxy interference, or CDN problems.",
+            Explanation = "App content download timed out or failed. This is usually caused by network issues, proxy interference, or CDN problems. The IME log shows a Delivery Optimization timeout or download content error.",
             Remediation = new List<RemediationStep>
             {
                 new RemediationStep { Title = "Improve download speed", Steps = new List<string> { "Check network bandwidth", "Verify proxy doesn't block *.delivery.mp.microsoft.com", "Consider Delivery Optimization configuration" } }
@@ -169,11 +197,39 @@ namespace AutopilotMonitor.Functions.Services
             Tags = new[] { "apps", "reboot", "loop" }
         };
 
+        private static AnalyzeRule CreateAppTrackingSummaryErrorsRule() => new AnalyzeRule
+        {
+            RuleId = "ANALYZE-APP-007",
+            Title = "Multiple App Installation Failures",
+            Description = "Detects when the app tracking summary reports multiple failed app installations.",
+            Severity = "high",
+            Category = "apps",
+            BaseConfidence = 75,
+            Conditions = new List<RuleCondition>
+            {
+                new RuleCondition { Signal = "summary_errors", Source = "event_type", EventType = "app_tracking_summary", DataField = "errorCount", Operator = "gte", Value = "2", Required = true }
+            },
+            ConfidenceFactors = new List<ConfidenceFactor>
+            {
+                new ConfidenceFactor { Signal = "enrollment_failed", Condition = "exists", Weight = 15 }
+            },
+            Explanation = "The app tracking summary reports 2 or more failed app installations during enrollment. This suggests a systemic issue rather than an isolated app failure.",
+            Remediation = new List<RemediationStep>
+            {
+                new RemediationStep { Title = "Review failed apps", Steps = new List<string> {
+                    "Check the individual app_install_failed events for specific error patterns",
+                    "Look for a common pattern (all MSI apps, all large apps, all from a specific publisher)",
+                    "Consider whether a shared prerequisite or dependency is failing"
+                }}
+            },
+            Tags = new[] { "apps", "summary", "multiple-failures" }
+        };
+
         private static AnalyzeRule CreateAppSlowInstallRule() => new AnalyzeRule
         {
             RuleId = "ANALYZE-APP-008",
             Title = "Slow App Installation",
-            Description = "Detects app installations that take longer than 2 minutes (test threshold).",
+            Description = "Detects app installations that take longer than 2 minutes.",
             Severity = "warning",
             Category = "apps",
             BaseConfidence = 70,
@@ -223,19 +279,27 @@ namespace AutopilotMonitor.Functions.Services
             Tags = new[] { "esp", "blocking", "timeout" }
         };
 
+        /// <summary>
+        /// Fixed: Now checks app_install_failed events for security/policy-related error patterns
+        /// instead of non-existent error_detected events. Also matches IME enforcement errors.
+        /// </summary>
         private static AnalyzeRule CreateEspSecurityPolicyFailureRule() => new AnalyzeRule
         {
             RuleId = "ANALYZE-ESP-002",
             Title = "Security Policy Application Failure",
-            Description = "Detects when a required security policy fails to apply during ESP.",
+            Description = "Detects when a required security policy fails to apply during ESP by looking for policy-related errors in app installation and IME log events.",
             Severity = "high",
             Category = "esp",
-            BaseConfidence = 70,
+            BaseConfidence = 65,
             Conditions = new List<RuleCondition>
             {
-                new RuleCondition { Signal = "policy_failure", Source = "event_type", EventType = "error_detected", DataField = "message", Operator = "regex", Value = "policy.*fail|security.*policy|compliance.*fail|BitLocker.*fail", Required = true }
+                new RuleCondition { Signal = "policy_failure", Source = "event_type", EventType = "app_install_failed", DataField = "message", Operator = "regex", Value = @"policy.*fail|security.*policy|compliance.*fail|BitLocker.*fail|enforcementState.*Error|EnforcementState", Required = true }
             },
-            Explanation = "A required security policy failed to apply during the ESP device setup phase. This blocks ESP completion.",
+            ConfidenceFactors = new List<ConfidenceFactor>
+            {
+                new ConfidenceFactor { Signal = "esp_stalled", Condition = "exists", Weight = 15 }
+            },
+            Explanation = "An app installation failed with a message indicating a security or compliance policy issue. This may block ESP completion if the affected app is an ESP-blocking app.",
             Remediation = new List<RemediationStep>
             {
                 new RemediationStep { Title = "Fix policy", Steps = new List<string> { "Check which policy failed in the event details", "Verify device meets policy prerequisites (TPM, SecureBoot)", "Review policy targeting and assignments" } }
@@ -245,17 +309,21 @@ namespace AutopilotMonitor.Functions.Services
 
         // ===== DEVICE =====
 
+        /// <summary>
+        /// Fixed: Now checks app_install_failed events for TPM-related error messages
+        /// instead of non-existent error_detected events.
+        /// </summary>
         private static AnalyzeRule CreateDeviceTpmNotReadyRule() => new AnalyzeRule
         {
             RuleId = "ANALYZE-DEV-001",
             Title = "TPM Not Ready",
-            Description = "Detects when the TPM is not ready or not functioning properly.",
+            Description = "Detects TPM-related errors in enrollment events.",
             Severity = "critical",
             Category = "device",
             BaseConfidence = 80,
             Conditions = new List<RuleCondition>
             {
-                new RuleCondition { Signal = "tpm_error", Source = "event_type", EventType = "error_detected", DataField = "message", Operator = "regex", Value = "TPM|Trusted Platform Module|0x80284001|0x80290300", Required = true }
+                new RuleCondition { Signal = "tpm_error", Source = "event_type", EventType = "app_install_failed", DataField = "message", Operator = "regex", Value = @"TPM|Trusted Platform Module|0x80284001|0x80290300|tpm.*not.*ready", Required = true }
             },
             Explanation = "The TPM (Trusted Platform Module) is not ready or functioning. TPM is required for Autopilot, Windows Hello, and BitLocker.",
             Remediation = new List<RemediationStep>
@@ -265,17 +333,21 @@ namespace AutopilotMonitor.Functions.Services
             Tags = new[] { "device", "tpm", "critical" }
         };
 
+        /// <summary>
+        /// Fixed: Now checks app_install_failed events for BitLocker-related error messages
+        /// instead of non-existent error_detected events.
+        /// </summary>
         private static AnalyzeRule CreateDeviceBitlockerEscrowRule() => new AnalyzeRule
         {
             RuleId = "ANALYZE-DEV-002",
             Title = "BitLocker Key Escrow Failure",
-            Description = "Detects when BitLocker recovery key fails to escrow to Azure AD.",
+            Description = "Detects BitLocker escrow-related errors in enrollment events.",
             Severity = "high",
             Category = "device",
             BaseConfidence = 70,
             Conditions = new List<RuleCondition>
             {
-                new RuleCondition { Signal = "bitlocker_escrow_failure", Source = "event_type", EventType = "error_detected", DataField = "message", Operator = "regex", Value = "BitLocker.*escrow|recovery key.*backup|key.*protector.*fail", Required = true }
+                new RuleCondition { Signal = "bitlocker_escrow_failure", Source = "event_type", EventType = "app_install_failed", DataField = "message", Operator = "regex", Value = @"BitLocker.*escrow|recovery key.*backup|key.*protector.*fail|BitLocker|bitlocker", Required = true }
             },
             Explanation = "BitLocker recovery key escrow to Azure AD failed. This may block ESP completion if 'Require BitLocker key escrow' is configured.",
             Remediation = new List<RemediationStep>
@@ -305,9 +377,6 @@ namespace AutopilotMonitor.Functions.Services
             Tags = new[] { "device", "secureboot" }
         };
 
-        // ===== CORRELATION RULES =====
-        // These combine signals from multiple event types for root-cause analysis
-
         private static AnalyzeRule CreateDeviceAadJoinNotDetectedRule() => new AnalyzeRule
         {
             RuleId = "ANALYZE-DEV-004",
@@ -330,34 +399,6 @@ namespace AutopilotMonitor.Functions.Services
                 }}
             },
             Tags = new[] { "device", "aad", "join", "critical" }
-        };
-
-        private static AnalyzeRule CreateAppTrackingSummaryErrorsRule() => new AnalyzeRule
-        {
-            RuleId = "ANALYZE-APP-007",
-            Title = "Multiple App Installation Failures",
-            Description = "Detects when the app tracking summary reports multiple failed app installations.",
-            Severity = "high",
-            Category = "apps",
-            BaseConfidence = 75,
-            Conditions = new List<RuleCondition>
-            {
-                new RuleCondition { Signal = "summary_errors", Source = "event_type", EventType = "app_tracking_summary", DataField = "errorCount", Operator = "gte", Value = "2", Required = true }
-            },
-            ConfidenceFactors = new List<ConfidenceFactor>
-            {
-                new ConfidenceFactor { Signal = "enrollment_failed", Condition = "exists", Weight = 15 }
-            },
-            Explanation = "The app tracking summary reports 2 or more failed app installations during enrollment. This suggests a systemic issue rather than an isolated app failure.",
-            Remediation = new List<RemediationStep>
-            {
-                new RemediationStep { Title = "Review failed apps", Steps = new List<string> {
-                    "Check the individual app_install_failed events for specific error codes",
-                    "Look for a common pattern (all MSI apps, all large apps, all from a specific publisher)",
-                    "Consider whether a shared prerequisite or dependency is failing"
-                }}
-            },
-            Tags = new[] { "apps", "summary", "multiple-failures" }
         };
 
         // ===== CORRELATION RULES =====
@@ -402,6 +443,10 @@ namespace AutopilotMonitor.Functions.Services
             Tags = new[] { "correlation", "apps", "network", "download", "root-cause" }
         };
 
+        /// <summary>
+        /// Fixed: Second condition now uses app_install_failed instead of non-existent error_detected.
+        /// Correlates low disk space from performance_snapshot with app failures.
+        /// </summary>
         private static AnalyzeRule CreateCorrelationDiskSpaceCausedInstallFailureRule() => new AnalyzeRule
         {
             RuleId = "ANALYZE-CORR-004",
@@ -414,15 +459,15 @@ namespace AutopilotMonitor.Functions.Services
             Conditions = new List<RuleCondition>
             {
                 new RuleCondition { Signal = "low_disk", Source = "event_type", EventType = "performance_snapshot", DataField = "disk_free_gb", Operator = "lt", Value = "5", Required = true },
-                new RuleCondition { Signal = "install_error", Source = "event_type", EventType = "error_detected", DataField = "message", Operator = "regex", Value = "disk space|storage|not enough space|0x80070070|0x80070008|ERROR_DISK_FULL", Required = true }
+                new RuleCondition { Signal = "app_failed", Source = "event_type", EventType = "app_install_failed", Operator = "exists", Value = "", Required = true }
             },
             ConfidenceFactors = new List<ConfidenceFactor>
             {
-                new ConfidenceFactor { Signal = "app_failed", Condition = "exists", Weight = 20 },
+                new ConfidenceFactor { Signal = "multiple_failures", Condition = "count >= 2", Weight = 15 },
                 new ConfidenceFactor { Signal = "enrollment_failed", Condition = "exists", Weight = 10 }
             },
             ConfidenceThreshold = 50,
-            Explanation = "**Root cause confirmed:** Performance monitoring shows disk free space dropped below 5 GB during enrollment, and error events contain disk-space-related error codes. The device ran out of storage during app installation.\n\nThis is common when deploying many large Win32 apps to devices with small drives (64 GB or 128 GB).",
+            Explanation = "**Root cause confirmed:** Performance monitoring shows disk free space dropped below 5 GB during enrollment, and apps failed to install. The device likely ran out of storage during app installation.\n\nThis is common when deploying many large Win32 apps to devices with small drives (64 GB or 128 GB).",
             Remediation = new List<RemediationStep>
             {
                 new RemediationStep { Title = "Reduce disk consumption during enrollment", Steps = new List<string> {
@@ -476,6 +521,179 @@ namespace AutopilotMonitor.Functions.Services
                 }}
             },
             Tags = new[] { "correlation", "apps", "proxy", "network", "download", "root-cause" }
+        };
+
+        // ===== NEW RULES =====
+
+        /// <summary>
+        /// Detects when the overall enrollment takes excessively long (> 60 minutes).
+        /// Uses the total time span between the first and last esp_phase_changed events.
+        /// </summary>
+        private static AnalyzeRule CreateEnrollmentTimeoutRule() => new AnalyzeRule
+        {
+            RuleId = "ANALYZE-ESP-003",
+            Title = "Enrollment Duration Exceeded 60 Minutes",
+            Description = "Detects when the total Autopilot enrollment takes longer than 60 minutes.",
+            Severity = "high",
+            Category = "esp",
+            BaseConfidence = 50,
+            Conditions = new List<RuleCondition>
+            {
+                new RuleCondition { Signal = "long_enrollment", Source = "phase_duration", EventType = "esp_phase_changed", DataField = "espPhase", Operator = "equals", Value = "DeviceSetup", Required = true }
+            },
+            ConfidenceFactors = new List<ConfidenceFactor>
+            {
+                new ConfidenceFactor { Signal = "long_esp", Condition = "phase_duration > 3600", Weight = 40 }
+            },
+            ConfidenceThreshold = 70,
+            Explanation = "The Autopilot enrollment exceeded 60 minutes. This is unusually long and may indicate stuck apps, slow network, or policy conflicts. The default ESP timeout is 60 minutes, after which the enrollment may be marked as failed.",
+            Remediation = new List<RemediationStep>
+            {
+                new RemediationStep { Title = "Investigate long enrollment", Steps = new List<string> {
+                    "Check the app installation timeline - identify which app took the longest",
+                    "Review download speeds in the performance data",
+                    "Consider reducing the number of ESP-blocking apps",
+                    "Check if the ESP timeout policy is configured (default: 60 min)"
+                }}
+            },
+            Tags = new[] { "esp", "timeout", "duration" }
+        };
+
+        /// <summary>
+        /// Detects explicit enrollment failure (enrollment_failed event).
+        /// The Agent emits this when the enrollment fails for any reason.
+        /// </summary>
+        private static AnalyzeRule CreateEnrollmentFailedRule() => new AnalyzeRule
+        {
+            RuleId = "ANALYZE-ENRL-001",
+            Title = "Enrollment Failed",
+            Description = "Detects when the Autopilot enrollment has explicitly failed.",
+            Severity = "critical",
+            Category = "enrollment",
+            BaseConfidence = 95,
+            Conditions = new List<RuleCondition>
+            {
+                new RuleCondition { Signal = "enrollment_failed", Source = "event_type", EventType = "enrollment_failed", Operator = "exists", Value = "", Required = true }
+            },
+            ConfidenceFactors = new List<ConfidenceFactor>
+            {
+                new ConfidenceFactor { Signal = "app_failed", Condition = "exists", Weight = 5 }
+            },
+            Explanation = "The Autopilot enrollment has explicitly failed. Check the enrollment_failed event details and other rule results for the root cause.",
+            Remediation = new List<RemediationStep>
+            {
+                new RemediationStep { Title = "Investigate enrollment failure", Steps = new List<string> {
+                    "Check the 'reason' field in the enrollment_failed event for specific failure details",
+                    "Review other analyze rule results for correlated issues (disk space, network, app failures)",
+                    "Check the device event timeline for the sequence of events leading to failure",
+                    "Verify the Autopilot profile and ESP configuration in Intune"
+                }}
+            },
+            Tags = new[] { "enrollment", "failed", "critical" }
+        };
+
+        /// <summary>
+        /// Detects when Windows Hello provisioning times out.
+        /// The HelloDetector emits hello_wait_timeout when Hello wizard doesn't start
+        /// within the configured timeout period after ESP exit.
+        /// </summary>
+        private static AnalyzeRule CreateWindowsHelloTimeoutRule() => new AnalyzeRule
+        {
+            RuleId = "ANALYZE-DEV-005",
+            Title = "Windows Hello Provisioning Timeout",
+            Description = "Detects when Windows Hello for Business provisioning did not start within the expected timeframe after ESP completion.",
+            Severity = "warning",
+            Category = "device",
+            BaseConfidence = 60,
+            Conditions = new List<RuleCondition>
+            {
+                new RuleCondition { Signal = "hello_timeout", Source = "event_type", EventType = "hello_wait_timeout", Operator = "exists", Value = "", Required = true }
+            },
+            ConfidenceFactors = new List<ConfidenceFactor>
+            {
+                new ConfidenceFactor { Signal = "hello_policy_detected", Condition = "exists", Weight = 30 }
+            },
+            Explanation = "Windows Hello for Business provisioning did not start within the expected time after ESP exit. This may indicate that the Hello policy is not configured, the device doesn't meet prerequisites, or there's a connectivity issue with the Key Registration Service.",
+            Remediation = new List<RemediationStep>
+            {
+                new RemediationStep { Title = "Verify Windows Hello configuration", Steps = new List<string> {
+                    "Check if Windows Hello for Business is configured in the tenant",
+                    "Verify the policy targets the device/user correctly",
+                    "Ensure the device has a TPM 2.0 (required for WHfB)",
+                    "Check connectivity to the Key Registration Service (enterpriseregistration.windows.net)"
+                }}
+            },
+            Tags = new[] { "device", "hello", "timeout" }
+        };
+
+        /// <summary>
+        /// Detects when app downloads appear stalled based on download_progress events
+        /// with status "failed" and app installation failure patterns matching download errors.
+        /// </summary>
+        private static AnalyzeRule CreateAppDownloadStallRule() => new AnalyzeRule
+        {
+            RuleId = "ANALYZE-APP-009",
+            Title = "App Download Stalled",
+            Description = "Detects when app downloads appear to have stalled, based on failed download progress events.",
+            Severity = "warning",
+            Category = "apps",
+            Trigger = "correlation",
+            BaseConfidence = 55,
+            Conditions = new List<RuleCondition>
+            {
+                new RuleCondition { Signal = "download_failed", Source = "event_type", EventType = "download_progress", DataField = "status", Operator = "equals", Value = "failed", Required = true },
+                new RuleCondition { Signal = "app_failed", Source = "event_type", EventType = "app_install_failed", Operator = "exists", Value = "", Required = true }
+            },
+            ConfidenceFactors = new List<ConfidenceFactor>
+            {
+                new ConfidenceFactor { Signal = "proxy_active", Condition = "exists", Weight = 15 },
+                new ConfidenceFactor { Signal = "multiple_failures", Condition = "count >= 2", Weight = 15 }
+            },
+            ConfidenceThreshold = 50,
+            Explanation = "Download progress events show a failed download, and at least one app installation also failed. This pattern suggests content delivery issues preventing apps from being downloaded successfully.",
+            Remediation = new List<RemediationStep>
+            {
+                new RemediationStep { Title = "Investigate download issues", Steps = new List<string> {
+                    "Check network connectivity and bandwidth during the enrollment",
+                    "Verify DNS resolution for *.delivery.mp.microsoft.com",
+                    "Check if a proxy or firewall is blocking content delivery",
+                    "Review Delivery Optimization settings and peer availability"
+                }}
+            },
+            Tags = new[] { "apps", "download", "stall", "correlation" }
+        };
+
+        /// <summary>
+        /// Detects high memory usage during enrollment which can cause app installation issues.
+        /// </summary>
+        private static AnalyzeRule CreateHighMemoryDuringInstallRule() => new AnalyzeRule
+        {
+            RuleId = "ANALYZE-DEV-006",
+            Title = "High Memory Usage During Enrollment",
+            Description = "Detects when memory usage exceeds 90% during enrollment, which can cause app installation failures or system instability.",
+            Severity = "warning",
+            Category = "device",
+            BaseConfidence = 55,
+            Conditions = new List<RuleCondition>
+            {
+                new RuleCondition { Signal = "high_memory", Source = "event_type", EventType = "performance_snapshot", DataField = "memory_used_percent", Operator = "gt", Value = "90", Required = true }
+            },
+            ConfidenceFactors = new List<ConfidenceFactor>
+            {
+                new ConfidenceFactor { Signal = "app_failed", Condition = "exists", Weight = 20 },
+                new ConfidenceFactor { Signal = "enrollment_failed", Condition = "exists", Weight = 15 }
+            },
+            Explanation = "Memory usage exceeded 90% during enrollment. High memory pressure can cause app installation failures, system slowdowns, and ESP timeouts.",
+            Remediation = new List<RemediationStep>
+            {
+                new RemediationStep { Title = "Reduce memory pressure", Steps = new List<string> {
+                    "Review which apps are being installed concurrently during ESP",
+                    "Consider staggering resource-heavy installations",
+                    "Check minimum RAM requirements for the device (8 GB recommended)",
+                    "Investigate if background services are consuming excessive memory"
+                }}
+            },
+            Tags = new[] { "device", "memory", "performance" }
         };
     }
 }

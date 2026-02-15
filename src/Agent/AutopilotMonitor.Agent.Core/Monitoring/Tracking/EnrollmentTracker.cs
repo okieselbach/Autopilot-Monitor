@@ -480,32 +480,6 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     }
                 }
 
-                // LEGACY: Old implementation reading from Diagnostics\AutoPilot (kept for reference, can be removed later)
-                /*
-                using (var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Provisioning\Diagnostics\AutoPilot"))
-                {
-                    if (key != null)
-                    {
-                        data["cloudAssignedTenantId"] = key.GetValue("CloudAssignedTenantId")?.ToString();
-                        data["cloudAssignedTenantDomain"] = key.GetValue("CloudAssignedTenantDomain")?.ToString();
-                        data["cloudAssignedOobeConfig"] = key.GetValue("CloudAssignedOobeConfig")?.ToString();
-                        data["deploymentProfileName"] = key.GetValue("DeploymentProfileName")?.ToString();
-
-                        // Read WDP detection values
-                        var deviceReg = key.GetValue("CloudAssignedDeviceRegistration")?.ToString();
-                        var espEnabled = key.GetValue("CloudAssignedEspEnabled")?.ToString();
-                        data["cloudAssignedDeviceRegistration"] = deviceReg;
-                        data["cloudAssignedEspEnabled"] = espEnabled;
-
-                        // Determine enrollment type: WDP if DeviceRegistration=2 or ESP explicitly disabled
-                        if (deviceReg == "2" || espEnabled == "0")
-                            _enrollmentType = "v2";
-                        else
-                            _enrollmentType = "v1";
-                    }
-                }
-                */
-
                 // Include enrollment type in autopilot_profile event data
                 data["enrollmentType"] = _enrollmentType;
 
@@ -884,6 +858,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     return; // Don't emit for Unknown, NotInstalled, InProgress
             }
 
+            // Build a descriptive message: include error detail if available
+            var message = $"{app.Name ?? app.Id}: {newState}";
+            if (newState == AppInstallationState.Error && !string.IsNullOrEmpty(app.ErrorDetail))
+                message = $"{app.Name ?? app.Id}: {app.ErrorDetail}";
+
             _emitEvent(new EnrollmentEvent
             {
                 SessionId = _sessionId,
@@ -892,7 +871,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 Severity = severity,
                 Source = "ImeLogTracker",
                 Phase = phase,
-                Message = $"{app.Name ?? app.Id}: {newState}",
+                Message = message,
                 Data = app.ToEventData()
             });
         }

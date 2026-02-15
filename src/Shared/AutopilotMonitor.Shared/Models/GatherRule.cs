@@ -51,11 +51,6 @@ namespace AutopilotMonitor.Shared.Models
         /// </summary>
         public bool IsBuiltIn { get; set; } = true;
 
-        /// <summary>
-        /// Whether this is a community-contributed rule (future use)
-        /// </summary>
-        public bool IsCommunity { get; set; } = false;
-
         // ===== WHAT TO COLLECT =====
 
         /// <summary>

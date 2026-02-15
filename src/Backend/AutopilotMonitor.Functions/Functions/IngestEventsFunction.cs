@@ -44,45 +44,15 @@ namespace AutopilotMonitor.Functions.Functions
         {
             try
             {
-                // Parse request - support both NDJSON+gzip (new) and JSON (legacy)
+                // Parse NDJSON+gzip request
                 IngestEventsRequest? request = null;
 
-                // Check Content-Encoding header for gzip
-                var contentEncoding = req.Headers.Contains("Content-Encoding")
-                    ? req.Headers.GetValues("Content-Encoding").FirstOrDefault()
+                // Extract tenantId from header to get config (for payload size limit)
+                var tenantIdHeader = req.Headers.Contains("X-Tenant-Id")
+                    ? req.Headers.GetValues("X-Tenant-Id").FirstOrDefault()
                     : null;
 
-                var contentType = req.Headers.Contains("Content-Type")
-                    ? req.Headers.GetValues("Content-Type").FirstOrDefault()
-                    : "application/json";
-
-                if (contentEncoding == "gzip" && contentType?.Contains("application/x-ndjson") == true)
-                {
-                    // New format: NDJSON + gzip
-                    _logger.LogDebug("Parsing gzip-compressed NDJSON request");
-
-                    // Extract tenantId from header to get config (for payload size limit)
-                    var tenantIdHeader = req.Headers.Contains("X-Tenant-Id")
-                        ? req.Headers.GetValues("X-Tenant-Id").FirstOrDefault()
-                        : null;
-
-                    request = await ParseNdjsonGzipRequest(req.Body, tenantIdHeader);
-                }
-                else
-                {
-                    // Legacy format: standard JSON (backwards compatibility)
-                    _logger.LogDebug("Parsing legacy JSON request");
-                    if (req.Headers.TryGetValues("Content-Length", out var clValues)
-                        && long.TryParse(clValues.FirstOrDefault(), out var contentLength)
-                        && contentLength > 1_048_576) // 1 MB limit
-                    {
-                        return await CreateErrorResponse(req, HttpStatusCode.BadRequest, "Request body too large");
-                    }
-                    var requestBody = await new StreamReader(req.Body).ReadToEndAsync();
-                    request = JsonConvert.DeserializeObject<IngestEventsRequest>(requestBody);
-                    if (request?.Events != null)
-                        foreach (var evt in request.Events) NormalizeEventData(evt);
-                }
+                request = await ParseNdjsonGzipRequest(req.Body, tenantIdHeader);
 
                 if (request?.Events == null || request.Events.Count == 0)
                 {
@@ -241,11 +211,14 @@ namespace AutopilotMonitor.Functions.Functions
                 }
 
                 // Increment platform stats (fire-and-forget, non-blocking)
-                _ = _storageService.IncrementPlatformStatAsync("TotalEventsProcessed", processedCount);
+                _ = _storageService.IncrementPlatformStatAsync("TotalEventsProcessed", processedCount)
+                    .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException, "Fire-and-forget IncrementPlatformStatAsync failed"), TaskContinuationOptions.OnlyOnFaulted);
                 if (newRuleResults.Count > 0)
-                    _ = _storageService.IncrementPlatformStatAsync("IssuesDetected", newRuleResults.Count);
+                    _ = _storageService.IncrementPlatformStatAsync("IssuesDetected", newRuleResults.Count)
+                        .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException, "Fire-and-forget IncrementPlatformStatAsync failed"), TaskContinuationOptions.OnlyOnFaulted);
                 if (completionEvent != null)
-                    _ = _storageService.IncrementPlatformStatAsync("SuccessfulEnrollments");
+                    _ = _storageService.IncrementPlatformStatAsync("SuccessfulEnrollments")
+                        .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException, "Fire-and-forget IncrementPlatformStatAsync failed"), TaskContinuationOptions.OnlyOnFaulted);
 
                 // Retrieve updated session data to include in SignalR messages
                 var updatedSession = await _storageService.GetSessionAsync(request.TenantId, request.SessionId);
