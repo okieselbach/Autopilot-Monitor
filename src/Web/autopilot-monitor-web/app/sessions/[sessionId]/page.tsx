@@ -547,10 +547,18 @@ export default function SessionDetailPage() {
             <div className="bg-white shadow rounded-lg p-6 mb-6">
               <h2 className="text-xl font-semibold text-gray-900 mb-4">Session Info</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                <InfoItem label="Device" value={session.deviceName || session.serialNumber} />
-                <InfoItem label="Model" value={`${session.manufacturer} ${session.model}`} />
-                <InfoItem label="Serial Number" value={session.serialNumber} />
-                <InfoItem label="Session ID" value={session.sessionId} />
+                <InfoItem
+                  label="Device"
+                  value={session.deviceName || session.serialNumber}
+                  copyText={session.deviceName || session.serialNumber}
+                />
+                <InfoItem
+                  label="Model"
+                  value={`${session.manufacturer} ${session.model}`}
+                  copyText={`${session.manufacturer} ${session.model}`}
+                />
+                <InfoItem label="Serial Number" value={session.serialNumber} copyText={session.serialNumber} />
+                <InfoItem label="Session ID" value={session.sessionId} copyText={session.sessionId} />
                 <InfoItem label="Status" value={<StatusBadge status={session.status} failureReason={session.failureReason} />} />
                 <InfoItem label="Events" value={session.eventCount.toString()} />
                 <InfoItem label="Duration" value={`${Math.round(session.durationSeconds / 60)} min`} />
@@ -783,11 +791,46 @@ export default function SessionDetailPage() {
   );
 }
 
-function InfoItem({ label, value }: { label: string; value: React.ReactNode }) {
+function InfoItem({ label, value, copyText }: { label: string; value: React.ReactNode; copyText?: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const copyValue = async () => {
+    if (!copyText) return;
+    try {
+      await navigator.clipboard.writeText(copyText);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1400);
+    } catch (err) {
+      console.error("Failed to copy value:", err);
+    }
+  };
+
   return (
     <div>
       <div className="text-sm font-medium text-gray-500">{label}</div>
-      <div className="mt-1 text-sm text-gray-900">{value}</div>
+      <div className="mt-1 group flex items-center gap-1.5">
+        <div className="text-sm text-gray-900 break-all">{value}</div>
+        {copyText && (
+          <button
+            type="button"
+            onClick={copyValue}
+            title={copied ? "Copied!" : "Copy to clipboard"}
+            aria-label={copied ? `${label} copied` : `Copy ${label}`}
+            className="inline-flex items-center justify-center w-5 h-5 rounded border border-gray-200 bg-white text-gray-500 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 hover:bg-gray-50 hover:text-gray-700 transition-opacity"
+          >
+            {copied ? (
+              <svg className="w-3.5 h-3.5 text-green-600" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M16.704 5.29a1 1 0 010 1.42l-7.2 7.2a1 1 0 01-1.415 0l-3.2-3.2a1 1 0 111.414-1.42l2.493 2.494 6.493-6.494a1 1 0 011.415 0z" clipRule="evenodd" />
+              </svg>
+            ) : (
+              <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                <path d="M6 2a2 2 0 00-2 2v8a2 2 0 002 2h1v-2H6V4h7v1h2V4a2 2 0 00-2-2H6z" />
+                <path d="M9 7a2 2 0 00-2 2v7a2 2 0 002 2h7a2 2 0 002-2V9a2 2 0 00-2-2H9z" />
+              </svg>
+            )}
+          </button>
+        )}
+      </div>
     </div>
   );
 }
