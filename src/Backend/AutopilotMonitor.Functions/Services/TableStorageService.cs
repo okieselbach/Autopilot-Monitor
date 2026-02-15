@@ -604,8 +604,11 @@ namespace AutopilotMonitor.Functions.Services
         /// </summary>
         private SessionSummary MapToSessionSummary(TableEntity entity)
         {
-            var startedAt = entity.GetDateTime("StartedAt") ?? DateTime.UtcNow;
-            var completedAt = entity.GetDateTime("CompletedAt");
+            // All typed getters (GetInt32, GetDateTime, etc.) throw InvalidOperationException
+            // when a property exists but has a different type (e.g. legacy data stored as string
+            // instead of int). Use safe helpers to handle type mismatches gracefully.
+            var startedAt = SafeGetDateTime(entity, "StartedAt") ?? DateTime.UtcNow;
+            var completedAt = SafeGetDateTime(entity, "CompletedAt");
 
             // Parse status with error handling and case-insensitivity
             var statusString = entity.GetString("Status") ?? "InProgress";
@@ -613,23 +616,6 @@ namespace AutopilotMonitor.Functions.Services
             {
                 _logger.LogWarning($"Failed to parse status '{statusString}' for session {entity.RowKey}, defaulting to Unknown");
                 status = SessionStatus.Unknown;
-            }
-
-            // CurrentPhase was previously stored as enum string, now stored as int.
-            // GetInt32 throws InvalidOperationException if the property exists but is not Int32,
-            // so fall back to parsing the string representation for legacy data.
-            int currentPhase = 0;
-            try
-            {
-                currentPhase = entity.GetInt32("CurrentPhase") ?? 0;
-            }
-            catch (InvalidOperationException)
-            {
-                var phaseString = entity.GetString("CurrentPhase");
-                if (phaseString != null && Enum.TryParse<EnrollmentPhase>(phaseString, ignoreCase: true, out var parsed))
-                {
-                    currentPhase = (int)parsed;
-                }
             }
 
             return new SessionSummary
@@ -642,16 +628,56 @@ namespace AutopilotMonitor.Functions.Services
                 Model = entity.GetString("Model") ?? string.Empty,
                 StartedAt = startedAt,
                 CompletedAt = completedAt,
-                CurrentPhase = currentPhase,
+                CurrentPhase = SafeGetInt32(entity, "CurrentPhase") ?? 0,
                 CurrentPhaseDetail = entity.GetString("CurrentPhaseDetail") ?? string.Empty,
                 Status = status,
                 FailureReason = entity.GetString("FailureReason") ?? string.Empty,
-                EventCount = entity.GetInt32("EventCount") ?? 0,
+                EventCount = SafeGetInt32(entity, "EventCount") ?? 0,
                 DurationSeconds = completedAt.HasValue
                     ? (int)(completedAt.Value - startedAt).TotalSeconds
                     : (int)(DateTime.UtcNow - startedAt).TotalSeconds,
                 EnrollmentType = entity.GetString("EnrollmentType") ?? "v1"
             };
+        }
+
+        /// <summary>
+        /// Safely reads an Int32 property from a TableEntity.
+        /// Returns null instead of throwing when the property has a different type (legacy data).
+        /// </summary>
+        private int? SafeGetInt32(TableEntity entity, string key)
+        {
+            try
+            {
+                return entity.GetInt32(key);
+            }
+            catch (InvalidOperationException)
+            {
+                _logger.LogWarning("Property '{Key}' on entity {PK}/{RK} is not Int32, attempting string parse", key, entity.PartitionKey, entity.RowKey);
+                var str = entity.GetString(key);
+                if (str != null && int.TryParse(str, out var parsed))
+                    return parsed;
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Safely reads a DateTime property from a TableEntity.
+        /// Returns null instead of throwing when the property has a different type (legacy data).
+        /// </summary>
+        private DateTime? SafeGetDateTime(TableEntity entity, string key)
+        {
+            try
+            {
+                return entity.GetDateTime(key);
+            }
+            catch (InvalidOperationException)
+            {
+                _logger.LogWarning("Property '{Key}' on entity {PK}/{RK} is not DateTime, attempting string parse", key, entity.PartitionKey, entity.RowKey);
+                var str = entity.GetString(key);
+                if (str != null && DateTime.TryParse(str, out var parsed))
+                    return parsed;
+                return null;
+            }
         }
 
         /// <summary>
