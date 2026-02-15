@@ -362,7 +362,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     OsEdition = DeviceInfoProvider.GetOsEdition(),
                     OsLanguage = System.Globalization.CultureInfo.CurrentCulture.Name,
                     StartedAt = DateTime.UtcNow,
-                    AgentVersion = "1.0.0",
+                    AgentVersion = _agentVersion,
                     EnrollmentType = EnrollmentTracker.DetectEnrollmentTypeStatic()
                 };
 
