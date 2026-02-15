@@ -309,14 +309,16 @@ namespace AutopilotMonitor.Functions.Services
                 var sessions = new List<SessionSummary>();
 
                 // Query sessions by tenant (PartitionKey)
+                // maxPerPage capped at 1000 (Azure Table Storage limit), pagination is automatic
                 var query = tableClient.QueryAsync<TableEntity>(
                     filter: $"PartitionKey eq '{tenantId}'",
-                    maxPerPage: maxResults
+                    maxPerPage: Math.Min(maxResults, 1000)
                 );
 
                 await foreach (var entity in query)
                 {
                     sessions.Add(MapToSessionSummary(entity));
+                    if (sessions.Count >= maxResults) break;
                 }
 
                 // Sort by StartedAt descending (most recent first)
@@ -324,7 +326,8 @@ namespace AutopilotMonitor.Functions.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"Failed to get sessions for tenant {tenantId}");
+                _logger.LogError("Failed to get sessions for tenant {TenantId}: {ExType}: {ExMessage}\n{StackTrace}",
+                    tenantId, ex.GetType().Name, ex.Message, ex.StackTrace);
                 return new List<SessionSummary>();
             }
         }
