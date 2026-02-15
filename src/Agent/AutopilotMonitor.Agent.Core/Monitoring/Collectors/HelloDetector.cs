@@ -33,6 +33,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         private System.Diagnostics.Eventing.Reader.EventLogWatcher _shellCoreWatcher;
         private System.Threading.Timer _policyCheckTimer;
         private System.Threading.Timer _helloWaitTimer;
+        private System.Threading.Timer _helloCompletionTimer;
 
         private bool _isPolicyConfigured = false;
         private bool _isHelloCompleted = false;
@@ -41,6 +42,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         private readonly object _stateLock = new object();
 
         private readonly int _helloWaitTimeoutSeconds;
+        private const int HelloCompletionTimeoutSeconds = 1500;
+        private const int BackfillLookbackMinutes = 5;
 
         /// <summary>
         /// Callback invoked when Hello provisioning completes (successfully or failed)
@@ -134,6 +137,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 
             // Subscribe to Shell-Core/Operational event log for ESP exit and Hello wizard detection
             StartShellCoreEventLogWatcher();
+
+            // Safety net: backfill recent terminal events in case watcher started late or event delivery lagged.
+            BackfillRecentTerminalHelloEvents();
         }
 
         public void Stop()
@@ -165,6 +171,20 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                 catch (Exception ex)
                 {
                     _logger.Error("Error stopping Hello wait timer", ex);
+                }
+            }
+
+            // Stop Hello completion timer
+            if (_helloCompletionTimer != null)
+            {
+                try
+                {
+                    _helloCompletionTimer.Dispose();
+                    _helloCompletionTimer = null;
+                }
+                catch (Exception ex)
+                {
+                    _logger.Error("Error stopping Hello completion timer", ex);
                 }
             }
 
@@ -325,7 +345,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                 var query = new EventLogQuery(
                     EventLogChannel,
                     PathType.LogName,
-                    "*[System[TimeCreated[timediff(@SystemTime) <= 1000]]]"
+                    "*[System[(EventID=300 or EventID=301 or EventID=358 or EventID=360 or EventID=362 or EventID=376)]]"
                 );
 
                 _watcher = new System.Diagnostics.Eventing.Reader.EventLogWatcher(query);
@@ -353,100 +373,126 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             {
                 var record = e.EventRecord;
                 var eventId = record.Id;
-
                 if (!TrackedEventIds.Contains(eventId))
                     return;
 
                 var description = record.FormatDescription() ?? $"Event ID {eventId}";
-
-                string eventType;
-                EventSeverity severity;
-                string message;
-
-                switch (eventId)
-                {
-                    case EventId_ProvisioningWillLaunch: // 358
-                        eventType = "hello_provisioning_started";
-                        severity = EventSeverity.Info;
-                        message = "Windows Hello for Business provisioning started - prerequisites passed";
-                        break;
-
-                    case EventId_NgcKeyRegistered: // 300
-                        eventType = "hello_provisioning_completed";
-                        severity = EventSeverity.Info;
-                        message = "Windows Hello for Business provisioned successfully - NGC key registered";
-                        // Mark Hello as completed (terminal event)
-                        lock (_stateLock) { _isHelloCompleted = true; }
-                        _logger.Info("Windows Hello provisioning COMPLETED successfully");
-                        // Trigger HelloCompleted event for EnrollmentTracker
-                        try { HelloCompleted?.Invoke(this, EventArgs.Empty); } catch { }
-                        break;
-
-                    case EventId_NgcKeyRegistrationFailed: // 301
-                        eventType = "hello_provisioning_failed";
-                        severity = EventSeverity.Error;
-                        message = "Windows Hello for Business provisioning failed - NGC key registration error";
-                        // Mark Hello as completed (terminal event - failed counts as completed)
-                        lock (_stateLock) { _isHelloCompleted = true; }
-                        _logger.Info("Windows Hello provisioning COMPLETED with failure");
-                        // Trigger HelloCompleted event for EnrollmentTracker
-                        try { HelloCompleted?.Invoke(this, EventArgs.Empty); } catch { }
-                        break;
-
-                    case EventId_ProvisioningWillNotLaunch: // 360
-                        eventType = "hello_provisioning_skipped";
-                        severity = EventSeverity.Warning;
-                        message = "Windows Hello for Business provisioning prerequisites not met (snapshot only, not terminal)";
-                        // DO NOT mark Hello as completed - event 360 is just a snapshot and can change
-                        // DO NOT trigger HelloCompleted event
-                        // Wait for actual terminal events: 300 (success), 301 (failed), or ESP exit + timeout
-                        _logger.Info("Windows Hello provisioning prerequisites not met (snapshot, not terminal)");
-                        break;
-
-                    case EventId_ProvisioningBlocked: // 362
-                        eventType = "hello_provisioning_blocked";
-                        severity = EventSeverity.Warning;
-                        message = "Windows Hello for Business provisioning blocked";
-                        // Mark Hello as completed (terminal event - blocked counts as completed)
-                        lock (_stateLock) { _isHelloCompleted = true; }
-                        _logger.Info("Windows Hello provisioning COMPLETED (blocked)");
-                        // Trigger HelloCompleted event for EnrollmentTracker
-                        try { HelloCompleted?.Invoke(this, EventArgs.Empty); } catch { }
-                        break;
-
-                    case EventId_PinStatus: // 376
-                        eventType = "hello_pin_status";
-                        severity = EventSeverity.Info;
-                        message = "Windows Hello PIN status update";
-                        break;
-
-                    default:
-                        return;
-                }
-
-                _onEventCollected(new EnrollmentEvent
-                {
-                    SessionId = _sessionId,
-                    TenantId = _tenantId,
-                    Timestamp = record.TimeCreated ?? DateTime.UtcNow,
-                    EventType = eventType,
-                    Severity = severity,
-                    Source = "HelloDetector",
-                    Phase = EnrollmentPhase.Unknown, // Phase will be determined by EnrollmentTracker based on context
-                    Message = message,
-                    Data = new Dictionary<string, object>
-                    {
-                        { "windowsEventId", eventId },
-                        { "providerName", record.ProviderName ?? "" },
-                        { "description", description }
-                    }
-                });
-
-                _logger.Info($"Hello event detected: {eventType} (EventID {eventId})");
+                ProcessHelloEvent(
+                    eventId,
+                    record.TimeCreated ?? DateTime.UtcNow,
+                    record.ProviderName ?? "",
+                    description,
+                    isBackfill: false);
             }
             catch (Exception ex)
             {
                 _logger.Error("Error processing Hello event record", ex);
+            }
+        }
+
+        private void ProcessHelloEvent(int eventId, DateTime timestamp, string providerName, string description, bool isBackfill)
+        {
+            string eventType;
+            EventSeverity severity;
+            string message;
+            bool shouldTriggerHelloCompleted = false;
+
+            switch (eventId)
+            {
+                case EventId_ProvisioningWillLaunch: // 358
+                    eventType = "hello_provisioning_started";
+                    severity = EventSeverity.Info;
+                    message = "Windows Hello for Business provisioning started - prerequisites passed";
+                    break;
+
+                case EventId_NgcKeyRegistered: // 300
+                    eventType = "hello_provisioning_completed";
+                    severity = EventSeverity.Info;
+                    message = "Windows Hello for Business provisioned successfully - NGC key registered";
+                    shouldTriggerHelloCompleted = MarkHelloCompleted();
+                    _logger.Info("Windows Hello provisioning COMPLETED successfully");
+                    break;
+
+                case EventId_NgcKeyRegistrationFailed: // 301
+                    eventType = "hello_provisioning_failed";
+                    severity = EventSeverity.Error;
+                    message = "Windows Hello for Business provisioning failed - NGC key registration error";
+                    shouldTriggerHelloCompleted = MarkHelloCompleted();
+                    _logger.Info("Windows Hello provisioning COMPLETED with failure");
+                    break;
+
+                case EventId_ProvisioningWillNotLaunch: // 360
+                    eventType = "hello_provisioning_skipped";
+                    severity = EventSeverity.Warning;
+                    message = "Windows Hello for Business provisioning prerequisites not met (snapshot only, not terminal)";
+                    // DO NOT mark Hello as completed - event 360 is just a snapshot and can change
+                    _logger.Info("Windows Hello provisioning prerequisites not met (snapshot, not terminal)");
+                    break;
+
+                case EventId_ProvisioningBlocked: // 362
+                    eventType = "hello_provisioning_blocked";
+                    severity = EventSeverity.Warning;
+                    message = "Windows Hello for Business provisioning blocked";
+                    shouldTriggerHelloCompleted = MarkHelloCompleted();
+                    _logger.Info("Windows Hello provisioning COMPLETED (blocked)");
+                    break;
+
+                case EventId_PinStatus: // 376
+                    eventType = "hello_pin_status";
+                    severity = EventSeverity.Info;
+                    message = "Windows Hello PIN status update";
+                    break;
+
+                default:
+                    return;
+            }
+
+            var data = new Dictionary<string, object>
+            {
+                { "windowsEventId", eventId },
+                { "providerName", providerName ?? "" },
+                { "description", description ?? "" }
+            };
+
+            if (isBackfill)
+            {
+                data["backfill"] = true;
+            }
+
+            _onEventCollected(new EnrollmentEvent
+            {
+                SessionId = _sessionId,
+                TenantId = _tenantId,
+                Timestamp = timestamp,
+                EventType = eventType,
+                Severity = severity,
+                Source = "HelloDetector",
+                Phase = EnrollmentPhase.Unknown,
+                Message = message,
+                Data = data
+            });
+
+            _logger.Info($"Hello event detected: {eventType} (EventID {eventId}{(isBackfill ? ", backfill" : "")})");
+
+            if (shouldTriggerHelloCompleted)
+            {
+                try { HelloCompleted?.Invoke(this, EventArgs.Empty); } catch { }
+            }
+        }
+
+        private bool MarkHelloCompleted()
+        {
+            lock (_stateLock)
+            {
+                if (_isHelloCompleted)
+                {
+                    _logger.Debug("Hello terminal event received but Hello is already marked completed");
+                    return false;
+                }
+
+                _isHelloCompleted = true;
+                StopHelloCompletionTimerLocked();
+                return true;
             }
         }
 
@@ -458,7 +504,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                 var query = new EventLogQuery(
                     ShellCoreEventLogChannel,
                     PathType.LogName,
-                    "*[System[TimeCreated[timediff(@SystemTime) <= 1000]]]"
+                    "*[System[(EventID=62404 or EventID=62407)]]"
                 );
 
                 _shellCoreWatcher = new System.Diagnostics.Eventing.Reader.EventLogWatcher(query);
@@ -520,6 +566,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                                     _helloWaitTimer = null;
                                     _logger.Info($"Hello wizard started within {_helloWaitTimeoutSeconds}s timeout - stopping wait timer");
                                 }
+
+                                StartHelloCompletionTimerLocked();
                             }
 
                             _logger.Info("Windows Hello wizard started - detected via Shell-Core event 62404");
@@ -628,6 +676,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                 _logger.Info("Assuming Hello is not configured or was skipped - marking as completed");
 
                 _isHelloCompleted = true;
+                StopHelloCompletionTimerLocked();
 
                 // Emit event for tracking
                 _onEventCollected(new EnrollmentEvent
@@ -694,6 +743,132 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     TimeSpan.FromSeconds(_helloWaitTimeoutSeconds),
                     TimeSpan.FromMilliseconds(-1) // One-shot timer
                 );
+            }
+        }
+
+        private void StartHelloCompletionTimerLocked()
+        {
+            if (_isHelloCompleted)
+                return;
+
+            if (_helloCompletionTimer != null)
+                return;
+
+            _logger.Info($"Starting Hello completion timer ({HelloCompletionTimeoutSeconds}s) - waiting for terminal Hello event (300/301/362)");
+            _helloCompletionTimer = new System.Threading.Timer(
+                OnHelloCompletionTimeout,
+                null,
+                TimeSpan.FromSeconds(HelloCompletionTimeoutSeconds),
+                TimeSpan.FromMilliseconds(-1));
+        }
+
+        private void StopHelloCompletionTimerLocked()
+        {
+            if (_helloCompletionTimer == null)
+                return;
+
+            try
+            {
+                _helloCompletionTimer.Dispose();
+            }
+            catch { }
+            finally
+            {
+                _helloCompletionTimer = null;
+            }
+        }
+
+        private void OnHelloCompletionTimeout(object state)
+        {
+            lock (_stateLock)
+            {
+                if (_isHelloCompleted)
+                {
+                    _logger.Debug("Hello completion timeout fired but Hello already completed - ignoring");
+                    return;
+                }
+
+                _logger.Warning($"Hello completion timeout ({HelloCompletionTimeoutSeconds}s) expired after wizard start without terminal event");
+                _isHelloCompleted = true;
+                StopHelloCompletionTimerLocked();
+
+                _onEventCollected(new EnrollmentEvent
+                {
+                    SessionId = _sessionId,
+                    TenantId = _tenantId,
+                    EventType = "hello_completion_timeout",
+                    Severity = EventSeverity.Warning,
+                    Source = "HelloDetector",
+                    Phase = EnrollmentPhase.Unknown,
+                    Message = $"Hello wizard started but no terminal event (300/301/362) arrived within {HelloCompletionTimeoutSeconds}s",
+                    Data = new Dictionary<string, object>
+                    {
+                        { "timeoutSeconds", HelloCompletionTimeoutSeconds },
+                        { "helloWizardStarted", _helloWizardStarted }
+                    }
+                });
+
+                try
+                {
+                    HelloCompleted?.Invoke(this, EventArgs.Empty);
+                }
+                catch (Exception ex)
+                {
+                    _logger.Error("Error invoking HelloCompleted from completion timeout", ex);
+                }
+            }
+        }
+
+        private void BackfillRecentTerminalHelloEvents()
+        {
+            try
+            {
+                var lookbackMs = BackfillLookbackMinutes * 60 * 1000;
+                var query = new EventLogQuery(
+                    EventLogChannel,
+                    PathType.LogName,
+                    $"*[System[(EventID=300 or EventID=301 or EventID=362) and TimeCreated[timediff(@SystemTime) <= {lookbackMs}]]]");
+
+                using (var reader = new EventLogReader(query))
+                {
+                    DateTime latestTimestamp = DateTime.MinValue;
+                    int? latestEventId = null;
+                    string latestProvider = string.Empty;
+                    string latestDescription = null;
+
+                    for (EventRecord record = reader.ReadEvent(); record != null; record = reader.ReadEvent())
+                    {
+                        using (record)
+                        {
+                            var eventId = record.Id;
+                            if (eventId != EventId_NgcKeyRegistered && eventId != EventId_NgcKeyRegistrationFailed && eventId != EventId_ProvisioningBlocked)
+                                continue;
+
+                            var timestamp = record.TimeCreated ?? DateTime.MinValue;
+                            if (timestamp < latestTimestamp)
+                                continue;
+
+                            latestTimestamp = timestamp;
+                            latestEventId = eventId;
+                            latestProvider = record.ProviderName ?? "";
+                            latestDescription = record.FormatDescription() ?? $"Event ID {eventId}";
+                        }
+                    }
+
+                    if (latestEventId.HasValue)
+                    {
+                        _logger.Info($"Backfill found recent Hello terminal event: EventID {latestEventId.Value} at {latestTimestamp:O}");
+                        ProcessHelloEvent(latestEventId.Value, latestTimestamp == DateTime.MinValue ? DateTime.UtcNow : latestTimestamp, latestProvider, latestDescription, isBackfill: true);
+                    }
+                    else
+                    {
+                        _logger.Debug($"Backfill found no terminal Hello events in last {BackfillLookbackMinutes} minutes");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"Hello terminal event backfill failed: {ex.Message}");
             }
         }
 
