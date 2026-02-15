@@ -18,6 +18,7 @@ interface DownloadItem {
   bytesTotal: number;
   downloadRateBps: number;
   lastUpdated: string;
+  lastUpdatedMs: number;
   isComplete: boolean;
   firstSeenIndex: number;
   eventData?: Record<string, any>;
@@ -39,22 +40,18 @@ function formatSpeed(bps: number): string {
   return `${(bps / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
 }
 
-function formatEta(bytesRemaining: number, rateBps: number): string {
-  if (rateBps <= 0 || bytesRemaining <= 0) return "--";
-  const seconds = bytesRemaining / rateBps;
-  if (seconds < 60) return `${Math.round(seconds)}s`;
-  if (seconds < 3600) return `${Math.round(seconds / 60)}m ${Math.round(seconds % 60)}s`;
-  return `${Math.floor(seconds / 3600)}h ${Math.round((seconds % 3600) / 60)}m`;
-}
-
 export default function DownloadProgress({ events }: DownloadProgressProps) {
   const downloads = useMemo(() => {
     if (events.length === 0) return [];
 
+    const sortedEvents = [...events].sort(
+      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
+
     const downloadMap = new Map<string, DownloadItem>();
     let insertionIndex = 0;
 
-    for (const evt of events) {
+    for (const evt of sortedEvents) {
       const d = evt.data;
       if (!d) continue;
 
@@ -65,9 +62,10 @@ export default function DownloadProgress({ events }: DownloadProgressProps) {
 
       const bytesDownloaded = parseInt(d.bytes_downloaded ?? d.bytesDownloaded ?? "0", 10);
       const bytesTotal = parseInt(d.bytes_total ?? d.bytesTotal ?? "0", 10);
-      const downloadRateBps = parseFloat(d.download_rate_bps ?? d.downloadRateBps ?? "0");
+      const reportedRateBps = parseFloat(d.download_rate_bps ?? d.downloadRateBps ?? "0");
       const status = d.status ?? "";
       const isDownloadStartEvent = evt.eventType === "app_download_started";
+      const eventTs = new Date(evt.timestamp).getTime();
 
       // Determine if complete: explicit status or bytes comparison
       const isComplete = status === "completed" || status === "failed" || (bytesTotal > 0 && bytesDownloaded >= bytesTotal);
@@ -90,12 +88,24 @@ export default function DownloadProgress({ events }: DownloadProgressProps) {
       }
 
       const existing = downloadMap.get(appName);
+      let effectiveRateBps = isNaN(reportedRateBps) ? 0 : reportedRateBps;
+      if (effectiveRateBps <= 0 && existing && Number.isFinite(eventTs) && Number.isFinite(existing.lastUpdatedMs)) {
+        const elapsedSeconds = (eventTs - existing.lastUpdatedMs) / 1000;
+        const deltaBytes = (isNaN(bytesDownloaded) ? 0 : bytesDownloaded) - existing.bytesDownloaded;
+        if (elapsedSeconds > 0 && deltaBytes > 0) {
+          effectiveRateBps = deltaBytes / elapsedSeconds;
+        } else {
+          effectiveRateBps = existing.downloadRateBps;
+        }
+      }
+
       downloadMap.set(appName, {
         appName,
         bytesDownloaded: isNaN(bytesDownloaded) ? 0 : bytesDownloaded,
         bytesTotal: isNaN(bytesTotal) ? 0 : bytesTotal,
-        downloadRateBps: isNaN(downloadRateBps) ? 0 : downloadRateBps,
+        downloadRateBps: effectiveRateBps,
         lastUpdated: evt.timestamp,
+        lastUpdatedMs: Number.isFinite(eventTs) ? eventTs : (existing?.lastUpdatedMs ?? Date.now()),
         isComplete,
         firstSeenIndex: existing?.firstSeenIndex ?? insertionIndex++,
         eventData: d,
@@ -149,17 +159,18 @@ export default function DownloadProgress({ events }: DownloadProgressProps) {
           const progressPercent = dl.bytesTotal > 0
             ? Math.min(100, (dl.bytesDownloaded / dl.bytesTotal) * 100)
             : 0;
-          const bytesRemaining = dl.bytesTotal > 0 ? dl.bytesTotal - dl.bytesDownloaded : 0;
 
-          return <DownloadItem key={dl.appName} download={dl} progressPercent={progressPercent} bytesRemaining={bytesRemaining} />;
+          return <DownloadItem key={dl.appName} download={dl} progressPercent={progressPercent} />;
         })}
       </div>}
     </div>
   );
 }
 
-function DownloadItem({ download: dl, progressPercent, bytesRemaining }: { download: DownloadItem; progressPercent: number; bytesRemaining: number }) {
+function DownloadItem({ download: dl, progressPercent }: { download: DownloadItem; progressPercent: number }) {
   const [showDetails, setShowDetails] = useState(false);
+  const hasKnownTotal = dl.bytesTotal > 0;
+  const showProgressBar = hasKnownTotal || !dl.isComplete;
 
   return (
             <div
@@ -182,9 +193,6 @@ function DownloadItem({ download: dl, progressPercent, bytesRemaining }: { downl
                   {!dl.isComplete && dl.downloadRateBps > 0 && (
                     <span className="font-medium text-blue-600">{formatSpeed(dl.downloadRateBps)}</span>
                   )}
-                  {!dl.isComplete && dl.bytesTotal > 0 && (
-                    <span>ETA: {formatEta(bytesRemaining, dl.downloadRateBps)}</span>
-                  )}
                   {dl.eventData && Object.keys(dl.eventData).length > 0 && (
                     <button
                       onClick={() => setShowDetails(!showDetails)}
@@ -197,19 +205,23 @@ function DownloadItem({ download: dl, progressPercent, bytesRemaining }: { downl
               </div>
 
               {/* Progress bar */}
-              {dl.bytesTotal > 0 && (
+              {showProgressBar && (
                 <div className="mt-1">
                   <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
                     <div
                       className={`h-full rounded-full transition-all duration-500 ${
                         dl.isComplete ? "bg-green-500" : "bg-blue-500"
                       }`}
-                      style={{ width: `${progressPercent}%` }}
+                      style={{ width: `${hasKnownTotal ? progressPercent : 0}%` }}
                     />
                   </div>
                   <div className="flex items-center justify-between mt-1 text-xs text-gray-500">
-                    <span>{formatBytes(dl.bytesDownloaded)} / {formatBytes(dl.bytesTotal)}</span>
-                    <span>{progressPercent.toFixed(0)}%</span>
+                    <span>
+                      {hasKnownTotal
+                        ? `${formatBytes(dl.bytesDownloaded)} / ${formatBytes(dl.bytesTotal)}`
+                        : `${formatBytes(dl.bytesDownloaded)} downloaded`}
+                    </span>
+                    <span>{hasKnownTotal ? `${progressPercent.toFixed(0)}%` : "started"}</span>
                   </div>
                 </div>
               )}
