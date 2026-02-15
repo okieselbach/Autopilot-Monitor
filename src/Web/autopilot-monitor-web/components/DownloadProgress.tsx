@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 
 interface DownloadEvent {
   timestamp: string;
+  eventType?: string;
   data?: Record<string, any>;
 }
 
@@ -57,7 +58,7 @@ export default function DownloadProgress({ events }: DownloadProgressProps) {
       const d = evt.data;
       if (!d) continue;
 
-      const appName = d.app_name ?? d.appName ?? d.file_name ?? d.fileName ?? "Unknown App";
+      const appName = d.app_name ?? d.appName ?? d.file_name ?? d.fileName ?? d.app_id ?? d.appId ?? "Unknown App";
 
       // Skip unknown apps
       if (appName === "Unknown App") continue;
@@ -66,6 +67,7 @@ export default function DownloadProgress({ events }: DownloadProgressProps) {
       const bytesTotal = parseInt(d.bytes_total ?? d.bytesTotal ?? "0", 10);
       const downloadRateBps = parseFloat(d.download_rate_bps ?? d.downloadRateBps ?? "0");
       const status = d.status ?? "";
+      const isDownloadStartEvent = evt.eventType === "app_download_started";
 
       // Determine if complete: explicit status or bytes comparison
       const isComplete = status === "completed" || status === "failed" || (bytesTotal > 0 && bytesDownloaded >= bytesTotal);
@@ -77,7 +79,13 @@ export default function DownloadProgress({ events }: DownloadProgressProps) {
 
       // Skip if no download activity yet (0 bytes downloaded, not completed/failed)
       // This makes downloads appear dynamically as they start
-      if (bytesDownloaded === 0 && bytesTotal === 0 && status !== "completed" && status !== "failed") {
+      if (
+        bytesDownloaded === 0 &&
+        bytesTotal === 0 &&
+        status !== "completed" &&
+        status !== "failed" &&
+        !isDownloadStartEvent
+      ) {
         continue;
       }
 
@@ -95,9 +103,8 @@ export default function DownloadProgress({ events }: DownloadProgressProps) {
     }
 
     return Array.from(downloadMap.values()).sort((a, b) => {
-      // In-progress first, then completed
-      if (a.isComplete !== b.isComplete) return a.isComplete ? 1 : -1;
-      // Preserve first-seen order: oldest first (first download on top, newest at bottom)
+      // Keep stable visual order based on first appearance only.
+      // This avoids active items jumping when completion status changes.
       return a.firstSeenIndex - b.firstSeenIndex;
     });
   }, [events]);

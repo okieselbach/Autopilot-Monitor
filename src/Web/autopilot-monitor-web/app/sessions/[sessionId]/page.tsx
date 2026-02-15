@@ -669,9 +669,11 @@ export default function SessionDetailPage() {
             events={events.filter(e => e.eventType === "performance_snapshot")}
           />
 
-          {/* Download Progress (from download_progress or app_tracking_summary events) */}
+          {/* Download Progress (from download_progress, app_download_started, or app_tracking_summary events) */}
           <DownloadProgress
-            events={events.filter(e => e.eventType === "download_progress" || e.eventType === "app_tracking_summary")}
+            events={events.filter(
+              e => e.eventType === "download_progress" || e.eventType === "app_download_started" || e.eventType === "app_tracking_summary"
+            )}
           />
 
           {/* Timeline */}
