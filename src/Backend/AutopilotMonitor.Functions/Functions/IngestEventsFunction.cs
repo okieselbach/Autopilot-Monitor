@@ -102,7 +102,7 @@ namespace AutopilotMonitor.Functions.Functions
                 DateTime? earliestEventTimestamp = null;
 
                 // Track app install events for AppInstallSummary aggregation
-                var appInstallUpdates = new Dictionary<string, AppInstallSummary>(StringComparer.OrdinalIgnoreCase);
+                var appInstallUpdates = new Dictionary<string, AppInstallAggregationState>(StringComparer.OrdinalIgnoreCase);
 
                 foreach (var evt in storedEvents)
                 {
@@ -137,7 +137,7 @@ namespace AutopilotMonitor.Functions.Functions
                 // Store app install summaries
                 foreach (var summary in appInstallUpdates.Values)
                 {
-                    await _storageService.StoreAppInstallSummaryAsync(summary);
+                    await _storageService.StoreAppInstallSummaryAsync(summary.Summary);
                 }
 
                 // Update session status based on events
@@ -447,7 +447,7 @@ namespace AutopilotMonitor.Functions.Functions
         /// <summary>
         /// Aggregates app install events into AppInstallSummary records
         /// </summary>
-        private void AggregateAppInstallEvent(EnrollmentEvent evt, string tenantId, string sessionId, Dictionary<string, AppInstallSummary> summaries)
+        private void AggregateAppInstallEvent(EnrollmentEvent evt, string tenantId, string sessionId, Dictionary<string, AppInstallAggregationState> summaries)
         {
             // Agent sends: app_install_started, app_install_completed, app_install_failed, app_download_started, download_progress
             // Support both legacy (app_install_start/complete) and current agent event types
@@ -464,26 +464,36 @@ namespace AutopilotMonitor.Functions.Functions
             var appName = evt.Data?.ContainsKey("appName") == true ? evt.Data["appName"]?.ToString() : null;
             if (string.IsNullOrEmpty(appName)) return;
 
-            if (!summaries.TryGetValue(appName, out var summary))
+            if (!summaries.TryGetValue(appName, out var state))
             {
-                summary = new AppInstallSummary
+                state = new AppInstallAggregationState
                 {
-                    AppName = appName,
-                    SessionId = sessionId,
-                    TenantId = tenantId,
-                    StartedAt = evt.Timestamp
+                    Summary = new AppInstallSummary
+                    {
+                        AppName = appName,
+                        SessionId = sessionId,
+                        TenantId = tenantId,
+                        StartedAt = evt.Timestamp
+                    }
                 };
-                summaries[appName] = summary;
+                summaries[appName] = state;
             }
+
+            var summary = state.Summary;
 
             switch (evt.EventType)
             {
                 case "app_install_started":
                 case "app_install_start":
+                    if (!state.InstallStartedAt.HasValue || evt.Timestamp < state.InstallStartedAt.Value)
+                        state.InstallStartedAt = evt.Timestamp;
+                    if (summary.Status == "InProgress" || summary.Status == string.Empty)
+                        summary.Status = "InProgress";
+                    break;
+
                 case "app_download_started":
-                    // Only set StartedAt on the very first start event
-                    if (summary.StartedAt == DateTime.MinValue || summary.StartedAt > evt.Timestamp)
-                        summary.StartedAt = evt.Timestamp;
+                    if (!state.DownloadStartedAt.HasValue || evt.Timestamp < state.DownloadStartedAt.Value)
+                        state.DownloadStartedAt = evt.Timestamp;
                     if (summary.Status == "InProgress" || summary.Status == string.Empty)
                         summary.Status = "InProgress";
                     break;
@@ -520,8 +530,47 @@ namespace AutopilotMonitor.Functions.Functions
                         : evt.Data?.ContainsKey("bytes_downloaded") == true ? "bytes_downloaded" : null;
                     if (bytesKey != null && long.TryParse(evt.Data![bytesKey]?.ToString(), out var bytes))
                         summary.DownloadBytes = Math.Max(summary.DownloadBytes, bytes);
-                    // download_duration_seconds is not sent by the agent — skip
                     break;
+            }
+
+            RecalculateAppDurations(state);
+        }
+
+        private static void RecalculateAppDurations(AppInstallAggregationState state)
+        {
+            var summary = state.Summary;
+
+            // Effective start for full app duration: earliest known install/download start.
+            var effectiveStart = summary.StartedAt;
+            if (state.DownloadStartedAt.HasValue &&
+                (effectiveStart == DateTime.MinValue || state.DownloadStartedAt.Value < effectiveStart))
+            {
+                effectiveStart = state.DownloadStartedAt.Value;
+            }
+
+            if (state.InstallStartedAt.HasValue &&
+                (effectiveStart == DateTime.MinValue || state.InstallStartedAt.Value < effectiveStart))
+            {
+                effectiveStart = state.InstallStartedAt.Value;
+            }
+
+            if (effectiveStart != DateTime.MinValue)
+            {
+                summary.StartedAt = effectiveStart;
+            }
+
+            // Download duration: from first download start to first install start.
+            if (state.DownloadStartedAt.HasValue && state.InstallStartedAt.HasValue &&
+                state.InstallStartedAt.Value >= state.DownloadStartedAt.Value)
+            {
+                summary.DownloadDurationSeconds = (int)(state.InstallStartedAt.Value - state.DownloadStartedAt.Value).TotalSeconds;
+            }
+
+            // Full duration: from effective start to completion/failure.
+            if (summary.CompletedAt.HasValue && summary.StartedAt != DateTime.MinValue &&
+                summary.CompletedAt.Value >= summary.StartedAt)
+            {
+                summary.DurationSeconds = (int)(summary.CompletedAt.Value - summary.StartedAt).TotalSeconds;
             }
         }
 
@@ -557,5 +606,12 @@ namespace AutopilotMonitor.Functions.Functions
     {
         public string SessionId { get; set; } = string.Empty;
         public string TenantId { get; set; } = string.Empty;
+    }
+
+    internal class AppInstallAggregationState
+    {
+        public AppInstallSummary Summary { get; set; } = new();
+        public DateTime? DownloadStartedAt { get; set; }
+        public DateTime? InstallStartedAt { get; set; }
     }
 }

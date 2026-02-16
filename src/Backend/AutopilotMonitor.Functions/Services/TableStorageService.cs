@@ -1458,7 +1458,7 @@ namespace AutopilotMonitor.Functions.Services
                         if (summary.StartedAt == DateTime.MinValue || existingStartedAt.Value < summary.StartedAt)
                         {
                             summary.StartedAt = existingStartedAt.Value;
-                            if (summary.CompletedAt.HasValue && summary.DurationSeconds == 0)
+                            if (summary.CompletedAt.HasValue && summary.CompletedAt.Value >= summary.StartedAt)
                             {
                                 summary.DurationSeconds = (int)(summary.CompletedAt.Value - summary.StartedAt).TotalSeconds;
                             }
