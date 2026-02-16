@@ -240,7 +240,7 @@ namespace AutopilotMonitor.Functions.Services
                 var groups = matchingEvents
                     .Select(e => new { Event = e, Key = GetDataFieldValue(e, condition.DataField) })
                     .Where(x => !string.IsNullOrEmpty(x.Key))
-                    .GroupBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
+                    .GroupBy(x => x.Key!, StringComparer.OrdinalIgnoreCase)
                     .Where(g => g.Count() >= groupThreshold)
                     .ToList();
 
@@ -248,20 +248,27 @@ namespace AutopilotMonitor.Functions.Services
                 {
                     var worst = groups.OrderByDescending(g => g.Count()).First();
                     var firstEvent = worst.First().Event;
-                    var appName = GetDataFieldValue(firstEvent, "appName") ?? worst.Key;
+                    var groupKey = worst.Key;
+                    var appName = GetDataFieldValue(firstEvent, "appName") ?? groupKey;
                     return (true, new Dictionary<string, object>
                     {
-                        ["eventId"] = firstEvent.EventId,
+                        ["eventId"] = firstEvent.EventId ?? string.Empty,
                         ["sequence"] = firstEvent.Sequence,
                         ["timestamp"] = firstEvent.Timestamp,
-                        ["groupKey"] = worst.Key,
-                        ["appName"] = appName,
+                        ["groupKey"] = groupKey,
+                        ["appName"] = appName ?? groupKey,
                         ["count"] = worst.Count(),
                         ["threshold"] = groupThreshold
                     });
                 }
 
-                return (false, new Dictionary<string, object> { ["totalEvents"] = matchingEvents.Count, ["distinctApps"] = matchingEvents.Select(e => GetDataFieldValue(e, condition.DataField)).Where(k => k != null).Distinct(StringComparer.OrdinalIgnoreCase).Count() });
+                var distinctApps = matchingEvents
+                    .Select(e => GetDataFieldValue(e, condition.DataField))
+                    .Where(k => k != null)
+                    .Cast<string>()
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Count();
+                return (false, new Dictionary<string, object> { ["totalEvents"] = matchingEvents.Count, ["distinctApps"] = distinctApps });
             }
 
             // count_gte: global count across all matching events
