@@ -117,7 +117,7 @@ export default function HealthCheckPage() {
             <div>
               <h1 className="text-3xl font-bold text-gray-900 mb-2">System Health Check</h1>
               <p className="text-gray-600">
-                Comprehensive health monitoring for Autopilot Monitor infrastructure
+                Health monitoring for Autopilot Monitor infrastructure
               </p>
             </div>
             <button
@@ -243,19 +243,7 @@ export default function HealthCheckPage() {
                 </li>
                 <li className="flex items-start gap-2">
                   <span className="text-blue-600 mt-0.5">•</span>
-                  <span><strong>Configuration:</strong> Presence of all required configuration settings</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="text-blue-600 mt-0.5">•</span>
-                  <span><strong>Authentication:</strong> Azure AD / MSAL configuration validity</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="text-blue-600 mt-0.5">•</span>
-                  <span><strong>SignalR:</strong> Azure SignalR Service configuration and endpoint</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="text-blue-600 mt-0.5">•</span>
-                  <span><strong>Certificate Validation:</strong> X.509 chain validation and self-signed certificate rejection</span>
+                  <span><strong>Functions Host:</strong> Azure Functions host process status and uptime</span>
                 </li>
               </ul>
             </div>
