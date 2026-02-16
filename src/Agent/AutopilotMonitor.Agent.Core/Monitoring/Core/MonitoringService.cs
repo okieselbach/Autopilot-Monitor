@@ -10,6 +10,7 @@ using AutopilotMonitor.Agent.Core.Monitoring.Collectors;
 using AutopilotMonitor.Agent.Core.Monitoring.Network;
 using AutopilotMonitor.Agent.Core.Monitoring.Replay;
 using AutopilotMonitor.Agent.Core.Monitoring.Tracking;
+using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.Models;
 
 namespace AutopilotMonitor.Agent.Core.Monitoring.Core
