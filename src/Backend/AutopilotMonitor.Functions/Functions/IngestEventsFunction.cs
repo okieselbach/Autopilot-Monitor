@@ -97,7 +97,7 @@ namespace AutopilotMonitor.Functions.Functions
                 EnrollmentEvent? lastPhaseChangeEvent = null;
                 EnrollmentEvent? completionEvent = null;
                 EnrollmentEvent? failureEvent = null;
-                string failureReason = null;
+                string? failureReason = null;
                 DateTime? earliestEventTimestamp = null;
 
                 // Track app install events for AppInstallSummary aggregation

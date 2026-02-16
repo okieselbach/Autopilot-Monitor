@@ -133,7 +133,7 @@ namespace AutopilotMonitor.Functions.Services
             }
         }
 
-        private static string BuildHardwareText(string manufacturer, string model)
+        private static string BuildHardwareText(string? manufacturer, string? model)
         {
             var parts = new[]
             {
