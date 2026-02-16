@@ -148,10 +148,13 @@ namespace AutopilotMonitor.Functions.Security
                 };
             }
 
-            // 4. Validate serial number against Intune Autopilot (optional, tenant setting)
+            // 4. Validate serial number against Intune Autopilot (incremental consent needs to be given during setup)
+            string? serialNumber = null;
+            string? autopilotDeviceId = null;
+
             if (config.ValidateSerialNumber)
             {
-                var serialNumber = req.Headers.Contains("X-Device-SerialNumber")
+                serialNumber = req.Headers.Contains("X-Device-SerialNumber")
                     ? req.Headers.GetValues("X-Device-SerialNumber").FirstOrDefault()
                     : null;
 
@@ -166,6 +169,8 @@ namespace AutopilotMonitor.Functions.Security
                         Details = serialValidation.ErrorMessage
                     };
                 }
+
+                autopilotDeviceId = serialValidation.AutopilotDeviceId;
             }
 
             // All checks passed
@@ -175,6 +180,8 @@ namespace AutopilotMonitor.Functions.Security
                 CertificateThumbprint = certValidation.Thumbprint,
                 Manufacturer = manufacturer,
                 Model = model,
+                SerialNumber = serialNumber,
+                AutopilotDeviceId = autopilotDeviceId,
                 RateLimitResult = rateLimitResult
             };
         }
@@ -219,6 +226,16 @@ namespace AutopilotMonitor.Functions.Security
         /// Device model (if validation succeeded)
         /// </summary>
         public string? Model { get; set; }
+
+        /// <summary>
+        /// Device serial number (if serial number validation is enabled and succeeded)
+        /// </summary>
+        public string? SerialNumber { get; set; }
+
+        /// <summary>
+        /// Autopilot device ID from Intune (if serial number validation is enabled and succeeded)
+        /// </summary>
+        public string? AutopilotDeviceId { get; set; }
 
         /// <summary>
         /// Rate limit result (if validation succeeded)

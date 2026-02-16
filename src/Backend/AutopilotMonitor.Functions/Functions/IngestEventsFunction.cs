@@ -64,7 +64,7 @@ namespace AutopilotMonitor.Functions.Functions
                     return await CreateErrorResponse(req, HttpStatusCode.BadRequest, "SessionId and TenantId are required");
                 }
 
-                // Validate request security (certificate, rate limit, hardware whitelist)
+                // Validate request security (certificate, rate limit, hardware whitelist, serial number in autopilot)
                 var (validation, errorResponse) = await req.ValidateSecurityAsync(
                     request.TenantId,
                     _configService,
