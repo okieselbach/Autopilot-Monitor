@@ -652,8 +652,36 @@ namespace AutopilotMonitor.Functions.Services
                 DurationSeconds = completedAt.HasValue
                     ? (int)(completedAt.Value - startedAt).TotalSeconds
                     : (int)(DateTime.UtcNow - startedAt).TotalSeconds,
-                EnrollmentType = entity.GetString("EnrollmentType") ?? "v1"
+                EnrollmentType = entity.GetString("EnrollmentType") ?? "v1",
+                DiagnosticsBlobName = entity.GetString("DiagnosticsBlobName")
             };
+        }
+
+        /// <summary>
+        /// Stores the diagnostics blob name on an existing session (Merge-mode, single field update).
+        /// </summary>
+        public async Task UpdateSessionDiagnosticsBlobAsync(string tenantId, string sessionId, string blobName)
+        {
+            SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
+            SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
+
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
+                var entity = await tableClient.GetEntityAsync<TableEntity>(tenantId, sessionId);
+
+                var update = new TableEntity(tenantId, sessionId)
+                {
+                    ["DiagnosticsBlobName"] = blobName
+                };
+
+                await tableClient.UpdateEntityAsync(update, entity.Value.ETag, Azure.Data.Tables.TableUpdateMode.Merge);
+                _logger.LogInformation($"Stored diagnostics blob name for session {sessionId}: {blobName}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, $"Failed to store diagnostics blob name for session {sessionId}");
+            }
         }
 
         /// <summary>

@@ -52,6 +52,7 @@ interface Session {
   durationSeconds: number;
   failureReason?: string;
   enrollmentType?: string; // "v1" | "v2" — absent for sessions before this feature
+  diagnosticsBlobName?: string;
 }
 
 // Phase definitions per enrollment type
@@ -562,6 +563,36 @@ export default function SessionDetailPage() {
                 <InfoItem label="Status" value={<StatusBadge status={session.status} failureReason={session.failureReason} />} />
                 <InfoItem label="Events" value={session.eventCount.toString()} />
                 <InfoItem label="Duration" value={`${Math.round(session.durationSeconds / 60)} min`} />
+                {session.diagnosticsBlobName && (
+                  <InfoItem
+                    label="Diagnostics"
+                    value={
+                      <button
+                        onClick={async () => {
+                          try {
+                            const token = await getAccessToken();
+                            if (!token) return;
+                            const res = await fetch(
+                              `${API_BASE_URL}/api/diagnostics/download-url?tenantId=${session.tenantId}&blobName=${encodeURIComponent(session.diagnosticsBlobName!)}`,
+                              { headers: { Authorization: `Bearer ${token}` } }
+                            );
+                            if (!res.ok) throw new Error('Failed to get download URL');
+                            const data = await res.json();
+                            window.open(data.downloadUrl, '_blank');
+                          } catch (err) {
+                            console.error('Diagnostics download failed:', err);
+                          }
+                        }}
+                        className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 hover:underline"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        Download Package
+                      </button>
+                    }
+                  />
+                )}
               </div>
             </div>
           )}

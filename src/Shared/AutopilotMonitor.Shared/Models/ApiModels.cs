@@ -135,6 +135,12 @@ namespace AutopilotMonitor.Shared.Models
         /// Defaults to "v1" for sessions that predate this field.
         /// </summary>
         public string EnrollmentType { get; set; } = "v1";
+
+        /// <summary>
+        /// Blob name of the uploaded diagnostics archive (null if not uploaded).
+        /// Used to construct a download URL via the tenant's Blob Storage SAS URL.
+        /// </summary>
+        public string DiagnosticsBlobName { get; set; }
     }
 
     /// <summary>

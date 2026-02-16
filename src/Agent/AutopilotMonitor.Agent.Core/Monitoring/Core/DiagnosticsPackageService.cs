@@ -35,10 +35,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 
         /// <summary>
         /// Creates a diagnostics ZIP and uploads it to the configured Blob Storage container.
-        /// Returns true if the upload succeeded, false if skipped or failed.
+        /// Returns the blob name on success, or null if skipped or failed.
         /// This method is non-fatal: all exceptions are caught and logged.
         /// </summary>
-        public async Task<bool> CreateAndUploadAsync(bool enrollmentSucceeded)
+        public async Task<string> CreateAndUploadAsync(bool enrollmentSucceeded)
         {
             try
             {
@@ -47,19 +47,19 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 if (string.Equals(mode, "Off", StringComparison.OrdinalIgnoreCase))
                 {
                     _logger.Debug("Diagnostics upload disabled (mode=Off)");
-                    return false;
+                    return null;
                 }
 
                 if (string.IsNullOrEmpty(_configuration.DiagnosticsBlobSasUrl))
                 {
                     _logger.Debug("Diagnostics upload skipped: no Blob Storage SAS URL configured");
-                    return false;
+                    return null;
                 }
 
                 if (string.Equals(mode, "OnFailure", StringComparison.OrdinalIgnoreCase) && enrollmentSucceeded)
                 {
                     _logger.Info("Diagnostics upload skipped: enrollment succeeded and mode=OnFailure");
-                    return false;
+                    return null;
                 }
 
                 _logger.Info($"Creating diagnostics package (mode={mode}, enrollmentSucceeded={enrollmentSucceeded})...");
@@ -94,14 +94,15 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 if (uploaded)
                 {
                     _logger.Info($"Diagnostics package uploaded successfully: {zipFileName}");
+                    return zipFileName;
                 }
 
-                return uploaded;
+                return null;
             }
             catch (Exception ex)
             {
                 _logger.Warning($"Diagnostics package creation/upload failed (non-fatal): {ex.Message}");
-                return false;
+                return null;
             }
         }
 

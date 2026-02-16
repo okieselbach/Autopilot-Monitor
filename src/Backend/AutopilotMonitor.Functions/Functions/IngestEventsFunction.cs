@@ -97,6 +97,7 @@ namespace AutopilotMonitor.Functions.Functions
                 EnrollmentEvent? lastPhaseChangeEvent = null;
                 EnrollmentEvent? completionEvent = null;
                 EnrollmentEvent? failureEvent = null;
+                EnrollmentEvent? diagnosticsUploadedEvent = null;
                 string? failureReason = null;
                 DateTime? earliestEventTimestamp = null;
 
@@ -123,6 +124,10 @@ namespace AutopilotMonitor.Functions.Functions
                     else if (evt.EventType == "enrollment_failed")
                     {
                         failureEvent = evt;
+                    }
+                    else if (evt.EventType == "diagnostics_uploaded")
+                    {
+                        diagnosticsUploadedEvent = evt;
                     }
 
                     // Track app install events for per-app metrics
@@ -226,6 +231,19 @@ namespace AutopilotMonitor.Functions.Functions
                 if (completionEvent != null)
                     _ = _storageService.IncrementPlatformStatAsync("SuccessfulEnrollments")
                         .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException, "Fire-and-forget IncrementPlatformStatAsync failed"), TaskContinuationOptions.OnlyOnFaulted);
+
+                // Store diagnostics blob name on session (if agent uploaded a diagnostics package)
+                if (diagnosticsUploadedEvent != null)
+                {
+                    var blobName = diagnosticsUploadedEvent.Data?.ContainsKey("blobName") == true
+                        ? diagnosticsUploadedEvent.Data["blobName"]?.ToString()
+                        : null;
+                    if (!string.IsNullOrEmpty(blobName))
+                    {
+                        await _storageService.UpdateSessionDiagnosticsBlobAsync(
+                            request.TenantId, request.SessionId, blobName);
+                    }
+                }
 
                 // Retrieve updated session data to include in SignalR messages
                 var updatedSession = await _storageService.GetSessionAsync(request.TenantId, request.SessionId);
