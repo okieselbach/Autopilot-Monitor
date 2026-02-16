@@ -1,4 +1,5 @@
 using System;
+using AutopilotMonitor.Agent.Core.Logging;
 using AutopilotMonitor.Shared;
 
 namespace AutopilotMonitor.Agent.Core.Configuration
@@ -54,9 +55,10 @@ namespace AutopilotMonitor.Agent.Core.Configuration
         public string ClientCertThumbprint { get; set; }
 
         /// <summary>
-        /// Enable debug logging
+        /// Log verbosity level: Info (default), Debug, Verbose.
+        /// Overridable via remote config.
         /// </summary>
-        public bool EnableDebugLogging { get; set; } = false;
+        public AgentLogLevel LogLevel { get; set; } = AgentLogLevel.Info;
 
         /// <summary>
         /// Maximum retry attempts for failed uploads

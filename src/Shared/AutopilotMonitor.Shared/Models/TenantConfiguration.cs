@@ -152,6 +152,27 @@ namespace AutopilotMonitor.Shared.Models
         /// </summary>
         public int? AuthFailureTimeoutMinutes { get; set; }
 
+        // ===== AGENT LOGGING / BEHAVIOR OVERRIDES =====
+
+        /// <summary>
+        /// Log verbosity level override for this tenant's agents.
+        /// null = use agent default ("Info"). Values: "Info", "Debug", "Verbose".
+        /// Note: Only configurable by Galactic Admins directly in the database.
+        /// </summary>
+        public string LogLevel { get; set; }
+
+        /// <summary>
+        /// Whether to reboot the device after enrollment completes.
+        /// null = use agent default (false).
+        /// </summary>
+        public bool? RebootOnComplete { get; set; }
+
+        /// <summary>
+        /// Maximum events per upload batch.
+        /// null = use agent default (100).
+        /// </summary>
+        public int? MaxBatchSize { get; set; }
+
         // ===== HELPER METHODS =====
 
         /// <summary>

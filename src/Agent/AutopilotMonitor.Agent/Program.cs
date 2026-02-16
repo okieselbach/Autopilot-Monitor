@@ -39,7 +39,7 @@ namespace AutopilotMonitor.Agent
         static void RunInstallMode(string[] args)
         {
             var logDir = Environment.ExpandEnvironmentVariables(Constants.LogDirectory);
-            var logger = new AgentLogger(logDir, enableDebug: true);
+            var logger = new AgentLogger(logDir, AgentLogLevel.Debug);
             var consoleMode = args.Contains("--console") || Environment.UserInteractive;
 
             try
@@ -131,7 +131,7 @@ namespace AutopilotMonitor.Agent
                 try
                 {
                     var logDir = Environment.ExpandEnvironmentVariables(Constants.LogDirectory);
-                    var logger = new AgentLogger(logDir, enableDebug: false);
+                    var logger = new AgentLogger(logDir);
                     logger.Warning(message);
                 }
                 catch { }
@@ -151,7 +151,7 @@ namespace AutopilotMonitor.Agent
             {
                 var config = LoadConfiguration(args);
                 var logDir = Environment.ExpandEnvironmentVariables(config.LogDirectory);
-                var logger = new AgentLogger(logDir, enableDebug: config.EnableDebugLogging);
+                var logger = new AgentLogger(logDir, config.LogLevel);
                 var agentVersion = GetAgentVersion();
 
                 logger.Info($"======================= Agent starting ({(consoleMode ? "console" : "background/SYSTEM")}) =======================");
@@ -271,7 +271,7 @@ namespace AutopilotMonitor.Agent
                     LogDirectory = Environment.ExpandEnvironmentVariables($@"%ProgramData%\AutopilotMonitor\MassRollout\{deviceConfig.DeviceName}\Logs"),
                     UploadIntervalSeconds = Constants.DefaultUploadIntervalSeconds,
                     MaxBatchSize = Constants.MaxBatchSize,
-                    EnableDebugLogging = true,
+                    LogLevel = AgentLogLevel.Debug,
                     EnableSimulator = true,
                     SimulateFailure = deviceConfig.SimulateFailure,
                     UseClientCertAuth = baseConfig.UseClientCertAuth,
@@ -286,7 +286,7 @@ namespace AutopilotMonitor.Agent
                 Directory.CreateDirectory(config.SpoolDirectory);
                 Directory.CreateDirectory(config.LogDirectory);
 
-                var logger = new AgentLogger(logDir, enableDebug: true);
+                var logger = new AgentLogger(logDir, AgentLogLevel.Debug);
 
                 Console.WriteLine($"[{deviceConfig.DeviceName}] Starting instance {instanceNumber}/5");
                 Console.WriteLine($"  Tenant ID: {deviceConfig.TenantId}");
@@ -468,7 +468,7 @@ namespace AutopilotMonitor.Agent
                 LogDirectory          = Environment.ExpandEnvironmentVariables(Constants.LogDirectory),
                 UploadIntervalSeconds = uploadIntervalSeconds,
                 MaxBatchSize          = Constants.MaxBatchSize,
-                EnableDebugLogging    = true,
+                LogLevel              = AgentLogLevel.Info,
                 EnableSimulator       = enableSimulator,
                 SimulateFailure       = simulateFailure,
                 UseClientCertAuth     = !noAuth && useClientCertAuthConfig,

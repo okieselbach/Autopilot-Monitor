@@ -64,6 +64,25 @@ namespace AutopilotMonitor.Shared.Models
         /// 0 = disabled (no time limit, only MaxAuthFailures applies). Default: 0.
         /// </summary>
         public int AuthFailureTimeoutMinutes { get; set; } = 0;
+
+        /// <summary>
+        /// Log verbosity level for the agent.
+        /// "Info" = normal messages, "Debug" = component state/decisions, "Verbose" = per-event tracing.
+        /// Default: "Info"
+        /// </summary>
+        public string LogLevel { get; set; } = "Info";
+
+        /// <summary>
+        /// Whether to reboot the device after enrollment completes (and cleanup/self-destruct).
+        /// Default: false
+        /// </summary>
+        public bool RebootOnComplete { get; set; } = false;
+
+        /// <summary>
+        /// Maximum number of events per upload batch.
+        /// Default: 100
+        /// </summary>
+        public int MaxBatchSize { get; set; } = 100;
     }
 
     /// <summary>

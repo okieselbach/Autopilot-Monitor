@@ -248,11 +248,21 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 
             _configuration.MaxAuthFailures = config.MaxAuthFailures;
             _configuration.AuthFailureTimeoutMinutes = config.AuthFailureTimeoutMinutes;
+            _configuration.RebootOnComplete = config.RebootOnComplete;
+            _configuration.MaxBatchSize = config.MaxBatchSize;
+
+            // Apply log level from remote config
+            if (Enum.TryParse<Logging.AgentLogLevel>(config.LogLevel, ignoreCase: true, out var remoteLogLevel))
+            {
+                _configuration.LogLevel = remoteLogLevel;
+                _logger.SetLogLevel(remoteLogLevel);
+            }
 
             _logger.Info("Applied runtime settings from remote config");
             _logger.Info($"  uploadIntervalSeconds={_configuration.UploadIntervalSeconds}, cleanupOnExit={_configuration.CleanupOnExit}, selfDestructOnComplete={_configuration.SelfDestructOnComplete}, keepLogFile={_configuration.KeepLogFile}");
             _logger.Info($"  imeMatchLogPath={_configuration.ImeMatchLogPath ?? "(none)"}");
             _logger.Info($"  maxAuthFailures={_configuration.MaxAuthFailures}, authFailureTimeoutMinutes={_configuration.AuthFailureTimeoutMinutes}");
+            _logger.Info($"  logLevel={_configuration.LogLevel}, rebootOnComplete={_configuration.RebootOnComplete}, maxBatchSize={_configuration.MaxBatchSize}");
         }
 
         /// <summary>

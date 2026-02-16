@@ -230,7 +230,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
         /// </summary>
         private void AddClientCertificateHeader(HttpRequestMessage request)
         {
-            _logger?.Debug("Adding security headers to request...");
+            _logger?.Verbose("Adding security headers to request...");
 
             // Add client certificate for device authentication
             if (_clientCertificate != null)
@@ -238,31 +238,31 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
                 var certBytes = _clientCertificate.Export(X509ContentType.Cert);
                 var certBase64 = Convert.ToBase64String(certBytes);
                 request.Headers.Add("X-Client-Certificate", certBase64);
-                _logger?.Debug($"  X-Client-Certificate: {_clientCertificate.Thumbprint.Substring(0, Math.Min(16, _clientCertificate.Thumbprint.Length))}...");
+                _logger?.Verbose($"  X-Client-Certificate: {_clientCertificate.Thumbprint.Substring(0, Math.Min(16, _clientCertificate.Thumbprint.Length))}...");
             }
             else
             {
-                _logger?.Debug("  X-Client-Certificate: NOT SENT (no certificate available)");
+                _logger?.Verbose("  X-Client-Certificate: NOT SENT (no certificate available)");
             }
 
             // Add hardware information for whitelist validation
             if (!string.IsNullOrEmpty(_manufacturer))
             {
                 request.Headers.Add("X-Device-Manufacturer", _manufacturer);
-                _logger?.Debug($"  X-Device-Manufacturer: {_manufacturer}");
+                _logger?.Verbose($"  X-Device-Manufacturer: {_manufacturer}");
             }
 
             if (!string.IsNullOrEmpty(_model))
             {
                 request.Headers.Add("X-Device-Model", _model);
-                _logger?.Debug($"  X-Device-Model: {_model}");
+                _logger?.Verbose($"  X-Device-Model: {_model}");
             }
 
             // Add serial number for optional backend validation against Intune Autopilot registration
             if (!string.IsNullOrEmpty(_serialNumber))
             {
                 request.Headers.Add("X-Device-SerialNumber", _serialNumber);
-                _logger?.Debug($"  X-Device-SerialNumber: {_serialNumber}");
+                _logger?.Verbose($"  X-Device-SerialNumber: {_serialNumber}");
             }
         }
 
