@@ -556,8 +556,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     }
                 });
 
-                // Only trigger self-destruct if configured
-                if (_configuration.SelfDestructOnComplete)
+                // Trigger self-destruct or reboot if configured
+                if (_configuration.SelfDestructOnComplete || _configuration.RebootOnComplete)
                 {
                     Task.Run(() => HandleEnrollmentComplete());
                     return; // Don't continue with normal event processing
@@ -752,7 +752,28 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 }
                 else if (_configuration.RebootOnComplete)
                 {
-                    _logger.Info("RebootOnComplete enabled - initiating reboot");
+                    _logger.Info($"RebootOnComplete enabled - initiating reboot in {_configuration.RebootDelaySeconds}s");
+
+                    // Emit reboot event into the timeline before shutdown
+                    EmitEvent(new EnrollmentEvent
+                    {
+                        SessionId = _configuration.SessionId,
+                        TenantId = _configuration.TenantId,
+                        Timestamp = DateTime.UtcNow,
+                        EventType = "reboot_triggered",
+                        Severity = EventSeverity.Info,
+                        Source = "MonitoringService",
+                        Phase = EnrollmentPhase.Complete,
+                        Message = $"Reboot configured — triggering reboot in {_configuration.RebootDelaySeconds} seconds",
+                        Data = new Dictionary<string, object>
+                        {
+                            { "rebootDelaySeconds", _configuration.RebootDelaySeconds }
+                        }
+                    });
+
+                    // Final upload to ensure the reboot event is sent
+                    await UploadEventsAsync();
+
                     var psi = new ProcessStartInfo
                     {
                         FileName = "shutdown.exe",

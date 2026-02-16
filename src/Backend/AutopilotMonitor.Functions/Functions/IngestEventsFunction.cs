@@ -136,10 +136,13 @@ namespace AutopilotMonitor.Functions.Functions
                 }
 
                 // Update session status based on events
+                // statusTransitioned = true only when this is the FIRST time the session reaches Succeeded/Failed
+                // (UpdateSessionStatusAsync returns false if already in a terminal state — idempotency guard)
+                bool statusTransitioned = false;
                 if (completionEvent != null)
                 {
                     // Enrollment completed successfully - use event timestamp for accurate duration
-                    await _storageService.UpdateSessionStatusAsync(
+                    statusTransitioned = await _storageService.UpdateSessionStatusAsync(
                         request.TenantId,
                         request.SessionId,
                         SessionStatus.Succeeded,
@@ -147,7 +150,7 @@ namespace AutopilotMonitor.Functions.Functions
                         completedAt: completionEvent.Timestamp,
                         earliestEventTimestamp: earliestEventTimestamp
                     );
-                    _logger.LogInformation($"{sessionPrefix} Status: Succeeded");
+                    _logger.LogInformation("{SessionPrefix} Status: Succeeded (transitioned={Transitioned})", sessionPrefix, statusTransitioned);
                 }
                 else if (failureEvent != null)
                 {
@@ -156,7 +159,7 @@ namespace AutopilotMonitor.Functions.Functions
                         ? $"{failureEvent.Message} ({failureEvent.Data["errorCode"]})"
                         : failureEvent.Message;
 
-                    await _storageService.UpdateSessionStatusAsync(
+                    statusTransitioned = await _storageService.UpdateSessionStatusAsync(
                         request.TenantId,
                         request.SessionId,
                         SessionStatus.Failed,
@@ -165,7 +168,7 @@ namespace AutopilotMonitor.Functions.Functions
                         completedAt: failureEvent.Timestamp,
                         earliestEventTimestamp: earliestEventTimestamp
                     );
-                    _logger.LogWarning($"{sessionPrefix} Status: Failed - {failureReason}");
+                    _logger.LogWarning("{SessionPrefix} Status: Failed - {FailureReason} (transitioned={Transitioned})", sessionPrefix, failureReason, statusTransitioned);
                 }
                 else if (lastPhaseChangeEvent != null)
                 {
@@ -228,7 +231,8 @@ namespace AutopilotMonitor.Functions.Functions
                 var updatedSession = await _storageService.GetSessionAsync(request.TenantId, request.SessionId);
 
                 // Send Teams notification on enrollment completion (fire-and-forget, non-fatal)
-                if (completionEvent != null || failureEvent != null)
+                // Only send when statusTransitioned=true to prevent duplicates on retry/double-upload
+                if (statusTransitioned && (completionEvent != null || failureEvent != null))
                 {
                     var tenantConfig = await _configService.GetConfigurationAsync(request.TenantId);
                     if (!string.IsNullOrEmpty(tenantConfig.TeamsWebhookUrl))

@@ -343,7 +343,8 @@ namespace AutopilotMonitor.Functions.Services
                 var sessions = new List<SessionSummary>();
 
                 // Query all sessions without tenant filter
-                var query = tableClient.QueryAsync<TableEntity>(maxPerPage: maxResults);
+                // maxPerPage is capped at 1000 (Azure Table Storage limit); pagination is automatic
+                var query = tableClient.QueryAsync<TableEntity>(maxPerPage: Math.Min(maxResults, 1000));
 
                 await foreach (var entity in query)
                 {
@@ -403,6 +404,18 @@ namespace AutopilotMonitor.Functions.Services
                     // Get the existing entity
                     var entity = await tableClient.GetEntityAsync<TableEntity>(tenantId, sessionId);
                     var session = entity.Value;
+
+                    // Idempotency: if the session is already in a terminal state (Succeeded/Failed),
+                    // do not overwrite it with another terminal state to prevent duplicate notifications.
+                    if (status == SessionStatus.Succeeded || status == SessionStatus.Failed)
+                    {
+                        var existingStatus = session.GetString("Status");
+                        if (existingStatus == SessionStatus.Succeeded.ToString() || existingStatus == SessionStatus.Failed.ToString())
+                        {
+                            _logger.LogInformation($"Session {sessionId} already in terminal state '{existingStatus}', skipping status update to '{status}'");
+                            return false;
+                        }
+                    }
 
                     // Update status
                     session["Status"] = status.ToString();
