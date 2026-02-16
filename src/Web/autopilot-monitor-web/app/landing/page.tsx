@@ -73,7 +73,7 @@ export default function LandingPage() {
             </h1>
             <p className="text-xl text-gray-600 mb-8 leading-relaxed">
               Real-time insights, intelligent troubleshooting, and comprehensive analytics for your Autopilot deployments.
-              Monitor every phase, track performance, and resolve issues faster than ever before.
+              Monitor every phase, run customizable analyze rules, and resolve issues faster than ever before.
             </p>
             <div className="flex items-center justify-center space-x-4">
               <button
@@ -134,7 +134,7 @@ export default function LandingPage() {
             Everything you need to monitor Autopilot
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            {/* Feature 1 */}
+            {/* Feature 1 - Real-Time Monitoring */}
             <div className="bg-white rounded-2xl p-8 shadow-lg hover:shadow-xl transition-shadow">
               <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center mb-4">
                 <svg className="w-6 h-6 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -142,51 +142,81 @@ export default function LandingPage() {
                 </svg>
               </div>
               <h3 className="text-xl font-semibold text-gray-900 mb-3">Real-Time Monitoring</h3>
-              <p className="text-gray-600">
-                Watch Autopilot deployments in real-time with live event streaming. Track every phase from device registration to user login.
+              <p className="text-gray-600 mb-4">
+                Watch Autopilot deployments in near real-time with live event streaming. Track every phase from device registration to user login.
               </p>
+              <ul className="space-y-2">
+                {["Live phase tracking", "Near realtime push updates", "Per-device event stream"].map(item => (
+                  <li key={item} className="flex items-center text-sm text-gray-500">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-400 mr-2 shrink-0" />
+                    {item}
+                  </li>
+                ))}
+              </ul>
             </div>
 
-            {/* Feature 2 */}
+            {/* Feature 2 - Rich Analytics */}
             <div className="bg-white rounded-2xl p-8 shadow-lg hover:shadow-xl transition-shadow">
               <div className="w-12 h-12 bg-indigo-100 rounded-xl flex items-center justify-center mb-4">
                 <svg className="w-6 h-6 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                 </svg>
               </div>
-              <h3 className="text-xl font-semibold text-gray-900 mb-3">Usage Analytics</h3>
-              <p className="text-gray-600">
-                Comprehensive metrics on deployment success rates, performance trends, and hardware insights across your tenant.
+              <h3 className="text-xl font-semibold text-gray-900 mb-3">Rich Analytics</h3>
+              <p className="text-gray-600 mb-4">
+                Comprehensive metrics on deployment success rates, performance trends, and hardware insights — powered by customizable analyze rules.
               </p>
+              <ul className="space-y-2">
+                {["Customizable analyze rules", "Success & failure rates", "Hardware model insights"].map(item => (
+                  <li key={item} className="flex items-center text-sm text-gray-500">
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 mr-2 shrink-0" />
+                    {item}
+                  </li>
+                ))}
+              </ul>
             </div>
 
-            {/* Feature 3 */}
-            <div className="bg-white rounded-2xl p-8 shadow-lg hover:shadow-xl transition-shadow">
+            {/* Feature 3 - Multi-Tenant / MSP (Planned) */}
+            <div className="relative bg-white rounded-2xl p-8 shadow-lg hover:shadow-xl transition-shadow">
+              <span className="absolute top-4 right-4 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-700 border border-amber-200">
+                Planned
+              </span>
               <div className="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center mb-4">
                 <svg className="w-6 h-6 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
                 </svg>
               </div>
-              <h3 className="text-xl font-semibold text-gray-900 mb-3">Multi-Tenant Ready</h3>
-              <p className="text-gray-600">
-                Built for MSPs and enterprises. Manage multiple tenants from a single dashboard with tenant isolation and role-based access.
+              <h3 className="text-xl font-semibold text-gray-900 mb-3">MSP Support</h3>
+              <p className="text-gray-600 mb-4">
+                Built for MSPs and enterprises. Manage multiple customer tenants from a single dashboard with full tenant isolation and role-based access.
               </p>
             </div>
 
-            {/* Feature 4 */}
-            <div className="bg-white rounded-2xl p-8 shadow-lg hover:shadow-xl transition-shadow">
+            {/* Feature 4 - Intelligent Alerts (Planned) */}
+            <div className="relative bg-white rounded-2xl p-8 shadow-lg hover:shadow-xl transition-shadow">
+              <span className="absolute top-4 right-4 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-700 border border-amber-200">
+                Planned
+              </span>
               <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center mb-4">
                 <svg className="w-6 h-6 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
               </div>
               <h3 className="text-xl font-semibold text-gray-900 mb-3">Intelligent Alerts</h3>
-              <p className="text-gray-600">
+              <p className="text-gray-600 mb-4">
                 Get notified instantly when deployments fail or encounter issues. Smart alerts help you catch problems before users do.
               </p>
+              <ul className="space-y-2">
+                {["Webhook notifications", "Teams & Slack integration", "Configurable rule results"].map(item => (
+                  <li key={item} className="flex items-center text-sm text-gray-500">
+                    <span className="w-1.5 h-1.5 rounded-full bg-green-400 mr-2 shrink-0" />
+                    {item}
+                  </li>
+                ))}
+              </ul>
             </div>
 
-            {/* Feature 5 */}
+            {/* Feature 5 - Event Timeline */}
             <div className="bg-white rounded-2xl p-8 shadow-lg hover:shadow-xl transition-shadow">
               <div className="w-12 h-12 bg-orange-100 rounded-xl flex items-center justify-center mb-4">
                 <svg className="w-6 h-6 text-orange-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -194,12 +224,20 @@ export default function LandingPage() {
                 </svg>
               </div>
               <h3 className="text-xl font-semibold text-gray-900 mb-3">Event Timeline</h3>
-              <p className="text-gray-600">
-                Detailed event timeline for every deployment session. Drill down into logs, errors, and warnings to troubleshoot efficiently.
+              <p className="text-gray-600 mb-4">
+                Detailed event timeline for every deployment session. Drill down into events, errors, and warnings to troubleshoot efficiently.
               </p>
+              <ul className="space-y-2">
+                {["Phase-by-phase breakdown", "App install details", "Error & warning highlights"].map(item => (
+                  <li key={item} className="flex items-center text-sm text-gray-500">
+                    <span className="w-1.5 h-1.5 rounded-full bg-orange-400 mr-2 shrink-0" />
+                    {item}
+                  </li>
+                ))}
+              </ul>
             </div>
 
-            {/* Feature 6 */}
+            {/* Feature 6 - Audit Logging */}
             <div className="bg-white rounded-2xl p-8 shadow-lg hover:shadow-xl transition-shadow">
               <div className="w-12 h-12 bg-red-100 rounded-xl flex items-center justify-center mb-4">
                 <svg className="w-6 h-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -207,9 +245,17 @@ export default function LandingPage() {
                 </svg>
               </div>
               <h3 className="text-xl font-semibold text-gray-900 mb-3">Audit Logging</h3>
-              <p className="text-gray-600">
+              <p className="text-gray-600 mb-4">
                 Complete audit trail of all actions and changes. Meet compliance requirements with detailed logging and data retention policies.
               </p>
+              <ul className="space-y-2">
+                {["Admin action history", "Configurable retention", "Tamper-evident records"].map(item => (
+                  <li key={item} className="flex items-center text-sm text-gray-500">
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-400 mr-2 shrink-0" />
+                    {item}
+                  </li>
+                ))}
+              </ul>
             </div>
           </div>
         </div>
@@ -236,7 +282,7 @@ export default function LandingPage() {
       {/* Footer */}
       <footer className="border-t border-gray-200 bg-white/50 backdrop-blur-sm py-8 px-6">
         <div className="max-w-7xl mx-auto text-center text-gray-600">
-          <p>&copy; 2026 Autopilot Monitor. Powered by Azure and Microsoft Identity.</p>
+          <p>&copy; 2026 Autopilot Monitor developed by Oliver Kieselbach and powered by Azure and Microsoft Identity.</p>
         </div>
       </footer>
     </div>

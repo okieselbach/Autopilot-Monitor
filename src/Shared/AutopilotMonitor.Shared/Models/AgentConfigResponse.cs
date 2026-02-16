@@ -37,7 +37,7 @@ namespace AutopilotMonitor.Shared.Models
         /// <summary>
         /// Optional path to IME pattern match log file.
         /// </summary>
-        public string ImeMatchLogPath { get; set; } = @"C:\ProgramData\AutopilotMonitor\Logs\ime_pattern_matches.log";
+        public string ImeMatchLogPath { get; set; } = Constants.ImeMatchLogPath;
 
         public CollectorConfiguration Collectors { get; set; }
 

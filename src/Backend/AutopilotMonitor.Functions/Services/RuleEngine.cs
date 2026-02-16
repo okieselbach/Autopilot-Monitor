@@ -233,8 +233,39 @@ namespace AutopilotMonitor.Functions.Services
         private (bool matched, object evidence) EvaluateEventCountCondition(RuleCondition condition, List<EnrollmentEvent> events)
         {
             var matchingEvents = events.Where(e => MatchesEventType(e, condition.EventType)).ToList();
-            var count = matchingEvents.Count;
 
+            // count_per_group_gte: group by DataField value (e.g. appId), fire if any group >= threshold
+            if (condition.Operator == "count_per_group_gte" && !string.IsNullOrEmpty(condition.DataField) && int.TryParse(condition.Value, out var groupThreshold))
+            {
+                var groups = matchingEvents
+                    .Select(e => new { Event = e, Key = GetDataFieldValue(e, condition.DataField) })
+                    .Where(x => !string.IsNullOrEmpty(x.Key))
+                    .GroupBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
+                    .Where(g => g.Count() >= groupThreshold)
+                    .ToList();
+
+                if (groups.Any())
+                {
+                    var worst = groups.OrderByDescending(g => g.Count()).First();
+                    var firstEvent = worst.First().Event;
+                    var appName = GetDataFieldValue(firstEvent, "appName") ?? worst.Key;
+                    return (true, new Dictionary<string, object>
+                    {
+                        ["eventId"] = firstEvent.EventId,
+                        ["sequence"] = firstEvent.Sequence,
+                        ["timestamp"] = firstEvent.Timestamp,
+                        ["groupKey"] = worst.Key,
+                        ["appName"] = appName,
+                        ["count"] = worst.Count(),
+                        ["threshold"] = groupThreshold
+                    });
+                }
+
+                return (false, new Dictionary<string, object> { ["totalEvents"] = matchingEvents.Count, ["distinctApps"] = matchingEvents.Select(e => GetDataFieldValue(e, condition.DataField)).Where(k => k != null).Distinct(StringComparer.OrdinalIgnoreCase).Count() });
+            }
+
+            // count_gte: global count across all matching events
+            var count = matchingEvents.Count;
             if (condition.Operator == "count_gte" && int.TryParse(condition.Value, out var threshold))
             {
                 if (count >= threshold)
@@ -437,7 +468,7 @@ namespace AutopilotMonitor.Functions.Services
             foreach (var completionEvent in completionEvents)
             {
                 var appId = GetDataFieldValue(completionEvent, "appId");
-                var appName = GetDataFieldValue(completionEvent, "appName") ?? GetDataFieldValue(completionEvent, "name");
+                var appName = GetDataFieldValue(completionEvent, "appName");
                 var appKey = !string.IsNullOrWhiteSpace(appId) ? appId : appName;
 
                 if (string.IsNullOrWhiteSpace(appKey))
@@ -447,7 +478,7 @@ namespace AutopilotMonitor.Functions.Services
                     (string.Equals(e.EventType, "app_install_started", StringComparison.OrdinalIgnoreCase) ||
                      string.Equals(e.EventType, "app_install_start", StringComparison.OrdinalIgnoreCase)) &&
                     e.Timestamp <= completionEvent.Timestamp &&
-                    string.Equals(GetDataFieldValue(e, "appId") ?? GetDataFieldValue(e, "appName") ?? GetDataFieldValue(e, "name"), appKey, StringComparison.OrdinalIgnoreCase));
+                    string.Equals(GetDataFieldValue(e, "appId") ?? GetDataFieldValue(e, "appName"), appKey, StringComparison.OrdinalIgnoreCase));
 
                 if (startEvent == null)
                     continue;

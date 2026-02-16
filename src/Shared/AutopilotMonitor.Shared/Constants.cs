@@ -30,6 +30,11 @@ namespace AutopilotMonitor.Shared
         public const string StateDirectory = @"%ProgramData%\AutopilotMonitor\State";
 
         /// <summary>
+        /// Default path for the IME pattern match log file (debugging/diagnostics)
+        /// </summary>
+        public const string ImeMatchLogPath = @"%ProgramData%\AutopilotMonitor\Logs\ime_pattern_matches.log";
+
+        /// <summary>
         /// Scheduled Task name used to run the agent as SYSTEM
         /// </summary>
         public const string ScheduledTaskName = "AutopilotMonitor-Agent";

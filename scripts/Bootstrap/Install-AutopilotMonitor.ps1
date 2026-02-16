@@ -31,17 +31,19 @@ param(
     [string]$AgentDownloadUrl = "https://autopilotmonitor.blob.core.windows.net/agent/AutopilotMonitor-Agent.zip",
     
     [Parameter(Mandatory = $false)]
-    [int]$MaxOsAgeMinutes = 60
+    [int]$MaxOsAgeMinutes = 120
 )
 
 # Configuration - Everything in ProgramData for easy cleanup
 $AgentBasePath = "$env:ProgramData\AutopilotMonitor"
 $AgentBinPath = "$AgentBasePath\Agent"
-$LogFile = "$AgentBasePath\Bootstrap.log"
+$AgentLogPath = "$AgentBasePath\Logs"
+$LogFile = "$AgentLogPath\Bootstrap.log"
 
 # Ensure directories exist
 New-Item -Path $AgentBasePath -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
 New-Item -Path $AgentBinPath -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
+New-Item -Path $AgentLogPath -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
 
 function Write-Log {
     param([string]$Message)

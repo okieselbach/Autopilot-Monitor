@@ -347,7 +347,6 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             var data = new Dictionary<string, object>
             {
                 { "appId", Id },
-                { "name", Name ?? Id },
                 { "appName", Name ?? Id },
                 { "state", InstallationState.ToString() },
                 { "intent", Intent.ToString() },

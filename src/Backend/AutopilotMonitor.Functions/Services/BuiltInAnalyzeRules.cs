@@ -181,18 +181,18 @@ namespace AutopilotMonitor.Functions.Services
         {
             RuleId = "ANALYZE-APP-006",
             Title = "Reboot Required Loop",
-            Description = "Detects when an app installation enters a reboot-required loop.",
+            Description = "Detects when the same app installation is attempted 3 or more times, indicating a reboot-required loop.",
             Severity = "high",
             Category = "apps",
             BaseConfidence = 70,
             Conditions = new List<RuleCondition>
             {
-                new RuleCondition { Signal = "reboot_loop", Source = "event_count", EventType = "app_install_started", Operator = "count_gte", Value = "3", Required = true }
+                new RuleCondition { Signal = "reboot_loop", Source = "event_count", EventType = "app_install_started", DataField = "appId", Operator = "count_per_group_gte", Value = "3", Required = true }
             },
-            Explanation = "An app appears to be in a reboot loop - it has been attempted multiple times. This may indicate that the app requires a reboot that is not being honored by the ESP.",
+            Explanation = "The same app has been installed 3 or more times during this enrollment. This typically indicates the app requires a reboot between install attempts, but the ESP is not honoring the reboot request, causing an install-detect-retry loop.",
             Remediation = new List<RemediationStep>
             {
-                new RemediationStep { Title = "Fix reboot handling", Steps = new List<string> { "Check if the app's return code mapping includes reboot codes", "Verify ESP reboot behavior settings", "Consider setting the app to 'Hard reboot' return code" } }
+                new RemediationStep { Title = "Fix reboot handling", Steps = new List<string> { "Check if the app's return code mapping includes reboot codes (3010, 1641)", "Verify ESP reboot behavior settings", "Consider setting the app to 'Hard reboot' return code in Intune" } }
             },
             Tags = new[] { "apps", "reboot", "loop" }
         };

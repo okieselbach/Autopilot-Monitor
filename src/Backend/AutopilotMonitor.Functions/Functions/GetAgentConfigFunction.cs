@@ -95,7 +95,7 @@ namespace AutopilotMonitor.Functions.Functions
                     CleanupOnExit = false,
                     SelfDestructOnComplete = false,
                     KeepLogFile = true,
-                    ImeMatchLogPath = @"C:\ProgramData\AutopilotMonitor\Logs\ime_pattern_matches.log",
+
                     Collectors = collectors,
                     GatherRules = gatherRules,
                     ImeLogPatterns = imeLogPatterns,

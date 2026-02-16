@@ -409,10 +409,7 @@ namespace AutopilotMonitor.Functions.Functions
 
             if (!isRelevant) return;
 
-            // Agent sends "appName" (and also "name") in the Data dictionary
             var appName = evt.Data?.ContainsKey("appName") == true ? evt.Data["appName"]?.ToString() : null;
-            if (string.IsNullOrEmpty(appName))
-                appName = evt.Data?.ContainsKey("name") == true ? evt.Data["name"]?.ToString() : null;
             if (string.IsNullOrEmpty(appName)) return;
 
             if (!summaries.TryGetValue(appName, out var summary))
