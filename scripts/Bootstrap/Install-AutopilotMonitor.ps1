@@ -38,7 +38,7 @@ param(
 $AgentBasePath = "$env:ProgramData\AutopilotMonitor"
 $AgentBinPath = "$AgentBasePath\Agent"
 $AgentLogPath = "$AgentBasePath\Logs"
-$LogFile = "$AgentLogPath\Bootstrap.log"
+$LogFile = "$AgentLogPath\bootstrap_agent.log"
 
 # Ensure directories exist
 New-Item -Path $AgentBasePath -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null

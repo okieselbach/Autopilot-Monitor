@@ -955,7 +955,7 @@ export default function SettingsPage() {
                         <span className="text-sm text-gray-600">Interval:</span>
                         <input
                           type="number"
-                          min="10"
+                          min="30"
                           max="300"
                           value={performanceCollectorInterval}
                           onChange={(e) => setPerformanceCollectorInterval(parseInt(e.target.value) || 60)}
@@ -979,7 +979,7 @@ export default function SettingsPage() {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
                     <p className="text-sm text-blue-800">
-                      Changes take effect on the next agent config refresh (default: every 5 minutes). Core collectors (Hello Detector) and enrollment tracking are always active.
+                      Core collectors 'Hello Detector' and general enrollment tracking are always active.
                     </p>
                   </div>
                 </div>
