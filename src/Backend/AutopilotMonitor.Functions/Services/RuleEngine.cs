@@ -248,15 +248,15 @@ namespace AutopilotMonitor.Functions.Services
                 {
                     var worst = groups.OrderByDescending(g => g.Count()).First();
                     var firstEvent = worst.First().Event;
-                    var groupKey = worst.Key;
-                    var appName = GetDataFieldValue(firstEvent, "appName") ?? groupKey;
+                    string groupKey = worst.Key ?? string.Empty;
+                    string appName = GetDataFieldValue(firstEvent, "appName") ?? groupKey;
                     return (true, new Dictionary<string, object>
                     {
                         ["eventId"] = firstEvent.EventId ?? string.Empty,
                         ["sequence"] = firstEvent.Sequence,
-                        ["timestamp"] = (object?)firstEvent.Timestamp ?? string.Empty,
-                        ["groupKey"] = groupKey ?? string.Empty,
-                        ["appName"] = appName ?? groupKey ?? string.Empty,
+                        ["timestamp"] = firstEvent.Timestamp,
+                        ["groupKey"] = groupKey,
+                        ["appName"] = appName,
                         ["count"] = worst.Count(),
                         ["threshold"] = groupThreshold
                     });
