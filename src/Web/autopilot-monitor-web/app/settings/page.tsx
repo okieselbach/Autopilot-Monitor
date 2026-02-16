@@ -25,6 +25,7 @@ interface TenantConfiguration {
   selfDestructOnComplete?: boolean;
   keepLogFile?: boolean;
   rebootOnComplete?: boolean;
+  rebootDelaySeconds?: number;
   enableGeoLocation?: boolean;
   enableImeMatchLog?: boolean;
   logLevel?: string;
@@ -82,6 +83,7 @@ export default function SettingsPage() {
   const [selfDestructOnComplete, setSelfDestructOnComplete] = useState(false);
   const [keepLogFile, setKeepLogFile] = useState(true);
   const [rebootOnComplete, setRebootOnComplete] = useState(false);
+  const [rebootDelaySeconds, setRebootDelaySeconds] = useState(10);
   const [enableGeoLocation, setEnableGeoLocation] = useState(true);
   const [enableImeMatchLog, setEnableImeMatchLog] = useState(false);
   const [logLevel, setLogLevel] = useState("Info");
@@ -130,6 +132,7 @@ export default function SettingsPage() {
         setSelfDestructOnComplete(data.selfDestructOnComplete ?? false);
         setKeepLogFile(data.keepLogFile ?? true);
         setRebootOnComplete(data.rebootOnComplete ?? false);
+        setRebootDelaySeconds(data.rebootDelaySeconds ?? 10);
         setEnableGeoLocation(data.enableGeoLocation ?? true);
         setEnableImeMatchLog(data.enableImeMatchLog ?? false);
         setLogLevel(data.logLevel ?? "Info");
@@ -206,6 +209,7 @@ export default function SettingsPage() {
         selfDestructOnComplete,
         keepLogFile,
         rebootOnComplete,
+        rebootDelaySeconds,
         enableGeoLocation,
         enableImeMatchLog,
         logLevel,
@@ -375,6 +379,7 @@ export default function SettingsPage() {
     setSelfDestructOnComplete(config.selfDestructOnComplete ?? false);
     setKeepLogFile(config.keepLogFile ?? true);
     setRebootOnComplete(config.rebootOnComplete ?? false);
+    setRebootDelaySeconds(config.rebootDelaySeconds ?? 10);
     setEnableGeoLocation(config.enableGeoLocation ?? true);
     setEnableImeMatchLog(config.enableImeMatchLog ?? false);
     setLogLevel(config.logLevel ?? "Info");
@@ -1020,6 +1025,26 @@ export default function SettingsPage() {
                     <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${rebootOnComplete ? 'translate-x-6' : 'translate-x-1'}`} />
                   </button>
                 </div>
+
+                {rebootOnComplete && (
+                  <div className="flex items-center justify-between p-4 rounded-lg border border-gray-200 hover:border-violet-200 transition-colors ml-4">
+                    <div>
+                      <p className="font-medium text-gray-900">Reboot Delay</p>
+                      <p className="text-sm text-gray-500">Seconds before reboot is initiated — gives the user time to see what is happening</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        min={0}
+                        max={3600}
+                        value={rebootDelaySeconds}
+                        onChange={(e) => setRebootDelaySeconds(Math.max(0, parseInt(e.target.value) || 0))}
+                        className="w-20 px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-gray-900 text-right focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
+                      />
+                      <span className="text-sm text-gray-500 whitespace-nowrap">seconds</span>
+                    </div>
+                  </div>
+                )}
 
                 {/* Geo Location */}
                 <div className="flex items-center justify-between p-4 rounded-lg border border-gray-200 hover:border-violet-200 transition-colors">

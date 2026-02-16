@@ -249,6 +249,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             _configuration.MaxAuthFailures = config.MaxAuthFailures;
             _configuration.AuthFailureTimeoutMinutes = config.AuthFailureTimeoutMinutes;
             _configuration.RebootOnComplete = config.RebootOnComplete;
+            _configuration.RebootDelaySeconds = config.RebootDelaySeconds;
             _configuration.MaxBatchSize = config.MaxBatchSize;
 
             // Apply log level from remote config
@@ -755,7 +756,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     var psi = new ProcessStartInfo
                     {
                         FileName = "shutdown.exe",
-                        Arguments = "/r /t 10 /c \"Autopilot enrollment completed - rebooting\"",
+                        Arguments = $"/r /t {_configuration.RebootDelaySeconds} /c \"Autopilot enrollment completed - rebooting\"",
                         UseShellExecute = false,
                         CreateNoWindow = true
                     };

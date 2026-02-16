@@ -80,6 +80,13 @@ namespace AutopilotMonitor.Shared.Models
         public bool RebootOnComplete { get; set; } = false;
 
         /// <summary>
+        /// Delay in seconds before the reboot is initiated (shutdown.exe /r /t X).
+        /// Gives the user a short window to see what is happening.
+        /// Default: 10 seconds
+        /// </summary>
+        public int RebootDelaySeconds { get; set; } = 10;
+
+        /// <summary>
         /// Maximum number of events per upload batch.
         /// Default: 100
         /// </summary>

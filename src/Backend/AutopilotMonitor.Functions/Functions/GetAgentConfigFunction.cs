@@ -100,6 +100,7 @@ namespace AutopilotMonitor.Functions.Functions
                     AuthFailureTimeoutMinutes = tenantConfig.AuthFailureTimeoutMinutes ?? 0,
                     LogLevel = tenantConfig.LogLevel ?? "Info",
                     RebootOnComplete = tenantConfig.RebootOnComplete ?? false,
+                    RebootDelaySeconds = tenantConfig.RebootDelaySeconds ?? 10,
                     MaxBatchSize = tenantConfig.MaxBatchSize ?? 100,
                     Collectors = collectors,
                     GatherRules = gatherRules,

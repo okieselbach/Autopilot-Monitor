@@ -82,6 +82,12 @@ namespace AutopilotMonitor.Agent.Core.Configuration
         public bool RebootOnComplete { get; set; } = false;
 
         /// <summary>
+        /// Delay in seconds before the reboot is initiated (shutdown.exe /r /t X).
+        /// Default: 10 seconds
+        /// </summary>
+        public int RebootDelaySeconds { get; set; } = 10;
+
+        /// <summary>
         /// When true, the log directory is preserved after self-destruct/cleanup.
         /// All other files (binaries, config, spool, scheduled task) are still removed.
         /// </summary>

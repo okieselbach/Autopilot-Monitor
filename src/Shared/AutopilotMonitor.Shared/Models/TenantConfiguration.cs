@@ -173,6 +173,12 @@ namespace AutopilotMonitor.Shared.Models
         public bool? RebootOnComplete { get; set; }
 
         /// <summary>
+        /// Delay in seconds before the reboot is initiated (shutdown.exe /r /t X).
+        /// null = use agent default (10 seconds).
+        /// </summary>
+        public int? RebootDelaySeconds { get; set; }
+
+        /// <summary>
         /// Whether to enable geo-location detection (queries external IP service).
         /// null = use agent default (true).
         /// </summary>
