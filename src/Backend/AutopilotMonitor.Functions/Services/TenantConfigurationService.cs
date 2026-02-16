@@ -175,7 +175,19 @@ namespace AutopilotMonitor.Functions.Services
                 { "SessionTimeoutHours", config.SessionTimeoutHours },
                 { "MaxNdjsonPayloadSizeMB", config.MaxNdjsonPayloadSizeMB },
                 { "EnablePerformanceCollector", config.EnablePerformanceCollector },
-                { "PerformanceCollectorIntervalSeconds", config.PerformanceCollectorIntervalSeconds }
+                { "PerformanceCollectorIntervalSeconds", config.PerformanceCollectorIntervalSeconds },
+                { "MaxAuthFailures", config.MaxAuthFailures },
+                { "AuthFailureTimeoutMinutes", config.AuthFailureTimeoutMinutes },
+                { "SelfDestructOnComplete", config.SelfDestructOnComplete },
+                { "KeepLogFile", config.KeepLogFile },
+                { "RebootOnComplete", config.RebootOnComplete },
+                { "EnableGeoLocation", config.EnableGeoLocation },
+                { "EnableImeMatchLog", config.EnableImeMatchLog },
+                { "LogLevel", config.LogLevel },
+                { "MaxBatchSize", config.MaxBatchSize },
+                { "TeamsWebhookUrl", config.TeamsWebhookUrl },
+                { "TeamsNotifyOnSuccess", config.TeamsNotifyOnSuccess },
+                { "TeamsNotifyOnFailure", config.TeamsNotifyOnFailure }
             };
 
             return entity;
@@ -202,7 +214,19 @@ namespace AutopilotMonitor.Functions.Services
                 SessionTimeoutHours = entity.GetInt32("SessionTimeoutHours") ?? 5,
                 MaxNdjsonPayloadSizeMB = entity.GetInt32("MaxNdjsonPayloadSizeMB") ?? 5,
                 EnablePerformanceCollector = entity.GetBoolean("EnablePerformanceCollector") ?? false,
-                PerformanceCollectorIntervalSeconds = entity.GetInt32("PerformanceCollectorIntervalSeconds") ?? 30
+                PerformanceCollectorIntervalSeconds = entity.GetInt32("PerformanceCollectorIntervalSeconds") ?? 30,
+                MaxAuthFailures = entity.GetInt32("MaxAuthFailures"),
+                AuthFailureTimeoutMinutes = entity.GetInt32("AuthFailureTimeoutMinutes"),
+                SelfDestructOnComplete = entity.GetBoolean("SelfDestructOnComplete"),
+                KeepLogFile = entity.GetBoolean("KeepLogFile"),
+                RebootOnComplete = entity.GetBoolean("RebootOnComplete"),
+                EnableGeoLocation = entity.GetBoolean("EnableGeoLocation"),
+                EnableImeMatchLog = entity.GetBoolean("EnableImeMatchLog"),
+                LogLevel = entity.GetString("LogLevel"),
+                MaxBatchSize = entity.GetInt32("MaxBatchSize"),
+                TeamsWebhookUrl = entity.GetString("TeamsWebhookUrl"),
+                TeamsNotifyOnSuccess = entity.GetBoolean("TeamsNotifyOnSuccess") ?? true,
+                TeamsNotifyOnFailure = entity.GetBoolean("TeamsNotifyOnFailure") ?? true
             };
         }
     }

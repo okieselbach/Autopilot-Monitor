@@ -20,24 +20,25 @@ namespace AutopilotMonitor.Shared.Models
         public int UploadIntervalSeconds { get; set; } = 30;
 
         /// <summary>
-        /// Whether to cleanup files on exit.
-        /// </summary>
-        public bool CleanupOnExit { get; set; } = false;
-
-        /// <summary>
-        /// Whether to self-destruct after enrollment completion.
+        /// Whether to self-destruct after enrollment completion (remove Scheduled Task and all files).
         /// </summary>
         public bool SelfDestructOnComplete { get; set; } = false;
 
         /// <summary>
-        /// Preserve logs during cleanup/self-destruct.
+        /// Preserve logs during self-destruct.
         /// </summary>
         public bool KeepLogFile { get; set; } = true;
 
         /// <summary>
-        /// Optional path to IME pattern match log file.
+        /// Whether to enable geo-location detection.
         /// </summary>
-        public string ImeMatchLogPath { get; set; } = Constants.ImeMatchLogPath;
+        public bool EnableGeoLocation { get; set; } = true;
+
+        /// <summary>
+        /// Whether to write a log of every IME log line matched by a pattern.
+        /// When true, the default path is used: Constants.ImeMatchLogPath.
+        /// </summary>
+        public bool EnableImeMatchLog { get; set; } = false;
 
         public CollectorConfiguration Collectors { get; set; }
 

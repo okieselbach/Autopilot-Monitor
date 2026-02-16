@@ -306,7 +306,6 @@ namespace AutopilotMonitor.Agent
             // Defaults
             string apiBaseUrl            = Constants.ApiBaseUrl;
             int    uploadIntervalSeconds = Constants.DefaultUploadIntervalSeconds;
-            bool   cleanupOnExit          = false;
             bool   selfDestructOnComplete = false;
             bool   rebootOnCompleteConfig = false;
             bool   enableGeoLocationConfig = true;
@@ -320,7 +319,6 @@ namespace AutopilotMonitor.Agent
 
             if (noCleanup)
             {
-                cleanupOnExit = false;
                 selfDestructOnComplete = false;
             }
 
@@ -355,7 +353,6 @@ namespace AutopilotMonitor.Agent
                 LogLevel              = AgentLogLevel.Info,
                 UseClientCertAuth     = !noAuth && useClientCertAuthConfig,
                 ClientCertThumbprint  = certThumbprint,
-                CleanupOnExit         = cleanupOnExit,
                 SelfDestructOnComplete = selfDestructOnComplete,
                 RebootOnComplete      = rebootOnComplete || rebootOnCompleteConfig,
                 EnableGeoLocation     = !disableGeoLoc && enableGeoLocationConfig,
@@ -520,17 +517,17 @@ namespace AutopilotMonitor.Agent
 
             logger.Info("Enrollment complete marker detected from previous session");
 
-            if (!config.CleanupOnExit && !config.SelfDestructOnComplete)
+            if (!config.SelfDestructOnComplete)
             {
                 // No cleanup configured - just exit
-                logger.Info("Enrollment already completed (no cleanup is configured). Agent will exit.");
+                logger.Info("Enrollment already completed (SelfDestructOnComplete is disabled). Agent will exit.");
                 if (consoleMode)
-                    Console.WriteLine("Enrollment already completed (no cleanup is configured). Agent will exit.");
+                    Console.WriteLine("Enrollment already completed (no cleanup configured). Agent will exit.");
                 return true;
             }
 
-            // Cleanup is configured - attempt it now in case scheduled task failed
-            logger.Info("Enrollment already completed. Attempting cleanup retry (scheduled task may have failed)...");
+            // Self-destruct is configured - attempt it now in case scheduled task failed
+            logger.Info("Enrollment already completed. Attempting self-destruct retry (scheduled task may have failed)...");
             if (consoleMode)
                 Console.WriteLine("Enrollment already completed. Attempting cleanup retry...");
 
@@ -538,19 +535,7 @@ namespace AutopilotMonitor.Agent
             {
                 using (var service = new MonitoringService(config, logger, GetAgentVersion()))
                 {
-                    // Trigger cleanup directly without running enrollment
-                    if (config.SelfDestructOnComplete)
-                    {
-                        logger.Info("Executing self-destruct cleanup...");
-                        // Call the internal cleanup method via reflection or expose it
-                        // For now, we'll create a minimal service and let it clean up on dispose
-                        service.TriggerCleanup();
-                    }
-                    else if (config.CleanupOnExit)
-                    {
-                        logger.Info("Executing standard cleanup...");
-                        service.TriggerCleanup();
-                    }
+                    service.TriggerCleanup();
                 }
 
                 logger.Info("Cleanup retry completed. Agent will exit.");

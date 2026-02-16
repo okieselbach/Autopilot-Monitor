@@ -21,6 +21,17 @@ interface TenantConfiguration {
   // Agent collector settings
   enablePerformanceCollector: boolean;
   performanceCollectorIntervalSeconds: number;
+  // Agent behavior
+  selfDestructOnComplete?: boolean;
+  keepLogFile?: boolean;
+  rebootOnComplete?: boolean;
+  enableGeoLocation?: boolean;
+  enableImeMatchLog?: boolean;
+  logLevel?: string;
+  // Teams notifications
+  teamsWebhookUrl?: string;
+  teamsNotifyOnSuccess?: boolean;
+  teamsNotifyOnFailure?: boolean;
 }
 
 interface TenantAdmin {
@@ -67,6 +78,18 @@ export default function SettingsPage() {
   const [performanceCollectorInterval, setPerformanceCollectorInterval] = useState(60);
   const [serialConsentInProgress, setSerialConsentInProgress] = useState(false);
 
+  // Agent behavior state
+  const [selfDestructOnComplete, setSelfDestructOnComplete] = useState(false);
+  const [keepLogFile, setKeepLogFile] = useState(true);
+  const [rebootOnComplete, setRebootOnComplete] = useState(false);
+  const [enableGeoLocation, setEnableGeoLocation] = useState(true);
+  const [enableImeMatchLog, setEnableImeMatchLog] = useState(false);
+  const [logLevel, setLogLevel] = useState("Info");
+
+  // Teams notifications state
+  const [teamsWebhookUrl, setTeamsWebhookUrl] = useState("");
+  const [teamsNotifyOnSuccess, setTeamsNotifyOnSuccess] = useState(true);
+  const [teamsNotifyOnFailure, setTeamsNotifyOnFailure] = useState(true);
 
   // Fetch configuration
   useEffect(() => {
@@ -104,6 +127,15 @@ export default function SettingsPage() {
         setSessionTimeoutHours(data.sessionTimeoutHours ?? 5);
         setEnablePerformanceCollector(data.enablePerformanceCollector ?? false);
         setPerformanceCollectorInterval(data.performanceCollectorIntervalSeconds ?? 60);
+        setSelfDestructOnComplete(data.selfDestructOnComplete ?? false);
+        setKeepLogFile(data.keepLogFile ?? true);
+        setRebootOnComplete(data.rebootOnComplete ?? false);
+        setEnableGeoLocation(data.enableGeoLocation ?? true);
+        setEnableImeMatchLog(data.enableImeMatchLog ?? false);
+        setLogLevel(data.logLevel ?? "Info");
+        setTeamsWebhookUrl(data.teamsWebhookUrl ?? "");
+        setTeamsNotifyOnSuccess(data.teamsNotifyOnSuccess ?? true);
+        setTeamsNotifyOnFailure(data.teamsNotifyOnFailure ?? true);
       } catch (err) {
         console.error("Error fetching configuration:", err);
         setError(err instanceof Error ? err.message : "Failed to load configuration");
@@ -171,6 +203,15 @@ export default function SettingsPage() {
         sessionTimeoutHours,
         enablePerformanceCollector,
         performanceCollectorIntervalSeconds: performanceCollectorInterval,
+        selfDestructOnComplete,
+        keepLogFile,
+        rebootOnComplete,
+        enableGeoLocation,
+        enableImeMatchLog,
+        logLevel,
+        teamsWebhookUrl: teamsWebhookUrl || undefined,
+        teamsNotifyOnSuccess,
+        teamsNotifyOnFailure,
       };
 
       const token = await getAccessToken();
@@ -331,6 +372,15 @@ export default function SettingsPage() {
     setSessionTimeoutHours(config.sessionTimeoutHours ?? 5);
     setEnablePerformanceCollector(config.enablePerformanceCollector ?? false);
     setPerformanceCollectorInterval(config.performanceCollectorIntervalSeconds ?? 60);
+    setSelfDestructOnComplete(config.selfDestructOnComplete ?? false);
+    setKeepLogFile(config.keepLogFile ?? true);
+    setRebootOnComplete(config.rebootOnComplete ?? false);
+    setEnableGeoLocation(config.enableGeoLocation ?? true);
+    setEnableImeMatchLog(config.enableImeMatchLog ?? false);
+    setLogLevel(config.logLevel ?? "Info");
+    setTeamsWebhookUrl(config.teamsWebhookUrl ?? "");
+    setTeamsNotifyOnSuccess(config.teamsNotifyOnSuccess ?? true);
+    setTeamsNotifyOnFailure(config.teamsNotifyOnFailure ?? true);
     setSuccessMessage(null);
     setError(null);
   };
@@ -915,6 +965,178 @@ export default function SettingsPage() {
                     </p>
                   </div>
                 </div>
+              </div>
+            </div>
+
+            {/* Agent Parameters */}
+            <div className="bg-white rounded-lg shadow">
+              <div className="p-6 border-b border-gray-200 bg-gradient-to-r from-violet-50 to-purple-50">
+                <div className="flex items-center space-x-2">
+                  <svg className="w-6 h-6 text-violet-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+                  </svg>
+                  <div>
+                    <h2 className="text-xl font-semibold text-gray-900">Agent Parameters</h2>
+                    <p className="text-sm text-gray-500 mt-1">Control agent behavior on enrolled devices. Changes take effect on the next agent config refresh.</p>
+                  </div>
+                </div>
+              </div>
+              <div className="p-6 space-y-4">
+
+                {/* Self-Destruct */}
+                <div className="flex items-center justify-between p-4 rounded-lg border border-gray-200 hover:border-violet-200 transition-colors">
+                  <div>
+                    <p className="font-medium text-gray-900">Self-Destruct on Complete</p>
+                    <p className="text-sm text-gray-500">Remove Scheduled Task and all agent files when enrollment completes</p>
+                  </div>
+                  <button onClick={() => setSelfDestructOnComplete(!selfDestructOnComplete)}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${selfDestructOnComplete ? 'bg-violet-500' : 'bg-gray-300'}`}>
+                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${selfDestructOnComplete ? 'translate-x-6' : 'translate-x-1'}`} />
+                  </button>
+                </div>
+
+                {/* Keep Log File */}
+                {selfDestructOnComplete && (
+                  <div className="flex items-center justify-between p-4 rounded-lg border border-gray-200 hover:border-violet-200 transition-colors ml-4">
+                    <div>
+                      <p className="font-medium text-gray-900">Keep Log File</p>
+                      <p className="text-sm text-gray-500">Preserve the agent log during self-destruct (all other files are removed)</p>
+                    </div>
+                    <button onClick={() => setKeepLogFile(!keepLogFile)}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${keepLogFile ? 'bg-violet-500' : 'bg-gray-300'}`}>
+                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${keepLogFile ? 'translate-x-6' : 'translate-x-1'}`} />
+                    </button>
+                  </div>
+                )}
+
+                {/* Reboot on Complete */}
+                <div className="flex items-center justify-between p-4 rounded-lg border border-gray-200 hover:border-violet-200 transition-colors">
+                  <div>
+                    <p className="font-medium text-gray-900">Reboot on Complete</p>
+                    <p className="text-sm text-gray-500">Reboot the device after enrollment completes (and after self-destruct if enabled)</p>
+                  </div>
+                  <button onClick={() => setRebootOnComplete(!rebootOnComplete)}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${rebootOnComplete ? 'bg-violet-500' : 'bg-gray-300'}`}>
+                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${rebootOnComplete ? 'translate-x-6' : 'translate-x-1'}`} />
+                  </button>
+                </div>
+
+                {/* Geo Location */}
+                <div className="flex items-center justify-between p-4 rounded-lg border border-gray-200 hover:border-violet-200 transition-colors">
+                  <div>
+                    <p className="font-medium text-gray-900">Geo-Location Detection</p>
+                    <p className="text-sm text-gray-500">Capture device location, ISP and network info at enrollment start (queries external IP service)</p>
+                  </div>
+                  <button onClick={() => setEnableGeoLocation(!enableGeoLocation)}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${enableGeoLocation ? 'bg-violet-500' : 'bg-gray-300'}`}>
+                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${enableGeoLocation ? 'translate-x-6' : 'translate-x-1'}`} />
+                  </button>
+                </div>
+
+                {/* IME Match Log */}
+                <div className="flex items-center justify-between p-4 rounded-lg border border-gray-200 hover:border-violet-200 transition-colors">
+                  <div>
+                    <p className="font-medium text-gray-900">IME Pattern Match Log</p>
+                    <p className="text-sm text-gray-500">
+                      Write every matched IME log line to a local file for diagnostics
+                      {enableImeMatchLog && <span className="block text-xs text-gray-400 mt-0.5 font-mono">%ProgramData%\AutopilotMonitor\Logs\ime_pattern_matches.log</span>}
+                    </p>
+                  </div>
+                  <button onClick={() => setEnableImeMatchLog(!enableImeMatchLog)}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${enableImeMatchLog ? 'bg-violet-500' : 'bg-gray-300'}`}>
+                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${enableImeMatchLog ? 'translate-x-6' : 'translate-x-1'}`} />
+                  </button>
+                </div>
+
+                {/* Log Level */}
+                <div className="flex items-center justify-between p-4 rounded-lg border border-gray-200 hover:border-violet-200 transition-colors">
+                  <div>
+                    <p className="font-medium text-gray-900">Log Level</p>
+                    <p className="text-sm text-gray-500">Agent log verbosity — Info for normal operation, Debug for troubleshooting, Verbose for full tracing</p>
+                  </div>
+                  <select
+                    value={logLevel}
+                    onChange={(e) => setLogLevel(e.target.value)}
+                    className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-gray-900 focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
+                  >
+                    <option value="Info">Info</option>
+                    <option value="Debug">Debug</option>
+                    <option value="Verbose">Verbose</option>
+                  </select>
+                </div>
+
+              </div>
+            </div>
+
+            {/* Teams Notifications */}
+            <div className="bg-white rounded-lg shadow">
+              <div className="p-6 border-b border-gray-200 bg-gradient-to-r from-sky-50 to-blue-50">
+                <div className="flex items-center space-x-2">
+                  <svg className="w-6 h-6 text-sky-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                  </svg>
+                  <div>
+                    <h2 className="text-xl font-semibold text-gray-900">Teams Notifications</h2>
+                    <p className="text-sm text-gray-500 mt-1">Send enrollment status notifications to a Microsoft Teams channel via Incoming Webhook.</p>
+                  </div>
+                </div>
+              </div>
+              <div className="p-6 space-y-4">
+
+                {/* Webhook URL */}
+                <div>
+                  <label className="block">
+                    <span className="text-gray-700 font-medium">Incoming Webhook URL</span>
+                    <p className="text-sm text-gray-500 mb-2">
+                      Create an Incoming Webhook in your Teams channel (Channel → Connectors → Incoming Webhook) and paste the URL here.
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="url"
+                        value={teamsWebhookUrl}
+                        onChange={(e) => setTeamsWebhookUrl(e.target.value)}
+                        placeholder="https://your-org.webhook.office.com/webhookb2/..."
+                        className="mt-1 block w-full px-4 py-2 border border-gray-300 rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition-colors font-mono text-sm"
+                      />
+                      {teamsWebhookUrl && (
+                        <span className="mt-1 inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 whitespace-nowrap">
+                          Active
+                        </span>
+                      )}
+                    </div>
+                  </label>
+                </div>
+
+                {/* Notify on Success */}
+                <div className={`flex items-center justify-between p-4 rounded-lg border transition-colors ${teamsWebhookUrl ? 'border-gray-200 hover:border-sky-200' : 'border-gray-100 opacity-50'}`}>
+                  <div>
+                    <p className="font-medium text-gray-900">Notify on Success</p>
+                    <p className="text-sm text-gray-500">Send a notification when an enrollment completes successfully</p>
+                  </div>
+                  <button
+                    onClick={() => teamsWebhookUrl && setTeamsNotifyOnSuccess(!teamsNotifyOnSuccess)}
+                    disabled={!teamsWebhookUrl}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors disabled:cursor-not-allowed ${teamsNotifyOnSuccess && teamsWebhookUrl ? 'bg-sky-500' : 'bg-gray-300'}`}
+                  >
+                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${teamsNotifyOnSuccess && teamsWebhookUrl ? 'translate-x-6' : 'translate-x-1'}`} />
+                  </button>
+                </div>
+
+                {/* Notify on Failure */}
+                <div className={`flex items-center justify-between p-4 rounded-lg border transition-colors ${teamsWebhookUrl ? 'border-gray-200 hover:border-sky-200' : 'border-gray-100 opacity-50'}`}>
+                  <div>
+                    <p className="font-medium text-gray-900">Notify on Failure</p>
+                    <p className="text-sm text-gray-500">Send a notification when an enrollment fails</p>
+                  </div>
+                  <button
+                    onClick={() => teamsWebhookUrl && setTeamsNotifyOnFailure(!teamsNotifyOnFailure)}
+                    disabled={!teamsWebhookUrl}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors disabled:cursor-not-allowed ${teamsNotifyOnFailure && teamsWebhookUrl ? 'bg-sky-500' : 'bg-gray-300'}`}
+                  >
+                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${teamsNotifyOnFailure && teamsWebhookUrl ? 'translate-x-6' : 'translate-x-1'}`} />
+                  </button>
+                </div>
+
               </div>
             </div>
 

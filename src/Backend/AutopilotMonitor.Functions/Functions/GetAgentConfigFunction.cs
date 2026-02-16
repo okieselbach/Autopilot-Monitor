@@ -90,19 +90,20 @@ namespace AutopilotMonitor.Functions.Functions
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(new AgentConfigResponse
                 {
-                    ConfigVersion = 4,
+                    ConfigVersion = 5,
                     UploadIntervalSeconds = 30,
-                    CleanupOnExit = false,
-                    SelfDestructOnComplete = false,
-                    KeepLogFile = true,
-                    Collectors = collectors,
-                    GatherRules = gatherRules,
-                    ImeLogPatterns = imeLogPatterns,
+                    SelfDestructOnComplete = tenantConfig.SelfDestructOnComplete ?? false,
+                    KeepLogFile = tenantConfig.KeepLogFile ?? true,
+                    EnableGeoLocation = tenantConfig.EnableGeoLocation ?? true,
+                    EnableImeMatchLog = tenantConfig.EnableImeMatchLog ?? false,
                     MaxAuthFailures = tenantConfig.MaxAuthFailures ?? 5,
                     AuthFailureTimeoutMinutes = tenantConfig.AuthFailureTimeoutMinutes ?? 0,
                     LogLevel = tenantConfig.LogLevel ?? "Info",
                     RebootOnComplete = tenantConfig.RebootOnComplete ?? false,
-                    MaxBatchSize = tenantConfig.MaxBatchSize ?? 100
+                    MaxBatchSize = tenantConfig.MaxBatchSize ?? 100,
+                    Collectors = collectors,
+                    GatherRules = gatherRules,
+                    ImeLogPatterns = imeLogPatterns
                 });
 
                 return response;

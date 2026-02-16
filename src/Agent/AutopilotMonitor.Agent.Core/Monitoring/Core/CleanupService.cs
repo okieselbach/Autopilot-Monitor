@@ -7,7 +7,8 @@ using AutopilotMonitor.Agent.Core.Logging;
 namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 {
     /// <summary>
-    /// Handles agent self-destruct and cleanup operations (PowerShell script generation and launch).
+    /// Handles agent cleanup on enrollment completion:
+    /// removes the Scheduled Task and deletes all agent files (self-destruct).
     /// </summary>
     public class CleanupService
     {
@@ -116,78 +117,5 @@ Remove-Item -Path $scriptPath -Force -ErrorAction SilentlyContinue
             }
         }
 
-        /// <summary>
-        /// Executes cleanup only (files) without removing scheduled task
-        /// </summary>
-        public void ExecuteCleanup()
-        {
-            try
-            {
-                _logger.Info($"Executing CLEANUP (Files only, keeping Scheduled Task{(_configuration.RebootOnComplete ? " + Reboot" : "")})");
-
-                var currentProcessId = Process.GetCurrentProcess().Id;
-                var agentBasePath = Path.GetFullPath(Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-                    "AutopilotMonitor"
-                ));
-
-                var logDir = Path.GetFullPath(Path.Combine(agentBasePath, "Logs"));
-                var keepLogs = _configuration.KeepLogFile;
-
-                // Create a self-deleting cleanup PowerShell script
-                var cleanupScript = $@"
-$scriptPath = $MyInvocation.MyCommand.Path
-
-# Wait for agent process to exit. Wait-Process may fail if the process is already gone - that is fine.
-Start-Sleep -Seconds 2
-Wait-Process -Id {currentProcessId} -ErrorAction SilentlyContinue -Timeout 30
-Start-Sleep -Seconds 1
-
-{(keepLogs ? $@"
-# Delete everything except Logs directory.
-# Rename subdirs/files first so locked EXE bytes are released, then remove.
-Get-ChildItem -Path '{agentBasePath}' -Exclude 'Logs' | ForEach-Object {{
-    $dest = $_.FullName + '.del'
-    try {{ Rename-Item -Path $_.FullName -NewName $dest -Force -ErrorAction SilentlyContinue }} catch {{ }}
-    Remove-Item -Path $dest -Recurse -Force -ErrorAction SilentlyContinue
-}}
-" : $@"
-# Rename the folder first (works even while EXE bytes are still mapped),
-# then delete the renamed copy - by then all handles are closed.
-$renamedPath = '{agentBasePath}.del'
-try {{ Rename-Item -Path '{agentBasePath}' -NewName $renamedPath -Force -ErrorAction Stop }} catch {{ $renamedPath = '{agentBasePath}' }}
-Remove-Item -Path $renamedPath -Recurse -Force -ErrorAction SilentlyContinue
-")}
-{(_configuration.RebootOnComplete ? @"
-Restart-Computer -Force
-" : "")}
-# Delete this script
-Remove-Item -Path $scriptPath -Force -ErrorAction SilentlyContinue
-";
-
-                // Write cleanup script to temp location
-                var tempScriptPath = Path.Combine(Path.GetTempPath(), $"AutopilotMonitor-Cleanup-{Guid.NewGuid()}.ps1");
-                File.WriteAllText(tempScriptPath, cleanupScript);
-                _logger.Info($"Cleanup script written to {tempScriptPath}");
-
-                // Launch via cmd /c start so the powershell process is created outside the
-                // current Job Object (Scheduled Task job). cmd's 'start' command always
-                // creates a new process group that breaks job inheritance, even under SYSTEM.
-                var psi = new ProcessStartInfo
-                {
-                    FileName = "cmd.exe",
-                    Arguments = $"/c start \"\" /b powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"{tempScriptPath}\"",
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
-
-                Process.Start(psi);
-                _logger.Info("Cleanup script launched. Agent will now exit.");
-            }
-            catch (Exception ex)
-            {
-                _logger.Error("Error executing cleanup", ex);
-            }
-        }
     }
 }

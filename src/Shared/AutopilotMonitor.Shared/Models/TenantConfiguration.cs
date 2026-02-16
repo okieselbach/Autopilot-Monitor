@@ -152,14 +152,19 @@ namespace AutopilotMonitor.Shared.Models
         /// </summary>
         public int? AuthFailureTimeoutMinutes { get; set; }
 
-        // ===== AGENT LOGGING / BEHAVIOR OVERRIDES =====
+        // ===== AGENT BEHAVIOR OVERRIDES =====
 
         /// <summary>
-        /// Log verbosity level override for this tenant's agents.
-        /// null = use agent default ("Info"). Values: "Info", "Debug", "Verbose".
-        /// Note: Only configurable by Galactic Admins directly in the database.
+        /// Whether to self-destruct after enrollment completion (remove Scheduled Task and all files).
+        /// null = use agent default (false).
         /// </summary>
-        public string LogLevel { get; set; }
+        public bool? SelfDestructOnComplete { get; set; }
+
+        /// <summary>
+        /// Preserve logs during self-destruct.
+        /// null = use agent default (true).
+        /// </summary>
+        public bool? KeepLogFile { get; set; }
 
         /// <summary>
         /// Whether to reboot the device after enrollment completes.
@@ -168,10 +173,49 @@ namespace AutopilotMonitor.Shared.Models
         public bool? RebootOnComplete { get; set; }
 
         /// <summary>
+        /// Whether to enable geo-location detection (queries external IP service).
+        /// null = use agent default (true).
+        /// </summary>
+        public bool? EnableGeoLocation { get; set; }
+
+        /// <summary>
+        /// Whether to write a match log for every IME log line matched by a pattern.
+        /// When true, the agent writes to the default path Constants.ImeMatchLogPath.
+        /// null = use agent default (false).
+        /// </summary>
+        public bool? EnableImeMatchLog { get; set; }
+
+        /// <summary>
+        /// Log verbosity level override for this tenant's agents.
+        /// null = use agent default ("Info"). Values: "Info", "Debug", "Verbose".
+        /// </summary>
+        public string LogLevel { get; set; }
+
+        /// <summary>
         /// Maximum events per upload batch.
         /// null = use agent default (100).
         /// </summary>
         public int? MaxBatchSize { get; set; }
+
+        // ===== TEAMS NOTIFICATIONS =====
+
+        /// <summary>
+        /// URL of the Teams Incoming Webhook for enrollment notifications.
+        /// If null or empty, no notifications are sent.
+        /// </summary>
+        public string TeamsWebhookUrl { get; set; }
+
+        /// <summary>
+        /// Send a Teams notification when an enrollment completes successfully.
+        /// Default: true
+        /// </summary>
+        public bool TeamsNotifyOnSuccess { get; set; } = true;
+
+        /// <summary>
+        /// Send a Teams notification when an enrollment fails.
+        /// Default: true
+        /// </summary>
+        public bool TeamsNotifyOnFailure { get; set; } = true;
 
         // ===== HELPER METHODS =====
 

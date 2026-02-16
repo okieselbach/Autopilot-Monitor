@@ -66,12 +66,8 @@ namespace AutopilotMonitor.Agent.Core.Configuration
         public int MaxRetryAttempts { get; set; } = 5;
 
         /// <summary>
-        /// Whether to cleanup files on exit (delete C:\ProgramData\AutopilotMonitor)
-        /// </summary>
-        public bool CleanupOnExit { get; set; } = true;
-
-        /// <summary>
-        /// Whether to self-destruct when enrollment completes (remove Scheduled Task and all files)
+        /// Whether to self-destruct when enrollment completes (remove Scheduled Task and all files).
+        /// This is the only cleanup mode — SelfDestruct always removes task + files.
         /// </summary>
         public bool SelfDestructOnComplete { get; set; } = true;
 

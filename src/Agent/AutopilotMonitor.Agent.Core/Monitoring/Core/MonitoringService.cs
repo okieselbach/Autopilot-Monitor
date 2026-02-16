@@ -236,14 +236,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             if (config == null) return;
 
             _configuration.UploadIntervalSeconds = config.UploadIntervalSeconds;
-            _configuration.CleanupOnExit = config.CleanupOnExit;
             _configuration.SelfDestructOnComplete = config.SelfDestructOnComplete;
             _configuration.KeepLogFile = config.KeepLogFile;
+            _configuration.EnableGeoLocation = config.EnableGeoLocation;
 
-            if (!string.IsNullOrWhiteSpace(config.ImeMatchLogPath))
-            {
-                _configuration.ImeMatchLogPath = config.ImeMatchLogPath;
-            }
+            // ImeMatchLog: use default path when enabled
+            _configuration.ImeMatchLogPath = config.EnableImeMatchLog
+                ? Environment.ExpandEnvironmentVariables(Constants.ImeMatchLogPath)
+                : null;
 
             _configuration.MaxAuthFailures = config.MaxAuthFailures;
             _configuration.AuthFailureTimeoutMinutes = config.AuthFailureTimeoutMinutes;
@@ -258,8 +258,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             }
 
             _logger.Info("Applied runtime settings from remote config");
-            _logger.Info($"  uploadIntervalSeconds={_configuration.UploadIntervalSeconds}, cleanupOnExit={_configuration.CleanupOnExit}, selfDestructOnComplete={_configuration.SelfDestructOnComplete}, keepLogFile={_configuration.KeepLogFile}");
-            _logger.Info($"  imeMatchLogPath={_configuration.ImeMatchLogPath ?? "(none)"}");
+            _logger.Info($"  uploadIntervalSeconds={_configuration.UploadIntervalSeconds}, selfDestructOnComplete={_configuration.SelfDestructOnComplete}, keepLogFile={_configuration.KeepLogFile}");
+            _logger.Info($"  enableGeoLocation={_configuration.EnableGeoLocation}, imeMatchLogPath={_configuration.ImeMatchLogPath ?? "(disabled)"}");
             _logger.Info($"  maxAuthFailures={_configuration.MaxAuthFailures}, authFailureTimeoutMinutes={_configuration.AuthFailureTimeoutMinutes}");
             _logger.Info($"  logLevel={_configuration.LogLevel}, rebootOnComplete={_configuration.RebootOnComplete}, maxBatchSize={_configuration.MaxBatchSize}");
         }
@@ -461,13 +461,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             {
                 _cleanupService.ExecuteSelfDestruct();
             }
-            else if (_configuration.CleanupOnExit)
-            {
-                _cleanupService.ExecuteCleanup();
-            }
             else
             {
-                _logger.Info("No cleanup configured - nothing to do");
+                _logger.Info("SelfDestructOnComplete is disabled - nothing to clean up");
             }
         }
 
@@ -747,18 +743,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 // Give a moment for final upload to complete
                 await Task.Delay(2000);
 
-                // Step 3: Execute self-destruct or cleanup
+                // Step 3: Self-destruct (removes Scheduled Task + files) or reboot-only
                 if (_configuration.SelfDestructOnComplete)
                 {
                     _cleanupService.ExecuteSelfDestruct();
                 }
-                else if (_configuration.CleanupOnExit)
-                {
-                    _cleanupService.ExecuteCleanup();
-                }
                 else if (_configuration.RebootOnComplete)
                 {
-                    _logger.Info("Reboot on complete enabled - initiating reboot");
+                    _logger.Info("RebootOnComplete enabled - initiating reboot");
                     var psi = new ProcessStartInfo
                     {
                         FileName = "shutdown.exe",

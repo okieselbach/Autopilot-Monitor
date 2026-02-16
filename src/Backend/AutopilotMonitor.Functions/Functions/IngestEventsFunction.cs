@@ -21,6 +21,7 @@ namespace AutopilotMonitor.Functions.Functions
         private readonly RateLimitService _rateLimitService;
         private readonly SerialNumberValidator _serialNumberValidator;
         private readonly AnalyzeRuleService _analyzeRuleService;
+        private readonly TeamsNotificationService _teamsNotificationService;
 
         public IngestEventsFunction(
             ILogger<IngestEventsFunction> logger,
@@ -28,7 +29,8 @@ namespace AutopilotMonitor.Functions.Functions
             TenantConfigurationService configService,
             RateLimitService rateLimitService,
             SerialNumberValidator serialNumberValidator,
-            AnalyzeRuleService analyzeRuleService)
+            AnalyzeRuleService analyzeRuleService,
+            TeamsNotificationService teamsNotificationService)
         {
             _logger = logger;
             _storageService = storageService;
@@ -36,6 +38,7 @@ namespace AutopilotMonitor.Functions.Functions
             _rateLimitService = rateLimitService;
             _serialNumberValidator = serialNumberValidator;
             _analyzeRuleService = analyzeRuleService;
+            _teamsNotificationService = teamsNotificationService;
         }
 
         [Function("IngestEvents")]
@@ -94,6 +97,7 @@ namespace AutopilotMonitor.Functions.Functions
                 EnrollmentEvent? lastPhaseChangeEvent = null;
                 EnrollmentEvent? completionEvent = null;
                 EnrollmentEvent? failureEvent = null;
+                string failureReason = null;
                 DateTime? earliestEventTimestamp = null;
 
                 // Track app install events for AppInstallSummary aggregation
@@ -148,7 +152,7 @@ namespace AutopilotMonitor.Functions.Functions
                 else if (failureEvent != null)
                 {
                     // Enrollment failed - use event timestamp for accurate duration
-                    var failureReason = failureEvent.Data?.ContainsKey("errorCode") == true
+                    failureReason = failureEvent.Data?.ContainsKey("errorCode") == true
                         ? $"{failureEvent.Message} ({failureEvent.Data["errorCode"]})"
                         : failureEvent.Message;
 
@@ -222,6 +226,32 @@ namespace AutopilotMonitor.Functions.Functions
 
                 // Retrieve updated session data to include in SignalR messages
                 var updatedSession = await _storageService.GetSessionAsync(request.TenantId, request.SessionId);
+
+                // Send Teams notification on enrollment completion (fire-and-forget, non-fatal)
+                if (completionEvent != null || failureEvent != null)
+                {
+                    var tenantConfig = await _configService.GetConfigurationAsync(request.TenantId);
+                    if (!string.IsNullOrEmpty(tenantConfig.TeamsWebhookUrl))
+                    {
+                        var notifySuccess = completionEvent != null && tenantConfig.TeamsNotifyOnSuccess;
+                        var notifyFailure = failureEvent != null && tenantConfig.TeamsNotifyOnFailure;
+                        if (notifySuccess || notifyFailure)
+                        {
+                            var duration = updatedSession?.DurationSeconds != null
+                                ? TimeSpan.FromSeconds(updatedSession.DurationSeconds.Value)
+                                : (TimeSpan?)null;
+                            _ = _teamsNotificationService.SendEnrollmentNotificationAsync(
+                                tenantConfig.TeamsWebhookUrl,
+                                updatedSession?.DeviceName,
+                                updatedSession?.SerialNumber,
+                                updatedSession?.Manufacturer,
+                                updatedSession?.Model,
+                                success: completionEvent != null,
+                                failureReason: failureReason,
+                                duration: duration);
+                        }
+                    }
+                }
 
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 var responseData = new IngestEventsResponse

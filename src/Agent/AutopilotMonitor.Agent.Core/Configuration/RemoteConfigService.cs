@@ -149,10 +149,10 @@ namespace AutopilotMonitor.Agent.Core.Configuration
             {
                 ConfigVersion = 0,
                 UploadIntervalSeconds = 30,
-                CleanupOnExit = false,
                 SelfDestructOnComplete = false,
                 KeepLogFile = true,
-                ImeMatchLogPath = @"C:\ProgramData\AutopilotMonitor\Logs\ime_pattern_matches.log",
+                EnableGeoLocation = true,
+                EnableImeMatchLog = false,
                 Collectors = CollectorConfiguration.CreateDefault(),
                 GatherRules = new System.Collections.Generic.List<GatherRule>(),
                 ImeLogPatterns = new System.Collections.Generic.List<ImeLogPattern>()
