@@ -517,6 +517,7 @@ export default function Home() {
               <p className="text-gray-600 mb-6">
                 No enrollment sessions yet. Sessions will appear below once devices start enrolling.
                 <br />
+                <br />
                 If you're just getting started, check out the documentation for Intune bootstrapper setup instructions.
               </p>
               <div className="mt-6">

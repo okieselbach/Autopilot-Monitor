@@ -69,7 +69,7 @@ export default function LandingPage() {
           <div className="text-center max-w-4xl mx-auto">
             <h1 className="text-6xl font-bold text-gray-900 mb-6 leading-tight">
               Advanced Monitoring for
-              <span className="bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent"> Windows Autopilot</span>
+              <span className="bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent"> Windows Enrollments</span>
             </h1>
             <p className="text-xl text-gray-600 mb-8 leading-relaxed">
               Real-time insights, intelligent troubleshooting, and comprehensive analytics for your Autopilot deployments.
@@ -88,7 +88,7 @@ export default function LandingPage() {
               </button>
             </div>
             <p className="mt-4 text-sm text-gray-500">
-              Free to try • Enterprise-ready • Multi-tenant support
+              Free to use • Open-Source
             </p>
 
             {/* Platform Stats - Since Release (Static) - Always show, even if 0 */}
@@ -194,9 +194,6 @@ export default function LandingPage() {
 
             {/* Feature 4 - Intelligent Alerts (Planned) */}
             <div className="relative bg-white rounded-2xl p-8 shadow-lg hover:shadow-xl transition-shadow">
-              <span className="absolute top-4 right-4 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-700 border border-amber-200">
-                Planned
-              </span>
               <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center mb-4">
                 <svg className="w-6 h-6 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -207,7 +204,7 @@ export default function LandingPage() {
                 Get notified instantly when deployments fail or encounter issues. Smart alerts help you catch problems before users do.
               </p>
               <ul className="space-y-2">
-                {["Webhook notifications", "Teams & Slack integration", "Configurable rule results"].map(item => (
+                {["Webhook notifications", "Teams integration", "Configurable rule results"].map(item => (
                   <li key={item} className="flex items-center text-sm text-gray-500">
                     <span className="w-1.5 h-1.5 rounded-full bg-green-400 mr-2 shrink-0" />
                     {item}
@@ -378,7 +375,7 @@ export default function LandingPage() {
             Ready to transform your Autopilot monitoring?
           </h2>
           <p className="text-xl text-gray-600 mb-8">
-            Join organizations using Autopilot Monitor to deploy devices faster and more reliably.
+            Join organizations using Autopilot Monitor to react faster and monitor more reliably.
           </p>
           <button
             onClick={login}
