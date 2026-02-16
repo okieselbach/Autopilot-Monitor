@@ -8,7 +8,7 @@ using AutopilotMonitor.Agent.Core.Configuration;
 using AutopilotMonitor.Agent.Core.Logging;
 using AutopilotMonitor.Agent.Core.Monitoring.Collectors;
 using AutopilotMonitor.Agent.Core.Monitoring.Network;
-using AutopilotMonitor.Agent.Core.Monitoring.Simulation;
+using AutopilotMonitor.Agent.Core.Monitoring.Replay;
 using AutopilotMonitor.Agent.Core.Monitoring.Tracking;
 using AutopilotMonitor.Shared.Models;
 
@@ -33,7 +33,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 
         // Core event collectors (always on)
         private HelloDetector _helloDetector;
-        private AutopilotSimulator _simulator;
+        private LogReplayService _logReplay;
 
         // Optional collectors (toggled via remote config)
         private PerformanceCollector _performanceCollector;
@@ -187,23 +187,22 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 );
                 _helloDetector.Start();
 
-                // Start Autopilot Simulator if enabled
-                if (_configuration.EnableSimulator)
+                // Start log replay if a replay directory is configured
+                if (!string.IsNullOrEmpty(_configuration.ReplayLogDir))
                 {
-                    _logger.Info("Simulator mode enabled - starting Autopilot simulator");
+                    _logger.Info($"Log replay mode enabled - starting log replay from: {_configuration.ReplayLogDir}");
                     var imeLogPatterns = _remoteConfigService?.CurrentConfig?.ImeLogPatterns;
-                    _simulator = new AutopilotSimulator(
+                    _logReplay = new LogReplayService(
                         _configuration.SessionId,
                         _configuration.TenantId,
                         EmitEvent,
                         _logger,
-                        _configuration.SimulateFailure,
-                        _configuration.SimulationLogDirectory,
-                        _configuration.SimulationSpeedFactor,
+                        _configuration.ReplayLogDir,
+                        _configuration.ReplaySpeedFactor,
                         imeLogPatterns
                     );
-                    _simulator.Start();
-                    _logger.Info("Autopilot simulator started");
+                    _logReplay.Start();
+                    _logger.Info("Log replay started");
                 }
 
                 _logger.Info("Core event collectors started successfully");
@@ -290,7 +289,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 
                 // EnrollmentTracker: smart enrollment tracking with IME log parsing
                 // (replaces DownloadProgressCollector + EspUiStateCollector)
-                if (!_configuration.EnableSimulator)
+                // Skip when log replay is active - LogReplayService starts its own EnrollmentTracker
+                if (string.IsNullOrEmpty(_configuration.ReplayLogDir))
                 {
                     var imeLogPatterns = config?.ImeLogPatterns;
                     var imeMatchLogPath = string.IsNullOrEmpty(_configuration.ImeMatchLogPath)
@@ -483,8 +483,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 _helloDetector?.Stop();
                 _helloDetector?.Dispose();
 
-                _simulator?.Stop();
-                _simulator?.Dispose();
+                _logReplay?.Stop();
+                _logReplay?.Dispose();
 
                 // Stop optional collectors
                 StopOptionalCollectors();
@@ -788,7 +788,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             _apiClient?.Dispose();
             _spool?.Dispose();
             _helloDetector?.Dispose();
-            _simulator?.Dispose();
+            _logReplay?.Dispose();
             _performanceCollector?.Dispose();
             _enrollmentTracker?.Dispose();
             _gatherRuleExecutor?.Dispose();

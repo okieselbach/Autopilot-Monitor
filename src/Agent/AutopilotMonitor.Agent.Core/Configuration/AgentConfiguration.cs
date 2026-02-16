@@ -66,16 +66,6 @@ namespace AutopilotMonitor.Agent.Core.Configuration
         public int MaxRetryAttempts { get; set; } = 5;
 
         /// <summary>
-        /// Enable Autopilot simulator for testing/demo (generates fake events)
-        /// </summary>
-        public bool EnableSimulator { get; set; } = false;
-
-        /// <summary>
-        /// Simulate enrollment failure (only used if EnableSimulator is true)
-        /// </summary>
-        public bool SimulateFailure { get; set; } = false;
-
-        /// <summary>
         /// Whether to cleanup files on exit (delete C:\ProgramData\AutopilotMonitor)
         /// </summary>
         public bool CleanupOnExit { get; set; } = true;
@@ -119,18 +109,16 @@ namespace AutopilotMonitor.Agent.Core.Configuration
         public string ImeMatchLogPath { get; set; }
 
         /// <summary>
-        /// Path to directory with real IME log files for simulation replay.
-        /// When set (with EnableSimulator), the simulator replays these logs with time compression
-        /// instead of generating artificial events.
+        /// Path to directory with real IME log files for log replay.
+        /// When set, the agent replays these logs with time compression instead of reading live logs.
         /// </summary>
-        public string SimulationLogDirectory { get; set; }
+        public string ReplayLogDir { get; set; }
 
         /// <summary>
-        /// Time compression factor for simulation mode.
+        /// Time compression factor for log replay.
         /// Higher values = faster replay. Default: 50 (e.g., 50 minutes of real logs = 1 minute of replay).
-        /// Targeting 3-5 minute total enrollment replay.
         /// </summary>
-        public double SimulationSpeedFactor { get; set; } = 50;
+        public double ReplaySpeedFactor { get; set; } = 50;
 
         /// <summary>
         /// Wait time in seconds after ESP exit before marking Hello as skipped.
