@@ -42,7 +42,7 @@ public class SerialValidationConsentFunction
             return authError;
         }
 
-        var validatorClientId = _configuration["Graph:ClientId"] ?? _configuration["AzureAd:ClientId"];
+        var validatorClientId = _configuration["EntraId:ClientId"];
         if (string.IsNullOrWhiteSpace(validatorClientId))
         {
             var badConfig = req.CreateResponse(HttpStatusCode.InternalServerError);

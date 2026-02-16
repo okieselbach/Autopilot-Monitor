@@ -4,18 +4,18 @@ import { Configuration, LogLevel, RedirectRequest } from "@azure/msal-browser";
  * MSAL Configuration for Multi-Tenant Azure AD Authentication
  *
  * Environment Variables:
- * - NEXT_PUBLIC_AZURE_AD_CLIENT_ID: Application (client) ID from App Registration
- * - NEXT_PUBLIC_AZURE_AD_REDIRECT_URI: Redirect URI configured in App Registration
- * - NEXT_PUBLIC_AZURE_AD_POST_LOGOUT_REDIRECT_URI: Post logout redirect URI
+ * - NEXT_PUBLIC_ENTRA_CLIENT_ID: Application (client) ID from App Registration
+ * - NEXT_PUBLIC_ENTRA_REDIRECT_URI: Redirect URI configured in App Registration
+ * - NEXT_PUBLIC_ENTRA_POST_LOGOUT_REDIRECT_URI: Post logout redirect URI
  */
 
 // MSAL Configuration
 export const msalConfig: Configuration = {
   auth: {
-    clientId: process.env.NEXT_PUBLIC_AZURE_AD_CLIENT_ID || "YOUR_CLIENT_ID_HERE",
+    clientId: process.env.NEXT_PUBLIC_ENTRA_CLIENT_ID || "YOUR_CLIENT_ID_HERE",
     authority: "https://login.microsoftonline.com/organizations", // Multi-tenant
-    redirectUri: process.env.NEXT_PUBLIC_AZURE_AD_REDIRECT_URI || "http://localhost:3000",
-    postLogoutRedirectUri: process.env.NEXT_PUBLIC_AZURE_AD_POST_LOGOUT_REDIRECT_URI || "http://localhost:3000/landing",
+    redirectUri: process.env.NEXT_PUBLIC_ENTRA_REDIRECT_URI || "http://localhost:3000",
+    postLogoutRedirectUri: process.env.NEXT_PUBLIC_ENTRA_POST_LOGOUT_REDIRECT_URI || "http://localhost:3000/landing",
     navigateToLoginRequestUrl: true,
   },
   cache: {
@@ -74,7 +74,7 @@ export const loginRequest: RedirectRequest = {
 export const apiRequest = {
   scopes: [
     // Option 1 (recommended): Use backend API scope after exposing API in Azure AD
-    `api://${process.env.NEXT_PUBLIC_BACKEND_CLIENT_ID}/access_as_user`
+    `api://${process.env.NEXT_PUBLIC_ENTRA_CLIENT_ID}/access_as_user`
   ],
 };
 

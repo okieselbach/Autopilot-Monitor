@@ -108,8 +108,8 @@ public class HealthCheckService
         var requiredSettings = new[]
         {
             "AzureWebJobsStorage",
-            "AzureAd:ClientId",
-            "AzureAd:TenantId",
+            "EntraId:ClientId",
+            "EntraId:TenantId",
             "AzureSignalR:ConnectionString"
         };
 
@@ -161,13 +161,13 @@ public class HealthCheckService
         var check = new HealthCheck
         {
             Name = "Authentication",
-            Description = "Azure AD / MSAL configuration"
+            Description = "Entra ID / MSAL configuration"
         };
 
         try
         {
-            var clientId = _configuration["AzureAd:ClientId"];
-            var tenantId = _configuration["AzureAd:TenantId"];
+            var clientId = _configuration["EntraId:ClientId"];
+            var tenantId = _configuration["EntraId:TenantId"];
 
             if (string.IsNullOrEmpty(clientId) || string.IsNullOrEmpty(tenantId))
             {

@@ -187,13 +187,13 @@ namespace AutopilotMonitor.Functions.Security
 
         private async Task<string?> GetGraphAccessTokenAsync(string tenantId)
         {
-            var clientId = _configuration["Graph:ClientId"] ?? _configuration["AzureAd:ClientId"];
-            var clientSecret = _configuration["Graph:ClientSecret"] ?? _configuration["AzureAd:ClientSecret"];
+            var clientId = _configuration["EntraId:ClientId"];
+            var clientSecret = _configuration["EntraId:ClientSecret"];
 
             if (string.IsNullOrWhiteSpace(clientId) || string.IsNullOrWhiteSpace(clientSecret))
             {
                 _logger.LogError(
-                    "Serial validation is enabled but Graph app credentials are not configured. Set Graph:ClientId and Graph:ClientSecret.");
+                    "Serial validation is enabled but Entra ID app credentials are not configured. Set EntraId:ClientId and EntraId:ClientSecret.");
                 return null;
             }
 

@@ -59,7 +59,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         // Multi-Tenant Configuration
         options.Instance = "https://login.microsoftonline.com/";
         options.TenantId = "organizations"; // Accept tokens from any Azure AD tenant
-        options.ClientId = builder.Configuration["AzureAd:ClientId"];
+        options.ClientId = builder.Configuration["EntraId:ClientId"];
 
         // Token validation parameters
         options.TokenValidationParameters = new Microsoft.IdentityModel.Tokens.TokenValidationParameters
@@ -77,7 +77,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             // TODO: Later expose custom API and use api://{clientId} scopes
             ValidAudiences = new[]
             {
-                builder.Configuration["AzureAd:ClientId"] // Our app's client ID
+                builder.Configuration["EntraId:ClientId"] // Our app's client ID
                 //"https://graph.microsoft.com", // Microsoft Graph
                 //"00000003-0000-0000-c000-000000000000" // Microsoft Graph App ID
             }

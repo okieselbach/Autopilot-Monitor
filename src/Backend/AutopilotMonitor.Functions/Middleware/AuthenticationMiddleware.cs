@@ -171,8 +171,8 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
                 ValidateAudience = true,
                 ValidAudiences = new[]
                 {
-                    _configuration["AzureAd:ClientId"],
-                    $"api://{_configuration["AzureAd:ClientId"]}"
+                    _configuration["EntraId:ClientId"],
+                    $"api://{_configuration["EntraId:ClientId"]}"
                 },
                 ValidateLifetime = true,
 
