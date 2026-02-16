@@ -48,6 +48,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         // Cleanup/self-destruct
         private readonly CleanupService _cleanupService;
 
+        // Auth failure circuit breaker
+        private int _consecutiveAuthFailures = 0;
+        private DateTime? _firstAuthFailureTime = null;
+
         public MonitoringService(AgentConfiguration configuration, AgentLogger logger, string agentVersion)
         {
             _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
@@ -242,9 +246,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 _configuration.ImeMatchLogPath = config.ImeMatchLogPath;
             }
 
+            _configuration.MaxAuthFailures = config.MaxAuthFailures;
+            _configuration.AuthFailureTimeoutMinutes = config.AuthFailureTimeoutMinutes;
+
             _logger.Info("Applied runtime settings from remote config");
             _logger.Info($"  uploadIntervalSeconds={_configuration.UploadIntervalSeconds}, cleanupOnExit={_configuration.CleanupOnExit}, selfDestructOnComplete={_configuration.SelfDestructOnComplete}, keepLogFile={_configuration.KeepLogFile}");
             _logger.Info($"  imeMatchLogPath={_configuration.ImeMatchLogPath ?? "(none)"}");
+            _logger.Info($"  maxAuthFailures={_configuration.MaxAuthFailures}, authFailureTimeoutMinutes={_configuration.AuthFailureTimeoutMinutes}");
         }
 
         /// <summary>
@@ -376,6 +384,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 {
                     _logger.Warning($"Session registration failed: {response.Message}");
                 }
+            }
+            catch (BackendAuthException ex)
+            {
+                _logger.Error($"Session registration authentication failed: {ex.Message}");
+                HandleAuthFailure();
             }
             catch (Exception ex)
             {
@@ -623,15 +636,63 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 {
                     _spool.RemoveEvents(events);
                     _logger.Debug($"Successfully uploaded {response.EventsProcessed} events");
+
+                    // Reset auth failure counter on success
+                    _consecutiveAuthFailures = 0;
+                    _firstAuthFailureTime = null;
                 }
                 else
                 {
                     _logger.Warning($"Upload failed: {response.Message}");
                 }
             }
+            catch (BackendAuthException ex)
+            {
+                _logger.Error($"Upload authentication failed: {ex.Message}");
+                HandleAuthFailure();
+            }
             catch (Exception ex)
             {
                 _logger.Error("Error uploading events", ex);
+            }
+        }
+
+        /// <summary>
+        /// Handles an authentication failure by incrementing the counter and shutting down
+        /// the agent if the configured threshold is reached.
+        /// </summary>
+        private void HandleAuthFailure()
+        {
+            _consecutiveAuthFailures++;
+
+            if (_firstAuthFailureTime == null)
+                _firstAuthFailureTime = DateTime.UtcNow;
+
+            _logger.Warning($"Authentication failure {_consecutiveAuthFailures}" +
+                (_configuration.MaxAuthFailures > 0 ? $"/{_configuration.MaxAuthFailures}" : "") +
+                $" (first failure at {_firstAuthFailureTime.Value:HH:mm:ss})");
+
+            // Check max attempts (0 = disabled)
+            if (_configuration.MaxAuthFailures > 0 && _consecutiveAuthFailures >= _configuration.MaxAuthFailures)
+            {
+                _logger.Error($"=== AGENT SHUTDOWN: {_consecutiveAuthFailures} consecutive authentication failures (401/403). " +
+                    "The device is not authorized to send data to Autopilot Monitor. " +
+                    "Check client certificate and serial number validation in your tenant configuration. ===");
+                Environment.Exit(1);
+            }
+
+            // Check timeout (0 = disabled)
+            if (_configuration.AuthFailureTimeoutMinutes > 0 && _firstAuthFailureTime.HasValue)
+            {
+                var elapsed = DateTime.UtcNow - _firstAuthFailureTime.Value;
+                if (elapsed.TotalMinutes >= _configuration.AuthFailureTimeoutMinutes)
+                {
+                    _logger.Error($"=== AGENT SHUTDOWN: Authentication failures persisted for {elapsed.TotalMinutes:F0} minutes " +
+                        $"(timeout: {_configuration.AuthFailureTimeoutMinutes} min). " +
+                        "The device is not authorized to send data to Autopilot Monitor. " +
+                        "Check client certificate and serial number validation in your tenant configuration. ===");
+                    Environment.Exit(1);
+                }
             }
         }
 

@@ -107,4 +107,20 @@ builder.Services.AddSingleton<AnalyzeRuleService>();
 builder.Services.AddSingleton<MaintenanceService>();
 builder.Services.AddSingleton<AutopilotMonitor.Functions.Security.SerialNumberValidator>();
 
-builder.Build().Run();
+var app = builder.Build();
+
+// Log CORS configuration at startup so misconfigured origins are immediately visible
+// in the log stream. CORS is enforced by Azure infrastructure, not by function code,
+// so a blocked preflight never reaches the function worker and leaves no trace.
+var startupLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
+var corsOrigins = builder.Configuration["Host:CORS"]                   // local.settings.json
+    ?? builder.Configuration["WEBSITE_CORS_ALLOWED_ORIGINS"]           // Azure App Settings
+    ?? "(not configured - all cross-origin requests will be blocked!)";
+var corsCredentials = builder.Configuration["Host:CORSCredentials"]
+    ?? builder.Configuration["WEBSITE_CORS_SUPPORT_CREDENTIALS"]
+    ?? "unknown";
+startupLogger.LogInformation(
+    "=== CORS CONFIG: AllowedOrigins={CorsOrigins} | SupportCredentials={CorsCredentials} ===",
+    corsOrigins, corsCredentials);
+
+app.Run();

@@ -139,6 +139,19 @@ namespace AutopilotMonitor.Agent.Core.Configuration
         public int HelloWaitTimeoutSeconds { get; set; } = 30;
 
         /// <summary>
+        /// Maximum consecutive authentication failures (401/403) before the agent shuts down.
+        /// Prevents endless retry traffic when the device is not authorized.
+        /// 0 = disabled (retry forever). Default: 5.
+        /// </summary>
+        public int MaxAuthFailures { get; set; } = 5;
+
+        /// <summary>
+        /// Maximum time in minutes the agent keeps retrying after the first auth failure.
+        /// 0 = disabled (no time limit, only MaxAuthFailures applies). Default: 0.
+        /// </summary>
+        public int AuthFailureTimeoutMinutes { get; set; } = 0;
+
+        /// <summary>
         /// Validates the configuration
         /// </summary>
         public bool IsValid()

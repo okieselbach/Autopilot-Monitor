@@ -108,6 +108,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
             AddClientCertificateHeader(httpRequest);
 
             var httpResponse = await _httpClient.SendAsync(httpRequest);
+            ThrowOnAuthFailure(httpResponse);
             httpResponse.EnsureSuccessStatusCode();
 
             var responseJson = await httpResponse.Content.ReadAsStringAsync();
@@ -157,12 +158,28 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
             AddClientCertificateHeader(httpRequest);
 
             var response = await _httpClient.SendAsync(httpRequest);
+            ThrowOnAuthFailure(response);
             response.EnsureSuccessStatusCode();
 
             var responseJson = await response.Content.ReadAsStringAsync();
             var result = JsonConvert.DeserializeObject<TResponse>(responseJson);
 
             return result;
+        }
+
+        /// <summary>
+        /// Throws BackendAuthException for 401/403 responses so callers can distinguish
+        /// authentication failures from transient server errors.
+        /// </summary>
+        private static void ThrowOnAuthFailure(HttpResponseMessage response)
+        {
+            if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized ||
+                response.StatusCode == System.Net.HttpStatusCode.Forbidden)
+            {
+                throw new BackendAuthException(
+                    $"Backend returned {(int)response.StatusCode} {response.StatusCode}. " +
+                    "The device is not authorized. Check client certificate and serial number validation.");
+            }
         }
 
         /// <summary>
@@ -253,5 +270,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
         {
             _httpClient?.Dispose();
         }
+    }
+
+    /// <summary>
+    /// Thrown when the backend returns 401 or 403, indicating the device is not authorized.
+    /// </summary>
+    public class BackendAuthException : Exception
+    {
+        public BackendAuthException(string message) : base(message) { }
     }
 }

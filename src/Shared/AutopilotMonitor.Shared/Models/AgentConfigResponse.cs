@@ -51,6 +51,19 @@ namespace AutopilotMonitor.Shared.Models
         /// Delivered from backend so patterns can be updated without agent rebuild.
         /// </summary>
         public List<ImeLogPattern> ImeLogPatterns { get; set; } = new List<ImeLogPattern>();
+
+        /// <summary>
+        /// Maximum consecutive authentication failures (401/403) before the agent shuts down.
+        /// Prevents endless retry traffic when the device is not authorized.
+        /// 0 = disabled (retry forever). Default: 5.
+        /// </summary>
+        public int MaxAuthFailures { get; set; } = 5;
+
+        /// <summary>
+        /// Maximum time in minutes the agent keeps retrying after the first auth failure.
+        /// 0 = disabled (no time limit, only MaxAuthFailures applies). Default: 0.
+        /// </summary>
+        public int AuthFailureTimeoutMinutes { get; set; } = 0;
     }
 
     /// <summary>

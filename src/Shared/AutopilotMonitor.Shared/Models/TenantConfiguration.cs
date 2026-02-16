@@ -138,6 +138,19 @@ namespace AutopilotMonitor.Shared.Models
         /// </summary>
         public int PerformanceCollectorIntervalSeconds { get; set; } = 60;
 
+        // ===== AGENT AUTH CIRCUIT BREAKER =====
+
+        /// <summary>
+        /// Maximum consecutive authentication failures (401/403) before the agent shuts down.
+        /// null = use default (5). 0 = disabled (retry forever).
+        /// </summary>
+        public int? MaxAuthFailures { get; set; }
+
+        /// <summary>
+        /// Maximum time in minutes the agent keeps retrying after the first auth failure.
+        /// null = use default (0 = disabled, only MaxAuthFailures applies).
+        /// </summary>
+        public int? AuthFailureTimeoutMinutes { get; set; }
 
         // ===== HELPER METHODS =====
 
