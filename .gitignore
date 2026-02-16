@@ -99,3 +99,7 @@ tmp/
 
 # Claude Code temporary files
 tmpclaude-*-cwd
+
+# Deployment scripts (local only)
+scripts/Deployment/build_and_upload_debug_agent_build.ps1
+scripts/Deployment/build_and_upload_release_agent_build.ps1
