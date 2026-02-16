@@ -1187,7 +1187,7 @@ export default function SettingsPage() {
                   </svg>
                   <div>
                     <h2 className="text-xl font-semibold text-gray-900">Diagnostics Package</h2>
-                    <p className="text-sm text-gray-500 mt-1">Upload agent and IME logs as a ZIP package to your Azure Blob Storage after enrollment.</p>
+                    <p className="text-sm text-gray-500 mt-1">Upload diagnostic files as a ZIP package to your Azure Blob Storage after enrollment.</p>
                   </div>
                 </div>
               </div>
@@ -1196,7 +1196,7 @@ export default function SettingsPage() {
                 {/* Info */}
                 <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
                   <p className="text-sm text-amber-900">
-                    The agent uploads diagnostics (agent logs + IME logs) directly to <strong>your</strong> Blob Storage container. Data never passes through our backend.
+                    The agent uploads diagnostics directly to the <strong>configured</strong> Blob Storage container. Data never passes through the backend.
                   </p>
                 </div>
 
@@ -1205,7 +1205,7 @@ export default function SettingsPage() {
                   <label className="block">
                     <span className="text-gray-700 font-medium">Blob Storage Container SAS URL</span>
                     <p className="text-sm text-gray-500 mb-2">
-                      Create an Azure Blob Storage container and generate a Container-level SAS URL with Write and Create permissions.
+                      Create an Azure Blob Storage container and generate a Container-level SAS URL with Read, Write and Create permissions.
                     </p>
                     <div className="flex items-center gap-2">
                       <input
@@ -1253,7 +1253,7 @@ export default function SettingsPage() {
                 <div className="flex items-center justify-between">
                   <div>
                     <h2 className="text-xl font-semibold text-gray-900">Serial Number Validation</h2>
-                    <p className="text-sm text-gray-500 mt-1">Validate devices against Intune Autopilot registration (mandatory for agent ingestion)</p>
+                    <p className="text-sm text-gray-500 mt-1">Validate devices against Intune - Windows Autopilot registration (mandatory for agent ingestion)</p>
                   </div>
                   <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${validateSerialNumber ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}>
                     {validateSerialNumber ? "Enabled" : "Disabled"}
@@ -1265,7 +1265,7 @@ export default function SettingsPage() {
                   <div>
                     <p className="font-medium text-gray-900">Enable Serial Number Validation</p>
                     <p className="text-sm text-gray-500">
-                      Enabling starts Microsoft Entra admin consent for the validator app. After consent, the setting is saved automatically.
+                      Enabling starts Microsoft Entra admin consent for the 'DeviceManagementServiceConfig.Read.All' permission. After consent, the setting is saved automatically.
                     </p>
                   </div>
                   <button
@@ -1315,12 +1315,12 @@ export default function SettingsPage() {
                     <input
                       type="number"
                       min="7"
-                      max="3650"
+                      max="180"
                       value={dataRetentionDays}
                       onChange={(e) => setDataRetentionDays(parseInt(e.target.value) || 90)}
                       className="mt-1 block w-full px-4 py-2 border border-gray-300 rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
                     />
-                    <p className="text-xs text-gray-400 mt-1">Minimum: 7 days, Maximum: 3650 days (10 years)</p>
+                    <p className="text-xs text-gray-400 mt-1">Minimum: 7 days, Maximum: 180 days</p>
                   </label>
                 </div>
 
@@ -1337,12 +1337,12 @@ export default function SettingsPage() {
                     <input
                       type="number"
                       min="1"
-                      max="48"
+                      max="12"
                       value={sessionTimeoutHours}
                       onChange={(e) => setSessionTimeoutHours(parseInt(e.target.value) || 5)}
                       className="mt-1 block w-full px-4 py-2 border border-gray-300 rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
                     />
-                    <p className="text-xs text-gray-400 mt-1">Default: 5 hours (ESP default). Minimum: 1 hour, Maximum: 48 hours</p>
+                    <p className="text-xs text-gray-400 mt-1">Default: 5 hours (ESP default). Minimum: 1 hour, Maximum: 12 hours</p>
                   </label>
                 </div>
               </div>
