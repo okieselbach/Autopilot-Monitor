@@ -203,6 +203,21 @@ namespace AutopilotMonitor.Shared.Models
         /// </summary>
         public int? MaxBatchSize { get; set; }
 
+        // ===== DIAGNOSTICS SETTINGS =====
+
+        /// <summary>
+        /// Azure Blob Storage Container SAS URL for diagnostics package upload.
+        /// Each tenant provides their own container — data stays in the customer's storage.
+        /// If null or empty, diagnostics upload is disabled.
+        /// </summary>
+        public string DiagnosticsBlobSasUrl { get; set; }
+
+        /// <summary>
+        /// When to upload diagnostics packages: "Off", "Always", "OnFailure".
+        /// Default: "Off"
+        /// </summary>
+        public string DiagnosticsUploadMode { get; set; } = "Off";
+
         // ===== TEAMS NOTIFICATIONS =====
 
         /// <summary>

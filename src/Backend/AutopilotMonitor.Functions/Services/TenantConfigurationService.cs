@@ -186,6 +186,8 @@ namespace AutopilotMonitor.Functions.Services
                 { "EnableImeMatchLog", config.EnableImeMatchLog },
                 { "LogLevel", config.LogLevel },
                 { "MaxBatchSize", config.MaxBatchSize },
+                { "DiagnosticsBlobSasUrl", config.DiagnosticsBlobSasUrl },
+                { "DiagnosticsUploadMode", config.DiagnosticsUploadMode },
                 { "TeamsWebhookUrl", config.TeamsWebhookUrl },
                 { "TeamsNotifyOnSuccess", config.TeamsNotifyOnSuccess },
                 { "TeamsNotifyOnFailure", config.TeamsNotifyOnFailure }
@@ -226,6 +228,8 @@ namespace AutopilotMonitor.Functions.Services
                 EnableImeMatchLog = entity.GetBoolean("EnableImeMatchLog"),
                 LogLevel = entity.GetString("LogLevel"),
                 MaxBatchSize = entity.GetInt32("MaxBatchSize"),
+                DiagnosticsBlobSasUrl = entity.GetString("DiagnosticsBlobSasUrl"),
+                DiagnosticsUploadMode = entity.GetString("DiagnosticsUploadMode") ?? "Off",
                 TeamsWebhookUrl = entity.GetString("TeamsWebhookUrl"),
                 TeamsNotifyOnSuccess = entity.GetBoolean("TeamsNotifyOnSuccess") ?? true,
                 TeamsNotifyOnFailure = entity.GetBoolean("TeamsNotifyOnFailure") ?? true

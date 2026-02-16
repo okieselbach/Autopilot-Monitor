@@ -33,6 +33,9 @@ interface TenantConfiguration {
   teamsWebhookUrl?: string;
   teamsNotifyOnSuccess?: boolean;
   teamsNotifyOnFailure?: boolean;
+  // Diagnostics package
+  diagnosticsBlobSasUrl?: string;
+  diagnosticsUploadMode?: string;
 }
 
 interface TenantAdmin {
@@ -93,6 +96,10 @@ export default function SettingsPage() {
   const [teamsNotifyOnSuccess, setTeamsNotifyOnSuccess] = useState(true);
   const [teamsNotifyOnFailure, setTeamsNotifyOnFailure] = useState(true);
 
+  // Diagnostics package state
+  const [diagnosticsBlobSasUrl, setDiagnosticsBlobSasUrl] = useState("");
+  const [diagnosticsUploadMode, setDiagnosticsUploadMode] = useState("Off");
+
   // Fetch configuration
   useEffect(() => {
     if (!tenantId) return;
@@ -139,6 +146,8 @@ export default function SettingsPage() {
         setTeamsWebhookUrl(data.teamsWebhookUrl ?? "");
         setTeamsNotifyOnSuccess(data.teamsNotifyOnSuccess ?? true);
         setTeamsNotifyOnFailure(data.teamsNotifyOnFailure ?? true);
+        setDiagnosticsBlobSasUrl(data.diagnosticsBlobSasUrl ?? "");
+        setDiagnosticsUploadMode(data.diagnosticsUploadMode ?? "Off");
       } catch (err) {
         console.error("Error fetching configuration:", err);
         setError(err instanceof Error ? err.message : "Failed to load configuration");
@@ -216,6 +225,8 @@ export default function SettingsPage() {
         teamsWebhookUrl: teamsWebhookUrl || undefined,
         teamsNotifyOnSuccess,
         teamsNotifyOnFailure,
+        diagnosticsBlobSasUrl: diagnosticsBlobSasUrl || undefined,
+        diagnosticsUploadMode,
       };
 
       const token = await getAccessToken();
@@ -386,6 +397,8 @@ export default function SettingsPage() {
     setTeamsWebhookUrl(config.teamsWebhookUrl ?? "");
     setTeamsNotifyOnSuccess(config.teamsNotifyOnSuccess ?? true);
     setTeamsNotifyOnFailure(config.teamsNotifyOnFailure ?? true);
+    setDiagnosticsBlobSasUrl(config.diagnosticsBlobSasUrl ?? "");
+    setDiagnosticsUploadMode(config.diagnosticsUploadMode ?? "Off");
     setSuccessMessage(null);
     setError(null);
   };
@@ -1160,6 +1173,75 @@ export default function SettingsPage() {
                   >
                     <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${teamsNotifyOnFailure && teamsWebhookUrl ? 'translate-x-6' : 'translate-x-1'}`} />
                   </button>
+                </div>
+
+              </div>
+            </div>
+
+            {/* Diagnostics Package */}
+            <div className="bg-white rounded-lg shadow">
+              <div className="p-6 border-b border-gray-200 bg-gradient-to-r from-amber-50 to-orange-50">
+                <div className="flex items-center space-x-2">
+                  <svg className="w-6 h-6 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+                  </svg>
+                  <div>
+                    <h2 className="text-xl font-semibold text-gray-900">Diagnostics Package</h2>
+                    <p className="text-sm text-gray-500 mt-1">Upload agent and IME logs as a ZIP package to your Azure Blob Storage after enrollment.</p>
+                  </div>
+                </div>
+              </div>
+              <div className="p-6 space-y-4">
+
+                {/* Info */}
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                  <p className="text-sm text-amber-900">
+                    The agent uploads diagnostics (agent logs + IME logs) directly to <strong>your</strong> Blob Storage container. Data never passes through our backend.
+                  </p>
+                </div>
+
+                {/* Blob Storage SAS URL */}
+                <div>
+                  <label className="block">
+                    <span className="text-gray-700 font-medium">Blob Storage Container SAS URL</span>
+                    <p className="text-sm text-gray-500 mb-2">
+                      Create an Azure Blob Storage container and generate a Container-level SAS URL with Write and Create permissions.
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="url"
+                        value={diagnosticsBlobSasUrl}
+                        onChange={(e) => setDiagnosticsBlobSasUrl(e.target.value)}
+                        placeholder="https://storageaccount.blob.core.windows.net/diagnostics?sv=...&sig=..."
+                        className="mt-1 block w-full px-4 py-2 border border-gray-300 rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500 transition-colors font-mono text-sm"
+                      />
+                      {diagnosticsBlobSasUrl && diagnosticsUploadMode !== "Off" && (
+                        <span className="mt-1 inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 whitespace-nowrap">
+                          Active
+                        </span>
+                      )}
+                    </div>
+                  </label>
+                </div>
+
+                {/* Upload Mode */}
+                <div className={`p-4 rounded-lg border transition-colors ${diagnosticsBlobSasUrl ? 'border-gray-200 hover:border-amber-200' : 'border-gray-100 opacity-50'}`}>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-medium text-gray-900">Upload Mode</p>
+                      <p className="text-sm text-gray-500">Choose when diagnostics packages are uploaded</p>
+                    </div>
+                    <select
+                      value={diagnosticsUploadMode}
+                      onChange={(e) => setDiagnosticsUploadMode(e.target.value)}
+                      disabled={!diagnosticsBlobSasUrl}
+                      className="px-3 py-2 border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                    >
+                      <option value="Off">Off</option>
+                      <option value="Always">Always</option>
+                      <option value="OnFailure">On Failure Only</option>
+                    </select>
+                  </div>
                 </div>
 
               </div>

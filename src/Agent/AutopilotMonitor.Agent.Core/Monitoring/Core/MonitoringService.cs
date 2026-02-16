@@ -49,6 +49,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         // Cleanup/self-destruct
         private readonly CleanupService _cleanupService;
 
+        // Diagnostics package upload
+        private readonly DiagnosticsPackageService _diagnosticsService;
+
         // Auth failure circuit breaker
         private int _consecutiveAuthFailures = 0;
         private DateTime? _firstAuthFailureTime = null;
@@ -67,6 +70,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             _spool = new EventSpool(_configuration.SpoolDirectory);
             _apiClient = new BackendApiClient(_configuration.ApiBaseUrl, _configuration, _logger);
             _cleanupService = new CleanupService(_configuration, _logger);
+            _diagnosticsService = new DiagnosticsPackageService(_configuration, _logger);
 
             // Subscribe to spool events for batched upload when new events arrive
             _spool.EventsAvailable += OnEventsAvailable;
@@ -251,6 +255,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             _configuration.RebootOnComplete = config.RebootOnComplete;
             _configuration.RebootDelaySeconds = config.RebootDelaySeconds;
             _configuration.MaxBatchSize = config.MaxBatchSize;
+            _configuration.DiagnosticsBlobSasUrl = config.DiagnosticsBlobSasUrl;
+            _configuration.DiagnosticsUploadMode = config.DiagnosticsUploadMode;
 
             // Apply log level from remote config
             if (Enum.TryParse<Logging.AgentLogLevel>(config.LogLevel, ignoreCase: true, out var remoteLogLevel))
@@ -529,6 +535,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             // Check for enrollment completion events
             if (evt.EventType == "enrollment_complete" || evt.EventType == "enrollment_failed")
             {
+                var enrollmentSucceeded = evt.EventType == "enrollment_complete";
                 _logger.Info($"Enrollment completion detected: {evt.EventType}");
 
                 // Delete session ID so a new session will be created on next enrollment
@@ -559,9 +566,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 // Trigger self-destruct or reboot if configured
                 if (_configuration.SelfDestructOnComplete || _configuration.RebootOnComplete)
                 {
-                    Task.Run(() => HandleEnrollmentComplete());
+                    Task.Run(() => HandleEnrollmentComplete(enrollmentSucceeded));
                     return; // Don't continue with normal event processing
                 }
+
+                // No self-destruct/reboot — still upload diagnostics if configured
+                Task.Run(() => UploadDiagnosticsWithTimelineEvents(enrollmentSucceeded));
             }
 
             // Immediate upload for:
@@ -725,9 +735,65 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         }
 
         /// <summary>
+        /// Uploads diagnostics package with timeline events (start + result).
+        /// Emits events, uploads them, then performs the actual diagnostics upload.
+        /// </summary>
+        private async Task UploadDiagnosticsWithTimelineEvents(bool enrollmentSucceeded)
+        {
+            var mode = _configuration.DiagnosticsUploadMode ?? "Off";
+            if (string.Equals(mode, "Off", StringComparison.OrdinalIgnoreCase))
+                return;
+            if (string.IsNullOrEmpty(_configuration.DiagnosticsBlobSasUrl))
+                return;
+            if (string.Equals(mode, "OnFailure", StringComparison.OrdinalIgnoreCase) && enrollmentSucceeded)
+                return;
+
+            // Emit "collecting" event
+            EmitEvent(new EnrollmentEvent
+            {
+                SessionId = _configuration.SessionId,
+                TenantId = _configuration.TenantId,
+                Timestamp = DateTime.UtcNow,
+                EventType = "diagnostics_collecting",
+                Severity = EventSeverity.Info,
+                Source = "MonitoringService",
+                Phase = EnrollmentPhase.Complete,
+                Message = $"Collecting diagnostics package (mode={mode})",
+                Data = new Dictionary<string, object>
+                {
+                    { "uploadMode", mode }
+                }
+            });
+            await UploadEventsAsync();
+
+            // Perform the actual ZIP + upload
+            var success = await _diagnosticsService.CreateAndUploadAsync(enrollmentSucceeded);
+
+            // Emit result event
+            EmitEvent(new EnrollmentEvent
+            {
+                SessionId = _configuration.SessionId,
+                TenantId = _configuration.TenantId,
+                Timestamp = DateTime.UtcNow,
+                EventType = success ? "diagnostics_uploaded" : "diagnostics_upload_failed",
+                Severity = success ? EventSeverity.Info : EventSeverity.Warning,
+                Source = "MonitoringService",
+                Phase = EnrollmentPhase.Complete,
+                Message = success
+                    ? "Diagnostics package uploaded successfully"
+                    : "Diagnostics package upload failed",
+                Data = new Dictionary<string, object>
+                {
+                    { "uploadMode", mode }
+                }
+            });
+            await UploadEventsAsync();
+        }
+
+        /// <summary>
         /// Handles enrollment completion and triggers self-destruct sequence
         /// </summary>
-        private async Task HandleEnrollmentComplete()
+        private async Task HandleEnrollmentComplete(bool enrollmentSucceeded)
         {
             try
             {
@@ -744,6 +810,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 
                 // Give a moment for final upload to complete
                 await Task.Delay(2000);
+
+                // Step 2.5: Upload diagnostics package (must complete before self-destruct/reboot)
+                await UploadDiagnosticsWithTimelineEvents(enrollmentSucceeded);
 
                 // Step 3: Self-destruct (removes Scheduled Task + files) or reboot-only
                 if (_configuration.SelfDestructOnComplete)
