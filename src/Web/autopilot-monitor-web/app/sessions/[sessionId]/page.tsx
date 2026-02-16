@@ -1512,7 +1512,7 @@ function DeviceDetailsCard({ events }: { events: EnrollmentEvent[] }) {
                 <DetailRow label="Boot Time" value={new Date(bootTime?.bootTime || agentStarted?.bootTime).toLocaleString()} />
               )}
               {bootTime?.uptimeMinutes && <DetailRow label="Uptime until enrollment starts" value={`${Math.floor(bootTime.uptimeMinutes / 60)}h ${bootTime.uptimeMinutes % 60}m`} />}
-              {agentStarted?.agentVersion && <DetailRow label="Monitor Agent Version" value={agentStarted.agentVersion.replace(/\+[0-9a-f]{8,}$/, v => v.slice(0, 8))} />}
+              {agentStarted?.agentVersion && <DetailRow label="Monitor Agent Version" value={agentStarted.agentVersion.replace(/\+([0-9a-f]{7})[0-9a-f]+$/, '+$1')} />}
               {imeVersion && <DetailRow label="IME Agent Version" value={imeVersion.version ?? imeVersion.agentVersion ?? "Unknown"} />}
               {(deviceLocation?.country || deviceLocation?.Country) && (
                 <DetailRow label="Country" value={deviceLocation.country ?? deviceLocation.Country} />

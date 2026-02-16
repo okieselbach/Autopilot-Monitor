@@ -240,7 +240,7 @@ namespace AutopilotMonitor.Functions.Services
                 var groups = matchingEvents
                     .Select(e => new { Event = e, Key = GetDataFieldValue(e, condition.DataField) })
                     .Where(x => !string.IsNullOrEmpty(x.Key))
-                    .GroupBy(x => x.Key!, StringComparer.OrdinalIgnoreCase)
+                    .GroupBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
                     .Where(g => g.Count() >= groupThreshold)
                     .ToList();
 
@@ -254,9 +254,9 @@ namespace AutopilotMonitor.Functions.Services
                     {
                         ["eventId"] = firstEvent.EventId ?? string.Empty,
                         ["sequence"] = firstEvent.Sequence,
-                        ["timestamp"] = firstEvent.Timestamp,
-                        ["groupKey"] = groupKey,
-                        ["appName"] = appName ?? groupKey,
+                        ["timestamp"] = (object?)firstEvent.Timestamp ?? string.Empty,
+                        ["groupKey"] = groupKey ?? string.Empty,
+                        ["appName"] = appName ?? groupKey ?? string.Empty,
                         ["count"] = worst.Count(),
                         ["threshold"] = groupThreshold
                     });
