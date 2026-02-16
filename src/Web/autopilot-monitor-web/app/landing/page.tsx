@@ -261,6 +261,116 @@ export default function LandingPage() {
         </div>
       </div>
 
+      {/* Comparison Table */}
+      <div className="py-20 px-6 bg-white/50 backdrop-blur-sm">
+        <div className="max-w-5xl mx-auto">
+          <p className="text-sm font-semibold text-center text-blue-600 uppercase tracking-widest mb-3">Comparison</p>
+          <h2 className="text-4xl font-bold text-center text-gray-900 mb-4">
+            Standard Autopilot vs. Monitored Autopilot
+          </h2>
+          <p className="text-center text-gray-500 mb-12 max-w-2xl mx-auto">
+            See what you're missing without Autopilot Monitor — and what you gain the moment you deploy it.
+          </p>
+
+          {/* Header */}
+          <div className="grid grid-cols-[1fr_1fr_1fr] gap-0 mb-1">
+            <div />
+            <div className="bg-gradient-to-br from-blue-600 to-indigo-600 text-white text-center py-4 px-6 rounded-t-2xl mx-1">
+              <div className="font-bold text-lg">Autopilot Monitor</div>
+              <div className="text-blue-200 text-sm mt-0.5">Fully Monitored</div>
+            </div>
+            <div className="bg-gray-100 text-center py-4 px-6 rounded-t-2xl mx-1">
+              <div className="font-semibold text-gray-700 text-lg">Standard Autopilot</div>
+              <div className="text-gray-400 text-sm mt-0.5">Out of the Box</div>
+            </div>
+          </div>
+
+          {/* Rows */}
+          {[
+            {
+              label: "Deployment Visibility",
+              monitor: "Real-time phase tracking with live push updates",
+              standard: "None — black box until it finishes or fails",
+            },
+            {
+              label: "Download Progress",
+              monitor: "Per-app download speed, bytes transferred, % complete",
+              standard: "No visibility into what's downloading or how long it takes",
+            },
+            {
+              label: "User-Facing Progress Page",
+              monitor: "Branded progress view with live app status & download info",
+              standard: "Generic ESP screen — no details for the end user",
+            },
+            {
+              label: "Fleet Health Dashboard",
+              monitor: "Success rates, failure trends, avg. duration across all devices",
+              standard: "Manual report extraction from Intune — no live overview",
+            },
+            {
+              label: "Analyze Rules",
+              monitor: "Built-in + fully customizable rules for automated issue detection",
+              standard: "Manual log review required after every failed deployment",
+            },
+            {
+              label: "Extended Data Gathering",
+              monitor: "Custom gather rules to capture registry, files, or WMI on any event",
+              standard: "No automated data collection during enrollment",
+            },
+            {
+              label: "Geo & Network Context",
+              monitor: "Device location, ISP, and network info captured at enrollment start",
+              standard: "No location or network context in deployment records",
+            },
+            {
+              label: "Hardware Insights",
+              monitor: "Manufacturer, model, and cert identity correlated per session",
+              standard: "Device info only available post-enrollment in Intune",
+            },
+            {
+              label: "Performance Monitoring",
+              monitor: "CPU, memory, disk, and network snapshots during deployment",
+              standard: "Not captured — no way to detect resource bottlenecks",
+            },
+            {
+              label: "Troubleshooting Speed",
+              monitor: "Drill into per-event timeline, IME log patterns, and analyze results",
+              standard: "Manual IME log hunting — slow and error-prone",
+            },
+          ].map((row, i) => (
+            <div
+              key={row.label}
+              className={`grid grid-cols-[1fr_1fr_1fr] gap-0 border-b border-gray-100 ${i % 2 === 0 ? "bg-white" : "bg-gray-50/60"}`}
+            >
+              <div className="py-4 px-5 font-semibold text-gray-800 text-sm flex items-center">{row.label}</div>
+              <div className="py-4 px-5 mx-1 bg-blue-50/50 text-sm text-blue-900 flex items-start gap-2">
+                <svg className="w-4 h-4 text-blue-500 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+                {row.monitor}
+              </div>
+              <div className="py-4 px-5 mx-1 text-sm text-gray-400 flex items-start gap-2">
+                <svg className="w-4 h-4 text-gray-300 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+                {row.standard}
+              </div>
+            </div>
+          ))}
+
+          {/* Bottom cap */}
+          <div className="grid grid-cols-[1fr_1fr_1fr] gap-0">
+            <div />
+            <div className="bg-gradient-to-br from-blue-600 to-indigo-600 rounded-b-2xl mx-1 py-3 text-center text-blue-100 text-xs font-medium">
+              Full observability from day one
+            </div>
+            <div className="bg-gray-100 rounded-b-2xl mx-1 py-3 text-center text-gray-400 text-xs">
+              Limited to what Intune reports after the fact
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* CTA Section */}
       <div className="py-20 px-6">
         <div className="max-w-4xl mx-auto text-center">
