@@ -135,6 +135,13 @@ const EMPTY_FORM: RuleForm = {
   relatedDocs: [],
 };
 
+function bumpVersion(v: string): string {
+  const parts = (v ?? "1.0").split(".");
+  const major = parts[0] ?? "1";
+  const minor = parseInt(parts[1] ?? "0", 10);
+  return `${major}.${minor + 1}`;
+}
+
 function ruleToForm(rule: AnalyzeRule): RuleForm {
   return {
     ruleId: rule.ruleId,
@@ -389,6 +396,8 @@ export default function AnalyzeRulesPage() {
         throw new Error("Failed to get access token");
       }
 
+      const isGlobalEdit = rule.isBuiltIn && isGalacticAdmin;
+
       const payload = {
         ...rule,
         title: editForm.title.trim(),
@@ -403,9 +412,11 @@ export default function AnalyzeRulesPage() {
         confidenceFactors: editForm.confidenceFactors.filter(f => f.signal.trim()),
         remediation: editForm.remediation.filter(r => r.title.trim()),
         relatedDocs: editForm.relatedDocs.filter(d => d.title.trim() && d.url.trim()),
+        // Galactic admin editing a global rule: preserve "Autopilot Monitor" as author but still bump version.
+        // All other edits: set author to the logged-in user.
+        author: isGlobalEdit ? rule.author : (user?.displayName || user?.upn || rule.author),
+        version: bumpVersion(rule.version),
       };
-
-      const isGlobalEdit = rule.isBuiltIn && isGalacticAdmin;
       const url = `${API_BASE_URL}/api/analyze-rules/${encodeURIComponent(rule.ruleId)}${isGlobalEdit ? "?global=true" : ""}`;
 
       const response = await fetch(url, {

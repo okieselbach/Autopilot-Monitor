@@ -355,6 +355,14 @@ export default function GatherRulesPage() {
         throw new Error("Failed to get access token");
       }
 
+      // Increment version: "1.0" → "1.1", "1.9" → "1.10", "2" → "2.1", unknown → "1.1"
+      const bumpVersion = (v: string): string => {
+        const parts = (v ?? "1.0").split(".");
+        const major = parts[0] ?? "1";
+        const minor = parseInt(parts[1] ?? "0", 10);
+        return `${major}.${minor + 1}`;
+      };
+
       const payload: Record<string, unknown> = {
         ...rule,
         title: editForm.title.trim(),
@@ -368,6 +376,8 @@ export default function GatherRulesPage() {
         parameters: editForm.collectorType === "registry" && editForm.valueName.trim()
           ? { valueName: editForm.valueName.trim() }
           : {},
+        author: user?.displayName || user?.upn || rule.author,
+        version: bumpVersion(rule.version),
       };
 
       if (editForm.trigger === "interval") {

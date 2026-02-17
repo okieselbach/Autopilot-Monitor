@@ -416,6 +416,8 @@ export default function SessionDetailPage() {
     [events, severityFilters]
   );
 
+  const isGatherRulesSession = session?.enrollmentType === "gather_rules";
+
   // Calculate enrollment duration from events (first event → enrollment_complete or last event)
   // More accurate than session.durationSeconds which is based on registration StartedAt
   const enrollmentDurationFromEvents = useMemo(() => {
@@ -587,7 +589,20 @@ export default function SessionDetailPage() {
           {/* Session Info Card */}
           {session && (
             <div className="bg-white shadow rounded-lg p-6 mb-6">
-              <h2 className="text-xl font-semibold text-gray-900 mb-4">Session Info</h2>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-semibold text-gray-900">Session Info</h2>
+                {isGatherRulesSession && (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-violet-100 text-violet-800 border border-violet-200">
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
+                    Gather Rules Collection
+                  </span>
+                )}
+              </div>
+              {isGatherRulesSession && (
+                <div className="mb-4 p-3 bg-violet-50 border border-violet-200 rounded-lg text-sm text-violet-800">
+                  This session was created by running <code className="font-mono text-xs bg-violet-100 px-1 py-0.5 rounded">--run-gather-rules</code>. It contains diagnostic data collected outside of a regular enrollment flow.
+                </div>
+              )}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <InfoItem
                   label="Device"
@@ -618,10 +633,10 @@ export default function SessionDetailPage() {
           )}
 
           {/* Device Details Card (from enrollment tracker events) */}
-          <DeviceDetailsCard events={events} />
+          {!isGatherRulesSession && <DeviceDetailsCard events={events} />}
 
           {/* Phase Timeline */}
-          {session && (
+          {!isGatherRulesSession && session && (
             <div className="bg-white shadow rounded-lg p-6 mb-6">
               <h2 className="text-xl font-semibold text-gray-900 mb-6">Enrollment Progress</h2>
               <PhaseTimeline
@@ -635,7 +650,7 @@ export default function SessionDetailPage() {
           )}
 
           {/* Analysis Results */}
-          <div className="bg-white shadow rounded-lg p-6 mb-6">
+          {!isGatherRulesSession && <div className="bg-white shadow rounded-lg p-6 mb-6">
             <div
               onClick={() => setAnalysisExpanded(!analysisExpanded)}
               className="flex items-center justify-between w-full text-left mb-4 cursor-pointer"
@@ -713,19 +728,23 @@ export default function SessionDetailPage() {
                 )}
               </>
             )}
-          </div>
+          </div>}
 
           {/* Performance Metrics (from performance_snapshot events) */}
-          <PerformanceChart
-            events={events.filter(e => e.eventType === "performance_snapshot")}
-          />
+          {!isGatherRulesSession && (
+            <PerformanceChart
+              events={events.filter(e => e.eventType === "performance_snapshot")}
+            />
+          )}
 
           {/* Download Progress (from download_progress, app_download_started, or app_tracking_summary events) */}
-          <DownloadProgress
-            events={events.filter(
-              e => e.eventType === "download_progress" || e.eventType === "app_download_started" || e.eventType === "app_tracking_summary"
-            )}
-          />
+          {!isGatherRulesSession && (
+            <DownloadProgress
+              events={events.filter(
+                e => e.eventType === "download_progress" || e.eventType === "app_download_started" || e.eventType === "app_tracking_summary"
+              )}
+            />
+          )}
 
           {/* Timeline */}
           <div className="bg-white shadow rounded-lg p-6">
@@ -966,8 +985,25 @@ function normalizeEventDataForDisplay(data?: Record<string, any>): Record<string
 
 function EventRow({ event, isGalacticAdmin }: { event: EnrollmentEvent; isGalacticAdmin?: boolean }) {
   const [showDetails, setShowDetails] = useState(false);
+  const [showRaw, setShowRaw] = useState(false);
   const [copied, setCopied] = useState(false);
   const detailData = useMemo(() => normalizeEventDataForDisplay(event.data), [event.data]);
+
+  // Gather rule console output detection
+  const isGatherEvent = event.eventType?.startsWith("gather_");
+  const gatherOutput = isGatherEvent
+    ? ((detailData?.output ?? detailData?.Output) as string | null | undefined) ?? null
+    : null;
+  const gatherCommand = isGatherEvent
+    ? ((detailData?.command ?? detailData?.Command) as string | null | undefined) ?? null
+    : null;
+  const gatherExitCode = isGatherEvent
+    ? ((detailData?.exit_code ?? detailData?.exitCode) as number | null | undefined) ?? null
+    : null;
+  const hasGatherOutput = gatherOutput != null && gatherOutput !== "";
+  const formattedOutput = hasGatherOutput
+    ? gatherOutput.replace(/\r\n/g, "\n").replace(/\r/g, "\n")
+    : null;
 
   const copyEventId = async () => {
     try {
@@ -978,6 +1014,8 @@ function EventRow({ event, isGalacticAdmin }: { event: EnrollmentEvent; isGalact
       console.error('Failed to copy EventID:', err);
     }
   };
+
+  const hasDetails = detailData && Object.keys(detailData).length > 0;
 
   return (
     <div className="bg-gray-50 rounded-lg p-3 hover:bg-gray-100 transition-colors">
@@ -1005,17 +1043,53 @@ function EventRow({ event, isGalacticAdmin }: { event: EnrollmentEvent; isGalact
             )}
           </div>
         </div>
-        {detailData && Object.keys(detailData).length > 0 && (
+        {hasDetails && (
           <button
             onClick={() => setShowDetails(!showDetails)}
-            className="text-xs text-blue-600 hover:text-blue-800 ml-4"
+            className="text-xs text-blue-600 hover:text-blue-800 ml-4 flex-shrink-0"
           >
-            {showDetails ? 'Hide' : 'Details'}
+            {showDetails ? 'Hide' : hasGatherOutput ? 'Output' : 'Details'}
           </button>
         )}
       </div>
 
-      {showDetails && detailData && (
+      {/* Gather rule: terminal-style output block */}
+      {showDetails && hasGatherOutput && (
+        <div className="mt-3">
+          {gatherCommand && (
+            <div className="flex items-center gap-1.5 mb-1.5 text-xs font-mono text-gray-600">
+              <span className="text-gray-400 select-none">$</span>
+              <span>{gatherCommand}</span>
+            </div>
+          )}
+          <div className="bg-gray-900 rounded-lg overflow-hidden">
+            <div className="px-3 py-2 max-h-96 overflow-y-auto overflow-x-auto">
+              <pre className="text-xs text-gray-100 font-mono whitespace-pre">{formattedOutput}</pre>
+            </div>
+          </div>
+          <div className="mt-1.5 flex items-center justify-between">
+            {gatherExitCode !== null ? (
+              <span className={`text-xs font-mono ${gatherExitCode === 0 ? 'text-green-600' : 'text-red-600'}`}>
+                exit {gatherExitCode}
+              </span>
+            ) : <span />}
+            <button
+              onClick={() => setShowRaw(!showRaw)}
+              className="text-xs text-gray-400 hover:text-gray-600"
+            >
+              {showRaw ? 'hide raw' : 'raw JSON'}
+            </button>
+          </div>
+          {showRaw && (
+            <div className="mt-2 p-3 bg-gray-900 rounded text-xs text-gray-100 font-mono overflow-x-auto">
+              <pre>{JSON.stringify(detailData, null, 2)}</pre>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Non-gather (or gather without output): raw JSON details */}
+      {showDetails && !hasGatherOutput && detailData && (
         <div className="mt-3 p-3 bg-gray-900 rounded text-xs text-gray-100 font-mono overflow-x-auto">
           <pre>{JSON.stringify(detailData, null, 2)}</pre>
         </div>

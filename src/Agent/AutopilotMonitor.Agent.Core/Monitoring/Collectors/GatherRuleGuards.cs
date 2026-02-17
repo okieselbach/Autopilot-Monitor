@@ -8,8 +8,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
     /// <summary>
     /// Privacy and security guards for GatherRule collectors.
     ///
-    /// All three allowlists (registry, file, WMI) restrict data collection to
-    /// enrollment-relevant information only. Rules targeting paths or queries
+    /// All four allowlists (registry, file, WMI, command) restrict data collection to
+    /// enrollment-relevant information only. Rules targeting paths, queries, or commands
     /// outside these lists are blocked and reported as security_warning events.
     ///
     /// To allow additional paths: add a prefix entry to the appropriate list.
@@ -17,6 +17,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
     /// up to a path separator or end of string, preventing prefix spoofing.
     /// Registry paths are expected without the hive prefix (e.g. "SOFTWARE\\Microsoft\\..." not "HKLM\\...").
     /// File paths should be expanded (no environment variables).
+    /// Commands must match exactly (trimmed) — no prefix matching for security.
     /// </summary>
     public static class GatherRuleGuards
     {
@@ -118,6 +119,37 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         };
 
         // -----------------------------------------------------------------------
+        // Command — exact match (trimmed); no prefix matching for security
+        // -----------------------------------------------------------------------
+        public static readonly IReadOnlyCollection<string> AllowedCommands = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            // TPM and Security
+            "Get-Tpm",
+            "Get-SecureBootPolicy",
+            "Get-SecureBootUEFI -Name SetupMode",
+
+            // BitLocker
+            "Get-BitLockerVolume -MountPoint C:",
+
+            // Network
+            "Get-NetAdapter | Select-Object Name, Status, InterfaceDescription, MacAddress, LinkSpeed",
+            "Get-DnsClientServerAddress | Select-Object InterfaceAlias, ServerAddresses",
+            "Get-NetIPConfiguration | Select-Object InterfaceAlias, IPv4Address, IPv4DefaultGateway, DNSServer",
+            "netsh winhttp show proxy",
+            "ipconfig /all",
+
+            // Domain / Identity
+            "nltest /dsgetdc:",
+            "dsregcmd /status",
+
+            // Certificate
+            "certutil -store My",
+
+            // Windows Update
+            "Get-HotFix | Select-Object -First 10 HotFixID, InstalledOn, Description"
+        };
+
+        // -----------------------------------------------------------------------
         // Guard methods
         // -----------------------------------------------------------------------
 
@@ -172,6 +204,18 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             return AllowedWmiQueryPrefixes.Any(prefix =>
                 trimmed.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
                 (trimmed.Length == prefix.Length || char.IsWhiteSpace(trimmed[prefix.Length])));
+        }
+
+        /// <summary>
+        /// Returns true if the command (trimmed) exactly matches an entry in the allowlist.
+        /// Exact matching is intentional — no prefix spoofing possible.
+        /// </summary>
+        public static bool IsCommandAllowed(string command)
+        {
+            if (string.IsNullOrEmpty(command))
+                return false;
+
+            return AllowedCommands.Contains(command.Trim());
         }
     }
 }

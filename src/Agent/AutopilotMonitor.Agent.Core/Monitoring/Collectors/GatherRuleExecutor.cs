@@ -30,38 +30,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         private readonly Dictionary<string, Timer> _intervalTimers = new Dictionary<string, Timer>();
         private readonly HashSet<string> _startupRulesExecuted = new HashSet<string>();
         private readonly LogFilePositionTracker _filePositionTracker = new LogFilePositionTracker();
-
-        /// <summary>
-        /// Strict command allowlist - only these commands can be executed via gather rules
-        /// This is a security boundary: commands not on this list are REJECTED
-        /// </summary>
-        private static readonly HashSet<string> CommandAllowlist = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            // TPM and Security
-            "Get-Tpm",
-            "Get-SecureBootPolicy",
-            "Get-SecureBootUEFI -Name SetupMode",
-
-            // BitLocker
-            "Get-BitLockerVolume -MountPoint C:",
-
-            // Network
-            "Get-NetAdapter | Select-Object Name, Status, InterfaceDescription, MacAddress, LinkSpeed",
-            "Get-DnsClientServerAddress | Select-Object InterfaceAlias, ServerAddresses",
-            "Get-NetIPConfiguration | Select-Object InterfaceAlias, IPv4Address, IPv4DefaultGateway, DNSServer",
-            "netsh winhttp show proxy",
-            "ipconfig /all",
-
-            // Domain / Identity
-            "nltest /dsgetdc:",
-            "dsregcmd /status",
-
-            // Certificate
-            "certutil -store My",
-
-            // Windows Update
-            "Get-HotFix | Select-Object -First 10 HotFixID, InstalledOn, Description"
-        };
+        private CountdownEvent _startupRulesLatch;   // non-null only while startup rules are pending
 
         public GatherRuleExecutor(string sessionId, string tenantId, Action<EnrollmentEvent> onEventCollected,
             AgentLogger logger, string imeLogPathOverride = null)
@@ -88,13 +57,24 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 
             _activeRules = rules.Where(r => r.Enabled).ToList();
 
-            // Execute startup rules
-            foreach (var rule in _activeRules.Where(r => r.Trigger == "startup"))
+            // Execute startup rules — track completion via CountdownEvent so callers can wait
+            var pendingStartup = _activeRules
+                .Where(r => r.Trigger == "startup" && !_startupRulesExecuted.Contains(r.RuleId))
+                .ToList();
+
+            if (pendingStartup.Count > 0)
             {
-                if (!_startupRulesExecuted.Contains(rule.RuleId))
+                _startupRulesLatch?.Dispose();
+                _startupRulesLatch = new CountdownEvent(pendingStartup.Count);
+
+                foreach (var rule in pendingStartup)
                 {
                     _startupRulesExecuted.Add(rule.RuleId);
-                    ThreadPool.QueueUserWorkItem(_ => ExecuteRule(rule));
+                    ThreadPool.QueueUserWorkItem(_ =>
+                    {
+                        try   { ExecuteRule(rule); }
+                        finally { _startupRulesLatch?.Signal(); }
+                    });
                 }
             }
 
@@ -393,7 +373,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                 return data;
 
             // SECURITY: Check command against allowlist
-            if (!IsCommandAllowed(command))
+            if (!GatherRuleGuards.IsCommandAllowed(command))
             {
                 _logger.Warning($"SECURITY: Command blocked by allowlist: {command} (Rule: {rule.RuleId})");
                 data["blocked"] = true;
@@ -777,10 +757,6 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         }
 
         /// <summary>
-        /// Checks if a command is on the allowlist
-        /// Uses exact match comparison for security
-        /// </summary>
-        /// <summary>
         /// Emits a security_warning event and returns an empty result dictionary.
         /// Called when a gather rule targets a path/query not on the allowlist.
         /// </summary>
@@ -811,15 +787,6 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             return new Dictionary<string, object>();
         }
 
-        private bool IsCommandAllowed(string command)
-        {
-            if (string.IsNullOrEmpty(command))
-                return false;
-
-            var trimmed = command.Trim();
-            return CommandAllowlist.Contains(trimmed);
-        }
-
         private EventSeverity ParseSeverity(string severity)
         {
             if (string.IsNullOrEmpty(severity))
@@ -845,9 +812,28 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             _intervalTimers.Clear();
         }
 
+        /// <summary>
+        /// Blocks until all startup rules that were queued by the most recent <see cref="UpdateRules"/>
+        /// call have finished executing, or the timeout elapses.
+        /// Returns true if all rules completed within the timeout; false if timed out.
+        /// </summary>
+        public bool WaitForStartupRules(int timeoutSeconds = 120)
+        {
+            var latch = _startupRulesLatch;
+            if (latch == null)
+                return true;  // no startup rules were queued
+
+            _logger.Debug($"WaitForStartupRules: waiting up to {timeoutSeconds}s for startup rules to complete...");
+            var completed = latch.Wait(TimeSpan.FromSeconds(timeoutSeconds));
+            _logger.Debug($"WaitForStartupRules: {(completed ? "all rules completed" : "timed out")}");
+            return completed;
+        }
+
         public void Dispose()
         {
             StopAllTimers();
+            _startupRulesLatch?.Dispose();
+            _startupRulesLatch = null;
         }
     }
 }
