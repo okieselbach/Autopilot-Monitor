@@ -6,7 +6,7 @@ import Link from "next/link";
 export default function DocsPage() {
   return (
     <ProtectedRoute>
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+      <div className="min-h-screen bg-gray-50">
         {/* Header */}
         <header className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-10">
           <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
@@ -29,6 +29,103 @@ export default function DocsPage() {
 
         {/* Content */}
         <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+          {/* Intune Deployment */}
+          <section className="bg-white rounded-lg shadow-md p-8">
+            <div className="flex items-center space-x-3 mb-4">
+              <svg className="w-8 h-8 text-blue-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+              </svg>
+              <h2 className="text-2xl font-bold text-gray-900">Agent Deployment via Intune</h2>
+            </div>
+            <p className="text-gray-700 mb-6">
+              The Autopilot Monitor agent is deployed to devices using a PowerShell bootstrapper script distributed as an
+              Intune <strong>Platform Script</strong>. The script downloads, installs, and registers the agent automatically —
+              no manual steps on the device are required.
+            </p>
+
+            <ol className="space-y-5">
+              <li className="flex gap-4">
+                <span className="flex-shrink-0 w-7 h-7 rounded-full bg-blue-600 text-white text-sm font-bold flex items-center justify-center">1</span>
+                <div>
+                  <p className="font-semibold text-gray-900">Download the bootstrapper script</p>
+                  <p className="text-sm text-gray-600 mt-1 mb-2">
+                    Download the PowerShell script that installs and configures the Autopilot Monitor agent:
+                  </p>
+                  <a
+                    href="https://autopilotmonitor.blob.core.windows.net/agent/Install-AutopilotMonitor.ps1"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
+                    Install-AutopilotMonitor.ps1
+                  </a>
+                </div>
+              </li>
+
+              <li className="flex gap-4">
+                <span className="flex-shrink-0 w-7 h-7 rounded-full bg-blue-600 text-white text-sm font-bold flex items-center justify-center">2</span>
+                <div>
+                  <p className="font-semibold text-gray-900">Create a Platform Script in Intune</p>
+                  <p className="text-sm text-gray-600 mt-1">
+                    In the <strong>Microsoft Intune admin center</strong>, navigate to{" "}
+                    <span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded">Devices → Scripts and remediations → Platform scripts</span>{" "}
+                    and click <strong>+ Add → Windows 10 and later</strong>.
+                  </p>
+                  <div className="mt-3 bg-gray-50 rounded-lg p-4 text-sm space-y-1.5 text-gray-700">
+                    <p className="font-medium text-gray-900 mb-2">Recommended script settings:</p>
+                    <p><span className="font-medium w-48 inline-block">Name:</span> Install Autopilot Monitor</p>
+                    <p><span className="font-medium w-48 inline-block">Script:</span> <em>Upload the downloaded .ps1 file</em></p>
+                    <p><span className="font-medium w-48 inline-block">Run this script using logged on credentials:</span> No</p>
+                    <p><span className="font-medium w-48 inline-block">Enforce script signature check:</span> No</p>
+                    <p><span className="font-medium w-48 inline-block">Run script in 64-bit PowerShell:</span> Yes</p>
+                  </div>
+                </div>
+              </li>
+
+              <li className="flex gap-4">
+                <span className="flex-shrink-0 w-7 h-7 rounded-full bg-blue-600 text-white text-sm font-bold flex items-center justify-center">3</span>
+                <div>
+                  <p className="font-semibold text-gray-900">Assign to a device group</p>
+                  <p className="text-sm text-gray-600 mt-1">
+                    Assign the script to the device group that covers your Autopilot-enrolled devices. The two most common choices are:
+                  </p>
+                  <ul className="mt-2 space-y-1.5 text-sm text-gray-700 ml-2">
+                    <li className="flex items-start gap-2">
+                      <span className="text-blue-600 font-bold mt-0.5">•</span>
+                      <span><strong>All devices</strong> — built-in Intune group, covers every managed device</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-blue-600 font-bold mt-0.5">•</span>
+                      <span>
+                        A dynamic Azure AD group for Autopilot devices using the membership rule{" "}
+                        <span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded">(device.devicePhysicalIds -any _ -startsWith &quot;[ZTDId]&quot;)</span>
+                        {" "}— targets only Autopilot-registered hardware
+                      </span>
+                    </li>
+                  </ul>
+                  <p className="mt-2 text-sm text-gray-500 italic">
+                    The "All Autopilot devices" dynamic group is preferred if you want to limit telemetry to Autopilot-enrolled hardware only.
+                  </p>
+                </div>
+              </li>
+
+              <li className="flex gap-4">
+                <span className="flex-shrink-0 w-7 h-7 rounded-full bg-green-600 text-white text-sm font-bold flex items-center justify-center">✓</span>
+                <div>
+                  <p className="font-semibold text-gray-900">Done</p>
+                  <p className="text-sm text-gray-600 mt-1">
+                    Once the script runs on a device, the agent installs itself, creates a scheduled task under
+                    SYSTEM, and begins monitoring the Autopilot enrollment immediately. Sessions will appear in
+                    your dashboard within seconds of the agent starting.
+                  </p>
+                </div>
+              </li>
+            </ol>
+          </section>
+
           {/* Introduction */}
           <section className="bg-white rounded-lg shadow-md p-8">
             <div className="flex items-center space-x-3 mb-4">
