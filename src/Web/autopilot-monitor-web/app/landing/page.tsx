@@ -932,7 +932,7 @@ export default function LandingPage() {
           {/* Bottom bar */}
           <div className="mt-8 pt-5 border-t border-gray-200 flex flex-col sm:flex-row items-center justify-between gap-2">
             <p className="text-[11px] text-gray-400">
-              &copy; 2026 Autopilot Monitor by Oliver Kieselbach. Powered by Azure and Microsoft Identity.
+              &copy; 2026 Autopilot Monitor. Built with ❤️ by Oliver Kieselbach. Powered by Azure.
             </p>
             <p className="text-[11px] text-gray-400">
               Open source. Star us on{' '}
