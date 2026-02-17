@@ -416,6 +416,22 @@ export default function SessionDetailPage() {
     [events, severityFilters]
   );
 
+  // Calculate enrollment duration from events (first event → enrollment_complete or last event)
+  // More accurate than session.durationSeconds which is based on registration StartedAt
+  const enrollmentDurationFromEvents = useMemo(() => {
+    if (events.length === 0) return null;
+    const timestamps = events.map(e => new Date(e.timestamp).getTime());
+    const firstEventTime = Math.min(...timestamps);
+    const completeEvent = events.find(e => e.eventType === "enrollment_complete");
+    const endTime = completeEvent
+      ? new Date(completeEvent.timestamp).getTime()
+      : Math.max(...timestamps);
+    const durationSec = Math.round((endTime - firstEventTime) / 1000);
+    if (durationSec < 60) return `${durationSec}s`;
+    if (durationSec < 3600) return `${Math.floor(durationSec / 60)}m ${durationSec % 60}s`;
+    return `${Math.floor(durationSec / 3600)}h ${Math.floor((durationSec % 3600) / 60)}m`;
+  }, [events]);
+
   // Group events by phase with memoization
   const { eventsByPhase, orderedPhases } = useMemo(() => {
     // Sort events by sequence (chronological order)
@@ -562,7 +578,7 @@ export default function SessionDetailPage() {
                 <InfoItem label="Session ID" value={session.sessionId} copyText={session.sessionId} />
                 <InfoItem label="Status" value={<StatusBadge status={session.status} failureReason={session.failureReason} />} />
                 <InfoItem label="Events" value={session.eventCount.toString()} />
-                <InfoItem label="Duration" value={`${Math.round(session.durationSeconds / 60)} min`} />
+                <InfoItem label="Duration" value={enrollmentDurationFromEvents ?? `${Math.round(session.durationSeconds / 60)} min`} />
                 {session.diagnosticsBlobName && (
                   <InfoItem
                     label="Diagnostics"
