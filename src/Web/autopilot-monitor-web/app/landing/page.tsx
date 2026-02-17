@@ -11,6 +11,106 @@ const PLATFORM_STATS = {
   uniqueDeviceModels: 1,
 };
 
+const QUICK_START = [
+  {
+    title: "Sign in and grant access",
+    description: "Authenticate with Microsoft and approve tenant access once.",
+  },
+  {
+    title: "Deploy bootstrapper in Intune",
+    description: "Assign the bootstrap script to your Autopilot scope.",
+  },
+  {
+    title: "Watch live telemetry",
+    description: "Track phases, apps, failures, and actions in real time.",
+  },
+];
+
+const FLOW_STEPS = [
+  {
+    title: "Intune assignment",
+    description: "Target the bootstrapper script to your selected Autopilot device groups.",
+    icon: "users",
+  },
+  {
+    title: "Bootstrapper execution",
+    description: "Device runs the bootstrapper script and installs Autopilot Monitor Agent.",
+    icon: "code",
+  },
+  {
+    title: "Live monitoring",
+    description: "Phase transitions, app installs, and progress are captured continuously.",
+    icon: "monitor",
+  },
+  {
+    title: "Event upload",
+    description: "Predefined and custom events are uploaded to the backend pipeline.",
+    icon: "cloud",
+  },
+  {
+    title: "Rule analysis",
+    description: "Backend correlates phases and runs analyze rules for instant insights.",
+    icon: "rules",
+  },
+  {
+    title: "Completion and notifications",
+    description: "Session status is finalized and Teams notifications are triggered.",
+    icon: "bell",
+  },
+  {
+    title: "Diagnostics download",
+    description: "Grab diagnostic bundles quickly for fast root-cause validation.",
+    icon: "download",
+  },
+];
+
+function StepIcon({ icon }: { icon: string }) {
+  switch (icon) {
+    case "users":
+      return (
+        <svg className="w-4 h-4 text-blue-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-1a4 4 0 00-5-3.87M9 20H2v-1a4 4 0 015-3.87m9-5.13a4 4 0 11-8 0 4 4 0 018 0z" />
+        </svg>
+      );
+    case "code":
+      return (
+        <svg className="w-4 h-4 text-blue-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="m8 9-3 3 3 3m8-6 3 3-3 3M13 7l-2 10" />
+        </svg>
+      );
+    case "monitor":
+      return (
+        <svg className="w-4 h-4 text-blue-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M3 4h18v12H3zM8 20h8m-4-4v4m-3-8 2-2 2 3 3-4 2 3" />
+        </svg>
+      );
+    case "cloud":
+      return (
+        <svg className="w-4 h-4 text-blue-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M7 18a4 4 0 01-.3-8A5 5 0 1117 8h1a4 4 0 010 8h-3m-3 0v-7m0 7-3-3m3 3 3-3" />
+        </svg>
+      );
+    case "rules":
+      return (
+        <svg className="w-4 h-4 text-blue-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5h10M9 9h10M9 13h10M9 17h10M4 5h.01M4 9h.01M4 13h.01M4 17h.01" />
+        </svg>
+      );
+    case "bell":
+      return (
+        <svg className="w-4 h-4 text-blue-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2c0 .5-.2 1-.6 1.4L4 17h5m6 0a3 3 0 11-6 0h6z" />
+        </svg>
+      );
+    default:
+      return (
+        <svg className="w-4 h-4 text-blue-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v10m0 0-3-3m3 3 3-3M5 19h14" />
+        </svg>
+      );
+  }
+}
+
 export default function LandingPage() {
   const { login, isAuthenticated, isLoading, user, isPreviewBlocked } = useAuth();
   const router = useRouter();
@@ -46,8 +146,12 @@ export default function LandingPage() {
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center space-x-3">
             <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-lg flex items-center justify-center">
-              <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              <svg className="w-6 h-6 text-white" viewBox="0 0 24 24" fill="none">
+                <rect x="5.0" y="12.2" width="2.8" height="7.8" rx="0.9" fill="currentColor" />
+                <rect x="10.6" y="10.9" width="2.8" height="9.1" rx="0.9" fill="currentColor" />
+                <rect x="16.2" y="8.6" width="2.8" height="11.4" rx="0.9" fill="currentColor" />
+                <path d="M4.4 8.9L8.6 6.8L12.0 7.4L15.4 5.5L18.8 4.9" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M17.8 4.2L19.1 4.9L17.9 5.9" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </div>
             <span className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
@@ -67,10 +171,28 @@ export default function LandingPage() {
       <div className="pt-32 pb-20 px-6">
         <div className="max-w-7xl mx-auto">
           <div className="text-center max-w-4xl mx-auto">
-            <h1 className="text-6xl font-bold text-gray-900 mb-6 leading-tight">
+            <div className="mb-7 inline-flex items-center gap-3 rounded-2xl border border-blue-300/70 bg-gradient-to-r from-blue-50 via-indigo-50 to-blue-50 px-4 py-2.5 shadow-md ring-1 ring-blue-200/60">
+              <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-blue-600 text-white shadow-sm">
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-1a4 4 0 00-5-3.87M9 20H2v-1a4 4 0 015-3.87m9-5.13a4 4 0 11-8 0 4 4 0 018 0z" />
+                </svg>
+              </span>
+              <p className="text-sm font-semibold text-blue-900">
+                Community-driven Analyze Rules support
+                <span className="font-normal text-blue-800">: discover, build, and share rules for everyone.</span>
+              </p>
+            </div>
+            <div className="relative inline-block mb-6">
+              <h1 className="text-6xl font-bold text-gray-900 leading-tight">
               Advanced Monitoring for
               <span className="bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent"> Windows Enrollments</span>
-            </h1>
+              </h1>
+              <div className="pointer-events-none absolute -right-10 -top-1 rotate-[13deg] inline-flex items-center rounded-md border border-amber-300/80 bg-gradient-to-r from-amber-500 to-orange-500 px-3 py-1 shadow-md">
+                <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-white whitespace-nowrap">
+                  Private Preview Running
+                </span>
+              </div>
+            </div>
             <p className="text-xl text-gray-600 mb-8 leading-relaxed">
               Real-time insights, intelligent troubleshooting, and comprehensive analytics for your Autopilot deployments.
               Monitor every phase, run customizable analyze rules, and resolve issues faster than ever before.
@@ -78,13 +200,13 @@ export default function LandingPage() {
             <div className="flex items-center justify-center space-x-4">
               <button
                 onClick={login}
-                className="px-8 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg font-semibold text-lg shadow-xl hover:shadow-2xl transform hover:-translate-y-1 transition-all flex items-center space-x-2"
+                className="px-8 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg font-semibold text-lg shadow-xl hover:shadow-2xl transform hover:-translate-y-0.5 transition-all flex items-center space-x-2"
               >
                 <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
                   <path d="M10 12a2 2 0 100-4 2 2 0 000 4z" />
                   <path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd" />
                 </svg>
-                <span>Get Started with Microsoft</span>
+                <span>Get Started</span>
               </button>
             </div>
             <p className="mt-4 text-sm text-gray-500">
@@ -127,11 +249,181 @@ export default function LandingPage() {
         </div>
       </div>
 
+      {/* Eye-Catcher Workflow Section */}
+      <section className="py-20 px-6">
+        <div className="max-w-7xl mx-auto">
+          <div className="text-center max-w-4xl mx-auto">
+            <p className="text-sm font-semibold text-blue-600 uppercase tracking-[0.22em] mb-3">
+              How It Works
+            </p>
+            <h2 className="text-4xl md:text-5xl font-bold text-gray-900 leading-tight">
+              From Intune rollout to deep insights in minutes
+            </h2>
+            <p className="mt-5 text-lg text-gray-600 leading-relaxed">
+              Simple onboarding, clear phase visibility, and automated analysis in one workflow.
+              Deploy once, monitor everything, and react faster when issues appear.
+            </p>
+          </div>
+
+          <div className="mt-10 grid grid-cols-1 md:grid-cols-3 gap-4">
+            {QUICK_START.map((item, index) => (
+              <div
+                key={item.title}
+                className="rounded-2xl border border-blue-100 bg-white/90 backdrop-blur-sm p-5 shadow-md"
+              >
+                <div className="inline-flex h-7 min-w-7 items-center justify-center rounded-full bg-blue-600 text-white text-xs font-bold px-2">
+                  {index + 1}
+                </div>
+                <h3 className="mt-3 text-lg font-semibold text-gray-900">{item.title}</h3>
+                <p className="mt-2 text-sm text-gray-600 leading-relaxed">{item.description}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-8 md:mt-10 text-center">
+            <p className="text-sm md:text-base text-gray-600 max-w-3xl mx-auto leading-relaxed">
+              This is what happens after rollout: each phase is captured, correlated, and translated into clear, actionable insights.
+            </p>
+          </div>
+
+          <div className="mt-6 md:mt-7 rounded-3xl border border-blue-100 bg-gradient-to-br from-white via-blue-50/60 to-indigo-50/60 p-5 md:p-6 shadow-xl overflow-hidden relative">
+            <div className="absolute -top-16 -left-16 w-48 h-48 bg-blue-200/30 blur-3xl rounded-full pointer-events-none" />
+            <div className="absolute -bottom-20 -right-16 w-56 h-56 bg-indigo-200/25 blur-3xl rounded-full pointer-events-none" />
+
+            <div className="relative z-10">
+              <div className="flex items-center justify-between gap-4 flex-wrap">
+                <div>
+                  <h3 className="text-gray-900 text-2xl md:text-3xl font-bold">
+                    One pipeline from deployment to action
+                  </h3>
+                </div>
+                <button
+                  onClick={login}
+                  className="px-5 py-2.5 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold shadow-lg hover:shadow-xl transition-all"
+                >
+                  Start Now
+                </button>
+              </div>
+
+              <div className="mt-6 relative">
+                {/* Desktop: independent left/right stacks for true vertical overlap */}
+                <div className="hidden md:grid grid-cols-[minmax(0,1fr)_40px_minmax(0,1fr)] gap-4 items-start relative isolate">
+                  <div className="space-y-20 relative z-30">
+                    {FLOW_STEPS.filter((_, i) => i % 2 === 0).map((step, leftIndex) => {
+                      const index = leftIndex * 2;
+                      return (
+                        <div
+                          key={step.title}
+                          className="step-card relative rounded-xl border border-blue-100 bg-white/90 backdrop-blur-sm p-3 md:p-3.5 shadow-md"
+                          style={{ animationDelay: `${index * 0.08}s` }}
+                        >
+                          <div className="absolute right-[-36px] top-[calc(50%+1px)] -translate-y-1/2 h-px w-[36px] bg-blue-200 z-10" />
+                          <span
+                            className="dot-pulse absolute right-[-42px] top-[calc(50%-4px)] -translate-y-1/2 h-3 w-3 rounded-full bg-blue-500 ring-4 ring-white z-50"
+                            style={{ animationDelay: `${index * 1.8}s` }}
+                          />
+                          <p className="text-blue-600 text-xs font-semibold uppercase tracking-[0.18em]">
+                            Step {index + 1}
+                          </p>
+                          <div className="mt-1.5 flex items-start justify-between gap-3">
+                            <h4 className="text-gray-900 font-semibold">{step.title}</h4>
+                            <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-blue-200 bg-blue-50">
+                              <StepIcon icon={step.icon} />
+                            </span>
+                          </div>
+                          <p className="mt-1 text-sm text-gray-600 leading-relaxed">{step.description}</p>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="relative self-stretch z-0">
+                    <div className="absolute left-1/2 -translate-x-1/2 top-2 bottom-2 w-px bg-blue-200 z-0" />
+                  </div>
+
+                  <div className="space-y-20 pt-24 relative z-30">
+                    {FLOW_STEPS.filter((_, i) => i % 2 === 1).map((step, rightIndex) => {
+                      const index = rightIndex * 2 + 1;
+                      return (
+                        <div
+                          key={step.title}
+                          className="step-card relative rounded-xl border border-blue-100 bg-white/90 backdrop-blur-sm p-3 md:p-3.5 shadow-md"
+                          style={{ animationDelay: `${index * 0.08}s` }}
+                        >
+                          <div className="absolute left-[-36px] top-[calc(50%+1px)] -translate-y-1/2 h-px w-[36px] bg-blue-200 z-10" />
+                          <span
+                            className="dot-pulse absolute left-[-42px] top-[calc(50%-4px)] -translate-y-1/2 h-3 w-3 rounded-full bg-blue-500 ring-4 ring-white z-50"
+                            style={{ animationDelay: `${index * 1.8}s` }}
+                          />
+                          <p className="text-blue-600 text-xs font-semibold uppercase tracking-[0.18em]">
+                            Step {index + 1}
+                          </p>
+                          <div className="mt-1.5 flex items-start justify-between gap-3">
+                            <h4 className="text-gray-900 font-semibold">{step.title}</h4>
+                            <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-blue-200 bg-blue-50">
+                              <StepIcon icon={step.icon} />
+                            </span>
+                          </div>
+                          <p className="mt-1 text-sm text-gray-600 leading-relaxed">{step.description}</p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Mobile: linear timeline */}
+                <div className="md:hidden relative isolate">
+                  <div className="absolute left-4 top-3 bottom-3 w-px bg-blue-200" />
+                  <div className="space-y-5">
+                    {FLOW_STEPS.map((step, index) => (
+                      <div key={step.title} className="relative">
+                        <div className="absolute left-4 top-[calc(2rem+1px)] h-px w-6 bg-blue-200 z-10" />
+                        <span
+                          className="dot-pulse absolute left-4 top-[calc(1.75rem-4px)] h-3 w-3 rounded-full bg-blue-500 ring-4 ring-white z-50"
+                          style={{ animationDelay: `${index * 1.8}s` }}
+                        />
+                        <div
+                          className="step-card ml-10 rounded-xl border border-blue-100 bg-white/90 backdrop-blur-sm p-3 shadow-md"
+                          style={{ animationDelay: `${index * 0.08}s` }}
+                        >
+                          <p className="text-blue-600 text-xs font-semibold uppercase tracking-[0.18em]">
+                            Step {index + 1}
+                          </p>
+                          <div className="mt-1.5 flex items-start justify-between gap-3">
+                            <h4 className="text-gray-900 font-semibold">{step.title}</h4>
+                            <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-blue-200 bg-blue-50">
+                              <StepIcon icon={step.icon} />
+                            </span>
+                          </div>
+                          <p className="mt-1 text-sm text-gray-600 leading-relaxed">{step.description}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-3">
+                {[
+                  "Know exactly what happens at each enrollment phase",
+                  "Detect app bottlenecks and policy issues immediately",
+                  "Move from alert to diagnostics with minimal friction",
+                ].map(item => (
+                  <div key={item} className="rounded-xl border border-blue-200 bg-blue-50/80 p-3.5 text-sm text-blue-900">
+                    {item}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* Features Grid */}
       <div className="py-20 px-6 bg-white/50 backdrop-blur-sm">
         <div className="max-w-7xl mx-auto">
           <h2 className="text-3xl font-bold text-center text-gray-900 mb-12">
-            Everything you need to monitor Autopilot
+            Everything you need for full Autopilot visibility
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             {/* Feature 1 - Real-Time Monitoring */}
@@ -296,13 +588,13 @@ export default function LandingPage() {
             },
             {
               label: "User-Facing Progress Page",
-              monitor: "Branded progress view with live app status & download info",
+              monitor: "Progress view with live app status & download info",
               standard: "Generic ESP screen — no details for the end user",
             },
             {
               label: "Fleet Health Dashboard",
               monitor: "Success rates, failure trends, avg. duration across all devices",
-              standard: "Manual report extraction from Intune — no live overview",
+              standard: "Limited manual report extraction from Intune",
             },
             {
               label: "Analyze Rules",
@@ -316,13 +608,8 @@ export default function LandingPage() {
             },
             {
               label: "Geo & Network Context",
-              monitor: "Device location, ISP, and network info captured at enrollment start",
+              monitor: "Device location, and network info captured at enrollment start",
               standard: "No location or network context in deployment records",
-            },
-            {
-              label: "Hardware Insights",
-              monitor: "Manufacturer, model, and cert identity correlated per session",
-              standard: "Device info only available post-enrollment in Intune",
             },
             {
               label: "Performance Monitoring",
@@ -379,7 +666,7 @@ export default function LandingPage() {
           </p>
           <button
             onClick={login}
-            className="px-8 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg font-semibold text-lg shadow-xl hover:shadow-2xl transform hover:-translate-y-1 transition-all"
+            className="px-8 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg font-semibold text-lg shadow-xl hover:shadow-2xl transform hover:-translate-y-0.5 transition-all"
           >
             Start Monitoring Now
           </button>
@@ -392,6 +679,51 @@ export default function LandingPage() {
           <p>&copy; 2026 Autopilot Monitor developed by Oliver Kieselbach and powered by Azure and Microsoft Identity.</p>
         </div>
       </footer>
+
+      <style jsx>{`
+        @keyframes stepReveal {
+          0% {
+            transform: translateY(8px);
+            opacity: 0;
+          }
+          100% {
+            transform: translateY(0);
+            opacity: 1;
+          }
+        }
+
+        @keyframes dotPulse {
+          0%,
+          100% {
+            box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.04);
+            transform: scale(1);
+          }
+          2% {
+            box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.16);
+            transform: scale(1.01);
+          }
+          8% {
+            box-shadow: 0 0 0 5px rgba(59, 130, 246, 0.30);
+            transform: scale(1.05);
+          }
+          14.5% {
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.18);
+            transform: scale(1.02);
+          }
+          15.87% {
+            box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.04);
+            transform: scale(1);
+          }
+        }
+
+        .step-card {
+          animation: stepReveal 0.45s ease-out both;
+        }
+
+        .dot-pulse {
+          animation: dotPulse 12.6s linear infinite;
+        }
+      `}</style>
     </div>
   );
 }
