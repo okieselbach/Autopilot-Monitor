@@ -425,7 +425,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                 case EventId_ProvisioningWillNotLaunch: // 360
                     eventType = "hello_provisioning_willnotlaunch";
                     severity = EventSeverity.Warning;
-                    message = "Windows Hello for Business provisioning prerequisites not met (snapshot only, not a final state";
+                    message = "Windows Hello for Business provisioning prerequisites not met (snapshot only, not a final state)";
                     // DO NOT mark Hello as completed - event 360 is just a snapshot and can change
                     _logger.Info("Windows Hello provisioning prerequisites not met (snapshot, not terminal)");
                     break;

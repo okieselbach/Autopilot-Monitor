@@ -1585,6 +1585,19 @@ function DeviceDetailsCard({ events }: { events: EnrollmentEvent[] }) {
   const estimatedBootTime = (bootTime?.bootTimeUtc || bootTime?.bootTime)
     ? new Date(bootTime?.bootTimeUtc ?? bootTime?.bootTime)
     : null;
+
+  // Uptime until enrollment starts: calculated from boot time to first event timestamp.
+  // More accurate than stored uptimeMinutes, which reflects when CollectBootTime() ran (after agent_started).
+  const uptimeUntilEnrollment = useMemo(() => {
+    if (!estimatedBootTime || events.length === 0) return null;
+    const firstEventMs = Math.min(...events.map(e => new Date(e.timestamp).getTime()));
+    const diffMs = firstEventMs - estimatedBootTime.getTime();
+    if (diffMs < 0) return null;
+    const totalMinutes = Math.floor(diffMs / 60000);
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    return `${hours}h ${minutes}m`;
+  }, [estimatedBootTime, events]);
   const osInfo = getEventData("os_info");
   const networkAdapters = getEventData("network_adapters");
   const dnsConfig = getEventData("dns_configuration");
@@ -1642,7 +1655,7 @@ function DeviceDetailsCard({ events }: { events: EnrollmentEvent[] }) {
               {estimatedBootTime && (
                 <DetailRow label="Boot Time" value={estimatedBootTime.toLocaleString([], { dateStyle: "short", timeStyle: "medium" })} />
               )}
-              {bootTime?.uptimeMinutes && <DetailRow label="Uptime until enrollment starts" value={`${Math.floor(bootTime.uptimeMinutes / 60)}h ${bootTime.uptimeMinutes % 60}m`} />}
+              {uptimeUntilEnrollment && <DetailRow label="Uptime until enrollment starts" value={uptimeUntilEnrollment} />}
               {agentStarted?.agentVersion && <DetailRow label="Monitor Agent Version" value={agentStarted.agentVersion.replace(/\+([0-9a-f]{7})[0-9a-f]+$/, '+$1')} />}
               {imeVersion && <DetailRow label="IME Agent Version" value={imeVersion.version ?? imeVersion.agentVersion ?? "Unknown"} />}
               {(deviceLocation?.country || deviceLocation?.Country) && (
