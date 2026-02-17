@@ -141,12 +141,13 @@ export default function LandingPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50">
-      {/* Navigation */}
-      <nav className="absolute top-0 left-0 right-0 z-10 p-6">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-lg flex items-center justify-center">
-              <svg className="w-6 h-6 text-white" viewBox="0 0 24 24" fill="none">
+      {/* Navigation — sticky top bar */}
+      <nav className="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-gray-200/60 shadow-sm">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 flex items-center justify-between h-14">
+          {/* Left — Logo + Name */}
+          <a href="#" className="flex items-center space-x-2.5 shrink-0">
+            <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-lg flex items-center justify-center">
+              <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none">
                 <rect x="5.0" y="12.2" width="2.8" height="7.8" rx="0.9" fill="currentColor" />
                 <rect x="10.6" y="10.9" width="2.8" height="9.1" rx="0.9" fill="currentColor" />
                 <rect x="16.2" y="8.6" width="2.8" height="11.4" rx="0.9" fill="currentColor" />
@@ -154,21 +155,44 @@ export default function LandingPage() {
                 <path d="M17.8 4.2L19.1 4.9L17.9 5.9" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </div>
-            <span className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-              Autopilot Monitor
+            <span className="text-lg font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
+              <span className="hidden md:inline">Autopilot Monitor</span>
+              <span className="md:hidden">AP Monitor</span>
             </span>
+          </a>
+
+          {/* Center — Section Links */}
+          <div className="hidden sm:flex items-center gap-1">
+            <a href="#features" className="px-3 py-1.5 text-sm font-medium text-gray-500 hover:text-blue-600 rounded-md hover:bg-blue-50/50 transition-colors">Features</a>
+            <a href="#how-it-works" className="px-3 py-1.5 text-sm font-medium text-gray-500 hover:text-blue-600 rounded-md hover:bg-blue-50/50 transition-colors">How It Works</a>
+            <a href="#comparison" className="px-3 py-1.5 text-sm font-medium text-gray-500 hover:text-blue-600 rounded-md hover:bg-blue-50/50 transition-colors">Comparison</a>
           </div>
-          <button
-            onClick={login}
-            className="px-6 py-2 bg-white text-blue-600 rounded-lg font-semibold shadow-md hover:shadow-lg transform hover:-translate-y-0.5 transition-all"
-          >
-            Sign In
-          </button>
+
+          {/* Right — GitHub + Sign In */}
+          <div className="flex items-center gap-2 shrink-0">
+            <a
+              href="https://github.com/okieselbach/Autopilot-Monitor"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-600 rounded-full border border-gray-200 hover:border-gray-300 hover:bg-gray-50 transition-colors"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" />
+              </svg>
+              <span className="hidden sm:inline">GitHub</span>
+            </a>
+            <button
+              onClick={login}
+              className="px-4 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg text-sm font-semibold shadow-sm hover:shadow-md transition-all"
+            >
+              Sign In
+            </button>
+          </div>
         </div>
       </nav>
 
       {/* Hero Section */}
-      <div className="pt-32 pb-20 px-6">
+      <div className="pt-20 pb-20 px-6">
         <div className="max-w-7xl mx-auto">
           <div className="text-center max-w-4xl mx-auto">
             <div className="mb-7 inline-flex items-center gap-3 rounded-2xl border border-blue-300/70 bg-gradient-to-r from-blue-50 via-indigo-50 to-blue-50 px-4 py-2.5 shadow-md ring-1 ring-blue-200/60">
@@ -210,47 +234,198 @@ export default function LandingPage() {
               </button>
             </div>
             <p className="mt-4 text-sm text-gray-500">
-              Free to use • Open-Source
+              Free to use • Open-Source • Sign in to request early access
             </p>
 
-            {/* Platform Stats - Since Release (Static) - Always show, even if 0 */}
-            <div className="mt-12 pt-12 border-t border-gray-200">
-              <p className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-6">
-                Since Release
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-8">
-                <div className="text-center">
-                  <div className="text-4xl font-bold text-blue-600 mb-2">
-                    {PLATFORM_STATS.totalEnrollments.toLocaleString()}
+            {/* Platform Stats - compact inline */}
+            <div className="mt-10 flex items-center justify-center gap-6 text-xs text-gray-400">
+              <span><span className="font-semibold text-gray-600">{PLATFORM_STATS.totalEnrollments.toLocaleString()}</span> enrollments monitored</span>
+              <span className="w-px h-3 bg-gray-300" />
+              <span><span className="font-semibold text-gray-600">{PLATFORM_STATS.totalTenants.toLocaleString()}</span> organizations</span>
+              <span className="w-px h-3 bg-gray-300" />
+              <span><span className="font-semibold text-gray-600">{PLATFORM_STATS.uniqueDeviceModels.toLocaleString()}</span> device models</span>
+            </div>
+
+            {/* Product Preview Showcase */}
+            <div className="mt-14 relative max-w-5xl mx-auto">
+              {/* Glow effects */}
+              <div className="absolute -top-10 left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-gradient-to-br from-blue-400/20 via-indigo-400/15 to-purple-400/10 blur-3xl rounded-full pointer-events-none" />
+
+              {/* Main screenshot — Fleet Health Dashboard */}
+              <div className="relative z-10 rounded-xl border border-gray-200/80 bg-white shadow-2xl overflow-hidden">
+                {/* Browser chrome */}
+                <div className="flex items-center gap-1.5 px-4 py-2.5 bg-gray-50 border-b border-gray-200">
+                  <div className="w-2.5 h-2.5 rounded-full bg-red-400" />
+                  <div className="w-2.5 h-2.5 rounded-full bg-amber-400" />
+                  <div className="w-2.5 h-2.5 rounded-full bg-green-400" />
+                  <div className="ml-3 flex-1 bg-gray-200/80 rounded-md px-3 py-1 text-[10px] text-gray-400 font-mono">autopilotmonitor.com/fleet-health</div>
+                </div>
+                {/* Fleet Health mock content */}
+                <div className="p-5 md:p-7">
+                  <div className="flex items-center justify-between mb-5">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-6 h-6 rounded bg-blue-100 flex items-center justify-center">
+                        <svg className="w-3.5 h-3.5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6m6 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0h6m4-10v10" /></svg>
+                      </div>
+                      <h4 className="text-lg font-bold text-gray-900">Fleet Health</h4>
+                    </div>
+                    <div className="flex gap-1.5">
+                      <span className="px-3 py-1 text-[10px] font-semibold bg-blue-600 text-white rounded-md">Last 7 Days</span>
+                      <span className="px-3 py-1 text-[10px] font-medium text-gray-500 bg-gray-100 rounded-md">Last 30 Days</span>
+                      <span className="px-3 py-1 text-[10px] font-medium text-gray-500 bg-gray-100 rounded-md hidden sm:block">Last 90 Days</span>
+                    </div>
                   </div>
-                  <div className="text-sm text-gray-600">
-                    Enrollments Monitored
+                  {/* KPI cards */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+                    <div className="rounded-lg border-l-4 border-l-green-500 border border-gray-100 bg-green-50/50 p-3">
+                      <p className="text-[10px] text-gray-500 mb-0.5">Success Rate</p>
+                      <p className="text-2xl font-bold text-green-600">80.0%</p>
+                      <p className="text-[9px] text-gray-400">8 of 10 enrollments</p>
+                    </div>
+                    <div className="rounded-lg border-l-4 border-l-blue-500 border border-gray-100 bg-blue-50/50 p-3">
+                      <p className="text-[10px] text-gray-500 mb-0.5">Avg. Enrollment Time</p>
+                      <p className="text-2xl font-bold text-blue-600">18 min</p>
+                      <p className="text-[9px] text-gray-400">Completed enrollments</p>
+                    </div>
+                    <div className="rounded-lg border-l-4 border-l-red-500 border border-gray-100 bg-red-50/50 p-3">
+                      <p className="text-[10px] text-gray-500 mb-0.5">Failed</p>
+                      <p className="text-2xl font-bold text-red-500">2</p>
+                      <p className="text-[9px] text-gray-400">Needs attention</p>
+                    </div>
+                    <div className="rounded-lg border-l-4 border-l-indigo-500 border border-gray-100 bg-indigo-50/50 p-3">
+                      <p className="text-[10px] text-gray-500 mb-0.5">Active Now</p>
+                      <p className="text-2xl font-bold text-indigo-600">0</p>
+                      <p className="text-[9px] text-gray-400">Currently enrolling</p>
+                    </div>
+                  </div>
+                  {/* Chart area */}
+                  <div className="rounded-lg border border-gray-100 bg-gray-50/60 p-4">
+                    <p className="text-sm font-semibold text-gray-800 mb-3">Enrollments Timeline</p>
+                    <div className="flex items-end gap-3 h-28 px-2">
+                      {[0, 0, 0, { g: 65, r: 25 }, { g: 50, r: 30 }, 0, { g: 40, r: 20 }, 0].map((bar, i) => (
+                        <div key={i} className="flex-1 flex flex-col items-center gap-0.5">
+                          {typeof bar === 'object' ? (
+                            <div className="w-full flex flex-col gap-px">
+                              <div className="w-full rounded-t bg-green-400" style={{ height: `${bar.g}px` }} />
+                              <div className="w-full rounded-b bg-red-300" style={{ height: `${bar.r}px` }} />
+                            </div>
+                          ) : (
+                            <div className="w-full rounded bg-gray-200/60" style={{ height: '2px' }} />
+                          )}
+                          <span className="text-[8px] text-gray-400 mt-1">{['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun', 'Mon'][i]}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-4 mt-2 ml-2">
+                      <span className="flex items-center gap-1 text-[9px] text-gray-500"><span className="w-2 h-2 rounded-sm bg-green-400" />Success (8)</span>
+                      <span className="flex items-center gap-1 text-[9px] text-gray-500"><span className="w-2 h-2 rounded-sm bg-red-300" />Failed (2)</span>
+                    </div>
                   </div>
                 </div>
-                <div className="text-center">
-                  <div className="text-4xl font-bold text-indigo-600 mb-2">
-                    {PLATFORM_STATS.totalTenants.toLocaleString()}
+              </div>
+
+              {/* Floating card — Session Details (overlapping bottom-left) */}
+              <div className="absolute -bottom-8 -left-4 md:-left-8 z-20 w-64 md:w-80 rounded-xl border border-gray-200/80 bg-white shadow-xl overflow-hidden transform rotate-[-2deg] hover:rotate-0 transition-transform duration-300">
+                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-50 border-b border-gray-100">
+                  <div className="w-2 h-2 rounded-full bg-red-400" />
+                  <div className="w-2 h-2 rounded-full bg-amber-400" />
+                  <div className="w-2 h-2 rounded-full bg-green-400" />
+                  <span className="ml-2 text-[8px] text-gray-400 font-mono">Session Details</span>
+                </div>
+                <div className="p-3.5">
+                  <p className="text-xs font-bold text-gray-900 mb-2">Enrollment Progress</p>
+                  {/* Progress steps */}
+                  <div className="flex items-center gap-0">
+                    {['Start', 'Prep', 'Setup', 'Apps', 'Account', 'Apps', 'Final', 'Done'].map((step, i) => (
+                      <div key={i} className="flex items-center">
+                        <div className="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center shrink-0">
+                          <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                        </div>
+                        {i < 7 && <div className="w-2 md:w-3 h-0.5 bg-green-400" />}
+                      </div>
+                    ))}
                   </div>
-                  <div className="text-sm text-gray-600">
-                    Active Organizations
+                  <div className="flex justify-between mt-1 px-0.5">
+                    {['Start', '', '', '', '', '', '', 'Done'].map((label, i) => (
+                      <span key={i} className="text-[7px] text-gray-400">{label}</span>
+                    ))}
+                  </div>
+                  {/* Analysis result */}
+                  <div className="mt-3 rounded-lg border-l-3 border-l-orange-400 bg-orange-50 p-2">
+                    <div className="flex items-center gap-1.5 mb-0.5">
+                      <span className="px-1.5 py-0.5 text-[7px] font-bold bg-orange-500 text-white rounded">HIGH</span>
+                      <span className="text-[8px] text-gray-500 font-mono">ANALYZE-APP-006</span>
+                    </div>
+                    <p className="text-[10px] font-semibold text-gray-800">Reboot Required Loop</p>
+                    <div className="flex items-center gap-1 mt-1">
+                      <span className="text-[8px] text-gray-400">Confidence:</span>
+                      <div className="w-12 h-1.5 bg-gray-200 rounded-full overflow-hidden"><div className="w-[70%] h-full bg-orange-500 rounded-full" /></div>
+                      <span className="text-[8px] text-gray-500">70%</span>
+                    </div>
                   </div>
                 </div>
-                <div className="text-center">
-                  <div className="text-4xl font-bold text-purple-600 mb-2">
-                    {PLATFORM_STATS.uniqueDeviceModels.toLocaleString()}
+              </div>
+
+              {/* Floating card — Performance Metrics (overlapping bottom-right) */}
+              <div className="absolute -bottom-6 -right-4 md:-right-6 z-20 w-60 md:w-72 rounded-xl border border-gray-200/80 bg-white shadow-xl overflow-hidden transform rotate-[2deg] hover:rotate-0 transition-transform duration-300">
+                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-50 border-b border-gray-100">
+                  <div className="w-2 h-2 rounded-full bg-red-400" />
+                  <div className="w-2 h-2 rounded-full bg-amber-400" />
+                  <div className="w-2 h-2 rounded-full bg-green-400" />
+                  <span className="ml-2 text-[8px] text-gray-400 font-mono">Performance Metrics</span>
+                </div>
+                <div className="p-3.5">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="rounded-lg border border-gray-100 p-2">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[9px] text-gray-500">CPU</span>
+                        <span className="text-[10px] font-bold text-red-500">92%</span>
+                      </div>
+                      <div className="h-6 flex items-end gap-px">
+                        {[40, 55, 70, 85, 92, 88, 75, 60, 80, 92].map((v, i) => (
+                          <div key={i} className="flex-1 rounded-t bg-red-400/70" style={{ height: `${v * 0.24}px` }} />
+                        ))}
+                      </div>
+                    </div>
+                    <div className="rounded-lg border border-gray-100 p-2">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[9px] text-gray-500">Memory</span>
+                        <span className="text-[10px] font-bold text-amber-600">77%</span>
+                      </div>
+                      <div className="h-6 flex items-end gap-px">
+                        {[60, 65, 68, 70, 72, 75, 74, 76, 77, 77].map((v, i) => (
+                          <div key={i} className="flex-1 rounded-t bg-amber-400/70" style={{ height: `${v * 0.24}px` }} />
+                        ))}
+                      </div>
+                    </div>
                   </div>
-                  <div className="text-sm text-gray-600">
-                    Different Device Models
+                  {/* Download progress */}
+                  <div className="mt-2.5">
+                    <p className="text-[9px] font-semibold text-gray-700 mb-1.5">Download Progress</p>
+                    {['RealmJoin Setup Launcher', 'BGInfo46', 'CMTrace.exe'].map((app, i) => (
+                      <div key={i} className="mb-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[8px] text-gray-600 flex items-center gap-1">
+                            <svg className="w-2.5 h-2.5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                            {app}
+                          </span>
+                          <span className="text-[8px] text-green-600 font-medium">100%</span>
+                        </div>
+                        <div className="w-full h-1 bg-gray-100 rounded-full mt-0.5"><div className="w-full h-full bg-green-500 rounded-full" /></div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               </div>
             </div>
+            {/* spacer for floating cards */}
+            <div className="h-14" />
           </div>
         </div>
       </div>
 
       {/* Eye-Catcher Workflow Section */}
-      <section className="py-20 px-6">
+      <section id="how-it-works" className="py-20 px-6 scroll-mt-14">
         <div className="max-w-7xl mx-auto">
           <div className="text-center max-w-4xl mx-auto">
             <p className="text-sm font-semibold text-blue-600 uppercase tracking-[0.22em] mb-3">
@@ -420,8 +595,11 @@ export default function LandingPage() {
       </section>
 
       {/* Features Grid */}
-      <div className="py-20 px-6 bg-white/50 backdrop-blur-sm">
+      <div id="features" className="py-20 px-6 bg-white/50 backdrop-blur-sm scroll-mt-14">
         <div className="max-w-7xl mx-auto">
+          <p className="text-sm font-semibold text-center text-blue-600 uppercase tracking-[0.22em] mb-3">
+            Features
+          </p>
           <h2 className="text-3xl font-bold text-center text-gray-900 mb-12">
             Everything you need for full Autopilot visibility
           </h2>
@@ -551,7 +729,7 @@ export default function LandingPage() {
       </div>
 
       {/* Comparison Table */}
-      <div className="py-20 px-6 bg-white/50 backdrop-blur-sm">
+      <div id="comparison" className="py-20 px-6 bg-white/50 backdrop-blur-sm scroll-mt-14">
         <div className="max-w-5xl mx-auto">
           <p className="text-sm font-semibold text-center text-blue-600 uppercase tracking-widest mb-3">Comparison</p>
           <h2 className="text-4xl font-bold text-center text-gray-900 mb-4">
@@ -674,9 +852,92 @@ export default function LandingPage() {
       </div>
 
       {/* Footer */}
-      <footer className="border-t border-gray-200 bg-white/50 backdrop-blur-sm py-8 px-6">
-        <div className="max-w-7xl mx-auto text-center text-gray-600">
-          <p>&copy; 2026 Autopilot Monitor developed by Oliver Kieselbach and powered by Azure and Microsoft Identity.</p>
+      <footer className="border-t border-gray-200/80 bg-white/60 backdrop-blur-sm">
+        <div className="max-w-7xl mx-auto px-6 py-10">
+          <div className="flex flex-col md:flex-row md:items-start gap-10">
+            {/* Brand — left, fixed width with extra right margin */}
+            <div className="shrink-0 md:w-52 md:mr-32">
+              <div className="flex items-center space-x-2.5 mb-3">
+                <div className="w-7 h-7 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-lg flex items-center justify-center">
+                  <svg className="w-4 h-4 text-white" viewBox="0 0 24 24" fill="none">
+                    <rect x="5.0" y="12.2" width="2.8" height="7.8" rx="0.9" fill="currentColor" />
+                    <rect x="10.6" y="10.9" width="2.8" height="9.1" rx="0.9" fill="currentColor" />
+                    <rect x="16.2" y="8.6" width="2.8" height="11.4" rx="0.9" fill="currentColor" />
+                    <path d="M4.4 8.9L8.6 6.8L12.0 7.4L15.4 5.5L18.8 4.9" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M17.8 4.2L19.1 4.9L17.9 5.9" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </div>
+                <span className="text-sm font-bold text-gray-900">Autopilot Monitor</span>
+              </div>
+              <p className="text-xs text-gray-500 leading-relaxed mb-4">
+                Real-time monitoring and analytics for Windows Autopilot deployments.
+              </p>
+              <div className="flex items-center gap-3">
+                <a href="https://www.linkedin.com/in/oliver-kieselbach/" target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-blue-600 transition-colors" title="LinkedIn">
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 01-2.063-2.065 2.064 2.064 0 112.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z" />
+                  </svg>
+                </a>
+                <a href="https://github.com/okieselbach/Autopilot-Monitor" target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-gray-900 transition-colors" title="GitHub">
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" />
+                  </svg>
+                </a>
+              </div>
+            </div>
+
+            {/* Link columns — spread across remaining space */}
+            <div className="flex-1 grid grid-cols-2 sm:grid-cols-4 gap-8">
+              {/* Product */}
+              <div>
+                <h4 className="text-[11px] font-semibold text-gray-900 uppercase tracking-wider mb-2.5">Product</h4>
+                <ul className="space-y-1.5">
+                  <li><a href="#features" className="text-xs text-gray-500 hover:text-blue-600 transition-colors">Features</a></li>
+                  <li><a href="#how-it-works" className="text-xs text-gray-500 hover:text-blue-600 transition-colors">How It Works</a></li>
+                  <li><a href="#comparison" className="text-xs text-gray-500 hover:text-blue-600 transition-colors">Comparison</a></li>
+                </ul>
+              </div>
+
+              {/* Resources */}
+              <div>
+                <h4 className="text-[11px] font-semibold text-gray-900 uppercase tracking-wider mb-2.5">Resources</h4>
+                <ul className="space-y-1.5">
+                  <li><a href="/docs" className="text-xs text-gray-500 hover:text-blue-600 transition-colors">Documentation</a></li>
+                  <li><a href="https://github.com/okieselbach/Autopilot-Monitor/issues" target="_blank" rel="noopener noreferrer" className="text-xs text-gray-500 hover:text-blue-600 transition-colors">Feedback</a></li>
+                  <li><a href="https://github.com/okieselbach/Autopilot-Monitor" target="_blank" rel="noopener noreferrer" className="text-xs text-gray-500 hover:text-blue-600 transition-colors">GitHub</a></li>
+                </ul>
+              </div>
+
+              {/* Company */}
+              <div>
+                <h4 className="text-[11px] font-semibold text-gray-900 uppercase tracking-wider mb-2.5">Company</h4>
+                <ul className="space-y-1.5">
+                  <li><a href="/about" className="text-xs text-gray-500 hover:text-blue-600 transition-colors">About</a></li>
+                  <li><a href="https://www.linkedin.com/in/oliver-kieselbach/" target="_blank" rel="noopener noreferrer" className="text-xs text-gray-500 hover:text-blue-600 transition-colors">Contact</a></li>
+                </ul>
+              </div>
+
+              {/* Legal */}
+              <div>
+                <h4 className="text-[11px] font-semibold text-gray-900 uppercase tracking-wider mb-2.5">Legal</h4>
+                <ul className="space-y-1.5">
+                  <li><a href="/about#privacy" className="text-xs text-gray-500 hover:text-blue-600 transition-colors">Privacy Policy</a></li>
+                  <li><a href="/about#terms" className="text-xs text-gray-500 hover:text-blue-600 transition-colors">Terms of Use</a></li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          {/* Bottom bar */}
+          <div className="mt-8 pt-5 border-t border-gray-200 flex flex-col sm:flex-row items-center justify-between gap-2">
+            <p className="text-[11px] text-gray-400">
+              &copy; 2026 Autopilot Monitor by Oliver Kieselbach. Powered by Azure and Microsoft Identity.
+            </p>
+            <p className="text-[11px] text-gray-400">
+              Open source. Star us on{' '}
+              <a href="https://github.com/okieselbach/Autopilot-Monitor" target="_blank" rel="noopener noreferrer" className="text-gray-500 hover:text-blue-600 transition-colors">GitHub</a>
+            </p>
+          </div>
         </div>
       </footer>
 
