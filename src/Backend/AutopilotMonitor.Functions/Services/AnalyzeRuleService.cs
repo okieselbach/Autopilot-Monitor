@@ -121,11 +121,20 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
-        /// Deletes a custom analyze rule (cannot delete built-in rules)
+        /// Deletes a custom analyze rule for a tenant
         /// </summary>
         public async Task<bool> DeleteRuleAsync(string tenantId, string ruleId)
         {
             return await _storageService.DeleteAnalyzeRuleAsync(tenantId, ruleId);
+        }
+
+        /// <summary>
+        /// Deletes a global built-in analyze rule (Galactic Admin only)
+        /// </summary>
+        public async Task<bool> DeleteGlobalRuleAsync(string ruleId)
+        {
+            _logger.LogInformation($"Deleting global analyze rule: {ruleId}");
+            return await _storageService.DeleteAnalyzeRuleAsync("global", ruleId);
         }
 
         /// <summary>
