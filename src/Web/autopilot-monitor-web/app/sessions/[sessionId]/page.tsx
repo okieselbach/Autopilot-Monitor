@@ -575,7 +575,15 @@ export default function SessionDetailPage() {
                   copyText={`${session.manufacturer} ${session.model}`}
                 />
                 <InfoItem label="Serial Number" value={session.serialNumber} copyText={session.serialNumber} />
-                <InfoItem label="Session ID" value={session.sessionId} copyText={session.sessionId} />
+                <InfoItem
+                  label="Session ID"
+                  value={
+                    <span title={session.sessionId} className="cursor-default">
+                      {session.sessionId.split("-").slice(0, 3).join("-")}…
+                    </span>
+                  }
+                  copyText={session.sessionId}
+                />
                 <InfoItem label="Status" value={<StatusBadge status={session.status} failureReason={session.failureReason} />} />
                 <InfoItem label="Events" value={session.eventCount.toString()} />
                 <InfoItem label="Duration" value={enrollmentDurationFromEvents ?? `${Math.round(session.durationSeconds / 60)} min`} />
