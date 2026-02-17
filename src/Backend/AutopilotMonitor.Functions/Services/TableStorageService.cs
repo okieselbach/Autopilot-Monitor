@@ -447,7 +447,15 @@ namespace AutopilotMonitor.Functions.Services
                     if (status == SessionStatus.Succeeded || status == SessionStatus.Failed)
                     {
                         // Use the provided completedAt timestamp (from event) if available, otherwise use current time
-                        session["CompletedAt"] = completedAt ?? DateTime.UtcNow;
+                        var effectiveCompletedAt = completedAt ?? DateTime.UtcNow;
+                        session["CompletedAt"] = effectiveCompletedAt;
+
+                        // Store accurate DurationSeconds based on first event timestamp (not registration StartedAt)
+                        // The agent registers before events arrive, so registration StartedAt is always earlier
+                        // than the actual enrollment start — using the first event gives the true enrollment duration.
+                        var durationStart = effectiveEarliest ?? currentStartedAt;
+                        if (durationStart < effectiveCompletedAt)
+                            session["DurationSeconds"] = (int)(effectiveCompletedAt - durationStart).TotalSeconds;
                     }
 
                     // Set failure reason if failed
@@ -649,9 +657,10 @@ namespace AutopilotMonitor.Functions.Services
                 Status = status,
                 FailureReason = entity.GetString("FailureReason") ?? string.Empty,
                 EventCount = SafeGetInt32(entity, "EventCount") ?? 0,
-                DurationSeconds = completedAt.HasValue
-                    ? (int)(completedAt.Value - startedAt).TotalSeconds
-                    : (int)(DateTime.UtcNow - startedAt).TotalSeconds,
+                DurationSeconds = SafeGetInt32(entity, "DurationSeconds")
+                    ?? (completedAt.HasValue
+                        ? (int)(completedAt.Value - startedAt).TotalSeconds
+                        : (int)(DateTime.UtcNow - startedAt).TotalSeconds),
                 EnrollmentType = entity.GetString("EnrollmentType") ?? "v1",
                 DiagnosticsBlobName = entity.GetString("DiagnosticsBlobName")
             };

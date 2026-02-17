@@ -1635,10 +1635,10 @@ function DeviceDetailsCard({ events }: { events: EnrollmentEvent[] }) {
           )}
 
           {/* System */}
-          {(bootTime?.bootTime || agentStarted?.bootTime || agentStarted?.agentVersion || imeVersion || aadJoinStatus?.joinType || deviceLocation?.country || deviceLocation?.Country || deviceLocation?.timezone || deviceLocation?.Timezone) && (
+          {(bootTime?.bootTimeUtc || bootTime?.bootTime || agentStarted?.bootTime || agentStarted?.agentVersion || imeVersion || aadJoinStatus?.joinType || deviceLocation?.country || deviceLocation?.Country || deviceLocation?.timezone || deviceLocation?.Timezone) && (
             <DetailSection title="System">
-              {(bootTime?.bootTime || agentStarted?.bootTime) && (
-                <DetailRow label="Boot Time" value={new Date(bootTime?.bootTime || agentStarted?.bootTime).toLocaleString()} />
+              {(bootTime?.bootTimeUtc || bootTime?.bootTime || agentStarted?.bootTime) && (
+                <DetailRow label="Boot Time" value={new Date(bootTime?.bootTimeUtc || bootTime?.bootTime || agentStarted?.bootTime).toLocaleString()} />
               )}
               {bootTime?.uptimeMinutes && <DetailRow label="Uptime until enrollment starts" value={`${Math.floor(bootTime.uptimeMinutes / 60)}h ${bootTime.uptimeMinutes % 60}m`} />}
               {agentStarted?.agentVersion && <DetailRow label="Monitor Agent Version" value={agentStarted.agentVersion.replace(/\+([0-9a-f]{7})[0-9a-f]+$/, '+$1')} />}
