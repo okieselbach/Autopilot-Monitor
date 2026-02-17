@@ -4,6 +4,7 @@
 
 html {
   scroll-behavior: smooth;
+  overflow-y: auto;
 }
 
 :root {
@@ -287,18 +288,42 @@ body {
 /* -- Progress bars and charts keep their vivid colors -- */
 /* (no overrides needed for bg-blue-500, bg-green-500, etc.) */
 
-/* -- Scrollbar -- */
+/* -- Scrollbar (global) -- */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #cbd5e1;
+}
+html:hover ::-webkit-scrollbar-thumb,
+body:hover ::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+}
+
+/* -- Scrollbar (dark mode) -- */
 .dark ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 .dark ::-webkit-scrollbar-track {
-  background: #1e293b;
+  background: transparent;
 }
 .dark ::-webkit-scrollbar-thumb {
-  background: #475569;
+  background: transparent;
   border-radius: 4px;
 }
 .dark ::-webkit-scrollbar-thumb:hover {
   background: #64748b;
+}
+.dark html:hover ::-webkit-scrollbar-thumb,
+.dark body:hover ::-webkit-scrollbar-thumb {
+  background: #475569;
 }
