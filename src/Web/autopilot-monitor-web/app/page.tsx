@@ -638,8 +638,11 @@ export default function Home() {
                           </td>
                         )}
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm text-gray-900">
-                            {session.manufacturer} {session.model}
+                          <div className="text-sm font-medium text-gray-900">
+                            {session.manufacturer || "Unknown manufacturer"}
+                          </div>
+                          <div className="text-sm text-gray-500">
+                            {session.model || "Unknown model"}
                           </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
