@@ -612,7 +612,10 @@ namespace AutopilotMonitor.Functions.Services
                 EventId = entity.GetString("EventId") ?? string.Empty,
                 SessionId = entity.GetString("SessionId") ?? string.Empty,
                 TenantId = entity.PartitionKey,
-                Timestamp = entity.GetDateTime("Timestamp") ?? DateTime.UtcNow,
+                Timestamp = DateTime.SpecifyKind(
+                    entity.GetDateTimeOffset("Timestamp")?.UtcDateTime
+                    ?? entity.GetDateTime("Timestamp")
+                    ?? DateTime.UtcNow, DateTimeKind.Utc),
                 EventType = entity.GetString("EventType") ?? string.Empty,
                 Severity = (EventSeverity)(entity.GetInt32("Severity") ?? 0),
                 Source = entity.GetString("Source") ?? string.Empty,

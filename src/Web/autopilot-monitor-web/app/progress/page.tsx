@@ -369,7 +369,7 @@ export default function ProgressPortalPage() {
 
   return (
     <ProtectedRoute>
-      <div className="min-h-screen bg-gradient-to-b from-blue-50 to-white">
+      <div className="min-h-screen bg-gray-50">
         <div className="max-w-2xl mx-auto px-4 py-6 sm:py-12">
           {/* Collapsible Header + Search */}
           {headerCollapsed && session ? (

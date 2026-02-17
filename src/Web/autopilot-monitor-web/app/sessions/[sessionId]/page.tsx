@@ -1580,18 +1580,11 @@ function DeviceDetailsCard({ events }: { events: EnrollmentEvent[] }) {
   const agentStarted = getEventData("agent_started");
   const bootTime = getEventData("boot_time");
 
-  // Calculate boot time from first event timestamp minus uptimeMinutes.
-  // The device-reported bootTimeUtc can be inconsistent with event timestamps due to
-  // timezone handling on the device side. Using firstEvent - uptime gives a result
-  // that is always consistent with the event timeline shown in the UI.
-  const estimatedBootTime = (() => {
-    const uptimeMinutes = bootTime?.uptimeMinutes ?? agentStarted?.uptimeMinutes;
-    if (!uptimeMinutes) return null;
-    const timestamps = events.map(e => new Date(e.timestamp).getTime()).filter(t => !isNaN(t));
-    if (timestamps.length === 0) return null;
-    const firstEventMs = Math.min(...timestamps);
-    return new Date(firstEventMs - uptimeMinutes * 60 * 1000);
-  })();
+  // Boot time from bootTimeUtc (device-reported UTC with Z suffix, parsed correctly as UTC by browser).
+  // Now that event timestamps are also serialized with Z suffix (Kind=Utc), both are consistent.
+  const estimatedBootTime = (bootTime?.bootTimeUtc || bootTime?.bootTime)
+    ? new Date(bootTime?.bootTimeUtc ?? bootTime?.bootTime)
+    : null;
   const osInfo = getEventData("os_info");
   const networkAdapters = getEventData("network_adapters");
   const dnsConfig = getEventData("dns_configuration");
