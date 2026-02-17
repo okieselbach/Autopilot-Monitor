@@ -400,9 +400,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             switch (eventId)
             {
                 case EventId_ProvisioningWillLaunch: // 358
-                    eventType = "hello_provisioning_started";
+                    eventType = "hello_provisioning_willlaunch";
                     severity = EventSeverity.Info;
-                    message = "Windows Hello for Business provisioning started - prerequisites passed";
+                    message = "Windows Hello for Business provisioning will launch - prerequisites passed (snapshot only, not a final state)";
+                    _logger.Info("Windows Hello provisioning will launch - prerequisites passed (snapshot only, not a final state)");
                     break;
 
                 case EventId_NgcKeyRegistered: // 300
@@ -422,9 +423,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     break;
 
                 case EventId_ProvisioningWillNotLaunch: // 360
-                    eventType = "hello_provisioning_skipped";
+                    eventType = "hello_provisioning_willnotlaunch";
                     severity = EventSeverity.Warning;
-                    message = "Windows Hello for Business provisioning prerequisites not met (snapshot only, not terminal)";
+                    message = "Windows Hello for Business provisioning prerequisites not met (snapshot only, not a final state";
                     // DO NOT mark Hello as completed - event 360 is just a snapshot and can change
                     _logger.Info("Windows Hello provisioning prerequisites not met (snapshot, not terminal)");
                     break;

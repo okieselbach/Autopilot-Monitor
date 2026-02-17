@@ -377,31 +377,6 @@ export default function SettingsPage() {
     }
   };
 
-  const handleReset = () => {
-    if (!config) return;
-
-    setManufacturerWhitelist(config.manufacturerWhitelist);
-    setModelWhitelist(config.modelWhitelist);
-    setValidateSerialNumber(config.validateSerialNumber);
-    setDataRetentionDays(config.dataRetentionDays ?? 90);
-    setSessionTimeoutHours(config.sessionTimeoutHours ?? 5);
-    setEnablePerformanceCollector(config.enablePerformanceCollector ?? false);
-    setPerformanceCollectorInterval(config.performanceCollectorIntervalSeconds ?? 60);
-    setSelfDestructOnComplete(config.selfDestructOnComplete ?? false);
-    setKeepLogFile(config.keepLogFile ?? true);
-    setRebootOnComplete(config.rebootOnComplete ?? false);
-    setRebootDelaySeconds(config.rebootDelaySeconds ?? 10);
-    setEnableGeoLocation(config.enableGeoLocation ?? true);
-    setEnableImeMatchLog(config.enableImeMatchLog ?? false);
-    setLogLevel(config.logLevel ?? "Info");
-    setTeamsWebhookUrl(config.teamsWebhookUrl ?? "");
-    setTeamsNotifyOnSuccess(config.teamsNotifyOnSuccess ?? true);
-    setTeamsNotifyOnFailure(config.teamsNotifyOnFailure ?? true);
-    setDiagnosticsBlobSasUrl(config.diagnosticsBlobSasUrl ?? "");
-    setDiagnosticsUploadMode(config.diagnosticsUploadMode ?? "Off");
-    setSuccessMessage(null);
-    setError(null);
-  };
 
   const handleAddAdmin = async () => {
     if (!tenantId || !newAdminEmail.trim()) return;
@@ -597,13 +572,6 @@ export default function SettingsPage() {
               </div>
               {!loading && (
                 <div className="flex items-center space-x-3">
-                  <button
-                    onClick={handleReset}
-                    disabled={saving}
-                    className="px-4 py-2 border border-gray-300 rounded-md text-sm text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                  >
-                    Reset
-                  </button>
                   <button
                     onClick={handleSave}
                     disabled={saving}

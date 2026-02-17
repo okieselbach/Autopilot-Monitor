@@ -205,16 +205,21 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                         if (!string.IsNullOrEmpty(lastBootUpTimeStr))
                         {
                             // WMI time format: yyyyMMddHHmmss.ffffff+/-UUU
-                            var bootTime = ManagementDateTimeConverter.ToDateTime(lastBootUpTimeStr);
-                            data["bootTime"] = bootTime.ToString("o"); // ISO 8601 format
-                            data["bootTimeUtc"] = bootTime.ToUniversalTime().ToString("o");
+                            // ManagementDateTimeConverter.ToDateTime returns DateTimeKind.Local,
+                            // so we must explicitly convert to UTC and tag it as UTC to ensure
+                            // correct ISO 8601 serialization with Z suffix.
+                            var bootTimeLocal = ManagementDateTimeConverter.ToDateTime(lastBootUpTimeStr);
+                            var bootTimeUtc = DateTime.SpecifyKind(bootTimeLocal.ToUniversalTime(), DateTimeKind.Utc);
 
-                            // Calculate uptime
-                            var uptime = DateTime.Now - bootTime;
+                            data["bootTimeUtc"] = bootTimeUtc.ToString("o"); // always ends with Z
+                            data["bootTime"] = bootTimeUtc.ToString("o");    // keep for compat, also UTC
+
+                            // Calculate uptime using UTC to avoid local-clock drift
+                            var uptime = DateTime.UtcNow - bootTimeUtc;
                             data["uptimeMinutes"] = (int)uptime.TotalMinutes;
                             data["uptimeHours"] = uptime.TotalHours;
 
-                            _logger.Debug($"Boot time: {bootTime:o}, Uptime: {uptime.TotalMinutes:F1} minutes");
+                            _logger.Debug($"Boot time (UTC): {bootTimeUtc:o}, Uptime: {uptime.TotalMinutes:F1} minutes");
                             break;
                         }
                     }
