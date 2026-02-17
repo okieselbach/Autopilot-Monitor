@@ -297,6 +297,8 @@ namespace AutopilotMonitor.Agent
                     lock (evtLock)
                         eventsToUpload = new List<EnrollmentEvent>(collectedEvents);
 
+                    // +1 because the completed event itself is also uploaded
+                    var totalEventCount = eventsToUpload.Count + 1;
                     emitEvent(new EnrollmentEvent
                     {
                         SessionId = config.SessionId,
@@ -306,10 +308,10 @@ namespace AutopilotMonitor.Agent
                         Severity = EventSeverity.Info,
                         Source = "Agent",
                         Phase = EnrollmentPhase.Start,
-                        Message = $"Gather rules collection completed ({eventsToUpload.Count} event(s) collected)",
+                        Message = $"Gather rules collection completed ({totalEventCount} event(s) collected)",
                         Data = new Dictionary<string, object>
                         {
-                            { "totalEvents", eventsToUpload.Count }
+                            { "totalEvents", totalEventCount }
                         }
                     });
                     // Re-snapshot after adding the completed event

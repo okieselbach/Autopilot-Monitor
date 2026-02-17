@@ -417,6 +417,11 @@ export default function SessionDetailPage() {
   );
 
   const isGatherRulesSession = session?.enrollmentType === "gather_rules";
+  // For gather_rules sessions: if the completed event is present, derive status as Succeeded
+  // (the backend never sets this status automatically for one-shot gather runs).
+  const gatherRulesSucceeded = isGatherRulesSession &&
+    events.some(e => e.eventType === "gather_rules_collection_completed");
+  const displayStatus = gatherRulesSucceeded ? "Succeeded" : (session?.status ?? "");
 
   // Calculate enrollment duration from events (first event → enrollment_complete or last event)
   // More accurate than session.durationSeconds which is based on registration StartedAt
@@ -624,7 +629,7 @@ export default function SessionDetailPage() {
                   }
                   copyText={session.sessionId}
                 />
-                <InfoItem label="Status" value={<StatusBadge status={session.status} failureReason={session.failureReason} />} />
+                <InfoItem label="Status" value={<StatusBadge status={displayStatus} failureReason={session.failureReason} />} />
                 <InfoItem label="Started" value={new Date(session.startedAt).toLocaleString([], { dateStyle: "short", timeStyle: "short" })} />
                 <InfoItem label="Duration" value={enrollmentDurationFromEvents ?? `${Math.round(session.durationSeconds / 60)} min`} />
                 <InfoItem label="Events" value={session.eventCount.toString()} />
@@ -989,8 +994,9 @@ function EventRow({ event, isGalacticAdmin }: { event: EnrollmentEvent; isGalact
   const [copied, setCopied] = useState(false);
   const detailData = useMemo(() => normalizeEventDataForDisplay(event.data), [event.data]);
 
-  // Gather rule console output detection
-  const isGatherEvent = event.eventType?.startsWith("gather_");
+  // Gather rule console output detection — use source, not eventType,
+  // because users can name gather rule event types freely.
+  const isGatherEvent = event.source === "GatherRuleExecutor";
   const gatherOutput = isGatherEvent
     ? ((detailData?.output ?? detailData?.Output) as string | null | undefined) ?? null
     : null;
