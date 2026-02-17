@@ -40,7 +40,7 @@ export default function Home() {
   const [sortColumn, setSortColumn] = useState<keyof Session | null>(null);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [currentPage, setCurrentPage] = useState(1);
-  const sessionsPerPage = 10;
+  const sessionsPerPage = 7;
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [sessionToDelete, setSessionToDelete] = useState<{ sessionId: string; tenantId: string; deviceName?: string } | null>(null);
   const [adminMode, setAdminMode] = useState(() => {
@@ -592,17 +592,17 @@ export default function Home() {
                       <SortableHeader column="status" currentSort={sortColumn} direction={sortDirection} onSort={handleSort}>
                         Status
                       </SortableHeader>
-                      <SortableHeader column="eventCount" currentSort={sortColumn} direction={sortDirection} onSort={handleSort}>
+                      <SortableHeader column="eventCount" currentSort={sortColumn} direction={sortDirection} onSort={handleSort} className="px-3">
                         Events
                       </SortableHeader>
-                      <SortableHeader column="durationSeconds" currentSort={sortColumn} direction={sortDirection} onSort={handleSort}>
+                      <SortableHeader column="durationSeconds" currentSort={sortColumn} direction={sortDirection} onSort={handleSort} className="px-3">
                         Duration
                       </SortableHeader>
-                      <SortableHeader column="startedAt" currentSort={sortColumn} direction={sortDirection} onSort={handleSort}>
+                      <SortableHeader column="startedAt" currentSort={sortColumn} direction={sortDirection} onSort={handleSort} className="px-3">
                         Started
                       </SortableHeader>
                       {adminMode && (
-                        <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        <th scope="col" className="pl-3 pr-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Actions
                         </th>
                       )}
@@ -648,17 +648,17 @@ export default function Home() {
                         <td className="px-6 py-4 whitespace-nowrap">
                           <StatusBadge status={session.status} failureReason={session.failureReason} />
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-500">
                           {session.eventCount}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-500">
                           {Math.round(session.durationSeconds / 60)} min
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-500">
                           {new Date(session.startedAt).toLocaleString()}
                         </td>
                         {adminMode && (
-                          <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                          <td className="pl-3 pr-4 py-4 whitespace-nowrap text-right text-sm font-medium">
                             <button
                               onClick={(e) => {
                                 e.stopPropagation(); // Prevent row click navigation
@@ -830,19 +830,21 @@ function SortableHeader({
   direction,
   onSort,
   children,
+  className,
 }: {
   column: keyof Session;
   currentSort: keyof Session | null;
   direction: "asc" | "desc";
   onSort: (column: keyof Session) => void;
   children: React.ReactNode;
+  className?: string;
 }) {
   const isActive = currentSort === column;
 
   return (
     <th
       onClick={() => onSort(column)}
-      className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors select-none"
+      className={`py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors select-none ${className ?? "px-6"}`}
     >
       <div className="flex items-center gap-2">
         {children}
