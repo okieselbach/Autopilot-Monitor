@@ -21,28 +21,24 @@ namespace AutopilotMonitor.Functions.Services
                 CreateAppSlowInstallRule(),
                 CreateAppRebootLoopRule(),
                 CreateAppTrackingSummaryErrorsRule(),
+                CreateAppDownloadStallRule(),
 
                 // ===== ESP RULES =====
                 CreateEspBlockingAppTimeoutRule(),
                 CreateEspSecurityPolicyFailureRule(),
+                CreateEnrollmentTimeoutRule(),
 
                 // ===== DEVICE RULES =====
-                CreateDeviceTpmNotReadyRule(),
-                CreateDeviceBitlockerEscrowRule(),
-                CreateDeviceSecureBootRule(),
-                CreateDeviceAadJoinNotDetectedRule(),
+                CreateWindowsHelloTimeoutRule(),
+                CreateHighMemoryDuringInstallRule(),
+
+                // ===== ENROLLMENT RULES =====
+                CreateEnrollmentFailedRule(),
 
                 // ===== CORRELATION RULES (cross-event analysis) =====
                 CreateCorrelationNetworkCausedInstallFailureRule(),
                 CreateCorrelationDiskSpaceCausedInstallFailureRule(),
                 CreateCorrelationProxyCausedDownloadFailureRule(),
-
-                // ===== NEW RULES =====
-                CreateEnrollmentTimeoutRule(),
-                CreateEnrollmentFailedRule(),
-                CreateWindowsHelloTimeoutRule(),
-                CreateAppDownloadStallRule(),
-                CreateHighMemoryDuringInstallRule(),
             };
         }
 
@@ -307,106 +303,12 @@ namespace AutopilotMonitor.Functions.Services
             Tags = new[] { "esp", "policy", "security" }
         };
 
-        // ===== DEVICE =====
-
-        /// <summary>
-        /// Fixed: Now checks app_install_failed events for TPM-related error messages
-        /// instead of non-existent error_detected events.
-        /// </summary>
-        private static AnalyzeRule CreateDeviceTpmNotReadyRule() => new AnalyzeRule
-        {
-            RuleId = "ANALYZE-DEV-001",
-            Title = "TPM Not Ready",
-            Description = "Detects TPM-related errors in enrollment events.",
-            Severity = "critical",
-            Category = "device",
-            BaseConfidence = 80,
-            Conditions = new List<RuleCondition>
-            {
-                new RuleCondition { Signal = "tpm_error", Source = "event_type", EventType = "app_install_failed", DataField = "message", Operator = "regex", Value = @"TPM|Trusted Platform Module|0x80284001|0x80290300|tpm.*not.*ready", Required = true }
-            },
-            Explanation = "The TPM (Trusted Platform Module) is not ready or functioning. TPM is required for Autopilot, Windows Hello, and BitLocker.",
-            Remediation = new List<RemediationStep>
-            {
-                new RemediationStep { Title = "Fix TPM", Steps = new List<string> { "Check BIOS/UEFI settings for TPM enablement", "Update TPM firmware if available", "Clear TPM and re-provision (WARNING: data loss)" } }
-            },
-            Tags = new[] { "device", "tpm", "critical" }
-        };
-
-        /// <summary>
-        /// Fixed: Now checks app_install_failed events for BitLocker-related error messages
-        /// instead of non-existent error_detected events.
-        /// </summary>
-        private static AnalyzeRule CreateDeviceBitlockerEscrowRule() => new AnalyzeRule
-        {
-            RuleId = "ANALYZE-DEV-002",
-            Title = "BitLocker Key Escrow Failure",
-            Description = "Detects BitLocker escrow-related errors in enrollment events.",
-            Severity = "high",
-            Category = "device",
-            BaseConfidence = 70,
-            Conditions = new List<RuleCondition>
-            {
-                new RuleCondition { Signal = "bitlocker_escrow_failure", Source = "event_type", EventType = "app_install_failed", DataField = "message", Operator = "regex", Value = @"BitLocker.*escrow|recovery key.*backup|key.*protector.*fail|BitLocker|bitlocker", Required = true }
-            },
-            Explanation = "BitLocker recovery key escrow to Azure AD failed. This may block ESP completion if 'Require BitLocker key escrow' is configured.",
-            Remediation = new List<RemediationStep>
-            {
-                new RemediationStep { Title = "Fix BitLocker escrow", Steps = new List<string> { "Verify Azure AD connectivity", "Check that the device is properly Azure AD joined", "Manually trigger BitLocker key backup: manage-bde -protectors -adbackup C: -id {ID}" } }
-            },
-            Tags = new[] { "device", "bitlocker", "escrow" }
-        };
-
-        private static AnalyzeRule CreateDeviceSecureBootRule() => new AnalyzeRule
-        {
-            RuleId = "ANALYZE-DEV-003",
-            Title = "Secure Boot Disabled",
-            Description = "Detects when Secure Boot is disabled, which may be required by compliance policies.",
-            Severity = "warning",
-            Category = "device",
-            BaseConfidence = 60,
-            Conditions = new List<RuleCondition>
-            {
-                new RuleCondition { Signal = "secureboot_disabled", Source = "event_type", EventType = "secureboot_status", DataField = "uefiSecureBootEnabled", Operator = "equals", Value = "False", Required = true }
-            },
-            Explanation = "Secure Boot is disabled on this device. Some compliance policies require Secure Boot to be enabled.",
-            Remediation = new List<RemediationStep>
-            {
-                new RemediationStep { Title = "Enable Secure Boot", Steps = new List<string> { "Enter BIOS/UEFI settings", "Enable Secure Boot", "Ensure the device boots in UEFI mode (not Legacy/CSM)" } }
-            },
-            Tags = new[] { "device", "secureboot" }
-        };
-
-        private static AnalyzeRule CreateDeviceAadJoinNotDetectedRule() => new AnalyzeRule
-        {
-            RuleId = "ANALYZE-DEV-004",
-            Title = "Azure AD Join Not Detected",
-            Description = "Detects when the device is not Azure AD joined at the time of enrollment.",
-            Severity = "critical",
-            Category = "device",
-            BaseConfidence = 85,
-            Conditions = new List<RuleCondition>
-            {
-                new RuleCondition { Signal = "aad_not_joined", Source = "event_type", EventType = "aad_join_status", DataField = "joinType", Operator = "equals", Value = "Not Joined", Required = true }
-            },
-            Explanation = "The device was not Azure AD joined at the start of enrollment. Autopilot requires the device to join Azure AD. This will prevent Intune enrollment and policy delivery from succeeding.",
-            Remediation = new List<RemediationStep>
-            {
-                new RemediationStep { Title = "Verify Azure AD connectivity", Steps = new List<string> {
-                    "Ensure the device can reach login.microsoftonline.com",
-                    "Check that the Autopilot profile's tenant matches the signing-in user's tenant",
-                    "Verify the device is not already joined to an on-premises domain (Hybrid Join may be required)"
-                }}
-            },
-            Tags = new[] { "device", "aad", "join", "critical" }
-        };
-
         // ===== CORRELATION RULES =====
         // These combine signals from multiple event types for root-cause analysis
 
         private static AnalyzeRule CreateCorrelationNetworkCausedInstallFailureRule() => new AnalyzeRule
         {
-            RuleId = "ANALYZE-CORR-003",
+            RuleId = "ANALYZE-CORR-001",
             Title = "Slow Network Causing App Installation Failure",
             Description = "Correlates slow download speeds with app installation failures while disk space is adequate, confirming network as root cause (not disk).",
             Severity = "high",
@@ -449,7 +351,7 @@ namespace AutopilotMonitor.Functions.Services
         /// </summary>
         private static AnalyzeRule CreateCorrelationDiskSpaceCausedInstallFailureRule() => new AnalyzeRule
         {
-            RuleId = "ANALYZE-CORR-004",
+            RuleId = "ANALYZE-CORR-002",
             Title = "Disk Space Exhaustion Caused Installation Failure",
             Description = "Correlates declining disk free space with app installation failure, confirming insufficient storage as root cause.",
             Severity = "critical",
@@ -486,7 +388,7 @@ namespace AutopilotMonitor.Functions.Services
 
         private static AnalyzeRule CreateCorrelationProxyCausedDownloadFailureRule() => new AnalyzeRule
         {
-            RuleId = "ANALYZE-CORR-005",
+            RuleId = "ANALYZE-CORR-003",
             Title = "Proxy Configuration Causing Download Failure",
             Description = "Correlates an active proxy configuration with app download failures, suggesting the proxy is blocking or throttling Intune content delivery.",
             Severity = "high",
@@ -599,7 +501,7 @@ namespace AutopilotMonitor.Functions.Services
         /// </summary>
         private static AnalyzeRule CreateWindowsHelloTimeoutRule() => new AnalyzeRule
         {
-            RuleId = "ANALYZE-DEV-005",
+            RuleId = "ANALYZE-DEV-001",
             Title = "Windows Hello Provisioning Timeout",
             Description = "Detects when Windows Hello for Business provisioning did not start within the expected timeframe after ESP completion.",
             Severity = "warning",
@@ -668,7 +570,7 @@ namespace AutopilotMonitor.Functions.Services
         /// </summary>
         private static AnalyzeRule CreateHighMemoryDuringInstallRule() => new AnalyzeRule
         {
-            RuleId = "ANALYZE-DEV-006",
+            RuleId = "ANALYZE-DEV-002",
             Title = "High Memory Usage During Enrollment",
             Description = "Detects when memory usage exceeds 90% during enrollment, which can cause app installation failures or system instability.",
             Severity = "warning",
