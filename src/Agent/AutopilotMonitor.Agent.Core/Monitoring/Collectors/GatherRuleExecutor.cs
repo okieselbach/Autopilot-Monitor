@@ -442,13 +442,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 
                     if (!string.IsNullOrWhiteSpace(output))
                     {
-                        // Truncate large output
-                        data["output"] = output.Length > 4000 ? output.Substring(0, 4000) + "... (truncated)" : output;
+                        data["output"] = output.Length > 32000 ? output.Substring(0, 32000) + "... (truncated)" : output;
                     }
 
                     if (!string.IsNullOrWhiteSpace(error))
                     {
-                        data["error_output"] = error.Length > 1000 ? error.Substring(0, 1000) + "... (truncated)" : error;
+                        data["error_output"] = error.Length > 8000 ? error.Substring(0, 8000) + "... (truncated)" : error;
                     }
                 }
             }
