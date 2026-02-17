@@ -47,6 +47,7 @@ export default function AdminConfigurationPage() {
   const [galacticAdminMode, setGalacticAdminMode] = useState(false);
   const [triggeringMaintenance, setTriggeringMaintenance] = useState(false);
   const [maintenanceDate, setMaintenanceDate] = useState<string>("");
+  const [reseedingRules, setReseedingRules] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
@@ -214,6 +215,39 @@ export default function AdminConfigurationPage() {
       setError(err instanceof Error ? err.message : "Failed to trigger maintenance job");
     } finally {
       setTriggeringMaintenance(false);
+    }
+  };
+
+  const handleReseedAnalyzeRules = async () => {
+    try {
+      setReseedingRules(true);
+      setError(null);
+      setSuccessMessage(null);
+
+      const token = await getAccessToken();
+      if (!token) {
+        throw new Error('Failed to get access token');
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/analyze-rules/reseed`, {
+        method: "POST",
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to reseed analyze rules: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      setSuccessMessage(result.message || "Analyze rules reseeded successfully!");
+      setTimeout(() => setSuccessMessage(null), 5000);
+    } catch (err) {
+      console.error("Error reseeding analyze rules:", err);
+      setError(err instanceof Error ? err.message : "Failed to reseed analyze rules");
+    } finally {
+      setReseedingRules(false);
     }
   };
 
@@ -860,6 +894,75 @@ export default function AdminConfigurationPage() {
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                           </svg>
                           <span>Run Now</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Reseed Analyze Rules */}
+            <div className="bg-gradient-to-br from-amber-50 to-orange-50 border-2 border-amber-300 rounded-lg shadow-lg">
+              <div className="p-6 border-b border-amber-200 bg-gradient-to-r from-amber-100 to-orange-100">
+                <div className="flex items-center space-x-2">
+                  <svg className="w-6 h-6 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  <div>
+                    <h2 className="text-xl font-semibold text-amber-900">Reseed Analyze Rules</h2>
+                    <p className="text-sm text-amber-600 mt-1">Re-import all built-in analyze rules from code into Azure Table Storage</p>
+                  </div>
+                </div>
+              </div>
+              <div className="p-6">
+                <div className="flex items-start space-x-4">
+                  <div className="flex-1">
+                    <p className="text-sm text-gray-600 mb-4">
+                      This operation performs a full re-import of all built-in analyze rules:
+                    </p>
+                    <ul className="text-sm text-gray-600 space-y-1 mb-4 ml-4">
+                      <li className="flex items-start">
+                        <span className="text-amber-500 mr-2">•</span>
+                        <span>Deletes all existing global built-in rules from the table</span>
+                      </li>
+                      <li className="flex items-start">
+                        <span className="text-amber-500 mr-2">•</span>
+                        <span>Writes all current code-defined rules as fresh entries</span>
+                      </li>
+                      <li className="flex items-start">
+                        <span className="text-amber-500 mr-2">•</span>
+                        <span>Tenant-specific custom rules and overrides are not affected</span>
+                      </li>
+                    </ul>
+                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
+                      <div className="flex items-start space-x-2">
+                        <svg className="w-5 h-5 text-yellow-600 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                        </svg>
+                        <p className="text-sm text-yellow-800">
+                          <strong>Use after deployments</strong> that add, remove, or modify built-in analyze rules to ensure Azure Table Storage reflects the latest code definitions.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex-shrink-0">
+                    <button
+                      onClick={handleReseedAnalyzeRules}
+                      disabled={reseedingRules}
+                      className="px-6 py-3 bg-gradient-to-r from-amber-600 to-orange-600 text-white rounded-lg hover:from-amber-700 hover:to-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md hover:shadow-lg flex items-center space-x-2"
+                    >
+                      {reseedingRules ? (
+                        <>
+                          <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                          <span>Reseeding...</span>
+                        </>
+                      ) : (
+                        <>
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                          </svg>
+                          <span>Reseed Now</span>
                         </>
                       )}
                     </button>

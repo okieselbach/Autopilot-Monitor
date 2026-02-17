@@ -870,7 +870,7 @@ export default function LandingPage() {
                 <span className="text-sm font-bold text-gray-900">Autopilot Monitor</span>
               </div>
               <p className="text-xs text-gray-500 leading-relaxed mb-4">
-                Real-time monitoring and analytics for Windows Autopilot deployments.
+                Real-time monitoring and analytics for Windows enrollments.
               </p>
               <div className="flex items-center gap-3">
                 <a href="https://www.linkedin.com/in/oliver-kieselbach/" target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-blue-600 transition-colors" title="LinkedIn">
@@ -908,12 +908,13 @@ export default function LandingPage() {
                 </ul>
               </div>
 
-              {/* Company */}
+              {/* About */}
               <div>
-                <h4 className="text-[11px] font-semibold text-gray-900 uppercase tracking-wider mb-2.5">Company</h4>
+                <h4 className="text-[11px] font-semibold text-gray-900 uppercase tracking-wider mb-2.5">About</h4>
                 <ul className="space-y-1.5">
-                  <li><a href="/about" className="text-xs text-gray-500 hover:text-blue-600 transition-colors">About</a></li>
-                  <li><a href="https://www.linkedin.com/in/oliver-kieselbach/" target="_blank" rel="noopener noreferrer" className="text-xs text-gray-500 hover:text-blue-600 transition-colors">Contact</a></li>
+                  <li><a href="/about" className="text-xs text-gray-500 hover:text-blue-600 transition-colors">Overview</a></li>
+                  <li><a href="/changelog" className="text-xs text-gray-500 hover:text-blue-600 transition-colors">Changelog</a></li>
+                  <li><a href="/roadmap" className="text-xs text-gray-500 hover:text-blue-600 transition-colors">Roadmap</a></li>
                 </ul>
               </div>
 

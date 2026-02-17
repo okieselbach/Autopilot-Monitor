@@ -129,6 +129,40 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
+        /// Re-imports all built-in analyze rules into the global partition.
+        /// Deletes old global built-in rules and writes current code definitions.
+        /// </summary>
+        public async Task<(int deleted, int written)> ReseedBuiltInRulesAsync()
+        {
+            _logger.LogInformation("Reseeding built-in analyze rules (full re-import)...");
+
+            // 1. Get existing global rules
+            var existingGlobalRules = await _storageService.GetAnalyzeRulesAsync("global");
+
+            // 2. Delete all existing global built-in rules
+            var deleted = 0;
+            foreach (var rule in existingGlobalRules.Where(r => r.IsBuiltIn))
+            {
+                await _storageService.DeleteAnalyzeRuleAsync("global", rule.RuleId);
+                deleted++;
+            }
+            _logger.LogInformation($"Deleted {deleted} old global built-in rules");
+
+            // 3. Write current code definitions
+            var builtInRules = BuiltInAnalyzeRules.GetAll();
+            foreach (var rule in builtInRules)
+            {
+                await _storageService.StoreAnalyzeRuleAsync(rule, "global");
+            }
+            _logger.LogInformation($"Written {builtInRules.Count} built-in analyze rules from code");
+
+            // Reset seed flag so next request picks up fresh data
+            _seeded = false;
+
+            return (deleted, builtInRules.Count);
+        }
+
+        /// <summary>
         /// Seeds built-in analyze rules if not already done.
         /// Also updates existing built-in rules when code definitions change.
         /// </summary>
