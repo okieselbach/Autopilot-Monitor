@@ -4,7 +4,8 @@
 
 html {
   scroll-behavior: smooth;
-  overflow-y: overlay;
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
 }
 
 :root {

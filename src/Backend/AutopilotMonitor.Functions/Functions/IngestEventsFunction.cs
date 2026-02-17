@@ -97,6 +97,7 @@ namespace AutopilotMonitor.Functions.Functions
                 EnrollmentEvent? lastPhaseChangeEvent = null;
                 EnrollmentEvent? completionEvent = null;
                 EnrollmentEvent? failureEvent = null;
+                EnrollmentEvent? gatherCompletionEvent = null;
                 EnrollmentEvent? diagnosticsUploadedEvent = null;
                 string? failureReason = null;
                 DateTime? earliestEventTimestamp = null;
@@ -120,6 +121,10 @@ namespace AutopilotMonitor.Functions.Functions
                     else if (evt.EventType == "enrollment_complete")
                     {
                         completionEvent = evt;
+                    }
+                    else if (evt.EventType == "gather_rules_collection_completed")
+                    {
+                        gatherCompletionEvent = evt;
                     }
                     else if (evt.EventType == "enrollment_failed")
                     {
@@ -174,6 +179,20 @@ namespace AutopilotMonitor.Functions.Functions
                         earliestEventTimestamp: earliestEventTimestamp
                     );
                     _logger.LogWarning("{SessionPrefix} Status: Failed - {FailureReason} (transitioned={Transitioned})", sessionPrefix, failureReason, statusTransitioned);
+                }
+                else if (gatherCompletionEvent != null)
+                {
+                    // Gather rules collection completed — mark session as Succeeded.
+                    // Does not trigger enrollment stats or Teams notifications (not a real enrollment).
+                    await _storageService.UpdateSessionStatusAsync(
+                        request.TenantId,
+                        request.SessionId,
+                        SessionStatus.Succeeded,
+                        gatherCompletionEvent.Phase,
+                        completedAt: gatherCompletionEvent.Timestamp,
+                        earliestEventTimestamp: earliestEventTimestamp
+                    );
+                    _logger.LogInformation("{SessionPrefix} Status: Succeeded (gather_rules)", sessionPrefix);
                 }
                 else if (lastPhaseChangeEvent != null)
                 {
