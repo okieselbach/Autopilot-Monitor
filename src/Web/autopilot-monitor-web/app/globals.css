@@ -290,10 +290,11 @@ body {
 /* (no overrides needed for bg-blue-500, bg-green-500, etc.) */
 
 /* -- Scrollbar (global) -- */
+/* Fixed width — no grow-on-hover so the cursor doesn't need to hit a tiny target.
+   Thumb is invisible by default and fades in as soon as the mouse enters the page. */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-  transition: width 0.2s ease;
+  width: 8px;
+  height: 8px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
@@ -301,23 +302,19 @@ body {
 ::-webkit-scrollbar-thumb {
   background: transparent;
   border-radius: 4px;
+  transition: background 0.15s ease;
 }
-::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
-}
-html:hover ::-webkit-scrollbar-thumb,
-body:hover ::-webkit-scrollbar-thumb {
+html:hover ::-webkit-scrollbar-thumb {
   background: #cbd5e1;
 }
-::-webkit-scrollbar:hover {
-  width: 10px;
-  height: 10px;
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8 !important;
 }
 
 /* -- Scrollbar (dark mode) -- */
 .dark ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 .dark ::-webkit-scrollbar-track {
   background: transparent;
@@ -325,15 +322,11 @@ body:hover ::-webkit-scrollbar-thumb {
 .dark ::-webkit-scrollbar-thumb {
   background: transparent;
   border-radius: 4px;
+  transition: background 0.15s ease;
 }
-.dark ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
-}
-.dark html:hover ::-webkit-scrollbar-thumb,
-.dark body:hover ::-webkit-scrollbar-thumb {
+.dark html:hover ::-webkit-scrollbar-thumb {
   background: #475569;
 }
-.dark ::-webkit-scrollbar:hover {
-  width: 10px;
-  height: 10px;
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8 !important;
 }
