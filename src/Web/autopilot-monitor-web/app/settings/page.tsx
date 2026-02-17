@@ -578,29 +578,26 @@ export default function SettingsPage() {
 
   return (
     <ProtectedRoute>
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+      <div className="min-h-screen bg-gray-50">
         {/* Header */}
-        <header className="bg-white shadow-sm border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              <button
-                onClick={() => router.push("/")}
-                className="flex items-center space-x-2 text-gray-600 hover:text-gray-900 transition-colors"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-                </svg>
-                <span>Back to Dashboard</span>
-              </button>
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">Tenant Configuration</h1>
-              <p className="text-sm text-gray-500">Tenant: {tenantId}</p>
+        <header className="bg-white shadow">
+          <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+            <div className="flex items-center justify-between">
+              <div>
+                <button
+                  onClick={() => router.push("/")}
+                  className="text-sm text-gray-600 hover:text-gray-900 mb-2 flex items-center"
+                >
+                  &larr; Back to Dashboard
+                </button>
+                <div>
+                  <h1 className="text-3xl font-bold text-gray-900">Tenant Configuration</h1>
+                  <p className="text-sm text-gray-600 mt-1">Tenant: {tenantId}</p>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-      </header>
+        </header>
 
       {/* Main Content */}
       <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -1261,11 +1258,11 @@ export default function SettingsPage() {
                 </div>
               </div>
               <div className="p-6 space-y-4">
-                <label className="flex items-center justify-between">
+                <label className="flex items-start justify-between gap-4">
                   <div>
                     <p className="font-medium text-gray-900">Enable Serial Number Validation</p>
                     <p className="text-sm text-gray-500">
-                      Enabling starts Microsoft Entra admin consent for the 'DeviceManagementServiceConfig.Read.All' permission. After consent, the setting is saved automatically.
+                      Enabling starts Microsoft Entra admin consent for the <strong>DeviceManagementServiceConfig.Read.All</strong> permission. After consent, the setting is saved automatically.
                     </p>
                   </div>
                   <button
