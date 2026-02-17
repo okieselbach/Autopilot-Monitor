@@ -1089,22 +1089,93 @@ function PhaseTimeline({ currentPhase, completedPhases, events = [], sessionStat
     return null;
   };
 
-  // Calculate phase durations from events
-  const getPhaseDuration = (phaseId: number): string | null => {
-    const phaseEvents = events.filter(e => e.phase === phaseId);
-    if (phaseEvents.length < 2) return null;
+  // Helper: get first/last event timestamp for a phase
+  const getFirstEventTime = (phaseId: number): number | null => {
+    const ts = events
+      .filter(e => e.phase === phaseId)
+      .map(e => new Date(e.timestamp).getTime());
+    return ts.length > 0 ? Math.min(...ts) : null;
+  };
+  const getLastEventTime = (phaseId: number): number | null => {
+    const ts = events
+      .filter(e => e.phase === phaseId)
+      .map(e => new Date(e.timestamp).getTime());
+    return ts.length > 0 ? Math.max(...ts) : null;
+  };
 
-    const sorted = [...phaseEvents].sort((a, b) =>
-      new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-    );
-    const first = new Date(sorted[0].timestamp).getTime();
-    const last = new Date(sorted[sorted.length - 1].timestamp).getTime();
-    const durationSec = Math.round((last - first) / 1000);
-
+  const formatDuration = (ms: number): string | null => {
+    const durationSec = Math.round(ms / 1000);
     if (durationSec < 5) return null;
     if (durationSec < 60) return `${durationSec}s`;
     if (durationSec < 3600) return `${Math.floor(durationSec / 60)}m ${durationSec % 60}s`;
     return `${Math.floor(durationSec / 3600)}h ${Math.floor((durationSec % 3600) / 60)}m`;
+  };
+
+  // Calculate phase durations using phase-transition timestamps
+  // Parent phases (Device Setup, Account Setup) span until the next major phase starts
+  // Sub-phases (Apps Device, Apps User) show only their own event range
+  const getPhaseDuration = (phaseId: number): string | null => {
+    const isV2 = enrollmentType === "v2";
+
+    // No timing for Start and Device Preparation (agent not active yet)
+    if (phaseId === 0 || phaseId === 1) return null;
+    // No timing for Complete
+    if (phaseId === 7) return null;
+
+    if (isV2) {
+      // V2: simpler phases — no sub-phase nesting
+      // Phase 3 (App Installation): first phase 3 event → first phase 6 event (or last phase 3)
+      // Phase 6 (Finalizing): first phase 6 event → first phase 7 event (or last phase 6)
+      const start = getFirstEventTime(phaseId);
+      if (!start) return null;
+
+      const nextPhaseMap: Record<number, number> = { 3: 6, 6: 7 };
+      const nextPhase = nextPhaseMap[phaseId];
+      const end = (nextPhase !== undefined ? getFirstEventTime(nextPhase) : null) ?? getLastEventTime(phaseId);
+      if (!end || end <= start) return null;
+
+      return formatDuration(end - start);
+    }
+
+    // V1 phase-transition-based durations:
+    // Device Setup (2): first phase 2 → first phase 4 (includes Apps Device sub-phase)
+    // Apps Device (3): first phase 3 → last phase 3 (sub-phase only)
+    // Account Setup (4): first phase 4 → first phase 6 (includes Apps User sub-phase)
+    // Apps User (5): first phase 5 → last phase 5 (sub-phase only)
+    // Finalizing (6): first phase 6 → first phase 7 (or last phase 6)
+    const start = getFirstEventTime(phaseId);
+    if (!start) return null;
+
+    let end: number | null = null;
+    switch (phaseId) {
+      case 2: // Device Setup → ends when Account Setup starts
+        end = getFirstEventTime(4) ?? getLastEventTime(3) ?? getLastEventTime(2);
+        break;
+      case 3: // Apps (Device) — sub-phase, own event range
+        end = getLastEventTime(3);
+        break;
+      case 4: // Account Setup → ends when Finalizing starts
+        end = getFirstEventTime(6) ?? getLastEventTime(5) ?? getLastEventTime(4);
+        break;
+      case 5: // Apps (User) — sub-phase, own event range
+        end = getLastEventTime(5);
+        break;
+      case 6: // Finalizing → ends when Complete starts
+        end = getFirstEventTime(7) ?? getLastEventTime(6);
+        break;
+      default:
+        end = getLastEventTime(phaseId);
+        break;
+    }
+
+    if (!end || end <= start) return null;
+    return formatDuration(end - start);
+  };
+
+  // Check if a phase is a sub-phase (Apps Device / Apps User in V1)
+  const isSubPhase = (phaseId: number): boolean => {
+    if (enrollmentType === "v2") return false;
+    return phaseId === 3 || phaseId === 5;
   };
 
   // Derive the highest real phase (0-7) seen in events, excluding phase 99 (Failed)
@@ -1221,8 +1292,11 @@ function PhaseTimeline({ currentPhase, completedPhases, events = [], sessionStat
                   {phase.shortName}
                 </div>
                 {(status === 'completed' || status === 'failed') && getPhaseDuration(phase.id) && (
-                  <div className={`mt-0.5 text-[10px] ${status === 'failed' ? 'text-red-400' : 'text-gray-400'}`}>
-                    {getPhaseDuration(phase.id)}
+                  <div className={`mt-0.5 text-[10px] ${
+                    status === 'failed' ? 'text-red-400' :
+                    isSubPhase(phase.id) ? 'text-gray-400 italic' : 'text-gray-500 font-medium'
+                  }`}>
+                    {isSubPhase(phase.id) ? `(${getPhaseDuration(phase.id)})` : getPhaseDuration(phase.id)}
                   </div>
                 )}
                 {status === 'failed' && (
