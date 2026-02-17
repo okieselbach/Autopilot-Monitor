@@ -174,20 +174,16 @@ export default function UsageMetricsPage() {
 
   return (
 <ProtectedRoute>
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-6">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="mb-6">
+    <div className="min-h-screen bg-gray-50">
+      <header className="bg-white shadow">
+        <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
+            <div>
               <button
                 onClick={() => router.push('/')}
-                className="p-2 hover:bg-white rounded-lg transition-colors"
-                title="Back to Home"
+                className="text-sm text-gray-600 hover:text-gray-900 mb-2 flex items-center"
               >
-                <svg className="h-6 w-6 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-                </svg>
+                &larr; Back to Dashboard
               </button>
               <div>
                 <h1 className="text-3xl font-bold text-gray-900">Usage Metrics</h1>
@@ -204,7 +200,7 @@ export default function UsageMetricsPage() {
             <button
               onClick={() => fetchMetrics(true)}
               disabled={refreshing}
-              className="px-4 py-2 bg-white text-gray-700 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-2"
+              className="px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-2"
             >
               <svg className={`h-5 w-5 ${refreshing ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -213,6 +209,8 @@ export default function UsageMetricsPage() {
             </button>
           </div>
         </div>
+      </header>
+      <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
 
         {/* Session Statistics */}
         <div className="mb-6">

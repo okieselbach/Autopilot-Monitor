@@ -531,6 +531,31 @@ export default function SessionDetailPage() {
             </h1>
           </div>
           <div className="flex items-center gap-3">
+            {session?.diagnosticsBlobName && (
+              <button
+                onClick={async () => {
+                  try {
+                    const token = await getAccessToken();
+                    if (!token) return;
+                    const res = await fetch(
+                      `${API_BASE_URL}/api/diagnostics/download-url?tenantId=${session.tenantId}&blobName=${encodeURIComponent(session.diagnosticsBlobName!)}`,
+                      { headers: { Authorization: `Bearer ${token}` } }
+                    );
+                    if (!res.ok) throw new Error('Failed to get download URL');
+                    const data = await res.json();
+                    window.open(data.downloadUrl, '_blank');
+                  } catch (err) {
+                    console.error('Diagnostics download failed:', err);
+                  }
+                }}
+                className="px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-md hover:bg-gray-50 transition-colors flex items-center gap-2 text-sm"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                Download Diagnostics
+              </button>
+            )}
             {session?.status === 'Failed' && (
               <button
                 onClick={() => router.push(`/diagnosis/${sessionId}`)}
@@ -542,17 +567,17 @@ export default function SessionDetailPage() {
                 Diagnosis
               </button>
             )}
-          {adminMode && session?.status === 'InProgress' && (
-            <button
-              onClick={markAsFailed}
-              className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors flex items-center gap-2"
-            >
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-              </svg>
-              Mark as Failed
-            </button>
-          )}
+            {adminMode && session?.status === 'InProgress' && (
+              <button
+                onClick={markAsFailed}
+                className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors flex items-center gap-2"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                Mark as Failed
+              </button>
+            )}
           </div>
         </div>
       </header>
@@ -585,38 +610,9 @@ export default function SessionDetailPage() {
                   copyText={session.sessionId}
                 />
                 <InfoItem label="Status" value={<StatusBadge status={session.status} failureReason={session.failureReason} />} />
-                <InfoItem label="Events" value={session.eventCount.toString()} />
+                <InfoItem label="Started" value={new Date(session.startedAt).toLocaleString([], { dateStyle: "short", timeStyle: "short" })} />
                 <InfoItem label="Duration" value={enrollmentDurationFromEvents ?? `${Math.round(session.durationSeconds / 60)} min`} />
-                {session.diagnosticsBlobName && (
-                  <InfoItem
-                    label="Diagnostics"
-                    value={
-                      <button
-                        onClick={async () => {
-                          try {
-                            const token = await getAccessToken();
-                            if (!token) return;
-                            const res = await fetch(
-                              `${API_BASE_URL}/api/diagnostics/download-url?tenantId=${session.tenantId}&blobName=${encodeURIComponent(session.diagnosticsBlobName!)}`,
-                              { headers: { Authorization: `Bearer ${token}` } }
-                            );
-                            if (!res.ok) throw new Error('Failed to get download URL');
-                            const data = await res.json();
-                            window.open(data.downloadUrl, '_blank');
-                          } catch (err) {
-                            console.error('Diagnostics download failed:', err);
-                          }
-                        }}
-                        className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 hover:underline"
-                      >
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                        </svg>
-                        Download Package
-                      </button>
-                    }
-                  />
-                )}
+                <InfoItem label="Events" value={session.eventCount.toString()} />
               </div>
             </div>
           )}
@@ -1583,6 +1579,19 @@ function DeviceDetailsCard({ events }: { events: EnrollmentEvent[] }) {
 
   const agentStarted = getEventData("agent_started");
   const bootTime = getEventData("boot_time");
+
+  // Calculate boot time from first event timestamp minus uptimeMinutes.
+  // The device-reported bootTimeUtc can be inconsistent with event timestamps due to
+  // timezone handling on the device side. Using firstEvent - uptime gives a result
+  // that is always consistent with the event timeline shown in the UI.
+  const estimatedBootTime = (() => {
+    const uptimeMinutes = bootTime?.uptimeMinutes ?? agentStarted?.uptimeMinutes;
+    if (!uptimeMinutes) return null;
+    const timestamps = events.map(e => new Date(e.timestamp).getTime()).filter(t => !isNaN(t));
+    if (timestamps.length === 0) return null;
+    const firstEventMs = Math.min(...timestamps);
+    return new Date(firstEventMs - uptimeMinutes * 60 * 1000);
+  })();
   const osInfo = getEventData("os_info");
   const networkAdapters = getEventData("network_adapters");
   const dnsConfig = getEventData("dns_configuration");
@@ -1635,10 +1644,10 @@ function DeviceDetailsCard({ events }: { events: EnrollmentEvent[] }) {
           )}
 
           {/* System */}
-          {(bootTime?.bootTimeUtc || bootTime?.bootTime || agentStarted?.bootTime || agentStarted?.agentVersion || imeVersion || aadJoinStatus?.joinType || deviceLocation?.country || deviceLocation?.Country || deviceLocation?.timezone || deviceLocation?.Timezone) && (
+          {(estimatedBootTime || agentStarted?.agentVersion || imeVersion || aadJoinStatus?.joinType || deviceLocation?.country || deviceLocation?.Country || deviceLocation?.timezone || deviceLocation?.Timezone) && (
             <DetailSection title="System">
-              {(bootTime?.bootTimeUtc || bootTime?.bootTime || agentStarted?.bootTime) && (
-                <DetailRow label="Boot Time" value={new Date(bootTime?.bootTimeUtc || bootTime?.bootTime || agentStarted?.bootTime).toLocaleString()} />
+              {estimatedBootTime && (
+                <DetailRow label="Boot Time" value={estimatedBootTime.toLocaleString([], { dateStyle: "short", timeStyle: "medium" })} />
               )}
               {bootTime?.uptimeMinutes && <DetailRow label="Uptime until enrollment starts" value={`${Math.floor(bootTime.uptimeMinutes / 60)}h ${bootTime.uptimeMinutes % 60}m`} />}
               {agentStarted?.agentVersion && <DetailRow label="Monitor Agent Version" value={agentStarted.agentVersion.replace(/\+([0-9a-f]{7})[0-9a-f]+$/, '+$1')} />}
