@@ -9,31 +9,31 @@ using Microsoft.Extensions.Logging;
 
 namespace AutopilotMonitor.Functions.Functions;
 
-public class SerialValidationConsentFunction
+public class AutopilotDeviceValidationConsentFunction
 {
-    private readonly ILogger<SerialValidationConsentFunction> _logger;
+    private readonly ILogger<AutopilotDeviceValidationConsentFunction> _logger;
     private readonly IConfiguration _configuration;
     private readonly TenantAdminsService _tenantAdminsService;
     private readonly GalacticAdminService _galacticAdminService;
-    private readonly SerialNumberValidator _serialNumberValidator;
+    private readonly AutopilotDeviceValidator _autopilotDeviceValidator;
 
-    public SerialValidationConsentFunction(
-        ILogger<SerialValidationConsentFunction> logger,
+    public AutopilotDeviceValidationConsentFunction(
+        ILogger<AutopilotDeviceValidationConsentFunction> logger,
         IConfiguration configuration,
         TenantAdminsService tenantAdminsService,
         GalacticAdminService galacticAdminService,
-        SerialNumberValidator serialNumberValidator)
+        AutopilotDeviceValidator autopilotDeviceValidator)
     {
         _logger = logger;
         _configuration = configuration;
         _tenantAdminsService = tenantAdminsService;
         _galacticAdminService = galacticAdminService;
-        _serialNumberValidator = serialNumberValidator;
+        _autopilotDeviceValidator = autopilotDeviceValidator;
     }
 
-    [Function("GetSerialValidationConsentUrl")]
+    [Function("GetAutopilotDeviceValidationConsentUrl")]
     public async Task<HttpResponseData> GetConsentUrl(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "config/{tenantId}/serial-validation/consent-url")] HttpRequestData req,
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "config/{tenantId}/autopilot-device-validation/consent-url")] HttpRequestData req,
         string tenantId)
     {
         var authError = await EnsureAuthorizedTenantAdminAsync(req, tenantId);
@@ -64,7 +64,7 @@ public class SerialValidationConsentFunction
             $"https://login.microsoftonline.com/{Uri.EscapeDataString(tenantId)}/adminconsent" +
             $"?client_id={Uri.EscapeDataString(validatorClientId)}" +
             $"&redirect_uri={Uri.EscapeDataString(redirectUri)}" +
-            $"&state={Uri.EscapeDataString("serial-validation-enable")}";
+            $"&state={Uri.EscapeDataString("autopilot-device-validation-enable")}";
 
         var response = req.CreateResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new
@@ -74,9 +74,9 @@ public class SerialValidationConsentFunction
         return response;
     }
 
-    [Function("GetSerialValidationConsentStatus")]
+    [Function("GetAutopilotDeviceValidationConsentStatus")]
     public async Task<HttpResponseData> GetConsentStatus(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "config/{tenantId}/serial-validation/consent-status")] HttpRequestData req,
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "config/{tenantId}/autopilot-device-validation/consent-status")] HttpRequestData req,
         string tenantId)
     {
         var authError = await EnsureAuthorizedTenantAdminAsync(req, tenantId);
@@ -85,7 +85,7 @@ public class SerialValidationConsentFunction
             return authError;
         }
 
-        var result = await _serialNumberValidator.GetConsentStatusAsync(tenantId);
+        var result = await _autopilotDeviceValidator.GetConsentStatusAsync(tenantId);
         var response = req.CreateResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new
         {
@@ -120,7 +120,7 @@ public class SerialValidationConsentFunction
         if (!isGalacticAdmin && !isTenantAdmin)
         {
             _logger.LogWarning(
-                "User {User} attempted serial-validation consent operation without admin rights for tenant {TenantId}",
+                "User {User} attempted autopilot-device-validation consent operation without admin rights for tenant {TenantId}",
                 userIdentifier,
                 tenantId);
 

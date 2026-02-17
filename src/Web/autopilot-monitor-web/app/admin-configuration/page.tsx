@@ -26,7 +26,7 @@ interface TenantConfiguration {
   rateLimitRequestsPerMinute: number;
   manufacturerWhitelist: string;
   modelWhitelist: string;
-  validateSerialNumber: boolean;
+  validateAutopilotDevice: boolean;
   allowInsecureAgentRequests?: boolean;
   dataRetentionDays: number;
   sessionTimeoutHours: number;
@@ -1305,17 +1305,17 @@ export default function AdminConfigurationPage() {
                     <label className="flex items-center space-x-2 cursor-pointer">
                       <input
                         type="checkbox"
-                        checked={editingTenant.validateSerialNumber}
-                        onChange={(e) => setEditingTenant({ ...editingTenant, validateSerialNumber: e.target.checked })}
+                        checked={editingTenant.validateAutopilotDevice}
+                        onChange={(e) => setEditingTenant({ ...editingTenant, validateAutopilotDevice: e.target.checked })}
                         className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
                       />
-                      <span className="text-sm font-medium text-gray-700">Validate Serial Number</span>
+                      <span className="text-sm font-medium text-gray-700">Autopilot Device Validation</span>
                     </label>
 
                     <div className="border border-amber-300 bg-amber-50 rounded-lg p-3">
                       <p className="text-sm font-semibold text-amber-900">Galactic Admin Test Bypass</p>
                       <p className="text-xs text-amber-800 mt-1">
-                        Allows agent requests even when serial validation is disabled. Use only for temporary test tenants.
+                        Allows agent requests even when Autopilot device validation is disabled. Use only for temporary test tenants.
                       </p>
                       <div className="mt-3 flex items-center justify-between">
                         <span className={`text-xs font-medium ${editingTenant.allowInsecureAgentRequests ? "text-red-700" : "text-green-700"}`}>

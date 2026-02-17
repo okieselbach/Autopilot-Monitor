@@ -13,7 +13,7 @@ interface TenantConfiguration {
   updatedBy: string;
   manufacturerWhitelist: string;
   modelWhitelist: string;
-  validateSerialNumber: boolean;
+  validateAutopilotDevice: boolean;
   allowInsecureAgentRequests?: boolean;
   dataRetentionDays: number;
   sessionTimeoutHours: number;
@@ -73,14 +73,14 @@ export default function SettingsPage() {
   // Form state
   const [manufacturerWhitelist, setManufacturerWhitelist] = useState("Dell*,HP*,Lenovo*,Microsoft Corporation");
   const [modelWhitelist, setModelWhitelist] = useState("*");
-  const [validateSerialNumber, setValidateSerialNumber] = useState(false);
+  const [validateAutopilotDevice, setValidateAutopilotDevice] = useState(false);
   const [dataRetentionDays, setDataRetentionDays] = useState(90);
   const [sessionTimeoutHours, setSessionTimeoutHours] = useState(5);
 
   // Collector settings state
   const [enablePerformanceCollector, setEnablePerformanceCollector] = useState(false);
   const [performanceCollectorInterval, setPerformanceCollectorInterval] = useState(60);
-  const [serialConsentInProgress, setSerialConsentInProgress] = useState(false);
+  const [autopilotConsentInProgress, setAutopilotConsentInProgress] = useState(false);
 
   // Agent behavior state
   const [selfDestructOnComplete, setSelfDestructOnComplete] = useState(false);
@@ -131,7 +131,7 @@ export default function SettingsPage() {
         // Update form state
         setManufacturerWhitelist(data.manufacturerWhitelist);
         setModelWhitelist(data.modelWhitelist);
-        setValidateSerialNumber(data.validateSerialNumber);
+        setValidateAutopilotDevice(data.validateAutopilotDevice);
         setDataRetentionDays(data.dataRetentionDays ?? 90);
         setSessionTimeoutHours(data.sessionTimeoutHours ?? 5);
         setEnablePerformanceCollector(data.enablePerformanceCollector ?? false);
@@ -196,7 +196,7 @@ export default function SettingsPage() {
     fetchAdmins();
   }, [tenantId]);
 
-  const saveConfiguration = async (validateSerialNumberOverride?: boolean) => {
+  const saveConfiguration = async (validateAutopilotDeviceOverride?: boolean) => {
     if (!tenantId || !config) return;
 
     try {
@@ -204,13 +204,13 @@ export default function SettingsPage() {
       setError(null);
       setSuccessMessage(null);
 
-      const serialValidationValue = validateSerialNumberOverride ?? validateSerialNumber;
+      const autopilotDeviceValidationValue = validateAutopilotDeviceOverride ?? validateAutopilotDevice;
 
       const updatedConfig: TenantConfiguration = {
         ...config,
         manufacturerWhitelist,
         modelWhitelist,
-        validateSerialNumber: serialValidationValue,
+        validateAutopilotDevice: autopilotDeviceValidationValue,
         dataRetentionDays,
         sessionTimeoutHours,
         enablePerformanceCollector,
@@ -250,7 +250,7 @@ export default function SettingsPage() {
 
       const result = await response.json();
       setConfig(result.config);
-      setValidateSerialNumber(result.config.validateSerialNumber);
+      setValidateAutopilotDevice(result.config.validateAutopilotDevice);
       setSuccessMessage("Configuration saved successfully!");
       setTimeout(() => setSuccessMessage(null), 3000);
     } finally {
@@ -258,11 +258,11 @@ export default function SettingsPage() {
     }
   };
 
-  const beginSerialValidationEnableFlow = async () => {
+  const beginAutopilotDeviceValidationEnableFlow = async () => {
     if (!tenantId) return;
 
     try {
-      setSerialConsentInProgress(true);
+      setAutopilotConsentInProgress(true);
       setError(null);
       setSuccessMessage(null);
 
@@ -273,7 +273,7 @@ export default function SettingsPage() {
 
       const redirectUri = `${window.location.origin}/settings`;
       const response = await fetch(
-        `${API_BASE_URL}/api/config/${tenantId}/serial-validation/consent-url?redirectUri=${encodeURIComponent(redirectUri)}`,
+        `${API_BASE_URL}/api/config/${tenantId}/autopilot-device-validation/consent-url?redirectUri=${encodeURIComponent(redirectUri)}`,
         {
           headers: {
             'Authorization': `Bearer ${token}`
@@ -291,11 +291,11 @@ export default function SettingsPage() {
         throw new Error("Backend did not return a consent URL.");
       }
 
-      sessionStorage.setItem("serialValidationPending", "true");
+      sessionStorage.setItem("autopilotDeviceValidationPending", "true");
       window.location.href = data.consentUrl;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to start admin consent flow");
-      setSerialConsentInProgress(false);
+      setAutopilotConsentInProgress(false);
     }
   };
 
@@ -303,7 +303,7 @@ export default function SettingsPage() {
     const handleConsentCallback = async () => {
       if (!tenantId || !config) return;
 
-      const wasPending = sessionStorage.getItem("serialValidationPending") === "true";
+      const wasPending = sessionStorage.getItem("autopilotDeviceValidationPending") === "true";
       if (!wasPending) return;
 
       const queryParams = new URLSearchParams(window.location.search);
@@ -315,27 +315,27 @@ export default function SettingsPage() {
         return;
       }
 
-      sessionStorage.removeItem("serialValidationPending");
+      sessionStorage.removeItem("autopilotDeviceValidationPending");
 
       if (consentError) {
         const errorText = consentErrorDescription
           ? `${consentError}: ${decodeURIComponent(consentErrorDescription)}`
           : consentError;
         setError(`Admin consent failed: ${errorText}`);
-        setSerialConsentInProgress(false);
+        setAutopilotConsentInProgress(false);
         router.replace("/settings");
         return;
       }
 
       try {
-        setSerialConsentInProgress(true);
+        setAutopilotConsentInProgress(true);
         const token = await getAccessToken();
         if (!token) {
           throw new Error("Failed to get access token");
         }
 
         const statusResponse = await fetch(
-          `${API_BASE_URL}/api/config/${tenantId}/serial-validation/consent-status`,
+          `${API_BASE_URL}/api/config/${tenantId}/autopilot-device-validation/consent-status`,
           {
             headers: {
               'Authorization': `Bearer ${token}`
@@ -354,12 +354,12 @@ export default function SettingsPage() {
         }
 
         await saveConfiguration(true);
-        setSuccessMessage("Serial Number Validation enabled. Backend agent endpoints are now unlocked for this tenant.");
+        setSuccessMessage("Autopilot Device Validation enabled. Backend agent endpoints are now unlocked for this tenant.");
         router.replace("/settings");
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to verify consent");
       } finally {
-        setSerialConsentInProgress(false);
+        setAutopilotConsentInProgress(false);
       }
     };
 
@@ -621,39 +621,39 @@ export default function SettingsPage() {
               </div>
             )}
 
-            {/* Serial Number Validation */}
+            {/* Autopilot Device Validation */}
             <div className="bg-white rounded-lg shadow">
               <div className="p-6 border-b border-gray-200">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h2 className="text-xl font-semibold text-gray-900">Serial Number Validation</h2>
-                    <p className="text-sm text-gray-500 mt-1">Validate devices against Intune - Windows Autopilot registration (mandatory for agent ingestion)</p>
+                    <h2 className="text-xl font-semibold text-gray-900">Autopilot Device Validation</h2>
+                    <p className="text-sm text-gray-500 mt-1">Validate devices against Intune Windows Autopilot registration (mandatory for agent ingestion)</p>
                   </div>
-                  <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${validateSerialNumber ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}>
-                    {validateSerialNumber ? "Enabled" : "Disabled"}
+                  <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${validateAutopilotDevice ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}>
+                    {validateAutopilotDevice ? "Enabled" : "Disabled"}
                   </span>
                 </div>
               </div>
               <div className="p-6 space-y-4">
                 <label className="flex items-start justify-between gap-4">
                   <div>
-                    <p className="font-medium text-gray-900">Enable Serial Number Validation</p>
+                    <p className="font-medium text-gray-900">Enable Autopilot Device Validation</p>
                     <p className="text-sm text-gray-500">
                       Enabling starts Microsoft Entra admin consent for the <strong>DeviceManagementServiceConfig.Read.All</strong> permission. After consent, the setting is saved automatically.
                     </p>
                   </div>
                   <button
                     onClick={() => {
-                      if (validateSerialNumber) {
-                        setValidateSerialNumber(false);
+                      if (validateAutopilotDevice) {
+                        setValidateAutopilotDevice(false);
                       } else {
-                        beginSerialValidationEnableFlow();
+                        beginAutopilotDeviceValidationEnableFlow();
                       }
                     }}
-                    disabled={saving || serialConsentInProgress}
-                    className={`relative inline-flex h-8 w-14 shrink-0 items-center rounded-full transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${validateSerialNumber ? 'bg-green-600' : 'bg-gray-300'}`}
+                    disabled={saving || autopilotConsentInProgress}
+                    className={`relative inline-flex h-8 w-14 shrink-0 items-center rounded-full transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${validateAutopilotDevice ? 'bg-green-600' : 'bg-gray-300'}`}
                   >
-                    <span className={`inline-block h-6 w-6 transform rounded-full bg-white transition-transform ${validateSerialNumber ? 'translate-x-7' : 'translate-x-1'}`} />
+                    <span className={`inline-block h-6 w-6 transform rounded-full bg-white transition-transform ${validateAutopilotDevice ? 'translate-x-7' : 'translate-x-1'}`} />
                   </button>
                 </label>
 
@@ -664,7 +664,7 @@ export default function SettingsPage() {
                   </p>
                 </div>
 
-                {serialConsentInProgress && (
+                {autopilotConsentInProgress && (
                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">
                     Checking or applying admin consent...
                   </div>

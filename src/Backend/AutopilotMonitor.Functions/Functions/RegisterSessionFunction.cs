@@ -16,20 +16,20 @@ namespace AutopilotMonitor.Functions.Functions
         private readonly TableStorageService _storageService;
         private readonly TenantConfigurationService _configService;
         private readonly RateLimitService _rateLimitService;
-        private readonly SerialNumberValidator _serialNumberValidator;
+        private readonly AutopilotDeviceValidator _autopilotDeviceValidator;
 
         public RegisterSessionFunction(
             ILogger<RegisterSessionFunction> logger,
             TableStorageService storageService,
             TenantConfigurationService configService,
             RateLimitService rateLimitService,
-            SerialNumberValidator serialNumberValidator)
+            AutopilotDeviceValidator autopilotDeviceValidator)
         {
             _logger = logger;
             _storageService = storageService;
             _configService = configService;
             _rateLimitService = rateLimitService;
-            _serialNumberValidator = serialNumberValidator;
+            _autopilotDeviceValidator = autopilotDeviceValidator;
         }
 
         [Function("RegisterSession")]
@@ -64,7 +64,7 @@ namespace AutopilotMonitor.Functions.Functions
                     registration.TenantId,
                     _configService,
                     _rateLimitService,
-                    _serialNumberValidator,
+                    _autopilotDeviceValidator,
                     _logger,
                     registration.SessionId
                 );

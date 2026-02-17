@@ -25,7 +25,7 @@ interface Session {
 }
 
 interface TenantConfigurationSummary {
-  validateSerialNumber: boolean;
+  validateAutopilotDevice: boolean;
 }
 
 export default function Home() {
@@ -133,7 +133,7 @@ export default function Home() {
         }
 
         const data: TenantConfigurationSummary = await response.json();
-        setSerialValidationEnabled(!!data.validateSerialNumber);
+        setSerialValidationEnabled(!!data.validateAutopilotDevice);
       } catch {
         setSerialValidationEnabled(null);
       }
@@ -471,9 +471,9 @@ export default function Home() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
                 <div>
-                  <p className="text-sm font-semibold text-red-900">Serial Number Validation is disabled</p>
+                  <p className="text-sm font-semibold text-red-900">Autopilot Device Validation is disabled</p>
                   <p className="text-sm text-red-800">
-                    Agent ingestion is blocked until this is enabled. Open Configuration and enable Serial Number Validation first.
+                    Agent ingestion is blocked until this is enabled. Open Configuration and enable Autopilot Device Validation first.
                   </p>
                 </div>
               </div>

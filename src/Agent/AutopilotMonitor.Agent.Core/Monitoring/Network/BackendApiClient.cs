@@ -61,7 +61,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
                 logger?.Debug("Client certificate authentication disabled");
             }
 
-            // Get hardware information for whitelist validation and serial number verification
+            // Get hardware information for whitelist validation and Autopilot device verification
             var hardwareInfo = HardwareInfo.GetHardwareInfo(logger);
             _manufacturer = hardwareInfo.Manufacturer;
             _model = hardwareInfo.Model;
@@ -178,7 +178,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
             {
                 throw new BackendAuthException(
                     $"Backend returned {(int)response.StatusCode} {response.StatusCode}. " +
-                    "The device is not authorized. Check client certificate and serial number validation.");
+                    "The device is not authorized. Check client certificate and Autopilot device validation.");
             }
         }
 
@@ -258,7 +258,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
                 _logger?.Verbose($"  X-Device-Model: {_model}");
             }
 
-            // Add serial number for optional backend validation against Intune Autopilot registration
+            // Add serial number for Autopilot device validation against Intune registration
             if (!string.IsNullOrEmpty(_serialNumber))
             {
                 request.Headers.Add("X-Device-SerialNumber", _serialNumber);

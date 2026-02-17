@@ -105,7 +105,7 @@ builder.Services.AddSingleton<HealthCheckService>();
 builder.Services.AddSingleton<GatherRuleService>();
 builder.Services.AddSingleton<AnalyzeRuleService>();
 builder.Services.AddSingleton<MaintenanceService>();
-builder.Services.AddSingleton<AutopilotMonitor.Functions.Security.SerialNumberValidator>();
+builder.Services.AddSingleton<AutopilotMonitor.Functions.Security.AutopilotDeviceValidator>();
 builder.Services.AddHttpClient<TeamsNotificationService>();
 
 var app = builder.Build();

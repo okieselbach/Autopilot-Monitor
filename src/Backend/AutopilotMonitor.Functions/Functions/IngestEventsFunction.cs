@@ -19,7 +19,7 @@ namespace AutopilotMonitor.Functions.Functions
         private readonly TableStorageService _storageService;
         private readonly TenantConfigurationService _configService;
         private readonly RateLimitService _rateLimitService;
-        private readonly SerialNumberValidator _serialNumberValidator;
+        private readonly AutopilotDeviceValidator _autopilotDeviceValidator;
         private readonly AnalyzeRuleService _analyzeRuleService;
         private readonly TeamsNotificationService _teamsNotificationService;
 
@@ -28,7 +28,7 @@ namespace AutopilotMonitor.Functions.Functions
             TableStorageService storageService,
             TenantConfigurationService configService,
             RateLimitService rateLimitService,
-            SerialNumberValidator serialNumberValidator,
+            AutopilotDeviceValidator autopilotDeviceValidator,
             AnalyzeRuleService analyzeRuleService,
             TeamsNotificationService teamsNotificationService)
         {
@@ -36,7 +36,7 @@ namespace AutopilotMonitor.Functions.Functions
             _storageService = storageService;
             _configService = configService;
             _rateLimitService = rateLimitService;
-            _serialNumberValidator = serialNumberValidator;
+            _autopilotDeviceValidator = autopilotDeviceValidator;
             _analyzeRuleService = analyzeRuleService;
             _teamsNotificationService = teamsNotificationService;
         }
@@ -72,7 +72,7 @@ namespace AutopilotMonitor.Functions.Functions
                     request.TenantId,
                     _configService,
                     _rateLimitService,
-                    _serialNumberValidator,
+                    _autopilotDeviceValidator,
                     _logger,
                     request.SessionId
                 );

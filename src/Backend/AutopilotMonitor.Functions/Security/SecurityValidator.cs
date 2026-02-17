@@ -43,18 +43,18 @@ namespace AutopilotMonitor.Functions.Security
 
         private readonly TenantConfigurationService _configService;
         private readonly RateLimitService _rateLimitService;
-        private readonly SerialNumberValidator _serialNumberValidator;
+        private readonly AutopilotDeviceValidator _autopilotDeviceValidator;
         private readonly ILogger _logger;
 
         public SecurityValidator(
             TenantConfigurationService configService,
             RateLimitService rateLimitService,
-            SerialNumberValidator serialNumberValidator,
+            AutopilotDeviceValidator autopilotDeviceValidator,
             ILogger logger)
         {
             _configService = configService;
             _rateLimitService = rateLimitService;
-            _serialNumberValidator = serialNumberValidator;
+            _autopilotDeviceValidator = autopilotDeviceValidator;
             _logger = logger;
         }
 
@@ -70,16 +70,16 @@ namespace AutopilotMonitor.Functions.Security
             var config = await _configService.GetConfigurationAsync(tenantId);
 
             // Security validation is always enforced (no longer configurable per tenant)
-            // Hard gate: tenant must enable serial validation before agent traffic is accepted.
+            // Hard gate: tenant must enable Autopilot device validation before agent traffic is accepted.
             // Galactic Admins can set AllowInsecureAgentRequests=true in the config row for test tenants.
-            if (!config.ValidateSerialNumber && !config.AllowInsecureAgentRequests)
+            if (!config.ValidateAutopilotDevice && !config.AllowInsecureAgentRequests)
             {
                 return new SecurityValidationResult
                 {
                     IsValid = false,
                     StatusCode = HttpStatusCode.Forbidden,
-                    ErrorMessage = "Serial number validation is required",
-                    Details = "Enable 'Validate Serial Number' in Configuration before using the agent ingestion endpoints."
+                    ErrorMessage = "Autopilot device validation is required",
+                    Details = "Enable 'Autopilot Device Validation' in Configuration before using the agent ingestion endpoints."
                 };
             }
 
@@ -148,17 +148,17 @@ namespace AutopilotMonitor.Functions.Security
                 };
             }
 
-            // 4. Validate serial number against Intune Autopilot (incremental consent needs to be given during setup)
+            // 4. Validate device against Intune Autopilot registration (admin consent needs to be given during setup)
             string? serialNumber = null;
             string? autopilotDeviceId = null;
 
-            if (config.ValidateSerialNumber)
+            if (config.ValidateAutopilotDevice)
             {
                 serialNumber = req.Headers.Contains("X-Device-SerialNumber")
                     ? req.Headers.GetValues("X-Device-SerialNumber").FirstOrDefault()
                     : null;
 
-                var serialValidation = await _serialNumberValidator.ValidateSerialNumberAsync(tenantId, serialNumber, sessionId);
+                var serialValidation = await _autopilotDeviceValidator.ValidateAutopilotDeviceAsync(tenantId, serialNumber, sessionId);
                 if (!serialValidation.IsValid)
                 {
                     return new SecurityValidationResult
@@ -228,12 +228,12 @@ namespace AutopilotMonitor.Functions.Security
         public string? Model { get; set; }
 
         /// <summary>
-        /// Device serial number (if serial number validation is enabled and succeeded)
+        /// Device serial number (if Autopilot device validation is enabled and succeeded)
         /// </summary>
         public string? SerialNumber { get; set; }
 
         /// <summary>
-        /// Autopilot device ID from Intune (if serial number validation is enabled and succeeded)
+        /// Autopilot device ID from Intune (if Autopilot device validation is enabled and succeeded)
         /// </summary>
         public string? AutopilotDeviceId { get; set; }
 

@@ -9,22 +9,22 @@ using Newtonsoft.Json.Linq;
 namespace AutopilotMonitor.Functions.Security
 {
     /// <summary>
-    /// Validates serial numbers against Intune Autopilot device registration via Microsoft Graph.
+    /// Validates devices against Intune Autopilot device registration via Microsoft Graph.
     /// Caches positive/negative lookups to reduce Graph traffic.
     /// </summary>
-    public class SerialNumberValidator
+    public class AutopilotDeviceValidator
     {
         private static readonly TimeSpan PositiveCacheTtl = TimeSpan.FromMinutes(30);
         private static readonly TimeSpan NegativeCacheTtl = TimeSpan.FromMinutes(5);
         private static readonly TimeSpan ConsentStatusTtl = TimeSpan.FromMinutes(2);
 
-        private readonly ILogger<SerialNumberValidator> _logger;
+        private readonly ILogger<AutopilotDeviceValidator> _logger;
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly IMemoryCache _cache;
         private readonly IConfiguration _configuration;
 
-        public SerialNumberValidator(
-            ILogger<SerialNumberValidator> logger,
+        public AutopilotDeviceValidator(
+            ILogger<AutopilotDeviceValidator> logger,
             IHttpClientFactory httpClientFactory,
             IMemoryCache cache,
             IConfiguration configuration)
@@ -35,14 +35,14 @@ namespace AutopilotMonitor.Functions.Security
             _configuration = configuration;
         }
 
-        public async Task<SerialNumberValidationResult> ValidateSerialNumberAsync(
+        public async Task<AutopilotDeviceValidationResult> ValidateAutopilotDeviceAsync(
             string tenantId,
             string? serialNumber,
             string? sessionId = null)
         {
             if (string.IsNullOrWhiteSpace(serialNumber))
             {
-                return new SerialNumberValidationResult
+                return new AutopilotDeviceValidationResult
                 {
                     IsValid = false,
                     ErrorMessage = "Serial number header not provided"
@@ -51,7 +51,7 @@ namespace AutopilotMonitor.Functions.Security
 
             var normalizedSerial = serialNumber.Trim();
             var cacheKey = BuildCacheKey(tenantId, normalizedSerial, sessionId);
-            if (_cache.TryGetValue(cacheKey, out SerialNumberValidationResult? cached) && cached != null)
+            if (_cache.TryGetValue(cacheKey, out AutopilotDeviceValidationResult? cached) && cached != null)
             {
                 return cached;
             }
@@ -61,7 +61,7 @@ namespace AutopilotMonitor.Functions.Security
                 var accessToken = await GetGraphAccessTokenAsync(tenantId);
                 if (string.IsNullOrEmpty(accessToken))
                 {
-                    return CacheAndReturn(cacheKey, new SerialNumberValidationResult
+                    return CacheAndReturn(cacheKey, new AutopilotDeviceValidationResult
                     {
                         IsValid = false,
                         SerialNumber = normalizedSerial,
@@ -84,12 +84,12 @@ namespace AutopilotMonitor.Functions.Security
                 if (!response.IsSuccessStatusCode)
                 {
                     _logger.LogWarning(
-                        "Graph serial validation failed for tenant {TenantId}. Status: {StatusCode}. Body: {ResponseBody}",
+                        "Autopilot device validation Graph query failed for tenant {TenantId}. Status: {StatusCode}. Body: {ResponseBody}",
                         tenantId,
                         (int)response.StatusCode,
                         responseBody);
 
-                    return CacheAndReturn(cacheKey, new SerialNumberValidationResult
+                    return CacheAndReturn(cacheKey, new AutopilotDeviceValidationResult
                     {
                         IsValid = false,
                         SerialNumber = normalizedSerial,
@@ -101,11 +101,11 @@ namespace AutopilotMonitor.Functions.Security
                 var devices = data?["value"] as JArray;
                 if (devices == null || devices.Count == 0)
                 {
-                    return CacheAndReturn(cacheKey, new SerialNumberValidationResult
+                    return CacheAndReturn(cacheKey, new AutopilotDeviceValidationResult
                     {
                         IsValid = false,
                         SerialNumber = normalizedSerial,
-                        ErrorMessage = $"Serial number '{normalizedSerial}' is not registered in Autopilot"
+                        ErrorMessage = $"Device with serial '{normalizedSerial}' is not registered in Autopilot"
                     }, isPositive: false);
                 }
 
@@ -118,15 +118,15 @@ namespace AutopilotMonitor.Functions.Security
 
                 if (exactDevice == null)
                 {
-                    return CacheAndReturn(cacheKey, new SerialNumberValidationResult
+                    return CacheAndReturn(cacheKey, new AutopilotDeviceValidationResult
                     {
                         IsValid = false,
                         SerialNumber = normalizedSerial,
-                        ErrorMessage = $"Serial number '{normalizedSerial}' is not registered in Autopilot"
+                        ErrorMessage = $"Device with serial '{normalizedSerial}' is not registered in Autopilot"
                     }, isPositive: false);
                 }
 
-                var result = new SerialNumberValidationResult
+                var result = new AutopilotDeviceValidationResult
                 {
                     IsValid = true,
                     SerialNumber = normalizedSerial,
@@ -134,7 +134,7 @@ namespace AutopilotMonitor.Functions.Security
                 };
 
                 _logger.LogInformation(
-                    "Serial number validation succeeded for tenant {TenantId}, session {SessionId}, serial {SerialNumber}, autopilotId {AutopilotDeviceId}",
+                    "Autopilot device validation succeeded for tenant {TenantId}, session {SessionId}, serial {SerialNumber}, autopilotId {AutopilotDeviceId}",
                     tenantId,
                     sessionId ?? "<none>",
                     normalizedSerial,
@@ -146,23 +146,23 @@ namespace AutopilotMonitor.Functions.Security
             {
                 _logger.LogError(
                     ex,
-                    "Error validating serial number for tenant {TenantId}, session {SessionId}, serial {SerialNumber}",
+                    "Error during Autopilot device validation for tenant {TenantId}, session {SessionId}, serial {SerialNumber}",
                     tenantId,
                     sessionId ?? "<none>",
                     normalizedSerial);
 
-                return CacheAndReturn(cacheKey, new SerialNumberValidationResult
+                return CacheAndReturn(cacheKey, new AutopilotDeviceValidationResult
                 {
                     IsValid = false,
                     SerialNumber = normalizedSerial,
-                    ErrorMessage = $"Error validating serial number: {ex.Message}"
+                    ErrorMessage = $"Error during Autopilot device validation: {ex.Message}"
                 }, isPositive: false);
             }
         }
 
         public async Task<GraphConsentStatusResult> GetConsentStatusAsync(string tenantId)
         {
-            var cacheKey = $"serial-validation-consent:{tenantId}";
+            var cacheKey = $"autopilot-device-validation-consent:{tenantId}";
             if (_cache.TryGetValue(cacheKey, out GraphConsentStatusResult? cached) && cached != null)
             {
                 return cached;
@@ -193,7 +193,7 @@ namespace AutopilotMonitor.Functions.Security
             if (string.IsNullOrWhiteSpace(clientId) || string.IsNullOrWhiteSpace(clientSecret))
             {
                 _logger.LogError(
-                    "Serial validation is enabled but Entra ID app credentials are not configured. Set EntraId:ClientId and EntraId:ClientSecret.");
+                    "Autopilot device validation is enabled but Entra ID app credentials are not configured. Set EntraId:ClientId and EntraId:ClientSecret.");
                 return null;
             }
 
@@ -228,15 +228,15 @@ namespace AutopilotMonitor.Functions.Security
         {
             if (!string.IsNullOrWhiteSpace(sessionId))
             {
-                return $"serial-validation:{tenantId}:{sessionId}:{serialNumber}";
+                return $"autopilot-device-validation:{tenantId}:{sessionId}:{serialNumber}";
             }
 
-            return $"serial-validation:{tenantId}:{serialNumber}";
+            return $"autopilot-device-validation:{tenantId}:{serialNumber}";
         }
 
-        private SerialNumberValidationResult CacheAndReturn(
+        private AutopilotDeviceValidationResult CacheAndReturn(
             string cacheKey,
-            SerialNumberValidationResult result,
+            AutopilotDeviceValidationResult result,
             bool isPositive)
         {
             var ttl = isPositive ? PositiveCacheTtl : NegativeCacheTtl;
@@ -249,7 +249,7 @@ namespace AutopilotMonitor.Functions.Security
         }
     }
 
-    public class SerialNumberValidationResult
+    public class AutopilotDeviceValidationResult
     {
         public bool IsValid { get; set; }
         public string? SerialNumber { get; set; }

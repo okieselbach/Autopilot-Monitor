@@ -84,14 +84,14 @@ namespace AutopilotMonitor.Shared.Models
         public string ModelWhitelist { get; set; } = "*";
 
         /// <summary>
-        /// Whether to validate serial numbers against Intune Autopilot
-        /// Requires Graph API integration
+        /// Whether to validate devices against Intune Autopilot device registration
+        /// Requires Graph API integration (admin consent for DeviceManagementServiceConfig.Read.All)
         /// </summary>
-        public bool ValidateSerialNumber { get; set; } = false;
+        public bool ValidateAutopilotDevice { get; set; } = false;
 
         /// <summary>
         /// Emergency bypass for agent security gate (Galactic Admin use only).
-        /// If true, agent requests are accepted even when ValidateSerialNumber is false.
+        /// If true, agent requests are accepted even when ValidateAutopilotDevice is false.
         /// Default: false
         /// </summary>
         public bool AllowInsecureAgentRequests { get; set; } = false;
@@ -296,7 +296,7 @@ namespace AutopilotMonitor.Shared.Models
                 CustomRateLimitRequestsPerMinute = null,
                 ManufacturerWhitelist = "Dell*,HP*,Lenovo*,Microsoft Corporation",
                 ModelWhitelist = "*",
-                ValidateSerialNumber = false,
+                ValidateAutopilotDevice = false,
                 AllowInsecureAgentRequests = false,
                 DataRetentionDays = 90,
                 SessionTimeoutHours = 5,

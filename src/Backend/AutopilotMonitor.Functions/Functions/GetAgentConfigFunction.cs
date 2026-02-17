@@ -19,20 +19,20 @@ namespace AutopilotMonitor.Functions.Functions
         private readonly TenantConfigurationService _configService;
         private readonly GatherRuleService _gatherRuleService;
         private readonly RateLimitService _rateLimitService;
-        private readonly SerialNumberValidator _serialNumberValidator;
+        private readonly AutopilotDeviceValidator _autopilotDeviceValidator;
 
         public GetAgentConfigFunction(
             ILogger<GetAgentConfigFunction> logger,
             TenantConfigurationService configService,
             GatherRuleService gatherRuleService,
             RateLimitService rateLimitService,
-            SerialNumberValidator serialNumberValidator)
+            AutopilotDeviceValidator autopilotDeviceValidator)
         {
             _logger = logger;
             _configService = configService;
             _gatherRuleService = gatherRuleService;
             _rateLimitService = rateLimitService;
-            _serialNumberValidator = serialNumberValidator;
+            _autopilotDeviceValidator = autopilotDeviceValidator;
         }
 
         [Function("GetAgentConfig")]
@@ -60,7 +60,7 @@ namespace AutopilotMonitor.Functions.Functions
                     tenantId,
                     _configService,
                     _rateLimitService,
-                    _serialNumberValidator,
+                    _autopilotDeviceValidator,
                     _logger
                 );
 

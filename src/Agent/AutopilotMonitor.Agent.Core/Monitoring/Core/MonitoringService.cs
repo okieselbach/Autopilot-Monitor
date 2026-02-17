@@ -695,7 +695,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             {
                 _logger.Error($"=== AGENT SHUTDOWN: {_consecutiveAuthFailures} consecutive authentication failures (401/403). " +
                     "The device is not authorized to send data to Autopilot Monitor. " +
-                    "Check client certificate and serial number validation in your tenant configuration. ===");
+                    "Check client certificate and Autopilot device validation in your tenant configuration. ===");
                 Environment.Exit(1);
             }
 
@@ -708,7 +708,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     _logger.Error($"=== AGENT SHUTDOWN: Authentication failures persisted for {elapsed.TotalMinutes:F0} minutes " +
                         $"(timeout: {_configuration.AuthFailureTimeoutMinutes} min). " +
                         "The device is not authorized to send data to Autopilot Monitor. " +
-                        "Check client certificate and serial number validation in your tenant configuration. ===");
+                        "Check client certificate and Autopilot device validation in your tenant configuration. ===");
                     Environment.Exit(1);
                 }
             }

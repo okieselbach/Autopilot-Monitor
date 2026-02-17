@@ -116,16 +116,16 @@ function SectionSetup() {
         <li className="flex gap-4">
           <span className="flex-shrink-0 w-7 h-7 rounded-full bg-blue-600 text-white text-sm font-bold flex items-center justify-center">2</span>
           <div className="flex-1">
-            <p className="font-semibold text-gray-900">Enable serial number validation in Configuration</p>
+            <p className="font-semibold text-gray-900">Enable Autopilot Device Validation in Configuration</p>
             <p className="text-sm text-gray-600 mt-1 mb-2">
               Navigate to{" "}
               <span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded">Settings → Configuration</span>{" "}
-              and enable the <strong>Serial Number Validation</strong> setting. This is required before the agent
+              and enable the <strong>Autopilot Device Validation</strong> setting. This is required before the agent
               is permitted to send any session data to the backend — without it, all agent uploads will be rejected.
             </p>
             <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-900">
-              <strong>Why is this required?</strong> The serial number check ensures that only devices with a
-              recognized hardware identity can register sessions, preventing unintended data from reaching your tenant.
+              <strong>Why is this required?</strong> The Autopilot device check ensures that only devices registered
+              in your Intune tenant can register sessions, preventing unintended data from reaching your tenant.
               Consenting to this setting is your confirmation that the agent may collect and transmit enrollment
               telemetry on behalf of your organization.
             </div>
@@ -137,7 +137,7 @@ function SectionSetup() {
           <div>
             <p className="font-semibold text-gray-900">Ready</p>
             <p className="text-sm text-gray-600 mt-1">
-              Once serial number validation is enabled, the portal is ready to receive data. Deploy the agent via
+              Once Autopilot Device Validation is enabled, the portal is ready to receive data. Deploy the agent via
               Intune (see <strong>Agent Setup</strong>) and sessions will start appearing in the dashboard as soon
               as devices begin enrolling.
             </p>
