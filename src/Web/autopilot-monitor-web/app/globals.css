@@ -160,6 +160,87 @@ body {
 .dark .bg-indigo-50 {
   background-color: #1e1b4b !important;
 }
+.dark .bg-indigo-100 {
+  background-color: #1e1b4b !important;
+}
+.dark .bg-violet-50 {
+  background-color: #2d1b4e !important;
+}
+.dark .bg-violet-100 {
+  background-color: #2d1b4e !important;
+}
+.dark .bg-emerald-50 {
+  background-color: #0d2e20 !important;
+}
+.dark .bg-emerald-100 {
+  background-color: #0d2e20 !important;
+}
+.dark .bg-teal-50 {
+  background-color: #0d2e2e !important;
+}
+.dark .bg-teal-100 {
+  background-color: #0d2e2e !important;
+}
+.dark .bg-sky-50 {
+  background-color: #0c2a3d !important;
+}
+.dark .bg-sky-100 {
+  background-color: #0c2a3d !important;
+}
+.dark .bg-orange-50 {
+  background-color: #3d260a !important;
+}
+.dark .bg-amber-100 {
+  background-color: #3d2e0a !important;
+}
+
+/* -- Gradient backgrounds (card headers) -- */
+.dark [class*="from-purple-50"],
+.dark [class*="from-indigo-50"],
+.dark [class*="from-violet-50"] {
+  --tw-gradient-from: #2d1b4e !important;
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important;
+}
+.dark [class*="to-indigo-50"],
+.dark [class*="to-violet-50"] {
+  --tw-gradient-to: #1e1b4b !important;
+}
+.dark [class*="to-purple-50"] {
+  --tw-gradient-to: #2d1b4e !important;
+}
+.dark [class*="from-emerald-50"] {
+  --tw-gradient-from: #0d2e20 !important;
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important;
+}
+.dark [class*="to-teal-50"] {
+  --tw-gradient-to: #0d2e2e !important;
+}
+.dark [class*="from-sky-50"] {
+  --tw-gradient-from: #0c2a3d !important;
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important;
+}
+.dark [class*="to-blue-50"] {
+  --tw-gradient-to: #1e3a5f !important;
+}
+.dark [class*="from-amber-50"] {
+  --tw-gradient-from: #3d2e0a !important;
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important;
+}
+.dark [class*="to-orange-50"] {
+  --tw-gradient-to: #3d260a !important;
+}
+.dark [class*="from-green-50"] {
+  --tw-gradient-from: #14332a !important;
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important;
+}
+.dark [class*="from-green-100"] {
+  --tw-gradient-from: #14332a !important;
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important;
+}
+.dark [class*="to-emerald-50"],
+.dark [class*="to-emerald-100"] {
+  --tw-gradient-to: #0d2e20 !important;
+}
 
 /* -- Colored borders in dark mode -- */
 .dark .border-blue-200 {
@@ -176,6 +257,31 @@ body {
 }
 .dark .border-purple-200 {
   border-color: #2d1b4e !important;
+}
+.dark .border-purple-300 {
+  border-color: #3b2060 !important;
+}
+.dark .border-emerald-50,
+.dark .border-emerald-100,
+.dark .border-emerald-200 {
+  border-color: #0d2e20 !important;
+}
+.dark .border-green-300 {
+  border-color: #14532d !important;
+}
+.dark .border-amber-200,
+.dark .border-amber-300 {
+  border-color: #3d2e0a !important;
+}
+.dark .border-violet-50,
+.dark .border-violet-100,
+.dark .border-violet-200 {
+  border-color: #2d1b4e !important;
+}
+.dark .border-sky-50,
+.dark .border-sky-100,
+.dark .border-sky-200 {
+  border-color: #0c2a3d !important;
 }
 
 /* -- Progress bars and charts keep their vivid colors -- */
