@@ -5,9 +5,14 @@ import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
 
 export function PublicSiteNavbar({ showSectionLinks }: { showSectionLinks: boolean }) {
-  const { login } = useAuth();
+  const { login, isAuthenticated } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const isDark = theme === "dark";
+
+  // Logged-in users should only see the main authenticated app navbar.
+  if (isAuthenticated) {
+    return null;
+  }
 
   return (
     <nav
