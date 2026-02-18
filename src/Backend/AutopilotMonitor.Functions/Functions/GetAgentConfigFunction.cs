@@ -92,8 +92,8 @@ namespace AutopilotMonitor.Functions.Functions
                 {
                     ConfigVersion = 5,
                     UploadIntervalSeconds = 30,
-                    SelfDestructOnComplete = tenantConfig.SelfDestructOnComplete ?? false,
-                    KeepLogFile = tenantConfig.KeepLogFile ?? true,
+                    SelfDestructOnComplete = tenantConfig.SelfDestructOnComplete ?? true,
+                    KeepLogFile = tenantConfig.KeepLogFile ?? false,
                     EnableGeoLocation = tenantConfig.EnableGeoLocation ?? true,
                     EnableImeMatchLog = tenantConfig.EnableImeMatchLog ?? false,
                     MaxAuthFailures = tenantConfig.MaxAuthFailures ?? 5,

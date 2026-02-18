@@ -149,8 +149,8 @@ namespace AutopilotMonitor.Agent.Core.Configuration
             {
                 ConfigVersion = 0,
                 UploadIntervalSeconds = 30,
-                SelfDestructOnComplete = false,
-                KeepLogFile = true,
+                SelfDestructOnComplete = true,
+                KeepLogFile = false,
                 EnableGeoLocation = true,
                 EnableImeMatchLog = false,
                 Collectors = CollectorConfiguration.CreateDefault(),

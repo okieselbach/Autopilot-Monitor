@@ -78,13 +78,13 @@ export default function SettingsPage() {
   const [sessionTimeoutHours, setSessionTimeoutHours] = useState(5);
 
   // Collector settings state
-  const [enablePerformanceCollector, setEnablePerformanceCollector] = useState(false);
-  const [performanceCollectorInterval, setPerformanceCollectorInterval] = useState(60);
+  const [enablePerformanceCollector, setEnablePerformanceCollector] = useState(true);
+  const [performanceCollectorInterval, setPerformanceCollectorInterval] = useState(30);
   const [autopilotConsentInProgress, setAutopilotConsentInProgress] = useState(false);
 
   // Agent behavior state
-  const [selfDestructOnComplete, setSelfDestructOnComplete] = useState(false);
-  const [keepLogFile, setKeepLogFile] = useState(true);
+  const [selfDestructOnComplete, setSelfDestructOnComplete] = useState(true);
+  const [keepLogFile, setKeepLogFile] = useState(false);
   const [rebootOnComplete, setRebootOnComplete] = useState(false);
   const [rebootDelaySeconds, setRebootDelaySeconds] = useState(10);
   const [enableGeoLocation, setEnableGeoLocation] = useState(true);
@@ -134,10 +134,10 @@ export default function SettingsPage() {
         setValidateAutopilotDevice(data.validateAutopilotDevice);
         setDataRetentionDays(data.dataRetentionDays ?? 90);
         setSessionTimeoutHours(data.sessionTimeoutHours ?? 5);
-        setEnablePerformanceCollector(data.enablePerformanceCollector ?? false);
-        setPerformanceCollectorInterval(data.performanceCollectorIntervalSeconds ?? 60);
-        setSelfDestructOnComplete(data.selfDestructOnComplete ?? false);
-        setKeepLogFile(data.keepLogFile ?? true);
+        setEnablePerformanceCollector(data.enablePerformanceCollector ?? true);
+        setPerformanceCollectorInterval(data.performanceCollectorIntervalSeconds ?? 30);
+        setSelfDestructOnComplete(data.selfDestructOnComplete ?? true);
+        setKeepLogFile(data.keepLogFile ?? false);
         setRebootOnComplete(data.rebootOnComplete ?? false);
         setRebootDelaySeconds(data.rebootDelaySeconds ?? 10);
         setEnableGeoLocation(data.enableGeoLocation ?? true);

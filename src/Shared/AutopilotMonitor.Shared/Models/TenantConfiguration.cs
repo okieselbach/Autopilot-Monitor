@@ -128,15 +128,15 @@ namespace AutopilotMonitor.Shared.Models
         /// <summary>
         /// Enable Performance Collector (CPU, memory, disk, network monitoring)
         /// Generates ~1 event per interval - can create significant traffic
-        /// Default: false (opt-in)
+        /// Default: true
         /// </summary>
-        public bool EnablePerformanceCollector { get; set; } = false;
+        public bool EnablePerformanceCollector { get; set; } = true;
 
         /// <summary>
         /// Performance collector interval in seconds
-        /// Default: 60 seconds
+        /// Default: 30 seconds
         /// </summary>
-        public int PerformanceCollectorIntervalSeconds { get; set; } = 60;
+        public int PerformanceCollectorIntervalSeconds { get; set; } = 30;
 
         // ===== AGENT AUTH CIRCUIT BREAKER =====
 
@@ -156,15 +156,15 @@ namespace AutopilotMonitor.Shared.Models
 
         /// <summary>
         /// Whether to self-destruct after enrollment completion (remove Scheduled Task and all files).
-        /// null = use agent default (false).
+        /// null = use agent default (true).
         /// </summary>
-        public bool? SelfDestructOnComplete { get; set; }
+        public bool? SelfDestructOnComplete { get; set; } = true;
 
         /// <summary>
         /// Preserve logs during self-destruct.
-        /// null = use agent default (true).
+        /// null = use agent default (false).
         /// </summary>
-        public bool? KeepLogFile { get; set; }
+        public bool? KeepLogFile { get; set; } = false;
 
         /// <summary>
         /// Whether to reboot the device after enrollment completes.
@@ -301,8 +301,10 @@ namespace AutopilotMonitor.Shared.Models
                 DataRetentionDays = 90,
                 SessionTimeoutHours = 5,
                 MaxNdjsonPayloadSizeMB = 5,
-                EnablePerformanceCollector = false,
-                PerformanceCollectorIntervalSeconds = 60
+                EnablePerformanceCollector = true,
+                PerformanceCollectorIntervalSeconds = 30,
+                SelfDestructOnComplete = true,
+                KeepLogFile = false
             };
         }
     }

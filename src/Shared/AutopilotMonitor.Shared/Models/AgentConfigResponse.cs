@@ -22,12 +22,12 @@ namespace AutopilotMonitor.Shared.Models
         /// <summary>
         /// Whether to self-destruct after enrollment completion (remove Scheduled Task and all files).
         /// </summary>
-        public bool SelfDestructOnComplete { get; set; } = false;
+        public bool SelfDestructOnComplete { get; set; } = true;
 
         /// <summary>
         /// Preserve logs during self-destruct.
         /// </summary>
-        public bool KeepLogFile { get; set; } = true;
+        public bool KeepLogFile { get; set; } = false;
 
         /// <summary>
         /// Whether to enable geo-location detection.
@@ -118,9 +118,9 @@ namespace AutopilotMonitor.Shared.Models
 
         /// <summary>
         /// Interval in seconds for performance snapshots
-        /// Default: 60 seconds
+        /// Default: 30 seconds
         /// </summary>
-        public int PerformanceIntervalSeconds { get; set; } = 60;
+        public int PerformanceIntervalSeconds { get; set; } = 30;
 
         /// <summary>
         /// Creates default collector configuration
