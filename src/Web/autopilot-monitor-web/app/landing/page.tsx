@@ -22,8 +22,31 @@ const DEFAULT_PLATFORM_STATS = {
   uniqueDeviceModels: 1,
 };
 
+function resolvePlatformStatsManifestUrl(rawUrl?: string): string {
+  const trimmed = rawUrl?.trim();
+  if (!trimmed) {
+    return "/platform-stats.json";
+  }
+
+  const hashIndex = trimmed.indexOf("#");
+  const withoutHash = hashIndex >= 0 ? trimmed.slice(0, hashIndex) : trimmed;
+  const hash = hashIndex >= 0 ? trimmed.slice(hashIndex) : "";
+
+  const queryIndex = withoutHash.indexOf("?");
+  const basePath = queryIndex >= 0 ? withoutHash.slice(0, queryIndex) : withoutHash;
+  const query = queryIndex >= 0 ? withoutHash.slice(queryIndex) : "";
+
+  if (/\.json$/i.test(basePath)) {
+    return trimmed;
+  }
+
+  const normalizedBasePath = basePath.endsWith("/") ? basePath.slice(0, -1) : basePath;
+  const manifestPath = `${normalizedBasePath}/platform-stats.json`;
+  return `${manifestPath}${query}${hash}`;
+}
+
 const PLATFORM_STATS_MANIFEST_URL =
-  process.env.NEXT_PUBLIC_PLATFORM_STATS_MANIFEST_URL || "/platform-stats.json";
+  resolvePlatformStatsManifestUrl(process.env.NEXT_PUBLIC_PLATFORM_STATS_MANIFEST_URL);
 
 const QUICK_START = [
   {

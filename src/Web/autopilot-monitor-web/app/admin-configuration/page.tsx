@@ -998,9 +998,9 @@ export default function AdminConfigurationPage() {
                       <label className="block">
                         <span className="text-gray-700 font-medium">Global Rate Limit (Requests per Minute per Device)</span>
                         <p className="text-sm text-gray-600 mb-2">
-                          Configure default DoS protection limits for all tenants. This limit applies to all tenants by default. Normal enrollment generates ~10-30 requests/min.
+                          Configure default DoS protection limits for all tenants. Normal enrollment generates ~10-30 requests/min.
                           <br />
-                          <strong className="text-indigo-700">Note:</strong> Tenants cannot change this value. Only Galactic Admins can override per tenant directly in the database.
+                          <strong className="text-indigo-700">Note:</strong> Tenants cannot change this value. Only Galactic Admins can override per tenant in tenant management section.
                         </p>
                         <input
                           type="number"
