@@ -180,7 +180,8 @@ namespace AutopilotMonitor.Functions.Services
             {
                 { "LastUpdated", config.LastUpdated },
                 { "UpdatedBy", config.UpdatedBy },
-                { "GlobalRateLimitRequestsPerMinute", config.GlobalRateLimitRequestsPerMinute }
+                { "GlobalRateLimitRequestsPerMinute", config.GlobalRateLimitRequestsPerMinute },
+                { "PlatformStatsBlobSasUrl", config.PlatformStatsBlobSasUrl ?? string.Empty }
             };
 
             return entity;
@@ -194,7 +195,8 @@ namespace AutopilotMonitor.Functions.Services
                 RowKey = entity.RowKey,
                 LastUpdated = entity.GetDateTime("LastUpdated") ?? DateTime.UtcNow,
                 UpdatedBy = entity.GetString("UpdatedBy") ?? "Unknown",
-                GlobalRateLimitRequestsPerMinute = entity.GetInt32("GlobalRateLimitRequestsPerMinute") ?? 100
+                GlobalRateLimitRequestsPerMinute = entity.GetInt32("GlobalRateLimitRequestsPerMinute") ?? 100,
+                PlatformStatsBlobSasUrl = entity.GetString("PlatformStatsBlobSasUrl") ?? string.Empty
             };
         }
     }

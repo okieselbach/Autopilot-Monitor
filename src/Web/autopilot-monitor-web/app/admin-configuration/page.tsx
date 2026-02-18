@@ -12,6 +12,7 @@ interface AdminConfiguration {
   lastUpdated: string;
   updatedBy: string;
   globalRateLimitRequestsPerMinute: number;
+  platformStatsBlobSasUrl?: string;
   customSettings?: string;
 }
 
@@ -56,6 +57,7 @@ export default function AdminConfigurationPage() {
   const [loadingConfig, setLoadingConfig] = useState(false);
   const [savingConfig, setSavingConfig] = useState(false);
   const [globalRateLimit, setGlobalRateLimit] = useState(100);
+  const [platformStatsBlobSasUrl, setPlatformStatsBlobSasUrl] = useState("");
 
   // Tenant Management state
   const [tenants, setTenants] = useState<TenantConfiguration[]>([]);
@@ -122,6 +124,7 @@ export default function AdminConfigurationPage() {
         const data: AdminConfiguration = await response.json();
         setAdminConfig(data);
         setGlobalRateLimit(data.globalRateLimitRequestsPerMinute);
+        setPlatformStatsBlobSasUrl(data.platformStatsBlobSasUrl ?? "");
       } catch (err) {
         console.error("Error fetching admin configuration:", err);
         setError(err instanceof Error ? err.message : "Failed to load admin configuration");
@@ -262,6 +265,7 @@ export default function AdminConfigurationPage() {
       const updatedConfig: AdminConfiguration = {
         ...adminConfig,
         globalRateLimitRequestsPerMinute: globalRateLimit,
+        platformStatsBlobSasUrl: platformStatsBlobSasUrl.trim(),
       };
 
       const token = await getAccessToken();
@@ -299,6 +303,7 @@ export default function AdminConfigurationPage() {
   const handleResetAdminConfig = () => {
     if (!adminConfig) return;
     setGlobalRateLimit(adminConfig.globalRateLimitRequestsPerMinute);
+    setPlatformStatsBlobSasUrl(adminConfig.platformStatsBlobSasUrl ?? "");
     setSuccessMessage(null);
     setError(null);
   };
@@ -1004,6 +1009,26 @@ export default function AdminConfigurationPage() {
                           value={globalRateLimit}
                           onChange={(e) => setGlobalRateLimit(parseInt(e.target.value) || 100)}
                           className="mt-1 block w-full px-4 py-2 border border-gray-300 rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+                        />
+                      </label>
+                    </div>
+
+                    <div>
+                      <label className="block">
+                        <span className="text-gray-700 font-medium">Platform Stats Blob Container SAS URL</span>
+                        <p className="text-sm text-gray-600 mb-2">
+                          Maintenance publishes two files into this container:
+                          <code className="ml-1 mr-1 text-xs">platform-stats.json</code>
+                          and
+                          <code className="ml-1 text-xs">platform-stats.YYYY-MM-DD.json</code>.
+                          The upload is best-effort and does not fail the maintenance run.
+                        </p>
+                        <input
+                          type="url"
+                          value={platformStatsBlobSasUrl}
+                          onChange={(e) => setPlatformStatsBlobSasUrl(e.target.value)}
+                          placeholder="https://storageaccount.blob.core.windows.net/publicstats?sv=...&sig=..."
+                          className="mt-1 block w-full px-4 py-2 border border-gray-300 rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors font-mono text-sm"
                         />
                       </label>
                     </div>

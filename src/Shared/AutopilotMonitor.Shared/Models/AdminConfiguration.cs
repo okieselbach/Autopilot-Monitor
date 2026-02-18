@@ -40,6 +40,12 @@ namespace AutopilotMonitor.Shared.Models
         public int GlobalRateLimitRequestsPerMinute { get; set; } = 100;
 
         /// <summary>
+        /// Container SAS URL used by maintenance to publish platform stats JSON files.
+        /// Expected format: https://{account}.blob.core.windows.net/{container}?sv=...&sig=...
+        /// </summary>
+        public string PlatformStatsBlobSasUrl { get; set; } = string.Empty;
+
+        /// <summary>
         /// Creates default configuration
         /// </summary>
         public static AdminConfiguration CreateDefault()
@@ -50,7 +56,8 @@ namespace AutopilotMonitor.Shared.Models
                 RowKey = "config",
                 LastUpdated = DateTime.UtcNow,
                 UpdatedBy = "System",
-                GlobalRateLimitRequestsPerMinute = 100
+                GlobalRateLimitRequestsPerMinute = 100,
+                PlatformStatsBlobSasUrl = string.Empty
             };
         }
     }

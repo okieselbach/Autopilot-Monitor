@@ -35,13 +35,6 @@ namespace AutopilotMonitor.Functions.Functions
             var tenantId = TenantHelper.IsAuthenticated(req) ? TenantHelper.GetTenantId(req) : null;
             if (string.IsNullOrEmpty(tenantId))
             {
-                // Fall back to query parameter for cross-tenant access
-                var query = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
-                tenantId = query["tenantId"];
-            }
-
-            if (string.IsNullOrEmpty(tenantId))
-            {
                 var unauthorized = req.CreateResponse(HttpStatusCode.Unauthorized);
                 await unauthorized.WriteAsJsonAsync(new { success = false, message = "Authentication required" });
                 return unauthorized;

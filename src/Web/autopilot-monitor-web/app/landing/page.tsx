@@ -3,14 +3,27 @@
 import { useAuth } from "../../contexts/AuthContext";
 import { useTheme } from "../../contexts/ThemeContext";
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
-// Static platform stats - manually updated periodically
-const PLATFORM_STATS = {
+interface PlatformStatsManifest {
+  latest: string;
+  generatedAtUtc: string;
+}
+
+interface PlatformStatsPayload {
+  totalEnrollments?: number;
+  totalTenants?: number;
+  uniqueDeviceModels?: number;
+}
+
+const DEFAULT_PLATFORM_STATS = {
   totalEnrollments: 123,
   totalTenants: 2,
   uniqueDeviceModels: 1,
 };
+
+const PLATFORM_STATS_MANIFEST_URL =
+  process.env.NEXT_PUBLIC_PLATFORM_STATS_MANIFEST_URL || "/platform-stats.json";
 
 const QUICK_START = [
   {
@@ -116,6 +129,7 @@ export default function LandingPage() {
   const { login, isAuthenticated, isLoading, user, isPreviewBlocked } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const router = useRouter();
+  const [platformStats, setPlatformStats] = useState(DEFAULT_PLATFORM_STATS);
 
   // Redirect after login: preview-blocked → /preview, admins → /, users → /progress
   useEffect(() => {
@@ -129,6 +143,48 @@ export default function LandingPage() {
       }
     }
   }, [isAuthenticated, isLoading, user, isPreviewBlocked, router]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadPlatformStats = async () => {
+      try {
+        const manifestResponse = await fetch(PLATFORM_STATS_MANIFEST_URL, { cache: "force-cache" });
+        if (!manifestResponse.ok) {
+          return;
+        }
+
+        const manifest = (await manifestResponse.json()) as PlatformStatsManifest;
+        if (!manifest?.latest) {
+          return;
+        }
+
+        const versionedUrl = new URL(manifest.latest, manifestResponse.url).toString();
+        const statsResponse = await fetch(versionedUrl, { cache: "force-cache" });
+        if (!statsResponse.ok) {
+          return;
+        }
+
+        const payload = (await statsResponse.json()) as PlatformStatsPayload;
+        if (cancelled) {
+          return;
+        }
+
+        setPlatformStats({
+          totalEnrollments: payload.totalEnrollments ?? DEFAULT_PLATFORM_STATS.totalEnrollments,
+          totalTenants: payload.totalTenants ?? DEFAULT_PLATFORM_STATS.totalTenants,
+          uniqueDeviceModels: payload.uniqueDeviceModels ?? DEFAULT_PLATFORM_STATS.uniqueDeviceModels,
+        });
+      } catch {
+        // Keep defaults if manifest/versioned files are not reachable.
+      }
+    };
+
+    loadPlatformStats();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   if (isLoading) {
     return (
@@ -256,11 +312,11 @@ export default function LandingPage() {
 
             {/* Platform Stats - compact inline */}
             <div className="mt-10 flex items-center justify-center gap-6 text-xs text-gray-400">
-              <span><span className="font-semibold text-gray-600">{PLATFORM_STATS.totalEnrollments.toLocaleString()}</span> enrollments monitored</span>
+              <span><span className="font-semibold text-gray-600">{platformStats.totalEnrollments.toLocaleString()}</span> enrollments monitored</span>
               <span className="w-px h-3 bg-gray-300" />
-              <span><span className="font-semibold text-gray-600">{PLATFORM_STATS.totalTenants.toLocaleString()}</span> organizations</span>
+              <span><span className="font-semibold text-gray-600">{platformStats.totalTenants.toLocaleString()}</span> organizations</span>
               <span className="w-px h-3 bg-gray-300" />
-              <span><span className="font-semibold text-gray-600">{PLATFORM_STATS.uniqueDeviceModels.toLocaleString()}</span> device models</span>
+              <span><span className="font-semibold text-gray-600">{platformStats.uniqueDeviceModels.toLocaleString()}</span> device models</span>
             </div>
 
             {/* Product Preview Showcase */}

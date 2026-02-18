@@ -39,7 +39,7 @@ namespace AutopilotMonitor.Functions.Functions
             {
                 status = "healthy",
                 service = "Autopilot Monitor API",
-                version = "1.0.0-phase1",
+                version = "1.0.0", // TODO: Version should be dynamically retrieved from assembly info or configuration
                 timestamp = DateTime.UtcNow
             });
 

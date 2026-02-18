@@ -1,9 +1,13 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using AutopilotMonitor.Shared.Models;
+using Azure.Storage.Blobs;
+using Azure.Storage.Blobs.Models;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 
@@ -38,17 +42,24 @@ namespace AutopilotMonitor.Functions.Services
         private readonly TableStorageService _storageService;
         private readonly TenantConfigurationService _tenantConfigService;
         private readonly UsageMetricsService _usageMetricsService;
+        private readonly AdminConfigurationService _adminConfigurationService;
         private readonly ILogger<MaintenanceService> _logger;
+
+        private const string PlatformStatsAliasFileName = "platform-stats.json";
+        private const string PlatformStatsAliasCacheControl = "public, max-age=300, stale-while-revalidate=86400";
+        private const string PlatformStatsVersionedCacheControl = "public, max-age=31536000, immutable";
 
         public MaintenanceService(
             TableStorageService storageService,
             TenantConfigurationService tenantConfigService,
             UsageMetricsService usageMetricsService,
+            AdminConfigurationService adminConfigurationService,
             ILogger<MaintenanceService> logger)
         {
             _storageService = storageService;
             _tenantConfigService = tenantConfigService;
             _usageMetricsService = usageMetricsService;
+            _adminConfigurationService = adminConfigurationService;
             _logger = logger;
         }
 
@@ -479,6 +490,7 @@ namespace AutopilotMonitor.Functions.Services
                 };
 
                 await _storageService.SavePlatformStatsAsync(stats);
+                await TryPublishPlatformStatsJsonAsync(stats);
 
                 sw.Stop();
                 _logger.LogInformation($"Platform stats recomputed in {sw.ElapsedMilliseconds}ms: " +
@@ -488,6 +500,75 @@ namespace AutopilotMonitor.Functions.Services
             {
                 _logger.LogError(ex, "Failed to recompute platform stats");
             }
+        }
+
+        /// <summary>
+        /// Publishes versioned platform stats JSON + alias manifest to Blob Storage.
+        /// This must never fail maintenance execution.
+        /// </summary>
+        private async Task TryPublishPlatformStatsJsonAsync(PlatformStats stats)
+        {
+            try
+            {
+                var adminConfig = await _adminConfigurationService.GetConfigurationAsync();
+                var containerSasUrl = adminConfig.PlatformStatsBlobSasUrl?.Trim();
+
+                if (string.IsNullOrWhiteSpace(containerSasUrl))
+                {
+                    _logger.LogInformation("Skipping platform stats JSON publish: PlatformStatsBlobSasUrl is not configured.");
+                    return;
+                }
+
+                var containerClient = new BlobContainerClient(new Uri(containerSasUrl));
+                var generatedAtUtc = DateTime.UtcNow;
+                var versionedFileName = $"platform-stats.{generatedAtUtc:yyyy-MM-dd}.json";
+
+                var versionedPayload = new
+                {
+                    totalEnrollments = stats.TotalEnrollments,
+                    totalUsers = stats.TotalUsers,
+                    totalTenants = stats.TotalTenants,
+                    uniqueDeviceModels = stats.UniqueDeviceModels,
+                    totalEventsProcessed = stats.TotalEventsProcessed,
+                    successfulEnrollments = stats.SuccessfulEnrollments,
+                    issuesDetected = stats.IssuesDetected,
+                    lastFullCompute = stats.LastFullCompute,
+                    lastUpdated = stats.LastUpdated
+                };
+
+                var aliasPayload = new
+                {
+                    latest = versionedFileName,
+                    generatedAtUtc = generatedAtUtc.ToString("o")
+                };
+
+                await UploadJsonBlobAsync(containerClient, versionedFileName, versionedPayload, PlatformStatsVersionedCacheControl);
+                await UploadJsonBlobAsync(containerClient, PlatformStatsAliasFileName, aliasPayload, PlatformStatsAliasCacheControl);
+
+                _logger.LogInformation(
+                    "Published platform stats JSON blobs: versioned={VersionedFile} and alias={AliasFile}",
+                    versionedFileName,
+                    PlatformStatsAliasFileName);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to publish platform stats JSON to Blob Storage. Maintenance continues.");
+            }
+        }
+
+        private async Task UploadJsonBlobAsync(BlobContainerClient containerClient, string blobName, object payload, string cacheControl)
+        {
+            var blobClient = containerClient.GetBlobClient(blobName);
+            var json = JsonConvert.SerializeObject(payload);
+            await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
+
+            await blobClient.UploadAsync(stream, overwrite: true);
+            await blobClient.SetHttpHeadersAsync(new BlobHttpHeaders
+            {
+                ContentType = "application/json; charset=utf-8",
+                CacheControl = cacheControl
+            });
+            await blobClient.SetAccessTierAsync(AccessTier.Hot);
         }
 
         /// <summary>

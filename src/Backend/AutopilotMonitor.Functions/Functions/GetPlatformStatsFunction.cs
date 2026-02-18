@@ -34,6 +34,9 @@ namespace AutopilotMonitor.Functions.Functions
                 if (stats == null)
                 {
                     // No stats computed yet - return zeros
+                    // TODO: get values from azure blob storage /stats/platform-stats.json, calculation is done nightly in maintenance function and not here
+                    // maybe used later for SWA-API passthrough - andvantage same does for usage metrics
+                    // alternative landing receives stats from blob storage and not from this endpoint, then we can remove this endpoint and call blob storage directly from landing page (CORS)
                     await response.WriteAsJsonAsync(new
                     {
                         totalEnrollments = 0,
@@ -42,7 +45,8 @@ namespace AutopilotMonitor.Functions.Functions
                         uniqueDeviceModels = 0,
                         totalEventsProcessed = 0,
                         successfulEnrollments = 0,
-                        issuesDetected = 0
+                        issuesDetected = 0,
+                        lastUpdated = (DateTime?)null
                     });
                 }
                 else
