@@ -62,7 +62,7 @@ export default function PreviewPage() {
           </h1>
 
           <p className="text-gray-600 mb-6 leading-relaxed">
-            {previewMessage || "Autopilot Monitor is currently in Private Preview. Your organization is on the waitlist \u2014 we'll notify you when access is granted."}
+            {previewMessage || "Autopilot Monitor is currently in private preview. Your organization has been added to the waitlist."}
           </p>
 
           <div className="bg-blue-50 rounded-lg p-4 mb-6">
@@ -72,6 +72,21 @@ export default function PreviewPage() {
             <p className="text-xs text-blue-500 mt-1">
               Tenant: {user?.tenantId}
             </p>
+          </div>
+
+          <div className="text-left bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6">
+            <p className="text-sm font-semibold text-amber-900 mb-1">Next steps</p>
+            <p className="text-sm text-amber-800">
+              Please sign out and open a GitHub issue to request access to the Private Preview.
+            </p>
+            <a
+              href="https://github.com/okieselbach/Autopilot-Monitor/issues"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-block mt-2 text-sm font-medium text-blue-700 hover:text-blue-800 underline"
+            >
+              Open GitHub Issues
+            </a>
           </div>
 
           <button
