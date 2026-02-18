@@ -5,7 +5,7 @@
 html {
   scroll-behavior: smooth;
   overflow-y: auto;
-  scrollbar-gutter: stable both-edges;
+  scrollbar-gutter: stable;
 }
 
 :root {
@@ -359,6 +359,98 @@ html:hover ::-webkit-scrollbar-thumb {
 }
 ::-webkit-scrollbar-thumb:hover {
   background: #94a3b8 !important;
+}
+
+/* -- Additional global colored text overrides -- */
+.dark .text-amber-700 {
+  color: #fbbf24 !important; /* amber-400 — for Planned badges on dark amber bg */
+}
+.dark .text-blue-700 {
+  color: #60a5fa !important; /* blue-400 — step icons etc. on dark surfaces */
+}
+
+/* ===== LANDING PAGE DARK MODE =====
+   Scoped to .landing-page to avoid affecting the authenticated app.
+   The landing page uses many opacity-variant Tailwind classes (bg-white/80,
+   bg-gray-50/60, etc.) that are not covered by the global solid-color overrides
+   above — those need explicit handling here. */
+
+/* Page background gradient (from-blue-50 via-indigo-50 to-purple-50) */
+.dark .landing-page {
+  background: linear-gradient(135deg, #0c1020 0%, #1a1b3b 50%, #0c1020 100%) !important;
+}
+
+/* Navigation sticky bar (bg-white/80 backdrop-blur) */
+.dark .landing-page nav {
+  background-color: rgba(15, 23, 42, 0.9) !important;
+  border-bottom-color: #334155 !important;
+}
+
+/* Nav anchor hover (hover:bg-blue-50/50 — not caught by global hover overrides) */
+.dark .landing-page nav a:hover {
+  background-color: rgba(30, 58, 95, 0.3) !important;
+}
+
+/* -- White opacity variants (nav, quick-start cards, step cards, sections, footer) -- */
+.dark .landing-page [class*="bg-white/"] {
+  background-color: #1e293b !important;
+}
+
+/* -- Gray opacity variants -- */
+.dark .landing-page [class*="bg-gray-50/"] {
+  background-color: #0f172a !important;
+}
+.dark .landing-page [class*="bg-gray-200/"] {
+  background-color: #334155 !important;
+}
+
+/* -- Colored bg opacity variants (KPI cards, comparison monitor column) -- */
+.dark .landing-page [class*="bg-blue-50/"] {
+  background-color: rgba(30, 58, 95, 0.4) !important;
+}
+.dark .landing-page [class*="bg-green-50/"] {
+  background-color: rgba(20, 51, 42, 0.5) !important;
+}
+.dark .landing-page [class*="bg-red-50/"] {
+  background-color: rgba(59, 28, 28, 0.5) !important;
+}
+.dark .landing-page [class*="bg-indigo-50/"] {
+  background-color: rgba(30, 27, 75, 0.5) !important;
+}
+
+/* -- Gradient overrides for child elements -- */
+
+/* Pipeline "One pipeline" container: from-white via-blue-50/60 to-indigo-50/60 */
+.dark .landing-page [class*="from-white"] {
+  --tw-gradient-from: #1e293b !important;
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to, rgba(30, 41, 59, 0)) !important;
+}
+.dark .landing-page [class*="via-blue-50"] {
+  --tw-gradient-to: rgba(30, 58, 95, 0) var(--tw-gradient-to-position) !important;
+  --tw-gradient-stops: var(--tw-gradient-from), #1e3a5f var(--tw-gradient-via-position), var(--tw-gradient-to) !important;
+}
+
+/* Hero community banner: from-blue-50 via-indigo-50 to-blue-50 */
+.dark .landing-page [class*="from-blue-50"] {
+  --tw-gradient-from: #1e3a5f !important;
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to, rgba(30, 58, 95, 0)) !important;
+}
+.dark .landing-page [class*="via-indigo-50"] {
+  --tw-gradient-to: rgba(30, 27, 75, 0) var(--tw-gradient-to-position) !important;
+  --tw-gradient-stops: var(--tw-gradient-from), #1e1b4b var(--tw-gradient-via-position), var(--tw-gradient-to) !important;
+}
+
+/* -- Border opacity variants -- */
+.dark .landing-page [class*="border-gray-200/"] {
+  border-color: #334155 !important;
+}
+.dark .landing-page [class*="border-blue-300/"] {
+  border-color: rgba(59, 130, 246, 0.3) !important;
+}
+
+/* -- Dot-pulse timeline rings (ring-white → match dark card surface) -- */
+.dark .landing-page .ring-white {
+  --tw-ring-color: #1e293b !important;
 }
 
 /* -- Scrollbar (dark mode) -- */
