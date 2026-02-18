@@ -260,6 +260,12 @@ body {
 .dark .text-violet-900 {
   color: #ede9fe !important; /* violet-100 */
 }
+.dark .text-indigo-800 {
+  color: #a5b4fc !important; /* indigo-300 */
+}
+.dark .text-indigo-900 {
+  color: #c7d2fe !important; /* indigo-200 */
+}
 .dark .text-amber-900 {
   color: #fde68a !important; /* amber-200 */
 }
