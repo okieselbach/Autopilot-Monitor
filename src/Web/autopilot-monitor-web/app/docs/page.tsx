@@ -1,6 +1,5 @@
 "use client";
 
-import { ProtectedRoute } from "../../components/ProtectedRoute";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -298,65 +297,63 @@ export default function DocsPage() {
   const ActiveContent = SECTION_COMPONENTS[activeSection] ?? SectionOverview;
 
   return (
-    <ProtectedRoute>
-      <div className="min-h-screen bg-gray-50">
-        {/* Header */}
-        <header className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-10">
-          <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-            <div className="flex items-center justify-between">
-              <Link
-                href="/"
-                className="flex items-center space-x-2 text-gray-600 hover:text-gray-900 transition-colors"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-                </svg>
-                <span>Back to Dashboard</span>
-              </Link>
-              <h1 className="text-2xl font-bold text-blue-600">Documentation</h1>
-            </div>
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <header className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-10">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          <div className="flex items-center justify-between">
+            <Link
+              href="/landing"
+              className="flex items-center space-x-2 text-gray-600 hover:text-gray-900 transition-colors"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+              </svg>
+              <span>Back to Landing</span>
+            </Link>
+            <h1 className="text-2xl font-bold text-blue-600">Documentation</h1>
           </div>
-        </header>
-
-        {/* Two-column layout */}
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex gap-8 items-start">
-
-          {/* Sidebar */}
-          <aside className="w-52 shrink-0 hidden md:block">
-            <nav className="sticky top-24 bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3 px-1">
-                Contents
-              </p>
-              <ul className="space-y-0.5">
-                {NAV_SECTIONS.map((s) => (
-                  <li key={s.id}>
-                    <button
-                      onClick={() => setActiveSection(s.id)}
-                      className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
-                        activeSection === s.id
-                          ? "bg-blue-50 text-blue-700 font-semibold"
-                          : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
-                      }`}
-                    >
-                      {s.label}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </nav>
-          </aside>
-
-          {/* Content — only the active section is rendered */}
-          <main className="flex-1 min-w-0 space-y-8">
-            <ActiveContent />
-            <div className="text-center text-sm text-gray-500 pb-4">
-              <p>Autopilot Monitor v1.0.0</p>
-              <p className="mt-1">Documentation last updated: {new Date().toLocaleDateString()}</p>
-            </div>
-          </main>
-
         </div>
+      </header>
+
+      {/* Two-column layout */}
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex gap-8 items-start">
+
+        {/* Sidebar */}
+        <aside className="w-52 shrink-0 hidden md:block">
+          <nav className="sticky top-24 bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3 px-1">
+              Contents
+            </p>
+            <ul className="space-y-0.5">
+              {NAV_SECTIONS.map((s) => (
+                <li key={s.id}>
+                  <button
+                    onClick={() => setActiveSection(s.id)}
+                    className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
+                      activeSection === s.id
+                        ? "bg-blue-50 text-blue-700 font-semibold"
+                        : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                    }`}
+                  >
+                    {s.label}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </nav>
+        </aside>
+
+        {/* Content — only the active section is rendered */}
+        <main className="flex-1 min-w-0 space-y-8">
+          <ActiveContent />
+          <div className="text-center text-sm text-gray-500 pb-4">
+            <p>Autopilot Monitor v1.0.0</p>
+            <p className="mt-1">Documentation last updated: {new Date().toLocaleDateString()}</p>
+          </div>
+        </main>
+
       </div>
-    </ProtectedRoute>
+    </div>
   );
 }
