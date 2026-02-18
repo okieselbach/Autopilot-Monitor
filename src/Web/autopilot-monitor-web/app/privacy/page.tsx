@@ -1,11 +1,16 @@
+"use client";
+
 import Link from "next/link";
+import { PublicPageHeader } from "../../components/PublicPageHeader";
+import { PublicSiteNavbar } from "../../components/PublicSiteNavbar";
 
 export default function PrivacyPage() {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+    <div className="min-h-screen bg-gray-50">
+      <PublicSiteNavbar showSectionLinks={false} />
+      <PublicPageHeader title="Privacy Policy" />
       <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12 space-y-6">
         <div className="bg-white rounded-lg shadow p-6">
-          <h1 className="text-3xl font-bold text-gray-900">Privacy Policy</h1>
           <p className="mt-2 text-gray-600">How Autopilot Monitor handles data.</p>
         </div>
 
@@ -56,9 +61,7 @@ export default function PrivacyPage() {
         </div>
 
         <div className="flex items-center gap-4 text-sm">
-          <Link href="/landing" className="text-blue-700 hover:text-blue-800 font-medium">
-            Back to landing page
-          </Link>
+          <Link href="/landing" className="text-blue-700 hover:text-blue-800 font-medium">Landing page</Link>
           <Link href="/docs" className="text-blue-700 hover:text-blue-800 font-medium">
             Documentation
           </Link>

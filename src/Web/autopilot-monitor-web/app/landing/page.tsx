@@ -1,9 +1,9 @@
 "use client";
 
 import { useAuth } from "../../contexts/AuthContext";
-import { useTheme } from "../../contexts/ThemeContext";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { PublicSiteNavbar } from "../../components/PublicSiteNavbar";
 
 interface PlatformStatsManifest {
   latest: string;
@@ -157,7 +157,6 @@ function StepIcon({ icon }: { icon: string }) {
 
 export default function LandingPage() {
   const { login, isAuthenticated, isLoading, user, isPreviewBlocked } = useAuth();
-  const { theme, toggleTheme } = useTheme();
   const router = useRouter();
   const [platformStats, setPlatformStats] = useState(DEFAULT_PLATFORM_STATS);
 
@@ -230,70 +229,7 @@ export default function LandingPage() {
 
   return (
     <div className="landing-page min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50">
-      {/* Navigation — sticky top bar */}
-      <nav className="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-gray-200/60 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 flex items-center justify-between h-14">
-          {/* Left — Logo + Name */}
-          <a href="#" className="flex items-center space-x-2.5 shrink-0">
-            <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-lg flex items-center justify-center">
-              <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none">
-                <rect x="5.0" y="12.2" width="2.8" height="7.8" rx="0.9" fill="currentColor" />
-                <rect x="10.6" y="10.9" width="2.8" height="9.1" rx="0.9" fill="currentColor" />
-                <rect x="16.2" y="8.6" width="2.8" height="11.4" rx="0.9" fill="currentColor" />
-                <path d="M4.4 8.9L8.6 6.8L12.0 7.4L15.4 5.5L18.8 4.9" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" />
-                <path d="M17.8 4.2L19.1 4.9L17.9 5.9" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </div>
-            <span className="text-lg font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-              <span className="hidden md:inline">Autopilot Monitor</span>
-              <span className="md:hidden">AP Monitor</span>
-            </span>
-          </a>
-
-          {/* Center — Section Links */}
-          <div className="hidden sm:flex items-center gap-1">
-            <a href="#features" className="px-3 py-1.5 text-sm font-medium text-gray-500 hover:text-blue-600 rounded-md hover:bg-blue-50/50 transition-colors">Features</a>
-            <a href="#how-it-works" className="px-3 py-1.5 text-sm font-medium text-gray-500 hover:text-blue-600 rounded-md hover:bg-blue-50/50 transition-colors">How It Works</a>
-            <a href="#comparison" className="px-3 py-1.5 text-sm font-medium text-gray-500 hover:text-blue-600 rounded-md hover:bg-blue-50/50 transition-colors">Comparison</a>
-          </div>
-
-          {/* Right — Dark Mode + GitHub + Sign In */}
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              onClick={toggleTheme}
-              className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 transition-colors"
-              title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-            >
-              {theme === 'dark' ? (
-                <svg className="w-4 h-4 text-yellow-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
-                </svg>
-              ) : (
-                <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
-                </svg>
-              )}
-            </button>
-            <a
-              href="https://github.com/okieselbach/Autopilot-Monitor"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-600 rounded-full border border-gray-200 hover:border-gray-300 hover:bg-gray-50 transition-colors"
-            >
-              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" />
-              </svg>
-              <span className="hidden sm:inline">GitHub</span>
-            </a>
-            <button
-              onClick={login}
-              className="px-4 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg text-sm font-semibold shadow-sm hover:shadow-md transition-all"
-            >
-              Sign In
-            </button>
-          </div>
-        </div>
-      </nav>
+      <PublicSiteNavbar showSectionLinks={true} />
 
       {/* Hero Section */}
       <div className="pt-20 pb-20 px-6">

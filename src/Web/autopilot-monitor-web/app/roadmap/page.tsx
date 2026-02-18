@@ -1,12 +1,17 @@
+"use client";
+
 import Link from "next/link";
+import { PublicPageHeader } from "../../components/PublicPageHeader";
+import { PublicSiteNavbar } from "../../components/PublicSiteNavbar";
 
 export default function RoadmapPage() {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+    <div className="min-h-screen bg-gray-50">
+      <PublicSiteNavbar showSectionLinks={false} />
+      <PublicPageHeader title="Roadmap" />
       <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 sm:p-10">
-          <h1 className="text-3xl sm:text-4xl font-bold text-gray-900">Roadmap</h1>
-          <p className="mt-3 text-gray-600">
+          <p className="text-gray-600">
             Planned features for upcoming releases.
           </p>
 
@@ -25,7 +30,7 @@ export default function RoadmapPage() {
               href="/landing"
               className="inline-flex items-center text-sm font-medium text-blue-700 hover:text-blue-800"
             >
-              Back to landing page
+              Landing page
             </Link>
           </div>
         </div>

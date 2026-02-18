@@ -1,13 +1,18 @@
+"use client";
+
 import Link from "next/link";
+import { PublicPageHeader } from "../../components/PublicPageHeader";
+import { PublicSiteNavbar } from "../../components/PublicSiteNavbar";
 
 const VERSION = "1.0.0";
 
 export default function AboutPage() {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+    <div className="min-h-screen bg-gray-50">
+      <PublicSiteNavbar showSectionLinks={false} />
+      <PublicPageHeader title="About" />
       <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12 space-y-6">
         <div className="bg-white rounded-lg shadow p-6">
-          <h1 className="text-3xl font-bold text-gray-900">About Autopilot Monitor</h1>
           <p className="mt-3 text-gray-700 leading-relaxed">
             <strong>Autopilot Monitor</strong> is a real-time monitoring and troubleshooting platform for Windows Autopilot enrollments.
             It gives IT teams visibility into enrollment phases, app progress, errors, and timelines so issues can be found and resolved faster.
