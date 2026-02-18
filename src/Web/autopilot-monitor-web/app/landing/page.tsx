@@ -12,14 +12,21 @@ interface PlatformStatsManifest {
 
 interface PlatformStatsPayload {
   totalEnrollments?: number;
+  totalUsers?: number;
   totalTenants?: number;
   uniqueDeviceModels?: number;
+  totalEventsProcessed?: number;
+  successfulEnrollments?: number;
+  issuesDetected?: number;
+  lastFullCompute?: string;
+  lastUpdated?: string;
 }
 
 const DEFAULT_PLATFORM_STATS = {
   totalEnrollments: 123,
   totalTenants: 2,
   uniqueDeviceModels: 1,
+  issuesDetected: 0,
 };
 
 function resolvePlatformStatsManifestUrl(rawUrl?: string): string {
@@ -197,6 +204,7 @@ export default function LandingPage() {
           totalEnrollments: payload.totalEnrollments ?? DEFAULT_PLATFORM_STATS.totalEnrollments,
           totalTenants: payload.totalTenants ?? DEFAULT_PLATFORM_STATS.totalTenants,
           uniqueDeviceModels: payload.uniqueDeviceModels ?? DEFAULT_PLATFORM_STATS.uniqueDeviceModels,
+          issuesDetected: payload.issuesDetected ?? DEFAULT_PLATFORM_STATS.issuesDetected,
         });
       } catch {
         // Keep defaults if manifest/versioned files are not reachable.
@@ -334,12 +342,14 @@ export default function LandingPage() {
             </p>
 
             {/* Platform Stats - compact inline */}
-            <div className="mt-10 flex items-center justify-center gap-6 text-xs text-gray-400">
-              <span><span className="font-semibold text-gray-600">{platformStats.totalEnrollments.toLocaleString()}</span> enrollments monitored</span>
-              <span className="w-px h-3 bg-gray-300" />
+            <div className="mt-10 flex items-center justify-center gap-3 sm:gap-4 text-xs text-gray-400">
               <span><span className="font-semibold text-gray-600">{platformStats.totalTenants.toLocaleString()}</span> organizations</span>
-              <span className="w-px h-3 bg-gray-300" />
+              <span className="w-px h-2.5 bg-gray-300" />
               <span><span className="font-semibold text-gray-600">{platformStats.uniqueDeviceModels.toLocaleString()}</span> device models</span>
+              <span className="w-px h-2.5 bg-gray-300" />
+              <span><span className="font-semibold text-gray-600">{platformStats.totalEnrollments.toLocaleString()}</span> enrollments monitored</span>
+              <span className="w-px h-2.5 bg-gray-300" />
+              <span><span className="font-semibold text-gray-600">{platformStats.issuesDetected.toLocaleString()}</span> detected issues</span>
             </div>
 
             {/* Product Preview Showcase */}
