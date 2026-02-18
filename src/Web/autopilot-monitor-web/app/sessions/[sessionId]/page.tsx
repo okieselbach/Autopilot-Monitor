@@ -1667,17 +1667,35 @@ function DeviceDetailsCard({ events }: { events: EnrollmentEvent[] }) {
     : null;
 
   // Uptime until enrollment starts: calculated from boot time to first event timestamp.
-  // More accurate than stored uptimeMinutes, which reflects when CollectBootTime() ran (after agent_started).
+  // Falls back to agent-reported uptimeMinutes if the timestamp diff is negative
+  // (e.g. clock not synced at start, or device rebooted mid-enrollment).
   const uptimeUntilEnrollment = useMemo(() => {
-    if (!estimatedBootTime || events.length === 0) return null;
+    if (!bootTime || events.length === 0) return null;
+    const bootTimeStr = bootTime.bootTimeUtc ?? bootTime.bootTime;
+    if (!bootTimeStr) return null;
+    const bootTimeMs = new Date(bootTimeStr).getTime();
+    if (isNaN(bootTimeMs)) return null;
+
     const firstEventMs = Math.min(...events.map(e => new Date(e.timestamp).getTime()));
-    const diffMs = firstEventMs - estimatedBootTime.getTime();
-    if (diffMs < 0) return null;
-    const totalMinutes = Math.floor(diffMs / 60000);
-    const hours = Math.floor(totalMinutes / 60);
-    const minutes = totalMinutes % 60;
-    return `${hours}h ${minutes}m`;
-  }, [estimatedBootTime, events]);
+    const diffMs = firstEventMs - bootTimeMs;
+
+    if (diffMs >= 0) {
+      const totalMinutes = Math.floor(diffMs / 60000);
+      const hours = Math.floor(totalMinutes / 60);
+      const minutes = totalMinutes % 60;
+      return `${hours}h ${minutes}m`;
+    }
+
+    // Fallback: agent-calculated uptime (always positive)
+    const uptimeMinutes = typeof bootTime.uptimeMinutes === 'number' ? bootTime.uptimeMinutes : null;
+    if (uptimeMinutes !== null && uptimeMinutes >= 0) {
+      const hours = Math.floor(uptimeMinutes / 60);
+      const minutes = uptimeMinutes % 60;
+      return `${hours}h ${minutes}m`;
+    }
+
+    return null;
+  }, [bootTime, events]);
   const osInfo = getEventData("os_info");
   const networkAdapters = getEventData("network_adapters");
   const dnsConfig = getEventData("dns_configuration");

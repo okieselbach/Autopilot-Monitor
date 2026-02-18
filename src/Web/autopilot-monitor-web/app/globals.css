@@ -169,7 +169,7 @@ body {
   background-color: #2d1b4e !important;
 }
 .dark .bg-violet-100 {
-  background-color: #2d1b4e !important;
+  background-color: #3b2060 !important; /* slightly lighter so inline code tags contrast against the parent */
 }
 .dark .bg-emerald-50 {
   background-color: #0d2e20 !important;
@@ -244,7 +244,51 @@ body {
   --tw-gradient-to: #0d2e20 !important;
 }
 
+/* -- Colored text in dark mode (light text on dark colored backgrounds) -- */
+.dark .text-blue-800 {
+  color: #93c5fd !important; /* blue-300 */
+}
+.dark .text-blue-900 {
+  color: #bfdbfe !important; /* blue-200 */
+}
+.dark .text-violet-800 {
+  color: #c4b5fd !important; /* violet-300 */
+}
+.dark .text-violet-700 {
+  color: #ddd6fe !important; /* violet-200 */
+}
+.dark .text-violet-900 {
+  color: #ede9fe !important; /* violet-100 */
+}
+.dark .text-amber-900 {
+  color: #fde68a !important; /* amber-200 */
+}
+.dark .text-amber-800 {
+  color: #fcd34d !important; /* amber-300 */
+}
+.dark .text-green-800 {
+  color: #86efac !important; /* green-300 */
+}
+.dark .text-green-900 {
+  color: #bbf7d0 !important; /* green-200 */
+}
+.dark .text-red-800 {
+  color: #fca5a5 !important; /* red-300 */
+}
+.dark .text-red-900 {
+  color: #fecaca !important; /* red-200 */
+}
+.dark .text-orange-800 {
+  color: #fdba74 !important; /* orange-300 */
+}
+.dark .text-yellow-800 {
+  color: #fde047 !important; /* yellow-300 */
+}
+
 /* -- Colored borders in dark mode -- */
+.dark .border-blue-100 {
+  border-color: #2d5282 !important;
+}
 .dark .border-blue-200 {
   border-color: #1e3a5f !important;
 }

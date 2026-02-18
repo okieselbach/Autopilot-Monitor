@@ -69,6 +69,9 @@ export default function Home() {
   // Track if we've joined the tenant group to prevent duplicate joins
   const hasJoinedGroup = useRef(false);
 
+  // Track whether we've been connected at least once — used to detect reconnects
+  const wasConnectedRef = useRef(false);
+
   const fetchSessions = async () => {
     try {
       // Use different endpoint based on galactic admin mode
@@ -160,10 +163,21 @@ export default function Home() {
 
   // Join tenant group when SignalR is connected (for multi-tenancy)
   useEffect(() => {
-    if (isConnected && !hasJoinedGroup.current) {
-      const groupName = `tenant-${tenantId}`;
-      joinGroup(groupName);
-      hasJoinedGroup.current = true;
+    if (isConnected) {
+      const isReconnect = wasConnectedRef.current;
+      wasConnectedRef.current = true;
+
+      if (!hasJoinedGroup.current) {
+        const groupName = `tenant-${tenantId}`;
+        hasJoinedGroup.current = true;
+        joinGroup(groupName);
+      }
+
+      // After a reconnect, refresh the session list to catch any sessions that were
+      // registered while the client was disconnected and not in the SignalR group.
+      if (isReconnect && hasInitialFetch.current) {
+        fetchSessions();
+      }
     }
 
     return () => {
@@ -209,8 +223,8 @@ export default function Home() {
     const handleNewSession = (data: { sessionId: string; tenantId: string; session: Session }) => {
       console.log('New session registered', data);
 
-      // Add new session to the list (at the beginning - most recent first)
       if (data.session) {
+        // Add new session to the list (at the beginning - most recent first)
         setSessions(prevSessions => {
           // Check if session already exists (shouldn't happen, but be defensive)
           const sessionIndex = prevSessions.findIndex(s => s.sessionId === data.session.sessionId);
@@ -224,6 +238,11 @@ export default function Home() {
             return [data.session, ...prevSessions];
           }
         });
+      } else {
+        // data.session is null — read-after-write race in Table Storage between StoreSession
+        // and GetSession. Fall back to a full list refresh so the session still appears.
+        console.warn('newSession event received without session data, falling back to fetch');
+        fetchSessions();
       }
     };
 
