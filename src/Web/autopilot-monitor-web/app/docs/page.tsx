@@ -211,7 +211,7 @@ function SectionAgentSetup() {
               Download the PowerShell script that installs and configures the Autopilot Monitor agent:
             </p>
             <a
-              href="https://autopilotmonitor.blob.core.windows.net/agent/Install-AutopilotMonitor.ps1"
+              href="/api/download/bootstrapper"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
