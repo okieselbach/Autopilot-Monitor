@@ -43,6 +43,7 @@ export default function TermsPage() {
             <p><strong>No Data Backup Guarantee:</strong> While we implement data retention policies, we do not guarantee the preservation of your data. You are responsible for maintaining your own backups and records.</p>
             <p><strong>Best Effort Support:</strong> Support is provided on a best-effort basis with no guaranteed response times or resolution commitments.</p>
             <p><strong>Use at Your Own Risk:</strong> By using this service, you acknowledge that you do so at your own risk and that you are solely responsible for any consequences arising from your use of the service.</p>
+            <p><strong>Active Development Notice:</strong> This project is under active development. Service interruptions or unexpected behavior can occur at any time, especially when updates are deployed to the backend, web application, or agent components.</p>
           </div>
         </div>
 
