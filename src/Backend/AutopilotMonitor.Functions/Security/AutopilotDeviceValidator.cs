@@ -61,12 +61,14 @@ namespace AutopilotMonitor.Functions.Security
                 var accessToken = await GetGraphAccessTokenAsync(tenantId);
                 if (string.IsNullOrEmpty(accessToken))
                 {
-                    return CacheAndReturn(cacheKey, new AutopilotDeviceValidationResult
+                    // Do not cache token-acquisition failures — this is a backend/propagation issue,
+                    // not a device issue. The next enrollment attempt should retry immediately.
+                    return new AutopilotDeviceValidationResult
                     {
                         IsValid = false,
                         SerialNumber = normalizedSerial,
                         ErrorMessage = "Graph access token could not be acquired"
-                    }, isPositive: false);
+                    };
                 }
 
                 var graphClient = _httpClientFactory.CreateClient();
@@ -197,31 +199,66 @@ namespace AutopilotMonitor.Functions.Security
                 return null;
             }
 
-            var tokenClient = _httpClientFactory.CreateClient();
             var tokenUrl = $"https://login.microsoftonline.com/{tenantId}/oauth2/v2.0/token";
-            var body = new FormUrlEncodedContent(new Dictionary<string, string>
-            {
-                ["client_id"] = clientId,
-                ["client_secret"] = clientSecret,
-                ["scope"] = "https://graph.microsoft.com/.default",
-                ["grant_type"] = "client_credentials"
-            });
 
-            var response = await tokenClient.PostAsync(tokenUrl, body);
-            var responseBody = await response.Content.ReadAsStringAsync();
+            // Retry with backoff to handle Azure AD consent propagation delays.
+            // After admin consent is granted, the service principal may not be immediately
+            // available in the tenant — Azure AD typically propagates within 30-90 seconds.
+            var retryDelays = new[] { TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(30) };
+            string? responseBody = null;
+            int attempt = 0;
 
-            if (!response.IsSuccessStatusCode)
+            while (true)
             {
-                _logger.LogWarning(
-                    "Failed to acquire Graph token for tenant {TenantId}. Status: {StatusCode}. Body: {ResponseBody}",
+                var tokenClient = _httpClientFactory.CreateClient();
+                var body = new FormUrlEncodedContent(new Dictionary<string, string>
+                {
+                    ["client_id"] = clientId,
+                    ["client_secret"] = clientSecret,
+                    ["scope"] = "https://graph.microsoft.com/.default",
+                    ["grant_type"] = "client_credentials"
+                });
+
+                var response = await tokenClient.PostAsync(tokenUrl, body);
+                responseBody = await response.Content.ReadAsStringAsync();
+
+                if (response.IsSuccessStatusCode)
+                {
+                    var tokenJson = JsonConvert.DeserializeObject<JObject>(responseBody);
+                    return tokenJson?["access_token"]?.ToString();
+                }
+
+                // Only retry on transient consent-propagation errors (unauthorized_client, invalid_client).
+                // Do not retry on permanent errors like invalid credentials or tenant not found.
+                var isRetryable = response.StatusCode == System.Net.HttpStatusCode.Unauthorized
+                    || response.StatusCode == System.Net.HttpStatusCode.BadRequest
+                    && (responseBody.Contains("unauthorized_client", StringComparison.OrdinalIgnoreCase)
+                        || responseBody.Contains("AADSTS700016", StringComparison.OrdinalIgnoreCase)
+                        || responseBody.Contains("AADSTS7000215", StringComparison.OrdinalIgnoreCase));
+
+                if (!isRetryable || attempt >= retryDelays.Length)
+                {
+                    _logger.LogWarning(
+                        "Failed to acquire Graph token for tenant {TenantId} after {Attempts} attempt(s). Status: {StatusCode}. Body: {ResponseBody}",
+                        tenantId,
+                        attempt + 1,
+                        (int)response.StatusCode,
+                        responseBody);
+                    return null;
+                }
+
+                var delay = retryDelays[attempt];
+                _logger.LogInformation(
+                    "Graph token acquisition for tenant {TenantId} returned {StatusCode} (attempt {Attempt}/{MaxAttempts}). Retrying in {Delay}s — likely Azure AD consent propagation delay.",
                     tenantId,
                     (int)response.StatusCode,
-                    responseBody);
-                return null;
-            }
+                    attempt + 1,
+                    retryDelays.Length + 1,
+                    delay.TotalSeconds);
 
-            var tokenJson = JsonConvert.DeserializeObject<JObject>(responseBody);
-            return tokenJson?["access_token"]?.ToString();
+                await Task.Delay(delay);
+                attempt++;
+            }
         }
 
         private static string BuildCacheKey(string tenantId, string serialNumber, string? sessionId)
