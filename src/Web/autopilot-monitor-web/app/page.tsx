@@ -550,7 +550,7 @@ export default function Home() {
                   <QuickLink
                     title="GitHub Repository"
                     description="Source code and issue tracking"
-                    href="https://github.com/yourusername/autopilot-monitor"
+                    href="https://github.com/okieselbach/autopilot-monitor"
                   />
                 </div>
               </div>

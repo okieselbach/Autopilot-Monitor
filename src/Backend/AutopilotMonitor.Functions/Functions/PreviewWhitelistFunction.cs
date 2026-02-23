@@ -18,15 +18,21 @@ public class PreviewWhitelistFunction
     private readonly ILogger<PreviewWhitelistFunction> _logger;
     private readonly PreviewWhitelistService _previewWhitelistService;
     private readonly GalacticAdminService _galacticAdminService;
+    private readonly TenantConfigurationService _tenantConfigurationService;
+    private readonly TenantAdminsService _tenantAdminsService;
 
     public PreviewWhitelistFunction(
         ILogger<PreviewWhitelistFunction> logger,
         PreviewWhitelistService previewWhitelistService,
-        GalacticAdminService galacticAdminService)
+        GalacticAdminService galacticAdminService,
+        TenantConfigurationService tenantConfigurationService,
+        TenantAdminsService tenantAdminsService)
     {
         _logger = logger;
         _previewWhitelistService = previewWhitelistService;
         _galacticAdminService = galacticAdminService;
+        _tenantConfigurationService = tenantConfigurationService;
+        _tenantAdminsService = tenantAdminsService;
     }
 
     /// <summary>
@@ -91,6 +97,48 @@ public class PreviewWhitelistFunction
         await _previewWhitelistService.ApproveAsync(tenantId, upn!);
 
         _logger.LogInformation("Preview tenant approved: {TenantId} by {Upn}", tenantId, upn);
+
+        // Auto-promote the tenant requester (first user who triggered tenant config creation)
+        // as TenantAdmin if they are not already one.
+        // This ensures whoever signed up doesn't need manual admin assignment after approval.
+        try
+        {
+            var tenantConfig = await _tenantConfigurationService.GetConfigurationAsync(tenantId);
+            var requesterUpn = tenantConfig.UpdatedBy;
+
+            if (!string.IsNullOrWhiteSpace(requesterUpn)
+                && !string.Equals(requesterUpn, "System", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(requesterUpn, "System (auto-re-enable)", StringComparison.OrdinalIgnoreCase))
+            {
+                var isAlreadyAdmin = await _tenantAdminsService.IsTenantAdminAsync(tenantId, requesterUpn);
+                if (!isAlreadyAdmin)
+                {
+                    await _tenantAdminsService.AddTenantAdminAsync(tenantId, requesterUpn, upn!);
+                    _logger.LogInformation(
+                        "Auto-promoted tenant requester {RequesterUpn} as TenantAdmin for tenant {TenantId} on preview approval by {ApprovedBy}",
+                        requesterUpn, tenantId, upn);
+                }
+                else
+                {
+                    _logger.LogInformation(
+                        "Tenant requester {RequesterUpn} is already a TenantAdmin for tenant {TenantId} — skipping auto-promote",
+                        requesterUpn, tenantId);
+                }
+            }
+            else
+            {
+                _logger.LogInformation(
+                    "No valid tenant requester UPN found in TenantConfiguration for tenant {TenantId} (UpdatedBy: '{UpdatedBy}') — skipping auto-promote",
+                    tenantId, requesterUpn ?? "<null>");
+            }
+        }
+        catch (Exception ex)
+        {
+            // Non-fatal: approval already succeeded, admin promotion is best-effort
+            _logger.LogWarning(ex,
+                "Failed to auto-promote tenant requester as TenantAdmin for tenant {TenantId} — approval still succeeded",
+                tenantId);
+        }
 
         var response = req.CreateResponse(HttpStatusCode.Created);
         await response.WriteAsJsonAsync(new { message = "Tenant approved for preview", tenantId });
