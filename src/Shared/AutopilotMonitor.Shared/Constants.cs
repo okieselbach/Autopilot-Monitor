@@ -153,6 +153,7 @@ namespace AutopilotMonitor.Shared
 
             // Preview gating (temporary — remove after GA)
             public const string PreviewWhitelist = "PreviewWhitelist";
+            public const string PreviewConfig    = "PreviewConfig";
 
             /// <summary>
             /// Returns all table names for initialization
@@ -173,7 +174,8 @@ namespace AutopilotMonitor.Shared
                 AdminConfiguration,
                 GalacticAdmins,
                 TenantAdmins,
-                PreviewWhitelist
+                PreviewWhitelist,
+                PreviewConfig
             };
         }
     }

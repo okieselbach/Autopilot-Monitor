@@ -107,6 +107,7 @@ builder.Services.AddSingleton<AnalyzeRuleService>();
 builder.Services.AddSingleton<MaintenanceService>();
 builder.Services.AddSingleton<AutopilotMonitor.Functions.Security.AutopilotDeviceValidator>();
 builder.Services.AddHttpClient<TeamsNotificationService>();
+builder.Services.AddHttpClient<TelegramNotificationService>();
 
 var app = builder.Build();
 
