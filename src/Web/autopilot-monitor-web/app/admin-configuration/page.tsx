@@ -633,21 +633,21 @@ export default function AdminConfigurationPage() {
 
   return (
     <ProtectedRoute>
-      <div className="min-h-screen bg-gray-50">
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
         {/* Header */}
-        <header className="bg-white shadow">
+        <header className="bg-white dark:bg-gray-800 shadow dark:shadow-gray-700">
           <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
             <div className="flex items-center justify-between">
               <div>
                 <button
                   onClick={() => router.push("/dashboard")}
-                  className="text-sm text-gray-600 hover:text-gray-900 mb-2 flex items-center"
+                  className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 mb-2 flex items-center"
                 >
                   &larr; Back to Dashboard
                 </button>
                 <div>
-                  <h1 className="text-3xl font-bold text-gray-900">Admin Configuration</h1>
-                  <p className="text-sm text-gray-600 mt-1">Galactic Admin Operations</p>
+                  <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Admin Configuration</h1>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Galactic Admin Operations</p>
                 </div>
               </div>
             </div>
@@ -818,40 +818,40 @@ export default function AdminConfigurationPage() {
             </div>
 
             {/* Manual Maintenance Trigger */}
-            <div className="bg-gradient-to-br from-purple-50 to-violet-50 border-2 border-purple-300 rounded-lg shadow-lg">
-              <div className="p-6 border-b border-purple-200 bg-gradient-to-r from-purple-100 to-violet-100">
+            <div className="bg-gradient-to-br from-purple-50 to-violet-50 dark:from-gray-800 dark:to-gray-800 border-2 border-purple-300 dark:border-purple-700 rounded-lg shadow-lg">
+              <div className="p-6 border-b border-purple-200 dark:border-purple-700 bg-gradient-to-r from-purple-100 to-violet-100 dark:from-purple-900/40 dark:to-violet-900/40">
                 <div className="flex items-center space-x-2">
-                  <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-6 h-6 text-purple-600 dark:text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                   </svg>
                   <div>
-                    <h2 className="text-xl font-semibold text-purple-900">Manual Maintenance Trigger</h2>
-                    <p className="text-sm text-purple-600 mt-1">Execute platform-wide maintenance operations</p>
+                    <h2 className="text-xl font-semibold text-purple-900 dark:text-purple-100">Manual Maintenance Trigger</h2>
+                    <p className="text-sm text-purple-600 dark:text-purple-300 mt-1">Execute platform-wide maintenance operations</p>
                   </div>
                 </div>
               </div>
               <div className="p-6">
                 <div className="flex items-start space-x-4">
                   <div className="flex-1">
-                    <p className="text-sm text-purple-900 mb-4">
+                    <p className="text-sm text-purple-900 dark:text-gray-200 mb-4">
                       Manually trigger the daily maintenance job which includes:
                     </p>
-                    <ul className="text-sm text-purple-900 space-y-1 mb-4 ml-4">
+                    <ul className="text-sm text-purple-900 dark:text-gray-200 space-y-1 mb-4 ml-4">
                       <li className="flex items-start">
-                        <span className="text-purple-500 mr-2">•</span>
+                        <span className="text-purple-500 dark:text-purple-400 mr-2">•</span>
                         <span>Mark stalled sessions as timed out</span>
                       </li>
                       <li className="flex items-start">
-                        <span className="text-purple-500 mr-2">•</span>
+                        <span className="text-purple-500 dark:text-purple-400 mr-2">•</span>
                         <span>Aggregate metrics into historical snapshots (with automatic catch-up for missed days)</span>
                       </li>
                       <li className="flex items-start">
-                        <span className="text-purple-500 mr-2">•</span>
+                        <span className="text-purple-500 dark:text-purple-400 mr-2">•</span>
                         <span>Clean up old data based on retention policies</span>
                       </li>
                     </ul>
-                    <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 mb-4">
-                      <label className="block text-sm font-medium text-purple-800 mb-1">
+                    <div className="bg-purple-50 dark:bg-gray-700 border border-purple-200 dark:border-purple-600 rounded-lg p-4 mb-4">
+                      <label className="block text-sm font-medium text-purple-800 dark:text-purple-200 mb-1">
                         Target Date (optional)
                       </label>
                       <input
@@ -859,19 +859,19 @@ export default function AdminConfigurationPage() {
                         value={maintenanceDate}
                         onChange={(e) => setMaintenanceDate(e.target.value)}
                         max={new Date(Date.now() - 86400000).toISOString().split('T')[0]}
-                        className="w-full max-w-xs px-3 py-2 border border-purple-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                        className="w-full max-w-xs px-3 py-2 border border-purple-300 dark:border-purple-600 rounded-lg text-sm bg-white dark:bg-gray-600 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
                       />
-                      <p className="text-xs text-gray-500 mt-2">
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
                         Leave empty to run the standard maintenance with automatic catch-up (aggregates any missed days within the last 7 days).
                         Select a specific date to manually aggregate metrics for that day, e.g. to backfill data older than 7 days.
                       </p>
                     </div>
-                    <div className="bg-white border border-purple-300 rounded-lg p-3 mb-4">
+                    <div className="bg-white dark:bg-gray-700 border border-purple-300 dark:border-purple-600 rounded-lg p-3 mb-4">
                       <div className="flex items-start space-x-2">
-                        <svg className="w-5 h-5 text-purple-600 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg className="w-5 h-5 text-purple-600 dark:text-purple-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                         </svg>
-                        <p className="text-sm text-gray-800">
+                        <p className="text-sm text-gray-800 dark:text-gray-200">
                           <strong>Warning:</strong> This operation runs across all tenants and may take several minutes to complete.
                           Use this only for testing or when immediate cleanup is needed.
                         </p>
@@ -905,44 +905,44 @@ export default function AdminConfigurationPage() {
             </div>
 
             {/* Reseed Analyze Rules */}
-            <div className="bg-gradient-to-br from-amber-50 to-orange-50 border-2 border-amber-300 rounded-lg shadow-lg">
-              <div className="p-6 border-b border-amber-200 bg-gradient-to-r from-amber-100 to-orange-100">
+            <div className="bg-gradient-to-br from-amber-50 to-orange-50 dark:from-gray-800 dark:to-gray-800 border-2 border-amber-300 dark:border-amber-700 rounded-lg shadow-lg">
+              <div className="p-6 border-b border-amber-200 dark:border-amber-700 bg-gradient-to-r from-amber-100 to-orange-100 dark:from-amber-900/40 dark:to-orange-900/40">
                 <div className="flex items-center space-x-2">
-                  <svg className="w-6 h-6 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-6 h-6 text-amber-600 dark:text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                   </svg>
                   <div>
-                    <h2 className="text-xl font-semibold text-amber-900">Reseed Analyze Rules</h2>
-                    <p className="text-sm text-amber-600 mt-1">Re-import all built-in analyze rules from code into Azure Table Storage</p>
+                    <h2 className="text-xl font-semibold text-amber-900 dark:text-amber-100">Reseed Analyze Rules</h2>
+                    <p className="text-sm text-amber-600 dark:text-amber-300 mt-1">Re-import all built-in analyze rules from code into Azure Table Storage</p>
                   </div>
                 </div>
               </div>
               <div className="p-6">
                 <div className="flex items-start space-x-4">
                   <div className="flex-1">
-                    <p className="text-sm text-amber-900 mb-4">
+                    <p className="text-sm text-amber-900 dark:text-gray-200 mb-4">
                       This operation performs a full re-import of all built-in analyze rules:
                     </p>
-                    <ul className="text-sm text-amber-900 space-y-1 mb-4 ml-4">
+                    <ul className="text-sm text-amber-900 dark:text-gray-200 space-y-1 mb-4 ml-4">
                       <li className="flex items-start">
-                        <span className="text-amber-500 mr-2">•</span>
+                        <span className="text-amber-500 dark:text-amber-400 mr-2">•</span>
                         <span>Deletes all existing global built-in rules from the table</span>
                       </li>
                       <li className="flex items-start">
-                        <span className="text-amber-500 mr-2">•</span>
+                        <span className="text-amber-500 dark:text-amber-400 mr-2">•</span>
                         <span>Writes all current code-defined rules as fresh entries</span>
                       </li>
                       <li className="flex items-start">
-                        <span className="text-amber-500 mr-2">•</span>
+                        <span className="text-amber-500 dark:text-amber-400 mr-2">•</span>
                         <span>Tenant-specific custom rules and overrides are not affected</span>
                       </li>
                     </ul>
-                    <div className="bg-white border border-orange-300 rounded-lg p-3 mb-4">
+                    <div className="bg-white dark:bg-gray-700 border border-orange-300 dark:border-amber-600 rounded-lg p-3 mb-4">
                       <div className="flex items-start space-x-2">
-                        <svg className="w-5 h-5 text-orange-600 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg className="w-5 h-5 text-orange-600 dark:text-amber-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                         </svg>
-                        <p className="text-sm text-gray-800">
+                        <p className="text-sm text-gray-800 dark:text-gray-200">
                           <strong>Use after deployments</strong> that add, remove, or modify built-in analyze rules to ensure Azure Table Storage reflects the latest code definitions.
                         </p>
                       </div>
@@ -974,33 +974,33 @@ export default function AdminConfigurationPage() {
             </div>
 
             {/* Global Rate Limiting Configuration */}
-            <div className="bg-gradient-to-br from-indigo-50 to-blue-50 border-2 border-indigo-300 rounded-lg shadow-lg">
-              <div className="p-6 border-b border-indigo-200 bg-gradient-to-r from-indigo-100 to-blue-100">
+            <div className="bg-gradient-to-br from-indigo-50 to-blue-50 dark:from-gray-800 dark:to-gray-800 border-2 border-indigo-300 dark:border-indigo-700 rounded-lg shadow-lg">
+              <div className="p-6 border-b border-indigo-200 dark:border-indigo-700 bg-gradient-to-r from-indigo-100 to-blue-100 dark:from-indigo-900/40 dark:to-blue-900/40">
                 <div className="flex items-center space-x-2">
-                  <svg className="w-6 h-6 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-6 h-6 text-indigo-600 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                   </svg>
                   <div>
-                    <h2 className="text-xl font-semibold text-indigo-900">Global Settings</h2>
-                    <p className="text-sm text-indigo-600 mt-1">Configure global settings for all tenants</p>
+                    <h2 className="text-xl font-semibold text-indigo-900 dark:text-indigo-100">Global Settings</h2>
+                    <p className="text-sm text-indigo-600 dark:text-indigo-300 mt-1">Configure global settings for all tenants</p>
                   </div>
                 </div>
               </div>
               <div className="p-6">
                 {loadingConfig ? (
                   <div className="text-center py-8">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600 mx-auto"></div>
-                    <p className="mt-3 text-indigo-800 text-sm">Loading configuration...</p>
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600 dark:border-indigo-400 mx-auto"></div>
+                    <p className="mt-3 text-indigo-800 dark:text-indigo-200 text-sm">Loading configuration...</p>
                   </div>
                 ) : (
                   <div className="space-y-4">
                     <div>
                       <label className="block">
-                        <span className="text-indigo-900 font-medium">Global Rate Limit (Requests per Minute per Device)</span>
-                        <p className="text-sm text-indigo-800 mb-2">
+                        <span className="text-indigo-900 dark:text-indigo-100 font-medium">Global Rate Limit (Requests per Minute per Device)</span>
+                        <p className="text-sm text-indigo-800 dark:text-gray-300 mb-2">
                           Configure default DoS protection limits for all tenants. Normal enrollment generates ~10-30 requests/min.
                           <br />
-                          <strong className="text-indigo-900">Note:</strong> Tenants cannot change this value. Only Galactic Admins can override per tenant in tenant management section.
+                          <strong className="text-indigo-900 dark:text-indigo-100">Note:</strong> Tenants cannot change this value. Only Galactic Admins can override per tenant in tenant management section.
                         </p>
                         <input
                           type="number"
@@ -1008,19 +1008,19 @@ export default function AdminConfigurationPage() {
                           max="1000"
                           value={globalRateLimit}
                           onChange={(e) => setGlobalRateLimit(parseInt(e.target.value) || 100)}
-                          className="mt-1 block w-full px-4 py-2 border border-indigo-300 rounded-lg bg-white text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+                          className="mt-1 block w-full px-4 py-2 border border-indigo-300 dark:border-indigo-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
                         />
                       </label>
                     </div>
 
                     <div>
                       <label className="block">
-                        <span className="text-indigo-900 font-medium">Platform Stats Blob Container SAS URL</span>
-                        <p className="text-sm text-indigo-800 mb-2">
+                        <span className="text-indigo-900 dark:text-indigo-100 font-medium">Platform Stats Blob Container SAS URL</span>
+                        <p className="text-sm text-indigo-800 dark:text-gray-300 mb-2">
                           Maintenance publishes two files into this container:
-                          <code className="ml-1 mr-1 text-xs bg-indigo-100 px-1 rounded">platform-stats.json</code>
+                          <code className="ml-1 mr-1 text-xs bg-indigo-100 dark:bg-indigo-900 dark:text-indigo-200 px-1 rounded">platform-stats.json</code>
                           and
-                          <code className="ml-1 text-xs bg-indigo-100 px-1 rounded">platform-stats.YYYY-MM-DD.json</code>.
+                          <code className="ml-1 text-xs bg-indigo-100 dark:bg-indigo-900 dark:text-indigo-200 px-1 rounded">platform-stats.YYYY-MM-DD.json</code>.
                           The upload is best-effort and does not fail the maintenance run.
                         </p>
                         <input
@@ -1028,18 +1028,18 @@ export default function AdminConfigurationPage() {
                           value={platformStatsBlobSasUrl}
                           onChange={(e) => setPlatformStatsBlobSasUrl(e.target.value)}
                           placeholder="https://storageaccount.blob.core.windows.net/publicstats?sv=...&sig=..."
-                          className="mt-1 block w-full px-4 py-2 border border-indigo-300 rounded-lg bg-white text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors font-mono text-sm"
+                          className="mt-1 block w-full px-4 py-2 border border-indigo-300 dark:border-indigo-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors font-mono text-sm"
                         />
                       </label>
                     </div>
 
                     {adminConfig && (
-                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                      <div className="bg-blue-50 dark:bg-gray-700 border border-blue-200 dark:border-indigo-600 rounded-lg p-3">
                         <div className="flex items-start space-x-2">
-                          <svg className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <svg className="w-5 h-5 text-blue-600 dark:text-indigo-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                           </svg>
-                          <div className="text-sm text-blue-800">
+                          <div className="text-sm text-blue-800 dark:text-gray-200">
                             <p className="font-medium">Configuration Info</p>
                             <p className="mt-1">Last updated: {new Date(adminConfig.lastUpdated).toLocaleString()}</p>
                             <p>Updated by: {adminConfig.updatedBy}</p>
@@ -1052,7 +1052,7 @@ export default function AdminConfigurationPage() {
                       <button
                         onClick={handleResetAdminConfig}
                         disabled={savingConfig}
-                        className="px-5 py-2 border border-indigo-300 rounded-md text-indigo-800 bg-white hover:bg-indigo-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        className="px-5 py-2 border border-indigo-300 dark:border-indigo-600 rounded-md text-indigo-800 dark:text-indigo-200 bg-white dark:bg-gray-700 hover:bg-indigo-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                       >
                         Reset
                       </button>
