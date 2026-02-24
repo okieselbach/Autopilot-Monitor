@@ -63,11 +63,13 @@ export default function AdminConfigurationPage() {
   const [tenants, setTenants] = useState<TenantConfiguration[]>([]);
   const [loadingTenants, setLoadingTenants] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [showOnlyReady, setShowOnlyReady] = useState(false);
+  const [tenantSectionExpanded, setTenantSectionExpanded] = useState(false);
   const [editingTenant, setEditingTenant] = useState<TenantConfiguration | null>(null);
   const [savingTenant, setSavingTenant] = useState(false);
   const [togglingSecurityBypassTenant, setTogglingSecurityBypassTenant] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(0);
-  const tenantsPerPage = 3;
+  const tenantsPerPage = tenantSectionExpanded ? 7 : 3;
 
   // Preview Whitelist state
   const [previewApproved, setPreviewApproved] = useState<Set<string>>(new Set());
@@ -602,10 +604,17 @@ export default function AdminConfigurationPage() {
   };
 
   // Filter and sort tenants
-  const filteredTenants = tenants.filter(t =>
-    t.tenantId.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    t.domainName.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredTenants = tenants.filter(t => {
+    const matchesSearch =
+      t.tenantId.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      t.domainName.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesReady = !showOnlyReady || t.validateAutopilotDevice;
+    return matchesSearch && matchesReady;
+  });
+
+  // Ready statistics (always over all tenants, not filtered)
+  const readyCount = tenants.filter(t => t.validateAutopilotDevice).length;
+  const totalCount = tenants.length;
 
   // Pagination
   const totalPages = Math.ceil(filteredTenants.length / tenantsPerPage);
@@ -616,7 +625,7 @@ export default function AdminConfigurationPage() {
   // Reset to first page when search changes
   useEffect(() => {
     setCurrentPage(0);
-  }, [searchQuery]);
+  }, [searchQuery, showOnlyReady]);
 
   // Admin Pagination with Search
   const filteredAdmins = tenantAdmins.filter(admin =>
@@ -679,17 +688,27 @@ export default function AdminConfigurationPage() {
 
             {/* Tenant Management */}
             <div className="bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-300 rounded-lg shadow-lg">
-              <div className="p-6 border-b border-green-200 bg-gradient-to-r from-green-100 to-emerald-100">
-                <div className="flex items-center space-x-2">
-                  <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                  </svg>
-                  <div>
-                    <h2 className="text-xl font-semibold text-green-900">Tenant Management</h2>
-                    <p className="text-sm text-green-600 mt-1">View and manage all tenant configurations</p>
+              <div
+                className="p-6 border-b border-green-200 bg-gradient-to-r from-green-100 to-emerald-100 cursor-pointer select-none"
+                onClick={() => { setTenantSectionExpanded(v => !v); setCurrentPage(0); }}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                    </svg>
+                    <div>
+                      <h2 className="text-xl font-semibold text-green-900">Tenant Management</h2>
+                      <p className="text-sm text-green-600 mt-1">View and manage all tenant configurations</p>
+                    </div>
                   </div>
+                  <svg
+                    className={`w-5 h-5 text-green-700 transition-transform duration-200 ${tenantSectionExpanded ? 'rotate-180' : ''}`}
+                    fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
                 </div>
-              </div>
               <div className="p-6">
                 {loadingTenants ? (
                   <div className="text-center py-8">
@@ -712,6 +731,21 @@ export default function AdminConfigurationPage() {
                           className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
                         />
                       </div>
+                      <button
+                        onClick={() => { setShowOnlyReady(v => !v); setCurrentPage(0); }}
+                        className={`flex items-center space-x-1 px-3 py-2 text-sm rounded-lg border transition-colors whitespace-nowrap ${
+                          showOnlyReady
+                            ? 'bg-blue-600 text-white border-blue-600'
+                            : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                        }`}
+                      >
+                        {showOnlyReady && (
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                        <span>Ready</span>
+                      </button>
                       <span className="text-sm text-gray-600 whitespace-nowrap">{filteredTenants.length} tenant(s)</span>
                     </div>
 
@@ -750,6 +784,11 @@ export default function AdminConfigurationPage() {
                                     ) : (
                                       <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
                                         Waitlist
+                                      </span>
+                                    )}
+                                    {tenant.validateAutopilotDevice && (
+                                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                        Ready
                                       </span>
                                     )}
                                   </div>
@@ -812,6 +851,19 @@ export default function AdminConfigurationPage() {
                         </>
                       )}
                     </div>
+
+                    {/* Ready Statistics */}
+                    {totalCount > 0 && (
+                      <div className="pt-3 border-t border-green-200 flex items-center justify-between text-sm text-gray-600">
+                        <span>
+                          <span className="font-semibold text-blue-700">{readyCount}</span>
+                          {' '}von{' '}
+                          <span className="font-semibold">{totalCount}</span>
+                          {' '}Tenant(s) sind Ready
+                        </span>
+                        <span className="text-xs text-gray-400">(ValidateAutopilotDevice aktiviert)</span>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
