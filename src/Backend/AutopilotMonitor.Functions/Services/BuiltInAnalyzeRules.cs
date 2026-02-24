@@ -22,6 +22,7 @@ namespace AutopilotMonitor.Functions.Services
                 CreateAppRebootLoopRule(),
                 CreateAppTrackingSummaryErrorsRule(),
                 CreateAppDownloadStallRule(),
+                CreateAppPostSuccessFailureRule(),
 
                 // ===== ESP RULES =====
                 CreateEspBlockingAppTimeoutRule(),
@@ -563,6 +564,74 @@ namespace AutopilotMonitor.Functions.Services
                 }}
             },
             Tags = new[] { "apps", "download", "stall", "correlation" }
+        };
+
+        /// <summary>
+        /// Detects when an app was initially reported as successfully installed but then
+        /// transitioned back to an error state (IME-ERROR-REPORT), while enrollment completed successfully.
+        /// This is a silent failure that can leave apps broken post-enrollment.
+        /// </summary>
+        private static AnalyzeRule CreateAppPostSuccessFailureRule() => new AnalyzeRule
+        {
+            RuleId = "ANALYZE-APP-010",
+            Title = "App Reverted to Error After Successful Install",
+            Description = "Detects when an app was marked as successfully installed but subsequently reported an error state, even though enrollment completed successfully. The app may be broken post-enrollment.",
+            Severity = "warning",
+            Category = "apps",
+            Trigger = "correlation",
+            BaseConfidence = 65,
+            Conditions = new List<RuleCondition>
+            {
+                new RuleCondition { Signal = "app_initially_succeeded", Source = "event_type", EventType = "app_install_completed", Operator = "exists", Value = "", Required = true },
+                new RuleCondition { Signal = "app_post_success_failure", Source = "event_type", EventType = "app_install_failed", DataField = "errorPatternId", Operator = "equals", Value = "IME-ERROR-REPORT", Required = true },
+                new RuleCondition { Signal = "enrollment_succeeded", Source = "event_type", EventType = "enrollment_complete", Operator = "exists", Value = "", Required = true }
+            },
+            ConfidenceFactors = new List<ConfidenceFactor>
+            {
+                new ConfidenceFactor { Signal = "enforcement_state_changed", Condition = "exists", Weight = 20 },
+                new ConfidenceFactor { Signal = "error_code_present", Condition = "exists", Weight = 10 }
+            },
+            ConfidenceThreshold = 60,
+            Explanation = @"An app was initially reported as **successfully installed** (`app_install_completed`) but then transitioned back to an **Error** state via an `IME-ERROR-REPORT` event — while the overall enrollment completed successfully.
+
+This pattern typically occurs when:
+- The IME (Intune Management Extension) re-evaluates enforcement state after the initial install report and detects a failure (e.g., `EnforcementState` changed from `Success` → `Error`)
+- A post-install detection check fails, causing the enforcement error code to be updated (e.g., error `-2016345060`)
+- The app may appear installed in the ESP but is actually in a broken or partially-deployed state on the device
+
+**The enrollment succeeded, but the affected app requires attention.**",
+            Remediation = new List<RemediationStep>
+            {
+                new RemediationStep
+                {
+                    Title = "Investigate the app's post-install state",
+                    Steps = new List<string>
+                    {
+                        "Check the Intune portal: Device > Apps — look for the app and confirm its current enforcement state",
+                        "Review IME logs on the device: C:\\ProgramData\\Microsoft\\IntuneManagementExtension\\Logs\\IntuneManagementExtension.log",
+                        "Search the log for the appId or appName and look for 'EnforcementState' transitions near the enrollment time",
+                        "Check the EnforcementErrorCode — error -2016345060 (0x87D13B9C) typically indicates a detection failure after install",
+                        "Verify the app's detection rule in Intune is correct and matches the installed state",
+                        "Trigger a manual sync on the device (Company Portal or Settings > Accounts > Access work or school > Sync) to force re-evaluation"
+                    }
+                },
+                new RemediationStep
+                {
+                    Title = "Fix detection or installation issues",
+                    Steps = new List<string>
+                    {
+                        "If detection fails: correct the detection rule (file path, registry key, or script) in the Intune app configuration",
+                        "If the app itself is broken: redeploy or reassign the app to trigger a fresh install",
+                        "Consider adding a post-install validation script to catch this scenario proactively"
+                    }
+                }
+            },
+            RelatedDocs = new List<RelatedDoc>
+            {
+                new RelatedDoc { Title = "Troubleshoot Win32 app installations", Url = "https://learn.microsoft.com/en-us/troubleshoot/mem/intune/app-management/troubleshoot-win32-app-install" },
+                new RelatedDoc { Title = "Intune Management Extension logs", Url = "https://learn.microsoft.com/en-us/mem/intune/apps/intune-management-extension" }
+            },
+            Tags = new[] { "apps", "win32", "enforcement", "post-install", "correlation" }
         };
 
         /// <summary>
