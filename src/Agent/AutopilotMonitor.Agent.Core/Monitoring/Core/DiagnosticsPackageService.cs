@@ -12,6 +12,27 @@ using AutopilotMonitor.Shared;
 namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 {
     /// <summary>
+    /// Result of a diagnostics package upload attempt.
+    /// </summary>
+    public class DiagnosticsUploadResult
+    {
+        /// <summary>Blob name on success, null on failure or skip.</summary>
+        public string BlobName { get; set; }
+
+        /// <summary>
+        /// First part of the SAS URL (up to and including the first query param) with the token truncated,
+        /// so the event shows the target container without leaking the full signature.
+        /// Example: "https://account.blob.core.windows.net/diagnostics?sp=(truncated)"
+        /// </summary>
+        public string SasUrlPrefix { get; set; }
+
+        /// <summary>Human-readable error code/message when upload failed. Null on success or skip.</summary>
+        public string ErrorCode { get; set; }
+
+        public bool Success => BlobName != null;
+    }
+
+    /// <summary>
     /// Creates and uploads a diagnostics ZIP package (agent logs + IME logs + session info)
     /// to the tenant's Azure Blob Storage container via a short-lived SAS URL.
     /// The SAS URL is fetched on-demand just before upload and never stored in config or on disk.
@@ -39,10 +60,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 
         /// <summary>
         /// Creates a diagnostics ZIP and uploads it to the configured Blob Storage container.
-        /// Returns the blob name on success, or null if skipped or failed.
+        /// Returns a DiagnosticsUploadResult with BlobName set on success, or ErrorCode set on failure.
+        /// Returns null if the upload was skipped (mode=Off, not configured, or OnFailure+succeeded).
         /// This method is non-fatal: all exceptions are caught and logged.
         /// </summary>
-        public async Task<string> CreateAndUploadAsync(bool enrollmentSucceeded)
+        public async Task<DiagnosticsUploadResult> CreateAndUploadAsync(bool enrollmentSucceeded)
         {
             try
             {
@@ -102,24 +124,50 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 
                 if (uploadUrlResponse == null || !uploadUrlResponse.Success || string.IsNullOrEmpty(uploadUrlResponse.UploadUrl))
                 {
-                    _logger.Warning("Failed to get diagnostics upload URL from backend — skipping upload");
-                    return null;
+                    var errorCode = uploadUrlResponse?.Message ?? "Failed to get diagnostics upload URL from backend";
+                    _logger.Warning($"Failed to get diagnostics upload URL from backend — skipping upload: {errorCode}");
+                    return new DiagnosticsUploadResult { ErrorCode = errorCode };
                 }
 
+                var sasUrlPrefix = BuildSasUrlPrefix(uploadUrlResponse.UploadUrl);
+
                 // Upload to Blob Storage using the freshly obtained URL
-                var uploaded = await UploadToBlobStorageAsync(zipFileName, zipBytes, uploadUrlResponse.UploadUrl);
+                var (uploaded, uploadErrorCode) = await UploadToBlobStorageAsync(zipFileName, zipBytes, uploadUrlResponse.UploadUrl);
                 if (uploaded)
                 {
                     _logger.Info($"Diagnostics package uploaded successfully: {zipFileName}");
-                    return zipFileName;
+                    return new DiagnosticsUploadResult { BlobName = zipFileName, SasUrlPrefix = sasUrlPrefix };
                 }
 
-                return null;
+                return new DiagnosticsUploadResult { SasUrlPrefix = sasUrlPrefix, ErrorCode = uploadErrorCode };
             }
             catch (Exception ex)
             {
                 _logger.Warning($"Diagnostics package creation/upload failed (non-fatal): {ex.Message}");
-                return null;
+                return new DiagnosticsUploadResult { ErrorCode = ex.Message };
+            }
+        }
+
+        /// <summary>
+        /// Returns a safe, truncated SAS URL prefix for logging — shows account/container but not the token.
+        /// Example: "https://account.blob.core.windows.net/diagnostics?sp=(truncated)"
+        /// </summary>
+        private static string BuildSasUrlPrefix(string sasUrl)
+        {
+            try
+            {
+                var qIndex = sasUrl.IndexOf('?');
+                if (qIndex < 0) return sasUrl;
+
+                // Keep only the first query param name to show which container/permissions are set
+                var basePath = sasUrl.Substring(0, qIndex);
+                var query = sasUrl.Substring(qIndex + 1);
+                var firstParam = query.Split('&')[0].Split('=')[0];
+                return $"{basePath}?{firstParam}=(truncated)";
+            }
+            catch
+            {
+                return "(url unavailable)";
             }
         }
 
@@ -191,9 +239,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         /// Uploads the ZIP bytes to Azure Blob Storage via PUT with the provided container SAS URL.
         /// Container SAS URL format: https://account.blob.core.windows.net/container?sv=...&sig=...
         /// Blob URL is constructed by inserting the blob name before the query string.
-        /// The URL is passed in directly (fetched on-demand just before upload, never from config).
+        /// Returns (success, errorCode) — errorCode is null on success, otherwise the last HTTP error.
         /// </summary>
-        private async Task<bool> UploadToBlobStorageAsync(string blobName, byte[] data, string containerSasUrl)
+        private async Task<(bool success, string errorCode)> UploadToBlobStorageAsync(string blobName, byte[] data, string containerSasUrl)
         {
             // Build blob URL: split at '?' to insert blob name
             var questionMarkIndex = containerSasUrl.IndexOf('?');
@@ -211,6 +259,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             }
 
             const int maxRetries = 3;
+            string lastErrorCode = null;
             for (int attempt = 1; attempt <= maxRetries; attempt++)
             {
                 try
@@ -225,14 +274,16 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 
                     if (response.IsSuccessStatusCode)
                     {
-                        return true;
+                        return (true, null);
                     }
 
+                    lastErrorCode = $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}";
                     var responseBody = await response.Content.ReadAsStringAsync();
-                    _logger.Warning($"Blob upload attempt {attempt} failed: HTTP {(int)response.StatusCode} - {responseBody}");
+                    _logger.Warning($"Blob upload attempt {attempt} failed: {lastErrorCode} - {responseBody}");
                 }
                 catch (Exception ex)
                 {
+                    lastErrorCode = ex.Message;
                     _logger.Warning($"Blob upload attempt {attempt} failed: {ex.Message}");
                 }
 
@@ -245,7 +296,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             }
 
             _logger.Warning($"Diagnostics package upload failed after {maxRetries} attempts");
-            return false;
+            return (false, lastErrorCode);
         }
     }
 }

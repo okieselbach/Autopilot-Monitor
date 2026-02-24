@@ -44,7 +44,8 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
         "/api/platform-stats",
         "/api/sessions/register",
         "/api/events/ingest",
-        "/api/agent/config"
+        "/api/agent/config",
+        "/api/diagnostics/upload-url"
     };
 
     public AuthenticationMiddleware(

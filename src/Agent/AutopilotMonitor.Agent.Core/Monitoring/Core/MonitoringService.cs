@@ -766,17 +766,21 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             });
             await UploadEventsAsync();
 
-            // Perform the actual ZIP + upload (returns blob name on success, null on failure)
-            var blobName = await _diagnosticsService.CreateAndUploadAsync(enrollmentSucceeded);
-            var success = blobName != null;
+            // Perform the actual ZIP + upload
+            var uploadResult = await _diagnosticsService.CreateAndUploadAsync(enrollmentSucceeded);
+            var success = uploadResult?.Success == true;
 
             // Emit result event (includes blobName so backend can store it on the session)
             var resultData = new Dictionary<string, object>
             {
                 { "uploadMode", mode }
             };
-            if (blobName != null)
-                resultData["blobName"] = blobName;
+            if (uploadResult?.BlobName != null)
+                resultData["blobName"] = uploadResult.BlobName;
+            if (uploadResult?.SasUrlPrefix != null)
+                resultData["sasUrl"] = uploadResult.SasUrlPrefix;
+            if (uploadResult?.ErrorCode != null)
+                resultData["errorCode"] = uploadResult.ErrorCode;
 
             EmitEvent(new EnrollmentEvent
             {
@@ -788,8 +792,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 Source = "MonitoringService",
                 Phase = EnrollmentPhase.Complete,
                 Message = success
-                    ? $"Diagnostics package uploaded: {blobName}"
-                    : "Diagnostics package upload failed",
+                    ? $"Diagnostics package uploaded: {uploadResult.BlobName}"
+                    : $"Diagnostics package upload failed{(uploadResult?.ErrorCode != null ? $": {uploadResult.ErrorCode}" : "")}",
                 Data = resultData
             });
             await UploadEventsAsync();
