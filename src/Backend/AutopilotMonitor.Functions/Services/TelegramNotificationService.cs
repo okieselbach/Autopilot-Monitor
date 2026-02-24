@@ -53,7 +53,7 @@ namespace AutopilotMonitor.Functions.Services
 
                 var payload = new
                 {
-                    chat_id = "@AutopilotMonitor-PrivatePreview",
+                    chat_id = "-1003632442830", // Telegram channel ID (as string)
                     text = $"New Private Preview signup!\nTenantID: {tenantId}\nUPN: {upn}"
                 };
 
