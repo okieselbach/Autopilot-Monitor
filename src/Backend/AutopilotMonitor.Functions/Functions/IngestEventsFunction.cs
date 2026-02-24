@@ -315,6 +315,20 @@ namespace AutopilotMonitor.Functions.Functions
                 // Galactic Admins only receive "newSession" events from RegisterSessionFunction,
                 // not every event batch, to avoid flooding them with updates
                 // Note: newRuleResults intentionally omitted - list views don't use them
+                // Send only mutable fields as delta update (static fields like
+                // serialNumber, deviceName, manufacturer, model, startedAt,
+                // enrollmentType never change after registration)
+                object? sessionDelta = updatedSession != null ? new {
+                    updatedSession.CurrentPhase,
+                    updatedSession.CurrentPhaseDetail,
+                    updatedSession.Status,
+                    updatedSession.FailureReason,
+                    updatedSession.EventCount,
+                    updatedSession.DurationSeconds,
+                    updatedSession.CompletedAt,
+                    updatedSession.DiagnosticsBlobName
+                } : null;
+
                 var summaryMessage = new SignalRMessageAction("newevents")
                 {
                     GroupName = $"tenant-{request.TenantId}",
@@ -322,19 +336,7 @@ namespace AutopilotMonitor.Functions.Functions
                         sessionId = request.SessionId,
                         tenantId = request.TenantId,
                         eventCount = processedCount,
-                        // Send only mutable fields as delta update (static fields like
-                        // serialNumber, deviceName, manufacturer, model, startedAt,
-                        // enrollmentType never change after registration)
-                        sessionUpdate = new {
-                            updatedSession.CurrentPhase,
-                            updatedSession.CurrentPhaseDetail,
-                            updatedSession.Status,
-                            updatedSession.FailureReason,
-                            updatedSession.EventCount,
-                            updatedSession.DurationSeconds,
-                            updatedSession.CompletedAt,
-                            updatedSession.DiagnosticsBlobName
-                        }
+                        sessionUpdate = sessionDelta
                     } }
                 };
 
