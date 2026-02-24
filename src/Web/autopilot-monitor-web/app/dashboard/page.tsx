@@ -30,7 +30,7 @@ interface TenantConfigurationSummary {
 
 export default function Home() {
   const router = useRouter();
-  const { user, logout, getAccessToken } = useAuth();
+  const { user, logout, getAccessToken, isPreviewBlocked } = useAuth();
   const { addNotification } = useNotifications();
   const [apiStatus, setApiStatus] = useState<"unchecked" | "checking" | "healthy" | "error">("unchecked");
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -581,7 +581,7 @@ export default function Home() {
           {/* Sessions List */}
           {sessions.length > 0 && (
             <div className="mt-8 bg-white shadow rounded-lg p-6">
-              <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
                 <h2 className="text-xl font-semibold text-gray-900">
                   Sessions ({sessions.length})
                   {filteredSessions.length !== sessions.length && (
@@ -590,6 +590,21 @@ export default function Home() {
                     </span>
                   )}
                 </h2>
+                {isPreviewBlocked ? (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-200 shrink-0">
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    Preview approval pending
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-800 border border-green-200 shrink-0">
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                    </svg>
+                    Preview approved
+                  </span>
+                )}
               </div>
 
               {/* Search Input */}
