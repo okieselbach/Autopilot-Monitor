@@ -80,6 +80,9 @@ body {
 .dark .divide-gray-200 > :not([hidden]) ~ :not([hidden]) {
   border-color: #334155 !important;
 }
+.dark .divide-gray-100 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #1e293b !important;
+}
 
 /* -- Shadows (softer in dark mode) -- */
 .dark .shadow,
@@ -140,6 +143,9 @@ body {
 }
 .dark .bg-red-50 {
   background-color: #3b1c1c !important;
+}
+.dark .bg-rose-50 {
+  background-color: #3b1c26 !important;
 }
 .dark .bg-red-100 {
   background-color: #3b1c1c !important;
@@ -290,6 +296,18 @@ body {
 .dark .text-red-900 {
   color: #fecaca !important; /* red-200 */
 }
+.dark .text-purple-900 {
+  color: #e9d5ff !important; /* purple-200 */
+}
+.dark .text-sky-900 {
+  color: #bae6fd !important; /* sky-200 */
+}
+.dark .text-emerald-900 {
+  color: #a7f3d0 !important; /* emerald-200 */
+}
+.dark .text-rose-900 {
+  color: #fecdd3 !important; /* rose-200 */
+}
 .dark .text-orange-800 {
   color: #fdba74 !important; /* orange-300 */
 }
@@ -315,6 +333,9 @@ body {
 }
 .dark .border-red-200 {
   border-color: #4a2020 !important;
+}
+.dark .border-rose-200 {
+  border-color: #4a2028 !important;
 }
 .dark .border-red-300 {
   border-color: #5a2424 !important;

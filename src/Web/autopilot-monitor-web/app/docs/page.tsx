@@ -393,13 +393,13 @@ function SectionAgentSetup() {
   );
 }
 
-function SettingsGroup({ title, color, children }: { title: string; color: string; children: React.ReactNode }) {
+function SettingsGroup({ title, color, borderColor, children }: { title: string; color: string; borderColor: string; children: React.ReactNode }) {
   return (
-    <div className={`border rounded-lg overflow-hidden mb-6`}>
+    <div className={`border ${borderColor} rounded-lg overflow-hidden mb-6`}>
       <div className={`px-4 py-2.5 ${color}`}>
         <p className="font-semibold text-sm">{title}</p>
       </div>
-      <div className="divide-y divide-gray-100">
+      <div className="divide-y divide-gray-100 bg-white">
         {children}
       </div>
     </div>
@@ -408,10 +408,10 @@ function SettingsGroup({ title, color, children }: { title: string; color: strin
 
 function SettingsRow({ name, defaultVal, children }: { name: string; defaultVal?: string; children: React.ReactNode }) {
   return (
-    <div className="px-4 py-3 grid grid-cols-1 sm:grid-cols-3 gap-1 sm:gap-4 text-sm">
+    <div className="px-4 py-3 grid grid-cols-1 sm:grid-cols-3 gap-1 sm:gap-4 text-sm bg-white">
       <div className="sm:col-span-1">
         <p className="font-medium text-gray-900">{name}</p>
-        {defaultVal && <p className="text-xs text-gray-400 mt-0.5">Default: {defaultVal}</p>}
+        {defaultVal && <p className="text-xs text-gray-500 mt-0.5">Default: {defaultVal}</p>}
       </div>
       <div className="sm:col-span-2 text-gray-600 leading-relaxed">{children}</div>
     </div>
@@ -436,7 +436,7 @@ function SectionSettings() {
       </p>
 
       {/* Security */}
-      <SettingsGroup title="Security" color="bg-purple-50 text-purple-900 border-purple-200">
+      <SettingsGroup title="Security" color="bg-purple-50 text-purple-900" borderColor="border-purple-200">
         <SettingsRow name="Autopilot Device Validation" defaultVal="Disabled">
           Validates that only devices registered in your Intune tenant as Windows Autopilot devices can register sessions.
           When enabled, the backend checks each incoming agent request against the Intune Autopilot device list — unauthorized
@@ -448,7 +448,7 @@ function SectionSettings() {
       </SettingsGroup>
 
       {/* Hardware Whitelist */}
-      <SettingsGroup title="Hardware Whitelist" color="bg-sky-50 text-sky-900 border-sky-200">
+      <SettingsGroup title="Hardware Whitelist" color="bg-sky-50 text-sky-900" borderColor="border-sky-200">
         <SettingsRow name="Allowed Manufacturers" defaultVal="Dell*, HP*, Lenovo*, Microsoft Corporation">
           Comma-separated list of manufacturer names that are permitted to register sessions. Wildcards (<span className="font-mono text-xs bg-gray-100 px-1 py-0.5 rounded">*</span>) are
           supported — e.g. <span className="font-mono text-xs bg-gray-100 px-1 py-0.5 rounded">Dell*</span> matches any string starting with &quot;Dell&quot;.
@@ -462,7 +462,7 @@ function SectionSettings() {
       </SettingsGroup>
 
       {/* Agent Collectors */}
-      <SettingsGroup title="Agent Collectors" color="bg-emerald-50 text-emerald-900 border-emerald-200">
+      <SettingsGroup title="Agent Collectors" color="bg-emerald-50 text-emerald-900" borderColor="border-emerald-200">
         <SettingsRow name="Performance Collector" defaultVal="Enabled, 30 s interval">
           When enabled, the agent periodically collects CPU, memory, disk, and network metrics during enrollment and
           streams them to the portal. The interval (30–300 seconds) controls how often samples are taken. Disabling
@@ -472,7 +472,7 @@ function SectionSettings() {
       </SettingsGroup>
 
       {/* Agent Parameters */}
-      <SettingsGroup title="Agent Parameters" color="bg-violet-50 text-violet-900 border-violet-200">
+      <SettingsGroup title="Agent Parameters" color="bg-violet-50 text-violet-900" borderColor="border-violet-200">
         <SettingsRow name="Self-Destruct on Complete" defaultVal="Enabled">
           After enrollment finishes, the agent removes its scheduled task and all agent files from the device.
           This is the recommended mode — the agent is temporary by design and should not remain on enrolled devices.
@@ -506,7 +506,7 @@ function SectionSettings() {
       </SettingsGroup>
 
       {/* Teams Notifications */}
-      <SettingsGroup title="Teams Notifications" color="bg-indigo-50 text-indigo-900 border-indigo-200">
+      <SettingsGroup title="Teams Notifications" color="bg-indigo-50 text-indigo-900" borderColor="border-indigo-200">
         <SettingsRow name="Incoming Webhook URL">
           A Microsoft Teams Incoming Webhook URL. Once configured, the portal can send enrollment outcome notifications
           directly to a Teams channel. To create one: open the target channel in Teams → <em>Connectors</em> → search
@@ -522,7 +522,7 @@ function SectionSettings() {
       </SettingsGroup>
 
       {/* Diagnostics Package */}
-      <SettingsGroup title="Diagnostics Package" color="bg-amber-50 text-amber-900 border-amber-200">
+      <SettingsGroup title="Diagnostics Package" color="bg-amber-50 text-amber-900" borderColor="border-amber-200">
         <SettingsRow name="Blob Storage Container SAS URL">
           An Azure Blob Storage Container SAS URL where the agent uploads diagnostics packages. The SAS URL must grant
           at minimum <strong>Read</strong>, <strong>Write</strong>, and <strong>Create</strong> permissions at the
@@ -539,7 +539,7 @@ function SectionSettings() {
       </SettingsGroup>
 
       {/* Data Management */}
-      <SettingsGroup title="Data Management" color="bg-rose-50 text-rose-900 border-rose-200">
+      <SettingsGroup title="Data Management" color="bg-rose-50 text-rose-900" borderColor="border-rose-200">
         <SettingsRow name="Data Retention Period" defaultVal="90 days (range: 7–180)">
           Sessions and their associated events are automatically deleted after this many days. Deletion runs as part
           of a daily maintenance job. Reduce this value to limit storage usage; increase it if you need a longer
@@ -553,7 +553,7 @@ function SectionSettings() {
       </SettingsGroup>
 
       {/* Admin Users */}
-      <SettingsGroup title="Admin Users" color="bg-gray-100 text-gray-800 border-gray-200">
+      <SettingsGroup title="Admin Users" color="bg-gray-100 text-gray-800" borderColor="border-gray-200">
         <SettingsRow name="Tenant Admins">
           The list of users with full admin access to the portal. Admins can view all sessions, access diagnostics,
           manage settings, and add or remove other admins. The first user to sign in for a tenant is automatically
@@ -569,7 +569,7 @@ function SectionSettings() {
         <div className="px-4 py-2.5 bg-red-50 text-red-900">
           <p className="font-semibold text-sm">Danger Zone</p>
         </div>
-        <div className="px-4 py-3 text-sm text-gray-700">
+        <div className="px-4 py-3 text-sm text-gray-700 bg-white">
           <p className="font-medium text-gray-900 mb-1">Offboard Tenant</p>
           <p>
             Permanently and irreversibly deletes <strong>all tenant data</strong>: sessions, events, analyze rules,
