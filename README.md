@@ -13,7 +13,7 @@ Autopilot Monitor provides real-time tracking, intelligent diagnostics, and auto
 
 ## Architecture
 
-For detailed information about the system architecture, components, and data flow, see [Architecture Documentation](architecture.md).
+For detailed information about the system architecture, components, and data flow, see [Architecture Documentation](ARCHITECTURE.md).
 
 ## Documentation
 
