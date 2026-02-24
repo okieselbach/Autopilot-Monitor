@@ -569,7 +569,8 @@ namespace AutopilotMonitor.Functions.Services
         /// <summary>
         /// Detects when an app was initially reported as successfully installed but then
         /// transitioned back to an error state (IME-ERROR-REPORT), correlated by appId.
-        /// Uses the app_state_regression source which matches the exact same app across both events.
+        /// Uses the generic event_correlation source to match the exact same app across
+        /// app_install_completed and app_install_failed events.
         /// This is a silent failure that can leave apps broken post-enrollment.
         /// </summary>
         private static AnalyzeRule CreateAppPostSuccessFailureRule() => new AnalyzeRule
@@ -583,12 +584,15 @@ namespace AutopilotMonitor.Functions.Services
             BaseConfidence = 75,
             Conditions = new List<RuleCondition>
             {
-                // Single condition: finds apps where completed -> failed regression exists for the same appId,
-                // and the failed event has errorPatternId = IME-ERROR-REPORT
+                // Correlate app_install_completed (Event A) with app_install_failed (Event B)
+                // for the same appId, where Event B has errorPatternId = IME-ERROR-REPORT
                 new RuleCondition
                 {
                     Signal = "app_regression",
-                    Source = "app_state_regression",
+                    Source = "event_correlation",
+                    EventType = "app_install_completed",
+                    CorrelateEventType = "app_install_failed",
+                    JoinField = "appId",
                     DataField = "errorPatternId",
                     Operator = "equals",
                     Value = "IME-ERROR-REPORT",

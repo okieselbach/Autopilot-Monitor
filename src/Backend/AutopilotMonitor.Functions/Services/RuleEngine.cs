@@ -161,8 +161,8 @@ namespace AutopilotMonitor.Functions.Services
                 case "app_install_duration":
                     return EvaluateAppInstallDurationCondition(condition, events);
 
-                case "app_state_regression":
-                    return EvaluateAppStateRegressionCondition(condition, events);
+                case "event_correlation":
+                    return EvaluateEventCorrelationCondition(condition, events);
 
                 default:
                     return (false, "unknown source");
@@ -517,69 +517,149 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
-        /// Detects apps that regressed: first seen as app_install_completed, then as app_install_failed,
-        /// correlated by appId. Optionally filters the failed event by a DataField/Operator/Value condition.
-        /// Returns evidence with appId, appName, and both event details.
+        /// Generic event correlation: finds pairs of events (A before B) sharing
+        /// the same value in a join field, with optional filters on each event
+        /// and optional time window constraint.
+        ///
+        /// Condition fields used:
+        ///   EventType          = Event A type (required)
+        ///   CorrelateEventType = Event B type (required)
+        ///   JoinField          = field that must match in both events (required, e.g. "appId")
+        ///   TimeWindowSeconds  = max seconds between A and B (optional, 0/null = unlimited)
+        ///   DataField/Operator/Value       = optional filter on Event B
+        ///   EventAFilterField/Operator/Value = optional filter on Event A
         /// </summary>
-        private (bool matched, object evidence) EvaluateAppStateRegressionCondition(RuleCondition condition, List<EnrollmentEvent> events)
+        private (bool matched, object evidence) EvaluateEventCorrelationCondition(RuleCondition condition, List<EnrollmentEvent> events)
         {
-            var sortedEvents = events.OrderBy(e => e.Timestamp).ThenBy(e => e.Sequence).ToList();
-
-            var completedEvents = sortedEvents
-                .Where(e => string.Equals(e.EventType, "app_install_completed", StringComparison.OrdinalIgnoreCase))
-                .ToList();
-
-            var failedEvents = sortedEvents
-                .Where(e => string.Equals(e.EventType, "app_install_failed", StringComparison.OrdinalIgnoreCase))
-                .ToList();
-
-            if (!completedEvents.Any() || !failedEvents.Any())
-                return (false, "no completed/failed event pair found");
-
-            foreach (var failedEvent in failedEvents)
+            if (string.IsNullOrEmpty(condition.EventType) ||
+                string.IsNullOrEmpty(condition.CorrelateEventType) ||
+                string.IsNullOrEmpty(condition.JoinField))
             {
-                // Apply optional DataField filter on the failed event
-                if (!string.IsNullOrEmpty(condition.DataField) && !string.IsNullOrEmpty(condition.Operator))
-                {
-                    var fieldValue = GetDataFieldValue(failedEvent, condition.DataField);
-                    if (fieldValue == null || !MatchesOperator(fieldValue, condition.Operator, condition.Value ?? ""))
-                        continue;
-                }
-
-                var failedAppId = GetDataFieldValue(failedEvent, "appId");
-                var failedAppName = GetDataFieldValue(failedEvent, "appName");
-                var appKey = !string.IsNullOrWhiteSpace(failedAppId) ? failedAppId : failedAppName;
-
-                if (string.IsNullOrWhiteSpace(appKey))
-                    continue;
-
-                // Find a completed event for the same app that occurred before the failed event
-                var matchingCompleted = completedEvents.LastOrDefault(c =>
-                    c.Timestamp <= failedEvent.Timestamp &&
-                    string.Equals(
-                        GetDataFieldValue(c, "appId") ?? GetDataFieldValue(c, "appName"),
-                        appKey,
-                        StringComparison.OrdinalIgnoreCase));
-
-                if (matchingCompleted == null)
-                    continue;
-
-                return (true, new Dictionary<string, object>
-                {
-                    ["appId"] = failedAppId ?? string.Empty,
-                    ["appName"] = failedAppName ?? appKey,
-                    ["completedEventId"] = matchingCompleted.EventId ?? string.Empty,
-                    ["completedSequence"] = matchingCompleted.Sequence,
-                    ["completedTimestamp"] = matchingCompleted.Timestamp,
-                    ["failedEventId"] = failedEvent.EventId ?? string.Empty,
-                    ["failedSequence"] = failedEvent.Sequence,
-                    ["failedTimestamp"] = failedEvent.Timestamp,
-                    ["errorPatternId"] = GetDataFieldValue(failedEvent, "errorPatternId") ?? string.Empty,
-                    ["errorDetail"] = GetDataFieldValue(failedEvent, "errorDetail") ?? failedEvent.Message ?? string.Empty
-                });
+                _logger.LogWarning($"event_correlation condition '{condition.Signal}' missing required fields (EventType, CorrelateEventType, JoinField)");
+                return (false, "event_correlation requires EventType, CorrelateEventType, and JoinField");
             }
 
-            return (false, "no app found with completed-then-failed regression");
+            var sortedEvents = events.OrderBy(e => e.Timestamp).ThenBy(e => e.Sequence).ToList();
+
+            // Collect Event A candidates with optional filter
+            var eventAList = sortedEvents
+                .Where(e => MatchesEventType(e, condition.EventType))
+                .Where(e =>
+                {
+                    if (string.IsNullOrEmpty(condition.EventAFilterField))
+                        return true;
+                    var val = GetDataFieldValue(e, condition.EventAFilterField);
+                    return val != null && MatchesOperator(val, condition.EventAFilterOperator ?? "exists", condition.EventAFilterValue ?? "");
+                })
+                .ToList();
+
+            // Collect Event B candidates with optional DataField/Operator/Value filter
+            var eventBList = sortedEvents
+                .Where(e => MatchesEventType(e, condition.CorrelateEventType))
+                .Where(e =>
+                {
+                    if (string.IsNullOrEmpty(condition.DataField))
+                        return true;
+                    var val = GetDataFieldValue(e, condition.DataField);
+                    return val != null && MatchesOperator(val, condition.Operator ?? "exists", condition.Value ?? "");
+                })
+                .ToList();
+
+            if (!eventAList.Any() || !eventBList.Any())
+                return (false, "no matching event pairs found");
+
+            // Index Event A by join field value for O(1) lookup
+            var eventAByJoinKey = eventAList
+                .Select(e => new { Event = e, Key = GetDataFieldValue(e, condition.JoinField) })
+                .Where(x => !string.IsNullOrEmpty(x.Key))
+                .GroupBy(x => x.Key!, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.Select(x => x.Event).ToList(), StringComparer.OrdinalIgnoreCase);
+
+            // For each Event B, find a matching Event A (same join key, A before B, within time window)
+            var matchedPairs = new List<Dictionary<string, object>>();
+            var matchedJoinKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var eventB in eventBList)
+            {
+                var bKey = GetDataFieldValue(eventB, condition.JoinField);
+                if (string.IsNullOrEmpty(bKey) || !eventAByJoinKey.ContainsKey(bKey))
+                    continue;
+
+                // Find the latest Event A that occurred before Event B
+                var matchingA = eventAByJoinKey[bKey]
+                    .Where(a => a.Timestamp < eventB.Timestamp ||
+                                (a.Timestamp == eventB.Timestamp && a.Sequence < eventB.Sequence))
+                    .Where(a =>
+                    {
+                        if (condition.TimeWindowSeconds == null || condition.TimeWindowSeconds <= 0)
+                            return true;
+                        return (eventB.Timestamp - a.Timestamp).TotalSeconds <= condition.TimeWindowSeconds.Value;
+                    })
+                    .OrderByDescending(a => a.Timestamp)
+                    .ThenByDescending(a => a.Sequence)
+                    .FirstOrDefault();
+
+                if (matchingA == null)
+                    continue;
+
+                // One match per join key to avoid duplicates
+                if (matchedJoinKeys.Contains(bKey))
+                    continue;
+                matchedJoinKeys.Add(bKey);
+
+                // Build evidence for this correlated pair
+                var pair = new Dictionary<string, object>
+                {
+                    ["joinField"] = condition.JoinField,
+                    ["joinValue"] = bKey,
+                    ["eventA_eventId"] = matchingA.EventId ?? string.Empty,
+                    ["eventA_eventType"] = matchingA.EventType ?? string.Empty,
+                    ["eventA_timestamp"] = matchingA.Timestamp,
+                    ["eventA_sequence"] = matchingA.Sequence,
+                    ["eventA_message"] = matchingA.Message ?? string.Empty,
+                    ["eventB_eventId"] = eventB.EventId ?? string.Empty,
+                    ["eventB_eventType"] = eventB.EventType ?? string.Empty,
+                    ["eventB_timestamp"] = eventB.Timestamp,
+                    ["eventB_sequence"] = eventB.Sequence,
+                    ["eventB_message"] = eventB.Message ?? string.Empty,
+                    ["timeDeltaSeconds"] = (eventB.Timestamp - matchingA.Timestamp).TotalSeconds
+                };
+
+                // Add well-known data fields from both events
+                AddDataFieldsToEvidence(pair, matchingA, "eventA_", condition.JoinField);
+                AddDataFieldsToEvidence(pair, eventB, "eventB_", condition.JoinField);
+
+                matchedPairs.Add(pair);
+            }
+
+            if (!matchedPairs.Any())
+                return (false, "no correlated event pairs found");
+
+            // Single match: flat dictionary; multiple: first as primary + allMatches list
+            var primary = matchedPairs[0];
+            primary["totalMatches"] = matchedPairs.Count;
+            if (matchedPairs.Count > 1)
+            {
+                primary["allMatches"] = matchedPairs;
+            }
+            return (true, primary);
+        }
+
+        /// <summary>
+        /// Adds well-known data fields from an event to the evidence dictionary with a prefix.
+        /// </summary>
+        private void AddDataFieldsToEvidence(Dictionary<string, object> evidence, EnrollmentEvent evt, string prefix, string joinField)
+        {
+            if (evt.Data == null) return;
+
+            var knownFields = new[] { "appId", "appName", "errorPatternId", "errorDetail", "errorCode", "status" };
+
+            foreach (var field in knownFields)
+            {
+                var val = GetDataFieldValue(evt, field);
+                if (val != null)
+                    evidence[$"{prefix}{field}"] = val;
+            }
         }
     }
 }

@@ -134,28 +134,34 @@ namespace AutopilotMonitor.Shared.Models
         public string Signal { get; set; }
 
         /// <summary>
-        /// Source of the signal: "event_type", "event_data", "phase_duration", "event_count", "app_install_duration", "app_state_regression"
+        /// Source of the signal: "event_type", "event_data", "phase_duration", "event_count", "app_install_duration", "event_correlation"
         /// </summary>
         public string Source { get; set; }
 
         /// <summary>
-        /// Event type to match on (when Source = "event_type" or "event_data")
+        /// Event type to match on.
+        /// For "event_type"/"event_data": the event type to match.
+        /// For "event_correlation": the FIRST event type (Event A).
         /// </summary>
         public string EventType { get; set; }
 
         /// <summary>
-        /// Data field to match on (when Source = "event_data")
-        /// Uses dot notation for nested fields (e.g., "data.errorCode")
+        /// Data field to match on.
+        /// For "event_data": field to check with Operator/Value.
+        /// For "event_correlation": optional filter field on Event B (the second event).
+        /// Uses dot notation for nested fields (e.g., "data.errorCode").
         /// </summary>
         public string DataField { get; set; }
 
         /// <summary>
         /// Comparison operator: "equals", "contains", "regex", "gt", "lt", "gte", "lte", "exists", "count_gte"
+        /// For "event_correlation": operator for the Event B filter (applied to DataField).
         /// </summary>
         public string Operator { get; set; }
 
         /// <summary>
-        /// Value to compare against
+        /// Value to compare against.
+        /// For "event_correlation": value for the Event B filter.
         /// </summary>
         public string Value { get; set; }
 
@@ -164,6 +170,42 @@ namespace AutopilotMonitor.Shared.Models
         /// If false, it only contributes to confidence scoring
         /// </summary>
         public bool Required { get; set; } = false;
+
+        // ===== Event Correlation Properties =====
+        // Used only when Source = "event_correlation"
+
+        /// <summary>
+        /// The second event type to correlate with (Event B).
+        /// Example: "app_install_failed"
+        /// </summary>
+        public string CorrelateEventType { get; set; }
+
+        /// <summary>
+        /// The data field to join on — must have the same value in both Event A and Event B.
+        /// Example: "appId" means both events must share the same appId value.
+        /// </summary>
+        public string JoinField { get; set; }
+
+        /// <summary>
+        /// Maximum time in seconds between Event A and Event B. Null or 0 means no time limit.
+        /// </summary>
+        public int? TimeWindowSeconds { get; set; }
+
+        /// <summary>
+        /// Optional filter field on Event A (the first event).
+        /// Combined with EventAFilterOperator and EventAFilterValue.
+        /// </summary>
+        public string EventAFilterField { get; set; }
+
+        /// <summary>
+        /// Operator for the Event A filter. Uses same operators as the main Operator field.
+        /// </summary>
+        public string EventAFilterOperator { get; set; }
+
+        /// <summary>
+        /// Value for the Event A filter.
+        /// </summary>
+        public string EventAFilterValue { get; set; }
     }
 
     /// <summary>
