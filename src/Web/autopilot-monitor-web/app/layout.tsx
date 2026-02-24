@@ -13,12 +13,12 @@ const inter = Inter({ subsets: ["latin"] });
 export const metadata: Metadata = {
   metadataBase: new URL("https://autopilotmonitor.com"),
   title: {
-    absolute: "Autopilot Monitor – Real-Time Windows Autopilot Monitoring",
+    absolute: "Autopilot Monitor – Real-Time Windows Enrollment Monitoring",
     default: "Autopilot Monitor",
     template: "%s | Autopilot Monitor",
   },
   description:
-    "Real-time monitoring and troubleshooting for Windows Autopilot deployments. Track every enrollment phase, detect issues automatically with Analyze Rules, and resolve failures faster.",
+    "Real-time monitoring and troubleshooting for Windows deployments. Track every enrollment phase, detect issues automatically with Analyze Rules, and resolve failures faster.",
   keywords: [
     "Windows Autopilot monitoring",
     "Autopilot deployment visibility",
@@ -42,13 +42,13 @@ export const metadata: Metadata = {
     locale: "en_US",
     url: "https://autopilotmonitor.com",
     siteName: "Autopilot Monitor",
-    title: "Autopilot Monitor – Real-Time Windows Autopilot Monitoring",
+    title: "Autopilot Monitor – Real-Time Windows Enrollment Monitoring",
     description:
       "Real-time monitoring and troubleshooting for Windows Autopilot deployments. Track every enrollment phase, detect issues automatically, and resolve failures faster.",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Autopilot Monitor – Real-Time Windows Autopilot Monitoring",
+    title: "Autopilot Monitor – Real-Time Windows Enrollment Monitoring",
     description:
       "Real-time monitoring and troubleshooting for Windows Autopilot deployments. Track every enrollment phase, detect issues automatically, and resolve failures faster.",
   },
@@ -75,7 +75,7 @@ const jsonLd = {
   "@type": "SoftwareApplication",
   name: "Autopilot Monitor",
   description:
-    "Real-time monitoring and troubleshooting platform for Windows Autopilot deployments. Gives IT teams full visibility into enrollment phases, app progress, errors, and timelines.",
+    "Real-time monitoring and troubleshooting platform for Windows deployments. Gives IT teams full visibility into enrollment phases, app progress, errors, and timelines.",
   applicationCategory: "BusinessApplication",
   operatingSystem: "Web",
   offers: {
