@@ -25,8 +25,9 @@ namespace AutopilotMonitor.Functions.Services
         /// <summary>
         /// Evaluates ALL active analyze rules against the full session event stream.
         /// Called once at enrollment end or on-demand. Fetches events internally.
+        /// When reanalyze=true, all rules are re-evaluated regardless of existing results.
         /// </summary>
-        public async Task<List<RuleResult>> AnalyzeSessionAsync(string tenantId, string sessionId)
+        public async Task<List<RuleResult>> AnalyzeSessionAsync(string tenantId, string sessionId, bool reanalyze = false)
         {
             var results = new List<RuleResult>();
 
@@ -41,9 +42,18 @@ namespace AutopilotMonitor.Functions.Services
                     return results;
                 }
 
-                // Get existing rule results to avoid duplicates
-                var existingResults = await _storageService.GetRuleResultsAsync(tenantId, sessionId);
-                var existingRuleIds = new HashSet<string>(existingResults.Select(r => r.RuleId));
+                // On reanalyze: skip deduplication so all rules are re-evaluated from scratch
+                // On normal run: skip rules already evaluated to avoid duplicate storage
+                HashSet<string> existingRuleIds;
+                if (reanalyze)
+                {
+                    existingRuleIds = new HashSet<string>();
+                }
+                else
+                {
+                    var existingResults = await _storageService.GetRuleResultsAsync(tenantId, sessionId);
+                    existingRuleIds = new HashSet<string>(existingResults.Select(r => r.RuleId));
+                }
 
                 _logger.LogInformation($"Analyzing session {sessionId}: {allEvents.Count} events, {activeRules.Count} rules ({existingRuleIds.Count} already evaluated)");
 
