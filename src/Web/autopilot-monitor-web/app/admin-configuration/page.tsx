@@ -833,10 +833,10 @@ export default function AdminConfigurationPage() {
               <div className="p-6">
                 <div className="flex items-start space-x-4">
                   <div className="flex-1">
-                    <p className="text-sm text-gray-600 mb-4">
+                    <p className="text-sm text-purple-900 mb-4">
                       Manually trigger the daily maintenance job which includes:
                     </p>
-                    <ul className="text-sm text-gray-600 space-y-1 mb-4 ml-4">
+                    <ul className="text-sm text-purple-900 space-y-1 mb-4 ml-4">
                       <li className="flex items-start">
                         <span className="text-purple-500 mr-2">•</span>
                         <span>Mark stalled sessions as timed out</span>
@@ -866,12 +866,12 @@ export default function AdminConfigurationPage() {
                         Select a specific date to manually aggregate metrics for that day, e.g. to backfill data older than 7 days.
                       </p>
                     </div>
-                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
+                    <div className="bg-white border border-purple-300 rounded-lg p-3 mb-4">
                       <div className="flex items-start space-x-2">
-                        <svg className="w-5 h-5 text-yellow-600 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg className="w-5 h-5 text-purple-600 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                         </svg>
-                        <p className="text-sm text-yellow-800">
+                        <p className="text-sm text-gray-800">
                           <strong>Warning:</strong> This operation runs across all tenants and may take several minutes to complete.
                           Use this only for testing or when immediate cleanup is needed.
                         </p>
@@ -920,10 +920,10 @@ export default function AdminConfigurationPage() {
               <div className="p-6">
                 <div className="flex items-start space-x-4">
                   <div className="flex-1">
-                    <p className="text-sm text-gray-600 mb-4">
+                    <p className="text-sm text-amber-900 mb-4">
                       This operation performs a full re-import of all built-in analyze rules:
                     </p>
-                    <ul className="text-sm text-gray-600 space-y-1 mb-4 ml-4">
+                    <ul className="text-sm text-amber-900 space-y-1 mb-4 ml-4">
                       <li className="flex items-start">
                         <span className="text-amber-500 mr-2">•</span>
                         <span>Deletes all existing global built-in rules from the table</span>
@@ -937,12 +937,12 @@ export default function AdminConfigurationPage() {
                         <span>Tenant-specific custom rules and overrides are not affected</span>
                       </li>
                     </ul>
-                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
+                    <div className="bg-white border border-orange-300 rounded-lg p-3 mb-4">
                       <div className="flex items-start space-x-2">
-                        <svg className="w-5 h-5 text-yellow-600 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg className="w-5 h-5 text-orange-600 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                         </svg>
-                        <p className="text-sm text-yellow-800">
+                        <p className="text-sm text-gray-800">
                           <strong>Use after deployments</strong> that add, remove, or modify built-in analyze rules to ensure Azure Table Storage reflects the latest code definitions.
                         </p>
                       </div>
@@ -990,17 +990,17 @@ export default function AdminConfigurationPage() {
                 {loadingConfig ? (
                   <div className="text-center py-8">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600 mx-auto"></div>
-                    <p className="mt-3 text-gray-600 text-sm">Loading configuration...</p>
+                    <p className="mt-3 text-indigo-800 text-sm">Loading configuration...</p>
                   </div>
                 ) : (
                   <div className="space-y-4">
                     <div>
                       <label className="block">
-                        <span className="text-gray-700 font-medium">Global Rate Limit (Requests per Minute per Device)</span>
-                        <p className="text-sm text-gray-600 mb-2">
+                        <span className="text-indigo-900 font-medium">Global Rate Limit (Requests per Minute per Device)</span>
+                        <p className="text-sm text-indigo-800 mb-2">
                           Configure default DoS protection limits for all tenants. Normal enrollment generates ~10-30 requests/min.
                           <br />
-                          <strong className="text-indigo-700">Note:</strong> Tenants cannot change this value. Only Galactic Admins can override per tenant in tenant management section.
+                          <strong className="text-indigo-900">Note:</strong> Tenants cannot change this value. Only Galactic Admins can override per tenant in tenant management section.
                         </p>
                         <input
                           type="number"
@@ -1008,19 +1008,19 @@ export default function AdminConfigurationPage() {
                           max="1000"
                           value={globalRateLimit}
                           onChange={(e) => setGlobalRateLimit(parseInt(e.target.value) || 100)}
-                          className="mt-1 block w-full px-4 py-2 border border-gray-300 rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+                          className="mt-1 block w-full px-4 py-2 border border-indigo-300 rounded-lg bg-white text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
                         />
                       </label>
                     </div>
 
                     <div>
                       <label className="block">
-                        <span className="text-gray-700 font-medium">Platform Stats Blob Container SAS URL</span>
-                        <p className="text-sm text-gray-600 mb-2">
+                        <span className="text-indigo-900 font-medium">Platform Stats Blob Container SAS URL</span>
+                        <p className="text-sm text-indigo-800 mb-2">
                           Maintenance publishes two files into this container:
-                          <code className="ml-1 mr-1 text-xs">platform-stats.json</code>
+                          <code className="ml-1 mr-1 text-xs bg-indigo-100 px-1 rounded">platform-stats.json</code>
                           and
-                          <code className="ml-1 text-xs">platform-stats.YYYY-MM-DD.json</code>.
+                          <code className="ml-1 text-xs bg-indigo-100 px-1 rounded">platform-stats.YYYY-MM-DD.json</code>.
                           The upload is best-effort and does not fail the maintenance run.
                         </p>
                         <input
@@ -1028,7 +1028,7 @@ export default function AdminConfigurationPage() {
                           value={platformStatsBlobSasUrl}
                           onChange={(e) => setPlatformStatsBlobSasUrl(e.target.value)}
                           placeholder="https://storageaccount.blob.core.windows.net/publicstats?sv=...&sig=..."
-                          className="mt-1 block w-full px-4 py-2 border border-gray-300 rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors font-mono text-sm"
+                          className="mt-1 block w-full px-4 py-2 border border-indigo-300 rounded-lg bg-white text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors font-mono text-sm"
                         />
                       </label>
                     </div>
@@ -1052,7 +1052,7 @@ export default function AdminConfigurationPage() {
                       <button
                         onClick={handleResetAdminConfig}
                         disabled={savingConfig}
-                        className="px-5 py-2 border border-gray-300 rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        className="px-5 py-2 border border-indigo-300 rounded-md text-indigo-800 bg-white hover:bg-indigo-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                       >
                         Reset
                       </button>
