@@ -178,7 +178,7 @@ export default function LandingPage() {
 
     const loadPlatformStats = async () => {
       try {
-        const manifestResponse = await fetch(PLATFORM_STATS_MANIFEST_URL, { cache: "force-cache" });
+        const manifestResponse = await fetch(PLATFORM_STATS_MANIFEST_URL, { cache: "no-store" });
         if (!manifestResponse.ok) {
           return;
         }
