@@ -261,7 +261,18 @@ export default function Navbar() {
                                 <div className="flex-1 min-w-0">
                                   <p className="text-sm font-medium text-gray-900">{notification.title}</p>
                                   <p className="text-xs text-gray-600 mt-0.5">{notification.message}</p>
-                                  <p className="text-[10px] text-gray-400 mt-1">{formatTime(notification.timestamp)}</p>
+                                  <div className="flex items-center gap-3 mt-1">
+                                    <p className="text-[10px] text-gray-400">{formatTime(notification.timestamp)}</p>
+                                    {notification.href && (
+                                      <Link
+                                        href={notification.href}
+                                        onClick={(e) => { e.stopPropagation(); markAsRead(notification.id); }}
+                                        className="text-[10px] text-blue-600 hover:text-blue-800 font-medium underline"
+                                      >
+                                        View
+                                      </Link>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
                               <button onClick={(e) => { e.stopPropagation(); removeNotification(notification.id); }} className="ml-2 text-gray-300 hover:text-gray-500">

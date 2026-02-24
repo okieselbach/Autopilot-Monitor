@@ -12,12 +12,13 @@ export interface Notification {
   timestamp: Date;
   read: boolean;
   key?: string; // Optional unique key for deduplication
+  href?: string; // Optional navigation link shown as "View" action
 }
 
 interface NotificationContextType {
   notifications: Notification[];
   unreadCount: number;
-  addNotification: (type: NotificationType, title: string, message: string, key?: string) => void;
+  addNotification: (type: NotificationType, title: string, message: string, key?: string, href?: string) => void;
   markAsRead: (id: string) => void;
   markAllAsRead: () => void;
   removeNotification: (id: string) => void;
@@ -29,7 +30,7 @@ const NotificationContext = createContext<NotificationContextType | undefined>(u
 export function NotificationProvider({ children }: { children: React.ReactNode }) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
 
-  const addNotification = useCallback((type: NotificationType, title: string, message: string, key?: string) => {
+  const addNotification = useCallback((type: NotificationType, title: string, message: string, key?: string, href?: string) => {
     // Check if a notification with this key already exists
     if (key) {
       setNotifications(prev => {
@@ -41,6 +42,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
           const updated = {
             ...existing,
             message,
+            href,
             timestamp: new Date(),
             read: false, // Mark as unread to get user's attention again
           };
@@ -59,6 +61,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
             timestamp: new Date(),
             read: false,
             key,
+            href,
           };
 
           // Auto-remove success/info notifications after 10 seconds
@@ -80,6 +83,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         message,
         timestamp: new Date(),
         read: false,
+        href,
       };
 
       setNotifications(prev => [notification, ...prev]);
