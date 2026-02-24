@@ -23,6 +23,8 @@ namespace AutopilotMonitor.Agent.Core.Security
             try
             {
                 // Get Manufacturer and Model from Win32_ComputerSystem
+                // Lenovo reports the marketing model name in Win32_ComputerSystemProduct.Version
+                // instead of Win32_ComputerSystem.Model (which contains a generic platform string)
                 using (var searcher = new ManagementObjectSearcher("SELECT Manufacturer, Model FROM Win32_ComputerSystem"))
                 using (var collection = searcher.Get())
                 {
@@ -31,7 +33,25 @@ namespace AutopilotMonitor.Agent.Core.Security
                         using (obj)
                         {
                             manufacturer = obj["Manufacturer"]?.ToString() ?? "Unknown";
-                            model = obj["Model"]?.ToString() ?? "Unknown";
+                            if (manufacturer.IndexOf("lenovo", StringComparison.OrdinalIgnoreCase) >= 0)
+                            {
+                                using (var lenovoSearcher = new ManagementObjectSearcher("SELECT Version FROM Win32_ComputerSystemProduct"))
+                                using (var lenovoCollection = lenovoSearcher.Get())
+                                {
+                                    foreach (var lenovoObj in lenovoCollection)
+                                    {
+                                        using (lenovoObj)
+                                        {
+                                            model = lenovoObj["Version"]?.ToString() ?? "Unknown";
+                                        }
+                                        break;
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                model = obj["Model"]?.ToString() ?? "Unknown";
+                            }
                         }
                     }
                 }
