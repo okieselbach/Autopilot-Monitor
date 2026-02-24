@@ -77,16 +77,32 @@ export default function PreviewPage() {
           <div className="text-left bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6">
             <p className="text-sm font-semibold text-amber-900 mb-1">Next steps</p>
             <p className="text-sm text-amber-800">
-              Please sign out and open a GitHub issue to request access to the Private Preview.
+              Please sign out and contact me on LinkedIn or open a GitHub issue to request access to the Private Preview.
             </p>
-            <a
-              href="https://github.com/okieselbach/Autopilot-Monitor/issues"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-block mt-2 text-sm font-medium text-blue-700 hover:text-blue-800 underline"
-            >
-              Open GitHub Issues
-            </a>
+            <div className="flex flex-wrap gap-2 mt-3">
+              <a
+                href="https://www.linkedin.com/in/oliver-kieselbach/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-blue-700 bg-blue-100 rounded-md hover:bg-blue-200 transition-colors"
+              >
+                LinkedIn
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                </svg>
+              </a>
+              <a
+                href="https://github.com/okieselbach/Autopilot-Monitor/issues"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-blue-700 bg-blue-100 rounded-md hover:bg-blue-200 transition-colors"
+              >
+                GitHub Issues
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                </svg>
+              </a>
+            </div>
           </div>
 
           <button
