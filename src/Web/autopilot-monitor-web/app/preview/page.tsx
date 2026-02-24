@@ -79,6 +79,9 @@ export default function PreviewPage() {
             <p className="text-sm text-amber-800">
               Please sign out and contact me on LinkedIn or open a GitHub issue to request access to the Private Preview.
             </p>
+            <p className="text-sm text-amber-800 mt-2">
+              In the meantime, you can already review the setup and configuration in the <a href="/docs" className="underline hover:no-underline">documentation</a>.
+            </p>
             <div className="flex flex-wrap gap-2 mt-3">
               <a
                 href="https://www.linkedin.com/in/oliver-kieselbach/"
