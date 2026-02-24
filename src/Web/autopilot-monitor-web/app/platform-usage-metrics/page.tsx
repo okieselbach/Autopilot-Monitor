@@ -53,6 +53,7 @@ interface PlatformStats {
   totalEnrollments: number;
   totalUsers: number;
   totalTenants: number;
+  totalSignedUpTenants: number;
   uniqueDeviceModels: number;
   totalEventsProcessed: number;
   successfulEnrollments: number;
@@ -367,36 +368,53 @@ export default function PlatformUsageMetricsPage() {
         {metrics.platformStats && (
           <div className="mb-6">
             <h2 className="text-xl font-semibold text-gray-900 mb-4">Platform Statistics (Since Release)</h2>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            {/* Tenants & Users */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+              <div className="bg-white rounded-lg shadow p-6">
+                <div className="text-sm text-gray-500 mb-1">Signed Up Tenants</div>
+                <div className="text-3xl font-bold text-cyan-600">{(metrics.platformStats.totalSignedUpTenants ?? 0).toLocaleString()}</div>
+                <div className="text-xs text-gray-400 mt-1">all registered tenants</div>
+              </div>
+              <div className="bg-white rounded-lg shadow p-6">
+                <div className="text-sm text-gray-500 mb-1">Active Tenants</div>
+                <div className="text-3xl font-bold text-teal-600">{metrics.platformStats.totalTenants.toLocaleString()}</div>
+                <div className="text-xs text-gray-400 mt-1">with at least one session</div>
+              </div>
+              <div className="bg-white rounded-lg shadow p-6">
+                <div className="text-sm text-gray-500 mb-1">Users Seen</div>
+                <div className="text-3xl font-bold text-indigo-600">{metrics.platformStats.totalUsers.toLocaleString()}</div>
+                <div className="text-xs text-gray-400 mt-1">cumulative unique users</div>
+              </div>
+            </div>
+            {/* Enrollments */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
               <div className="bg-white rounded-lg shadow p-6">
                 <div className="text-sm text-gray-500 mb-1">Total Enrollments</div>
                 <div className="text-3xl font-bold text-blue-600">{metrics.platformStats.totalEnrollments.toLocaleString()}</div>
+                <div className="text-xs text-gray-400 mt-1">all enrollment sessions</div>
               </div>
               <div className="bg-white rounded-lg shadow p-6">
                 <div className="text-sm text-gray-500 mb-1">Successful Enrollments</div>
                 <div className="text-3xl font-bold text-green-600">{metrics.platformStats.successfulEnrollments.toLocaleString()}</div>
+                <div className="text-xs text-gray-400 mt-1">completed successfully</div>
               </div>
               <div className="bg-white rounded-lg shadow p-6">
                 <div className="text-sm text-gray-500 mb-1">Issues Detected</div>
                 <div className="text-3xl font-bold text-red-600">{metrics.platformStats.issuesDetected.toLocaleString()}</div>
+                <div className="text-xs text-gray-400 mt-1">by analyze rules</div>
               </div>
+            </div>
+            {/* Events & Models */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="bg-white rounded-lg shadow p-6">
                 <div className="text-sm text-gray-500 mb-1">Total Events Processed</div>
                 <div className="text-3xl font-bold text-purple-600">{metrics.platformStats.totalEventsProcessed.toLocaleString()}</div>
-              </div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
-              <div className="bg-white rounded-lg shadow p-6">
-                <div className="text-sm text-gray-500 mb-1">Total Users</div>
-                <div className="text-3xl font-bold text-indigo-600">{metrics.platformStats.totalUsers.toLocaleString()}</div>
-              </div>
-              <div className="bg-white rounded-lg shadow p-6">
-                <div className="text-sm text-gray-500 mb-1">Total Tenants</div>
-                <div className="text-3xl font-bold text-cyan-600">{metrics.platformStats.totalTenants.toLocaleString()}</div>
+                <div className="text-xs text-gray-400 mt-1">all ingested events</div>
               </div>
               <div className="bg-white rounded-lg shadow p-6">
                 <div className="text-sm text-gray-500 mb-1">Unique Device Models</div>
                 <div className="text-3xl font-bold text-amber-600">{metrics.platformStats.uniqueDeviceModels.toLocaleString()}</div>
+                <div className="text-xs text-gray-400 mt-1">distinct manufacturer + model combinations</div>
               </div>
             </div>
           </div>

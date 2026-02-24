@@ -15,8 +15,11 @@ namespace AutopilotMonitor.Shared.Models
         /// <summary>Total unique users who logged in</summary>
         public long TotalUsers { get; set; }
 
-        /// <summary>Total unique tenants using the platform</summary>
+        /// <summary>Total unique tenants using the platform (have at least one session)</summary>
         public long TotalTenants { get; set; }
+
+        /// <summary>Total tenants signed up (have a tenant configuration entry)</summary>
+        public long TotalSignedUpTenants { get; set; }
 
         /// <summary>Total unique device models seen (manufacturer + model)</summary>
         public long UniqueDeviceModels { get; set; }

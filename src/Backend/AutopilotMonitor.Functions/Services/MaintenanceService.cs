@@ -450,6 +450,7 @@ namespace AutopilotMonitor.Functions.Services
             try
             {
                 var tenantIds = await _storageService.GetAllTenantIdsAsync();
+                var allConfigs = await _tenantConfigService.GetAllConfigurationsAsync();
                 long totalEnrollments = 0;
                 long successfulEnrollments = 0;
                 long totalEvents = 0;
@@ -481,6 +482,7 @@ namespace AutopilotMonitor.Functions.Services
                     TotalEnrollments = totalEnrollments,
                     TotalUsers = totalUsers,
                     TotalTenants = tenantIds.Count,
+                    TotalSignedUpTenants = allConfigs.Count,
                     UniqueDeviceModels = uniqueModels.Count,
                     TotalEventsProcessed = totalEvents,
                     SuccessfulEnrollments = successfulEnrollments,

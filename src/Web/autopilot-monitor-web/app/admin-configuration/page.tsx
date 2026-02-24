@@ -63,7 +63,7 @@ export default function AdminConfigurationPage() {
   const [tenants, setTenants] = useState<TenantConfiguration[]>([]);
   const [loadingTenants, setLoadingTenants] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [showOnlyReady, setShowOnlyReady] = useState(false);
+  const [showOnlyWaitlist, setShowOnlyWaitlist] = useState(false);
   const [tenantSectionExpanded, setTenantSectionExpanded] = useState(false);
   const [editingTenant, setEditingTenant] = useState<TenantConfiguration | null>(null);
   const [savingTenant, setSavingTenant] = useState(false);
@@ -608,12 +608,13 @@ export default function AdminConfigurationPage() {
     const matchesSearch =
       t.tenantId.toLowerCase().includes(searchQuery.toLowerCase()) ||
       t.domainName.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesReady = !showOnlyReady || t.validateAutopilotDevice;
-    return matchesSearch && matchesReady;
+    const matchesWaitlist = !showOnlyWaitlist || !previewApproved.has(t.tenantId);
+    return matchesSearch && matchesWaitlist;
   });
 
-  // Ready statistics (always over all tenants, not filtered)
+  // Statistics (always over all tenants, not filtered)
   const readyCount = tenants.filter(t => t.validateAutopilotDevice).length;
+  const waitlistCount = tenants.filter(t => !previewApproved.has(t.tenantId)).length;
   const totalCount = tenants.length;
 
   // Pagination
@@ -625,7 +626,7 @@ export default function AdminConfigurationPage() {
   // Reset to first page when search changes
   useEffect(() => {
     setCurrentPage(0);
-  }, [searchQuery, showOnlyReady]);
+  }, [searchQuery, showOnlyWaitlist]);
 
   // Admin Pagination with Search
   const filteredAdmins = tenantAdmins.filter(admin =>
@@ -733,19 +734,19 @@ export default function AdminConfigurationPage() {
                         />
                       </div>
                       <button
-                        onClick={() => { setShowOnlyReady(v => !v); setCurrentPage(0); }}
+                        onClick={() => { setShowOnlyWaitlist(v => !v); setCurrentPage(0); }}
                         className={`flex items-center space-x-1 px-3 py-2 text-sm rounded-lg border transition-colors whitespace-nowrap ${
-                          showOnlyReady
-                            ? 'bg-blue-600 text-white border-blue-600'
+                          showOnlyWaitlist
+                            ? 'bg-amber-500 text-white border-amber-500'
                             : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
                         }`}
                       >
-                        {showOnlyReady && (
+                        {showOnlyWaitlist && (
                           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
                           </svg>
                         )}
-                        <span>Ready</span>
+                        <span>Waitlist</span>
                       </button>
                       <span className="text-sm text-gray-600 whitespace-nowrap">{filteredTenants.length} tenant(s)</span>
                     </div>
@@ -754,7 +755,7 @@ export default function AdminConfigurationPage() {
                     <div className="space-y-3">
                       {paginatedTenants.length === 0 ? (
                         <div className="text-center py-8 text-gray-500">
-                          {searchQuery ? "No tenants found matching your search" : "No tenants registered yet"}
+                          {showOnlyWaitlist ? "No waitlist tenants found" : searchQuery ? "No tenants found matching your search" : "No tenants registered yet"}
                         </div>
                       ) : (
                         <>
@@ -853,14 +854,20 @@ export default function AdminConfigurationPage() {
                       )}
                     </div>
 
-                    {/* Ready Statistics */}
+                    {/* Statistics */}
                     {totalCount > 0 && (
-                      <div className="pt-3 border-t border-green-200 flex items-center justify-between text-sm text-gray-600">
+                      <div className="pt-3 border-t border-green-200 flex items-center justify-between gap-4 text-sm text-gray-600 flex-wrap">
                         <span>
                           <span className="font-semibold text-blue-700">{readyCount}</span>
                           {' '}von{' '}
                           <span className="font-semibold">{totalCount}</span>
                           {' '}Tenant(s) sind Ready
+                        </span>
+                        <span>
+                          <span className="font-semibold text-amber-600">{waitlistCount}</span>
+                          {' '}von{' '}
+                          <span className="font-semibold">{totalCount}</span>
+                          {' '}Tenant(s) auf Waitlist
                         </span>
                       </div>
                     )}
