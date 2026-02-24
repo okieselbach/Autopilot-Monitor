@@ -481,6 +481,17 @@ export default function Home() {
       {/* Main content */}
       <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
         <div className="px-4 py-6 sm:px-0">
+          {/* Temporary banner: Analyze Rules are being actively refined */}
+          <div className="mb-4 bg-amber-50 border border-amber-300 rounded-lg px-4 py-3 flex items-start gap-3 dark:bg-amber-950/30 dark:border-amber-700/50">
+            <svg className="w-4 h-4 text-amber-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+            </svg>
+            <p className="text-sm text-amber-800 dark:text-amber-300">
+              <span className="font-semibold">Analyze Rules are actively being refined.</span>{" "}
+              During this phase there may be occasional backend redeploys and analysis results might change or appear inconsistent. This is expected while rules are being fine-tuned.
+            </p>
+          </div>
+
           {serialValidationEnabled === false && (
             <div className="mb-6 bg-red-600 border-2 border-red-700 rounded-xl p-5 shadow-lg">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
