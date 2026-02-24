@@ -72,8 +72,8 @@ export default function Navbar() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Don't render navbar on landing page
-  if (pathname === '/landing') {
+  // Don't render navbar on landing page (root route)
+  if (pathname === '/') {
     return null;
   }
 

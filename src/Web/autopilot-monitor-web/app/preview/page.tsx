@@ -12,13 +12,13 @@ export default function PreviewPage() {
   useEffect(() => {
     if (!isLoading && isAuthenticated && user && !isPreviewBlocked) {
       if (user.isTenantAdmin || user.isGalacticAdmin) {
-        router.push("/");
+        router.push("/dashboard");
       } else {
         router.push("/progress");
       }
     }
     if (!isLoading && !isAuthenticated) {
-      router.push("/landing");
+      router.push("/");
     }
   }, [isAuthenticated, isLoading, user, isPreviewBlocked, router]);
 

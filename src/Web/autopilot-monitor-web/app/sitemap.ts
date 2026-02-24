@@ -5,7 +5,7 @@ const BASE_URL = "https://autopilotmonitor.com";
 export default function sitemap(): MetadataRoute.Sitemap {
   return [
     {
-      url: `${BASE_URL}/landing`,
+      url: `${BASE_URL}/`,
       lastModified: new Date(),
       changeFrequency: "monthly",
       priority: 1,

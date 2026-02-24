@@ -20,7 +20,7 @@ export function ProtectedRoute({ children, requireGalacticAdmin = false }: Prote
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
       // Not authenticated -> redirect to landing
-      router.push("/landing");
+      router.push("/");
     }
     // Note: We don't automatically redirect for galactic admin check
     // Instead, we show the "Access Denied" dialog and let user click "Back to Home"
@@ -54,7 +54,7 @@ export function ProtectedRoute({ children, requireGalacticAdmin = false }: Prote
           <h2 className="text-xl font-semibold text-gray-900 mb-2">Access Denied</h2>
           <p className="text-gray-600 mb-6">You need Galactic Admin permissions to access this page.</p>
           <button
-            onClick={() => router.push("/")}
+            onClick={() => router.push("/dashboard")}
             className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
           >
             Back to Home

@@ -61,7 +61,7 @@ export default function PrivacyPage() {
         </div>
 
         <div className="flex items-center gap-4 text-sm">
-          <Link href="/landing" className="text-blue-700 hover:text-blue-800 font-medium">Landing page</Link>
+          <Link href="/" className="text-blue-700 hover:text-blue-800 font-medium">Landing page</Link>
           <Link href="/docs" className="text-blue-700 hover:text-blue-800 font-medium">
             Documentation
           </Link>

@@ -21,7 +21,7 @@ export function PublicSiteNavbar({ showSectionLinks }: { showSectionLinks: boole
       }`}
     >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 flex items-center justify-between h-14">
-        <Link href="/landing" className="flex items-center space-x-2.5 shrink-0">
+        <Link href="/" className="flex items-center space-x-2.5 shrink-0">
           <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-lg flex items-center justify-center">
             <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none">
               <rect x="5.0" y="12.2" width="2.8" height="7.8" rx="0.9" fill="currentColor" />

@@ -15,7 +15,7 @@ export const msalConfig: Configuration = {
     clientId: process.env.NEXT_PUBLIC_ENTRA_CLIENT_ID || "YOUR_CLIENT_ID_HERE",
     authority: "https://login.microsoftonline.com/organizations", // Multi-tenant
     redirectUri: process.env.NEXT_PUBLIC_ENTRA_REDIRECT_URI || "http://localhost:3000",
-    postLogoutRedirectUri: process.env.NEXT_PUBLIC_ENTRA_POST_LOGOUT_REDIRECT_URI || "http://localhost:3000/landing",
+    postLogoutRedirectUri: process.env.NEXT_PUBLIC_ENTRA_POST_LOGOUT_REDIRECT_URI || "http://localhost:3000",
     navigateToLoginRequestUrl: true,
   },
   cache: {

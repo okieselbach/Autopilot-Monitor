@@ -92,7 +92,7 @@ export default function AdminConfigurationPage() {
 
     // Redirect if not in galactic admin mode
     if (!galacticMode) {
-      router.push("/");
+      router.push("/dashboard");
     }
   }, [router]);
 
@@ -640,7 +640,7 @@ export default function AdminConfigurationPage() {
             <div className="flex items-center justify-between">
               <div>
                 <button
-                  onClick={() => router.push("/")}
+                  onClick={() => router.push("/dashboard")}
                   className="text-sm text-gray-600 hover:text-gray-900 mb-2 flex items-center"
                 >
                   &larr; Back to Dashboard

@@ -27,7 +27,7 @@ export default function RoadmapPage() {
 
           <div className="mt-10">
             <Link
-              href="/landing"
+              href="/"
               className="inline-flex items-center text-sm font-medium text-blue-700 hover:text-blue-800"
             >
               Landing page
