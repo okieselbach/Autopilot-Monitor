@@ -202,7 +202,8 @@ namespace AutopilotMonitor.Functions.Services
                     if (existingLookup.TryGetValue(rule.RuleId, out var existing))
                     {
                         if (existing.Title != rule.Title || existing.Description != rule.Description
-                            || existing.Severity != rule.Severity || existing.Trigger != rule.Trigger)
+                            || existing.Severity != rule.Severity || existing.Trigger != rule.Trigger
+                            || existing.Enabled != rule.Enabled)
                         {
                             await _storageService.StoreAnalyzeRuleAsync(rule, "global");
                             updated++;

@@ -14,7 +14,7 @@ namespace AutopilotMonitor.Functions.Services
             {
                 // ===== APP RULES =====
                 CreateAppDetectionScriptFailureRule(),
-                CreateAppMsiErrorRule(),
+                CreateAppInstallErrorRule(),
                 CreateAppDependencyChainRule(),
                 CreateAppDiskSpaceRule(),
                 CreateAppDownloadTimeoutRule(),
@@ -26,7 +26,6 @@ namespace AutopilotMonitor.Functions.Services
 
                 // ===== ESP RULES =====
                 CreateEspBlockingAppTimeoutRule(),
-                CreateEspSecurityPolicyFailureRule(),
                 CreateEnrollmentTimeoutRule(),
 
                 // ===== DEVICE RULES =====
@@ -74,25 +73,31 @@ namespace AutopilotMonitor.Functions.Services
         };
 
         /// <summary>
-        /// Fixed: Now checks errorDetail field (which contains the IME log line) for MSI error codes
-        /// instead of the non-existent errorCode field.
+        /// Detects app installation failures with specific error codes (MSI exit codes, HRESULT codes).
+        /// Checks errorDetail field (which contains the IME log line) for known error patterns.
         /// </summary>
-        private static AnalyzeRule CreateAppMsiErrorRule() => new AnalyzeRule
+        private static AnalyzeRule CreateAppInstallErrorRule() => new AnalyzeRule
         {
             RuleId = "ANALYZE-APP-002",
-            Title = "MSI Installation Error",
-            Description = "Maps common MSI error codes to their meanings and suggests fixes.",
+            Title = "App Installation Error",
+            Description = "Detects app installation failures with specific exit codes or HRESULT error codes and suggests fixes.",
             Severity = "high",
             Category = "apps",
             BaseConfidence = 80,
             Conditions = new List<RuleCondition>
             {
-                new RuleCondition { Signal = "msi_error", Source = "event_type", EventType = "app_install_failed", DataField = "message", Operator = "regex", Value = @"16[0-9]{2}|0x80070[0-9a-fA-F]+|lpExitCode|unmapped.*exit", Required = true }
+                new RuleCondition { Signal = "install_error", Source = "event_type", EventType = "app_install_failed", DataField = "message", Operator = "regex", Value = @"16[0-9]{2}|0x80070[0-9a-fA-F]+|lpExitCode|unmapped.*exit", Required = true }
             },
-            Explanation = "An MSI installation failed with a specific error code. Common codes: 1603 (Fatal error), 1618 (Another install in progress), 1619 (Package could not be opened), 1625 (Installation prohibited by policy).",
+            Explanation = "An app installation failed with a specific error code. Common MSI exit codes: 1603 (Fatal error during installation), 1618 (Another installation already in progress), 1619 (Package could not be opened), 1625 (Installation prohibited by policy). Common HRESULT codes are also captured.",
             Remediation = new List<RemediationStep>
             {
-                new RemediationStep { Title = "Investigate MSI error", Steps = new List<string> { "Check the MSI log in C:\\Windows\\CCM\\Logs", "Look up the specific error code", "Verify prerequisites are met" } }
+                new RemediationStep { Title = "Investigate the error code", Steps = new List<string> {
+                    "Check the error code in the rule finding details",
+                    "Look up the specific error code in Microsoft documentation",
+                    "Review the IME logs on the device: C:\\ProgramData\\Microsoft\\IntuneManagementExtension\\Logs\\IntuneManagementExtension.log",
+                    "Verify all prerequisites for the app are met",
+                    "Check if another installation was running concurrently (error 1618)"
+                } }
             },
             Tags = new[] { "apps", "msi", "error-code" }
         };
@@ -276,34 +281,6 @@ namespace AutopilotMonitor.Functions.Services
             Tags = new[] { "esp", "blocking", "timeout" }
         };
 
-        /// <summary>
-        /// Fixed: Now checks app_install_failed events for security/policy-related error patterns
-        /// instead of non-existent error_detected events. Also matches IME enforcement errors.
-        /// </summary>
-        private static AnalyzeRule CreateEspSecurityPolicyFailureRule() => new AnalyzeRule
-        {
-            RuleId = "ANALYZE-ESP-002",
-            Title = "Security Policy Application Failure",
-            Description = "Detects when a required security policy fails to apply during ESP by looking for policy-related errors in app installation and IME log events.",
-            Severity = "high",
-            Category = "esp",
-            BaseConfidence = 65,
-            Conditions = new List<RuleCondition>
-            {
-                new RuleCondition { Signal = "policy_failure", Source = "event_type", EventType = "app_install_failed", DataField = "message", Operator = "regex", Value = @"policy.*fail|security.*policy|compliance.*fail|BitLocker.*fail|enforcementState.*Error|EnforcementState", Required = true }
-            },
-            ConfidenceFactors = new List<ConfidenceFactor>
-            {
-                new ConfidenceFactor { Signal = "esp_stalled", Condition = "exists", Weight = 15 }
-            },
-            Explanation = "An app installation failed with a message indicating a security or compliance policy issue. This may block ESP completion if the affected app is an ESP-blocking app.",
-            Remediation = new List<RemediationStep>
-            {
-                new RemediationStep { Title = "Fix policy", Steps = new List<string> { "Check which policy failed in the event details", "Verify device meets policy prerequisites (TPM, SecureBoot)", "Review policy targeting and assignments" } }
-            },
-            Tags = new[] { "esp", "policy", "security" }
-        };
-
         // ===== CORRELATION RULES =====
         // These combine signals from multiple event types for root-cause analysis
 
@@ -315,6 +292,7 @@ namespace AutopilotMonitor.Functions.Services
             Severity = "high",
             Category = "apps",
             Trigger = "correlation",
+            Enabled = false,
             BaseConfidence = 55,
             Conditions = new List<RuleCondition>
             {
@@ -541,6 +519,7 @@ namespace AutopilotMonitor.Functions.Services
             Severity = "warning",
             Category = "apps",
             Trigger = "correlation",
+            Enabled = false,
             BaseConfidence = 55,
             Conditions = new List<RuleCondition>
             {
