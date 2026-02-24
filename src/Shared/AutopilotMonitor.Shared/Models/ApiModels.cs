@@ -87,28 +87,6 @@ namespace AutopilotMonitor.Shared.Models
     }
 
     /// <summary>
-    /// Request to upload a troubleshooting bundle
-    /// </summary>
-    public class UploadBundleRequest
-    {
-        public string SessionId { get; set; }
-        public string TenantId { get; set; }
-        public string BundleFileName { get; set; }
-    }
-
-    /// <summary>
-    /// Response with SAS URL for bundle upload
-    /// </summary>
-    public class UploadBundleResponse
-    {
-        public bool Success { get; set; }
-        public string SasUrl { get; set; }
-        public string BlobPath { get; set; }
-        public DateTime ExpiresAt { get; set; }
-        public string Message { get; set; }
-    }
-
-    /// <summary>
     /// Request to get a short-lived SAS URL for diagnostics package upload.
     /// Called by the agent just before upload — the URL is never cached in config.
     /// </summary>

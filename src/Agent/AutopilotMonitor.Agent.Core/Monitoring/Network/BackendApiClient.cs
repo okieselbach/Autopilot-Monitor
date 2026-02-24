@@ -136,16 +136,6 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
         }
 
         /// <summary>
-        /// Gets a SAS URL for uploading a troubleshooting bundle
-        /// </summary>
-        public async Task<UploadBundleResponse> GetBundleUploadUrlAsync(UploadBundleRequest request)
-        {
-            var url = $"{_baseUrl}{Constants.ApiEndpoints.UploadBundle}";
-            var response = await PostAsync<UploadBundleRequest, UploadBundleResponse>(url, request);
-            return response;
-        }
-
-        /// <summary>
         /// Requests a short-lived SAS URL for diagnostics package upload.
         /// Called just before upload so the URL is never stored in config or on disk.
         /// Returns null if the request fails (non-fatal — diagnostics upload is best-effort).

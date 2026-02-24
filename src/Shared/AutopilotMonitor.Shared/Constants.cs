@@ -69,8 +69,7 @@ namespace AutopilotMonitor.Shared
         {
             public const string RegisterSession          = "/api/sessions/register";
             public const string IngestEvents             = "/api/events/ingest";
-            public const string UploadBundle             = "/api/bundles/upload";
-            public const string GetAgentConfig           = "/api/agent/config";
+public const string GetAgentConfig           = "/api/agent/config";
             public const string GatherRules              = "/api/gather-rules";
             public const string AnalyzeRules             = "/api/analyze-rules";
             public const string GetDiagnosticsUploadUrl  = "/api/diagnostics/upload-url";
