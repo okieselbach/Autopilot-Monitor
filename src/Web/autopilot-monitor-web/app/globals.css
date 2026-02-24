@@ -105,6 +105,12 @@ body {
 .dark .hover\:bg-gray-100:hover {
   background-color: #334155 !important;
 }
+.dark .hover\:bg-indigo-100:hover {
+  background-color: #312e81 !important;
+}
+.dark .hover\:bg-indigo-50:hover {
+  background-color: #1e1b4b !important;
+}
 
 /* -- Input fields -- */
 .dark input,
@@ -291,6 +297,12 @@ body {
   color: #fde047 !important; /* yellow-300 */
 }
 
+/* -- Ring (focus/selection outlines) in dark mode -- */
+.dark .ring-1.ring-indigo-200,
+.dark .ring-2.ring-indigo-200 {
+  --tw-ring-color: #312e81 !important;
+}
+
 /* -- Colored borders in dark mode -- */
 .dark .border-blue-100 {
   border-color: #2d5282 !important;
@@ -304,14 +316,29 @@ body {
 .dark .border-red-200 {
   border-color: #4a2020 !important;
 }
+.dark .border-red-300 {
+  border-color: #5a2424 !important;
+}
 .dark .border-yellow-200 {
   border-color: #3d2e0a !important;
+}
+.dark .border-orange-200,
+.dark .border-orange-300 {
+  border-color: #4a2e0a !important;
 }
 .dark .border-purple-200 {
   border-color: #2d1b4e !important;
 }
 .dark .border-purple-300 {
   border-color: #3b2060 !important;
+}
+.dark .border-indigo-200,
+.dark .border-indigo-300 {
+  border-color: #312e81 !important;
+}
+.dark .border-teal-200,
+.dark .border-teal-300 {
+  border-color: #0d3d3d !important;
 }
 .dark .border-emerald-50,
 .dark .border-emerald-100,
@@ -367,6 +394,27 @@ html:hover ::-webkit-scrollbar-thumb {
 }
 .dark .text-blue-700 {
   color: #60a5fa !important; /* blue-400 — step icons etc. on dark surfaces */
+}
+.dark .text-indigo-700 {
+  color: #a5b4fc !important; /* indigo-300 — category badge, correlation labels, doc links */
+}
+.dark .text-indigo-600 {
+  color: #818cf8 !important; /* indigo-400 — link/action text on dark surfaces */
+}
+.dark .text-purple-700 {
+  color: #c4b5fd !important; /* violet-300 — identity category badge */
+}
+.dark .text-orange-700 {
+  color: #fb923c !important; /* orange-400 — apps category badge */
+}
+.dark .text-orange-600 {
+  color: #f97316 !important; /* orange-500 — High count stat */
+}
+.dark .text-teal-700 {
+  color: #2dd4bf !important; /* teal-400 — esp category badge */
+}
+.dark .text-teal-600 {
+  color: #14b8a6 !important; /* teal-500 */
 }
 
 /* ===== LANDING PAGE DARK MODE =====
