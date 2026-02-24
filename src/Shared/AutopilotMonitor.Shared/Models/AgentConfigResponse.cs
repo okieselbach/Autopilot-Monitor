@@ -93,10 +93,11 @@ namespace AutopilotMonitor.Shared.Models
         public int MaxBatchSize { get; set; } = 100;
 
         /// <summary>
-        /// Azure Blob Storage Container SAS URL for diagnostics package upload.
-        /// The agent uploads directly to the tenant's storage — data never passes through the backend.
+        /// Whether diagnostics upload is configured for this tenant.
+        /// When true, the agent should request a short-lived upload URL via the API just before uploading.
+        /// The SAS URL itself is never included in this config response — it is fetched on-demand.
         /// </summary>
-        public string DiagnosticsBlobSasUrl { get; set; }
+        public bool DiagnosticsUploadEnabled { get; set; } = false;
 
         /// <summary>
         /// When to upload diagnostics packages: "Off", "Always", "OnFailure".

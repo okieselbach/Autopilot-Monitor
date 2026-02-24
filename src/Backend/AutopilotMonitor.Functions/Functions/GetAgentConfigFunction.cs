@@ -90,7 +90,7 @@ namespace AutopilotMonitor.Functions.Functions
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(new AgentConfigResponse
                 {
-                    ConfigVersion = 5,
+                    ConfigVersion = 6,
                     UploadIntervalSeconds = 30,
                     SelfDestructOnComplete = tenantConfig.SelfDestructOnComplete ?? true,
                     KeepLogFile = tenantConfig.KeepLogFile ?? false,
@@ -102,7 +102,7 @@ namespace AutopilotMonitor.Functions.Functions
                     RebootOnComplete = tenantConfig.RebootOnComplete ?? false,
                     RebootDelaySeconds = tenantConfig.RebootDelaySeconds ?? 10,
                     MaxBatchSize = tenantConfig.MaxBatchSize ?? 100,
-                    DiagnosticsBlobSasUrl = tenantConfig.DiagnosticsBlobSasUrl,
+                    DiagnosticsUploadEnabled = !string.IsNullOrEmpty(tenantConfig.DiagnosticsBlobSasUrl),
                     DiagnosticsUploadMode = tenantConfig.DiagnosticsUploadMode ?? "Off",
                     Collectors = collectors,
                     GatherRules = gatherRules,

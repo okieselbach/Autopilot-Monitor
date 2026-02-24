@@ -46,6 +46,21 @@ interface TenantAdmin {
   addedBy: string;
 }
 
+/** Parses the expiry date from the `se=` parameter of a SAS URL. Returns null if not found. */
+function parseSasExpiry(sasUrl: string): Date | null {
+  try {
+    const qIndex = sasUrl.indexOf('?');
+    if (qIndex < 0) return null;
+    const params = new URLSearchParams(sasUrl.substring(qIndex + 1));
+    const se = params.get('se');
+    if (!se) return null;
+    const d = new Date(se);
+    return isNaN(d.getTime()) ? null : d;
+  } catch {
+    return null;
+  }
+}
+
 export default function SettingsPage() {
   const router = useRouter();
   const { tenantId } = useTenant();
@@ -99,6 +114,8 @@ export default function SettingsPage() {
   // Diagnostics package state
   const [diagnosticsBlobSasUrl, setDiagnosticsBlobSasUrl] = useState("");
   const [diagnosticsUploadMode, setDiagnosticsUploadMode] = useState("Off");
+  const [diagnosticsSasExpiry, setDiagnosticsSasExpiry] = useState<Date | null>(null);
+  const [diagnosticsSasWarning, setDiagnosticsSasWarning] = useState<string | null>(null);
 
   // Fetch configuration
   useEffect(() => {
@@ -146,8 +163,26 @@ export default function SettingsPage() {
         setTeamsWebhookUrl(data.teamsWebhookUrl ?? "");
         setTeamsNotifyOnSuccess(data.teamsNotifyOnSuccess ?? true);
         setTeamsNotifyOnFailure(data.teamsNotifyOnFailure ?? true);
-        setDiagnosticsBlobSasUrl(data.diagnosticsBlobSasUrl ?? "");
+        const sasUrl = data.diagnosticsBlobSasUrl ?? "";
+        setDiagnosticsBlobSasUrl(sasUrl);
         setDiagnosticsUploadMode(data.diagnosticsUploadMode ?? "Off");
+
+        // Parse SAS expiry and set warning/error notifications
+        if (sasUrl) {
+          const expiry = parseSasExpiry(sasUrl);
+          setDiagnosticsSasExpiry(expiry);
+          if (expiry) {
+            const now = new Date();
+            const daysRemaining = Math.ceil((expiry.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+            if (daysRemaining <= 0) {
+              setDiagnosticsSasWarning("error");
+            } else if (daysRemaining <= 7) {
+              setDiagnosticsSasWarning("warning");
+            } else {
+              setDiagnosticsSasWarning(null);
+            }
+          }
+        }
       } catch (err) {
         console.error("Error fetching configuration:", err);
         setError(err instanceof Error ? err.message : "Failed to load configuration");
@@ -618,6 +653,28 @@ export default function SettingsPage() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
                 <span className="text-red-800">{error}</span>
+              </div>
+            )}
+
+            {/* Diagnostics SAS URL expiry notifications */}
+            {diagnosticsSasWarning === "error" && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center space-x-3">
+                <svg className="w-5 h-5 text-red-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span className="text-red-800">
+                  <strong>Diagnostics SAS URL has expired.</strong> Diagnostics upload is non-functional. Please update the SAS URL in the Diagnostics Package section.
+                </span>
+              </div>
+            )}
+            {diagnosticsSasWarning === "warning" && diagnosticsSasExpiry && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-center space-x-3">
+                <svg className="w-5 h-5 text-amber-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                </svg>
+                <span className="text-amber-900">
+                  <strong>Diagnostics SAS URL expires on {diagnosticsSasExpiry.toLocaleDateString()}</strong> — please update it soon to avoid interruption.
+                </span>
               </div>
             )}
 
@@ -1237,7 +1294,7 @@ export default function SettingsPage() {
                 {/* Info */}
                 <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
                   <p className="text-sm text-amber-900">
-                    The agent uploads diagnostics directly to the <strong>configured</strong> Blob Storage container. Data never passes through the backend.
+                    The agent requests a short-lived upload URL from the backend <strong>just before uploading</strong>. Your SAS URL is stored securely in the backend and never sent to devices in the agent configuration.
                   </p>
                 </div>
 
@@ -1263,6 +1320,36 @@ export default function SettingsPage() {
                       )}
                     </div>
                   </label>
+
+                  {/* SAS URL expiry indicator */}
+                  {diagnosticsBlobSasUrl && diagnosticsSasExpiry && (() => {
+                    const now = new Date();
+                    const daysRemaining = Math.ceil((diagnosticsSasExpiry.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+                    const isExpired = daysRemaining <= 0;
+                    const isWarning = daysRemaining > 0 && daysRemaining <= 7;
+                    return (
+                      <div className={`mt-2 flex items-center gap-1.5 text-xs ${isExpired ? 'text-red-600' : isWarning ? 'text-amber-600' : 'text-green-600'}`}>
+                        {isExpired ? (
+                          <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                        ) : isWarning ? (
+                          <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                          </svg>
+                        ) : (
+                          <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                        )}
+                        <span>
+                          {isExpired
+                            ? `Expired on ${diagnosticsSasExpiry.toLocaleDateString()}`
+                            : `Expires on ${diagnosticsSasExpiry.toLocaleDateString()}${isWarning ? ` (${daysRemaining} day${daysRemaining === 1 ? '' : 's'} remaining)` : ''}`}
+                        </span>
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {/* Upload Mode */}

@@ -109,6 +109,28 @@ namespace AutopilotMonitor.Shared.Models
     }
 
     /// <summary>
+    /// Request to get a short-lived SAS URL for diagnostics package upload.
+    /// Called by the agent just before upload — the URL is never cached in config.
+    /// </summary>
+    public class GetDiagnosticsUploadUrlRequest
+    {
+        public string TenantId { get; set; }
+        public string SessionId { get; set; }
+        public string FileName { get; set; }
+    }
+
+    /// <summary>
+    /// Response containing a short-lived SAS URL for diagnostics package upload.
+    /// </summary>
+    public class GetDiagnosticsUploadUrlResponse
+    {
+        public bool Success { get; set; }
+        public string UploadUrl { get; set; }
+        public DateTime ExpiresAt { get; set; }
+        public string Message { get; set; }
+    }
+
+    /// <summary>
     /// Session summary for UI display
     /// </summary>
     public class SessionSummary

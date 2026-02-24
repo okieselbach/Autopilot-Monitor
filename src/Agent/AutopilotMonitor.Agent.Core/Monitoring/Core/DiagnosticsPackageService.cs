@@ -6,18 +6,21 @@ using System.Text;
 using System.Threading.Tasks;
 using AutopilotMonitor.Agent.Core.Configuration;
 using AutopilotMonitor.Agent.Core.Logging;
+using AutopilotMonitor.Agent.Core.Monitoring.Network;
 using AutopilotMonitor.Shared;
 
 namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 {
     /// <summary>
     /// Creates and uploads a diagnostics ZIP package (agent logs + IME logs + session info)
-    /// directly to the tenant's Azure Blob Storage container via SAS URL.
+    /// to the tenant's Azure Blob Storage container via a short-lived SAS URL.
+    /// The SAS URL is fetched on-demand just before upload and never stored in config or on disk.
     /// </summary>
     public class DiagnosticsPackageService
     {
         private readonly AgentConfiguration _configuration;
         private readonly AgentLogger _logger;
+        private readonly BackendApiClient _apiClient;
         private readonly HttpClient _httpClient;
 
         private static readonly string ImeLogFolder =
@@ -26,10 +29,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         private static readonly string AgentLogFolder =
             Environment.ExpandEnvironmentVariables(Constants.LogDirectory);
 
-        public DiagnosticsPackageService(AgentConfiguration configuration, AgentLogger logger)
+        public DiagnosticsPackageService(AgentConfiguration configuration, AgentLogger logger, BackendApiClient apiClient)
         {
             _configuration = configuration;
             _logger = logger;
+            _apiClient = apiClient;
             _httpClient = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
         }
 
@@ -50,9 +54,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     return null;
                 }
 
-                if (string.IsNullOrEmpty(_configuration.DiagnosticsBlobSasUrl))
+                if (!_configuration.DiagnosticsUploadEnabled)
                 {
-                    _logger.Debug("Diagnostics upload skipped: no Blob Storage SAS URL configured");
+                    _logger.Debug("Diagnostics upload skipped: not configured for this tenant");
                     return null;
                 }
 
@@ -89,8 +93,21 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 
                 _logger.Info($"Diagnostics package created: {zipFileName} ({zipBytes.Length / 1024} KB)");
 
-                // Upload to Blob Storage
-                var uploaded = await UploadToBlobStorageAsync(zipFileName, zipBytes);
+                // Fetch a short-lived upload URL just before uploading — never stored in config or on disk
+                _logger.Info("Requesting diagnostics upload URL from backend...");
+                var uploadUrlResponse = await _apiClient.GetDiagnosticsUploadUrlAsync(
+                    _configuration.TenantId,
+                    _configuration.SessionId,
+                    zipFileName);
+
+                if (uploadUrlResponse == null || !uploadUrlResponse.Success || string.IsNullOrEmpty(uploadUrlResponse.UploadUrl))
+                {
+                    _logger.Warning("Failed to get diagnostics upload URL from backend — skipping upload");
+                    return null;
+                }
+
+                // Upload to Blob Storage using the freshly obtained URL
+                var uploaded = await UploadToBlobStorageAsync(zipFileName, zipBytes, uploadUrlResponse.UploadUrl);
                 if (uploaded)
                 {
                     _logger.Info($"Diagnostics package uploaded successfully: {zipFileName}");
@@ -171,14 +188,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         }
 
         /// <summary>
-        /// Uploads the ZIP bytes to the configured Azure Blob Storage container via PUT with SAS token.
+        /// Uploads the ZIP bytes to Azure Blob Storage via PUT with the provided container SAS URL.
         /// Container SAS URL format: https://account.blob.core.windows.net/container?sv=...&sig=...
         /// Blob URL is constructed by inserting the blob name before the query string.
+        /// The URL is passed in directly (fetched on-demand just before upload, never from config).
         /// </summary>
-        private async Task<bool> UploadToBlobStorageAsync(string blobName, byte[] data)
+        private async Task<bool> UploadToBlobStorageAsync(string blobName, byte[] data, string containerSasUrl)
         {
-            var containerSasUrl = _configuration.DiagnosticsBlobSasUrl;
-
             // Build blob URL: split at '?' to insert blob name
             var questionMarkIndex = containerSasUrl.IndexOf('?');
             string blobUrl;

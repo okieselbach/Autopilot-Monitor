@@ -70,7 +70,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             _spool = new EventSpool(_configuration.SpoolDirectory);
             _apiClient = new BackendApiClient(_configuration.ApiBaseUrl, _configuration, _logger);
             _cleanupService = new CleanupService(_configuration, _logger);
-            _diagnosticsService = new DiagnosticsPackageService(_configuration, _logger);
+            _diagnosticsService = new DiagnosticsPackageService(_configuration, _logger, _apiClient);
 
             // Subscribe to spool events for batched upload when new events arrive
             _spool.EventsAvailable += OnEventsAvailable;
@@ -255,7 +255,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             _configuration.RebootOnComplete = config.RebootOnComplete;
             _configuration.RebootDelaySeconds = config.RebootDelaySeconds;
             _configuration.MaxBatchSize = config.MaxBatchSize;
-            _configuration.DiagnosticsBlobSasUrl = config.DiagnosticsBlobSasUrl;
+            _configuration.DiagnosticsUploadEnabled = config.DiagnosticsUploadEnabled;
             _configuration.DiagnosticsUploadMode = config.DiagnosticsUploadMode;
 
             // Apply log level from remote config
@@ -743,7 +743,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             var mode = _configuration.DiagnosticsUploadMode ?? "Off";
             if (string.Equals(mode, "Off", StringComparison.OrdinalIgnoreCase))
                 return;
-            if (string.IsNullOrEmpty(_configuration.DiagnosticsBlobSasUrl))
+            if (!_configuration.DiagnosticsUploadEnabled)
                 return;
             if (string.Equals(mode, "OnFailure", StringComparison.OrdinalIgnoreCase) && enrollmentSucceeded)
                 return;

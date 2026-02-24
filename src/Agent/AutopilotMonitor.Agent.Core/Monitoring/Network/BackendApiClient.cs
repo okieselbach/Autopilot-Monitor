@@ -145,6 +145,25 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
             return response;
         }
 
+        /// <summary>
+        /// Requests a short-lived SAS URL for diagnostics package upload.
+        /// Called just before upload so the URL is never stored in config or on disk.
+        /// Returns null if the request fails (non-fatal — diagnostics upload is best-effort).
+        /// </summary>
+        public async Task<GetDiagnosticsUploadUrlResponse> GetDiagnosticsUploadUrlAsync(
+            string tenantId, string sessionId, string fileName)
+        {
+            var url = $"{_baseUrl}{Constants.ApiEndpoints.GetDiagnosticsUploadUrl}";
+            var request = new GetDiagnosticsUploadUrlRequest
+            {
+                TenantId = tenantId,
+                SessionId = sessionId,
+                FileName = fileName
+            };
+            var response = await PostAsync<GetDiagnosticsUploadUrlRequest, GetDiagnosticsUploadUrlResponse>(url, request);
+            return response;
+        }
+
         private async Task<TResponse> PostAsync<TRequest, TResponse>(string url, TRequest data)
         {
             var json = JsonConvert.SerializeObject(data);

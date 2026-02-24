@@ -144,10 +144,11 @@ namespace AutopilotMonitor.Agent.Core.Configuration
         public int AuthFailureTimeoutMinutes { get; set; } = 0;
 
         /// <summary>
-        /// Azure Blob Storage Container SAS URL for diagnostics package upload.
-        /// The agent uploads directly to the tenant's storage.
+        /// Whether diagnostics upload is configured for this tenant.
+        /// When true, the agent requests a short-lived upload URL from the backend just before uploading.
+        /// The SAS URL itself is never stored in config — it is fetched on-demand and used in memory only.
         /// </summary>
-        public string DiagnosticsBlobSasUrl { get; set; }
+        public bool DiagnosticsUploadEnabled { get; set; } = false;
 
         /// <summary>
         /// When to upload diagnostics packages: "Off", "Always", "OnFailure".
