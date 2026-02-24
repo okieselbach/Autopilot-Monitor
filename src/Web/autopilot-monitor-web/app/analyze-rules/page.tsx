@@ -31,6 +31,13 @@ interface RuleCondition {
   operator: string;
   value: string;
   required: boolean;
+  // event_correlation fields
+  correlateEventType?: string;
+  joinField?: string;
+  timeWindowSeconds?: number | null;
+  eventAFilterField?: string;
+  eventAFilterOperator?: string;
+  eventAFilterValue?: string;
 }
 
 interface AnalyzeRule {
@@ -77,7 +84,7 @@ const CATEGORIES = ["network", "identity", "apps", "device", "esp", "enrollment"
 const SEVERITIES = ["info", "warning", "high", "critical"] as const;
 const TRIGGERS = ["single", "correlation"] as const;
 const OPERATORS = ["equals", "contains", "regex", "gt", "lt", "gte", "lte", "exists", "count_gte"] as const;
-const SOURCES = ["event_type", "event_data", "phase_duration", "event_count"] as const;
+const SOURCES = ["event_type", "event_data", "phase_duration", "event_count", "event_correlation"] as const;
 
 const SEVERITY_COLORS: Record<string, { bg: string; text: string; border: string; dot: string }> = {
   critical: { bg: "bg-red-100", text: "text-red-800", border: "border-red-300", dot: "bg-red-500" },
@@ -111,6 +118,12 @@ const EMPTY_CONDITION: RuleCondition = {
   operator: "contains",
   value: "",
   required: true,
+  correlateEventType: "",
+  joinField: "",
+  timeWindowSeconds: null,
+  eventAFilterField: "",
+  eventAFilterOperator: "equals",
+  eventAFilterValue: "",
 };
 
 const EMPTY_FACTOR: ConfidenceFactor = {
@@ -187,6 +200,12 @@ export default function AnalyzeRulesPage() {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newRule, setNewRule] = useState<RuleForm>({ ...EMPTY_FORM });
   const [creating, setCreating] = useState(false);
+
+  // JSON mode (create + edit)
+  const [jsonModeCreate, setJsonModeCreate] = useState(false);
+  const [jsonModeEdit, setJsonModeEdit] = useState(false);
+  const [jsonText, setJsonText] = useState("");
+  const [jsonError, setJsonError] = useState<string | null>(null);
 
   // Toggling / deleting state
   const [togglingRuleId, setTogglingRuleId] = useState<string | null>(null);
@@ -317,8 +336,9 @@ export default function AnalyzeRulesPage() {
   };
 
   // Create custom rule
-  const handleCreateRule = async () => {
-    if (!newRule.ruleId.trim() || !newRule.title.trim()) {
+  const handleCreateRule = async (formOverride?: RuleForm) => {
+    const form = formOverride ?? newRule;
+    if (!form.ruleId.trim() || !form.title.trim()) {
       showError("Rule ID and Title are required.");
       return;
     }
@@ -333,19 +353,19 @@ export default function AnalyzeRulesPage() {
       }
 
       const payload = {
-        ruleId: newRule.ruleId.trim(),
-        title: newRule.title.trim(),
-        description: newRule.description.trim(),
-        severity: newRule.severity,
-        category: newRule.category,
-        trigger: newRule.trigger,
-        explanation: newRule.explanation.trim(),
-        baseConfidence: newRule.baseConfidence,
-        confidenceThreshold: newRule.confidenceThreshold,
-        conditions: newRule.conditions.filter(c => c.signal.trim()),
-        confidenceFactors: newRule.confidenceFactors.filter(f => f.signal.trim()),
-        remediation: newRule.remediation.filter(r => r.title.trim()),
-        relatedDocs: newRule.relatedDocs.filter(d => d.title.trim() && d.url.trim()),
+        ruleId: form.ruleId.trim(),
+        title: form.title.trim(),
+        description: form.description.trim(),
+        severity: form.severity,
+        category: form.category,
+        trigger: form.trigger,
+        explanation: form.explanation.trim(),
+        baseConfidence: form.baseConfidence,
+        confidenceThreshold: form.confidenceThreshold,
+        conditions: form.conditions.filter(c => c.signal.trim()),
+        confidenceFactors: form.confidenceFactors.filter(f => f.signal.trim()),
+        remediation: form.remediation.filter(r => r.title.trim()),
+        relatedDocs: form.relatedDocs.filter(d => d.title.trim() && d.url.trim()),
       };
 
       const response = await fetch(`${API_BASE_URL}/api/analyze-rules`, {
@@ -362,7 +382,7 @@ export default function AnalyzeRulesPage() {
         throw new Error(errorData.error || errorData.message || `Failed to create rule: ${response.statusText}`);
       }
 
-      showSuccess(`Rule "${newRule.title}" created successfully!`);
+      showSuccess(`Rule "${form.title}" created successfully!`);
       setNewRule({ ...EMPTY_FORM, conditions: [{ ...EMPTY_CONDITION }] });
       setShowCreateForm(false);
       await fetchRules();
@@ -381,8 +401,9 @@ export default function AnalyzeRulesPage() {
   };
 
   // Save edited rule
-  const handleSaveEdit = async (rule: AnalyzeRule) => {
-    if (!editForm.title.trim()) {
+  const handleSaveEdit = async (rule: AnalyzeRule, formOverride?: RuleForm) => {
+    const form = formOverride ?? editForm;
+    if (!form.title.trim()) {
       showError("Title is required.");
       return;
     }
@@ -400,18 +421,18 @@ export default function AnalyzeRulesPage() {
 
       const payload = {
         ...rule,
-        title: editForm.title.trim(),
-        description: editForm.description.trim(),
-        severity: editForm.severity,
-        category: editForm.category,
-        trigger: editForm.trigger,
-        explanation: editForm.explanation.trim(),
-        baseConfidence: editForm.baseConfidence,
-        confidenceThreshold: editForm.confidenceThreshold,
-        conditions: editForm.conditions.filter(c => c.signal.trim()),
-        confidenceFactors: editForm.confidenceFactors.filter(f => f.signal.trim()),
-        remediation: editForm.remediation.filter(r => r.title.trim()),
-        relatedDocs: editForm.relatedDocs.filter(d => d.title.trim() && d.url.trim()),
+        title: form.title.trim(),
+        description: form.description.trim(),
+        severity: form.severity,
+        category: form.category,
+        trigger: form.trigger,
+        explanation: form.explanation.trim(),
+        baseConfidence: form.baseConfidence,
+        confidenceThreshold: form.confidenceThreshold,
+        conditions: form.conditions.filter(c => c.signal.trim()),
+        confidenceFactors: form.confidenceFactors.filter(f => f.signal.trim()),
+        remediation: form.remediation.filter(r => r.title.trim()),
+        relatedDocs: form.relatedDocs.filter(d => d.title.trim() && d.url.trim()),
         // Galactic admin editing a global rule: preserve "Autopilot Monitor" as author but still bump version.
         // All other edits: set author to the logged-in user.
         author: isGlobalEdit ? rule.author : (user?.displayName || user?.upn || rule.author),
@@ -529,34 +550,84 @@ export default function AnalyzeRulesPage() {
           <button type="button" onClick={() => setForm({ ...form, conditions: [...form.conditions, { ...EMPTY_CONDITION }] })} className="text-xs text-indigo-600 hover:text-indigo-800 font-medium">+ Add Condition</button>
         </div>
         <div className="space-y-3">
-          {form.conditions.map((cond, idx) => (
-            <div key={idx} className="bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-medium text-gray-500">Condition {idx + 1}</span>
-                {form.conditions.length > 1 && (
-                  <button type="button" onClick={() => setForm({ ...form, conditions: form.conditions.filter((_, i) => i !== idx) })} className="text-xs text-red-500 hover:text-red-700">Remove</button>
+          {form.conditions.map((cond, idx) => {
+            const isCorrelation = cond.source === "event_correlation";
+            const updateCond = (patch: Partial<RuleCondition>) => {
+              const c = [...form.conditions];
+              c[idx] = { ...c[idx], ...patch };
+              setForm({ ...form, conditions: c });
+            };
+            return (
+              <div key={idx} className={`border rounded-lg p-3 space-y-2 ${isCorrelation ? "bg-indigo-50 border-indigo-200" : "bg-gray-50 border-gray-200"}`}>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-gray-500">
+                    Condition {idx + 1}
+                    {isCorrelation && <span className="ml-2 px-1.5 py-0.5 bg-indigo-100 text-indigo-700 rounded text-xs">event_correlation</span>}
+                  </span>
+                  {form.conditions.length > 1 && (
+                    <button type="button" onClick={() => setForm({ ...form, conditions: form.conditions.filter((_, i) => i !== idx) })} className="text-xs text-red-500 hover:text-red-700">Remove</button>
+                  )}
+                </div>
+
+                {/* Row 1: Signal, Source, Event Type A */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <input type="text" value={cond.signal} onChange={(e) => updateCond({ signal: e.target.value })} placeholder="Signal name" autoComplete="off" className="px-3 py-1.5 border border-gray-300 rounded text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+                  <select value={cond.source} onChange={(e) => updateCond({ source: e.target.value })} className="px-3 py-1.5 border border-gray-300 rounded text-sm text-gray-900 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                    {SOURCES.map((s) => (<option key={s} value={s}>{s}</option>))}
+                  </select>
+                  <input type="text" value={cond.eventType} onChange={(e) => updateCond({ eventType: e.target.value })} placeholder={isCorrelation ? "Event A type (e.g. app_install_completed)" : "Event type"} autoComplete="off" className="px-3 py-1.5 border border-gray-300 rounded text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+                </div>
+
+                {/* Row 2: Data field / Operator / Value / Required */}
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                  <input type="text" value={cond.dataField} onChange={(e) => updateCond({ dataField: e.target.value })} placeholder={isCorrelation ? "Filter field on Event B" : "Data field"} autoComplete="off" className="px-3 py-1.5 border border-gray-300 rounded text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+                  <select value={cond.operator} onChange={(e) => updateCond({ operator: e.target.value })} className="px-3 py-1.5 border border-gray-300 rounded text-sm text-gray-900 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                    {OPERATORS.map((o) => (<option key={o} value={o}>{o}</option>))}
+                  </select>
+                  <input type="text" value={cond.value} onChange={(e) => updateCond({ value: e.target.value })} placeholder={isCorrelation ? "Filter value on Event B" : "Value"} autoComplete="off" className="px-3 py-1.5 border border-gray-300 rounded text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+                  <label className="flex items-center space-x-2 text-sm text-gray-700">
+                    <input type="checkbox" checked={cond.required} onChange={(e) => updateCond({ required: e.target.checked })} className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
+                    <span>Required</span>
+                  </label>
+                </div>
+
+                {/* event_correlation extra fields */}
+                {isCorrelation && (
+                  <div className="pt-2 border-t border-indigo-200 space-y-2">
+                    <p className="text-xs font-medium text-indigo-600">Correlation settings</p>
+
+                    {/* Correlate Event Type + Join Field + Time Window */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">Event B type <span className="text-red-500">*</span></label>
+                        <input type="text" value={cond.correlateEventType ?? ""} onChange={(e) => updateCond({ correlateEventType: e.target.value })} placeholder="e.g. app_install_failed" autoComplete="off" className="w-full px-3 py-1.5 border border-indigo-300 rounded text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">Join field <span className="text-red-500">*</span></label>
+                        <input type="text" value={cond.joinField ?? ""} onChange={(e) => updateCond({ joinField: e.target.value })} placeholder="e.g. appId" autoComplete="off" className="w-full px-3 py-1.5 border border-indigo-300 rounded text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">Time window (seconds, optional)</label>
+                        <input type="number" min={0} value={cond.timeWindowSeconds ?? ""} onChange={(e) => updateCond({ timeWindowSeconds: e.target.value === "" ? null : parseInt(e.target.value) || 0 })} placeholder="e.g. 300" className="w-full px-3 py-1.5 border border-indigo-300 rounded text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+                      </div>
+                    </div>
+
+                    {/* Event A Filter */}
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Event A filter (optional)</label>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <input type="text" value={cond.eventAFilterField ?? ""} onChange={(e) => updateCond({ eventAFilterField: e.target.value })} placeholder="Filter field on Event A" autoComplete="off" className="px-3 py-1.5 border border-indigo-300 rounded text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+                        <select value={cond.eventAFilterOperator ?? "equals"} onChange={(e) => updateCond({ eventAFilterOperator: e.target.value })} className="px-3 py-1.5 border border-indigo-300 rounded text-sm text-gray-900 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                          {OPERATORS.map((o) => (<option key={o} value={o}>{o}</option>))}
+                        </select>
+                        <input type="text" value={cond.eventAFilterValue ?? ""} onChange={(e) => updateCond({ eventAFilterValue: e.target.value })} placeholder="Filter value on Event A" autoComplete="off" className="px-3 py-1.5 border border-indigo-300 rounded text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+                      </div>
+                    </div>
+                  </div>
                 )}
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                <input type="text" value={cond.signal} onChange={(e) => { const c = [...form.conditions]; c[idx] = { ...c[idx], signal: e.target.value }; setForm({ ...form, conditions: c }); }} placeholder="Signal name" autoComplete="off" className="px-3 py-1.5 border border-gray-300 rounded text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
-                <select value={cond.source} onChange={(e) => { const c = [...form.conditions]; c[idx] = { ...c[idx], source: e.target.value }; setForm({ ...form, conditions: c }); }} className="px-3 py-1.5 border border-gray-300 rounded text-sm text-gray-900 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500">
-                  {SOURCES.map((s) => (<option key={s} value={s}>{s}</option>))}
-                </select>
-                <input type="text" value={cond.eventType} onChange={(e) => { const c = [...form.conditions]; c[idx] = { ...c[idx], eventType: e.target.value }; setForm({ ...form, conditions: c }); }} placeholder="Event type" autoComplete="off" className="px-3 py-1.5 border border-gray-300 rounded text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
-                <input type="text" value={cond.dataField} onChange={(e) => { const c = [...form.conditions]; c[idx] = { ...c[idx], dataField: e.target.value }; setForm({ ...form, conditions: c }); }} placeholder="Data field" autoComplete="off" className="px-3 py-1.5 border border-gray-300 rounded text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
-                <select value={cond.operator} onChange={(e) => { const c = [...form.conditions]; c[idx] = { ...c[idx], operator: e.target.value }; setForm({ ...form, conditions: c }); }} className="px-3 py-1.5 border border-gray-300 rounded text-sm text-gray-900 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500">
-                  {OPERATORS.map((o) => (<option key={o} value={o}>{o}</option>))}
-                </select>
-                <input type="text" value={cond.value} onChange={(e) => { const c = [...form.conditions]; c[idx] = { ...c[idx], value: e.target.value }; setForm({ ...form, conditions: c }); }} placeholder="Value" autoComplete="off" className="px-3 py-1.5 border border-gray-300 rounded text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
-                <label className="flex items-center space-x-2 text-sm text-gray-700">
-                  <input type="checkbox" checked={cond.required} onChange={(e) => { const c = [...form.conditions]; c[idx] = { ...c[idx], required: e.target.checked }; setForm({ ...form, conditions: c }); }} className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
-                  <span>Required</span>
-                </label>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
@@ -782,19 +853,65 @@ export default function AnalyzeRulesPage() {
               {showCreateForm && (
                 <div className="bg-white rounded-lg shadow">
                   <div className="p-6 border-b border-gray-200 bg-gradient-to-r from-indigo-50 to-purple-50">
-                    <div className="flex items-center space-x-2">
-                      <svg className="w-6 h-6 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" /></svg>
-                      <div>
-                        <h2 className="text-xl font-semibold text-gray-900">Create Custom Analyze Rule</h2>
-                        <p className="text-sm text-gray-500 mt-1">Define conditions and confidence scoring for issue detection</p>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <svg className="w-6 h-6 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" /></svg>
+                        <div>
+                          <h2 className="text-xl font-semibold text-gray-900">Create Custom Analyze Rule</h2>
+                          <p className="text-sm text-gray-500 mt-1">Define conditions and confidence scoring for issue detection</p>
+                        </div>
+                      </div>
+                      {/* JSON Mode Toggle */}
+                      <div className="flex items-center bg-gray-100 rounded-lg p-1">
+                        <button onClick={() => { setJsonModeCreate(false); setJsonError(null); }} className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${!jsonModeCreate ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>Form</button>
+                        <button onClick={() => { setJsonText(JSON.stringify(newRule, null, 2)); setJsonModeCreate(true); setJsonError(null); }} className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${jsonModeCreate ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>JSON</button>
                       </div>
                     </div>
                   </div>
                   <div className="p-6">
-                    {renderFormFields(newRule, setNewRule, true)}
+                    {jsonModeCreate ? (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <p className="text-sm text-gray-600">Edit the rule as JSON. All fields are supported including <code className="bg-gray-100 px-1 rounded text-xs">event_correlation</code> condition properties.</p>
+                          <button type="button" onClick={() => {
+                            try {
+                              const parsed = JSON.parse(jsonText) as RuleForm;
+                              if (!parsed.ruleId && !parsed.title) throw new Error("JSON must include at least ruleId and title");
+                              setNewRule({ ...EMPTY_FORM, ...parsed });
+                              setJsonModeCreate(false);
+                              setJsonError(null);
+                            } catch (e) {
+                              setJsonError(e instanceof Error ? e.message : "Invalid JSON");
+                            }
+                          }} className="text-xs text-indigo-600 hover:text-indigo-800 font-medium whitespace-nowrap ml-4">Apply JSON →</button>
+                        </div>
+                        {jsonError && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{jsonError}</p>}
+                        <textarea
+                          value={jsonText}
+                          onChange={(e) => { setJsonText(e.target.value); setJsonError(null); }}
+                          rows={30}
+                          spellCheck={false}
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm font-mono text-gray-900 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 resize-y"
+                        />
+                      </div>
+                    ) : (
+                      renderFormFields(newRule, setNewRule, true)
+                    )}
                     <div className="flex items-center justify-end space-x-3 pt-4 mt-5 border-t border-gray-200">
-                      <button onClick={() => { setShowCreateForm(false); setNewRule({ ...EMPTY_FORM, conditions: [{ ...EMPTY_CONDITION }] }); }} disabled={creating} className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-medium">Cancel</button>
-                      <button onClick={handleCreateRule} disabled={creating} className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-2 text-sm font-medium">
+                      <button onClick={() => { setShowCreateForm(false); setJsonModeCreate(false); setJsonError(null); setNewRule({ ...EMPTY_FORM, conditions: [{ ...EMPTY_CONDITION }] }); }} disabled={creating} className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-medium">Cancel</button>
+                      <button onClick={() => {
+                        if (jsonModeCreate) {
+                          try {
+                            const parsed = JSON.parse(jsonText) as RuleForm;
+                            setJsonError(null);
+                            handleCreateRule({ ...EMPTY_FORM, ...parsed });
+                          } catch (e) {
+                            setJsonError(e instanceof Error ? e.message : "Invalid JSON");
+                          }
+                        } else {
+                          handleCreateRule();
+                        }
+                      }} disabled={creating} className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-2 text-sm font-medium">
                         {creating ? (<><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div><span>Creating...</span></>) : (<span>Save Rule</span>)}
                       </button>
                     </div>
@@ -979,14 +1096,21 @@ export default function AnalyzeRulesPage() {
                         {/* Edit Form */}
                         {isExpanded && isEditing && (
                           <div className="border-t border-gray-200 p-6">
-                            <div className="flex items-center space-x-2 mb-4">
-                              <svg className="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                              <h4 className="text-sm font-semibold text-gray-900">
-                                Editing: {rule.ruleId}
-                                {rule.isBuiltIn && isGalacticAdmin && (
-                                  <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700 border border-amber-200">Global Edit</span>
-                                )}
-                              </h4>
+                            <div className="flex items-center justify-between mb-4">
+                              <div className="flex items-center space-x-2">
+                                <svg className="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                                <h4 className="text-sm font-semibold text-gray-900">
+                                  Editing: {rule.ruleId}
+                                  {rule.isBuiltIn && isGalacticAdmin && (
+                                    <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700 border border-amber-200">Global Edit</span>
+                                  )}
+                                </h4>
+                              </div>
+                              {/* JSON Mode Toggle */}
+                              <div className="flex items-center bg-gray-100 rounded-lg p-1">
+                                <button onClick={() => { setJsonModeEdit(false); setJsonError(null); }} className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${!jsonModeEdit ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>Form</button>
+                                <button onClick={() => { setJsonText(JSON.stringify(editForm, null, 2)); setJsonModeEdit(true); setJsonError(null); }} className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${jsonModeEdit ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>JSON</button>
+                              </div>
                             </div>
 
                             {rule.isBuiltIn && isGalacticAdmin && (
@@ -995,11 +1119,50 @@ export default function AnalyzeRulesPage() {
                               </div>
                             )}
 
-                            {renderFormFields(editForm, setEditForm, false)}
+                            {jsonModeEdit ? (
+                              <div className="space-y-3">
+                                <div className="flex items-center justify-between">
+                                  <p className="text-sm text-gray-600">Edit the rule as JSON. All fields are supported including <code className="bg-gray-100 px-1 rounded text-xs">event_correlation</code> condition properties.</p>
+                                  <button type="button" onClick={() => {
+                                    try {
+                                      const parsed = JSON.parse(jsonText) as RuleForm;
+                                      if (!parsed.title) throw new Error("JSON must include title");
+                                      setEditForm({ ...editForm, ...parsed });
+                                      setJsonModeEdit(false);
+                                      setJsonError(null);
+                                    } catch (e) {
+                                      setJsonError(e instanceof Error ? e.message : "Invalid JSON");
+                                    }
+                                  }} className="text-xs text-indigo-600 hover:text-indigo-800 font-medium whitespace-nowrap ml-4">Apply JSON →</button>
+                                </div>
+                                {jsonError && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{jsonError}</p>}
+                                <textarea
+                                  value={jsonText}
+                                  onChange={(e) => { setJsonText(e.target.value); setJsonError(null); }}
+                                  rows={30}
+                                  spellCheck={false}
+                                  className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm font-mono text-gray-900 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 resize-y"
+                                />
+                              </div>
+                            ) : (
+                              renderFormFields(editForm, setEditForm, false)
+                            )}
 
                             <div className="flex items-center justify-end space-x-3 pt-4 mt-5 border-t border-gray-200">
-                              <button onClick={() => setEditingRuleId(null)} disabled={saving} className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-medium">Cancel</button>
-                              <button onClick={() => handleSaveEdit(rule)} disabled={saving} className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-2 text-sm font-medium">
+                              <button onClick={() => { setEditingRuleId(null); setJsonModeEdit(false); setJsonError(null); }} disabled={saving} className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-medium">Cancel</button>
+                              <button onClick={() => {
+                                if (jsonModeEdit) {
+                                  try {
+                                    const parsed = JSON.parse(jsonText) as RuleForm;
+                                    setJsonError(null);
+                                    handleSaveEdit(rule, { ...editForm, ...parsed });
+                                  } catch (e) {
+                                    setJsonError(e instanceof Error ? e.message : "Invalid JSON");
+                                  }
+                                } else {
+                                  handleSaveEdit(rule);
+                                }
+                              }} disabled={saving} className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-2 text-sm font-medium">
                                 {saving ? (<><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div><span>Saving...</span></>) : (<span>Save Changes</span>)}
                               </button>
                             </div>
