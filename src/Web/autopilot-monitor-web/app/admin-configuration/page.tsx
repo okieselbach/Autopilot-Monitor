@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ProtectedRoute } from "../../components/ProtectedRoute";
 import { useAuth } from "../../contexts/AuthContext";
@@ -139,51 +139,50 @@ export default function AdminConfigurationPage() {
   }, [galacticAdminMode]);
 
   // Fetch all tenant configurations + preview whitelist
-  useEffect(() => {
+  const fetchTenants = useCallback(async () => {
     if (!galacticAdminMode) return;
+    try {
+      setLoadingTenants(true);
 
-    const fetchTenants = async () => {
-      try {
-        setLoadingTenants(true);
-
-        const token = await getAccessToken();
-        if (!token) {
-          throw new Error('Failed to get access token');
-        }
-
-        const [tenantsRes, previewRes] = await Promise.all([
-          fetch(`${API_BASE_URL}/api/config/all`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-          }),
-          fetch(`${API_BASE_URL}/api/preview-whitelist`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-          })
-        ]);
-
-        if (!tenantsRes.ok) {
-          throw new Error(`Failed to load tenants: ${tenantsRes.statusText}`);
-        }
-
-        const data: TenantConfiguration[] = await tenantsRes.json();
-        setTenants(data);
-
-        if (previewRes.ok) {
-          const previewData = await previewRes.json();
-          const approvedIds = new Set<string>(
-            (previewData.tenants || []).map((t: { partitionKey: string }) => t.partitionKey)
-          );
-          setPreviewApproved(approvedIds);
-        }
-      } catch (err) {
-        console.error("Error fetching tenants:", err);
-        setError(err instanceof Error ? err.message : "Failed to load tenants");
-      } finally {
-        setLoadingTenants(false);
+      const token = await getAccessToken();
+      if (!token) {
+        throw new Error('Failed to get access token');
       }
-    };
 
-    fetchTenants();
+      const [tenantsRes, previewRes] = await Promise.all([
+        fetch(`${API_BASE_URL}/api/config/all`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        }),
+        fetch(`${API_BASE_URL}/api/preview-whitelist`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        })
+      ]);
+
+      if (!tenantsRes.ok) {
+        throw new Error(`Failed to load tenants: ${tenantsRes.statusText}`);
+      }
+
+      const data: TenantConfiguration[] = await tenantsRes.json();
+      setTenants(data);
+
+      if (previewRes.ok) {
+        const previewData = await previewRes.json();
+        const approvedIds = new Set<string>(
+          (previewData.tenants || []).map((t: { partitionKey: string }) => t.partitionKey)
+        );
+        setPreviewApproved(approvedIds);
+      }
+    } catch (err) {
+      console.error("Error fetching tenants:", err);
+      setError(err instanceof Error ? err.message : "Failed to load tenants");
+    } finally {
+      setLoadingTenants(false);
+    }
   }, [galacticAdminMode, getAccessToken]);
+
+  useEffect(() => {
+    fetchTenants();
+  }, [fetchTenants]);
 
   const handleTriggerMaintenance = async () => {
     try {
@@ -703,12 +702,24 @@ export default function AdminConfigurationPage() {
                       <p className="text-sm text-green-600 mt-1">View and manage all tenant configurations</p>
                     </div>
                   </div>
-                  <svg
-                    className={`w-5 h-5 text-green-700 transition-transform duration-200 ${tenantSectionExpanded ? 'rotate-180' : ''}`}
-                    fill="none" stroke="currentColor" viewBox="0 0 24 24"
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
+                  <div className="flex items-center space-x-2">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); fetchTenants(); }}
+                      disabled={loadingTenants}
+                      className="p-1.5 rounded-lg text-green-700 hover:bg-green-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      title="Refresh tenants"
+                    >
+                      <svg className={`w-4 h-4 ${loadingTenants ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                    </button>
+                    <svg
+                      className={`w-5 h-5 text-green-700 transition-transform duration-200 ${tenantSectionExpanded ? 'rotate-180' : ''}`}
+                      fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </div>
                 </div>
               </div>
               <div className="p-6">
