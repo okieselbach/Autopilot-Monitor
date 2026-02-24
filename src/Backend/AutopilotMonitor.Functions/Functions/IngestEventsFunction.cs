@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Linq;
 using System.Net;
 using System.Text;
 using AutopilotMonitor.Functions.Security;
@@ -309,35 +310,75 @@ namespace AutopilotMonitor.Functions.Functions
                 // Send SignalR notifications using Groups for multi-tenancy and cost optimization
                 // Include session data so frontend doesn't need to fetch it (cost optimization)
 
-                var messagePayload = new {
-                    sessionId = request.SessionId,
-                    tenantId = request.TenantId,
-                    eventCount = processedCount,
-                    session = updatedSession, // Include full session data
-                    newRuleResults = newRuleResults.Count > 0 ? newRuleResults : null
-                };
-
                 // 1. Summary notification for session list updates (tenant-specific only)
                 // Only sent to clients in the tenant group - prevents cross-tenant data leaks
                 // Galactic Admins only receive "newSession" events from RegisterSessionFunction,
                 // not every event batch, to avoid flooding them with updates
+                // Note: newRuleResults intentionally omitted - list views don't use them
                 var summaryMessage = new SignalRMessageAction("newevents")
                 {
                     GroupName = $"tenant-{request.TenantId}",
-                    Arguments = new[] { messagePayload }
+                    Arguments = new object[] { new {
+                        sessionId = request.SessionId,
+                        tenantId = request.TenantId,
+                        eventCount = processedCount,
+                        // Send only mutable fields as delta update (static fields like
+                        // serialNumber, deviceName, manufacturer, model, startedAt,
+                        // enrollmentType never change after registration)
+                        sessionUpdate = new {
+                            updatedSession.CurrentPhase,
+                            updatedSession.CurrentPhaseDetail,
+                            updatedSession.Status,
+                            updatedSession.FailureReason,
+                            updatedSession.EventCount,
+                            updatedSession.DurationSeconds,
+                            updatedSession.CompletedAt,
+                            updatedSession.DiagnosticsBlobName
+                        }
+                    } }
                 };
 
                 // 2. Detailed events for real-time event streaming on detail pages (session-specific)
                 // Only sent to clients viewing this specific session - massive cost savings
+                // Strip redundant sessionId/tenantId from individual events and rule results
+                var slimEvents = storedEvents.Select(e => new {
+                    e.EventId,
+                    e.Timestamp,
+                    e.EventType,
+                    severity = e.SeverityString,
+                    e.Source,
+                    phase = e.PhaseNumber,
+                    phaseName = e.PhaseName,
+                    e.Message,
+                    e.Data,
+                    e.Sequence
+                }).ToList();
+
+                var slimRuleResults = newRuleResults.Count > 0
+                    ? newRuleResults.Select(r => new {
+                        r.ResultId,
+                        r.RuleId,
+                        r.RuleTitle,
+                        r.Severity,
+                        r.Category,
+                        r.ConfidenceScore,
+                        r.Explanation,
+                        r.Remediation,
+                        r.RelatedDocs,
+                        r.MatchedConditions,
+                        r.DetectedAt
+                    }).ToList<object>()
+                    : null;
+
                 var eventsMessage = new SignalRMessageAction("eventStream")
                 {
                     GroupName = $"session-{request.TenantId}-{request.SessionId}",
                     Arguments = new object[] { new {
                         sessionId = request.SessionId,
                         tenantId = request.TenantId,
-                        events = storedEvents,
-                        session = updatedSession, // Include full session data
-                        newRuleResults = newRuleResults.Count > 0 ? newRuleResults : null
+                        events = slimEvents,
+                        session = updatedSession,
+                        newRuleResults = slimRuleResults
                     } }
                 };
 

@@ -143,9 +143,9 @@ export default function DiagnosisPage() {
         });
       }
     };
-    on("eventstream", handleEventStream);
+    on("eventStream", handleEventStream);
     return () => {
-      off("eventstream", handleEventStream);
+      off("eventStream", handleEventStream);
     };
   }, [on, off]);
 

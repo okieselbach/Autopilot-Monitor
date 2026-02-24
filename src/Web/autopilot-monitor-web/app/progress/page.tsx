@@ -100,15 +100,18 @@ export default function ProgressPortalPage() {
 
   // Listen for real-time session updates
   useEffect(() => {
-    const handleNewEvents = (data: { session: Session; events?: EnrollmentEvent[] }) => {
+    const handleNewEvents = (data: { sessionId: string; sessionUpdate?: Partial<Session>; session?: Session; events?: EnrollmentEvent[] }) => {
       console.log('[Progress] Received newevents:', data);
       if (
-        data.session &&
         sessionRef.current &&
-        data.session.sessionId === sessionRef.current.sessionId
+        data.sessionId === sessionRef.current.sessionId
       ) {
-        console.log('[Progress] Updating session from newevents');
-        setSession(data.session);
+        // Merge delta update into existing session
+        const update = data.sessionUpdate || data.session;
+        if (update) {
+          console.log('[Progress] Updating session from newevents');
+          setSession(prev => prev ? { ...prev, ...update } : prev);
+        }
 
         // Add new events to the events list
         if (data.events && data.events.length > 0) {

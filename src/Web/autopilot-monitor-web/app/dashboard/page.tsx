@@ -246,23 +246,21 @@ export default function Home() {
       }
     };
 
-    const handleNewEvents = (data: { sessionId: string; tenantId: string; eventCount: number; session: Session }) => {
+    const handleNewEvents = (data: { sessionId: string; tenantId: string; eventCount: number; sessionUpdate?: Partial<Session>; session?: Session }) => {
       console.log('New events notification received on home page', data);
 
-      // Update the session in the list directly from SignalR data (no HTTP request needed!)
-      if (data.session) {
+      // Merge delta update into existing session (sessionUpdate contains only changed fields)
+      // Falls back to full session replacement if sessionUpdate is not present
+      const update = data.sessionUpdate || data.session;
+      if (update) {
         setSessions(prevSessions => {
-          const sessionIndex = prevSessions.findIndex(s => s.sessionId === data.session.sessionId);
+          const sessionIndex = prevSessions.findIndex(s => s.sessionId === data.sessionId);
           if (sessionIndex >= 0) {
-            // Update existing session
             const updated = [...prevSessions];
-            updated[sessionIndex] = data.session;
+            updated[sessionIndex] = { ...prevSessions[sessionIndex], ...update };
             return updated;
-          } else {
-            // Session not in list yet - this can happen if we missed the newSession event
-            // Add it to the list anyway
-            return [data.session, ...prevSessions];
           }
+          return prevSessions;
         });
       }
     };

@@ -230,20 +230,21 @@ export default function SessionDetailPage() {
     };
 
     // Also listen for summary updates to update session details
-    const handleNewEvents = (data: { sessionId: string; tenantId: string; eventCount: number; session: Session }) => {
+    const handleNewEvents = (data: { sessionId: string; tenantId: string; eventCount: number; sessionUpdate?: Partial<Session>; session?: Session }) => {
       if (data.sessionId === sessionIdRef.current) {
-        // Update session details directly from SignalR (no HTTP request needed!)
-        if (data.session) {
-          setSession(data.session);
+        // Merge delta update into existing session (no HTTP request needed!)
+        const update = data.sessionUpdate || data.session;
+        if (update) {
+          setSession(prev => prev ? { ...prev, ...update } : prev);
         }
       }
     };
 
-    on('eventstream', handleEventStream);
+    on('eventStream', handleEventStream);
     on('newevents', handleNewEvents);
 
     return () => {
-      off('eventstream', handleEventStream);
+      off('eventStream', handleEventStream);
       off('newevents', handleNewEvents);
       if (refreshTimeoutRef.current) {
         clearTimeout(refreshTimeoutRef.current);

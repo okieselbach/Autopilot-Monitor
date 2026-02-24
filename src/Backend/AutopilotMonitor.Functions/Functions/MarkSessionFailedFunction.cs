@@ -83,20 +83,27 @@ namespace AutopilotMonitor.Functions.Functions
                         message = $"Session {sessionId} marked as failed"
                     });
 
-                    var messagePayload = new {
-                        sessionId = sessionId,
-                        tenantId = tenantId,
-                        eventCount = 0,
-                        session = updatedSession
-                    };
-
                     // Send SignalR notification to update all clients in the tenant
                     // Only sent to tenant-specific group (not galactic-admins) to avoid flooding
                     // Galactic Admins can refresh or view session details to see status changes
                     var tenantMessage = new SignalRMessageAction("newevents")
                     {
                         GroupName = $"tenant-{tenantId}",
-                        Arguments = new[] { messagePayload }
+                        Arguments = new object[] { new {
+                            sessionId = sessionId,
+                            tenantId = tenantId,
+                            eventCount = 0,
+                            sessionUpdate = new {
+                                updatedSession.CurrentPhase,
+                                updatedSession.CurrentPhaseDetail,
+                                updatedSession.Status,
+                                updatedSession.FailureReason,
+                                updatedSession.EventCount,
+                                updatedSession.DurationSeconds,
+                                updatedSession.CompletedAt,
+                                updatedSession.DiagnosticsBlobName
+                            }
+                        } }
                     };
 
                     return new MarkSessionFailedOutput

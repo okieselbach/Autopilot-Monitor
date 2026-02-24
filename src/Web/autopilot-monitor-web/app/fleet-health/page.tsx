@@ -109,18 +109,19 @@ export default function FleetHealthPage() {
         });
       }
     };
-    const handleNewEvents = (data: { session: Session }) => {
-      if (data.session) {
+    const handleNewEvents = (data: { sessionId: string; sessionUpdate?: Partial<Session>; session?: Session }) => {
+      const update = data.sessionUpdate || data.session;
+      if (update) {
         setSessions((prev) => {
           const idx = prev.findIndex(
-            (s) => s.sessionId === data.session.sessionId
+            (s) => s.sessionId === data.sessionId
           );
           if (idx >= 0) {
             const updated = [...prev];
-            updated[idx] = data.session;
+            updated[idx] = { ...prev[idx], ...update };
             return updated;
           }
-          return [data.session, ...prev];
+          return prev;
         });
       }
     };
