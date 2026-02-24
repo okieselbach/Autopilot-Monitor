@@ -123,7 +123,7 @@ export default function Navbar() {
   // Regular users (non-TenantAdmin): show minimal navbar with only Progress Portal
   if (!isTenantAdmin && !user?.isGalacticAdmin) {
     return (
-      <nav className="bg-white border-b border-gray-200 shadow-sm">
+      <nav className="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-30">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-14">
             <div className="flex items-center">
@@ -184,7 +184,7 @@ export default function Navbar() {
   }
 
   return (
-    <nav className="bg-white border-b border-gray-200 shadow-sm">
+    <nav className="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-30">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between h-14">
           {/* Logo and Title */}
