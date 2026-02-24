@@ -161,6 +161,9 @@ namespace AutopilotMonitor.Functions.Services
                 case "app_install_duration":
                     return EvaluateAppInstallDurationCondition(condition, events);
 
+                case "app_state_regression":
+                    return EvaluateAppStateRegressionCondition(condition, events);
+
                 default:
                     return (false, "unknown source");
             }
@@ -511,6 +514,72 @@ namespace AutopilotMonitor.Functions.Services
             }
 
             return (false, "no app install duration matched");
+        }
+
+        /// <summary>
+        /// Detects apps that regressed: first seen as app_install_completed, then as app_install_failed,
+        /// correlated by appId. Optionally filters the failed event by a DataField/Operator/Value condition.
+        /// Returns evidence with appId, appName, and both event details.
+        /// </summary>
+        private (bool matched, object evidence) EvaluateAppStateRegressionCondition(RuleCondition condition, List<EnrollmentEvent> events)
+        {
+            var sortedEvents = events.OrderBy(e => e.Timestamp).ThenBy(e => e.Sequence).ToList();
+
+            var completedEvents = sortedEvents
+                .Where(e => string.Equals(e.EventType, "app_install_completed", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            var failedEvents = sortedEvents
+                .Where(e => string.Equals(e.EventType, "app_install_failed", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            if (!completedEvents.Any() || !failedEvents.Any())
+                return (false, "no completed/failed event pair found");
+
+            foreach (var failedEvent in failedEvents)
+            {
+                // Apply optional DataField filter on the failed event
+                if (!string.IsNullOrEmpty(condition.DataField) && !string.IsNullOrEmpty(condition.Operator))
+                {
+                    var fieldValue = GetDataFieldValue(failedEvent, condition.DataField);
+                    if (fieldValue == null || !MatchesOperator(fieldValue, condition.Operator, condition.Value ?? ""))
+                        continue;
+                }
+
+                var failedAppId = GetDataFieldValue(failedEvent, "appId");
+                var failedAppName = GetDataFieldValue(failedEvent, "appName");
+                var appKey = !string.IsNullOrWhiteSpace(failedAppId) ? failedAppId : failedAppName;
+
+                if (string.IsNullOrWhiteSpace(appKey))
+                    continue;
+
+                // Find a completed event for the same app that occurred before the failed event
+                var matchingCompleted = completedEvents.LastOrDefault(c =>
+                    c.Timestamp <= failedEvent.Timestamp &&
+                    string.Equals(
+                        GetDataFieldValue(c, "appId") ?? GetDataFieldValue(c, "appName"),
+                        appKey,
+                        StringComparison.OrdinalIgnoreCase));
+
+                if (matchingCompleted == null)
+                    continue;
+
+                return (true, new Dictionary<string, object>
+                {
+                    ["appId"] = failedAppId ?? string.Empty,
+                    ["appName"] = failedAppName ?? appKey,
+                    ["completedEventId"] = matchingCompleted.EventId ?? string.Empty,
+                    ["completedSequence"] = matchingCompleted.Sequence,
+                    ["completedTimestamp"] = matchingCompleted.Timestamp,
+                    ["failedEventId"] = failedEvent.EventId ?? string.Empty,
+                    ["failedSequence"] = failedEvent.Sequence,
+                    ["failedTimestamp"] = failedEvent.Timestamp,
+                    ["errorPatternId"] = GetDataFieldValue(failedEvent, "errorPatternId") ?? string.Empty,
+                    ["errorDetail"] = GetDataFieldValue(failedEvent, "errorDetail") ?? failedEvent.Message ?? string.Empty
+                });
+            }
+
+            return (false, "no app found with completed-then-failed regression");
         }
     }
 }

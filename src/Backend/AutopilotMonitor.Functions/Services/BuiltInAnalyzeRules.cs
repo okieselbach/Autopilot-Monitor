@@ -568,51 +568,66 @@ namespace AutopilotMonitor.Functions.Services
 
         /// <summary>
         /// Detects when an app was initially reported as successfully installed but then
-        /// transitioned back to an error state (IME-ERROR-REPORT), while enrollment completed successfully.
+        /// transitioned back to an error state (IME-ERROR-REPORT), correlated by appId.
+        /// Uses the app_state_regression source which matches the exact same app across both events.
         /// This is a silent failure that can leave apps broken post-enrollment.
         /// </summary>
         private static AnalyzeRule CreateAppPostSuccessFailureRule() => new AnalyzeRule
         {
             RuleId = "ANALYZE-APP-010",
             Title = "App Reverted to Error After Successful Install",
-            Description = "Detects when an app was marked as successfully installed but subsequently reported an error state, even though enrollment completed successfully. The app may be broken post-enrollment.",
+            Description = "Detects when a specific app (matched by appId) was first reported as successfully installed but subsequently reported an IME enforcement error — while enrollment completed successfully. The app may be broken post-enrollment.",
             Severity = "warning",
             Category = "apps",
             Trigger = "correlation",
-            BaseConfidence = 65,
+            BaseConfidence = 75,
             Conditions = new List<RuleCondition>
             {
-                new RuleCondition { Signal = "app_initially_succeeded", Source = "event_type", EventType = "app_install_completed", Operator = "exists", Value = "", Required = true },
-                new RuleCondition { Signal = "app_post_success_failure", Source = "event_type", EventType = "app_install_failed", DataField = "errorPatternId", Operator = "equals", Value = "IME-ERROR-REPORT", Required = true },
-                new RuleCondition { Signal = "enrollment_succeeded", Source = "event_type", EventType = "enrollment_complete", Operator = "exists", Value = "", Required = true }
+                // Single condition: finds apps where completed -> failed regression exists for the same appId,
+                // and the failed event has errorPatternId = IME-ERROR-REPORT
+                new RuleCondition
+                {
+                    Signal = "app_regression",
+                    Source = "app_state_regression",
+                    DataField = "errorPatternId",
+                    Operator = "equals",
+                    Value = "IME-ERROR-REPORT",
+                    Required = true
+                },
+                new RuleCondition
+                {
+                    Signal = "enrollment_succeeded",
+                    Source = "event_type",
+                    EventType = "enrollment_complete",
+                    Operator = "exists",
+                    Value = "",
+                    Required = true
+                }
             },
-            ConfidenceFactors = new List<ConfidenceFactor>
-            {
-                new ConfidenceFactor { Signal = "enforcement_state_changed", Condition = "exists", Weight = 20 },
-                new ConfidenceFactor { Signal = "error_code_present", Condition = "exists", Weight = 10 }
-            },
-            ConfidenceThreshold = 60,
-            Explanation = @"An app was initially reported as **successfully installed** (`app_install_completed`) but then transitioned back to an **Error** state via an `IME-ERROR-REPORT` event — while the overall enrollment completed successfully.
+            ConfidenceThreshold = 70,
+            Explanation = @"An app was initially reported as **successfully installed** (`app_install_completed`) but the IME (Intune Management Extension) subsequently reported an **Error** state for the same app via an `IME-ERROR-REPORT` event — while the overall enrollment completed successfully.
 
-This pattern typically occurs when:
-- The IME (Intune Management Extension) re-evaluates enforcement state after the initial install report and detects a failure (e.g., `EnforcementState` changed from `Success` → `Error`)
-- A post-install detection check fails, causing the enforcement error code to be updated (e.g., error `-2016345060`)
-- The app may appear installed in the ESP but is actually in a broken or partially-deployed state on the device
+This pattern occurs when the IME re-evaluates enforcement state after the initial install report and detects a failure, e.g. `EnforcementState` transitions from `Success` → `Error`. The affected app and its details are captured in the matched evidence.
+
+Common causes:
+- A post-install detection check fails (detection rule mismatch)
+- The enforcement error code `-2016345060` (0x87D13B9C) indicates the app state diverged from expected
+- The app may appear installed in the ESP summary but is in an error state on the device
 
 **The enrollment succeeded, but the affected app requires attention.**",
             Remediation = new List<RemediationStep>
             {
                 new RemediationStep
                 {
-                    Title = "Investigate the app's post-install state",
+                    Title = "Investigate the app's post-install enforcement state",
                     Steps = new List<string>
                     {
-                        "Check the Intune portal: Device > Apps — look for the app and confirm its current enforcement state",
+                        "Note the appId and appName from the rule finding — these identify the exact affected app",
+                        "Check the Intune portal: Devices > [Device] > Apps — confirm the current enforcement state of the app",
                         "Review IME logs on the device: C:\\ProgramData\\Microsoft\\IntuneManagementExtension\\Logs\\IntuneManagementExtension.log",
-                        "Search the log for the appId or appName and look for 'EnforcementState' transitions near the enrollment time",
-                        "Check the EnforcementErrorCode — error -2016345060 (0x87D13B9C) typically indicates a detection failure after install",
-                        "Verify the app's detection rule in Intune is correct and matches the installed state",
-                        "Trigger a manual sync on the device (Company Portal or Settings > Accounts > Access work or school > Sync) to force re-evaluation"
+                        "Search the log for the appId and look for 'EnforcementState' transitions (Success → Error) near the enrollment time",
+                        "Error -2016345060 (0x87D13B9C) typically indicates a detection failure after install — verify the app's detection rule in Intune",
+                        "Trigger a manual sync (Company Portal or Settings > Accounts > Access work or school > Sync) to force re-evaluation"
                     }
                 },
                 new RemediationStep
@@ -620,7 +635,7 @@ This pattern typically occurs when:
                     Title = "Fix detection or installation issues",
                     Steps = new List<string>
                     {
-                        "If detection fails: correct the detection rule (file path, registry key, or script) in the Intune app configuration",
+                        "If detection fails: correct the detection rule (file path, registry key, or PowerShell script) in the Intune app configuration",
                         "If the app itself is broken: redeploy or reassign the app to trigger a fresh install",
                         "Consider adding a post-install validation script to catch this scenario proactively"
                     }
