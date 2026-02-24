@@ -862,7 +862,6 @@ export default function AdminConfigurationPage() {
                           <span className="font-semibold">{totalCount}</span>
                           {' '}Tenant(s) sind Ready
                         </span>
-                        <span className="text-xs text-gray-400">(ValidateAutopilotDevice aktiviert)</span>
                       </div>
                     )}
                   </div>

@@ -64,7 +64,8 @@ function SectionPrivatePreview() {
           organization has not yet been granted access, you will see a <strong>Private Preview</strong> screen
           (see below) confirming that your tenant has been placed on the waitlist. Once you are on the waitlist,
           reach out via LinkedIn or open a GitHub issue to request activation — your tenant is then enabled manually
-          in the backend.
+          in the backend. I'll check incoming requests regularly and approve them as quickly as possible, depending 
+          on my capacity. When you signed-up, sign in again later to view the updated approval status on your dashboard.
         </p>
         <div className="flex flex-wrap gap-3 mb-6">
           <a
