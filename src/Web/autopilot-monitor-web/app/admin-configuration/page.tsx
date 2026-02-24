@@ -859,15 +859,15 @@ export default function AdminConfigurationPage() {
                       <div className="pt-3 border-t border-green-200 flex items-center justify-between gap-4 text-sm text-gray-600 flex-wrap">
                         <span>
                           <span className="font-semibold text-blue-700">{readyCount}</span>
-                          {' '}von{' '}
+                          {' '}of{' '}
                           <span className="font-semibold">{totalCount}</span>
-                          {' '}Tenant(s) sind Ready
+                          {' '}Tenant(s) are Ready
                         </span>
                         <span>
                           <span className="font-semibold text-amber-600">{waitlistCount}</span>
-                          {' '}von{' '}
+                          {' '}of{' '}
                           <span className="font-semibold">{totalCount}</span>
-                          {' '}Tenant(s) auf Waitlist
+                          {' '}Tenant(s) are on the Waitlist
                         </span>
                       </div>
                     )}

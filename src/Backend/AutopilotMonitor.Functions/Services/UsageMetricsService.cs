@@ -199,6 +199,7 @@ namespace AutopilotMonitor.Functions.Services
                     TotalEnrollments = platformStats.TotalEnrollments,
                     TotalUsers = platformStats.TotalUsers,
                     TotalTenants = platformStats.TotalTenants,
+                    TotalSignedUpTenants = platformStats.TotalSignedUpTenants,
                     UniqueDeviceModels = platformStats.UniqueDeviceModels,
                     TotalEventsProcessed = platformStats.TotalEventsProcessed,
                     SuccessfulEnrollments = platformStats.SuccessfulEnrollments,

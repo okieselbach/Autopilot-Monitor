@@ -56,6 +56,7 @@ namespace AutopilotMonitor.Functions.Functions
                         totalEnrollments = stats.TotalEnrollments,
                         totalUsers = stats.TotalUsers,
                         totalTenants = stats.TotalTenants,
+                        totalSignedUpTenants = stats.TotalSignedUpTenants,
                         uniqueDeviceModels = stats.UniqueDeviceModels,
                         totalEventsProcessed = stats.TotalEventsProcessed,
                         successfulEnrollments = stats.SuccessfulEnrollments,
