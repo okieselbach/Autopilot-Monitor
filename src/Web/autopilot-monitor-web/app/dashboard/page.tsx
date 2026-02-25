@@ -145,11 +145,15 @@ export default function Home() {
     fetchTenantSecurityConfig();
   }, [tenantId, user]);
 
-  // Initial data fetch (only runs for admins)
+  // Initial data fetch (only runs for admins).
+  // Wait for a real tenantId — TenantContext starts with the 'deadbeef' placeholder
+  // and updates asynchronously once AuthContext finishes loading the user token.
+  const DEFAULT_TENANT_ID = 'deadbeef-dead-beef-dead-beefdeadbeef';
   useEffect(() => {
     if (user && !user.isTenantAdmin && !user.isGalacticAdmin) {
       return; // regular users are being redirected, don't fetch
     }
+    if (!galacticAdminMode && tenantId === DEFAULT_TENANT_ID) return; // wait for real tenant ID
     // Prevent duplicate fetches in React StrictMode (development double-mounting)
     if (hasInitialFetch.current) {
       return;
@@ -159,7 +163,7 @@ export default function Home() {
     // Only fetch sessions on load, no automatic health check
     fetchSessions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]); // re-run once user is known
+  }, [user, tenantId, galacticAdminMode]); // re-run once user and tenantId are known
 
   // Join tenant group when SignalR is connected (for multi-tenancy)
   useEffect(() => {

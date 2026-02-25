@@ -123,9 +123,13 @@ export default function SessionDetailPage() {
   const { tenantId } = useTenant();
   const { getAccessToken, user } = useAuth();
 
-  // Initial data fetch
+  // Initial data fetch — wait for a real tenantId before calling the backend.
+  // tenantId starts as the 'deadbeef' default until AuthContext finishes loading
+  // and TenantContext copies the real ID from the user token.
+  const DEFAULT_TENANT_ID = 'deadbeef-dead-beef-dead-beefdeadbeef';
   useEffect(() => {
     if (!sessionId) return;
+    if (!galacticAdminMode && tenantId === DEFAULT_TENANT_ID) return; // wait for real tenant ID
 
     // Update sessionIdRef
     sessionIdRef.current = sessionId;
@@ -143,7 +147,7 @@ export default function SessionDetailPage() {
 
     fetchSessionDetails();
     // fetchEvents will be called after sessionTenantId is set
-  }, [sessionId]);
+  }, [sessionId, tenantId, galacticAdminMode]);
 
   // Fetch events and analysis when we have the session's tenant ID
   useEffect(() => {
