@@ -24,6 +24,6 @@ export default function robots(): MetadataRoute.Robots {
         ],
       },
     ],
-    sitemap: "https://autopilotmonitor.com/sitemap.xml",
+    sitemap: "https://www.autopilotmonitor.com/sitemap.xml",
   };
 }
