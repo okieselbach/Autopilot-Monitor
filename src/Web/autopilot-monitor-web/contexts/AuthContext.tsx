@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { PublicClientApplication, AccountInfo, InteractionStatus } from '@azure/msal-browser';
 import { MsalProvider, useMsal, useIsAuthenticated } from '@azure/msal-react';
 import { msalConfig, loginRequest, apiRequest } from '@/lib/msalConfig';
@@ -49,6 +49,7 @@ function AuthProviderInternal({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useIsAuthenticated();
   const [user, setUser] = useState<UserInfo | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const isLoadingRef = useRef(true);
   const [isPreviewBlocked, setPreviewBlocked] = useState(false);
   const [previewMessage, setPreviewMessage] = useState('');
 
@@ -152,6 +153,7 @@ function AuthProviderInternal({ children }: { children: React.ReactNode }) {
         } else {
           setUser(null);
         }
+        isLoadingRef.current = false;
         setIsLoading(false);
       }
     };
@@ -160,14 +162,15 @@ function AuthProviderInternal({ children }: { children: React.ReactNode }) {
 
     // Fallback: if MSAL doesn't initialize within 3 seconds, set loading to false anyway
     const timeout = setTimeout(() => {
-      if (isLoading) {
+      if (isLoadingRef.current) {
         console.warn('[Auth] MSAL initialization timeout - setting isLoading to false');
+        isLoadingRef.current = false;
         setIsLoading(false);
       }
     }, 3000);
 
     return () => clearTimeout(timeout);
-  }, [accounts, inProgress, fetchUserInfo, isLoading]);
+  }, [accounts, inProgress, fetchUserInfo]);
 
   /**
    * Initiates login flow
