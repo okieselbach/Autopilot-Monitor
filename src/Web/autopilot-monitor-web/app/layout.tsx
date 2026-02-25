@@ -11,7 +11,7 @@ import Navbar from "../components/Navbar";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://autopilotmonitor.com"),
+  metadataBase: new URL("https://www.autopilotmonitor.com"),
   title: {
     absolute: "Autopilot Monitor – Real-Time Windows Enrollment Monitoring",
     default: "Autopilot Monitor",
@@ -40,7 +40,7 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     locale: "en_US",
-    url: "https://autopilotmonitor.com",
+    url: "https://www.autopilotmonitor.com",
     siteName: "Autopilot Monitor",
     title: "Autopilot Monitor – Real-Time Windows Enrollment Monitoring",
     description:
@@ -53,7 +53,10 @@ export const metadata: Metadata = {
       "Real-time monitoring and troubleshooting for Windows Autopilot deployments. Track every enrollment phase, detect issues automatically, and resolve failures faster.",
   },
   alternates: {
-    canonical: "https://autopilotmonitor.com",
+    canonical: "https://www.autopilotmonitor.com",
+  },
+  verification: {
+    google: "qqIx6VoSjaNL-Idu78il6i3n76_ax9OUT44saxaGyac",
   },
   robots: {
     index: true,
@@ -88,7 +91,7 @@ const jsonLd = {
     name: "Oliver Kieselbach",
     url: "https://www.linkedin.com/in/oliver-kieselbach/",
   },
-  url: "https://autopilotmonitor.com",
+  url: "https://www.autopilotmonitor.com",
   codeRepository: "https://github.com/okieselbach/Autopilot-Monitor",
   keywords:
     "Windows Autopilot, Intune, enrollment monitoring, autopilot troubleshooting, Windows deployment",
