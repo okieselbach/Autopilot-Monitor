@@ -146,14 +146,13 @@ export default function Home() {
   }, [tenantId, user]);
 
   // Initial data fetch (only runs for admins).
-  // Wait for a real tenantId — TenantContext starts with the 'deadbeef' placeholder
-  // and updates asynchronously once AuthContext finishes loading the user token.
-  const DEFAULT_TENANT_ID = 'deadbeef-dead-beef-dead-beefdeadbeef';
+  // Wait for a real tenantId before fetching — TenantContext initializes to '' and
+  // updates asynchronously once AuthContext finishes loading the user token.
   useEffect(() => {
     if (user && !user.isTenantAdmin && !user.isGalacticAdmin) {
       return; // regular users are being redirected, don't fetch
     }
-    if (!galacticAdminMode && tenantId === DEFAULT_TENANT_ID) return; // wait for real tenant ID
+    if (!galacticAdminMode && !tenantId) return; // wait for real tenant ID
     // Prevent duplicate fetches in React StrictMode (development double-mounting)
     if (hasInitialFetch.current) {
       return;

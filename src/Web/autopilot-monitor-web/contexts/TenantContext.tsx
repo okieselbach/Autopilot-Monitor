@@ -10,17 +10,18 @@ interface TenantContextType {
 
 const TenantContext = createContext<TenantContextType | undefined>(undefined);
 
-const DEFAULT_TENANT_ID = 'deadbeef-dead-beef-dead-beefdeadbeef';
+const LEGACY_FAKE_TENANT_ID = 'deadbeef-dead-beef-dead-beefdeadbeef';
 
 export function TenantProvider({ children }: { children: React.ReactNode }) {
   const { user, isAuthenticated, isLoading } = useAuth();
 
   const [tenantId, setTenantId] = useState<string>(() => {
-    // Initial: aus localStorage oder Default
     if (typeof window !== 'undefined') {
-      return localStorage.getItem('tenantId') || DEFAULT_TENANT_ID;
+      const stored = localStorage.getItem('tenantId');
+      // Migrate away from the old fake placeholder ID
+      return (stored && stored !== LEGACY_FAKE_TENANT_ID) ? stored : '';
     }
-    return DEFAULT_TENANT_ID;
+    return '';
   });
 
   // Update tenant ID from authenticated user
@@ -33,10 +34,10 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
         setTenantId(user.tenantId);
       }
     } else if (!isLoading && !isAuthenticated) {
-      // Not authenticated - use default
-      if (tenantId !== DEFAULT_TENANT_ID) {
-        console.log(`[TenantContext] User not authenticated, using default tenant ID`);
-        setTenantId(DEFAULT_TENANT_ID);
+      // Not authenticated - clear tenant ID
+      if (tenantId !== '') {
+        console.log(`[TenantContext] User not authenticated, clearing tenant ID`);
+        setTenantId('');
       }
     }
   }, [user, isAuthenticated, isLoading, tenantId]);

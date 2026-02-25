@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useSignalR } from "../../../contexts/SignalRContext";
 import { useTenant } from "../../../contexts/TenantContext";
 import { useAuth } from "../../../contexts/AuthContext";
+import { useNotifications } from "../../../contexts/NotificationContext";
 import { ProtectedRoute } from '../../../components/ProtectedRoute';
 import PerformanceChart from '../../../components/PerformanceChart';
 import DownloadProgress from '../../../components/DownloadProgress';
@@ -122,14 +123,13 @@ export default function SessionDetailPage() {
   const { on, off, isConnected, joinGroup, leaveGroup } = useSignalR();
   const { tenantId } = useTenant();
   const { getAccessToken, user } = useAuth();
+  const { addNotification } = useNotifications();
 
   // Initial data fetch — wait for a real tenantId before calling the backend.
-  // tenantId starts as the 'deadbeef' default until AuthContext finishes loading
-  // and TenantContext copies the real ID from the user token.
-  const DEFAULT_TENANT_ID = 'deadbeef-dead-beef-dead-beefdeadbeef';
+  // TenantContext initializes to '' and updates once AuthContext finishes loading.
   useEffect(() => {
     if (!sessionId) return;
-    if (!galacticAdminMode && tenantId === DEFAULT_TENANT_ID) return; // wait for real tenant ID
+    if (!galacticAdminMode && !tenantId) return; // wait for real tenant ID
 
     // Update sessionIdRef
     sessionIdRef.current = sessionId;
@@ -269,7 +269,7 @@ export default function SessionDetailPage() {
       const token = await getAccessToken();
 
       if (!token) {
-        console.error('Failed to get access token for session details');
+        addNotification('error', 'Authentication Error', 'Failed to get access token. Please try logging in again.', 'session-detail-auth-error');
         return;
       }
       const response = await fetch(endpoint, {
@@ -285,9 +285,12 @@ export default function SessionDetailPage() {
           // Store the session's tenant ID for subsequent requests
           setSessionTenantId(foundSession.tenantId);
         }
+      } else {
+        addNotification('error', 'Backend Error', `Failed to load session details: ${response.statusText}`, 'session-detail-fetch-error');
       }
     } catch (error) {
       console.error("Failed to fetch session details:", error);
+      addNotification('error', 'Backend Not Reachable', 'Unable to load session details. Please check your connection.', 'session-detail-fetch-error');
     }
   };
 
@@ -300,7 +303,7 @@ export default function SessionDetailPage() {
       const token = await getAccessToken();
 
       if (!token) {
-        console.error('Failed to get access token for events');
+        addNotification('error', 'Authentication Error', 'Failed to get access token. Please try logging in again.', 'session-events-auth-error');
         setLoading(false);
         return;
       }
@@ -326,9 +329,12 @@ export default function SessionDetailPage() {
           if (newEvents.length === 0) return prevEvents;
           return [...prevEvents, ...newEvents].sort((a: EnrollmentEvent, b: EnrollmentEvent) => a.sequence - b.sequence);
         });
+      } else {
+        addNotification('error', 'Backend Error', `Failed to load session events: ${response.statusText}`, 'session-events-fetch-error');
       }
     } catch (error) {
       console.error("Failed to fetch events:", error);
+      addNotification('error', 'Backend Not Reachable', 'Unable to load session events. Please check your connection.', 'session-events-fetch-error');
     } finally {
       setLoading(false);
     }

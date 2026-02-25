@@ -6,6 +6,7 @@ import { ProtectedRoute } from "../../components/ProtectedRoute";
 import { useSignalR } from "../../contexts/SignalRContext";
 import { useTenant } from "../../contexts/TenantContext";
 import { useAuth } from "../../contexts/AuthContext";
+import { useNotifications } from "../../contexts/NotificationContext";
 import { API_BASE_URL } from "@/lib/config";
 
 interface Session {
@@ -57,6 +58,7 @@ export default function FleetHealthPage() {
   const { on, off, isConnected, joinGroup, leaveGroup } = useSignalR();
   const { tenantId } = useTenant();
   const { getAccessToken } = useAuth();
+  const { addNotification } = useNotifications();
 
   const [galacticAdminMode] = useState(() => {
     if (typeof window !== "undefined") {
@@ -66,11 +68,12 @@ export default function FleetHealthPage() {
   });
 
   useEffect(() => {
+    if (!galacticAdminMode && !tenantId) return; // wait for real tenant ID
     if (hasInitialFetch.current) return;
     hasInitialFetch.current = true;
     fetchSessions();
     fetchAppMetrics(timeRange);
-  }, []);
+  }, [tenantId, galacticAdminMode]);
 
   useEffect(() => {
     if (isTimeRangeMount.current) {
@@ -139,16 +142,22 @@ export default function FleetHealthPage() {
         ? `${API_BASE_URL}/api/galactic/sessions`
         : `${API_BASE_URL}/api/sessions?tenantId=${tenantId}`;
       const token = await getAccessToken();
-      if (!token) return;
+      if (!token) {
+        addNotification('error', 'Authentication Error', 'Failed to get access token. Please try logging in again.', 'fleet-health-auth-error');
+        return;
+      }
       const response = await fetch(endpoint, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (response.ok) {
         const data = await response.json();
         setSessions(data.sessions || []);
+      } else {
+        addNotification('error', 'Backend Error', `Failed to load sessions: ${response.statusText}`, 'fleet-health-sessions-error');
       }
     } catch (error) {
       console.error("Failed to fetch sessions:", error);
+      addNotification('error', 'Backend Not Reachable', 'Unable to load fleet health data. Please check your connection.', 'fleet-health-sessions-error');
     } finally {
       setLoading(false);
     }
@@ -166,9 +175,12 @@ export default function FleetHealthPage() {
       if (response.ok) {
         const data = await response.json();
         setAppMetrics(data);
+      } else {
+        addNotification('error', 'Backend Error', `Failed to load app metrics: ${response.statusText}`, 'fleet-health-metrics-error');
       }
     } catch (error) {
       console.error("Failed to fetch app metrics:", error);
+      addNotification('error', 'Backend Not Reachable', 'Unable to load app metrics. Please check your connection.', 'fleet-health-metrics-error');
     }
   };
 

@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useSignalR } from "../../../contexts/SignalRContext";
 import { useTenant } from "../../../contexts/TenantContext";
 import { useAuth } from "../../../contexts/AuthContext";
+import { useNotifications } from "../../../contexts/NotificationContext";
 import { ProtectedRoute } from "../../../components/ProtectedRoute";
 import { API_BASE_URL } from "@/lib/config";
 
@@ -72,6 +73,7 @@ export default function DiagnosisPage() {
   const { on, off, isConnected, joinGroup, leaveGroup } = useSignalR();
   const { tenantId } = useTenant();
   const { getAccessToken } = useAuth();
+  const { addNotification } = useNotifications();
 
   const [galacticAdminMode] = useState(() => {
     if (typeof window !== "undefined") {
@@ -82,6 +84,7 @@ export default function DiagnosisPage() {
 
   useEffect(() => {
     if (!sessionId) return;
+    if (!galacticAdminMode && !tenantId) return; // wait for real tenant ID
     sessionIdRef.current = sessionId;
     if (lastFetchedSessionId.current !== sessionId) {
       hasInitialFetch.current = false;
@@ -91,7 +94,7 @@ export default function DiagnosisPage() {
     if (hasInitialFetch.current) return;
     hasInitialFetch.current = true;
     fetchSessionDetails();
-  }, [sessionId]);
+  }, [sessionId, tenantId, galacticAdminMode]);
 
   useEffect(() => {
     if (sessionTenantId && sessionId) {
@@ -155,7 +158,10 @@ export default function DiagnosisPage() {
         ? `${API_BASE_URL}/api/galactic/sessions`
         : `${API_BASE_URL}/api/sessions?tenantId=${tenantId}`;
       const token = await getAccessToken();
-      if (!token) return;
+      if (!token) {
+        addNotification('error', 'Authentication Error', 'Failed to get access token. Please try logging in again.', 'diagnosis-auth-error');
+        return;
+      }
       const response = await fetch(endpoint, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -168,9 +174,12 @@ export default function DiagnosisPage() {
           setSession(found);
           setSessionTenantId(found.tenantId);
         }
+      } else {
+        addNotification('error', 'Backend Error', `Failed to load session: ${response.statusText}`, 'diagnosis-fetch-error');
       }
     } catch (error) {
       console.error("Failed to fetch session details:", error);
+      addNotification('error', 'Backend Not Reachable', 'Unable to load session details. Please check your connection.', 'diagnosis-fetch-error');
     }
   };
 
@@ -186,9 +195,12 @@ export default function DiagnosisPage() {
       if (response.ok) {
         const data = await response.json();
         setEvents(data.events || []);
+      } else {
+        addNotification('error', 'Backend Error', `Failed to load events: ${response.statusText}`, 'diagnosis-events-error');
       }
     } catch (error) {
       console.error("Failed to fetch events:", error);
+      addNotification('error', 'Backend Not Reachable', 'Unable to load session events. Please check your connection.', 'diagnosis-events-error');
     }
   };
 

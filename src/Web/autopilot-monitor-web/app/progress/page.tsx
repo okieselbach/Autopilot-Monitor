@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { API_BASE_URL } from "@/lib/config";
 import { useTenant } from "../../contexts/TenantContext";
 import { useAuth } from "../../contexts/AuthContext";
+import { useNotifications } from "../../contexts/NotificationContext";
 import { useSignalR } from "../../contexts/SignalRContext";
 import { ProtectedRoute } from "../../components/ProtectedRoute";
 
@@ -55,6 +56,7 @@ export default function ProgressPortalPage() {
 
   const { tenantId } = useTenant();
   const { getAccessToken } = useAuth();
+  const { addNotification } = useNotifications();
   const { on, off, isConnected, joinGroup, leaveGroup } = useSignalR();
 
   const hasJoinedTenantGroup = useRef(false);
@@ -189,13 +191,16 @@ export default function ProgressPortalPage() {
               (a, b) => a.sequence - b.sequence
             );
           });
+        } else {
+          addNotification('error', 'Backend Error', `Failed to load enrollment events: ${response.statusText}`, 'progress-events-error');
         }
       } catch (error) {
         console.error("Failed to fetch events:", error);
+        addNotification('error', 'Backend Not Reachable', 'Unable to load enrollment events. Please check your connection.', 'progress-events-error');
       }
     };
     fetchEvents();
-  }, [session?.sessionId]);
+  }, [session?.sessionId, tenantId]);
 
   const searchBySerial = async () => {
     if (!serialInput.trim()) return;
@@ -210,6 +215,7 @@ export default function ProgressPortalPage() {
     try {
       const token = await getAccessToken();
       if (!token) {
+        addNotification('error', 'Authentication Error', 'Failed to get access token. Please try logging in again.', 'progress-auth-error');
         setSearching(false);
         return;
       }
@@ -245,9 +251,13 @@ export default function ProgressPortalPage() {
         } else {
           setNotFound(true);
         }
+      } else {
+        addNotification('error', 'Backend Error', `Search failed: ${response.statusText}`, 'progress-search-error');
+        setNotFound(true);
       }
     } catch (error) {
       console.error("Search failed:", error);
+      addNotification('error', 'Backend Not Reachable', 'Unable to search for device. Please check your connection.', 'progress-search-error');
       setNotFound(true);
     } finally {
       setSearching(false);
