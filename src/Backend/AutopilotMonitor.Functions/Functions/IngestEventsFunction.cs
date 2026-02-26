@@ -47,7 +47,7 @@ namespace AutopilotMonitor.Functions.Functions
 
         [Function("IngestEvents")]
         public async Task<IngestEventsOutput> Run(
-            [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "events/ingest")] HttpRequestData req)
+            [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "agent/ingest")] HttpRequestData req)
         {
             try
             {

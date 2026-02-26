@@ -109,9 +109,15 @@ namespace AutopilotMonitor.Functions.Security
             }
 
             // 1. Validate client certificate
-            var certHeader = req.Headers.Contains("X-Client-Certificate")
-                ? req.Headers.GetValues("X-Client-Certificate").FirstOrDefault()
-                : null;
+            // Production: Azure App Service mTLS forwards client cert in X-ARR-ClientCert header.
+            // Local dev fallback: X-Client-Certificate header for testing with Azure Functions Core Tools
+            // (which does not support mTLS). This fallback never triggers in production because
+            // requests without a TLS client cert are rejected by Azure before reaching the function.
+            var certHeader = req.Headers.Contains("X-ARR-ClientCert")
+                ? req.Headers.GetValues("X-ARR-ClientCert").FirstOrDefault()
+                : req.Headers.Contains("X-Client-Certificate")
+                    ? req.Headers.GetValues("X-Client-Certificate").FirstOrDefault()
+                    : null;
 
             var certValidation = CertificateValidator.ValidateCertificate(certHeader, _logger);
             if (!certValidation.IsValid)

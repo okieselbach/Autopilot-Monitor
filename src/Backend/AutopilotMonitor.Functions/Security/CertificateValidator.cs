@@ -57,6 +57,13 @@ namespace AutopilotMonitor.Functions.Security
 
             try
             {
+                // Azure App Service may URL-encode the X-ARR-ClientCert header value.
+                // Decode before Base64 parsing.
+                if (certificateBase64.Contains('%'))
+                {
+                    certificateBase64 = Uri.UnescapeDataString(certificateBase64);
+                }
+
                 // Parse certificate from Base64
                 var certBytes = Convert.FromBase64String(certificateBase64);
                 var certificate = new X509Certificate2(certBytes);

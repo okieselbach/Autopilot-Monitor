@@ -67,12 +67,12 @@ namespace AutopilotMonitor.Shared
         /// </summary>
         public static class ApiEndpoints
         {
-            public const string RegisterSession          = "/api/sessions/register";
-            public const string IngestEvents             = "/api/events/ingest";
-public const string GetAgentConfig           = "/api/agent/config";
+            public const string RegisterSession          = "/api/agent/register-session";
+            public const string IngestEvents             = "/api/agent/ingest";
+            public const string GetAgentConfig           = "/api/agent/config";
             public const string GatherRules              = "/api/gather-rules";
             public const string AnalyzeRules             = "/api/analyze-rules";
-            public const string GetDiagnosticsUploadUrl  = "/api/diagnostics/upload-url";
+            public const string GetDiagnosticsUploadUrl  = "/api/agent/upload-url";
             public const string BlockDevice              = "/api/devices/block";
             public const string GetBlockedDevices        = "/api/devices/blocked";
         }

@@ -97,7 +97,7 @@ namespace AutopilotMonitor.Functions.Functions
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(new AgentConfigResponse
                 {
-                    ConfigVersion = 7,
+                    ConfigVersion = 8, // mTLS migration: agent sends cert via TLS, routes moved under /api/agent/
                     UploadIntervalSeconds = 30,
                     SelfDestructOnComplete = tenantConfig.SelfDestructOnComplete ?? true,
                     KeepLogFile = tenantConfig.KeepLogFile ?? false,

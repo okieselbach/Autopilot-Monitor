@@ -36,7 +36,7 @@ namespace AutopilotMonitor.Functions.Functions
 
         [Function("GetDiagnosticsUploadUrl")]
         public async Task<HttpResponseData> Run(
-            [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "diagnostics/upload-url")] HttpRequestData req)
+            [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "agent/upload-url")] HttpRequestData req)
         {
             try
             {

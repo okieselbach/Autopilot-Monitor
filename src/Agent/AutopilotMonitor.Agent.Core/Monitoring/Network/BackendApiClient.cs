@@ -67,7 +67,17 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
             _model = hardwareInfo.Model;
             _serialNumber = hardwareInfo.SerialNumber;
 
-            _httpClient = new HttpClient
+            // Use HttpClientHandler with client certificate for TLS-level mTLS negotiation.
+            // Azure App Service extracts the cert from the TLS handshake and forwards it
+            // in the X-ARR-ClientCert header to the backend function.
+            var handler = new HttpClientHandler();
+            if (_clientCertificate != null)
+            {
+                handler.ClientCertificates.Add(_clientCertificate);
+                logger?.Info("Client certificate attached to TLS handler for mTLS negotiation");
+            }
+
+            _httpClient = new HttpClient(handler)
             {
                 Timeout = TimeSpan.FromSeconds(30)
             };
@@ -107,8 +117,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
             // Add TenantId header so the backend can run security checks before parsing the body
             httpRequest.Headers.Add("X-Tenant-Id", request.TenantId);
 
-            // Add client certificate for device authentication (if available)
-            AddClientCertificateHeader(httpRequest);
+            // Add additional security headers for device authorization (client cert is at TLS layer, but we can add hardware info in headers for whitelist validation and Autopilot device verification)
+            AddSecurityHeaders(httpRequest);
 
             var httpResponse = await _httpClient.SendAsync(httpRequest);
             ThrowOnAuthFailure(httpResponse);
@@ -128,7 +138,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
             var url = $"{_baseUrl}{Constants.ApiEndpoints.GetAgentConfig}?tenantId={Uri.EscapeDataString(tenantId)}";
 
             var httpRequest = new HttpRequestMessage(HttpMethod.Get, url);
-            AddClientCertificateHeader(httpRequest);
+            AddSecurityHeaders(httpRequest);
 
             var response = await _httpClient.SendAsync(httpRequest);
             response.EnsureSuccessStatusCode();
@@ -166,8 +176,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
                 Content = new StringContent(json, Encoding.UTF8, "application/json")
             };
 
-            // Add device identification headers for all API calls
-            AddClientCertificateHeader(httpRequest);
+            // Add additional security headers for device authorization (client cert is at TLS layer, but we can add hardware info in headers for whitelist validation and Autopilot device verification)
+            AddSecurityHeaders(httpRequest);
 
             var response = await _httpClient.SendAsync(httpRequest);
             ThrowOnAuthFailure(response);
@@ -237,25 +247,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
         }
 
         /// <summary>
-        /// Adds device identification headers for authentication and authorization
-        /// Includes: Client certificate, manufacturer, model, serial number
+        /// Adds additional security headers for device authorization.
+        /// Client certificate is sent at TLS layer via HttpClientHandler.ClientCertificates.
         /// </summary>
-        private void AddClientCertificateHeader(HttpRequestMessage request)
+        private void AddSecurityHeaders(HttpRequestMessage request)
         {
             _logger?.Verbose("Adding security headers to request...");
-
-            // Add client certificate for device authentication
-            if (_clientCertificate != null)
-            {
-                var certBytes = _clientCertificate.Export(X509ContentType.Cert);
-                var certBase64 = Convert.ToBase64String(certBytes);
-                request.Headers.Add("X-Client-Certificate", certBase64);
-                _logger?.Verbose($"  X-Client-Certificate: {_clientCertificate.Thumbprint.Substring(0, Math.Min(16, _clientCertificate.Thumbprint.Length))}...");
-            }
-            else
-            {
-                _logger?.Verbose("  X-Client-Certificate: NOT SENT (no certificate available)");
-            }
+            // Client certificate is sent at TLS layer via HttpClientHandler.ClientCertificates (mTLS)
 
             // Add hardware information for whitelist validation
             if (!string.IsNullOrEmpty(_manufacturer))

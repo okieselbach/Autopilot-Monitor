@@ -34,7 +34,7 @@ namespace AutopilotMonitor.Functions.Functions
 
         [Function("RegisterSession")]
         public async Task<RegisterSessionOutput> Run(
-            [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "sessions/register")] HttpRequestData req)
+            [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "agent/register-session")] HttpRequestData req)
         {
             _logger.LogInformation("RegisterSession function processing request");
 

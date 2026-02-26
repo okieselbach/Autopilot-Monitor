@@ -42,10 +42,10 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
     {
         "/api/health",
         "/api/platform-stats",
-        "/api/sessions/register",
-        "/api/events/ingest",
+        "/api/agent/register-session",
+        "/api/agent/ingest",
         "/api/agent/config",
-        "/api/diagnostics/upload-url"
+        "/api/agent/upload-url"
     };
 
     public AuthenticationMiddleware(
