@@ -14,6 +14,7 @@ interface PlatformStatsPayload {
   totalEnrollments?: number;
   totalUsers?: number;
   totalTenants?: number;
+  totalSignedUpTenants?: number;
   uniqueDeviceModels?: number;
   totalEventsProcessed?: number;
   successfulEnrollments?: number;
@@ -25,8 +26,11 @@ interface PlatformStatsPayload {
 const DEFAULT_PLATFORM_STATS = {
   totalEnrollments: 123,
   totalTenants: 2,
+  totalSignedUpTenants: 2,
   uniqueDeviceModels: 1,
+  totalEventsProcessed: 0,
   issuesDetected: 0,
+  lastUpdated: null as string | null,
 };
 
 function resolvePlatformStatsManifestUrl(rawUrl?: string): string {
@@ -202,8 +206,11 @@ export default function LandingPage() {
         setPlatformStats({
           totalEnrollments: payload.totalEnrollments ?? DEFAULT_PLATFORM_STATS.totalEnrollments,
           totalTenants: payload.totalTenants ?? DEFAULT_PLATFORM_STATS.totalTenants,
+          totalSignedUpTenants: payload.totalSignedUpTenants ?? DEFAULT_PLATFORM_STATS.totalSignedUpTenants,
           uniqueDeviceModels: payload.uniqueDeviceModels ?? DEFAULT_PLATFORM_STATS.uniqueDeviceModels,
+          totalEventsProcessed: payload.totalEventsProcessed ?? DEFAULT_PLATFORM_STATS.totalEventsProcessed,
           issuesDetected: payload.issuesDetected ?? DEFAULT_PLATFORM_STATS.issuesDetected,
+          lastUpdated: payload.lastUpdated ?? null,
         });
       } catch {
         // Keep defaults if manifest/versioned files are not reachable.
@@ -278,14 +285,23 @@ export default function LandingPage() {
             </p>
 
             {/* Platform Stats - compact inline */}
-            <div className="mt-10 flex items-center justify-center gap-3 sm:gap-4 text-xs text-gray-400">
-              <span><span className="font-semibold text-gray-600">{platformStats.totalTenants.toLocaleString()}</span> organizations</span>
-              <span className="w-px h-2.5 bg-gray-300" />
-              <span><span className="font-semibold text-gray-600">{platformStats.uniqueDeviceModels.toLocaleString()}</span> device models</span>
-              <span className="w-px h-2.5 bg-gray-300" />
-              <span><span className="font-semibold text-gray-600">{platformStats.totalEnrollments.toLocaleString()}</span> enrollments monitored</span>
-              <span className="w-px h-2.5 bg-gray-300" />
-              <span><span className="font-semibold text-gray-600">{platformStats.issuesDetected.toLocaleString()}</span> detected issues</span>
+            <div className="mt-10 text-xs text-gray-400">
+              <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-2 sm:gap-x-4">
+                <span><span className="font-semibold text-gray-600">{platformStats.totalSignedUpTenants.toLocaleString()}</span> organisations</span>
+                <span className="w-px h-2.5 bg-gray-300 hidden sm:inline-block" />
+                <span><span className="font-semibold text-gray-600">{platformStats.uniqueDeviceModels.toLocaleString()}</span> device models</span>
+                <span className="w-px h-2.5 bg-gray-300 hidden sm:inline-block" />
+                <span><span className="font-semibold text-gray-600">{platformStats.totalEnrollments.toLocaleString()}</span> enrollments monitored</span>
+                <span className="w-px h-2.5 bg-gray-300 hidden sm:inline-block" />
+                <span><span className="font-semibold text-gray-600">{platformStats.issuesDetected.toLocaleString()}</span> detected issues</span>
+                <span className="w-px h-2.5 bg-gray-300 hidden sm:inline-block" />
+                <span><span className="font-semibold text-gray-600">{platformStats.totalEventsProcessed.toLocaleString()}</span> events processed</span>
+              </div>
+              {platformStats.lastUpdated && (
+                <p className="mt-1.5 text-[10px] text-gray-300">
+                  last updated: {new Date(platformStats.lastUpdated).toLocaleString()}
+                </p>
+              )}
             </div>
 
             {/* Product Preview Showcase */}
