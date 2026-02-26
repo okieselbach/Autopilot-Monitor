@@ -65,14 +65,6 @@ export default function ChangelogPage() {
 
           </div>
 
-          <div className="mt-12 pt-8 border-t border-gray-100">
-            <Link
-              href="/"
-              className="inline-flex items-center text-sm font-medium text-blue-700 hover:text-blue-800"
-            >
-              Landing page
-            </Link>
-          </div>
         </div>
       </main>
     </div>

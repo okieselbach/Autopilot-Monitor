@@ -25,14 +25,6 @@ export default function RoadmapPage() {
             </ul>
           </section>
 
-          <div className="mt-10">
-            <Link
-              href="/"
-              className="inline-flex items-center text-sm font-medium text-blue-700 hover:text-blue-800"
-            >
-              Landing page
-            </Link>
-          </div>
         </div>
       </main>
     </div>
