@@ -509,7 +509,7 @@ export default function Home() {
                 href="/changelog"
                 className="underline font-medium hover:text-blue-600 dark:hover:text-blue-200"
               >
-                Private Preview Changelog
+                Private Preview Changelog/Known Issues
               </Link>
               .{" "}
               Feedback or bug report?{" "}

@@ -376,12 +376,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                 if (!TrackedEventIds.Contains(eventId))
                     return;
 
-                var description = record.FormatDescription() ?? $"Event ID {eventId}";
                 ProcessHelloEvent(
                     eventId,
                     record.TimeCreated ?? DateTime.UtcNow,
                     record.ProviderName ?? "",
-                    description,
                     isBackfill: false);
             }
             catch (Exception ex)
@@ -390,7 +388,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             }
         }
 
-        private void ProcessHelloEvent(int eventId, DateTime timestamp, string providerName, string description, bool isBackfill)
+        private void ProcessHelloEvent(int eventId, DateTime timestamp, string providerName, bool isBackfill)
         {
             string eventType;
             EventSeverity severity;
@@ -448,11 +446,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     return;
             }
 
+            // We only need the event ID and provider for tracking purposes.
+            // The full description can contain sensitive data (e.g. server responses with key IDs, UPNs, tokens).
             var data = new Dictionary<string, object>
             {
                 { "windowsEventId", eventId },
                 { "providerName", providerName ?? "" },
-                { "description", description ?? "" }
+                { "description", "truncated" }
             };
 
             if (isBackfill)
@@ -851,7 +851,6 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     DateTime latestTimestamp = DateTime.MinValue;
                     int? latestEventId = null;
                     string latestProvider = string.Empty;
-                    string latestDescription = null;
 
                     for (EventRecord record = reader.ReadEvent(); record != null; record = reader.ReadEvent())
                     {
@@ -868,14 +867,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                             latestTimestamp = timestamp;
                             latestEventId = eventId;
                             latestProvider = record.ProviderName ?? "";
-                            latestDescription = record.FormatDescription() ?? $"Event ID {eventId}";
                         }
                     }
 
                     if (latestEventId.HasValue)
                     {
                         _logger.Info($"Backfill found recent Hello terminal event: EventID {latestEventId.Value} at {latestTimestamp:O}");
-                        ProcessHelloEvent(latestEventId.Value, latestTimestamp == DateTime.MinValue ? DateTime.UtcNow : latestTimestamp, latestProvider, latestDescription, isBackfill: true);
+                        ProcessHelloEvent(latestEventId.Value, latestTimestamp == DateTime.MinValue ? DateTime.UtcNow : latestTimestamp, latestProvider, isBackfill: true);
                     }
                     else
                     {

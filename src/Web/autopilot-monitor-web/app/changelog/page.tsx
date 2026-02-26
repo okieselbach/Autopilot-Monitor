@@ -34,13 +34,26 @@ export default function ChangelogPage() {
             </p>
           </div>
 
+          {/* Known Issues */}
+          <div className="mb-10 pb-8 border-b border-gray-100">
+            <h2 className="text-sm font-semibold text-gray-900 mb-3 uppercase tracking-wider">Known Issues</h2>
+            <ul className="space-y-2">
+              <li className="flex gap-2 text-sm text-gray-600 leading-relaxed">
+                <span className="mt-0.5 text-yellow-500 flex-shrink-0">⚠</span>
+                <span>
+                  <span className="font-medium text-gray-800">Event Timeline</span> — only tested with Entra-only, user-driven Autopilot (no WhiteGlove, ESP with &ldquo;wait for all apps&rdquo; only, no Device Preparation, no hybrid scenario). There is code to handle some of these scenarios but they are untested. If you&apos;d like to share logs for any of these scenarios, that would be greatly appreciated.
+                </span>
+              </li>
+            </ul>
+          </div>
+
           {/* Entries — newest first */}
           <div className="space-y-10">
 
             <div>
               <div className="flex items-center gap-3 mb-3">
                 <span className="text-xs font-mono font-semibold text-gray-400 uppercase tracking-wider">
-                  2026-02-26
+                  2026-02-26 - 10:15 CET
                 </span>
                 <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
                   Architecture
@@ -51,15 +64,7 @@ export default function ChangelogPage() {
               </h2>
               <p className="text-sm text-gray-600 leading-relaxed">
                 The way live session events reach the dashboard timeline was fundamentally
-                reworked. Previously, SignalR pushed full event payloads directly into the
-                UI — which could cause silent gaps if a message was dropped or arrived
-                out of order. Events are now fetched directly from storage on each signal,
-                making Table Storage the single source of truth. The timeline always reflects
-                what is actually stored, ordering and completeness are guaranteed, and
-                phase grouping is computed at render time rather than at receipt time
-                (eliminating a race condition when session metadata wasn&apos;t yet available).
-                A 30-second catch-up fetch was also added as a safety net for sessions
-                with degraded SignalR connectivity.
+                reworked. This should make the timeline more reliable and accurate.
               </p>
             </div>
 
