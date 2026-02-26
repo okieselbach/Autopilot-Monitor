@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { ProtectedRoute } from "../../components/ProtectedRoute";
 import { useTenant } from "../../contexts/TenantContext";
 import { useAuth } from "../../contexts/AuthContext";
 import { useNotifications } from "../../contexts/NotificationContext";
 import { API_BASE_URL } from "@/lib/config";
+import UnsavedChangesModal from "../../components/UnsavedChangesModal";
 
 interface TenantConfiguration {
   tenantId: string;
@@ -87,6 +88,10 @@ export default function SettingsPage() {
   const [offboarding, setOffboarding] = useState(false);
   const [offboardError, setOffboardError] = useState<string | null>(null);
 
+  // Unsaved changes guard
+  const [showUnsavedModal, setShowUnsavedModal] = useState(false);
+  const pendingNavigationRef = useRef<string | null>(null);
+
   // Form state
   const [manufacturerWhitelist, setManufacturerWhitelist] = useState("Dell*,HP*,Lenovo*,Microsoft Corporation");
   const [modelWhitelist, setModelWhitelist] = useState("*");
@@ -117,6 +122,40 @@ export default function SettingsPage() {
   const [diagnosticsBlobSasUrl, setDiagnosticsBlobSasUrl] = useState("");
   const [diagnosticsUploadMode, setDiagnosticsUploadMode] = useState("Off");
   const [diagnosticsSasExpiry, setDiagnosticsSasExpiry] = useState<Date | null>(null);
+
+  // Derived: true when form differs from last-saved config
+  const hasUnsavedChanges = useMemo(() => {
+    if (!config) return false;
+    return (
+      manufacturerWhitelist !== config.manufacturerWhitelist ||
+      modelWhitelist !== config.modelWhitelist ||
+      validateAutopilotDevice !== config.validateAutopilotDevice ||
+      dataRetentionDays !== config.dataRetentionDays ||
+      sessionTimeoutHours !== config.sessionTimeoutHours ||
+      enablePerformanceCollector !== config.enablePerformanceCollector ||
+      performanceCollectorInterval !== config.performanceCollectorIntervalSeconds ||
+      selfDestructOnComplete !== (config.selfDestructOnComplete ?? true) ||
+      keepLogFile !== (config.keepLogFile ?? false) ||
+      rebootOnComplete !== (config.rebootOnComplete ?? false) ||
+      rebootDelaySeconds !== (config.rebootDelaySeconds ?? 10) ||
+      enableGeoLocation !== (config.enableGeoLocation ?? true) ||
+      enableImeMatchLog !== (config.enableImeMatchLog ?? false) ||
+      logLevel !== (config.logLevel ?? "Info") ||
+      teamsWebhookUrl !== (config.teamsWebhookUrl ?? "") ||
+      teamsNotifyOnSuccess !== (config.teamsNotifyOnSuccess ?? true) ||
+      teamsNotifyOnFailure !== (config.teamsNotifyOnFailure ?? true) ||
+      diagnosticsBlobSasUrl !== (config.diagnosticsBlobSasUrl ?? "") ||
+      diagnosticsUploadMode !== (config.diagnosticsUploadMode ?? "Off")
+    );
+  }, [
+    config,
+    manufacturerWhitelist, modelWhitelist, validateAutopilotDevice,
+    dataRetentionDays, sessionTimeoutHours, enablePerformanceCollector,
+    performanceCollectorInterval, selfDestructOnComplete, keepLogFile,
+    rebootOnComplete, rebootDelaySeconds, enableGeoLocation, enableImeMatchLog,
+    logLevel, teamsWebhookUrl, teamsNotifyOnSuccess, teamsNotifyOnFailure,
+    diagnosticsBlobSasUrl, diagnosticsUploadMode,
+  ]);
 
   // Fetch configuration
   useEffect(() => {
@@ -241,6 +280,84 @@ export default function SettingsPage() {
     if (!tenantId) return;
     fetchAdmins();
   }, [tenantId]);
+
+  // Intercept <Link> clicks from Navbar and any other anchor navigations
+  useEffect(() => {
+    const handleLinkClick = (e: MouseEvent) => {
+      if (!hasUnsavedChanges) return;
+      if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+      const target = (e.target as Element).closest('a[href]');
+      if (!target) return;
+      const href = target.getAttribute('href');
+      if (!href || href.startsWith('#') || href.startsWith('http://') || href.startsWith('https://')) return;
+      if (href === '/settings' || href.startsWith('/settings?') || href.startsWith('/settings#')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      pendingNavigationRef.current = href;
+      setShowUnsavedModal(true);
+    };
+    document.addEventListener('click', handleLinkClick, true);
+    return () => document.removeEventListener('click', handleLinkClick, true);
+  }, [hasUnsavedChanges]);
+
+  // Intercept browser back/forward button
+  useEffect(() => {
+    const handlePopState = () => {
+      if (!hasUnsavedChanges) return;
+      window.history.pushState(null, '', window.location.href);
+      pendingNavigationRef.current = null;
+      setShowUnsavedModal(true);
+    };
+    window.history.pushState(null, '', window.location.href);
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [hasUnsavedChanges]);
+
+  // Intercept tab close / page refresh
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (!hasUnsavedChanges) return;
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasUnsavedChanges]);
+
+  const handleNavigate = (url: string) => {
+    if (hasUnsavedChanges) {
+      pendingNavigationRef.current = url;
+      setShowUnsavedModal(true);
+    } else {
+      router.push(url);
+    }
+  };
+
+  const handleSaveAndNavigate = async () => {
+    setShowUnsavedModal(false);
+    const destination = pendingNavigationRef.current;
+    pendingNavigationRef.current = null;
+    try {
+      await saveConfiguration();
+      if (destination) router.push(destination);
+      else router.back();
+    } catch {
+      // saveConfiguration already calls setError; stay on page
+    }
+  };
+
+  const handleDiscardAndNavigate = () => {
+    setShowUnsavedModal(false);
+    const destination = pendingNavigationRef.current;
+    pendingNavigationRef.current = null;
+    if (destination) router.push(destination);
+    else router.back();
+  };
+
+  const handleCancelNavigation = () => {
+    setShowUnsavedModal(false);
+    pendingNavigationRef.current = null;
+  };
 
   const saveConfiguration = async (validateAutopilotDeviceOverride?: boolean) => {
     if (!tenantId || !config) return;
@@ -606,7 +723,7 @@ export default function SettingsPage() {
             <div className="flex items-center justify-between">
               <div>
                 <button
-                  onClick={() => router.push("/dashboard")}
+                  onClick={() => handleNavigate("/dashboard")}
                   className="text-sm text-gray-600 hover:text-gray-900 mb-2 flex items-center"
                 >
                   &larr; Back to Dashboard
@@ -1544,6 +1661,14 @@ export default function SettingsPage() {
         )}
       </main>
       </div>
+
+      <UnsavedChangesModal
+        isOpen={showUnsavedModal}
+        isSaving={saving}
+        onSaveAndNavigate={handleSaveAndNavigate}
+        onDiscardAndNavigate={handleDiscardAndNavigate}
+        onCancel={handleCancelNavigation}
+      />
     </ProtectedRoute>
   );
 }
