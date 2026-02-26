@@ -104,6 +104,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
             httpRequest.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/x-ndjson");
             httpRequest.Content.Headers.Add("Content-Encoding", "gzip");
 
+            // Add TenantId header so the backend can run security checks before parsing the body
+            httpRequest.Headers.Add("X-Tenant-Id", request.TenantId);
+
             // Add client certificate for device authentication (if available)
             AddClientCertificateHeader(httpRequest);
 
