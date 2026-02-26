@@ -502,24 +502,35 @@ export default function Home() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
             </svg>
             <p className="text-sm text-blue-800 dark:text-blue-300">
-              <span className="font-semibold">Private Preview — ongoing platform updates.</span>{" "}
-              Check the{" "}
+              <span className="font-semibold">Private Preview.</span>{" "}
+              The platform is under active development.{" "}
+              If something looks off, check the{" "}
               <Link
                 href="/changelog"
                 className="underline font-medium hover:text-blue-600 dark:hover:text-blue-200"
               >
                 Private Preview Changelog
               </Link>
-              {" "}if something looks off — recent changes are listed there. Feedback or a bug to report?{" "}
+              .{" "}
+              Feedback or bug report?{" "}
               <a
                 href="https://github.com/okieselbach/Autopilot-Monitor/issues"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="underline font-medium hover:text-blue-600 dark:hover:text-blue-200"
               >
-                Open a GitHub Issue
+                Open a GitHub issue
               </a>
-              {" "}— or reach out via LinkedIn DM.
+              {" "}or message me on{" "}
+              <a
+                href="https://www.linkedin.com/in/oliver-kieselbach/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline font-medium hover:text-blue-600 dark:hover:text-blue-200"
+              >
+                LinkedIn
+              </a>
+              .
             </p>
           </div>
 
