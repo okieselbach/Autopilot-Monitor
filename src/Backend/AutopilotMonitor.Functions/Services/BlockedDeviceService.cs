@@ -64,7 +64,7 @@ namespace AutopilotMonitor.Functions.Services
         /// <summary>
         /// Blocks a device for the specified duration. Updates both Table Storage and the in-memory cache.
         /// </summary>
-        public async Task BlockDeviceAsync(string tenantId, string serialNumber, int durationHours, string blockedByEmail, string reason = null)
+        public async Task BlockDeviceAsync(string tenantId, string serialNumber, int durationHours, string blockedByEmail, string? reason = null)
         {
             var now = DateTime.UtcNow;
             var unblockAt = now.AddHours(durationHours);
@@ -212,12 +212,12 @@ namespace AutopilotMonitor.Functions.Services
     /// </summary>
     public class BlockedDeviceEntry
     {
-        public string TenantId { get; set; }
-        public string SerialNumber { get; set; }
+        public string TenantId { get; set; } = string.Empty;
+        public string SerialNumber { get; set; } = string.Empty;
         public DateTime BlockedAt { get; set; }
         public DateTime UnblockAt { get; set; }
-        public string BlockedByEmail { get; set; }
+        public string BlockedByEmail { get; set; } = string.Empty;
         public int DurationHours { get; set; }
-        public string Reason { get; set; }
+        public string? Reason { get; set; }
     }
 }
