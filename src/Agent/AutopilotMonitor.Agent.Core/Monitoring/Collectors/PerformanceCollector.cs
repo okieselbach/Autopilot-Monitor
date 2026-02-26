@@ -20,24 +20,30 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         private readonly string _tenantId;
         private readonly Action<EnrollmentEvent> _onEventCollected;
         private readonly int _intervalSeconds;
+        private readonly int _maxDurationHours;
+        private DateTime _startedAt;
         private Timer _pollTimer;
 
         private PerformanceCounter _cpuCounter;
         private PerformanceCounter _diskQueueCounter;
 
         public PerformanceCollector(string sessionId, string tenantId, Action<EnrollmentEvent> onEventCollected,
-            AgentLogger logger, int intervalSeconds = 60)
+            AgentLogger logger, int intervalSeconds = 60, int maxDurationHours = 4)
         {
             _sessionId = sessionId ?? throw new ArgumentNullException(nameof(sessionId));
             _tenantId = tenantId ?? throw new ArgumentNullException(nameof(tenantId));
             _onEventCollected = onEventCollected ?? throw new ArgumentNullException(nameof(onEventCollected));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _intervalSeconds = intervalSeconds;
+            _maxDurationHours = maxDurationHours;
         }
 
         public void Start()
         {
-            _logger.Info($"Starting Performance collector (interval: {_intervalSeconds}s)");
+            var limitInfo = _maxDurationHours > 0 ? $", max duration: {_maxDurationHours}h" : ", no duration limit";
+            _logger.Info($"Starting Performance collector (interval: {_intervalSeconds}s{limitInfo})");
+
+            _startedAt = DateTime.UtcNow;
 
             try
             {
@@ -72,6 +78,30 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         {
             try
             {
+                // Stop after max duration to avoid unbounded backend traffic when a session is stuck
+                if (_maxDurationHours > 0 && (DateTime.UtcNow - _startedAt).TotalHours >= _maxDurationHours)
+                {
+                    _logger.Info($"Performance collector max duration reached ({_maxDurationHours}h) — stopping");
+                    _onEventCollected(new EnrollmentEvent
+                    {
+                        SessionId = _sessionId,
+                        TenantId = _tenantId,
+                        Timestamp = DateTime.UtcNow,
+                        EventType = "performance_collector_stopped",
+                        Severity = EventSeverity.Info,
+                        Source = "PerformanceCollector",
+                        Phase = EnrollmentPhase.Unknown,
+                        Message = $"Performance collector stopped after {_maxDurationHours}h (max duration policy)",
+                        Data = new Dictionary<string, object>
+                        {
+                            { "reason", "max_duration_reached" },
+                            { "maxDurationHours", _maxDurationHours }
+                        }
+                    });
+                    Stop();
+                    return;
+                }
+
                 var data = new Dictionary<string, object>();
 
                 // CPU usage

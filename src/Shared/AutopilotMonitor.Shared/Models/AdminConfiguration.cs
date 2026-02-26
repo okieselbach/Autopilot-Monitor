@@ -46,6 +46,14 @@ namespace AutopilotMonitor.Shared.Models
         public string PlatformStatsBlobSasUrl { get; set; } = string.Empty;
 
         /// <summary>
+        /// Maximum duration in hours that interval-based collectors (e.g. PerformanceCollector)
+        /// keep running per session. After this time they stop automatically to prevent
+        /// excessive backend traffic when a device is stuck during enrollment.
+        /// 0 = no limit (run forever). Default: 4 hours.
+        /// </summary>
+        public int MaxCollectorDurationHours { get; set; } = 4;
+
+        /// <summary>
         /// Creates default configuration
         /// </summary>
         public static AdminConfiguration CreateDefault()
@@ -57,7 +65,8 @@ namespace AutopilotMonitor.Shared.Models
                 LastUpdated = DateTime.UtcNow,
                 UpdatedBy = "System",
                 GlobalRateLimitRequestsPerMinute = 100,
-                PlatformStatsBlobSasUrl = string.Empty
+                PlatformStatsBlobSasUrl = string.Empty,
+                MaxCollectorDurationHours = 4
             };
         }
     }

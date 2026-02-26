@@ -17,6 +17,7 @@ namespace AutopilotMonitor.Functions.Functions
     {
         private readonly ILogger<GetAgentConfigFunction> _logger;
         private readonly TenantConfigurationService _configService;
+        private readonly AdminConfigurationService _adminConfigService;
         private readonly GatherRuleService _gatherRuleService;
         private readonly RateLimitService _rateLimitService;
         private readonly AutopilotDeviceValidator _autopilotDeviceValidator;
@@ -24,12 +25,14 @@ namespace AutopilotMonitor.Functions.Functions
         public GetAgentConfigFunction(
             ILogger<GetAgentConfigFunction> logger,
             TenantConfigurationService configService,
+            AdminConfigurationService adminConfigService,
             GatherRuleService gatherRuleService,
             RateLimitService rateLimitService,
             AutopilotDeviceValidator autopilotDeviceValidator)
         {
             _logger = logger;
             _configService = configService;
+            _adminConfigService = adminConfigService;
             _gatherRuleService = gatherRuleService;
             _rateLimitService = rateLimitService;
             _autopilotDeviceValidator = autopilotDeviceValidator;
@@ -74,11 +77,15 @@ namespace AutopilotMonitor.Functions.Functions
                 // Get tenant configuration
                 var tenantConfig = await _configService.GetConfigurationAsync(tenantId);
 
-                // Build collector configuration from tenant settings
+                // Get global admin config for platform-wide policy settings
+                var adminConfig = await _adminConfigService.GetConfigurationAsync();
+
+                // Build collector configuration from tenant settings + global policy
                 var collectors = new CollectorConfiguration
                 {
                     EnablePerformanceCollector = tenantConfig.EnablePerformanceCollector,
-                    PerformanceIntervalSeconds = tenantConfig.PerformanceCollectorIntervalSeconds
+                    PerformanceIntervalSeconds = tenantConfig.PerformanceCollectorIntervalSeconds,
+                    MaxCollectorDurationHours = adminConfig.MaxCollectorDurationHours
                 };
 
                 // Get active gather rules for this tenant (user-defined ad-hoc only)
@@ -90,7 +97,7 @@ namespace AutopilotMonitor.Functions.Functions
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(new AgentConfigResponse
                 {
-                    ConfigVersion = 6,
+                    ConfigVersion = 7,
                     UploadIntervalSeconds = 30,
                     SelfDestructOnComplete = tenantConfig.SelfDestructOnComplete ?? true,
                     KeepLogFile = tenantConfig.KeepLogFile ?? false,

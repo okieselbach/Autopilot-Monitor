@@ -124,6 +124,12 @@ namespace AutopilotMonitor.Shared.Models
         public int PerformanceIntervalSeconds { get; set; } = 30;
 
         /// <summary>
+        /// Maximum duration in hours that interval-based collectors run before stopping themselves.
+        /// 0 = no limit. Default: 4 hours.
+        /// </summary>
+        public int MaxCollectorDurationHours { get; set; } = 4;
+
+        /// <summary>
         /// Creates default collector configuration
         /// </summary>
         public static CollectorConfiguration CreateDefault()

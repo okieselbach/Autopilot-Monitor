@@ -286,12 +286,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             {
                 // PerformanceCollector is always on (feeds UI chart)
                 var perfInterval = collectors?.PerformanceIntervalSeconds ?? 60;
+                var maxCollectorDurationHours = collectors?.MaxCollectorDurationHours ?? 4;
                 _performanceCollector = new PerformanceCollector(
                     _configuration.SessionId,
                     _configuration.TenantId,
                     EmitEvent,
                     _logger,
-                    perfInterval
+                    perfInterval,
+                    maxCollectorDurationHours
                 );
                 _performanceCollector.Start();
 

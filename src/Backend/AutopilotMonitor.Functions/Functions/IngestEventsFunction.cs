@@ -48,15 +48,41 @@ namespace AutopilotMonitor.Functions.Functions
         {
             try
             {
-                // Parse NDJSON+gzip request
-                IngestEventsRequest? request = null;
+                // --- Security checks FIRST — before touching the request body ---
 
-                // Extract tenantId from header to get config (for payload size limit)
+                // TenantId is available in the X-Tenant-Id header, so we can validate the request
+                // before paying the cost of gzip decompression and JSON parsing.
                 var tenantIdHeader = req.Headers.Contains("X-Tenant-Id")
                     ? req.Headers.GetValues("X-Tenant-Id").FirstOrDefault()
                     : null;
 
-                request = await ParseNdjsonGzipRequest(req.Body, tenantIdHeader);
+                if (string.IsNullOrEmpty(tenantIdHeader))
+                {
+                    return await CreateErrorResponse(req, HttpStatusCode.BadRequest, "X-Tenant-Id header is required");
+                }
+
+                // Validate request security (certificate, rate limit, hardware whitelist, serial number in autopilot)
+                // sessionId is not yet known at this point — that's fine, it's optional for logging only.
+                var (validation, errorResponse) = await req.ValidateSecurityAsync(
+                    tenantIdHeader,
+                    _configService,
+                    _rateLimitService,
+                    _autopilotDeviceValidator,
+                    _logger
+                );
+
+                if (errorResponse != null)
+                {
+                    // Security validation failed - return before parsing the body
+                    return new IngestEventsOutput
+                    {
+                        HttpResponse = errorResponse,
+                        SignalRMessages = Array.Empty<SignalRMessageAction>()
+                    };
+                }
+
+                // --- Parse NDJSON+gzip request body (only after security is cleared) ---
+                var request = await ParseNdjsonGzipRequest(req.Body, tenantIdHeader);
 
                 if (request?.Events == null || request.Events.Count == 0)
                 {
@@ -68,24 +94,11 @@ namespace AutopilotMonitor.Functions.Functions
                     return await CreateErrorResponse(req, HttpStatusCode.BadRequest, "SessionId and TenantId are required");
                 }
 
-                // Validate request security (certificate, rate limit, hardware whitelist, serial number in autopilot)
-                var (validation, errorResponse) = await req.ValidateSecurityAsync(
-                    request.TenantId,
-                    _configService,
-                    _rateLimitService,
-                    _autopilotDeviceValidator,
-                    _logger,
-                    request.SessionId
-                );
-
-                if (errorResponse != null)
+                // Ensure body TenantId matches the validated header TenantId (prevent body spoofing)
+                if (!string.Equals(request.TenantId, tenantIdHeader, StringComparison.OrdinalIgnoreCase))
                 {
-                    // Security validation failed - return error response
-                    return new IngestEventsOutput
-                    {
-                        HttpResponse = errorResponse,
-                        SignalRMessages = Array.Empty<SignalRMessageAction>()
-                    };
+                    _logger.LogWarning("TenantId mismatch: header={HeaderTenantId}, body={BodyTenantId}", tenantIdHeader, request.TenantId);
+                    return await CreateErrorResponse(req, HttpStatusCode.Forbidden, "TenantId mismatch between header and payload");
                 }
 
                 var sessionPrefix = $"[Session: {request.SessionId.Substring(0, Math.Min(8, request.SessionId.Length))}]";
@@ -340,22 +353,10 @@ namespace AutopilotMonitor.Functions.Functions
                     } }
                 };
 
-                // 2. Detailed events for real-time event streaming on detail pages (session-specific)
-                // Only sent to clients viewing this specific session - massive cost savings
-                // Strip redundant sessionId/tenantId from individual events and rule results
-                var slimEvents = storedEvents.Select(e => new {
-                    e.EventId,
-                    e.Timestamp,
-                    e.EventType,
-                    severity = e.SeverityString,
-                    e.Source,
-                    phase = e.PhaseNumber,
-                    phaseName = e.PhaseName,
-                    e.Message,
-                    e.Data,
-                    e.Sequence
-                }).ToList();
-
+                // 2. Signal for real-time event streaming on detail pages (session-specific)
+                // Only sent to clients viewing this specific session - cost-efficient signal pattern:
+                // frontend fetches full events from Table Storage on receipt, ensuring canonical truth
+                // and eliminating SignalR gap issues. Events payload omitted intentionally.
                 var slimRuleResults = newRuleResults.Count > 0
                     ? newRuleResults.Select(r => new {
                         r.ResultId,
@@ -378,7 +379,7 @@ namespace AutopilotMonitor.Functions.Functions
                     Arguments = new object[] { new {
                         sessionId = request.SessionId,
                         tenantId = request.TenantId,
-                        events = slimEvents,
+                        newEventCount = processedCount,
                         session = updatedSession,
                         newRuleResults = slimRuleResults
                     } }

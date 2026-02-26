@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ProtectedRoute } from "../../components/ProtectedRoute";
 import { useSignalR } from "../../contexts/SignalRContext";
@@ -492,6 +493,33 @@ export default function Home() {
             <p className="text-sm text-amber-800 dark:text-amber-300">
               <span className="font-semibold">Analyze Rules are actively being refined.</span>{" "}
               During this phase there may be occasional backend redeploys and analysis results might change or appear inconsistent. This is expected while rules are being fine-tuned.
+            </p>
+          </div>
+
+          {/* Feedback & bug report banner */}
+          <div className="mb-4 bg-blue-50 border border-blue-300 rounded-lg px-4 py-3 flex items-start gap-3 dark:bg-blue-950/30 dark:border-blue-700/50">
+            <svg className="w-4 h-4 text-blue-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+            </svg>
+            <p className="text-sm text-blue-800 dark:text-blue-300">
+              <span className="font-semibold">Private Preview — ongoing platform updates.</span>{" "}
+              Check the{" "}
+              <Link
+                href="/changelog"
+                className="underline font-medium hover:text-blue-600 dark:hover:text-blue-200"
+              >
+                Private Preview Changelog
+              </Link>
+              {" "}if something looks off — recent changes are listed there. Feedback or a bug to report?{" "}
+              <a
+                href="https://github.com/okieselbach/Autopilot-Monitor/issues"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline font-medium hover:text-blue-600 dark:hover:text-blue-200"
+              >
+                Open a GitHub Issue
+              </a>
+              {" "}— or reach out via LinkedIn DM.
             </p>
           </div>
 

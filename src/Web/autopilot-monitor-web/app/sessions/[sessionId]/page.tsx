@@ -199,37 +199,27 @@ export default function SessionDetailPage() {
 
   // Setup SignalR listener - re-register when connection changes
   useEffect(() => {
-    // Listen for real-time event stream (cost-efficient - no HTTP requests!)
-    const handleEventStream = (data: { sessionId: string; tenantId: string; events: EnrollmentEvent[]; session: Session; newRuleResults?: RuleResult[] }) => {
-      console.log('Event stream received via SignalR:', data);
-      if (data.sessionId === sessionIdRef.current && data.events && data.events.length > 0) {
-        // Add phase names to new events
-        const phaseNamesMap = data.session?.enrollmentType === "v2" ? V2_PHASE_NAMES : V1_PHASE_NAMES;
-        const eventsWithPhaseNames = data.events.map((e: EnrollmentEvent) => ({
-          ...e,
-          phaseName: phaseNamesMap[e.phase] || "Unknown"
-        }));
+    // Listen for event stream signal — backend sends a lightweight signal (no event payload).
+    // Frontend fetches fresh events from Table Storage on receipt: canonical truth, no gaps.
+    const handleEventStream = (data: { sessionId: string; tenantId: string; newEventCount: number; session?: Session; newRuleResults?: RuleResult[] }) => {
+      console.log('Event stream signal received via SignalR:', data);
+      if (data.sessionId !== sessionIdRef.current) return;
 
-        // Add new events to existing list (deduplication by eventId)
-        setEvents(prevEvents => {
-          const existingIds = new Set(prevEvents.map(e => e.eventId));
-          const newEvents = eventsWithPhaseNames.filter(e => !existingIds.has(e.eventId));
-          return [...prevEvents, ...newEvents].sort((a, b) => a.sequence - b.sequence);
+      // Fetch full events from storage (single source of truth)
+      fetchEvents();
+
+      // Session update from SignalR (no extra fetch needed)
+      if (data.session) {
+        setSession(data.session);
+      }
+
+      // Rule results from SignalR (only on enrollment completion)
+      if (data.newRuleResults && data.newRuleResults.length > 0) {
+        setAnalysisResults(prev => {
+          const existingIds = new Set(prev.map(r => r.ruleId));
+          const newResults = data.newRuleResults!.filter(r => !existingIds.has(r.ruleId));
+          return [...prev, ...newResults].sort((a, b) => b.confidenceScore - a.confidenceScore);
         });
-
-        // Update session details directly from SignalR (no HTTP request needed!)
-        if (data.session) {
-          setSession(data.session);
-        }
-
-        // Add new rule results in real-time
-        if (data.newRuleResults && data.newRuleResults.length > 0) {
-          setAnalysisResults(prev => {
-            const existingIds = new Set(prev.map(r => r.ruleId));
-            const newResults = data.newRuleResults!.filter(r => !existingIds.has(r.ruleId));
-            return [...prev, ...newResults].sort((a, b) => b.confidenceScore - a.confidenceScore);
-          });
-        }
       }
     };
 
@@ -255,6 +245,17 @@ export default function SessionDetailPage() {
       }
     };
   }, [on, off]); // Re-register when SignalR connection changes
+
+  // Periodic catch-up fetch — fills any SignalR gaps every 30s when tab is visible
+  useEffect(() => {
+    const effectiveTenantId = sessionTenantId || tenantId;
+    if (!sessionId || !effectiveTenantId) return;
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") fetchEvents();
+    }, 30_000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId, sessionTenantId, tenantId]);
 
   const fetchSessionDetails = async () => {
     try {
@@ -314,21 +315,10 @@ export default function SessionDetailPage() {
       });
       if (response.ok) {
         const data = await response.json();
-        const phaseNamesMap = session?.enrollmentType === "v2" ? V2_PHASE_NAMES : V1_PHASE_NAMES;
-        const eventsWithPhaseNames = data.events.map((e: EnrollmentEvent) => ({
-          ...e,
-          phaseName: phaseNamesMap[e.phase] || "Unknown"
-        }));
-        // Merge with existing events (from SignalR) instead of replacing,
-        // so we don't lose events that arrived via SignalR since the last fetch.
-        // Deduplication by eventId, same as the SignalR handler.
-        setEvents(prevEvents => {
-          if (prevEvents.length === 0) return eventsWithPhaseNames;
-          const existingIds = new Set(prevEvents.map(e => e.eventId));
-          const newEvents = eventsWithPhaseNames.filter((e: EnrollmentEvent) => !existingIds.has(e.eventId));
-          if (newEvents.length === 0) return prevEvents;
-          return [...prevEvents, ...newEvents].sort((a: EnrollmentEvent, b: EnrollmentEvent) => a.sequence - b.sequence);
-        });
+        // Replace entire event list with fresh data from Table Storage (canonical truth).
+        // No merge needed — fetchEvents() is the single source; SignalR only signals.
+        // phaseName is computed at render time in eventsByPhase useMemo (no race condition).
+        setEvents(data.events ?? []);
       } else {
         addNotification('error', 'Backend Error', `Failed to load session events: ${response.statusText}`, 'session-events-fetch-error');
       }
@@ -452,8 +442,13 @@ export default function SessionDetailPage() {
 
   // Group events by phase with memoization
   const { eventsByPhase, orderedPhases } = useMemo(() => {
-    // Sort events by sequence (chronological order)
-    const sortedEvents = [...filteredEvents].sort((a, b) => a.sequence - b.sequence);
+    // Compute phaseName at render time so enrollmentType is always resolved (no race condition)
+    const phaseNamesMap = session?.enrollmentType === "v2" ? V2_PHASE_NAMES : V1_PHASE_NAMES;
+
+    // Sort events by sequence (chronological order), enriching phaseName from current session
+    const sortedEvents = [...filteredEvents]
+      .sort((a, b) => a.sequence - b.sequence)
+      .map(e => ({ ...e, phaseName: phaseNamesMap[e.phase] ?? "Unknown" }));
 
     // Group events by phase, inserting "Unknown" events into their chronological position
     const eventsByPhase = {} as Record<string, EnrollmentEvent[]>;
