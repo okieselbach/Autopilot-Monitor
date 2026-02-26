@@ -20,7 +20,15 @@ export default function RoadmapPage() {
             <ul className="space-y-2">
               <li className="flex items-center gap-2 text-gray-700">
                 <span className="inline-block w-2 h-2 rounded-full bg-blue-600" />
-                MSP Support
+                Stablizing the system and fixing bugs from Private Preview feedback.
+              </li>
+              <li className="flex items-center gap-2 text-gray-700">
+                <span className="inline-block w-2 h-2 rounded-full bg-blue-600" />
+                Implementing core monitoring features like analyze rules and reporting.
+              </li>
+              <li className="flex items-center gap-2 text-gray-700">
+                <span className="inline-block w-2 h-2 rounded-full bg-blue-600" />
+                Expanding documentation and troubleshooting guides.
               </li>
             </ul>
           </section>
