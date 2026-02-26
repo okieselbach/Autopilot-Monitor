@@ -73,6 +73,8 @@ public const string GetAgentConfig           = "/api/agent/config";
             public const string GatherRules              = "/api/gather-rules";
             public const string AnalyzeRules             = "/api/analyze-rules";
             public const string GetDiagnosticsUploadUrl  = "/api/diagnostics/upload-url";
+            public const string BlockDevice              = "/api/devices/block";
+            public const string GetBlockedDevices        = "/api/devices/blocked";
         }
 
         // -----------------------------------------------------------------------
@@ -155,6 +157,9 @@ public const string GetAgentConfig           = "/api/agent/config";
             public const string PreviewWhitelist = "PreviewWhitelist";
             public const string PreviewConfig    = "PreviewConfig";
 
+            // Device blocking
+            public const string BlockedDevices = "BlockedDevices";
+
             /// <summary>
             /// Returns all table names for initialization
             /// </summary>
@@ -175,7 +180,8 @@ public const string GetAgentConfig           = "/api/agent/config";
                 GalacticAdmins,
                 TenantAdmins,
                 PreviewWhitelist,
-                PreviewConfig
+                PreviewConfig,
+                BlockedDevices
             };
         }
     }

@@ -23,6 +23,7 @@ namespace AutopilotMonitor.Functions.Functions
         private readonly AutopilotDeviceValidator _autopilotDeviceValidator;
         private readonly AnalyzeRuleService _analyzeRuleService;
         private readonly TeamsNotificationService _teamsNotificationService;
+        private readonly BlockedDeviceService _blockedDeviceService;
 
         public IngestEventsFunction(
             ILogger<IngestEventsFunction> logger,
@@ -31,7 +32,8 @@ namespace AutopilotMonitor.Functions.Functions
             RateLimitService rateLimitService,
             AutopilotDeviceValidator autopilotDeviceValidator,
             AnalyzeRuleService analyzeRuleService,
-            TeamsNotificationService teamsNotificationService)
+            TeamsNotificationService teamsNotificationService,
+            BlockedDeviceService blockedDeviceService)
         {
             _logger = logger;
             _storageService = storageService;
@@ -40,6 +42,7 @@ namespace AutopilotMonitor.Functions.Functions
             _autopilotDeviceValidator = autopilotDeviceValidator;
             _analyzeRuleService = analyzeRuleService;
             _teamsNotificationService = teamsNotificationService;
+            _blockedDeviceService = blockedDeviceService;
         }
 
         [Function("IngestEvents")]
@@ -79,6 +82,40 @@ namespace AutopilotMonitor.Functions.Functions
                         HttpResponse = errorResponse,
                         SignalRMessages = Array.Empty<SignalRMessageAction>()
                     };
+                }
+
+                // --- Device block check (after security, before body decompression) ---
+                // Check if this device has been administratively blocked (e.g. rogue device sending excessive data).
+                // We read the serial number from the header (same header used by AutopilotDeviceValidator).
+                // Using HTTP 200 with DeviceBlocked=true so the agent does not trigger its auth-failure circuit breaker.
+                var serialNumberHeader = req.Headers.Contains("X-Device-SerialNumber")
+                    ? req.Headers.GetValues("X-Device-SerialNumber").FirstOrDefault()
+                    : null;
+
+                if (!string.IsNullOrEmpty(serialNumberHeader))
+                {
+                    var (isBlocked, unblockAt) = await _blockedDeviceService.IsBlockedAsync(tenantIdHeader, serialNumberHeader);
+                    if (isBlocked)
+                    {
+                        _logger.LogWarning(
+                            "Rejected ingest from blocked device: TenantId={TenantId}, SerialNumber={SerialNumber}, UnblockAt={UnblockAt}",
+                            tenantIdHeader, serialNumberHeader, unblockAt);
+
+                        var blockedHttpResponse = req.CreateResponse(System.Net.HttpStatusCode.OK);
+                        await blockedHttpResponse.WriteAsJsonAsync(new IngestEventsResponse
+                        {
+                            Success = false,
+                            DeviceBlocked = true,
+                            UnblockAt = unblockAt,
+                            Message = "Device is temporarily blocked by an administrator.",
+                            ProcessedAt = DateTime.UtcNow
+                        });
+                        return new IngestEventsOutput
+                        {
+                            HttpResponse = blockedHttpResponse,
+                            SignalRMessages = Array.Empty<SignalRMessageAction>()
+                        };
+                    }
                 }
 
                 // --- Parse NDJSON+gzip request body (only after security is cleared) ---

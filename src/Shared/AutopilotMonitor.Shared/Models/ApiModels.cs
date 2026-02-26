@@ -58,6 +58,16 @@ namespace AutopilotMonitor.Shared.Models
         /// Rate limit details (only populated if RateLimitExceeded is true)
         /// </summary>
         public RateLimitInfo RateLimitInfo { get; set; }
+
+        /// <summary>
+        /// Whether the device has been temporarily blocked by an admin
+        /// </summary>
+        public bool DeviceBlocked { get; set; }
+
+        /// <summary>
+        /// When the block expires (only populated if DeviceBlocked is true)
+        /// </summary>
+        public DateTime? UnblockAt { get; set; }
     }
 
     /// <summary>

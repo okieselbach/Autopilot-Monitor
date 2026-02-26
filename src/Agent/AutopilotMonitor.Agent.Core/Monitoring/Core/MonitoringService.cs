@@ -652,6 +652,20 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 
                 var response = await _apiClient.IngestEventsAsync(request);
 
+                if (response.DeviceBlocked)
+                {
+                    var unblockMsg = response.UnblockAt.HasValue
+                        ? $" until {response.UnblockAt.Value:yyyy-MM-dd HH:mm:ss} UTC"
+                        : string.Empty;
+                    _logger.Warning($"=== DEVICE BLOCKED by administrator{unblockMsg}. Stopping all uploads for this session. ===");
+
+                    // Stop upload timers — no further uploads for the duration of this run.
+                    // The block is temporary; the next agent run (after reboot / re-enrollment) will check again.
+                    _uploadTimer?.Change(Timeout.Infinite, Timeout.Infinite);
+                    _debounceTimer?.Change(Timeout.Infinite, Timeout.Infinite);
+                    return;
+                }
+
                 if (response.Success)
                 {
                     _spool.RemoveEvents(events);

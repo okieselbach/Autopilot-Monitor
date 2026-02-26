@@ -868,6 +868,7 @@ export default function SessionDetailPage() {
             </div>
           </div>
         )}
+
       </main>
     </div>
   </ProtectedRoute>
