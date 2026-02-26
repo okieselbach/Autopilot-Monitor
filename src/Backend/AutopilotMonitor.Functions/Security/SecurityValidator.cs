@@ -66,8 +66,33 @@ namespace AutopilotMonitor.Functions.Security
         /// <returns>Security validation result</returns>
         public async Task<SecurityValidationResult> ValidateRequestAsync(HttpRequestData req, string tenantId, string? sessionId = null)
         {
-            // Load tenant configuration
-            var config = await _configService.GetConfigurationAsync(tenantId);
+            // 0. Verify tenant is known and not suspended (cheapest gate — runs before cert/rate/hardware)
+            var (config, tenantExists) = await _configService.TryGetConfigurationAsync(tenantId);
+
+            if (!tenantExists)
+            {
+                _logger.LogWarning("Rejected agent request: unknown tenant {TenantId}", tenantId);
+                return new SecurityValidationResult
+                {
+                    IsValid = false,
+                    StatusCode = HttpStatusCode.Forbidden,
+                    ErrorMessage = "Tenant not registered",
+                    Details = "This tenant ID is not registered with the platform."
+                };
+            }
+
+            if (config.IsCurrentlyDisabled())
+            {
+                _logger.LogWarning("Rejected agent request: suspended tenant {TenantId} (reason: {Reason})",
+                    tenantId, config.DisabledReason);
+                return new SecurityValidationResult
+                {
+                    IsValid = false,
+                    StatusCode = HttpStatusCode.Forbidden,
+                    ErrorMessage = "Tenant is suspended",
+                    Details = config.DisabledReason ?? "This tenant has been suspended. Contact support."
+                };
+            }
 
             // Security validation is always enforced (no longer configurable per tenant)
             // Hard gate: tenant must enable Autopilot device validation before agent traffic is accepted.

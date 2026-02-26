@@ -132,6 +132,39 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
+        /// Returns (config, exists). exists=false when no row was found — does NOT auto-create.
+        /// Use for agent security gates where unknown tenants must be rejected.
+        /// </summary>
+        public async Task<(TenantConfiguration config, bool exists)> TryGetConfigurationAsync(string tenantId)
+        {
+            if (string.IsNullOrEmpty(tenantId))
+                return (TenantConfiguration.CreateDefault("unknown"), false);
+
+            var cacheKey = $"tenant-config:{tenantId}";
+
+            if (_cache.TryGetValue(cacheKey, out TenantConfiguration? cachedConfig) && cachedConfig != null)
+                return (cachedConfig, true);
+
+            try
+            {
+                var entity = await _tableClient.GetEntityAsync<TableEntity>(tenantId, "config");
+                var config = ConvertFromTableEntity(entity.Value);
+                _cache.Set(cacheKey, config, CacheDuration);
+                return (config, true);
+            }
+            catch (RequestFailedException ex) when (ex.Status == 404)
+            {
+                return (TenantConfiguration.CreateDefault(tenantId), false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error loading configuration for tenant {tenantId} in TryGetConfigurationAsync");
+                // On error, treat as non-existent to fail safely
+                return (TenantConfiguration.CreateDefault(tenantId), false);
+            }
+        }
+
+        /// <summary>
         /// Gets all tenant configurations (for Galactic Admin use)
         /// </summary>
         public async Task<List<TenantConfiguration>> GetAllConfigurationsAsync()
