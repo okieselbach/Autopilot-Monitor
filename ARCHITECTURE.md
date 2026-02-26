@@ -29,8 +29,8 @@
 | APIs / Ingestion / Rules  |               \
 +---------------------------+                \       +---------------------------+
           ^                                   +----->| Storage Tables            |
-          | telemetry/events                         | Sessions / Events / Rules |
-          |                                          +---------------------------+
+          | mTLS                                     | Sessions / Events / Rules |
+          | telemetry / events                       +---------------------------+
           |                                          +---------------------------+
 +---------------------------+                        | Notifications             |
 | Agent on Windows Devices  |                        | Teams / Webhooks ...      |
