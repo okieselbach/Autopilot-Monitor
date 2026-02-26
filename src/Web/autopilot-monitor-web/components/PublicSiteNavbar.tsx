@@ -33,7 +33,8 @@ export function PublicSiteNavbar({ showSectionLinks }: { showSectionLinks: boole
           </div>
           <span className="text-lg font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
             <span className="hidden md:inline">Autopilot Monitor</span>
-            <span className="md:hidden">AP Monitor</span>
+            <span className="hidden sm:inline md:hidden">AP Monitor</span>
+            <span className="sm:hidden">AP Mon</span>
           </span>
         </Link>
 
@@ -69,6 +70,16 @@ export function PublicSiteNavbar({ showSectionLinks }: { showSectionLinks: boole
             >
               Comparison
             </a>
+            <Link
+              href="/docs"
+              className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                isDark
+                  ? "bg-transparent text-gray-300 hover:text-gray-100 hover:bg-white/5"
+                  : "text-gray-500 hover:text-blue-600 hover:bg-blue-50/50"
+              }`}
+            >
+              Docs
+            </Link>
           </div>
         ) : (
           <div />
@@ -92,6 +103,17 @@ export function PublicSiteNavbar({ showSectionLinks }: { showSectionLinks: boole
               </svg>
             )}
           </button>
+          <Link
+            href="/docs"
+            className={`sm:hidden p-1.5 rounded-lg transition-colors ${
+              isDark ? "text-gray-300 hover:bg-white/10" : "text-gray-500 hover:bg-gray-100"
+            }`}
+            title="Documentation"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+            </svg>
+          </Link>
           <a
             href="https://github.com/okieselbach/Autopilot-Monitor"
             target="_blank"
