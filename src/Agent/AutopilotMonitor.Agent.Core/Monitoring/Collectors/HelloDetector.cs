@@ -594,6 +594,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     //"eventLogChannel": "Microsoft-Windows-Shell-Core/Operational"
                     //}
 
+                    //{
+                    //"windowsEventId": 62407,
+                    //"providerName": "Microsoft-Windows-Shell-Core",
+                    //"description": "CloudExperienceHost-Web-App-Ereignis 2. Name: 'CommercialOOBE_ESPProgress_WhiteGlove_Success', Wert: '{\"message\":\"BootstrapStatus: Exiting page due to White Glove success.\",\"errorCode\":0}'.",
+                    //"eventLogChannel": "Microsoft-Windows-Shell-Core/Operational"
+                    //}
+
                     case EventId_ShellCore_WebAppEvent: // 62407
                         // Check if this is ESP exit event
                         // Use robust pattern: OOBE_ESP*Exiting* instead of full string CommercialOOBE_ESPProgress_Page_Exiting
