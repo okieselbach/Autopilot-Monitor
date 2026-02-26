@@ -387,7 +387,7 @@ namespace AutopilotMonitor.Functions.Services
         /// <summary>
         /// Updates the session status and current phase
         /// </summary>
-        public async Task<bool> UpdateSessionStatusAsync(string tenantId, string sessionId, SessionStatus status, EnrollmentPhase? currentPhase = null, string? failureReason = null, DateTime? completedAt = null, DateTime? earliestEventTimestamp = null)
+        public async Task<bool> UpdateSessionStatusAsync(string tenantId, string sessionId, SessionStatus status, EnrollmentPhase? currentPhase = null, string? failureReason = null, DateTime? completedAt = null, DateTime? earliestEventTimestamp = null, DateTime? latestEventTimestamp = null)
         {
             SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
             SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
@@ -458,6 +458,14 @@ namespace AutopilotMonitor.Functions.Services
                             session["DurationSeconds"] = (int)(effectiveCompletedAt - durationStart).TotalSeconds;
                     }
 
+                    // Track the most recent event timestamp for excessive data sender detection
+                    if (latestEventTimestamp.HasValue)
+                    {
+                        var currentLastEventAt = session.GetDateTimeOffset("LastEventAt")?.UtcDateTime;
+                        if (!currentLastEventAt.HasValue || latestEventTimestamp.Value > currentLastEventAt.Value)
+                            session["LastEventAt"] = latestEventTimestamp.Value;
+                    }
+
                     // Set failure reason if failed
                     if (status == SessionStatus.Failed && !string.IsNullOrEmpty(failureReason))
                     {
@@ -508,7 +516,7 @@ namespace AutopilotMonitor.Functions.Services
         /// Increments the session event count without touching status or phase fields.
         /// Uses Merge mode to safely handle concurrent updates.
         /// </summary>
-        public async Task IncrementSessionEventCountAsync(string tenantId, string sessionId, int increment, DateTime? earliestEventTimestamp = null)
+        public async Task IncrementSessionEventCountAsync(string tenantId, string sessionId, int increment, DateTime? earliestEventTimestamp = null, DateTime? latestEventTimestamp = null)
         {
             SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
             SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
@@ -543,6 +551,14 @@ namespace AutopilotMonitor.Functions.Services
                     if (effectiveEarliest.HasValue && effectiveEarliest.Value < currentStartedAt)
                     {
                         update["StartedAt"] = effectiveEarliest.Value;
+                    }
+
+                    // Track the most recent event timestamp for excessive data sender detection
+                    if (latestEventTimestamp.HasValue)
+                    {
+                        var currentLastEventAt = entity.Value.GetDateTimeOffset("LastEventAt")?.UtcDateTime;
+                        if (!currentLastEventAt.HasValue || latestEventTimestamp.Value > currentLastEventAt.Value)
+                            update["LastEventAt"] = latestEventTimestamp.Value;
                     }
 
                     await tableClient.UpdateEntityAsync(update, entity.Value.ETag, TableUpdateMode.Merge);
@@ -665,7 +681,8 @@ namespace AutopilotMonitor.Functions.Services
                         ? (int)(completedAt.Value - startedAt).TotalSeconds
                         : (int)(DateTime.UtcNow - startedAt).TotalSeconds),
                 EnrollmentType = entity.GetString("EnrollmentType") ?? "v1",
-                DiagnosticsBlobName = entity.GetString("DiagnosticsBlobName")
+                DiagnosticsBlobName = entity.GetString("DiagnosticsBlobName"),
+                LastEventAt = SafeGetDateTime(entity, "LastEventAt")
             };
         }
 
@@ -1094,6 +1111,46 @@ namespace AutopilotMonitor.Functions.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, $"Failed to get stalled sessions for tenant {tenantId}");
+                return new List<SessionSummary>();
+            }
+        }
+
+        /// <summary>
+        /// Gets sessions where the device has sent data within the last window period
+        /// AND the session started before that window cutoff – indicating a device that has been
+        /// actively sending data for longer than the allowed maximum.
+        /// Status-independent: detects excessive data senders regardless of session status.
+        /// Uses LastEventAt (written on every event batch) for the "still active" check.
+        /// Sessions without LastEventAt (predating this field) are not returned.
+        /// </summary>
+        public async Task<List<SessionSummary>> GetExcessiveDataSendersAsync(string tenantId, DateTime windowCutoff)
+        {
+            SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
+
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
+
+                // LastEventAt gt cutoff  → device sent data recently (still active)
+                // StartedAt lt cutoff    → session has been running longer than the allowed window
+                var cutoffStr = windowCutoff.ToString("yyyy-MM-ddTHH:mm:ss");
+                var filter = $"PartitionKey eq '{tenantId}' " +
+                             $"and LastEventAt gt datetime'{cutoffStr}Z' " +
+                             $"and StartedAt lt datetime'{cutoffStr}Z'";
+
+                var query = tableClient.QueryAsync<TableEntity>(filter: filter);
+
+                var sessions = new List<SessionSummary>();
+                await foreach (var entity in query)
+                {
+                    sessions.Add(MapToSessionSummary(entity));
+                }
+
+                return sessions;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to get excessive data sender sessions for tenant {tenantId}");
                 return new List<SessionSummary>();
             }
         }

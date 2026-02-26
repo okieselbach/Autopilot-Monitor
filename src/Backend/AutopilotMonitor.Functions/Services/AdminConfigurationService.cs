@@ -182,7 +182,9 @@ namespace AutopilotMonitor.Functions.Services
                 { "UpdatedBy", config.UpdatedBy },
                 { "GlobalRateLimitRequestsPerMinute", config.GlobalRateLimitRequestsPerMinute },
                 { "PlatformStatsBlobSasUrl", config.PlatformStatsBlobSasUrl ?? string.Empty },
-                { "MaxCollectorDurationHours", config.MaxCollectorDurationHours }
+                { "MaxCollectorDurationHours", config.MaxCollectorDurationHours },
+                { "MaxSessionWindowHours", config.MaxSessionWindowHours },
+                { "MaintenanceBlockDurationHours", config.MaintenanceBlockDurationHours }
             };
 
             return entity;
@@ -198,7 +200,9 @@ namespace AutopilotMonitor.Functions.Services
                 UpdatedBy = entity.GetString("UpdatedBy") ?? "Unknown",
                 GlobalRateLimitRequestsPerMinute = entity.GetInt32("GlobalRateLimitRequestsPerMinute") ?? 100,
                 PlatformStatsBlobSasUrl = entity.GetString("PlatformStatsBlobSasUrl") ?? string.Empty,
-                MaxCollectorDurationHours = entity.GetInt32("MaxCollectorDurationHours") ?? 4
+                MaxCollectorDurationHours = entity.GetInt32("MaxCollectorDurationHours") ?? 4,
+                MaxSessionWindowHours = entity.GetInt32("MaxSessionWindowHours") ?? 24,
+                MaintenanceBlockDurationHours = entity.GetInt32("MaintenanceBlockDurationHours") ?? 12
             };
         }
     }

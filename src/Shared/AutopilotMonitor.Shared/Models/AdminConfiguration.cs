@@ -53,6 +53,22 @@ namespace AutopilotMonitor.Shared.Models
         /// </summary>
         public int MaxCollectorDurationHours { get; set; } = 4;
 
+        // ===== MAINTENANCE AUTO-BLOCK SETTINGS =====
+
+        /// <summary>
+        /// Max active data window in hours for maintenance auto-block detection.
+        /// Sessions with LastEventAt within the last MaxSessionWindowHours AND StartedAt older
+        /// than MaxSessionWindowHours will have their device blocked by the nightly maintenance function.
+        /// 0 = disabled. Default: 24.
+        /// </summary>
+        public int MaxSessionWindowHours { get; set; } = 24;
+
+        /// <summary>
+        /// Duration in hours for maintenance-triggered device blocks (excessive data senders).
+        /// Default: 12.
+        /// </summary>
+        public int MaintenanceBlockDurationHours { get; set; } = 12;
+
         /// <summary>
         /// Creates default configuration
         /// </summary>
@@ -66,7 +82,9 @@ namespace AutopilotMonitor.Shared.Models
                 UpdatedBy = "System",
                 GlobalRateLimitRequestsPerMinute = 100,
                 PlatformStatsBlobSasUrl = string.Empty,
-                MaxCollectorDurationHours = 4
+                MaxCollectorDurationHours = 4,
+                MaxSessionWindowHours = 24,
+                MaintenanceBlockDurationHours = 12
             };
         }
     }

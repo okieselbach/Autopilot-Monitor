@@ -580,10 +580,26 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                         }
                         break;
 
+                    //{
+                    //"windowsEventId": 62407,
+                    //"providerName": "Microsoft-Windows-Shell-Core",
+                    //"description": "CloudExperienceHost Web App Event 2. Name: 'CommercialOOBE_ESP_ExitPage', Value: '{\"message\":\"BootstrapStatus: Clearing ESP cache on page exit\",\"errorCode\":0}'.",
+                    //"eventLogChannel": "Microsoft-Windows-Shell-Core/Operational"
+                    //}
+
+                    //{
+                    //"windowsEventId": 62407,
+                    //"providerName": "Microsoft-Windows-Shell-Core",
+                    //"description": "CloudExperienceHost Web App Event 2. Name: 'CommercialOOBE_ESPProgress_Page_Exiting', Value: '{\"message\":\"BootstrapStatus: Exiting page normally.\",\"errorCode\":0}'.",
+                    //"eventLogChannel": "Microsoft-Windows-Shell-Core/Operational"
+                    //}
+
                     case EventId_ShellCore_WebAppEvent: // 62407
                         // Check if this is ESP exit event
-                        // Use robust pattern: OOBE_ESP*Exit* instead of full string CommercialOOBE_ESPProgress_Page_Exiting
-                        if (System.Text.RegularExpressions.Regex.IsMatch(description, @"OOBE_ESP.*Exit", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                        // Use robust pattern: OOBE_ESP*Exiting* instead of full string CommercialOOBE_ESPProgress_Page_Exiting
+                        // Fix 26.02.26 - RegEx was not preceisely matching as we used Exit instead of Exiting, which is the actual value in the event description. 
+                        //                Updated to check for Exiting to reliably detect ESP exit events. Compare with event samples from real devices listed above.
+                        if (System.Text.RegularExpressions.Regex.IsMatch(description, @"OOBE_ESP.*Exiting", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
                         {
                             eventType = "esp_exiting";
                             message = "ESP (Enrollment Status Page) phase exiting";

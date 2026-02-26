@@ -152,6 +152,7 @@ namespace AutopilotMonitor.Functions.Functions
                 EnrollmentEvent? diagnosticsUploadedEvent = null;
                 string? failureReason = null;
                 DateTime? earliestEventTimestamp = null;
+                DateTime? latestEventTimestamp = null;
 
                 // Track app install events for AppInstallSummary aggregation
                 var appInstallUpdates = new Dictionary<string, AppInstallAggregationState>(StringComparer.OrdinalIgnoreCase);
@@ -162,6 +163,12 @@ namespace AutopilotMonitor.Functions.Functions
                     if (!earliestEventTimestamp.HasValue || evt.Timestamp < earliestEventTimestamp.Value)
                     {
                         earliestEventTimestamp = evt.Timestamp;
+                    }
+
+                    // Track latest event timestamp for excessive data sender detection
+                    if (!latestEventTimestamp.HasValue || evt.Timestamp > latestEventTimestamp.Value)
+                    {
+                        latestEventTimestamp = evt.Timestamp;
                     }
 
                     // Track special events for session status updates
@@ -209,7 +216,8 @@ namespace AutopilotMonitor.Functions.Functions
                         SessionStatus.Succeeded,
                         completionEvent.Phase,
                         completedAt: completionEvent.Timestamp,
-                        earliestEventTimestamp: earliestEventTimestamp
+                        earliestEventTimestamp: earliestEventTimestamp,
+                        latestEventTimestamp: latestEventTimestamp
                     );
                     _logger.LogInformation("{SessionPrefix} Status: Succeeded (transitioned={Transitioned})", sessionPrefix, statusTransitioned);
                 }
@@ -227,7 +235,8 @@ namespace AutopilotMonitor.Functions.Functions
                         failureEvent.Phase,
                         failureReason,
                         completedAt: failureEvent.Timestamp,
-                        earliestEventTimestamp: earliestEventTimestamp
+                        earliestEventTimestamp: earliestEventTimestamp,
+                        latestEventTimestamp: latestEventTimestamp
                     );
                     _logger.LogWarning("{SessionPrefix} Status: Failed - {FailureReason} (transitioned={Transitioned})", sessionPrefix, failureReason, statusTransitioned);
                 }
@@ -241,7 +250,8 @@ namespace AutopilotMonitor.Functions.Functions
                         SessionStatus.Succeeded,
                         gatherCompletionEvent.Phase,
                         completedAt: gatherCompletionEvent.Timestamp,
-                        earliestEventTimestamp: earliestEventTimestamp
+                        earliestEventTimestamp: earliestEventTimestamp,
+                        latestEventTimestamp: latestEventTimestamp
                     );
                     _logger.LogInformation("{SessionPrefix} Status: Succeeded (gather_rules)", sessionPrefix);
                 }
@@ -253,7 +263,8 @@ namespace AutopilotMonitor.Functions.Functions
                         request.SessionId,
                         SessionStatus.InProgress,
                         lastPhaseChangeEvent.Phase,
-                        earliestEventTimestamp: earliestEventTimestamp
+                        earliestEventTimestamp: earliestEventTimestamp,
+                        latestEventTimestamp: latestEventTimestamp
                     );
                 }
                 else if (processedCount > 0)
@@ -263,7 +274,8 @@ namespace AutopilotMonitor.Functions.Functions
                         request.TenantId,
                         request.SessionId,
                         processedCount,
-                        earliestEventTimestamp
+                        earliestEventTimestamp,
+                        latestEventTimestamp
                     );
                 }
 

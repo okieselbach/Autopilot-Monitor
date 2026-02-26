@@ -151,6 +151,14 @@ namespace AutopilotMonitor.Shared.Models
         /// Used to construct a download URL via the tenant's Blob Storage SAS URL.
         /// </summary>
         public string DiagnosticsBlobName { get; set; }
+
+        /// <summary>
+        /// Timestamp of the most recently received event for this session.
+        /// Updated on every event batch ingestion. Used by maintenance to detect
+        /// sessions that are still actively sending data beyond the configured window.
+        /// Null for sessions that predate this field.
+        /// </summary>
+        public DateTime? LastEventAt { get; set; }
     }
 
     /// <summary>
