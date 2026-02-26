@@ -704,35 +704,40 @@ export default function LandingPage() {
               </ul>
             </div>
 
-            {/* Feature 3 - Multi-Tenant / MSP (Planned) */}
-            <div className="relative bg-white rounded-2xl p-8 shadow-lg hover:shadow-xl transition-shadow">
-              <span className="absolute top-4 right-4 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-700 border border-amber-200">
-                Planned
-              </span>
+            {/* Feature 3 - Fleet Health */}
+            <div className="bg-white rounded-2xl p-8 shadow-lg hover:shadow-xl transition-shadow">
               <div className="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center mb-4">
                 <svg className="w-6 h-6 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
                 </svg>
               </div>
-              <h3 className="text-xl font-semibold text-gray-900 mb-3">MSP Support</h3>
+              <h3 className="text-xl font-semibold text-gray-900 mb-3">Fleet Health</h3>
               <p className="text-gray-600 mb-4">
-                Built for MSPs and enterprises. Manage multiple customer tenants from a single dashboard with full tenant isolation and role-based access.
-              </p>
-            </div>
-
-            {/* Feature 4 - Intelligent Alerts (Planned) */}
-            <div className="relative bg-white rounded-2xl p-8 shadow-lg hover:shadow-xl transition-shadow">
-              <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center mb-4">
-                <svg className="w-6 h-6 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
-              <h3 className="text-xl font-semibold text-gray-900 mb-3">Intelligent Alerts</h3>
-              <p className="text-gray-600 mb-4">
-                Get notified instantly when deployments fail or encounter issues. Smart alerts help you catch problems before users do.
+                Live overview of your entire device fleet. Spot unhealthy devices, track blocked enrollments, and monitor per-tenant health at a glance.
               </p>
               <ul className="space-y-2">
-                {["Webhook notifications", "Teams integration", "Configurable rule results"].map(item => (
+                {["Device health scoring", "Blocked device detection", "Tenant-level overview"].map(item => (
+                  <li key={item} className="flex items-center text-sm text-gray-500">
+                    <span className="w-1.5 h-1.5 rounded-full bg-purple-400 mr-2 shrink-0" />
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* Feature 4 - Diagnostics Collection */}
+            <div className="bg-white rounded-2xl p-8 shadow-lg hover:shadow-xl transition-shadow">
+              <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center mb-4">
+                <svg className="w-6 h-6 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+              </div>
+              <h3 className="text-xl font-semibold text-gray-900 mb-3">Diagnostics Collection</h3>
+              <p className="text-gray-600 mb-4">
+                Trigger on-demand diagnostic uploads directly from the portal. Collect ETL logs, event logs, and system info from any enrolled device.
+              </p>
+              <ul className="space-y-2">
+                {["On-demand ZIP upload", "ETL & event log collection", "Per-device retrieval"].map(item => (
                   <li key={item} className="flex items-center text-sm text-gray-500">
                     <span className="w-1.5 h-1.5 rounded-full bg-green-400 mr-2 shrink-0" />
                     {item}
