@@ -68,6 +68,27 @@ export default function ChangelogPage() {
               </p>
             </div>
 
+            <div>
+              <div className="flex items-center gap-3 mb-3">
+                <span className="text-xs font-mono font-semibold text-gray-400 uppercase tracking-wider">
+                  2026-02-27 - 14:38 CET
+                </span>
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                  Architecture
+                </span>
+              </div>
+              <h2 className="text-base font-semibold text-gray-900 mb-2">
+                First implementation of Pre-Provisioning support incl. session timeline visualization
+              </h2>
+              <p className="text-sm text-gray-600 leading-relaxed">
+                The session timeline now also supports sessions that started with Pre-Provisioning
+                (aka White Glove) — including the provisioning process itself. This is a first
+                implementation and only tested with a very basic scenario, so if you use
+                Pre-Provisioning and see anything that looks off in the timeline, please check
+                the logs and share them via GitHub Issues.
+              </p>
+            </div>
+
           </div>
 
         </div>
