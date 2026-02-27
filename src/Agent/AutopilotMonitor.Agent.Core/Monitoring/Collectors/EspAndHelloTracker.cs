@@ -37,6 +37,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         private System.Threading.Timer _helloCompletionTimer;
 
         private bool _isPolicyConfigured = false;
+        private bool _isHelloPolicyEnabled = false; // true when Hello policy is explicitly detected as enabled
         private bool _isHelloCompleted = false;
         private bool _espExitDetected = false;
         private bool _helloWizardStarted = false;
@@ -241,6 +242,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     if (!_isPolicyConfigured && isEnabled.HasValue)
                     {
                         _isPolicyConfigured = true;
+                        _isHelloPolicyEnabled = isEnabled.Value;
                         var status = isEnabled.Value ? "enabled" : "disabled";
 
                         _onEventCollected(new EnrollmentEvent
@@ -747,9 +749,43 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     return;
                 }
 
-                // Timeout expired without Hello wizard starting
+                // Timeout expired without Hello wizard starting.
+                // If Hello policy is known to be ENABLED, the wizard simply hasn't appeared yet
+                // (e.g. Windows is still setting up prerequisites). Do NOT declare enrollment
+                // complete — start the long HelloCompletion timer and keep waiting.
+                // If Hello policy is disabled/unknown, assume Hello is not configured and proceed.
+                if (_isHelloPolicyEnabled)
+                {
+                    _logger.Info($"Hello wait timeout ({_helloWaitTimeoutSeconds}s) expired but Hello policy is enabled — " +
+                                 $"wizard not yet visible, starting long completion timer ({HelloCompletionTimeoutSeconds}s)");
+
+                    _onEventCollected(new EnrollmentEvent
+                    {
+                        SessionId = _sessionId,
+                        TenantId = _tenantId,
+                        EventType = "hello_wait_timeout",
+                        Severity = EventSeverity.Info,
+                        Source = "EspAndHelloTracker",
+                        Phase = EnrollmentPhase.Unknown,
+                        Message = $"Hello wizard did not start within {_helloWaitTimeoutSeconds}s after ESP exit — " +
+                                  $"Hello policy is enabled, waiting up to {HelloCompletionTimeoutSeconds}s for wizard",
+                        Data = new Dictionary<string, object>
+                        {
+                            { "timeoutSeconds", _helloWaitTimeoutSeconds },
+                            { "espExitDetected", _espExitDetected },
+                            { "helloPolicyEnabled", true },
+                            { "action", "extended_wait" }
+                        }
+                    });
+
+                    // Arm the long completion timer so we don't wait forever
+                    StartHelloCompletionTimerLocked();
+                    return;
+                }
+
+                // Hello policy disabled or unknown — assume Hello is not configured
                 _logger.Info($"Hello wait timeout ({_helloWaitTimeoutSeconds}s) expired without Hello wizard starting");
-                _logger.Info("Assuming Hello is not configured or was skipped - marking as completed");
+                _logger.Info("Hello policy not detected as enabled — assuming Hello is not configured or was skipped");
 
                 _isHelloCompleted = true;
                 StopHelloCompletionTimerLocked();
@@ -767,7 +803,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     Data = new Dictionary<string, object>
                     {
                         { "timeoutSeconds", _helloWaitTimeoutSeconds },
-                        { "espExitDetected", _espExitDetected }
+                        { "espExitDetected", _espExitDetected },
+                        { "helloPolicyEnabled", false },
+                        { "action", "enrollment_complete" }
                     }
                 });
 
