@@ -53,18 +53,19 @@ export default function ChangelogPage() {
             <div>
               <div className="flex items-center gap-3 mb-3">
                 <span className="text-xs font-mono font-semibold text-gray-400 uppercase tracking-wider">
-                  2026-02-26 - 10:15 CET
+                  2026-02-27 - 21:38 CET
                 </span>
                 <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                  Architecture
+                  Features
                 </span>
               </div>
               <h2 className="text-base font-semibold text-gray-900 mb-2">
-                Reworked real-time event delivery and session timeline processing
+                Configurable Diagnostic Package, Gather Rule Examples, Updated Docs
               </h2>
               <p className="text-sm text-gray-600 leading-relaxed">
-                The way live session events reach the dashboard timeline was fundamentally
-                reworked. This should make the timeline more reliable and accurate.
+                The configurable diagnostic package allows for more flexible data collection and analysis.
+                Gather rule examples have been added to help users understand how to create their own rules.
+                Documentation has been updated to reflect these changes and provide guidance on using the features.
               </p>
             </div>
 
@@ -86,6 +87,24 @@ export default function ChangelogPage() {
                 implementation and only tested with a very basic scenario, so if you use
                 Pre-Provisioning and see anything that looks off in the timeline, please check
                 the logs and share them via GitHub Issues.
+              </p>
+            </div>
+
+            <div>
+              <div className="flex items-center gap-3 mb-3">
+                <span className="text-xs font-mono font-semibold text-gray-400 uppercase tracking-wider">
+                  2026-02-26 - 10:15 CET
+                </span>
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                  Architecture
+                </span>
+              </div>
+              <h2 className="text-base font-semibold text-gray-900 mb-2">
+                Reworked real-time event delivery and session timeline processing
+              </h2>
+              <p className="text-sm text-gray-600 leading-relaxed">
+                The way live session events reach the dashboard timeline was fundamentally
+                reworked. This should make the timeline more reliable and accurate.
               </p>
             </div>
 
