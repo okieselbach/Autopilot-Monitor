@@ -1409,7 +1409,7 @@ export default function AdminConfigurationPage() {
                       >
                         <option value="">— select tenant —</option>
                         {tenants.map((t) => (
-                          <option key={t.tenantId} value={t.tenantId}>{t.domainName || t.tenantId}</option>
+                          <option key={t.tenantId} value={t.tenantId}>{t.domainName ? `${t.domainName} (${t.tenantId})` : t.tenantId}</option>
                         ))}
                       </select>
                     </div>
@@ -1461,7 +1461,7 @@ export default function AdminConfigurationPage() {
                       >
                         <option value="">— select tenant —</option>
                         {tenants.map((t) => (
-                          <option key={t.tenantId} value={t.tenantId}>{t.domainName || t.tenantId}</option>
+                          <option key={t.tenantId} value={t.tenantId}>{t.domainName ? `${t.domainName} (${t.tenantId})` : t.tenantId}</option>
                         ))}
                       </select>
                     </div>
