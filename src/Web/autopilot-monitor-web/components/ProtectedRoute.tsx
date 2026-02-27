@@ -2,7 +2,7 @@
 
 import { useAuth } from "../contexts/AuthContext";
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -17,17 +17,22 @@ export function ProtectedRoute({ children, requireGalacticAdmin = false }: Prote
   const { isAuthenticated, user, isLoading } = useAuth();
   const router = useRouter();
 
+  // Once authenticated, remember it so transient auth-state flips (e.g. MSAL
+  // handleRedirectPromise re-settling) don't unmount/flash the children.
+  const wasAuthenticated = useRef(false);
+  if (isAuthenticated) {
+    wasAuthenticated.current = true;
+  }
+
   useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
-      // Not authenticated -> redirect to landing
+    if (!isLoading && !isAuthenticated && !wasAuthenticated.current) {
+      // Never been authenticated in this session -> redirect to landing
       router.push("/");
     }
-    // Note: We don't automatically redirect for galactic admin check
-    // Instead, we show the "Access Denied" dialog and let user click "Back to Home"
   }, [isAuthenticated, isLoading, router]);
 
-  // Show loading state
-  if (isLoading) {
+  // Show loading state only on the very first load (never been authenticated yet)
+  if (isLoading && !wasAuthenticated.current) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
         <div className="text-center">
@@ -38,8 +43,8 @@ export function ProtectedRoute({ children, requireGalacticAdmin = false }: Prote
     );
   }
 
-  // Show nothing if not authenticated (will redirect)
-  if (!isAuthenticated) {
+  // Show nothing if never authenticated (will redirect)
+  if (!isAuthenticated && !wasAuthenticated.current) {
     return null;
   }
 
