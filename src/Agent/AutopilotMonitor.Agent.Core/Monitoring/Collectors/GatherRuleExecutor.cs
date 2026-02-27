@@ -491,17 +491,24 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     if (rule.Parameters != null && rule.Parameters.TryGetValue("readContent", out readContent) &&
                         readContent == "true" && info.Length < 50000) // Max 50KB
                     {
-                        // Read only up to 4000 chars to avoid loading entire file into memory
-                        var buffer = new char[4000];
-                        int charsRead;
+                        // Read the last 4000 chars — most useful for log files where recent entries matter
+                        const int maxChars = 4000;
+                        string content;
+                        bool truncated = false;
                         using (var reader = new StreamReader(filePath))
                         {
-                            charsRead = reader.Read(buffer, 0, buffer.Length);
+                            var full = reader.ReadToEnd();
+                            if (full.Length > maxChars)
+                            {
+                                content = full.Substring(full.Length - maxChars);
+                                truncated = true;
+                            }
+                            else
+                            {
+                                content = full;
+                            }
                         }
-                        var content = new string(buffer, 0, charsRead);
-                        data["content"] = charsRead == 4000 && info.Length > 4000
-                            ? content + "... (truncated)"
-                            : content;
+                        data["content"] = truncated ? "(truncated) ..." + content : content;
                     }
                 }
                 else if (Directory.Exists(filePath))

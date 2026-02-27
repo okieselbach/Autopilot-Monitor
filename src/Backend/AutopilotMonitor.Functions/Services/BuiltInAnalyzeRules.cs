@@ -231,15 +231,16 @@ namespace AutopilotMonitor.Functions.Services
         {
             RuleId = "ANALYZE-APP-008",
             Title = "Slow App Installation",
-            Description = "Detects app installations that take longer than 2 minutes.",
+            Description = "Detects app installations that take longer than 10 minutes.",
             Severity = "warning",
             Category = "apps",
             BaseConfidence = 70,
             Conditions = new List<RuleCondition>
             {
-                new RuleCondition { Signal = "slow_app_install", Source = "app_install_duration", EventType = "app_install_completed", Operator = "gt", Value = "120", Required = true }
+                // 600 seconds = 10 minutes; shorter installs are normal and not flagged
+                new RuleCondition { Signal = "slow_app_install", Source = "app_install_duration", EventType = "app_install_completed", Operator = "gt", Value = "600", Required = true }
             },
-            Explanation = "At least one app installation took longer than 2 minutes. This can indicate slow content delivery, installation overhead, or endpoint performance bottlenecks.",
+            Explanation = "At least one app installation took longer than 10 minutes. This can indicate slow content delivery, installation overhead, or endpoint performance bottlenecks.",
             Remediation = new List<RemediationStep>
             {
                 new RemediationStep { Title = "Analyze slow app behavior", Steps = new List<string> {

@@ -39,10 +39,15 @@ interface NewRuleForm {
   category: string;
   collectorType: string;
   target: string;
-  valueName: string;
-  eventId: string;
-  messageFilter: string;
-  maxEntries: string;
+  valueName: string;          // registry
+  eventId: string;            // eventlog
+  messageFilter: string;      // eventlog
+  maxEntries: string;         // eventlog
+  source: string;             // eventlog
+  readContent: boolean;       // file
+  logPattern: string;         // logparser
+  trackPosition: boolean;     // logparser
+  maxLines: string;           // logparser
   trigger: string;
   intervalSeconds: number;
   triggerPhase: string;
@@ -104,6 +109,11 @@ const EMPTY_FORM: NewRuleForm = {
   eventId: "",
   messageFilter: "",
   maxEntries: "",
+  source: "",
+  readContent: false,
+  logPattern: "",
+  trackPosition: true,
+  maxLines: "",
   trigger: "startup",
   intervalSeconds: 60,
   triggerPhase: "",
@@ -146,6 +156,12 @@ export default function GatherRulesPage() {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newRule, setNewRule] = useState<NewRuleForm>({ ...EMPTY_FORM });
   const [creating, setCreating] = useState(false);
+
+  // JSON mode (create + edit)
+  const [jsonModeCreate, setJsonModeCreate] = useState(false);
+  const [jsonModeEdit, setJsonModeEdit] = useState(false);
+  const [jsonText, setJsonText] = useState("");
+  const [jsonError, setJsonError] = useState<string | null>(null);
 
   // Toggling / deleting state
   const [togglingRule, setTogglingRule] = useState<string | null>(null);
@@ -286,13 +302,23 @@ export default function GatherRulesPage() {
       if (form.eventId.trim()) params.eventId = form.eventId.trim();
       if (form.messageFilter.trim()) params.messageFilter = form.messageFilter.trim();
       if (form.maxEntries.trim()) params.maxEntries = form.maxEntries.trim();
+      if (form.source.trim()) params.source = form.source.trim();
+    }
+    if (form.collectorType === "file") {
+      if (form.readContent) params.readContent = "true";
+    }
+    if (form.collectorType === "logparser") {
+      if (form.logPattern.trim()) params.pattern = form.logPattern.trim();
+      params.trackPosition = form.trackPosition ? "true" : "false";
+      if (form.maxLines.trim()) params.maxLines = form.maxLines.trim();
     }
     return params;
   };
 
   // Create custom rule
-  const handleCreateRule = async () => {
-    if (!newRule.ruleId.trim() || !newRule.title.trim() || !newRule.target.trim() || !newRule.outputEventType.trim()) {
+  const handleCreateRule = async (overrideForm?: NewRuleForm) => {
+    const formData = overrideForm || newRule;
+    if (!formData.ruleId.trim() || !formData.title.trim() || !formData.target.trim() || !formData.outputEventType.trim()) {
       showError("Rule ID, Title, Target, and Output Event Type are required.");
       return;
     }
@@ -307,26 +333,26 @@ export default function GatherRulesPage() {
       }
 
       const payload: Record<string, unknown> = {
-        ruleId: newRule.ruleId.trim(),
-        title: newRule.title.trim(),
-        description: newRule.description.trim(),
-        category: newRule.category,
-        collectorType: newRule.collectorType,
-        target: newRule.target.trim(),
-        trigger: newRule.trigger,
-        outputEventType: newRule.outputEventType.trim(),
-        outputSeverity: newRule.outputSeverity,
-        parameters: buildParameters(newRule),
+        ruleId: formData.ruleId.trim(),
+        title: formData.title.trim(),
+        description: formData.description.trim(),
+        category: formData.category,
+        collectorType: formData.collectorType,
+        target: formData.target.trim(),
+        trigger: formData.trigger,
+        outputEventType: formData.outputEventType.trim(),
+        outputSeverity: formData.outputSeverity,
+        parameters: buildParameters(formData),
       };
 
-      if (newRule.trigger === "interval") {
-        payload.intervalSeconds = newRule.intervalSeconds;
+      if (formData.trigger === "interval") {
+        payload.intervalSeconds = formData.intervalSeconds;
       }
-      if (newRule.trigger === "phase_change") {
-        payload.triggerPhase = newRule.triggerPhase.trim();
+      if (formData.trigger === "phase_change") {
+        payload.triggerPhase = formData.triggerPhase.trim();
       }
-      if (newRule.trigger === "on_event") {
-        payload.triggerEventType = newRule.triggerEventType.trim();
+      if (formData.trigger === "on_event") {
+        payload.triggerEventType = formData.triggerEventType.trim();
       }
 
       const response = await fetch(`${API_BASE_URL}/api/gather-rules`, {
@@ -343,9 +369,11 @@ export default function GatherRulesPage() {
         throw new Error(errorData.error || `Failed to create rule: ${response.statusText}`);
       }
 
-      showSuccess(`Rule "${newRule.title}" created successfully!`);
+      showSuccess(`Rule "${formData.title}" created successfully!`);
       setNewRule({ ...EMPTY_FORM });
       setShowCreateForm(false);
+      setJsonModeCreate(false);
+      setJsonError(null);
       await fetchRules();
     } catch (err) {
       console.error("Error creating rule:", err);
@@ -375,12 +403,18 @@ export default function GatherRulesPage() {
       eventId: rule.parameters?.eventId || "",
       messageFilter: rule.parameters?.messageFilter || "",
       maxEntries: rule.parameters?.maxEntries || "",
+      source: rule.parameters?.source || "",
+      readContent: rule.parameters?.readContent === "true",
+      logPattern: rule.parameters?.pattern || "",
+      trackPosition: rule.parameters?.trackPosition !== "false",
+      maxLines: rule.parameters?.maxLines || "",
     });
   };
 
   // Save edited rule
-  const handleSaveEdit = async (rule: GatherRule) => {
-    if (!editForm.title.trim() || !editForm.target.trim() || !editForm.outputEventType.trim()) {
+  const handleSaveEdit = async (rule: GatherRule, overrideForm?: NewRuleForm) => {
+    const formData = overrideForm || editForm;
+    if (!formData.title.trim() || !formData.target.trim() || !formData.outputEventType.trim()) {
       showError("Title, Target, and Output Event Type are required.");
       return;
     }
@@ -404,27 +438,27 @@ export default function GatherRulesPage() {
 
       const payload: Record<string, unknown> = {
         ...rule,
-        title: editForm.title.trim(),
-        description: editForm.description.trim(),
-        category: editForm.category,
-        collectorType: editForm.collectorType,
-        target: editForm.target.trim(),
-        trigger: editForm.trigger,
-        outputEventType: editForm.outputEventType.trim(),
-        outputSeverity: editForm.outputSeverity,
-        parameters: buildParameters(editForm),
+        title: formData.title.trim(),
+        description: formData.description.trim(),
+        category: formData.category,
+        collectorType: formData.collectorType,
+        target: formData.target.trim(),
+        trigger: formData.trigger,
+        outputEventType: formData.outputEventType.trim(),
+        outputSeverity: formData.outputSeverity,
+        parameters: buildParameters(formData),
         author: user?.displayName || user?.upn || rule.author,
         version: bumpVersion(rule.version),
       };
 
-      if (editForm.trigger === "interval") {
-        payload.intervalSeconds = editForm.intervalSeconds;
+      if (formData.trigger === "interval") {
+        payload.intervalSeconds = formData.intervalSeconds;
       }
-      if (editForm.trigger === "phase_change") {
-        payload.triggerPhase = editForm.triggerPhase.trim();
+      if (formData.trigger === "phase_change") {
+        payload.triggerPhase = formData.triggerPhase.trim();
       }
-      if (editForm.trigger === "on_event") {
-        payload.triggerEventType = editForm.triggerEventType.trim();
+      if (formData.trigger === "on_event") {
+        payload.triggerEventType = formData.triggerEventType.trim();
       }
 
       // Galactic Admin editing a built-in rule = global update
@@ -446,7 +480,9 @@ export default function GatherRulesPage() {
       }
 
       setEditingRuleId(null);
-      showSuccess(`Rule "${editForm.title}" updated successfully${isGlobalEdit ? " (global)" : ""}!`);
+      setJsonModeEdit(false);
+      setJsonError(null);
+      showSuccess(`Rule "${formData.title}" updated successfully${isGlobalEdit ? " (global)" : ""}!`);
       await fetchRules();
     } catch (err) {
       console.error("Error saving rule:", err);
@@ -633,17 +669,94 @@ export default function GatherRulesPage() {
               <p className="text-xs text-gray-400 mt-1">Maximum number of events to return (1–50, default: 10).</p>
             </div>
           </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Source / Provider</label>
+              <input
+                type="text"
+                value={form.source}
+                onChange={(e) => setForm({ ...form, source: e.target.value })}
+                placeholder="e.g., Microsoft-Windows-Kernel-General"
+                autoComplete="off"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+              />
+              <p className="text-xs text-gray-400 mt-1">Filter by event provider/source name. Leave empty for all sources.</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Message Filter</label>
+              <input
+                type="text"
+                value={form.messageFilter}
+                onChange={(e) => setForm({ ...form, messageFilter: e.target.value })}
+                placeholder="e.g., *ESPProgress* (leave empty for no filter)"
+                autoComplete="off"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+              />
+              <p className="text-xs text-gray-400 mt-1">Filter by message text. Use * as wildcard prefix/suffix.</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* File: optional parameters */}
+      {form.collectorType === "file" && (
+        <div>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={form.readContent}
+              onChange={(e) => setForm({ ...form, readContent: e.target.checked })}
+              className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+            />
+            <span className="text-sm font-medium text-gray-700">Read file content</span>
+          </label>
+          <p className="text-xs text-gray-400 mt-1 ml-6">Read the last 4000 characters of the file (only files &lt;50 KB). Useful for log files and setup logs.</p>
+        </div>
+      )}
+
+      {/* LogParser: required pattern + optional settings */}
+      {form.collectorType === "logparser" && (
+        <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Message Filter</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Pattern <span className="text-red-500">*</span>
+            </label>
             <input
               type="text"
-              value={form.messageFilter}
-              onChange={(e) => setForm({ ...form, messageFilter: e.target.value })}
-              placeholder="e.g., *ESPProgress* (leave empty for no filter)"
+              value={form.logPattern}
+              onChange={(e) => setForm({ ...form, logPattern: e.target.value })}
+              placeholder={`e.g., (?<action>Install|Uninstall).*(?<appName>[A-Za-z0-9_-]+)`}
               autoComplete="off"
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
             />
-            <p className="text-xs text-gray-400 mt-1">Filter events where the message contains this text. Use * as wildcard prefix/suffix.</p>
+            <p className="text-xs text-gray-400 mt-1">Regex with named capture groups. Each match emits a separate event. Named groups become event data fields.</p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Max Lines</label>
+              <input
+                type="number"
+                min={1}
+                max={10000}
+                value={form.maxLines}
+                onChange={(e) => setForm({ ...form, maxLines: e.target.value })}
+                placeholder="1000"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+              />
+              <p className="text-xs text-gray-400 mt-1">Max lines to parse per execution (default: 1000).</p>
+            </div>
+            <div className="flex flex-col justify-center">
+              <label className="flex items-center gap-2 cursor-pointer mt-4">
+                <input
+                  type="checkbox"
+                  checked={form.trackPosition}
+                  onChange={(e) => setForm({ ...form, trackPosition: e.target.checked })}
+                  className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                />
+                <span className="text-sm font-medium text-gray-700">Track position</span>
+              </label>
+              <p className="text-xs text-gray-400 mt-1 ml-6">Resume from last read position across executions (recommended).</p>
+            </div>
           </div>
         </div>
       )}
@@ -909,24 +1022,60 @@ export default function GatherRulesPage() {
               {showCreateForm && (
                 <div className="bg-white rounded-lg shadow">
                   <div className="p-6 border-b border-gray-200 bg-gradient-to-r from-indigo-50 to-purple-50">
-                    <div className="flex items-center space-x-2">
-                      <svg className="w-6 h-6 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                      </svg>
-                      <div>
-                        <h2 className="text-xl font-semibold text-gray-900">Create Custom Rule</h2>
-                        <p className="text-sm text-gray-500 mt-1">Define a new data collection rule for enrolled devices</p>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <svg className="w-6 h-6 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                        </svg>
+                        <div>
+                          <h2 className="text-xl font-semibold text-gray-900">Create Custom Rule</h2>
+                          <p className="text-sm text-gray-500 mt-1">Define a new data collection rule for enrolled devices</p>
+                        </div>
+                      </div>
+                      {/* JSON Mode Toggle */}
+                      <div className="flex items-center bg-gray-100 rounded-lg p-1">
+                        <button onClick={() => { setJsonModeCreate(false); setJsonError(null); }} className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${!jsonModeCreate ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>Form</button>
+                        <button onClick={() => { setJsonText(JSON.stringify(newRule, null, 2)); setJsonModeCreate(true); setJsonError(null); }} className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${jsonModeCreate ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>JSON</button>
                       </div>
                     </div>
                   </div>
                   <div className="p-6">
-                    {renderFormFields(newRule, setNewRule, true)}
+                    {jsonModeCreate ? (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <p className="text-sm text-gray-600">Edit the rule as JSON. All fields are supported including <code className="bg-gray-100 px-1 rounded text-xs">parameters</code> for collector-specific options.</p>
+                          <button type="button" onClick={() => {
+                            try {
+                              const parsed = JSON.parse(jsonText) as NewRuleForm;
+                              if (!parsed.ruleId && !parsed.title) throw new Error("JSON must include at least ruleId and title");
+                              setNewRule({ ...EMPTY_FORM, ...parsed });
+                              setJsonModeCreate(false);
+                              setJsonError(null);
+                            } catch (e) {
+                              setJsonError(e instanceof Error ? e.message : "Invalid JSON");
+                            }
+                          }} className="text-xs text-indigo-600 hover:text-indigo-800 font-medium whitespace-nowrap ml-4">Apply JSON &rarr;</button>
+                        </div>
+                        {jsonError && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{jsonError}</p>}
+                        <textarea
+                          value={jsonText}
+                          onChange={(e) => { setJsonText(e.target.value); setJsonError(null); }}
+                          rows={20}
+                          spellCheck={false}
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm font-mono text-gray-900 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 resize-y"
+                        />
+                      </div>
+                    ) : (
+                      renderFormFields(newRule, setNewRule, true)
+                    )}
 
                     {/* Action Buttons */}
                     <div className="flex items-center justify-end space-x-3 pt-4 mt-5 border-t border-gray-200">
                       <button
                         onClick={() => {
                           setShowCreateForm(false);
+                          setJsonModeCreate(false);
+                          setJsonError(null);
                           setNewRule({ ...EMPTY_FORM });
                         }}
                         disabled={creating}
@@ -935,7 +1084,19 @@ export default function GatherRulesPage() {
                         Cancel
                       </button>
                       <button
-                        onClick={handleCreateRule}
+                        onClick={() => {
+                          if (jsonModeCreate) {
+                            try {
+                              const parsed = JSON.parse(jsonText) as NewRuleForm;
+                              setJsonError(null);
+                              handleCreateRule({ ...EMPTY_FORM, ...parsed });
+                            } catch (e) {
+                              setJsonError(e instanceof Error ? e.message : "Invalid JSON");
+                            }
+                          } else {
+                            handleCreateRule();
+                          }
+                        }}
                         disabled={creating}
                         className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-2 text-sm font-medium"
                       >
@@ -1256,18 +1417,25 @@ export default function GatherRulesPage() {
                         {/* Edit Form (replaces detail view when editing) */}
                         {isExpanded && isEditing && (
                           <div className="border-t border-gray-200 p-6">
-                            <div className="flex items-center space-x-2 mb-4">
-                              <svg className="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                              </svg>
-                              <h4 className="text-sm font-semibold text-gray-900">
-                                Editing: {rule.ruleId}
-                                {rule.isBuiltIn && isGalacticAdmin && (
-                                  <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700 border border-amber-200">
-                                    Global Edit
-                                  </span>
-                                )}
-                              </h4>
+                            <div className="flex items-center justify-between mb-4">
+                              <div className="flex items-center space-x-2">
+                                <svg className="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                </svg>
+                                <h4 className="text-sm font-semibold text-gray-900">
+                                  Editing: {rule.ruleId}
+                                  {rule.isBuiltIn && isGalacticAdmin && (
+                                    <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700 border border-amber-200">
+                                      Global Edit
+                                    </span>
+                                  )}
+                                </h4>
+                              </div>
+                              {/* JSON Mode Toggle */}
+                              <div className="flex items-center bg-gray-100 rounded-lg p-1">
+                                <button onClick={() => { setJsonModeEdit(false); setJsonError(null); }} className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${!jsonModeEdit ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>Form</button>
+                                <button onClick={() => { setJsonText(JSON.stringify(editForm, null, 2)); setJsonModeEdit(true); setJsonError(null); }} className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${jsonModeEdit ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>JSON</button>
+                              </div>
                             </div>
 
                             {rule.isBuiltIn && isGalacticAdmin && (
@@ -1276,19 +1444,58 @@ export default function GatherRulesPage() {
                               </div>
                             )}
 
-                            {renderFormFields(editForm, setEditForm, false)}
+                            {jsonModeEdit ? (
+                              <div className="space-y-3">
+                                <div className="flex items-center justify-between">
+                                  <p className="text-sm text-gray-600">Edit the rule as JSON. All fields are supported including <code className="bg-gray-100 px-1 rounded text-xs">parameters</code> for collector-specific options.</p>
+                                  <button type="button" onClick={() => {
+                                    try {
+                                      const parsed = JSON.parse(jsonText) as NewRuleForm;
+                                      if (!parsed.title) throw new Error("JSON must include title");
+                                      setEditForm({ ...editForm, ...parsed });
+                                      setJsonModeEdit(false);
+                                      setJsonError(null);
+                                    } catch (e) {
+                                      setJsonError(e instanceof Error ? e.message : "Invalid JSON");
+                                    }
+                                  }} className="text-xs text-indigo-600 hover:text-indigo-800 font-medium whitespace-nowrap ml-4">Apply JSON &rarr;</button>
+                                </div>
+                                {jsonError && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{jsonError}</p>}
+                                <textarea
+                                  value={jsonText}
+                                  onChange={(e) => { setJsonText(e.target.value); setJsonError(null); }}
+                                  rows={20}
+                                  spellCheck={false}
+                                  className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm font-mono text-gray-900 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 resize-y"
+                                />
+                              </div>
+                            ) : (
+                              renderFormFields(editForm, setEditForm, false)
+                            )}
 
                             {/* Action Buttons */}
                             <div className="flex items-center justify-end space-x-3 pt-4 mt-5 border-t border-gray-200">
                               <button
-                                onClick={() => setEditingRuleId(null)}
+                                onClick={() => { setEditingRuleId(null); setJsonModeEdit(false); setJsonError(null); }}
                                 disabled={saving}
                                 className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-medium"
                               >
                                 Cancel
                               </button>
                               <button
-                                onClick={() => handleSaveEdit(rule)}
+                                onClick={() => {
+                                  if (jsonModeEdit) {
+                                    try {
+                                      const parsed = JSON.parse(jsonText) as NewRuleForm;
+                                      setJsonError(null);
+                                      handleSaveEdit(rule, { ...editForm, ...parsed });
+                                    } catch (e) {
+                                      setJsonError(e instanceof Error ? e.message : "Invalid JSON");
+                                    }
+                                  } else {
+                                    handleSaveEdit(rule);
+                                  }
+                                }}
                                 disabled={saving}
                                 className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-2 text-sm font-medium"
                               >
