@@ -159,8 +159,9 @@ export default function SessionDetailPage() {
   const { getAccessToken, user } = useAuth();
   const { addNotification } = useNotifications();
 
-  // Initial data fetch — wait for a real tenantId before calling the backend.
+  // Initial data fetch — wait for auth to be ready and a real tenantId before calling the backend.
   // TenantContext initializes to '' and updates once AuthContext finishes loading.
+  // `user` is included so that a retry fires once MSAL settles (token becomes available).
   useEffect(() => {
     if (!sessionId) return;
     if (!galacticAdminMode && !tenantId) return; // wait for real tenant ID
@@ -181,7 +182,7 @@ export default function SessionDetailPage() {
 
     fetchSessionDetails();
     // fetchEvents will be called after sessionTenantId is set
-  }, [sessionId, tenantId, galacticAdminMode]);
+  }, [sessionId, tenantId, galacticAdminMode, user]);
 
   // Fetch events and analysis when we have the session's tenant ID
   useEffect(() => {
@@ -299,12 +300,13 @@ export default function SessionDetailPage() {
         ? `${API_BASE_URL}/api/galactic/sessions`
         : `${API_BASE_URL}/api/sessions?tenantId=${tenantId}`;
 
-
       // Get access token and include Authorization header
       const token = await getAccessToken();
 
       if (!token) {
         addNotification('error', 'Authentication Error', 'Failed to get access token. Please try logging in again.', 'session-detail-auth-error');
+        // Allow retry — token may not be ready yet (MSAL still initializing)
+        hasInitialFetch.current = false;
         return;
       }
       const response = await fetch(endpoint, {
@@ -326,6 +328,8 @@ export default function SessionDetailPage() {
     } catch (error) {
       console.error("Failed to fetch session details:", error);
       addNotification('error', 'Backend Not Reachable', 'Unable to load session details. Please check your connection.', 'session-detail-fetch-error');
+      // Allow retry on network errors
+      hasInitialFetch.current = false;
     }
   };
 
