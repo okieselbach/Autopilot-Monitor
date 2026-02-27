@@ -9,7 +9,7 @@ export default function TermsPage() {
     <div className="min-h-screen bg-gray-50">
       <PublicSiteNavbar showSectionLinks={false} />
       <PublicPageHeader title="Terms of Use" />
-      <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12 space-y-6">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 space-y-6">
         <div className="bg-white rounded-lg shadow p-6">
           <p className="mt-2 text-gray-600">Conditions and legal disclaimers for using Autopilot Monitor.</p>
         </div>

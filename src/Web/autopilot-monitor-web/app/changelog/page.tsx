@@ -9,7 +9,7 @@ export default function ChangelogPage() {
     <div className="min-h-screen bg-gray-50">
       <PublicSiteNavbar showSectionLinks={false} />
       <PublicPageHeader title="Changelog" />
-      <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 sm:p-10">
 
           {/* Intro */}
