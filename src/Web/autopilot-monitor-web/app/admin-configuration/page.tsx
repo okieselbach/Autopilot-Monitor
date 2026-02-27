@@ -18,6 +18,7 @@ interface SessionExportEvent {
   phaseName?: string;
   message: string;
   sequence: number;
+  rowKey?: string;
   data?: Record<string, unknown>;
 }
 
@@ -709,9 +710,11 @@ export default function AdminConfigurationPage() {
   const endAdminIndex = startAdminIndex + adminsPerPage;
   const paginatedAdmins = filteredAdmins.slice(startAdminIndex, endAdminIndex);
 
+  const cleanId = (v: string) => v.trim().replace(/^["'\s]+|["'\s]+$/g, "");
+
   const handleFetchExportEvents = async () => {
-    const sid = exportSessionId.trim();
-    const tid = exportTenantId.trim();
+    const sid = cleanId(exportSessionId);
+    const tid = cleanId(exportTenantId);
     if (!sid || !tid) {
       setExportError("Session ID and Tenant ID are required.");
       return;
@@ -751,8 +754,15 @@ export default function AdminConfigurationPage() {
     const isV1 = events.some(e => e.phase === 2);
     const phaseNames = isV1 ? EXPORT_V1_PHASE_NAMES : EXPORT_V2_PHASE_NAMES;
     const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
-    const header = "EventId,SessionId,TenantId,Timestamp,EventType,Severity,Source,Phase,PhaseName,Message,Sequence,Data";
-    const rows = events.map(e => [
+    // Sort exactly as Azure Table Storage: by timestamp ascending, then sequence ascending
+    const sorted = [...events].sort((a, b) => {
+      const tCmp = (a.timestamp ?? "").localeCompare(b.timestamp ?? "");
+      if (tCmp !== 0) return tCmp;
+      return (a.sequence ?? 0) - (b.sequence ?? 0);
+    });
+    const header = "RowKey,EventId,SessionId,TenantId,Timestamp,EventType,Severity,Source,Phase,PhaseName,Message,Sequence,Data";
+    const rows = sorted.map(e => [
+      esc(e.rowKey ?? ""),
       esc(e.eventId ?? ""),
       esc(e.sessionId ?? ""),
       esc(e.tenantId ?? ""),
@@ -1533,13 +1543,37 @@ export default function AdminConfigurationPage() {
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-teal-900 dark:text-teal-100 mb-1">Tenant ID</label>
-                      <input
-                        type="text"
-                        placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                        value={exportTenantId}
-                        onChange={e => setExportTenantId(e.target.value)}
-                        className="w-full px-3 py-2 border border-teal-300 dark:border-teal-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
-                      />
+                      {tenants.length > 0 ? (
+                        <div className="space-y-1.5">
+                          <select
+                            value={tenants.some(t => t.tenantId === exportTenantId) ? exportTenantId : ""}
+                            onChange={e => { if (e.target.value) setExportTenantId(e.target.value); }}
+                            className="w-full px-3 py-2 border border-teal-300 dark:border-teal-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+                          >
+                            <option value="">— select tenant —</option>
+                            {[...tenants].sort((a, b) => (a.domainName || a.tenantId).localeCompare(b.domainName || b.tenantId)).map(t => (
+                              <option key={t.tenantId} value={t.tenantId}>
+                                {t.domainName ? `${t.domainName} (${t.tenantId})` : t.tenantId}
+                              </option>
+                            ))}
+                          </select>
+                          <input
+                            type="text"
+                            placeholder="or enter Tenant ID directly"
+                            value={exportTenantId}
+                            onChange={e => setExportTenantId(e.target.value)}
+                            className="w-full px-3 py-2 border border-teal-300 dark:border-teal-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+                          />
+                        </div>
+                      ) : (
+                        <input
+                          type="text"
+                          placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                          value={exportTenantId}
+                          onChange={e => setExportTenantId(e.target.value)}
+                          className="w-full px-3 py-2 border border-teal-300 dark:border-teal-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+                        />
+                      )}
                     </div>
                   </div>
 
@@ -1585,14 +1619,14 @@ export default function AdminConfigurationPage() {
                           {" \u00B7 "}
                           {exportedEvents.some(e => e.phase === 2) ? "V1" : "V2"}
                           {" \u00B7 "}
-                          session {exportSessionId.trim().slice(0, 8)}
+                          session {cleanId(exportSessionId).slice(0, 8)}
                         </span>
                       </div>
                       <div className="flex flex-col sm:flex-row gap-3">
                         <button
                           onClick={() => {
-                            const sid = exportSessionId.trim();
-                            const tid = exportTenantId.trim();
+                            const sid = cleanId(exportSessionId);
+                            const tid = cleanId(exportTenantId);
                             downloadFile(
                               generateUiExport(exportedEvents, sid, tid),
                               `session-${sid.slice(0, 8)}-timeline.txt`,
@@ -1608,7 +1642,7 @@ export default function AdminConfigurationPage() {
                         </button>
                         <button
                           onClick={() => {
-                            const sid = exportSessionId.trim();
+                            const sid = cleanId(exportSessionId);
                             downloadFile(
                               generateCsvExport(exportedEvents),
                               `session-${sid.slice(0, 8)}-events.csv`,
