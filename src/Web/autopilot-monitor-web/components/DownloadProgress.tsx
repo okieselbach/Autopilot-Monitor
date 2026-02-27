@@ -88,12 +88,18 @@ export default function DownloadProgress({ events }: DownloadProgressProps) {
       }
 
       const existing = downloadMap.get(appName);
+      // Max plausible rate: 250 MB/s (~2 Gbit/s, generous for any real client connection)
+      const MAX_PLAUSIBLE_BPS = 250 * 1024 * 1024;
+
       let effectiveRateBps = isNaN(reportedRateBps) ? 0 : reportedRateBps;
+      if (effectiveRateBps > MAX_PLAUSIBLE_BPS) effectiveRateBps = 0;
+
       if (effectiveRateBps <= 0 && existing && Number.isFinite(eventTs) && Number.isFinite(existing.lastUpdatedMs)) {
         const elapsedSeconds = (eventTs - existing.lastUpdatedMs) / 1000;
         const deltaBytes = (isNaN(bytesDownloaded) ? 0 : bytesDownloaded) - existing.bytesDownloaded;
         if (elapsedSeconds > 0 && deltaBytes > 0) {
-          effectiveRateBps = deltaBytes / elapsedSeconds;
+          const calculatedRate = deltaBytes / elapsedSeconds;
+          effectiveRateBps = calculatedRate <= MAX_PLAUSIBLE_BPS ? calculatedRate : 0;
         } else {
           effectiveRateBps = existing.downloadRateBps;
         }
