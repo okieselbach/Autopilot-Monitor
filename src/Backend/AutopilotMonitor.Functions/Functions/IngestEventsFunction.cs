@@ -150,6 +150,7 @@ namespace AutopilotMonitor.Functions.Functions
                 EnrollmentEvent? failureEvent = null;
                 EnrollmentEvent? gatherCompletionEvent = null;
                 EnrollmentEvent? diagnosticsUploadedEvent = null;
+                EnrollmentEvent? whiteGloveEvent = null;
                 string? failureReason = null;
                 DateTime? earliestEventTimestamp = null;
                 DateTime? latestEventTimestamp = null;
@@ -191,6 +192,10 @@ namespace AutopilotMonitor.Functions.Functions
                     else if (evt.EventType == "diagnostics_uploaded")
                     {
                         diagnosticsUploadedEvent = evt;
+                    }
+                    else if (evt.EventType == "whiteglove_complete")
+                    {
+                        whiteGloveEvent = evt;
                     }
 
                     // Track app install events for per-app metrics
@@ -254,6 +259,27 @@ namespace AutopilotMonitor.Functions.Functions
                         latestEventTimestamp: latestEventTimestamp
                     );
                     _logger.LogInformation("{SessionPrefix} Status: Succeeded (gather_rules)", sessionPrefix);
+                }
+                else if (whiteGloveEvent != null)
+                {
+                    // WhiteGlove pre-provisioning completed — transition to Pending
+                    statusTransitioned = await _storageService.UpdateSessionStatusAsync(
+                        request.TenantId,
+                        request.SessionId,
+                        SessionStatus.Pending,
+                        whiteGloveEvent.Phase,
+                        earliestEventTimestamp: earliestEventTimestamp,
+                        latestEventTimestamp: latestEventTimestamp
+                    );
+
+                    // Mark session as pre-provisioned for UI display (split timeline)
+                    await _storageService.SetSessionPreProvisionedAsync(
+                        request.TenantId,
+                        request.SessionId,
+                        true
+                    );
+
+                    _logger.LogInformation("{SessionPrefix} Status: Pending (WhiteGlove pre-provisioning complete)", sessionPrefix);
                 }
                 else if (lastPhaseChangeEvent != null)
                 {

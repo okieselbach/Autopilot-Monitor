@@ -24,7 +24,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         private readonly AgentLogger _logger;
         private readonly string _imeLogFolder;
         private readonly List<ImeLogPattern> _imeLogPatterns;
-        private readonly Collectors.HelloDetector _helloDetector;
+        private readonly Collectors.EspAndHelloTracker _helloDetector;
 
         private ImeLogTracker _imeLogTracker;
         private Timer _summaryTimer;
@@ -79,7 +79,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             bool simulationMode = false,
             double speedFactor = 50,
             string imeMatchLogPath = null,
-            Collectors.HelloDetector helloDetector = null)
+            Collectors.EspAndHelloTracker helloDetector = null)
         {
             _sessionId = sessionId;
             _tenantId = tenantId;
@@ -109,6 +109,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             {
                 _helloDetector.HelloCompleted += OnHelloCompleted;
                 _helloDetector.FinalizingSetupPhaseTriggered += OnFinalizingSetupPhaseTriggered;
+                _helloDetector.WhiteGloveCompleted += OnWhiteGloveCompleted;
             }
         }
 
@@ -1013,6 +1014,36 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         }
 
         /// <summary>
+        /// Called when WhiteGlove (Pre-Provisioning) completes successfully.
+        /// Emits the whiteglove_complete event. The MonitoringService handles
+        /// the actual agent shutdown upon seeing this event type.
+        /// </summary>
+        private void OnWhiteGloveCompleted(object sender, EventArgs e)
+        {
+            _logger.Info("EnrollmentTracker: WhiteGlove pre-provisioning completed");
+
+            // Stop summary timer — no more app tracking needed
+            _summaryTimer?.Change(System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite);
+            _summaryTimerActive = false;
+
+            _emitEvent(new EnrollmentEvent
+            {
+                SessionId = _sessionId,
+                TenantId = _tenantId,
+                EventType = "whiteglove_complete",
+                Severity = EventSeverity.Info,
+                Source = "EnrollmentTracker",
+                Phase = EnrollmentPhase.Complete,
+                Message = "WhiteGlove (Pre-Provisioning) completed \u2014 device entering pending state"
+            });
+
+            // WICHTIG: Kein WriteEnrollmentCompleteMarker()!
+            // Das Marker-File wuerde verhindern, dass der Agent beim naechsten Start wieder laeuft.
+            // WICHTIG: Kein _imeLogTracker?.DeleteState()!
+            // Der State wird fuer Part 2 benoetigt falls der Tracker weiterlaufen muss.
+        }
+
+        /// <summary>
         /// Called when ESP exit or Hello wizard start is detected (via HelloDetector Shell-Core events)
         /// Triggers transition to FinalizingSetup phase
         /// </summary>
@@ -1136,6 +1167,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             {
                 _helloDetector.HelloCompleted -= OnHelloCompleted;
                 _helloDetector.FinalizingSetupPhaseTriggered -= OnFinalizingSetupPhaseTriggered;
+                _helloDetector.WhiteGloveCompleted -= OnWhiteGloveCompleted;
             }
 
             _summaryTimer?.Dispose();

@@ -114,6 +114,15 @@ namespace AutopilotMonitor.Functions.Services
                     eventCount = existingEntity.GetInt32("EventCount") ?? eventCount;
                     completedAt = existingEntity.GetDateTimeOffset("CompletedAt")?.UtcDateTime;
                     failureReason = existingEntity.GetString("FailureReason") ?? string.Empty;
+
+                    // WhiteGlove resumption: if the existing session was in Pending state,
+                    // this re-registration means the user has received the device and booted it.
+                    // Transition back to InProgress for Part 2 of enrollment.
+                    if (status == SessionStatus.Pending.ToString())
+                    {
+                        _logger.LogInformation($"Session {registration.SessionId} resuming from Pending (WhiteGlove Part 2)");
+                        status = SessionStatus.InProgress.ToString();
+                    }
                 }
                 catch (RequestFailedException ex) when (ex.Status == 404)
                 {
@@ -682,7 +691,8 @@ namespace AutopilotMonitor.Functions.Services
                         : (int)(DateTime.UtcNow - startedAt).TotalSeconds),
                 EnrollmentType = entity.GetString("EnrollmentType") ?? "v1",
                 DiagnosticsBlobName = entity.GetString("DiagnosticsBlobName"),
-                LastEventAt = SafeGetDateTime(entity, "LastEventAt")
+                LastEventAt = SafeGetDateTime(entity, "LastEventAt"),
+                IsPreProvisioned = entity.GetBoolean("IsPreProvisioned") ?? false
             };
         }
 
@@ -710,6 +720,33 @@ namespace AutopilotMonitor.Functions.Services
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, $"Failed to store diagnostics blob name for session {sessionId}");
+            }
+        }
+
+        /// <summary>
+        /// Sets the IsPreProvisioned flag on an existing session (Merge-mode, single field update).
+        /// </summary>
+        public async Task SetSessionPreProvisionedAsync(string tenantId, string sessionId, bool isPreProvisioned)
+        {
+            SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
+            SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
+
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
+                var entity = await tableClient.GetEntityAsync<TableEntity>(tenantId, sessionId);
+
+                var update = new TableEntity(tenantId, sessionId)
+                {
+                    ["IsPreProvisioned"] = isPreProvisioned
+                };
+
+                await tableClient.UpdateEntityAsync(update, entity.Value.ETag, Azure.Data.Tables.TableUpdateMode.Merge);
+                _logger.LogInformation($"Set IsPreProvisioned={isPreProvisioned} for session {sessionId}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to set IsPreProvisioned for session {sessionId}");
             }
         }
 
@@ -1133,10 +1170,14 @@ namespace AutopilotMonitor.Functions.Services
 
                 // LastEventAt gt cutoff  → device sent data recently (still active)
                 // StartedAt lt cutoff    → session has been running longer than the allowed window
+                // IsPreProvisioned ne true → exclude WhiteGlove sessions: a pre-provisioned device
+                //   that resumes after weeks in storage looks like an excessive sender (StartedAt old,
+                //   LastEventAt recent) but is a legitimate resumption, not abuse.
                 var cutoffStr = windowCutoff.ToString("yyyy-MM-ddTHH:mm:ss");
                 var filter = $"PartitionKey eq '{tenantId}' " +
                              $"and LastEventAt gt datetime'{cutoffStr}Z' " +
-                             $"and StartedAt lt datetime'{cutoffStr}Z'";
+                             $"and StartedAt lt datetime'{cutoffStr}Z' " +
+                             $"and IsPreProvisioned ne true";
 
                 var query = tableClient.QueryAsync<TableEntity>(filter: filter);
 

@@ -33,7 +33,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         private EnrollmentPhase? _lastPhase = null;
 
         // Core event collectors (always on)
-        private HelloDetector _helloDetector;
+        private EspAndHelloTracker _helloDetector;
         private LogReplayService _logReplay;
 
         // Optional collectors (toggled via remote config)
@@ -182,8 +182,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 
             try
             {
-                // Start Hello detector (WHfB provisioning tracking)
-                _helloDetector = new HelloDetector(
+                // Start ESP and Hello tracker (ESP exit, WhiteGlove, and WHfB provisioning tracking)
+                _helloDetector = new EspAndHelloTracker(
                     _configuration.SessionId,
                     _configuration.TenantId,
                     EmitEvent,
@@ -532,6 +532,49 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             if (!string.IsNullOrEmpty(evt.EventType))
             {
                 try { _gatherRuleExecutor?.OnEvent(evt.EventType); } catch { }
+            }
+
+            // Check for WhiteGlove completion — agent exits gracefully, session stays open
+            if (evt.EventType == "whiteglove_complete")
+            {
+                _logger.Info("WhiteGlove pre-provisioning complete. Stopping collectors and exiting.");
+
+                // 1. Stop performance collection (no value while device is off)
+                _performanceCollector?.Stop();
+                _performanceCollector?.Dispose();
+                _performanceCollector = null;
+
+                // 2. Stop all other collectors
+                StopEventCollectors();
+
+                // 3. Stop upload timers
+                _uploadTimer?.Change(Timeout.Infinite, Timeout.Infinite);
+                _debounceTimer?.Change(Timeout.Infinite, Timeout.Infinite);
+
+                // 4. Final upload to ensure whiteglove_complete reaches the backend
+                Task.Run(async () =>
+                {
+                    try
+                    {
+                        await UploadEventsAsync();
+                        _logger.Info("WhiteGlove final upload done. Agent exiting.");
+
+                        // Small delay to ensure network transmission completes
+                        await Task.Delay(2000);
+
+                        // 5. Exit — session.id file stays (no DeleteSessionId!),
+                        //    no enrollment-complete marker (no WriteEnrollmentCompleteMarker!),
+                        //    no self-destruct. Scheduled task restarts us on next boot.
+                        Environment.Exit(0);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Warning($"WhiteGlove final upload failed: {ex.Message}");
+                        Environment.Exit(0); // Exit anyway — events will be in the spool for next start
+                    }
+                });
+
+                return; // Don't continue with normal event processing
             }
 
             // Check for enrollment completion events

@@ -159,6 +159,12 @@ namespace AutopilotMonitor.Shared.Models
         /// Null for sessions that predate this field.
         /// </summary>
         public DateTime? LastEventAt { get; set; }
+
+        /// <summary>
+        /// Whether this session used WhiteGlove (Pre-Provisioning).
+        /// Set when a whiteglove_complete event is processed.
+        /// </summary>
+        public bool IsPreProvisioned { get; set; }
     }
 
     /// <summary>
@@ -167,6 +173,7 @@ namespace AutopilotMonitor.Shared.Models
     public enum SessionStatus
     {
         InProgress,
+        Pending,      // WhiteGlove pre-provisioning complete, awaiting user enrollment
         Succeeded,
         Failed,
         Unknown

@@ -101,6 +101,7 @@ namespace AutopilotMonitor.Shared
             public const string CertValidation      = "cert_validation";
             public const string EspUiState          = "esp_ui_state";
             public const string GatherResult        = "gather_result";
+            public const string WhiteGloveComplete  = "whiteglove_complete";
         }
 
         // -----------------------------------------------------------------------

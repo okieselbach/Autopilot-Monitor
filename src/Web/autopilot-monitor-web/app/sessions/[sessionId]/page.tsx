@@ -54,6 +54,7 @@ interface Session {
   failureReason?: string;
   enrollmentType?: string; // "v1" | "v2" — absent for sessions before this feature
   diagnosticsBlobName?: string;
+  isPreProvisioned?: boolean;
 }
 
 // Phase definitions per enrollment type
@@ -82,6 +83,35 @@ const V2_PHASE_ORDER = ["Start", "Device Preparation", "App Installation", "Fina
 // Lookup by phase number — Phase 3 has different names per enrollment type
 const V1_PHASE_NAMES: Record<number, string> = { [-1]: "Unknown", 0: "Start", 1: "Device Preparation", 2: "Device Setup", 3: "Apps (Device)",    4: "Account Setup", 5: "Apps (User)", 6: "Finalizing Setup", 7: "Complete", 99: "Failed" };
 const V2_PHASE_NAMES: Record<number, string> = { [-1]: "Unknown", 0: "Start", 1: "Device Preparation", 2: "Device Setup", 3: "App Installation", 4: "Account Setup", 5: "Apps (User)", 6: "Finalizing Setup", 7: "Complete", 99: "Failed" };
+
+// Pure helper — groups a flat event list into phase buckets.
+// Extracted from the useMemo so it can be called multiple times for WhiteGlove split timelines.
+function groupEventsByPhase(
+  events: EnrollmentEvent[],
+  phaseNamesMap: Record<number, string>,
+  phaseOrder: string[]
+): { eventsByPhase: Record<string, EnrollmentEvent[]>; orderedPhases: string[] } {
+  const sortedEvents = [...events]
+    .sort((a, b) => a.sequence - b.sequence)
+    .map(e => ({ ...e, phaseName: phaseNamesMap[e.phase] ?? "Unknown" }));
+
+  const eventsByPhase: Record<string, EnrollmentEvent[]> = {};
+  let currentActivePhaseName = "Start";
+
+  for (const event of sortedEvents) {
+    let targetPhase = event.phaseName || "Unknown";
+    if (targetPhase !== "Unknown") {
+      currentActivePhaseName = targetPhase;
+    } else {
+      targetPhase = currentActivePhaseName;
+    }
+    if (!eventsByPhase[targetPhase]) eventsByPhase[targetPhase] = [];
+    eventsByPhase[targetPhase].push(event);
+  }
+
+  const orderedPhases = phaseOrder.filter(p => eventsByPhase[p]?.length > 0);
+  return { eventsByPhase, orderedPhases };
+}
 
 export default function SessionDetailPage() {
   const params = useParams();
@@ -118,6 +148,10 @@ export default function SessionDetailPage() {
 
   // Track if we've joined groups to prevent duplicate joins
   const hasJoinedGroups = useRef(false);
+
+  // Deduplication: track in-flight fetchEvents to avoid concurrent calls
+  const fetchEventsInFlight = useRef(false);
+  const fetchEventsQueued = useRef(false);
 
   // Use global contexts
   const { on, off, isConnected, joinGroup, leaveGroup } = useSignalR();
@@ -296,6 +330,15 @@ export default function SessionDetailPage() {
   };
 
   const fetchEvents = async () => {
+    // Deduplication: if a fetch is already in flight, queue one follow-up instead of
+    // stacking concurrent requests (SignalR signal + 30s timer + group-join can overlap).
+    if (fetchEventsInFlight.current) {
+      fetchEventsQueued.current = true;
+      return;
+    }
+    fetchEventsInFlight.current = true;
+    fetchEventsQueued.current = false;
+
     // Use the session's tenant ID if available, otherwise fall back to current user's tenant ID
     const effectiveTenantId = sessionTenantId || tenantId;
 
@@ -327,6 +370,13 @@ export default function SessionDetailPage() {
       addNotification('error', 'Backend Not Reachable', 'Unable to load session events. Please check your connection.', 'session-events-fetch-error');
     } finally {
       setLoading(false);
+      fetchEventsInFlight.current = false;
+
+      // If another fetch was requested while we were in flight, run it now
+      if (fetchEventsQueued.current) {
+        fetchEventsQueued.current = false;
+        fetchEvents();
+      }
     }
   };
 
@@ -440,54 +490,67 @@ export default function SessionDetailPage() {
     return `${Math.floor(durationSec / 3600)}h ${Math.floor((durationSec % 3600) / 60)}m`;
   }, [events]);
 
-  // Group events by phase with memoization
+  const phaseNamesMap = session?.enrollmentType === "v2" ? V2_PHASE_NAMES : V1_PHASE_NAMES;
+  const phaseOrder = session?.enrollmentType === "v2" ? V2_PHASE_ORDER : V1_PHASE_ORDER;
+
+  // Detect WhiteGlove session and find the split point
+  const isWhiteGloveSession = session?.isPreProvisioned === true ||
+    events.some(e => e.eventType === "whiteglove_complete");
+
+  const whiteGloveSplitSequence = useMemo(() => {
+    if (!isWhiteGloveSession) return -1;
+    const wgEvent = events.find(e => e.eventType === "whiteglove_complete");
+    return wgEvent?.sequence ?? -1;
+  }, [events, isWhiteGloveSession]);
+
+  // For WhiteGlove sessions: split filtered events into pre-provisioning and user-enrollment parts
+  const preProvEvents = useMemo(() => {
+    if (!isWhiteGloveSession || whiteGloveSplitSequence < 0) return [] as EnrollmentEvent[];
+    return filteredEvents.filter(e => e.sequence <= whiteGloveSplitSequence);
+  }, [filteredEvents, isWhiteGloveSession, whiteGloveSplitSequence]);
+
+  const userEnrollEvents = useMemo(() => {
+    if (!isWhiteGloveSession || whiteGloveSplitSequence < 0) return [] as EnrollmentEvent[];
+    return filteredEvents.filter(e => e.sequence > whiteGloveSplitSequence);
+  }, [filteredEvents, isWhiteGloveSession, whiteGloveSplitSequence]);
+
+  // Group events by phase — single timeline for normal sessions, two groups for WhiteGlove
   const { eventsByPhase, orderedPhases } = useMemo(() => {
-    // Compute phaseName at render time so enrollmentType is always resolved (no race condition)
-    const phaseNamesMap = session?.enrollmentType === "v2" ? V2_PHASE_NAMES : V1_PHASE_NAMES;
+    if (isWhiteGloveSession) return { eventsByPhase: {} as Record<string, EnrollmentEvent[]>, orderedPhases: [] as string[] };
+    return groupEventsByPhase(filteredEvents, phaseNamesMap, phaseOrder);
+  }, [filteredEvents, isWhiteGloveSession, phaseNamesMap, phaseOrder]);
 
-    // Sort events by sequence (chronological order), enriching phaseName from current session
-    const sortedEvents = [...filteredEvents]
-      .sort((a, b) => a.sequence - b.sequence)
-      .map(e => ({ ...e, phaseName: phaseNamesMap[e.phase] ?? "Unknown" }));
+  const preProvGrouped = useMemo(() =>
+    isWhiteGloveSession && preProvEvents.length > 0
+      ? groupEventsByPhase(preProvEvents, phaseNamesMap, phaseOrder)
+      : { eventsByPhase: {} as Record<string, EnrollmentEvent[]>, orderedPhases: [] as string[] },
+    [preProvEvents, isWhiteGloveSession, phaseNamesMap, phaseOrder]
+  );
 
-    // Group events by phase, inserting "Unknown" events into their chronological position
-    const eventsByPhase = {} as Record<string, EnrollmentEvent[]>;
-    let currentActivePhaseName = "Start"; // Default to Start phase
-
-    for (let i = 0; i < sortedEvents.length; i++) {
-      const event = sortedEvents[i];
-      let targetPhase = event.phaseName || "Unknown";
-
-      // If event has explicit phase (not Unknown), update current active phase
-      if (targetPhase !== "Unknown") {
-        currentActivePhaseName = targetPhase;
-      } else {
-        // Unknown events go into the current active phase
-        targetPhase = currentActivePhaseName;
-      }
-
-      if (!eventsByPhase[targetPhase]) {
-        eventsByPhase[targetPhase] = [];
-      }
-      eventsByPhase[targetPhase].push(event);
-    }
-
-    const phaseOrder = session?.enrollmentType === "v2" ? V2_PHASE_ORDER : V1_PHASE_ORDER;
-    const orderedPhases = phaseOrder.filter(phase => eventsByPhase[phase] && eventsByPhase[phase].length > 0);
-
-    return { eventsByPhase, orderedPhases };
-  }, [filteredEvents, events.length, session?.enrollmentType]);
+  const userEnrollGrouped = useMemo(() =>
+    isWhiteGloveSession && userEnrollEvents.length > 0
+      ? groupEventsByPhase(userEnrollEvents, phaseNamesMap, phaseOrder)
+      : { eventsByPhase: {} as Record<string, EnrollmentEvent[]>, orderedPhases: [] as string[] },
+    [userEnrollEvents, isWhiteGloveSession, phaseNamesMap, phaseOrder]
+  );
 
   const [expandedPhases, setExpandedPhases] = useState<Set<string>>(new Set());
 
-  // Auto-expand new phases as they appear (keeps existing expanded/collapsed state)
+  // Auto-expand new phases as they appear (keeps existing expanded/collapsed state).
+  // For WhiteGlove sessions we use prefixed keys (pre-X, user-X) to avoid collisions.
   useEffect(() => {
     setExpandedPhases(prev => {
-      // Add any new phases that aren't already tracked
       const newExpanded = new Set(prev);
       let hasChanges = false;
 
-      for (const phase of orderedPhases) {
+      const allPhases = isWhiteGloveSession
+        ? [
+            ...preProvGrouped.orderedPhases.map(p => `pre-${p}`),
+            ...userEnrollGrouped.orderedPhases.map(p => `user-${p}`),
+          ]
+        : orderedPhases;
+
+      for (const phase of allPhases) {
         if (!prev.has(phase)) {
           newExpanded.add(phase);
           hasChanges = true;
@@ -496,10 +559,17 @@ export default function SessionDetailPage() {
 
       return hasChanges ? newExpanded : prev;
     });
-  }, [orderedPhases]);
+  }, [orderedPhases, preProvGrouped.orderedPhases, userEnrollGrouped.orderedPhases, isWhiteGloveSession]);
 
   const expandAll = () => {
-    setExpandedPhases(new Set(orderedPhases));
+    if (isWhiteGloveSession) {
+      setExpandedPhases(new Set([
+        ...preProvGrouped.orderedPhases.map(p => `pre-${p}`),
+        ...userEnrollGrouped.orderedPhases.map(p => `user-${p}`),
+      ]));
+    } else {
+      setExpandedPhases(new Set(orderedPhases));
+    }
   };
 
   const collapseAll = () => {
@@ -518,7 +588,9 @@ export default function SessionDetailPage() {
     });
   };
 
-  if (loading) {
+  // Only show full-page loading spinner on the very first load (no data yet).
+  // Subsequent refreshes (SignalR, 30s poll) keep the existing UI visible.
+  if (loading && !session && events.length === 0) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-gray-600">Loading session details...</div>
@@ -580,7 +652,7 @@ export default function SessionDetailPage() {
                 Diagnosis
               </button>
             )}
-            {adminMode && session?.status === 'InProgress' && (
+            {adminMode && (session?.status === 'InProgress' || session?.status === 'Pending') && (
               <button
                 onClick={markAsFailed}
                 className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors flex items-center gap-2"
@@ -757,79 +829,139 @@ export default function SessionDetailPage() {
             />
           )}
 
-          {/* Timeline */}
-          <div className="bg-white shadow rounded-lg p-6">
-            <button
-              onClick={() => setTimelineExpanded(!timelineExpanded)}
-              className="flex items-center justify-between w-full text-left mb-4"
-            >
-              <h2 className="text-xl font-semibold text-gray-900">Event Timeline</h2>
-              <span className="text-gray-400">{timelineExpanded ? '▼' : '▶'}</span>
-            </button>
-            {timelineExpanded && (
-              <>
-                {/* Severity Filters + Expand/Collapse All */}
-                <div className="flex items-center justify-between mb-6">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-medium text-gray-500">Filter:</span>
-                    {(["Debug", "Info", "Warning", "Error", "Critical"] as const).map((sev) => {
-                      const active = severityFilters.has(sev);
-                      const colors: Record<string, { on: string; off: string }> = {
-                        Debug: { on: "bg-gray-200 text-gray-800", off: "bg-gray-50 text-gray-400" },
-                        Info: { on: "bg-blue-100 text-blue-800", off: "bg-gray-50 text-gray-400" },
-                        Warning: { on: "bg-yellow-100 text-yellow-800", off: "bg-gray-50 text-gray-400" },
-                        Error: { on: "bg-red-100 text-red-800", off: "bg-gray-50 text-gray-400" },
-                        Critical: { on: "bg-red-200 text-red-900", off: "bg-gray-50 text-gray-400" },
-                      };
-                      return (
-                        <button
-                          key={sev}
-                          onClick={() => toggleSeverityFilter(sev)}
-                          className={`px-2.5 py-1 text-xs font-medium rounded-full transition-colors ${active ? colors[sev].on : colors[sev].off} hover:opacity-80`}
-                        >
-                          {sev}
-                        </button>
-                      );
-                    })}
-                    <span className="text-xs text-gray-400 ml-1">({filteredEvents.length}/{events.length})</span>
-                  </div>
-                  {orderedPhases.length > 0 && (
-                    <div className="flex gap-2">
-                      <button
-                        onClick={expandAll}
-                        className="px-3 py-1 text-sm bg-blue-50 text-blue-700 hover:bg-blue-100 rounded transition-colors"
-                      >
-                        Expand All
-                      </button>
-                      <button
-                        onClick={collapseAll}
-                        className="px-3 py-1 text-sm bg-gray-50 text-gray-700 hover:bg-gray-100 rounded transition-colors"
-                      >
-                        Collapse All
-                      </button>
-                    </div>
-                  )}
-                </div>
+          {/* Severity filters + Expand/Collapse — shared controls above the timeline(s) */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-medium text-gray-500">Filter:</span>
+              {(["Debug", "Info", "Warning", "Error", "Critical"] as const).map((sev) => {
+                const active = severityFilters.has(sev);
+                const colors: Record<string, { on: string; off: string }> = {
+                  Debug:    { on: "bg-gray-200 text-gray-800",  off: "bg-gray-50 text-gray-400" },
+                  Info:     { on: "bg-blue-100 text-blue-800",  off: "bg-gray-50 text-gray-400" },
+                  Warning:  { on: "bg-yellow-100 text-yellow-800", off: "bg-gray-50 text-gray-400" },
+                  Error:    { on: "bg-red-100 text-red-800",    off: "bg-gray-50 text-gray-400" },
+                  Critical: { on: "bg-red-200 text-red-900",    off: "bg-gray-50 text-gray-400" },
+                };
+                return (
+                  <button
+                    key={sev}
+                    onClick={() => toggleSeverityFilter(sev)}
+                    className={`px-2.5 py-1 text-xs font-medium rounded-full transition-colors ${active ? colors[sev].on : colors[sev].off} hover:opacity-80`}
+                  >
+                    {sev}
+                  </button>
+                );
+              })}
+              <span className="text-xs text-gray-400 ml-1">({filteredEvents.length}/{events.length})</span>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={expandAll}
+                className="px-3 py-1 text-sm bg-blue-50 text-blue-700 hover:bg-blue-100 rounded transition-colors"
+              >
+                Expand All
+              </button>
+              <button
+                onClick={collapseAll}
+                className="px-3 py-1 text-sm bg-gray-50 text-gray-700 hover:bg-gray-100 rounded transition-colors"
+              >
+                Collapse All
+              </button>
+            </div>
+          </div>
 
-                {orderedPhases.length === 0 ? (
-                  <div className="text-gray-500 text-center py-8">No events found for this session.</div>
+          {/* Timeline — split for WhiteGlove sessions, single card otherwise */}
+          {isWhiteGloveSession ? (
+            <>
+              {/* Pre-Provisioning Part */}
+              <div className="bg-white shadow rounded-lg p-6">
+                <div className="flex items-center gap-3 mb-6">
+                  <h2 className="text-xl font-semibold text-gray-900">Pre-Provisioning Part</h2>
+                  <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-amber-100 text-amber-800">WhiteGlove</span>
+                </div>
+                {preProvGrouped.orderedPhases.length === 0 ? (
+                  <div className="text-gray-500 text-center py-8">No events found.</div>
                 ) : (
                   <div className="space-y-8">
-                    {orderedPhases.map((phaseName) => (
+                    {preProvGrouped.orderedPhases.map((phaseName) => (
                       <PhaseSection
-                        key={phaseName}
+                        key={`pre-${phaseName}`}
                         phaseName={phaseName}
-                        events={eventsByPhase[phaseName]}
-                        isExpanded={expandedPhases.has(phaseName)}
-                        onToggle={() => togglePhase(phaseName)}
+                        events={preProvGrouped.eventsByPhase[phaseName]}
+                        isExpanded={expandedPhases.has(`pre-${phaseName}`)}
+                        onToggle={() => togglePhase(`pre-${phaseName}`)}
                         isGalacticAdmin={user?.isGalacticAdmin}
                       />
                     ))}
                   </div>
                 )}
-              </>
-            )}
-          </div>
+              </div>
+
+              {/* User Enrollment Part */}
+              {userEnrollEvents.length > 0 ? (
+                <div className="bg-white shadow rounded-lg p-6">
+                  <div className="flex items-center gap-3 mb-6">
+                    <h2 className="text-xl font-semibold text-gray-900">User Enrollment Part</h2>
+                    <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">Resumed</span>
+                  </div>
+                  {userEnrollGrouped.orderedPhases.length === 0 ? (
+                    <div className="text-gray-500 text-center py-8">No events found.</div>
+                  ) : (
+                    <div className="space-y-8">
+                      {userEnrollGrouped.orderedPhases.map((phaseName) => (
+                        <PhaseSection
+                          key={`user-${phaseName}`}
+                          phaseName={phaseName}
+                          events={userEnrollGrouped.eventsByPhase[phaseName]}
+                          isExpanded={expandedPhases.has(`user-${phaseName}`)}
+                          onToggle={() => togglePhase(`user-${phaseName}`)}
+                          isGalacticAdmin={user?.isGalacticAdmin}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : session?.status === 'Pending' ? (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-6 text-center">
+                  <p className="text-amber-800 font-medium mb-1">Awaiting User Enrollment</p>
+                  <p className="text-amber-600 text-sm">
+                    Pre-provisioning is complete. The timeline will continue when the user powers on the device.
+                  </p>
+                </div>
+              ) : null}
+            </>
+          ) : (
+            /* Original single-timeline card */
+            <div className="bg-white shadow rounded-lg p-6">
+              <button
+                onClick={() => setTimelineExpanded(!timelineExpanded)}
+                className="flex items-center justify-between w-full text-left mb-4"
+              >
+                <h2 className="text-xl font-semibold text-gray-900">Event Timeline</h2>
+                <span className="text-gray-400">{timelineExpanded ? '▼' : '▶'}</span>
+              </button>
+              {timelineExpanded && (
+                <>
+                  {orderedPhases.length === 0 ? (
+                    <div className="text-gray-500 text-center py-8">No events found for this session.</div>
+                  ) : (
+                    <div className="space-y-8">
+                      {orderedPhases.map((phaseName) => (
+                        <PhaseSection
+                          key={phaseName}
+                          phaseName={phaseName}
+                          events={eventsByPhase[phaseName]}
+                          isExpanded={expandedPhases.has(phaseName)}
+                          onToggle={() => togglePhase(phaseName)}
+                          isGalacticAdmin={user?.isGalacticAdmin}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Mark as Failed Confirmation Modal */}
@@ -1916,6 +2048,7 @@ function DetailRow({ label, value }: { label: string; value: string }) {
 function StatusBadge({ status, failureReason }: { status: string; failureReason?: string }) {
   const statusConfig = {
     InProgress: { color: "bg-blue-100 text-blue-800", text: "In Progress" },
+    Pending: { color: "bg-amber-100 text-amber-800", text: "Pending" },
     Succeeded: { color: "bg-green-100 text-green-800", text: "Succeeded" },
     Failed: { color: "bg-red-100 text-red-800", text: "Failed" },
     Unknown: { color: "bg-gray-100 text-gray-800", text: "Unknown" },

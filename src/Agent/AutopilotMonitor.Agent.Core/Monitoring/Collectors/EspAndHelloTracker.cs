@@ -8,9 +8,8 @@ using Microsoft.Win32;
 namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 {
     /// <summary>
-    /// Detects and tracks Windows Hello for Business provisioning during Autopilot enrollment.
-    /// Monitors the "Microsoft-Windows-User Device Registration/Admin" event log channel
-    /// and checks registry for WHfB policy configuration.
+    /// Tracks ESP (Enrollment Status Page) exit events and Windows Hello for Business (WHfB)
+    /// provisioning during Autopilot enrollment, including WhiteGlove (Pre-Provisioning) detection.
     ///
     /// Key Event IDs (User Device Registration/Admin):
     ///   358 - Prerequisites passed, provisioning will be launched
@@ -21,9 +20,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
     ///
     /// Key Event IDs (Microsoft-Windows-Shell-Core/Operational):
     ///   62404 - CloudExperienceHost Web App Activity Started (CXID: 'AADHello' or 'NGC' - Hello wizard started)
-    ///   62407 - CloudExperienceHost Web App Event 2 (CommercialOOBE_ESPProgress_Page_Exiting - ESP exit)
+    ///   62407 - CloudExperienceHost Web App Event 2:
+    ///           CommercialOOBE_ESPProgress_Page_Exiting      — normal ESP exit
+    ///           CommercialOOBE_ESPProgress_WhiteGlove_Success — WhiteGlove (Pre-Provisioning) complete
     /// </summary>
-    public class HelloDetector : IDisposable
+    public class EspAndHelloTracker : IDisposable
     {
         private readonly AgentLogger _logger;
         private readonly string _sessionId;
@@ -39,6 +40,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         private bool _isHelloCompleted = false;
         private bool _espExitDetected = false;
         private bool _helloWizardStarted = false;
+        private bool _whiteGloveDetected = false;
         private readonly object _stateLock = new object();
 
         private readonly int _helloWaitTimeoutSeconds;
@@ -56,6 +58,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         /// Triggers transition to FinalizingSetup phase
         /// </summary>
         public event EventHandler<string> FinalizingSetupPhaseTriggered;
+
+        /// <summary>
+        /// Fired when WhiteGlove (Pre-Provisioning) completes successfully.
+        /// The device will shut down; the agent should terminate gracefully.
+        /// </summary>
+        public event EventHandler WhiteGloveCompleted;
 
         private const string EventLogChannel = "Microsoft-Windows-User Device Registration/Admin";
         private const string ShellCoreEventLogChannel = "Microsoft-Windows-Shell-Core/Operational";
@@ -92,7 +100,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             EventId_ShellCore_WebAppEvent
         };
 
-        public HelloDetector(string sessionId, string tenantId, Action<EnrollmentEvent> onEventCollected, AgentLogger logger, int helloWaitTimeoutSeconds = 30)
+        public EspAndHelloTracker(string sessionId, string tenantId, Action<EnrollmentEvent> onEventCollected, AgentLogger logger, int helloWaitTimeoutSeconds = 30)
         {
             _sessionId = sessionId ?? throw new ArgumentNullException(nameof(sessionId));
             _tenantId = tenantId ?? throw new ArgumentNullException(nameof(tenantId));
@@ -119,7 +127,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 
         public void Start()
         {
-            _logger.Info("Starting Hello detector");
+            _logger.Info("Starting ESP and Hello tracker");
 
             // Check if WHfB policy is configured initially
             CheckHelloPolicy();
@@ -144,7 +152,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 
         public void Stop()
         {
-            _logger.Info("Stopping Hello detector");
+            _logger.Info("Stopping ESP and Hello tracker");
 
             // Stop periodic policy check timer
             if (_policyCheckTimer != null)
@@ -156,7 +164,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                 }
                 catch (Exception ex)
                 {
-                    _logger.Error("Error stopping Hello detector policy check timer", ex);
+                    _logger.Error("Error stopping ESP and Hello tracker policy check timer", ex);
                 }
             }
 
@@ -200,7 +208,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                 }
                 catch (Exception ex)
                 {
-                    _logger.Error("Error stopping Hello detector watcher", ex);
+                    _logger.Error("Error stopping ESP and Hello tracker watcher", ex);
                 }
             }
 
@@ -241,7 +249,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                             TenantId = _tenantId,
                             EventType = "hello_policy_detected",
                             Severity = EventSeverity.Info,
-                            Source = "HelloDetector",
+                            Source = "EspAndHelloTracker",
                             Phase = EnrollmentPhase.Unknown,
                             Message = $"Windows Hello for Business policy detected: {status} (via {source})",
                             Data = new Dictionary<string, object>
@@ -467,7 +475,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                 Timestamp = timestamp,
                 EventType = eventType,
                 Severity = severity,
-                Source = "HelloDetector",
+                Source = "EspAndHelloTracker",
                 Phase = EnrollmentPhase.Unknown,
                 Message = message,
                 Data = data
@@ -601,12 +609,44 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     //"eventLogChannel": "Microsoft-Windows-Shell-Core/Operational"
                     //}
 
+                    //{
+                    //"windowsEventId": 62407,
+                    //"providerName": "Microsoft-Windows-Shell-Core",
+                    //"description": "CloudExperienceHost Web App Event 2. Name: 'CommercialOOBE_ESPProgress_Failure', Value: '{\"message\":\"BootstrapStatus: ...\",\"errorCode\":...}'.",
+                    //"eventLogChannel": "Microsoft-Windows-Shell-Core/Operational"
+                    //}
+
                     case EventId_ShellCore_WebAppEvent: // 62407
+                        // WhiteGlove check FIRST — its description also contains "Exiting"
+                        // which would match the generic OOBE_ESP.*Exiting regex below.
+                        if (description.Contains("WhiteGlove_Success", StringComparison.OrdinalIgnoreCase))
+                        {
+                            // Guard: event 62407 can fire multiple times; only process once
+                            lock (_stateLock)
+                            {
+                                if (_whiteGloveDetected) return;
+                                _whiteGloveDetected = true;
+                            }
+
+                            eventType = "whiteglove_complete";
+                            message = "WhiteGlove (Pre-Provisioning) completed successfully";
+                            // Do NOT set triggerFinalizingSetup — WhiteGlove terminates the
+                            // pre-provisioning phase entirely, it does not transition to FinalizingSetup.
+
+                            _logger.Info("WhiteGlove (Pre-Provisioning) success detected via Shell-Core event 62407");
+                        }
                         // Check if this is ESP exit event
                         // Use robust pattern: OOBE_ESP*Exiting* instead of full string CommercialOOBE_ESPProgress_Page_Exiting
-                        // Fix 26.02.26 - RegEx was not preceisely matching as we used Exit instead of Exiting, which is the actual value in the event description. 
+                        // Fix 26.02.26 - RegEx was not preceisely matching as we used Exit instead of Exiting, which is the actual value in the event description.
                         //                Updated to check for Exiting to reliably detect ESP exit events. Compare with event samples from real devices listed above.
-                        if (System.Text.RegularExpressions.Regex.IsMatch(description, @"OOBE_ESP.*Exiting", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                        else if (description.Contains("ESPProgress_Failure", StringComparison.OrdinalIgnoreCase))
+                        {
+                            eventType = "esp_failure";
+                            severity = EventSeverity.Error;
+                            message = "ESP (Enrollment Status Page) reported a failure";
+                            _logger.Warning("ESP failure detected via Shell-Core event 62407");
+                        }
+                        else if (System.Text.RegularExpressions.Regex.IsMatch(description, @"OOBE_ESP.*Exiting", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
                         {
                             eventType = "esp_exiting";
                             message = "ESP (Enrollment Status Page) phase exiting";
@@ -626,7 +666,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                         }
                         else
                         {
-                            // Not ESP exit, ignore
+                            // Not a tracked ESP event, ignore
                             return;
                         }
                         break;
@@ -642,7 +682,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     Timestamp = record.TimeCreated ?? DateTime.UtcNow,
                     EventType = eventType,
                     Severity = severity,
-                    Source = "HelloDetector",
+                    Source = "EspAndHelloTracker",
                     Phase = EnrollmentPhase.Unknown, // Let EnrollmentTracker decide phase
                     Message = message,
                     Data = new Dictionary<string, object>
@@ -662,6 +702,18 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     try
                     {
                         FinalizingSetupPhaseTriggered?.Invoke(this, finalizingSetupReason);
+                    }
+                    catch { }
+                }
+
+                // Fire WhiteGloveCompleted if this was a WhiteGlove success event.
+                // Must happen AFTER the event has been emitted above so the
+                // whiteglove_complete event is in the spool before the agent exits.
+                if (eventType == "whiteglove_complete")
+                {
+                    try
+                    {
+                        WhiteGloveCompleted?.Invoke(this, EventArgs.Empty);
                     }
                     catch { }
                 }
@@ -709,7 +761,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     TenantId = _tenantId,
                     EventType = "hello_wait_timeout",
                     Severity = EventSeverity.Info,
-                    Source = "HelloDetector",
+                    Source = "EspAndHelloTracker",
                     Phase = EnrollmentPhase.Unknown,
                     Message = $"Hello wizard did not start within {_helloWaitTimeoutSeconds}s after ESP exit - assuming not configured",
                     Data = new Dictionary<string, object>
@@ -822,7 +874,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     TenantId = _tenantId,
                     EventType = "hello_completion_timeout",
                     Severity = EventSeverity.Warning,
-                    Source = "HelloDetector",
+                    Source = "EspAndHelloTracker",
                     Phase = EnrollmentPhase.Unknown,
                     Message = $"Hello wizard started but no terminal event (300/301/362) arrived within {HelloCompletionTimeoutSeconds}s",
                     Data = new Dictionary<string, object>
