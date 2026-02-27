@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ProtectedRoute } from "../../components/ProtectedRoute";
 import { useTenant } from "../../contexts/TenantContext";
@@ -39,6 +40,9 @@ interface NewRuleForm {
   collectorType: string;
   target: string;
   valueName: string;
+  eventId: string;
+  messageFilter: string;
+  maxEntries: string;
   trigger: string;
   intervalSeconds: number;
   triggerPhase: string;
@@ -71,6 +75,24 @@ const COLLECTOR_TYPE_LABELS: Record<string, string> = {
   logparser: "Log Parser",
 };
 
+const TARGET_PLACEHOLDERS: Record<string, string> = {
+  registry: "e.g., HKLM\\SOFTWARE\\Microsoft\\Enrollments",
+  eventlog: "e.g., Microsoft-Windows-Shell-Core/Operational",
+  wmi: "e.g., SELECT * FROM Win32_BIOS",
+  file: "e.g., C:\\Windows\\Panther\\UnattendGC\\setupact.log",
+  command_allowlisted: "e.g., Get-Tpm or dsregcmd /status",
+  logparser: "e.g., %ProgramData%\\Microsoft\\IntuneManagementExtension\\Logs\\AppWorkload.log",
+};
+
+const TARGET_HINTS: Record<string, string> = {
+  registry: "Full registry path including hive (HKLM, HKCU). The agent reads values from this key.",
+  eventlog: "Event log name — supports operational/analytic logs like Microsoft-Windows-Shell-Core/Operational.",
+  wmi: "Full WQL query (SELECT * FROM ...). Must use an allowed WMI class.",
+  file: "File path. Environment variables like %ProgramData% are supported. Must be within allowed directories.",
+  command_allowlisted: "Exact command string from the agent's allowlist. Custom commands are not permitted.",
+  logparser: "Path to a CMTrace-format log file. Environment variables are expanded. Requires a regex pattern in parameters.",
+};
+
 const EMPTY_FORM: NewRuleForm = {
   ruleId: "",
   title: "",
@@ -79,6 +101,9 @@ const EMPTY_FORM: NewRuleForm = {
   collectorType: "registry",
   target: "",
   valueName: "",
+  eventId: "",
+  messageFilter: "",
+  maxEntries: "",
   trigger: "startup",
   intervalSeconds: 60,
   triggerPhase: "",
@@ -252,6 +277,19 @@ export default function GatherRulesPage() {
     }
   };
 
+  const buildParameters = (form: NewRuleForm): Record<string, string> => {
+    const params: Record<string, string> = {};
+    if (form.collectorType === "registry" && form.valueName.trim()) {
+      params.valueName = form.valueName.trim();
+    }
+    if (form.collectorType === "eventlog") {
+      if (form.eventId.trim()) params.eventId = form.eventId.trim();
+      if (form.messageFilter.trim()) params.messageFilter = form.messageFilter.trim();
+      if (form.maxEntries.trim()) params.maxEntries = form.maxEntries.trim();
+    }
+    return params;
+  };
+
   // Create custom rule
   const handleCreateRule = async () => {
     if (!newRule.ruleId.trim() || !newRule.title.trim() || !newRule.target.trim() || !newRule.outputEventType.trim()) {
@@ -278,9 +316,7 @@ export default function GatherRulesPage() {
         trigger: newRule.trigger,
         outputEventType: newRule.outputEventType.trim(),
         outputSeverity: newRule.outputSeverity,
-        parameters: newRule.collectorType === "registry" && newRule.valueName.trim()
-          ? { valueName: newRule.valueName.trim() }
-          : {},
+        parameters: buildParameters(newRule),
       };
 
       if (newRule.trigger === "interval") {
@@ -336,6 +372,9 @@ export default function GatherRulesPage() {
       outputEventType: rule.outputEventType,
       outputSeverity: rule.outputSeverity,
       valueName: rule.parameters?.valueName || "",
+      eventId: rule.parameters?.eventId || "",
+      messageFilter: rule.parameters?.messageFilter || "",
+      maxEntries: rule.parameters?.maxEntries || "",
     });
   };
 
@@ -373,9 +412,7 @@ export default function GatherRulesPage() {
         trigger: editForm.trigger,
         outputEventType: editForm.outputEventType.trim(),
         outputSeverity: editForm.outputSeverity,
-        parameters: editForm.collectorType === "registry" && editForm.valueName.trim()
-          ? { valueName: editForm.valueName.trim() }
-          : {},
+        parameters: buildParameters(editForm),
         author: user?.displayName || user?.upn || rule.author,
         version: bumpVersion(rule.version),
       };
@@ -543,11 +580,11 @@ export default function GatherRulesPage() {
           type="text"
           value={form.target}
           onChange={(e) => setForm({ ...form, target: e.target.value })}
-          placeholder="e.g., HKLM\SOFTWARE\Microsoft\... or Win32_OperatingSystem"
+          placeholder={TARGET_PLACEHOLDERS[form.collectorType] || "Target for data collection"}
           autoComplete="off"
           className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
         />
-        <p className="text-xs text-gray-400 mt-1">Registry path, WMI class, event log name, file path, or command depending on collector type</p>
+        <p className="text-xs text-gray-400 mt-1">{TARGET_HINTS[form.collectorType] || "Registry path, WMI class, event log name, file path, or command depending on collector type"}</p>
       </div>
 
       {/* Registry: optional Value Name */}
@@ -563,6 +600,51 @@ export default function GatherRulesPage() {
             className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
           />
           <p className="text-xs text-gray-400 mt-1">Specific registry value to read. Leave empty to read all values in the key.</p>
+        </div>
+      )}
+
+      {/* EventLog: optional filters */}
+      {form.collectorType === "eventlog" && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Event ID</label>
+              <input
+                type="text"
+                value={form.eventId}
+                onChange={(e) => setForm({ ...form, eventId: e.target.value })}
+                placeholder="e.g., 62407 (leave empty for all events)"
+                autoComplete="off"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+              />
+              <p className="text-xs text-gray-400 mt-1">Filter by specific Event ID. Leave empty to collect all events.</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Max Entries</label>
+              <input
+                type="number"
+                min={1}
+                max={50}
+                value={form.maxEntries}
+                onChange={(e) => setForm({ ...form, maxEntries: e.target.value })}
+                placeholder="10"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+              />
+              <p className="text-xs text-gray-400 mt-1">Maximum number of events to return (1–50, default: 10).</p>
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Message Filter</label>
+            <input
+              type="text"
+              value={form.messageFilter}
+              onChange={(e) => setForm({ ...form, messageFilter: e.target.value })}
+              placeholder="e.g., *ESPProgress* (leave empty for no filter)"
+              autoComplete="off"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+            />
+            <p className="text-xs text-gray-400 mt-1">Filter events where the message contains this text. Use * as wildcard prefix/suffix.</p>
+          </div>
         </div>
       )}
 
@@ -617,7 +699,7 @@ export default function GatherRulesPage() {
             type="text"
             value={form.triggerEventType}
             onChange={(e) => setForm({ ...form, triggerEventType: e.target.value })}
-            placeholder="e.g., NetworkChange, PolicyApplied"
+            placeholder="e.g., enrollment_complete, enrollment_failed, app_install_failed"
             autoComplete="off"
             className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
           />
@@ -672,7 +754,15 @@ export default function GatherRulesPage() {
                   &larr; Back to Dashboard
                 </button>
                 <div>
-                  <h1 className="text-3xl font-bold text-gray-900">Gather Rules</h1>
+                  <div className="flex items-center gap-4">
+                    <h1 className="text-3xl font-bold text-gray-900">Gather Rules</h1>
+                    <Link href="/docs#gather-rules" className="text-sm text-indigo-600 hover:text-indigo-800 flex items-center gap-1 mt-1">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                      </svg>
+                      Documentation
+                    </Link>
+                  </div>
                   <p className="text-sm text-gray-600 mt-1">Manage data collection rules for device enrollment</p>
                 </div>
               </div>

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Diagnostics.Eventing.Reader;
 using System.IO;
 using System.Linq;
 using System.Management;
@@ -538,43 +539,76 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             try
             {
                 int maxEntries = 10;
-                string maxEntriesStr;
-                if (rule.Parameters != null && rule.Parameters.TryGetValue("maxEntries", out maxEntriesStr))
+                if (rule.Parameters != null && rule.Parameters.TryGetValue("maxEntries", out var maxEntriesStr))
                 {
                     int.TryParse(maxEntriesStr, out maxEntries);
                     maxEntries = Math.Min(maxEntries, 50); // Cap at 50
                 }
 
-                using (var eventLog = new EventLog(logName))
+                // Build XPath query with optional filters
+                var conditions = new List<string>();
+
+                string sourceFilter = null;
+                if (rule.Parameters != null && rule.Parameters.TryGetValue("source", out sourceFilter)
+                    && !string.IsNullOrEmpty(sourceFilter))
                 {
-                    data["log_name"] = logName;
-                    data["total_entries"] = eventLog.Entries.Count;
+                    conditions.Add($"Provider[@Name='{EscapeXPath(sourceFilter)}']");
+                }
 
-                    var entries = new List<string>();
-                    var startIndex = Math.Max(0, eventLog.Entries.Count - maxEntries);
+                string eventIdFilter = null;
+                if (rule.Parameters != null && rule.Parameters.TryGetValue("eventId", out eventIdFilter)
+                    && !string.IsNullOrEmpty(eventIdFilter))
+                {
+                    conditions.Add($"EventID={eventIdFilter}");
+                }
 
-                    for (int i = eventLog.Entries.Count - 1; i >= startIndex && entries.Count < maxEntries; i--)
+                string xpath = conditions.Count > 0
+                    ? $"*[System[{string.Join(" and ", conditions)}]]"
+                    : "*";
+
+                string messageFilter = null;
+                rule.Parameters?.TryGetValue("messageFilter", out messageFilter);
+
+                var query = new EventLogQuery(logName, PathType.LogName, xpath)
+                {
+                    ReverseDirection = true // newest first
+                };
+
+                data["log_name"] = logName;
+                var entries = new List<string>();
+
+                using (var reader = new EventLogReader(query))
+                {
+                    EventRecord record;
+                    while ((record = reader.ReadEvent()) != null && entries.Count < maxEntries)
                     {
-                        try
+                        using (record)
                         {
-                            var entry = eventLog.Entries[i];
+                            var message = "";
+                            try { message = record.FormatDescription() ?? ""; }
+                            catch { /* Some events lack formatting resources */ }
 
-                            // Apply source filter if specified
-                            string sourceFilter;
-                            if (rule.Parameters != null && rule.Parameters.TryGetValue("source", out sourceFilter))
+                            // Apply message filter (wildcard contains)
+                            if (!string.IsNullOrEmpty(messageFilter))
                             {
-                                if (!string.Equals(entry.Source, sourceFilter, StringComparison.OrdinalIgnoreCase))
+                                var pattern = messageFilter.Trim('*');
+                                if (string.IsNullOrEmpty(pattern) ||
+                                    message.IndexOf(pattern, StringComparison.OrdinalIgnoreCase) < 0)
                                     continue;
                             }
 
-                            entries.Add($"[{entry.TimeGenerated:yyyy-MM-dd HH:mm:ss}] [{entry.EntryType}] [{entry.Source}] {entry.Message?.Substring(0, Math.Min(200, entry.Message?.Length ?? 0))}");
-                        }
-                        catch { }
-                    }
+                            var level = "";
+                            try { level = record.LevelDisplayName ?? record.Level?.ToString() ?? "Unknown"; }
+                            catch { level = record.Level?.ToString() ?? "Unknown"; }
 
-                    data["entries"] = string.Join("\n", entries);
-                    data["entries_returned"] = entries.Count;
+                            var truncMsg = message.Length > 500 ? message.Substring(0, 500) : message;
+                            entries.Add($"[{record.TimeCreated:yyyy-MM-dd HH:mm:ss}] [{level}] [ID:{record.Id}] {truncMsg}");
+                        }
+                    }
                 }
+
+                data["entries"] = string.Join("\n", entries);
+                data["entries_returned"] = entries.Count;
             }
             catch (Exception ex)
             {
@@ -582,6 +616,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             }
 
             return data;
+        }
+
+        private static string EscapeXPath(string value)
+        {
+            return value.Replace("'", "&apos;");
         }
 
         private void ExecuteLogParserRule(GatherRule rule)

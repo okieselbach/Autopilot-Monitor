@@ -81,7 +81,7 @@ namespace AutopilotMonitor.Shared.Models
         /// <summary>
         /// Additional parameters for the collector:
         /// - registry: { "valueName": "ProxyServer" } — omit to read all values
-        /// - eventlog: { "maxEntries": "10", "source": "Microsoft-Windows-DeviceManagement-Enterprise-Diagnostics" }
+        /// - eventlog: { "maxEntries": "10", "source": "...", "eventId": "62407", "messageFilter": "*ESPProgress*" }
         /// - wmi: { "namespace": "root\\CIMV2\\Security\\MicrosoftTpm" }
         /// - file: { "readContent": "true" } — only reads files &lt;50 KB
         /// - command_allowlisted: (no additional parameters — command is the full string in Target)
