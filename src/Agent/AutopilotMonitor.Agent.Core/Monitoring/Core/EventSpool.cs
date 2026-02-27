@@ -146,19 +146,17 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             {
                 foreach (var evt in events)
                 {
-                    var pattern = $"event_*_{evt.Sequence}.json";
-                    var files = Directory.GetFiles(_spoolDirectory, pattern);
-
-                    foreach (var file in files)
+                    // Reconstruct the exact filename used in Add() — no glob, no cross-boot collision
+                    var fileName = $"event_{evt.Timestamp:yyyyMMddHHmmssfff}_{evt.Sequence}.json";
+                    var filePath = Path.Combine(_spoolDirectory, fileName);
+                    try
                     {
-                        try
-                        {
-                            File.Delete(file);
-                        }
-                        catch
-                        {
-                            // Ignore deletion errors
-                        }
+                        if (File.Exists(filePath))
+                            File.Delete(filePath);
+                    }
+                    catch
+                    {
+                        // Ignore deletion errors — file may already be gone
                     }
                 }
             }
@@ -194,6 +192,25 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                         // Ignore deletion errors
                     }
                 }
+            }
+        }
+
+        /// <summary>
+        /// Returns the highest sequence number found in spool files, or 0 if empty.
+        /// Used at startup for crash recovery: ensures new sequences never collide
+        /// with unsent events still in the spool.
+        /// </summary>
+        public long GetMaxSequence()
+        {
+            lock (_lockObject)
+            {
+                long max = 0;
+                foreach (var file in Directory.GetFiles(_spoolDirectory, "event_*.json"))
+                {
+                    var seq = ExtractSequenceFromFilename(file);
+                    if (seq > max) max = seq;
+                }
+                return max;
             }
         }
 

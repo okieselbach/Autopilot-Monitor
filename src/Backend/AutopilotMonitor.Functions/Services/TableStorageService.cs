@@ -416,18 +416,30 @@ namespace AutopilotMonitor.Functions.Services
 
                     // Idempotency: if the session is already in a terminal state (Succeeded/Failed),
                     // do not overwrite it with another terminal state to prevent duplicate notifications.
+                    var existingStatusStr = session.GetString("Status");
                     if (status == SessionStatus.Succeeded || status == SessionStatus.Failed)
                     {
-                        var existingStatus = session.GetString("Status");
-                        if (existingStatus == SessionStatus.Succeeded.ToString() || existingStatus == SessionStatus.Failed.ToString())
+                        if (existingStatusStr == SessionStatus.Succeeded.ToString() || existingStatusStr == SessionStatus.Failed.ToString())
                         {
-                            _logger.LogInformation($"Session {sessionId} already in terminal state '{existingStatus}', skipping status update to '{status}'");
+                            _logger.LogInformation($"Session {sessionId} already in terminal state '{existingStatusStr}', skipping status update to '{status}'");
                             return false;
                         }
                     }
 
-                    // Update status
-                    session["Status"] = status.ToString();
+                    // Status promotion rule: a Pending session (WhiteGlove pre-provisioning complete)
+                    // must not regress to InProgress via phase-change events from the resumed boot.
+                    // The Pending → InProgress transition happens exclusively in StoreSessionAsync
+                    // (agent re-registration at Boot 2).
+                    if (status == SessionStatus.InProgress && existingStatusStr == SessionStatus.Pending.ToString())
+                    {
+                        _logger.LogInformation($"Session {sessionId} is Pending (WhiteGlove), preserving status (InProgress blocked by promotion rule)");
+                        // Phase, timestamps, and event count are still updated below.
+                    }
+                    else
+                    {
+                        // Update status
+                        session["Status"] = status.ToString();
+                    }
 
                     // Update current phase if provided
                     if (currentPhase.HasValue)
@@ -647,7 +659,8 @@ namespace AutopilotMonitor.Functions.Services
                 Phase = (EnrollmentPhase)(entity.GetInt32("Phase") ?? 0),
                 Message = entity.GetString("Message") ?? string.Empty,
                 Sequence = entity.GetInt64("Sequence") ?? 0,
-                Data = DeserializeEventData(entity.GetString("DataJson"))
+                Data = DeserializeEventData(entity.GetString("DataJson")),
+                RowKey = entity.RowKey
             };
         }
 

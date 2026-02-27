@@ -29,7 +29,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         private readonly Timer _debounceTimer;
         private readonly object _timerLock = new object();
         private readonly ManualResetEventSlim _completionEvent = new(false);
-        private long _eventSequence = 0;
+        private long _eventSequence; // Initialized from persistence + spool ceiling in constructor
+        private readonly SessionPersistence _sessionPersistence;
         private EnrollmentPhase? _lastPhase = null;
 
         // Core event collectors (always on)
@@ -71,6 +72,18 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             _apiClient = new BackendApiClient(_configuration.ApiBaseUrl, _configuration, _logger);
             _cleanupService = new CleanupService(_configuration, _logger);
             _diagnosticsService = new DiagnosticsPackageService(_configuration, _logger, _apiClient);
+
+            // Initialize sequence from persistence, with spool-ceiling crash recovery
+            var dataDirectory = Environment.ExpandEnvironmentVariables(Constants.AgentDataDirectory);
+            _sessionPersistence = new SessionPersistence(dataDirectory);
+            _eventSequence = _sessionPersistence.LoadSequence();
+            var spoolMax = _spool.GetMaxSequence();
+            if (spoolMax > _eventSequence)
+            {
+                _logger.Info($"Spool ceiling ({spoolMax}) > persisted sequence ({_eventSequence}), advancing");
+                _eventSequence = spoolMax;
+            }
+            _logger.Info($"Event sequence initialized at {_eventSequence}");
 
             // Subscribe to spool events for batched upload when new events arrive
             _spool.EventsAvailable += OnEventsAvailable;
@@ -516,6 +529,15 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             _spool.Add(evt);
             _logger.Debug($"Event emitted: {evt.EventType} - {evt.Message}");
 
+            // Persist sequence periodically (every 50 events) + always on critical events
+            if (evt.Sequence % 50 == 0 ||
+                evt.EventType == "whiteglove_complete" ||
+                evt.EventType == "enrollment_complete" ||
+                evt.EventType == "enrollment_failed")
+            {
+                _sessionPersistence.SaveSequence(evt.Sequence);
+            }
+
             // Check if this is a phase transition
             bool isPhaseTransition = false;
             if (evt.Phase != _lastPhase)
@@ -754,18 +776,16 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         }
 
         /// <summary>
-        /// Deletes the persisted session ID file
-        /// Should be called when enrollment is complete/failed
+        /// Deletes the persisted session ID and sequence files.
+        /// Should be called when enrollment is complete/failed.
         /// </summary>
         private void DeleteSessionId()
         {
-            _logger.Info("Deleting persisted session ID...");
+            _logger.Info("Deleting persisted session ID and sequence...");
             try
             {
-                var dataDirectory = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor");
-                var sessionPersistence = new SessionPersistence(dataDirectory);
-                sessionPersistence.DeleteSession();
-                _logger.Info("Session ID deleted successfully");
+                _sessionPersistence.DeleteSession(); // Deletes session.id AND session.seq
+                _logger.Info("Session ID and sequence deleted successfully");
             }
             catch (Exception ex)
             {
@@ -943,7 +963,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 //         distinguishable from the later full-enrollment package.
                 await UploadDiagnosticsWithTimelineEvents(enrollmentSucceeded: true, fileNameSuffix: "preprov");
 
-                // Step 4: Exit — session.id survives so the agent resumes on next boot.
+                // Step 4: Persist final sequence for Boot 2 continuation
+                _sessionPersistence.SaveSequence(Interlocked.Read(ref _eventSequence));
+                _logger.Info($"Sequence counter persisted at {Interlocked.Read(ref _eventSequence)} for next boot");
+
+                // Step 5: Exit — session.id + session.seq survive so the agent resumes on next boot.
                 //         No DeleteSessionId, no WriteEnrollmentCompleteMarker, no self-destruct.
                 //         The Windows Autopilot shutdown will power off the device;
                 //         the Scheduled Task restarts the agent on the user's first boot.

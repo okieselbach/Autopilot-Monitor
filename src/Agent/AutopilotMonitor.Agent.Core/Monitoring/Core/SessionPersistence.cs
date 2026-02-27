@@ -9,6 +9,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
     public class SessionPersistence
     {
         private readonly string _sessionFilePath;
+        private readonly string _sequenceFilePath;
         private readonly object _lockObject = new object();
 
         public SessionPersistence(string dataDirectory)
@@ -24,6 +25,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             }
 
             _sessionFilePath = Path.Combine(dataDirectory, "session.id");
+            _sequenceFilePath = Path.Combine(dataDirectory, "session.seq");
         }
 
         /// <summary>
@@ -73,9 +75,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 try
                 {
                     if (File.Exists(_sessionFilePath))
-                    {
                         File.Delete(_sessionFilePath);
-                    }
+                    if (File.Exists(_sequenceFilePath))
+                        File.Delete(_sequenceFilePath);
                 }
                 catch (Exception)
                 {
@@ -94,6 +96,53 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             lock (_lockObject)
             {
                 return File.Exists(_sessionFilePath);
+            }
+        }
+
+        /// <summary>
+        /// Loads the persisted sequence counter. Returns 0 if no file exists or content is invalid.
+        /// </summary>
+        public long LoadSequence()
+        {
+            lock (_lockObject)
+            {
+                try
+                {
+                    if (File.Exists(_sequenceFilePath))
+                    {
+                        var content = File.ReadAllText(_sequenceFilePath).Trim();
+                        if (long.TryParse(content, out var sequence) && sequence >= 0)
+                            return sequence;
+                    }
+                }
+                catch { }
+                return 0;
+            }
+        }
+
+        /// <summary>
+        /// Persists the current sequence counter to disk.
+        /// Called periodically and before graceful shutdown (WhiteGlove).
+        /// </summary>
+        public void SaveSequence(long sequence)
+        {
+            lock (_lockObject)
+            {
+                try { File.WriteAllText(_sequenceFilePath, sequence.ToString()); }
+                catch { } // Non-fatal: worst case, next boot starts with a small gap
+            }
+        }
+
+        /// <summary>
+        /// Deletes the persisted sequence file.
+        /// Called alongside DeleteSession when enrollment completes.
+        /// </summary>
+        public void DeleteSequence()
+        {
+            lock (_lockObject)
+            {
+                try { if (File.Exists(_sequenceFilePath)) File.Delete(_sequenceFilePath); }
+                catch { }
             }
         }
     }

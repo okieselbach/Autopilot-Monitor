@@ -25,7 +25,10 @@ namespace AutopilotMonitor.Shared.Models
         public string TenantId { get; set; }
 
         /// <summary>
-        /// Timestamp when the event occurred (UTC)
+        /// Timestamp when the agent detected/created this event on the device (UTC).
+        /// Set at construction time (DateTime.UtcNow) or from the source's native timestamp
+        /// (e.g., Windows EventLog TimeCreated). The backend stores this as-is — it is the
+        /// authoritative "agent-side" timestamp, not a server-side receive time.
         /// </summary>
         public DateTime Timestamp { get; set; }
 
@@ -101,6 +104,13 @@ namespace AutopilotMonitor.Shared.Models
         /// Sequence number for ordering events with same timestamp
         /// </summary>
         public long Sequence { get; set; }
+
+        /// <summary>
+        /// Azure Table Storage RowKey — format: {Timestamp:yyyyMMddHHmmssfff}_{Sequence:D10}
+        /// Represents the exact sort key used in storage.
+        /// </summary>
+        [JsonPropertyName("rowKey")]
+        public string RowKey { get; set; }
 
         public EnrollmentEvent()
         {
