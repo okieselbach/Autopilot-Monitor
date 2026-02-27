@@ -551,12 +551,19 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 _uploadTimer?.Change(Timeout.Infinite, Timeout.Infinite);
                 _debounceTimer?.Change(Timeout.Infinite, Timeout.Infinite);
 
-                // 4. Final upload to ensure whiteglove_complete reaches the backend
+                // 4. Final upload — drain the entire spool, not just one batch.
+                //    whiteglove_complete may be beyond the first MaxBatchSize (100) events,
+                //    so we loop until the spool is empty to guarantee the event reaches the backend.
                 Task.Run(async () =>
                 {
                     try
                     {
-                        await UploadEventsAsync();
+                        int maxIterations = 20; // safety cap — avoids infinite loop on persistent failures
+                        while (_spool.GetCount() > 0 && maxIterations-- > 0)
+                        {
+                            await UploadEventsAsync();
+                        }
+
                         _logger.Info("WhiteGlove final upload done. Agent exiting.");
 
                         // Small delay to ensure network transmission completes
