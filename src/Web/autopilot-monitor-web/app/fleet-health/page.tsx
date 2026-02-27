@@ -813,36 +813,31 @@ export default function FleetHealthPage() {
                 No data available
               </div>
             ) : (
-              <div className="space-y-4">
+              <div className="space-y-3">
                 {modelHealth.map((m) => {
                   const successRate =
                     m.total > 0
                       ? Math.round((m.succeeded / m.total) * 100)
                       : 0;
                   return (
-                    <div key={m.model} className="flex items-center space-x-4">
-                      <div className="w-48 text-sm text-gray-700 truncate flex-shrink-0">
-                        {m.model}
+                    <div key={m.model}>
+                      <div className="flex items-baseline justify-between mb-1">
+                        <span className="text-sm text-gray-700 break-words leading-snug">{m.model}</span>
+                        <span className="ml-3 flex-shrink-0 text-sm font-medium text-gray-900">
+                          {successRate}% <span className="text-xs font-normal text-gray-400">({m.total} devices)</span>
+                        </span>
                       </div>
-                      <div className="flex-1">
-                        <div className="w-full h-4 bg-gray-100 rounded-full overflow-hidden">
-                          <div
-                            className={`h-full rounded-full transition-all ${
-                              successRate >= 95
-                                ? "bg-green-500"
-                                : successRate >= 80
-                                ? "bg-yellow-500"
-                                : "bg-red-500"
-                            }`}
-                            style={{ width: `${successRate}%` }}
-                          />
-                        </div>
-                      </div>
-                      <div className="text-sm font-medium text-gray-900 w-12 text-right">
-                        {successRate}%
-                      </div>
-                      <div className="text-xs text-gray-400 w-24 text-right">
-                        ({m.total} devices)
+                      <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all ${
+                            successRate >= 95
+                              ? "bg-green-500"
+                              : successRate >= 80
+                              ? "bg-yellow-500"
+                              : "bg-red-500"
+                          }`}
+                          style={{ width: `${successRate}%` }}
+                        />
                       </div>
                     </div>
                   );
