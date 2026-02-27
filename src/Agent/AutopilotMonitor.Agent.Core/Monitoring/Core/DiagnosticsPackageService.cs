@@ -64,7 +64,16 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         /// Returns null if the upload was skipped (mode=Off, not configured, or OnFailure+succeeded).
         /// This method is non-fatal: all exceptions are caught and logged.
         /// </summary>
-        public async Task<DiagnosticsUploadResult> CreateAndUploadAsync(bool enrollmentSucceeded)
+        /// <param name="enrollmentSucceeded">
+        /// True for a successful enrollment (affects OnFailure mode check and sessioninfo.txt content).
+        /// Pass true for WhiteGlove pre-provisioning (it succeeded up to this point).
+        /// </param>
+        /// <param name="fileNameSuffix">
+        /// Optional suffix inserted before the .zip extension.
+        /// Example: "preprov" → AgentDiagnostics-{sessionId}-{timestamp}-preprov.zip
+        /// Null (default) → AgentDiagnostics-{sessionId}-{timestamp}.zip
+        /// </param>
+        public async Task<DiagnosticsUploadResult> CreateAndUploadAsync(bool enrollmentSucceeded, string fileNameSuffix = null)
         {
             try
             {
@@ -88,11 +97,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     return null;
                 }
 
-                _logger.Info($"Creating diagnostics package (mode={mode}, enrollmentSucceeded={enrollmentSucceeded})...");
+                _logger.Info($"Creating diagnostics package (mode={mode}, enrollmentSucceeded={enrollmentSucceeded}{(fileNameSuffix != null ? $", suffix={fileNameSuffix}" : "")})...");
 
                 // Build ZIP in memory
                 var timestamp = DateTime.UtcNow.ToString("yyyyMMddHHmmss");
-                var zipFileName = $"AgentDiagnostics-{_configuration.SessionId}-{timestamp}.zip";
+                var suffix = string.IsNullOrEmpty(fileNameSuffix) ? "" : $"-{fileNameSuffix}";
+                var zipFileName = $"AgentDiagnostics-{_configuration.SessionId}-{timestamp}{suffix}.zip";
 
                 byte[] zipBytes;
                 using (var ms = new MemoryStream())

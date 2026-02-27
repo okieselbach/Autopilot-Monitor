@@ -537,49 +537,22 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             // Check for WhiteGlove completion — agent exits gracefully, session stays open
             if (evt.EventType == "whiteglove_complete")
             {
-                _logger.Info("WhiteGlove pre-provisioning complete. Stopping collectors and exiting.");
+                _logger.Info("WhiteGlove pre-provisioning complete. Starting graceful shutdown sequence.");
 
-                // 1. Stop performance collection (no value while device is off)
+                // Stop performance collection immediately (no value while device is off)
                 _performanceCollector?.Stop();
                 _performanceCollector?.Dispose();
                 _performanceCollector = null;
 
-                // 2. Stop all other collectors
+                // Stop all event collectors and the spool watcher — no new events after this point
                 StopEventCollectors();
+                _spool.StopWatching();
 
-                // 3. Stop upload timers
+                // Stop upload timers — we drive uploads manually from here
                 _uploadTimer?.Change(Timeout.Infinite, Timeout.Infinite);
                 _debounceTimer?.Change(Timeout.Infinite, Timeout.Infinite);
 
-                // 4. Final upload — drain the entire spool, not just one batch.
-                //    whiteglove_complete may be beyond the first MaxBatchSize (100) events,
-                //    so we loop until the spool is empty to guarantee the event reaches the backend.
-                Task.Run(async () =>
-                {
-                    try
-                    {
-                        int maxIterations = 20; // safety cap — avoids infinite loop on persistent failures
-                        while (_spool.GetCount() > 0 && maxIterations-- > 0)
-                        {
-                            await UploadEventsAsync();
-                        }
-
-                        _logger.Info("WhiteGlove final upload done. Agent exiting.");
-
-                        // Small delay to ensure network transmission completes
-                        await Task.Delay(2000);
-
-                        // 5. Exit — session.id file stays (no DeleteSessionId!),
-                        //    no enrollment-complete marker (no WriteEnrollmentCompleteMarker!),
-                        //    no self-destruct. Scheduled task restarts us on next boot.
-                        Environment.Exit(0);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.Warning($"WhiteGlove final upload failed: {ex.Message}");
-                        Environment.Exit(0); // Exit anyway — events will be in the spool for next start
-                    }
-                });
+                Task.Run(() => HandleWhiteGloveComplete());
 
                 return; // Don't continue with normal event processing
             }
@@ -804,7 +777,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         /// Uploads diagnostics package with timeline events (start + result).
         /// Emits events, uploads them, then performs the actual diagnostics upload.
         /// </summary>
-        private async Task UploadDiagnosticsWithTimelineEvents(bool enrollmentSucceeded)
+        private async Task UploadDiagnosticsWithTimelineEvents(bool enrollmentSucceeded, string fileNameSuffix = null)
         {
             var mode = _configuration.DiagnosticsUploadMode ?? "Off";
             if (string.Equals(mode, "Off", StringComparison.OrdinalIgnoreCase))
@@ -824,7 +797,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 Severity = EventSeverity.Info,
                 Source = "MonitoringService",
                 Phase = EnrollmentPhase.Complete,
-                Message = $"Collecting diagnostics package (mode={mode})",
+                Message = $"Collecting diagnostics package (mode={mode}{(fileNameSuffix != null ? $", type={fileNameSuffix}" : "")})",
                 Data = new Dictionary<string, object>
                 {
                     { "uploadMode", mode }
@@ -833,7 +806,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             await UploadEventsAsync();
 
             // Perform the actual ZIP + upload
-            var uploadResult = await _diagnosticsService.CreateAndUploadAsync(enrollmentSucceeded);
+            var uploadResult = await _diagnosticsService.CreateAndUploadAsync(enrollmentSucceeded, fileNameSuffix);
             var success = uploadResult?.Success == true;
 
             // Emit result event (includes blobName so backend can store it on the session)
@@ -937,6 +910,50 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             {
                 _logger.Error("Error during self-destruct sequence", ex);
                 Environment.Exit(1);
+            }
+        }
+
+        /// <summary>
+        /// Graceful shutdown sequence after WhiteGlove (Pre-Provisioning) completes.
+        /// Mirrors HandleEnrollmentComplete but does NOT delete the session ID or write the
+        /// enrollment-complete marker — the session must survive for Part 2 (user enrollment).
+        /// Uploads a "preprov" diagnostics package if diagnostics are configured.
+        /// </summary>
+        private async Task HandleWhiteGloveComplete()
+        {
+            try
+            {
+                _logger.Info("===== WHITEGLOVE COMPLETE - Starting graceful shutdown sequence =====");
+
+                // Step 1: Drain the entire spool — whiteglove_complete may be beyond the first
+                //         MaxBatchSize (100) events, so loop until empty.
+                _logger.Info("Uploading final events (draining spool)...");
+                int maxIterations = 20; // safety cap against persistent upload failures
+                while (_spool.GetCount() > 0 && maxIterations-- > 0)
+                {
+                    await UploadEventsAsync();
+                }
+
+                // Step 2: Small delay to ensure final network transmission completes
+                await Task.Delay(2000);
+
+                // Step 3: Upload pre-provisioning diagnostics package if configured.
+                //         Pass enrollmentSucceeded=true (pre-prov succeeded) and suffix "preprov"
+                //         so the blob is named AgentDiagnostics-{sessionId}-{ts}-preprov.zip,
+                //         distinguishable from the later full-enrollment package.
+                await UploadDiagnosticsWithTimelineEvents(enrollmentSucceeded: true, fileNameSuffix: "preprov");
+
+                // Step 4: Exit — session.id survives so the agent resumes on next boot.
+                //         No DeleteSessionId, no WriteEnrollmentCompleteMarker, no self-destruct.
+                //         The Windows Autopilot shutdown will power off the device;
+                //         the Scheduled Task restarts the agent on the user's first boot.
+                _logger.Info("WhiteGlove graceful shutdown complete. Agent exiting.");
+                Environment.Exit(0);
+            }
+            catch (Exception ex)
+            {
+                _logger.Error("Error during WhiteGlove shutdown sequence", ex);
+                Environment.Exit(0); // Still exit — don't leave a zombie process
             }
         }
 
