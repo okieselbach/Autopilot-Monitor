@@ -1,9 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
-using System.Management;
-using System.Text.Json;
 using System.Threading;
 using AutopilotMonitor.Agent.Core.Logging;
 using AutopilotMonitor.Shared.Models;
@@ -24,7 +21,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         private readonly AgentLogger _logger;
         private readonly string _imeLogFolder;
         private readonly List<ImeLogPattern> _imeLogPatterns;
-        private readonly Collectors.EspAndHelloTracker _helloDetector;
+        private readonly Collectors.EspAndHelloTracker _espAndHelloTracker;
 
         private ImeLogTracker _imeLogTracker;
         private Timer _summaryTimer;
@@ -37,7 +34,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
 
         // Default IME log folder
         private const string DefaultImeLogFolder = @"%ProgramData%\Microsoft\IntuneManagementExtension\Logs";
-        private const string RegKeyWindowsCurrentVersion = @"HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion";
+
+        private Collectors.DeviceInfoCollector _deviceInfoCollector;
 
         /// <summary>
         /// Detects whether this is an Autopilot v1 (Classic ESP) or v2 (Windows Device Preparation) enrollment
@@ -79,7 +77,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             bool simulationMode = false,
             double speedFactor = 50,
             string imeMatchLogPath = null,
-            Collectors.EspAndHelloTracker helloDetector = null)
+            Collectors.EspAndHelloTracker espAndHelloTracker = null)
         {
             _sessionId = sessionId;
             _tenantId = tenantId;
@@ -87,7 +85,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             _logger = logger;
             _imeLogPatterns = imeLogPatterns ?? new List<ImeLogPattern>();
             _imeLogFolder = imeLogFolderOverride ?? DefaultImeLogFolder;
-            _helloDetector = helloDetector;
+            _espAndHelloTracker = espAndHelloTracker;
+            _deviceInfoCollector = new Collectors.DeviceInfoCollector(sessionId, tenantId, emitEvent, logger);
 
             // Create ImeLogTracker with state persistence directory
             var stateDirectory = @"%ProgramData%\AutopilotMonitor\State";
@@ -104,12 +103,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             _imeLogTracker.OnAllAppsCompleted = HandleAllAppsCompleted;
             _imeLogTracker.OnUserSessionCompleted = HandleUserSessionCompleted;
 
-            // Subscribe to HelloDetector completion event if available
-            if (_helloDetector != null)
+            // Subscribe to EspAndHelloTracker completion event if available
+            if (_espAndHelloTracker != null)
             {
-                _helloDetector.HelloCompleted += OnHelloCompleted;
-                _helloDetector.FinalizingSetupPhaseTriggered += OnFinalizingSetupPhaseTriggered;
-                _helloDetector.WhiteGloveCompleted += OnWhiteGloveCompleted;
+                _espAndHelloTracker.HelloCompleted += OnHelloCompleted;
+                _espAndHelloTracker.FinalizingSetupPhaseTriggered += OnFinalizingSetupPhaseTriggered;
+                _espAndHelloTracker.WhiteGloveCompleted += OnWhiteGloveCompleted;
             }
         }
 
@@ -163,500 +162,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         // ===== Device Info Collection =====
 
         private void CollectDeviceInfo()
-        {
-            _logger.Info("EnrollmentTracker: collecting device info (at start)");
-
-            CollectOSInfo();
-            CollectBootTime();
-            CollectNetworkAdapters();
-            CollectDnsConfiguration();
-            CollectProxyConfiguration();
-            CollectAutopilotProfile();
-            CollectSecureBootStatus();
-            CollectBitLockerStatus();
-            CollectAadJoinStatus();
-        }
+            => _enrollmentType = _deviceInfoCollector.CollectAll();
 
         /// <summary>
         /// Collects device info that may change during enrollment (e.g., BitLocker enabled via policy).
         /// Called at enrollment complete to capture final state.
         /// </summary>
         private void CollectDeviceInfoAtEnd()
-        {
-            _logger.Info("EnrollmentTracker: collecting device info (at end)");
-
-            // BitLocker can be enabled during enrollment via policy
-            CollectBitLockerStatus();
-
-            // Add more collectors here as needed
-        }
-
-        private void CollectBootTime()
-        {
-            try
-            {
-                var data = new Dictionary<string, object>();
-
-                // Query WMI for OS boot time
-                using (var searcher = new ManagementObjectSearcher("SELECT LastBootUpTime FROM Win32_OperatingSystem"))
-                {
-                    foreach (ManagementObject obj in searcher.Get())
-                    {
-                        var lastBootUpTimeStr = obj["LastBootUpTime"]?.ToString();
-                        if (!string.IsNullOrEmpty(lastBootUpTimeStr))
-                        {
-                            // WMI time format: yyyyMMddHHmmss.ffffff+/-UUU
-                            // ManagementDateTimeConverter.ToDateTime returns DateTimeKind.Local,
-                            // so we must explicitly convert to UTC and tag it as UTC to ensure
-                            // correct ISO 8601 serialization with Z suffix.
-                            var bootTimeLocal = ManagementDateTimeConverter.ToDateTime(lastBootUpTimeStr);
-                            var bootTimeUtc = DateTime.SpecifyKind(bootTimeLocal.ToUniversalTime(), DateTimeKind.Utc);
-
-                            data["bootTimeUtc"] = bootTimeUtc.ToString("o"); // always ends with Z
-                            data["bootTime"] = bootTimeUtc.ToString("o");    // keep for compat, also UTC
-
-                            // Calculate uptime using UTC to avoid local-clock drift
-                            var uptime = DateTime.UtcNow - bootTimeUtc;
-                            data["uptimeMinutes"] = (int)uptime.TotalMinutes;
-                            data["uptimeHours"] = uptime.TotalHours;
-
-                            _logger.Debug($"Boot time (UTC): {bootTimeUtc:o}, Uptime: {uptime.TotalMinutes:F1} minutes");
-                            break;
-                        }
-                    }
-                }
-
-                if (!data.ContainsKey("bootTime"))
-                {
-                    data["note"] = "Boot time could not be determined";
-                }
-
-                EmitDeviceInfoEvent("boot_time",
-                    data.ContainsKey("bootTime")
-                        ? $"Last boot: {data["bootTime"]}"
-                        : "Boot time unavailable",
-                    data);
-            }
-            catch (Exception ex)
-            {
-                _logger.Warning($"EnrollmentTracker: failed to collect boot time: {ex.Message}");
-            }
-        }
-
-        private void CollectOSInfo()
-        {
-            try
-            {
-                var data = new Dictionary<string, object>
-                {
-                    { "version", Environment.OSVersion.Version.ToString() },
-                    { "osVersion", GetOsName() },
-                    { "edition", (Registry.GetValue(RegKeyWindowsCurrentVersion, "EditionID", string.Empty) ?? string.Empty).ToString() },
-                    { "compositionEdition", (Registry.GetValue(RegKeyWindowsCurrentVersion, "CompositionEditionID", string.Empty) ?? string.Empty).ToString() },
-                    { "currentBuild", (Registry.GetValue(RegKeyWindowsCurrentVersion, "CurrentBuild", string.Empty) ?? string.Empty).ToString() },
-                    { "buildBranch", (Registry.GetValue(RegKeyWindowsCurrentVersion, "BuildBranch", string.Empty) ?? string.Empty).ToString() },
-                    { "displayVersion", (Registry.GetValue(RegKeyWindowsCurrentVersion, "DisplayVersion", string.Empty) ?? string.Empty).ToString() },
-                    { "buildRevision", (Registry.GetValue(RegKeyWindowsCurrentVersion, "UBR", string.Empty) ?? string.Empty).ToString() }
-                };
-
-                object osVersionValue;
-                object displayVersionValue;
-                object currentBuildValue;
-                object buildRevisionValue;
-
-                var osVersion = data.TryGetValue("osVersion", out osVersionValue) ? osVersionValue?.ToString() ?? string.Empty : string.Empty;
-                var displayVersion = data.TryGetValue("displayVersion", out displayVersionValue) ? displayVersionValue?.ToString() ?? string.Empty : string.Empty;
-                var currentBuild = data.TryGetValue("currentBuild", out currentBuildValue) ? currentBuildValue?.ToString() ?? string.Empty : string.Empty;
-                var buildRevision = data.TryGetValue("buildRevision", out buildRevisionValue) ? buildRevisionValue?.ToString() ?? string.Empty : string.Empty;
-
-                var message = string.IsNullOrWhiteSpace(osVersion) ? "OS information collected" : osVersion;
-                if (!string.IsNullOrWhiteSpace(displayVersion))
-                {
-                    message += $" {displayVersion}";
-                }
-
-                if (!string.IsNullOrWhiteSpace(currentBuild))
-                {
-                    message += string.IsNullOrWhiteSpace(buildRevision)
-                        ? $" (Build {currentBuild})"
-                        : $" (Build {currentBuild}.{buildRevision})";
-                }
-
-                EmitDeviceInfoEvent("os_info", message, data);
-            }
-            catch (Exception ex)
-            {
-                _logger.Warning($"EnrollmentTracker: failed to collect OS info: {ex.Message}");
-            }
-        }
-
-        private string GetOsName()
-        {
-            var osName = string.Empty;
-
-            try
-            {
-                using (var searcher = new ManagementObjectSearcher("SELECT Caption FROM Win32_OperatingSystem"))
-                {
-                    foreach (ManagementObject obj in searcher.Get())
-                    {
-                        osName = obj["Caption"]?.ToString() ?? string.Empty;
-                        break;
-                    }
-                }
-            }
-            catch
-            {
-                // prevent OS info collection from failing the tracker
-            }
-
-            return osName;
-        }
-
-        private void CollectNetworkAdapters()
-        {
-            try
-            {
-                var adapters = new List<Dictionary<string, object>>();
-                using (var searcher = new ManagementObjectSearcher(
-                    "SELECT Description, IPAddress, IPSubnet, DefaultIPGateway, MACAddress, DHCPEnabled, DHCPServer, DNSServerSearchOrder " +
-                    "FROM Win32_NetworkAdapterConfiguration WHERE IPEnabled = True"))
-                {
-                    foreach (ManagementObject obj in searcher.Get())
-                    {
-                        var adapter = new Dictionary<string, object>
-                        {
-                            { "description", obj["Description"]?.ToString() },
-                            { "macAddress", obj["MACAddress"]?.ToString() },
-                            { "dhcpEnabled", obj["DHCPEnabled"]?.ToString() },
-                            { "dhcpServer", obj["DHCPServer"]?.ToString() }
-                        };
-
-                        var ipAddresses = obj["IPAddress"] as string[];
-                        if (ipAddresses != null)
-                            adapter["ipAddresses"] = string.Join(", ", ipAddresses);
-
-                        var subnets = obj["IPSubnet"] as string[];
-                        if (subnets != null)
-                            adapter["subnets"] = string.Join(", ", subnets);
-
-                        var gateways = obj["DefaultIPGateway"] as string[];
-                        if (gateways != null)
-                            adapter["gateways"] = string.Join(", ", gateways);
-
-                        adapters.Add(adapter);
-                    }
-                }
-
-                EmitDeviceInfoEvent("network_adapters", "Network adapters configuration",
-                    new Dictionary<string, object>
-                    {
-                        { "adapterCount", adapters.Count },
-                        { "adapters", adapters }
-                    });
-            }
-            catch (Exception ex)
-            {
-                _logger.Warning($"EnrollmentTracker: failed to collect network adapters: {ex.Message}");
-            }
-        }
-
-        private void CollectDnsConfiguration()
-        {
-            try
-            {
-                var dnsServers = new List<Dictionary<string, object>>();
-                using (var searcher = new ManagementObjectSearcher(
-                    "SELECT Description, DNSServerSearchOrder FROM Win32_NetworkAdapterConfiguration WHERE IPEnabled = True"))
-                {
-                    foreach (ManagementObject obj in searcher.Get())
-                    {
-                        var servers = obj["DNSServerSearchOrder"] as string[];
-                        if (servers != null && servers.Length > 0)
-                        {
-                            dnsServers.Add(new Dictionary<string, object>
-                            {
-                                { "adapter", obj["Description"]?.ToString() },
-                                { "servers", string.Join(", ", servers) }
-                            });
-                        }
-                    }
-                }
-
-                EmitDeviceInfoEvent("dns_configuration", "DNS server configuration",
-                    new Dictionary<string, object>
-                    {
-                        { "dnsEntries", dnsServers }
-                    });
-            }
-            catch (Exception ex)
-            {
-                _logger.Warning($"EnrollmentTracker: failed to collect DNS config: {ex.Message}");
-            }
-        }
-
-        private void CollectProxyConfiguration()
-        {
-            try
-            {
-                var data = new Dictionary<string, object>();
-
-                using (var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Internet Settings"))
-                {
-                    if (key != null)
-                    {
-                        data["proxyEnabled"] = key.GetValue("ProxyEnable")?.ToString() == "1";
-                        data["proxyServer"] = key.GetValue("ProxyServer")?.ToString();
-                        data["proxyOverride"] = key.GetValue("ProxyOverride")?.ToString();
-                        data["autoConfigUrl"] = key.GetValue("AutoConfigURL")?.ToString();
-                    }
-                }
-
-                // Also check WinHTTP proxy
-                using (var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Internet Settings\Connections"))
-                {
-                    data["winHttpProxyConfigured"] = key?.GetValue("WinHttpSettings") != null;
-                }
-
-                var proxyType = "Direct";
-                if (data.ContainsKey("proxyEnabled") && (bool)data["proxyEnabled"])
-                    proxyType = "Proxy";
-                else if (data.ContainsKey("autoConfigUrl") && data["autoConfigUrl"] != null)
-                    proxyType = "PAC";
-
-                data["proxyType"] = proxyType;
-
-                EmitDeviceInfoEvent("proxy_configuration", $"Proxy configuration: {proxyType}", data);
-            }
-            catch (Exception ex)
-            {
-                _logger.Warning($"EnrollmentTracker: failed to collect proxy config: {ex.Message}");
-            }
-        }
-
-        private void CollectAutopilotProfile()
-        {
-            try
-            {
-                var data = new Dictionary<string, object>();
-
-                // Read JSON from AutopilotPolicyCache registry key (contains all Autopilot profile info)
-                using (var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Provisioning\AutopilotPolicyCache"))
-                {
-                    if (key != null)
-                    {
-                        // The registry key contains individual values that together form the Autopilot profile
-                        // Read all available values and add them to data dictionary
-                        foreach (var valueName in key.GetValueNames())
-                        {
-                            var value = key.GetValue(valueName);
-                            if (value != null)
-                            {
-                                // Store with original casing from registry
-                                var valueAsString = value.ToString();
-                                if (string.Equals(valueName, "PolicyJsonCache", StringComparison.OrdinalIgnoreCase) ||
-                                    string.Equals(valueName, "CloudAssignedAadServerData", StringComparison.OrdinalIgnoreCase))
-                                {
-                                    valueAsString = TryFormatJson(valueAsString);
-                                }
-
-                                data[valueName] = valueAsString;
-                            }
-                        }
-
-                        // Extract key values for enrollment type detection and UI display
-                        var deviceReg = data.ContainsKey("CloudAssignedDeviceRegistration")
-                            ? data["CloudAssignedDeviceRegistration"]?.ToString()
-                            : null;
-                        var espEnabled = data.ContainsKey("CloudAssignedEspEnabled")
-                            ? data["CloudAssignedEspEnabled"]?.ToString()
-                            : null;
-
-                        // Determine enrollment type: WDP if DeviceRegistration=2 or ESP explicitly disabled
-                        if (deviceReg == "2" || espEnabled == "0")
-                            _enrollmentType = "v2";
-                        else
-                            _enrollmentType = "v1";
-
-                        _logger.Info($"EnrollmentTracker: Read {data.Count} values from AutopilotPolicyCache");
-                    }
-                    else
-                    {
-                        _logger.Warning("EnrollmentTracker: AutopilotPolicyCache registry key not found");
-                    }
-                }
-
-                // Include enrollment type in autopilot_profile event data
-                data["enrollmentType"] = _enrollmentType;
-
-                EmitDeviceInfoEvent("autopilot_profile", "Autopilot profile configuration", data);
-
-                // Emit dedicated enrollment_type_detected event for easy filtering
-                _emitEvent(new EnrollmentEvent
-                {
-                    SessionId = _sessionId,
-                    TenantId = _tenantId,
-                    EventType = "enrollment_type_detected",
-                    Severity = EventSeverity.Info,
-                    Source = "EnrollmentTracker",
-                    Phase = EnrollmentPhase.Start,
-                    Message = _enrollmentType == "v2"
-                        ? "Enrollment type: Autopilot v2 (Windows Device Preparation)"
-                        : "Enrollment type: Autopilot v1 (Classic ESP)",
-                    Data = new Dictionary<string, object> { { "enrollmentType", _enrollmentType } }
-                });
-
-                _logger.Info($"EnrollmentTracker: enrollment type detected: {_enrollmentType}");
-            }
-            catch (Exception ex)
-            {
-                _logger.Warning($"EnrollmentTracker: failed to collect autopilot profile: {ex.Message}");
-            }
-        }
-
-        private void CollectSecureBootStatus()
-        {
-            try
-            {
-                var data = new Dictionary<string, object>();
-
-                using (var key = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\SecureBoot\State"))
-                {
-                    if (key != null)
-                    {
-                        var value = key.GetValue("UEFISecureBootEnabled");
-                        data["uefiSecureBootEnabled"] = value != null && Convert.ToInt32(value) == 1;
-                    }
-                    else
-                    {
-                        data["uefiSecureBootEnabled"] = false;
-                        data["note"] = "SecureBoot registry key not found";
-                    }
-                }
-
-                EmitDeviceInfoEvent("secureboot_status", $"SecureBoot: {data["uefiSecureBootEnabled"]}", data);
-            }
-            catch (Exception ex)
-            {
-                _logger.Warning($"EnrollmentTracker: failed to collect SecureBoot status: {ex.Message}");
-            }
-        }
-
-        private void CollectBitLockerStatus()
-        {
-            try
-            {
-                var data = new Dictionary<string, object>();
-                var volumes = new List<Dictionary<string, object>>();
-
-                using (var searcher = new ManagementObjectSearcher(
-                    new ManagementScope(@"\\.\root\CIMV2\Security\MicrosoftVolumeEncryption"),
-                    new ObjectQuery("SELECT DriveLetter, ProtectionStatus, ConversionStatus, EncryptionMethod FROM Win32_EncryptableVolume")))
-                {
-                    foreach (ManagementObject obj in searcher.Get())
-                    {
-                        volumes.Add(new Dictionary<string, object>
-                        {
-                            { "driveLetter", obj["DriveLetter"]?.ToString() },
-                            { "protectionStatus", obj["ProtectionStatus"]?.ToString() },
-                            { "conversionStatus", obj["ConversionStatus"]?.ToString() },
-                            { "encryptionMethod", obj["EncryptionMethod"]?.ToString() }
-                        });
-                    }
-                }
-
-                data["volumes"] = volumes;
-                data["systemDriveProtected"] = volumes.Any(v =>
-                    v["driveLetter"]?.ToString() == "C:" && v["protectionStatus"]?.ToString() == "1");
-
-                EmitDeviceInfoEvent("bitlocker_status", "BitLocker encryption status", data);
-            }
-            catch (Exception ex)
-            {
-                _logger.Warning($"EnrollmentTracker: failed to collect BitLocker status: {ex.Message}");
-            }
-        }
-
-        private void CollectAadJoinStatus()
-        {
-            try
-            {
-                var data = new Dictionary<string, object>();
-
-                using (var joinInfoKey = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\CloudDomainJoin\JoinInfo"))
-                {
-                    if (joinInfoKey != null)
-                    {
-                        var subKeyNames = joinInfoKey.GetSubKeyNames();
-                        if (subKeyNames.Length > 0)
-                        {
-                            using (var subKey = joinInfoKey.OpenSubKey(subKeyNames[0]))
-                            {
-                                if (subKey != null)
-                                {
-                                    data["tenantId"] = subKey.GetValue("TenantId")?.ToString();
-                                    data["userEmail"] = subKey.GetValue("UserEmail")?.ToString();
-                                    data["joinType"] = "Azure AD Joined";
-                                    data["thumbprint"] = subKeyNames[0]; // Certificate thumbprint
-                                }
-                            }
-                        }
-                        else
-                        {
-                            data["joinType"] = "Not Joined";
-                        }
-                    }
-                    else
-                    {
-                        data["joinType"] = "Not Joined";
-                    }
-                }
-
-                object joinTypeValue;
-                var joinType = data.TryGetValue("joinType", out joinTypeValue) ? joinTypeValue?.ToString() ?? "Unknown" : "Unknown";
-                EmitDeviceInfoEvent("aad_join_status", $"AAD join: {joinType}", data);
-            }
-            catch (Exception ex)
-            {
-                _logger.Warning($"EnrollmentTracker: failed to collect AAD join status: {ex.Message}");
-            }
-        }
-
-        private void EmitDeviceInfoEvent(string eventType, string message, Dictionary<string, object> data)
-        {
-            _emitEvent(new EnrollmentEvent
-            {
-                SessionId = _sessionId,
-                TenantId = _tenantId,
-                EventType = eventType,
-                Severity = EventSeverity.Info,
-                Source = "EnrollmentTracker",
-                Phase = EnrollmentPhase.Unknown,
-                Message = message,
-                Data = data
-            });
-        }
-
-        private static string TryFormatJson(string input)
-        {
-            if (string.IsNullOrWhiteSpace(input))
-                return input ?? string.Empty;
-
-            try
-            {
-                using (var doc = JsonDocument.Parse(input))
-                {
-                    return JsonSerializer.Serialize(doc.RootElement, new JsonSerializerOptions
-                    {
-                        WriteIndented = true
-                    });
-                }
-            }
-            catch
-            {
-                return input;
-            }
-        }
+            => _deviceInfoCollector.CollectAtEnd();
 
         // ===== ImeLogTracker Callbacks -> Strategic Events =====
 
@@ -917,10 +430,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             _summaryTimerActive = false;
 
             // Check if Windows Hello is configured but not yet completed
-            if (_helloDetector != null)
+            if (_espAndHelloTracker != null)
             {
-                bool helloPolicyConfigured = _helloDetector.IsPolicyConfigured;
-                bool helloCompleted = _helloDetector.IsHelloCompleted;
+                bool helloPolicyConfigured = _espAndHelloTracker.IsPolicyConfigured;
+                bool helloCompleted = _espAndHelloTracker.IsHelloCompleted;
 
                 if (helloPolicyConfigured && !helloCompleted)
                 {
@@ -1081,7 +594,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     CollectDeviceInfoAtFinalizingSetup(reason);
 
                     // Start Hello wait timer (waits for Hello wizard to start or timeout)
-                    _helloDetector?.StartHelloWaitTimer();
+                    _espAndHelloTracker?.StartHelloWaitTimer();
                 }
                 else
                 {
@@ -1163,11 +676,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             Stop();
 
             // Unsubscribe from HelloDetector events
-            if (_helloDetector != null)
+            if (_espAndHelloTracker != null)
             {
-                _helloDetector.HelloCompleted -= OnHelloCompleted;
-                _helloDetector.FinalizingSetupPhaseTriggered -= OnFinalizingSetupPhaseTriggered;
-                _helloDetector.WhiteGloveCompleted -= OnWhiteGloveCompleted;
+                _espAndHelloTracker.HelloCompleted -= OnHelloCompleted;
+                _espAndHelloTracker.FinalizingSetupPhaseTriggered -= OnFinalizingSetupPhaseTriggered;
+                _espAndHelloTracker.WhiteGloveCompleted -= OnWhiteGloveCompleted;
             }
 
             _summaryTimer?.Dispose();

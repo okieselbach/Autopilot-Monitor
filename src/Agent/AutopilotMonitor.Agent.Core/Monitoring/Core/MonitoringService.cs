@@ -34,7 +34,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         private EnrollmentPhase? _lastPhase = null;
 
         // Core event collectors (always on)
-        private EspAndHelloTracker _helloDetector;
+        private EspAndHelloTracker _espAndHelloTracker;
         private LogReplayService _logReplay;
 
         // Optional collectors (toggled via remote config)
@@ -196,14 +196,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             try
             {
                 // Start ESP and Hello tracker (ESP exit, WhiteGlove, and WHfB provisioning tracking)
-                _helloDetector = new EspAndHelloTracker(
+                _espAndHelloTracker = new EspAndHelloTracker(
                     _configuration.SessionId,
                     _configuration.TenantId,
                     EmitEvent,
                     _logger,
                     _configuration.HelloWaitTimeoutSeconds
                 );
-                _helloDetector.Start();
+                _espAndHelloTracker.Start();
 
                 // Start log replay if a replay directory is configured
                 if (!string.IsNullOrEmpty(_configuration.ReplayLogDir))
@@ -328,7 +328,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                         imeLogPatterns,
                         _configuration.ImeLogPathOverride,
                         imeMatchLogPath: imeMatchLogPath,
-                        helloDetector: _helloDetector
+                        espAndHelloTracker: _espAndHelloTracker
                     );
                     _enrollmentTracker.Start();
                 }
@@ -499,8 +499,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 
             try
             {
-                _helloDetector?.Stop();
-                _helloDetector?.Dispose();
+                _espAndHelloTracker?.Stop();
+                _espAndHelloTracker?.Dispose();
 
                 _logReplay?.Stop();
                 _logReplay?.Dispose();
@@ -987,7 +987,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             _debounceTimer?.Dispose();
             _apiClient?.Dispose();
             _spool?.Dispose();
-            _helloDetector?.Dispose();
+            _espAndHelloTracker?.Dispose();
             _logReplay?.Dispose();
             _performanceCollector?.Dispose();
             _enrollmentTracker?.Dispose();
