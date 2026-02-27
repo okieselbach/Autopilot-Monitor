@@ -26,8 +26,14 @@ export function ProtectedRoute({ children, requireGalacticAdmin = false }: Prote
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated && !wasAuthenticated.current) {
-      // Never been authenticated in this session -> redirect to landing
-      router.push("/");
+      // Delay redirect slightly to let MSAL finish its double handleRedirectPromise
+      // settling cycle before deciding the user is truly unauthenticated.
+      const t = setTimeout(() => {
+        if (!wasAuthenticated.current) {
+          router.push("/");
+        }
+      }, 500);
+      return () => clearTimeout(t);
     }
   }, [isAuthenticated, isLoading, router]);
 

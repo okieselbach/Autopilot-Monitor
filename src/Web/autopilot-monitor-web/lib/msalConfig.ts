@@ -16,7 +16,7 @@ export const msalConfig: Configuration = {
     authority: "https://login.microsoftonline.com/organizations", // Multi-tenant
     redirectUri: process.env.NEXT_PUBLIC_ENTRA_REDIRECT_URI || "http://localhost:3000",
     postLogoutRedirectUri: process.env.NEXT_PUBLIC_ENTRA_POST_LOGOUT_REDIRECT_URI || "http://localhost:3000",
-    navigateToLoginRequestUrl: true,
+    navigateToLoginRequestUrl: false,
   },
   cache: {
     cacheLocation: "sessionStorage", // Using sessionStorage for better XSS protection
