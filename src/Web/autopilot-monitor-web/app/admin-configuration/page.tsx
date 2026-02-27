@@ -1511,19 +1511,21 @@ export default function AdminConfigurationPage() {
                 ) : globalDiagPaths.length === 0 ? (
                   <p className="text-sm text-gray-500 dark:text-gray-400 italic">No global paths configured yet.</p>
                 ) : (
-                  <div className="flex flex-wrap gap-2">
+                  <div className="space-y-2">
                     {globalDiagPaths.map((entry, idx) => (
-                      <div key={idx} className="flex items-center space-x-1 bg-teal-100 dark:bg-teal-900/40 border border-teal-300 dark:border-teal-700 rounded-full px-3 py-1 text-sm">
-                        <span className="font-mono text-teal-900 dark:text-teal-100">{entry.path}</span>
-                        {entry.description && (
-                          <span className="text-teal-600 dark:text-teal-400 text-xs ml-1">— {entry.description}</span>
-                        )}
+                      <div key={idx} className="flex items-start justify-between bg-teal-100 dark:bg-teal-900/40 border border-teal-300 dark:border-teal-700 rounded-lg px-3 py-2">
+                        <div className="min-w-0 flex-1">
+                          <p className="font-mono text-sm text-teal-900 dark:text-teal-100 break-all">{entry.path}</p>
+                          {entry.description && (
+                            <p className="text-xs text-teal-600 dark:text-teal-400 mt-0.5">{entry.description}</p>
+                          )}
+                        </div>
                         <button
                           onClick={() => {
                             const updated = globalDiagPaths.filter((_, i) => i !== idx);
                             setGlobalDiagPaths(updated);
                           }}
-                          className="ml-1 text-teal-500 hover:text-red-600 dark:hover:text-red-400 transition-colors"
+                          className="ml-3 flex-shrink-0 text-teal-500 hover:text-red-600 dark:hover:text-red-400 transition-colors"
                           title="Remove"
                         >
                           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

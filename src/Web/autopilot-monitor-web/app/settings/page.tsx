@@ -1219,16 +1219,6 @@ export default function SettingsPage() {
                   </button>
                 </div>
 
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                  <div className="flex items-start space-x-2">
-                    <svg className="w-5 h-5 text-blue-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    <p className="text-sm text-blue-800">
-                      Core collectors 'Hello Detector' and general enrollment tracking are always active.
-                    </p>
-                  </div>
-                </div>
               </div>
             </div>
 
@@ -1531,12 +1521,14 @@ export default function SettingsPage() {
                   {globalDiagPaths.length > 0 && (
                     <div className="mb-3">
                       <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2">Global (platform-wide)</p>
-                      <div className="flex flex-wrap gap-2">
+                      <div className="space-y-1.5">
                         {globalDiagPaths.map((entry, idx) => (
-                          <div key={idx} className="flex items-center space-x-1 bg-gray-100 border border-gray-300 rounded-full px-3 py-1 text-xs">
-                            <span className="font-mono text-gray-700">{entry.path}</span>
-                            {entry.description && <span className="text-gray-500 ml-1">— {entry.description}</span>}
-                            <span className="ml-1 text-gray-400 bg-gray-200 rounded-full px-1.5 py-0.5">global</span>
+                          <div key={idx} className="flex items-start justify-between bg-gray-100 border border-gray-300 rounded-lg px-3 py-2">
+                            <div className="min-w-0 flex-1">
+                              <p className="font-mono text-xs text-gray-700 break-all">{entry.path}</p>
+                              {entry.description && <p className="text-xs text-gray-500 mt-0.5">{entry.description}</p>}
+                            </div>
+                            <span className="ml-2 flex-shrink-0 text-gray-400 bg-gray-200 rounded-full px-1.5 py-0.5 text-xs">global</span>
                           </div>
                         ))}
                       </div>
@@ -1547,17 +1539,19 @@ export default function SettingsPage() {
                   {tenantDiagPaths.length > 0 && (
                     <div className="mb-3">
                       <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2">Your paths</p>
-                      <div className="flex flex-wrap gap-2">
+                      <div className="space-y-1.5">
                         {tenantDiagPaths.map((entry, idx) => (
-                          <div key={idx} className="flex items-center space-x-1 bg-amber-50 border border-amber-200 rounded-full px-3 py-1 text-xs">
-                            <span className="font-mono text-amber-900">{entry.path}</span>
-                            {entry.description && <span className="text-amber-600 ml-1">— {entry.description}</span>}
+                          <div key={idx} className="flex items-start justify-between bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                            <div className="min-w-0 flex-1">
+                              <p className="font-mono text-xs text-amber-900 break-all">{entry.path}</p>
+                              {entry.description && <p className="text-xs text-amber-600 mt-0.5">{entry.description}</p>}
+                            </div>
                             <button
                               onClick={() => setTenantDiagPaths(tenantDiagPaths.filter((_, i) => i !== idx))}
-                              className="ml-1 text-amber-400 hover:text-red-600 transition-colors"
+                              className="ml-2 flex-shrink-0 text-amber-400 hover:text-red-600 transition-colors"
                               title="Remove"
                             >
-                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                               </svg>
                             </button>
