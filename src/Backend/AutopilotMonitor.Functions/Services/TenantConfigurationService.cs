@@ -221,6 +221,7 @@ namespace AutopilotMonitor.Functions.Services
                 { "MaxBatchSize", config.MaxBatchSize },
                 { "DiagnosticsBlobSasUrl", config.DiagnosticsBlobSasUrl },
                 { "DiagnosticsUploadMode", config.DiagnosticsUploadMode },
+                { "DiagnosticsLogPathsJson", config.DiagnosticsLogPathsJson },
                 { "TeamsWebhookUrl", config.TeamsWebhookUrl },
                 { "TeamsNotifyOnSuccess", config.TeamsNotifyOnSuccess },
                 { "TeamsNotifyOnFailure", config.TeamsNotifyOnFailure }
@@ -263,6 +264,7 @@ namespace AutopilotMonitor.Functions.Services
                 MaxBatchSize = entity.GetInt32("MaxBatchSize"),
                 DiagnosticsBlobSasUrl = entity.GetString("DiagnosticsBlobSasUrl"),
                 DiagnosticsUploadMode = entity.GetString("DiagnosticsUploadMode") ?? "Off",
+                DiagnosticsLogPathsJson = entity.GetString("DiagnosticsLogPathsJson"),
                 TeamsWebhookUrl = entity.GetString("TeamsWebhookUrl"),
                 TeamsNotifyOnSuccess = entity.GetBoolean("TeamsNotifyOnSuccess") ?? true,
                 TeamsNotifyOnFailure = entity.GetBoolean("TeamsNotifyOnFailure") ?? true

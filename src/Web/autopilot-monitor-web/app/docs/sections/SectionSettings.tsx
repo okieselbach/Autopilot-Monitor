@@ -1,4 +1,6 @@
-import React from "react";
+"use client";
+
+import React, { useState } from "react";
 
 function SettingsGroup({ title, color, borderColor, children }: { title: string; color: string; borderColor: string; children: React.ReactNode }) {
   return (
@@ -26,6 +28,8 @@ function SettingsRow({ name, defaultVal, children }: { name: string; defaultVal?
 }
 
 export function SectionSettings() {
+  const [showDiagGuards, setShowDiagGuards] = useState(false);
+
   return (
     <section className="bg-white rounded-lg shadow-md p-8">
       <div className="flex items-center space-x-3 mb-4">
@@ -142,6 +146,42 @@ export function SectionSettings() {
           <strong>Always</strong> — upload after every session,{" "}
           <strong>OnFailure</strong> — upload only when the session ends in failure (recommended if storage costs
           are a concern). Only available when a Blob Storage URL is configured.
+        </SettingsRow>
+        <SettingsRow name="Additional Log Paths">
+          <span>
+            Extra log files or wildcard patterns added to the diagnostics ZIP package. Global paths are defined
+            platform-wide by the Galactic Admin and always included. Tenant Admins can add their own paths in addition
+            to the global ones (e.g. custom app logs or third-party agent logs).
+          </span>
+          <span className="block mt-2 text-xs text-gray-500">
+            Environment variables (e.g. <span className="font-mono bg-gray-100 px-1 rounded">%ProgramData%</span>) are expanded by the agent.
+            Wildcards are only supported in the <strong>last path segment</strong> (e.g.{" "}
+            <span className="font-mono bg-gray-100 px-1 rounded">C:\Windows\Panther\*.log</span>).
+          </span>
+          <span className="block mt-2">
+            <button
+              onClick={() => setShowDiagGuards(v => !v)}
+              className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700 select-none"
+            >
+              <span>{showDiagGuards ? "▾" : "▸"}</span>
+              <span>Allowed path prefixes (agent guard)</span>
+            </button>
+            {showDiagGuards && (
+              <div className="mt-1 bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs font-mono space-y-0.5">
+                <p>C:\ProgramData\AutopilotMonitor</p>
+                <p>C:\ProgramData\Microsoft\IntuneManagementExtension</p>
+                <p>C:\Windows\Panther</p>
+                <p>C:\Windows\Logs</p>
+                <p>C:\Windows\SetupDiag</p>
+                <p>C:\Windows\SoftwareDistribution\ReportingEvents.log</p>
+                <p>C:\Windows\System32\winevt\Logs</p>
+                <p>C:\Windows\CCM\Logs</p>
+                <p>C:\ProgramData\Microsoft\DiagnosticLogCSP</p>
+                <p>C:\ProgramData\Microsoft\Windows\WER</p>
+                <p>C:\Windows\Logs\CBS</p>
+              </div>
+            )}
+          </span>
         </SettingsRow>
       </SettingsGroup>
 

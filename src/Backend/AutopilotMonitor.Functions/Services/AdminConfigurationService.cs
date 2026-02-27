@@ -184,7 +184,8 @@ namespace AutopilotMonitor.Functions.Services
                 { "PlatformStatsBlobSasUrl", config.PlatformStatsBlobSasUrl ?? string.Empty },
                 { "MaxCollectorDurationHours", config.MaxCollectorDurationHours },
                 { "MaxSessionWindowHours", config.MaxSessionWindowHours },
-                { "MaintenanceBlockDurationHours", config.MaintenanceBlockDurationHours }
+                { "MaintenanceBlockDurationHours", config.MaintenanceBlockDurationHours },
+                { "DiagnosticsGlobalLogPathsJson", config.DiagnosticsGlobalLogPathsJson }
             };
 
             return entity;
@@ -202,7 +203,8 @@ namespace AutopilotMonitor.Functions.Services
                 PlatformStatsBlobSasUrl = entity.GetString("PlatformStatsBlobSasUrl") ?? string.Empty,
                 MaxCollectorDurationHours = entity.GetInt32("MaxCollectorDurationHours") ?? 4,
                 MaxSessionWindowHours = entity.GetInt32("MaxSessionWindowHours") ?? 24,
-                MaintenanceBlockDurationHours = entity.GetInt32("MaintenanceBlockDurationHours") ?? 12
+                MaintenanceBlockDurationHours = entity.GetInt32("MaintenanceBlockDurationHours") ?? 12,
+                DiagnosticsGlobalLogPathsJson = entity.GetString("DiagnosticsGlobalLogPathsJson")
             };
         }
     }

@@ -1,3 +1,23 @@
+"use client";
+
+import { useState } from "react";
+
+function GuardToggle({ label, children }: { label: string; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div>
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700 mt-1 select-none"
+      >
+        <span>{open ? "▾" : "▸"}</span>
+        <span>{label}</span>
+      </button>
+      {open && <div className="mt-1">{children}</div>}
+    </div>
+  );
+}
+
 export function SectionGatherRules() {
   return (
     <section className="bg-white rounded-lg shadow-md p-8 space-y-8">
@@ -46,38 +66,40 @@ export function SectionGatherRules() {
           <div>
             <p className="font-medium text-gray-900">Allowed Prefixes</p>
             <p className="text-xs text-gray-500 mt-0.5">All paths are under <code className="bg-gray-100 px-1 rounded">HKLM\</code> or <code className="bg-gray-100 px-1 rounded">HKCU\</code>. Segment-bounded matching — subkeys are allowed, but sibling keys are not.</p>
-            <div className="mt-1 bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs font-mono space-y-1">
-              <p className="text-gray-400 font-sans not-italic">MDM / Enrollment</p>
-              <p>SOFTWARE\Microsoft\Enrollments</p>
-              <p>SOFTWARE\Microsoft\EnterpriseDesktopAppManagement</p>
-              <p>SOFTWARE\Microsoft\Provisioning</p>
-              <p>SOFTWARE\Microsoft\PolicyManager</p>
-              <p>SOFTWARE\Microsoft\Windows\CurrentVersion\MDM</p>
-              <p className="text-gray-400 font-sans not-italic pt-1">AAD / Entra Join</p>
-              <p>SOFTWARE\Microsoft\IdentityStore</p>
-              <p>SYSTEM\CurrentControlSet\Control\CloudDomainJoin</p>
-              <p className="text-gray-400 font-sans not-italic pt-1">Windows Update / WUfB</p>
-              <p>SOFTWARE\Microsoft\WindowsUpdate</p>
-              <p>SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate</p>
-              <p className="text-gray-400 font-sans not-italic pt-1">BitLocker</p>
-              <p>SOFTWARE\Microsoft\BitLocker</p>
-              <p>SYSTEM\CurrentControlSet\Control\BitLockerStatus</p>
-              <p className="text-gray-400 font-sans not-italic pt-1">Network / Proxy</p>
-              <p>SOFTWARE\Microsoft\Windows\CurrentVersion\Internet Settings</p>
-              <p>SYSTEM\CurrentControlSet\Services\Tcpip</p>
-              <p className="text-gray-400 font-sans not-italic pt-1">Autopilot / OOBE / Setup</p>
-              <p>SOFTWARE\Microsoft\Windows\CurrentVersion\Setup</p>
-              <p>SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE</p>
-              <p>SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon</p>
-              <p className="text-gray-400 font-sans not-italic pt-1">TPM</p>
-              <p>SYSTEM\CurrentControlSet\Services\TPM</p>
-              <p>SOFTWARE\Microsoft\Tpm</p>
-              <p className="text-gray-400 font-sans not-italic pt-1">Intune IME</p>
-              <p>SOFTWARE\Microsoft\IntuneManagementExtension</p>
-              <p className="text-gray-400 font-sans not-italic pt-1">Certificates (SCEP)</p>
-              <p>SOFTWARE\Microsoft\SystemCertificates</p>
-              <p>SOFTWARE\Policies\Microsoft\SystemCertificates</p>
-            </div>
+            <GuardToggle label="Show allowed registry prefixes">
+              <div className="bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs font-mono space-y-1">
+                <p className="text-gray-400 font-sans not-italic">MDM / Enrollment</p>
+                <p>SOFTWARE\Microsoft\Enrollments</p>
+                <p>SOFTWARE\Microsoft\EnterpriseDesktopAppManagement</p>
+                <p>SOFTWARE\Microsoft\Provisioning</p>
+                <p>SOFTWARE\Microsoft\PolicyManager</p>
+                <p>SOFTWARE\Microsoft\Windows\CurrentVersion\MDM</p>
+                <p className="text-gray-400 font-sans not-italic pt-1">AAD / Entra Join</p>
+                <p>SOFTWARE\Microsoft\IdentityStore</p>
+                <p>SYSTEM\CurrentControlSet\Control\CloudDomainJoin</p>
+                <p className="text-gray-400 font-sans not-italic pt-1">Windows Update / WUfB</p>
+                <p>SOFTWARE\Microsoft\WindowsUpdate</p>
+                <p>SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate</p>
+                <p className="text-gray-400 font-sans not-italic pt-1">BitLocker</p>
+                <p>SOFTWARE\Microsoft\BitLocker</p>
+                <p>SYSTEM\CurrentControlSet\Control\BitLockerStatus</p>
+                <p className="text-gray-400 font-sans not-italic pt-1">Network / Proxy</p>
+                <p>SOFTWARE\Microsoft\Windows\CurrentVersion\Internet Settings</p>
+                <p>SYSTEM\CurrentControlSet\Services\Tcpip</p>
+                <p className="text-gray-400 font-sans not-italic pt-1">Autopilot / OOBE / Setup</p>
+                <p>SOFTWARE\Microsoft\Windows\CurrentVersion\Setup</p>
+                <p>SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE</p>
+                <p>SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon</p>
+                <p className="text-gray-400 font-sans not-italic pt-1">TPM</p>
+                <p>SYSTEM\CurrentControlSet\Services\TPM</p>
+                <p>SOFTWARE\Microsoft\Tpm</p>
+                <p className="text-gray-400 font-sans not-italic pt-1">Intune IME</p>
+                <p>SOFTWARE\Microsoft\IntuneManagementExtension</p>
+                <p className="text-gray-400 font-sans not-italic pt-1">Certificates (SCEP)</p>
+                <p>SOFTWARE\Microsoft\SystemCertificates</p>
+                <p>SOFTWARE\Policies\Microsoft\SystemCertificates</p>
+              </div>
+            </GuardToggle>
           </div>
           <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
             <p className="font-semibold text-green-900 text-xs mb-1">Example</p>
@@ -137,20 +159,22 @@ export function SectionGatherRules() {
           </div>
           <div>
             <p className="font-medium text-gray-900">Allowed WMI Classes</p>
-            <div className="mt-1 bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs font-mono columns-2 space-y-0.5">
-              <p>Win32_OperatingSystem</p>
-              <p>Win32_ComputerSystem</p>
-              <p>Win32_BIOS</p>
-              <p>Win32_Processor</p>
-              <p>Win32_BaseBoard</p>
-              <p>Win32_Battery</p>
-              <p>Win32_TPM</p>
-              <p>Win32_NetworkAdapter</p>
-              <p>Win32_NetworkAdapterConfiguration</p>
-              <p>Win32_DiskDrive</p>
-              <p>Win32_LogicalDisk</p>
-              <p>SoftwareLicensingProduct</p>
-            </div>
+            <GuardToggle label="Show allowed WMI classes">
+              <div className="bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs font-mono columns-2 space-y-0.5">
+                <p>Win32_OperatingSystem</p>
+                <p>Win32_ComputerSystem</p>
+                <p>Win32_BIOS</p>
+                <p>Win32_Processor</p>
+                <p>Win32_BaseBoard</p>
+                <p>Win32_Battery</p>
+                <p>Win32_TPM</p>
+                <p>Win32_NetworkAdapter</p>
+                <p>Win32_NetworkAdapterConfiguration</p>
+                <p>Win32_DiskDrive</p>
+                <p>Win32_LogicalDisk</p>
+                <p>SoftwareLicensingProduct</p>
+              </div>
+            </GuardToggle>
           </div>
           <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
             <p className="font-semibold text-green-900 text-xs mb-1">Example — Network Adapter Monitoring</p>
@@ -183,15 +207,17 @@ export function SectionGatherRules() {
           </div>
           <div>
             <p className="font-medium text-gray-900">Allowed Path Prefixes</p>
-            <div className="mt-1 bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs font-mono space-y-0.5">
-              <p>C:\ProgramData\Microsoft\IntuneManagementExtension</p>
-              <p>C:\Windows\CCM\Logs</p>
-              <p>C:\Windows\Logs</p>
-              <p>C:\Windows\Panther</p>
-              <p>C:\Windows\SetupDiag</p>
-              <p>C:\ProgramData\Microsoft\DiagnosticLogCSP</p>
-              <p>C:\Windows\SoftwareDistribution\ReportingEvents.log</p>
-            </div>
+            <GuardToggle label="Show allowed file path prefixes">
+              <div className="bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs font-mono space-y-0.5">
+                <p>C:\ProgramData\Microsoft\IntuneManagementExtension</p>
+                <p>C:\Windows\CCM\Logs</p>
+                <p>C:\Windows\Logs</p>
+                <p>C:\Windows\Panther</p>
+                <p>C:\Windows\SetupDiag</p>
+                <p>C:\ProgramData\Microsoft\DiagnosticLogCSP</p>
+                <p>C:\Windows\SoftwareDistribution\ReportingEvents.log</p>
+              </div>
+            </GuardToggle>
           </div>
           <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
             <p className="font-semibold text-green-900 text-xs mb-1">Example</p>
@@ -218,27 +244,29 @@ export function SectionGatherRules() {
           </div>
           <div>
             <p className="font-medium text-gray-900">Allowed Commands</p>
-            <div className="mt-1 bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs font-mono space-y-0.5">
-              <p className="text-gray-400"># TPM and Security</p>
-              <p>Get-Tpm</p>
-              <p>Get-SecureBootPolicy</p>
-              <p>Get-SecureBootUEFI -Name SetupMode</p>
-              <p className="text-gray-400"># BitLocker</p>
-              <p>Get-BitLockerVolume -MountPoint C:</p>
-              <p className="text-gray-400"># Network</p>
-              <p>Get-NetAdapter | Select-Object Name, Status, InterfaceDescription, MacAddress, LinkSpeed</p>
-              <p>Get-DnsClientServerAddress | Select-Object InterfaceAlias, ServerAddresses</p>
-              <p>Get-NetIPConfiguration | Select-Object InterfaceAlias, IPv4Address, IPv4DefaultGateway, DNSServer</p>
-              <p>netsh winhttp show proxy</p>
-              <p>ipconfig /all</p>
-              <p className="text-gray-400"># Domain / Identity</p>
-              <p>nltest /dsgetdc:</p>
-              <p>dsregcmd /status</p>
-              <p className="text-gray-400"># Certificate</p>
-              <p>certutil -store My</p>
-              <p className="text-gray-400"># Windows Update</p>
-              <p>Get-HotFix | Select-Object -First 10 HotFixID, InstalledOn, Description</p>
-            </div>
+            <GuardToggle label="Show allowed commands">
+              <div className="bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs font-mono space-y-0.5">
+                <p className="text-gray-400"># TPM and Security</p>
+                <p>Get-Tpm</p>
+                <p>Get-SecureBootPolicy</p>
+                <p>Get-SecureBootUEFI -Name SetupMode</p>
+                <p className="text-gray-400"># BitLocker</p>
+                <p>Get-BitLockerVolume -MountPoint C:</p>
+                <p className="text-gray-400"># Network</p>
+                <p>Get-NetAdapter | Select-Object Name, Status, InterfaceDescription, MacAddress, LinkSpeed</p>
+                <p>Get-DnsClientServerAddress | Select-Object InterfaceAlias, ServerAddresses</p>
+                <p>Get-NetIPConfiguration | Select-Object InterfaceAlias, IPv4Address, IPv4DefaultGateway, DNSServer</p>
+                <p>netsh winhttp show proxy</p>
+                <p>ipconfig /all</p>
+                <p className="text-gray-400"># Domain / Identity</p>
+                <p>nltest /dsgetdc:</p>
+                <p>dsregcmd /status</p>
+                <p className="text-gray-400"># Certificate</p>
+                <p>certutil -store My</p>
+                <p className="text-gray-400"># Windows Update</p>
+                <p>Get-HotFix | Select-Object -First 10 HotFixID, InstalledOn, Description</p>
+              </div>
+            </GuardToggle>
           </div>
           <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
             <p className="font-semibold text-green-900 text-xs mb-1">Example — TPM at Enrollment Complete</p>
@@ -317,7 +345,7 @@ export function SectionGatherRules() {
       <p className="text-gray-700 text-sm">
         Each gather rule execution emits an event with the configured <strong>Output Event Type</strong> and <strong>Severity</strong>.
         The collected data is stored in the event&apos;s <code className="bg-gray-100 px-1 rounded">data</code> field as key-value pairs.
-        These events appear in the session timeline and can be exported via CSV or timeline export.
+        These events appear in the session timeline.
       </p>
     </section>
   );

@@ -1,5 +1,6 @@
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Extensions.Logging;
+using System.Linq;
 
 namespace AutopilotMonitor.Functions.Services
 {
@@ -136,6 +137,40 @@ namespace AutopilotMonitor.Functions.Services
         public async Task<bool> DeleteRuleAsync(string tenantId, string ruleId)
         {
             return await _storageService.DeleteGatherRuleAsync(tenantId, ruleId);
+        }
+
+        /// <summary>
+        /// Re-imports all built-in gather rules into the global partition.
+        /// Deletes old global built-in rules and writes current code definitions.
+        /// </summary>
+        public async Task<(int deleted, int written)> ReseedBuiltInRulesAsync()
+        {
+            _logger.LogInformation("Reseeding built-in gather rules (full re-import)...");
+
+            // 1. Get existing global rules
+            var existingGlobalRules = await _storageService.GetGatherRulesAsync("global");
+
+            // 2. Delete all existing global built-in rules
+            var deleted = 0;
+            foreach (var rule in existingGlobalRules.Where(r => r.IsBuiltIn))
+            {
+                await _storageService.DeleteGatherRuleAsync("global", rule.RuleId);
+                deleted++;
+            }
+            _logger.LogInformation($"Deleted {deleted} old global built-in gather rules");
+
+            // 3. Write current code definitions
+            var builtInRules = BuiltInGatherRules.GetAll();
+            foreach (var rule in builtInRules)
+            {
+                await _storageService.StoreGatherRuleAsync(rule, "global");
+            }
+            _logger.LogInformation($"Written {builtInRules.Count} built-in gather rules from code");
+
+            // Reset seed flag so next request picks up fresh data
+            _seeded = false;
+
+            return (deleted, builtInRules.Count);
         }
 
         /// <summary>

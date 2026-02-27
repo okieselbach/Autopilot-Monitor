@@ -9,6 +9,12 @@ import { useNotifications } from "../../contexts/NotificationContext";
 import { API_BASE_URL } from "@/lib/config";
 import UnsavedChangesModal from "../../components/UnsavedChangesModal";
 
+interface DiagnosticsLogPath {
+  path: string;
+  description: string;
+  isBuiltIn: boolean;
+}
+
 interface TenantConfiguration {
   tenantId: string;
   lastUpdated: string;
@@ -38,6 +44,7 @@ interface TenantConfiguration {
   // Diagnostics package
   diagnosticsBlobSasUrl?: string;
   diagnosticsUploadMode?: string;
+  diagnosticsLogPathsJson?: string;
 }
 
 interface TenantAdmin {
@@ -122,6 +129,10 @@ export default function SettingsPage() {
   const [diagnosticsBlobSasUrl, setDiagnosticsBlobSasUrl] = useState("");
   const [diagnosticsUploadMode, setDiagnosticsUploadMode] = useState("Off");
   const [diagnosticsSasExpiry, setDiagnosticsSasExpiry] = useState<Date | null>(null);
+  const [tenantDiagPaths, setTenantDiagPaths] = useState<DiagnosticsLogPath[]>([]);
+  const [globalDiagPaths, setGlobalDiagPaths] = useState<DiagnosticsLogPath[]>([]);
+  const [newDiagPath, setNewDiagPath] = useState("");
+  const [newDiagDesc, setNewDiagDesc] = useState("");
 
   // Derived: true when form differs from last-saved config
   const hasUnsavedChanges = useMemo(() => {
@@ -145,7 +156,10 @@ export default function SettingsPage() {
       teamsNotifyOnSuccess !== (config.teamsNotifyOnSuccess ?? true) ||
       teamsNotifyOnFailure !== (config.teamsNotifyOnFailure ?? true) ||
       diagnosticsBlobSasUrl !== (config.diagnosticsBlobSasUrl ?? "") ||
-      diagnosticsUploadMode !== (config.diagnosticsUploadMode ?? "Off")
+      diagnosticsUploadMode !== (config.diagnosticsUploadMode ?? "Off") ||
+      JSON.stringify(tenantDiagPaths) !== JSON.stringify(
+        config.diagnosticsLogPathsJson ? (() => { try { return JSON.parse(config.diagnosticsLogPathsJson!); } catch { return []; } })() : []
+      )
     );
   }, [
     config,
@@ -154,7 +168,7 @@ export default function SettingsPage() {
     performanceCollectorInterval, selfDestructOnComplete, keepLogFile,
     rebootOnComplete, rebootDelaySeconds, enableGeoLocation, enableImeMatchLog,
     logLevel, teamsWebhookUrl, teamsNotifyOnSuccess, teamsNotifyOnFailure,
-    diagnosticsBlobSasUrl, diagnosticsUploadMode,
+    diagnosticsBlobSasUrl, diagnosticsUploadMode, tenantDiagPaths,
   ]);
 
   // Fetch configuration
@@ -206,6 +220,11 @@ export default function SettingsPage() {
         const sasUrl = data.diagnosticsBlobSasUrl ?? "";
         setDiagnosticsBlobSasUrl(sasUrl);
         setDiagnosticsUploadMode(data.diagnosticsUploadMode ?? "Off");
+        try {
+          setTenantDiagPaths(data.diagnosticsLogPathsJson ? JSON.parse(data.diagnosticsLogPathsJson) : []);
+        } catch {
+          setTenantDiagPaths([]);
+        }
 
         // Parse SAS expiry and fire notification to bell if needed
         if (sasUrl) {
@@ -280,6 +299,27 @@ export default function SettingsPage() {
     if (!tenantId) return;
     fetchAdmins();
   }, [tenantId]);
+
+  // Fetch global diagnostics paths (best-effort, may return 403 for non-galactic-admins)
+  useEffect(() => {
+    const fetchGlobalDiagPaths = async () => {
+      try {
+        const token = await getAccessToken();
+        if (!token) return;
+        const res = await fetch(`${API_BASE_URL}/api/global/config`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.diagnosticsGlobalLogPathsJson) {
+          setGlobalDiagPaths(JSON.parse(data.diagnosticsGlobalLogPathsJson));
+        }
+      } catch {
+        // Non-fatal: galactic-admin endpoint may be unreachable for regular admins
+      }
+    };
+    fetchGlobalDiagPaths();
+  }, []);
 
   // Intercept <Link> clicks from Navbar and any other anchor navigations
   useEffect(() => {
@@ -390,6 +430,7 @@ export default function SettingsPage() {
         teamsNotifyOnFailure,
         diagnosticsBlobSasUrl: diagnosticsBlobSasUrl || undefined,
         diagnosticsUploadMode,
+        diagnosticsLogPathsJson: tenantDiagPaths.length > 0 ? JSON.stringify(tenantDiagPaths) : undefined,
       };
 
       const token = await getAccessToken();
@@ -1477,6 +1518,88 @@ export default function SettingsPage() {
                       <option value="OnFailure">On Failure Only</option>
                     </select>
                   </div>
+                </div>
+
+                {/* Additional Log Paths */}
+                <div className="p-4 rounded-lg border border-gray-200">
+                  <p className="font-medium text-gray-900 mb-1">Additional Log Paths</p>
+                  <p className="text-sm text-gray-500 mb-3">
+                    Extra log files or wildcards included in the diagnostics ZIP. Global paths (set by your platform admin) are always included and shown below as read-only.
+                  </p>
+
+                  {/* Global paths (read-only) */}
+                  {globalDiagPaths.length > 0 && (
+                    <div className="mb-3">
+                      <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2">Global (platform-wide)</p>
+                      <div className="flex flex-wrap gap-2">
+                        {globalDiagPaths.map((entry, idx) => (
+                          <div key={idx} className="flex items-center space-x-1 bg-gray-100 border border-gray-300 rounded-full px-3 py-1 text-xs">
+                            <span className="font-mono text-gray-700">{entry.path}</span>
+                            {entry.description && <span className="text-gray-500 ml-1">— {entry.description}</span>}
+                            <span className="ml-1 text-gray-400 bg-gray-200 rounded-full px-1.5 py-0.5">global</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Tenant paths */}
+                  {tenantDiagPaths.length > 0 && (
+                    <div className="mb-3">
+                      <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2">Your paths</p>
+                      <div className="flex flex-wrap gap-2">
+                        {tenantDiagPaths.map((entry, idx) => (
+                          <div key={idx} className="flex items-center space-x-1 bg-amber-50 border border-amber-200 rounded-full px-3 py-1 text-xs">
+                            <span className="font-mono text-amber-900">{entry.path}</span>
+                            {entry.description && <span className="text-amber-600 ml-1">— {entry.description}</span>}
+                            <button
+                              onClick={() => setTenantDiagPaths(tenantDiagPaths.filter((_, i) => i !== idx))}
+                              className="ml-1 text-amber-400 hover:text-red-600 transition-colors"
+                              title="Remove"
+                            >
+                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Add new tenant path */}
+                  <div className="flex flex-col sm:flex-row gap-2 mt-2">
+                    <input
+                      type="text"
+                      placeholder="Path or wildcard (e.g. C:\Windows\Panther\*.log)"
+                      value={newDiagPath}
+                      onChange={(e) => setNewDiagPath(e.target.value)}
+                      className="flex-1 px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500 font-mono"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Description (optional)"
+                      value={newDiagDesc}
+                      onChange={(e) => setNewDiagDesc(e.target.value)}
+                      className="flex-1 px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+                    />
+                    <button
+                      onClick={() => {
+                        const p = newDiagPath.trim();
+                        if (!p) return;
+                        setTenantDiagPaths([...tenantDiagPaths, { path: p, description: newDiagDesc.trim(), isBuiltIn: false }]);
+                        setNewDiagPath("");
+                        setNewDiagDesc("");
+                      }}
+                      disabled={!newDiagPath.trim()}
+                      className="px-4 py-1.5 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+                    >
+                      Add
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-400 mt-2">
+                    Paths are validated on the agent against an allowlist of safe prefixes. Wildcards are only allowed in the last segment.
+                  </p>
                 </div>
 
               </div>

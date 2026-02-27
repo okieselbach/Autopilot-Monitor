@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Text.Json;
 
 namespace AutopilotMonitor.Shared.Models
 {
@@ -68,6 +70,34 @@ namespace AutopilotMonitor.Shared.Models
         /// Default: 12.
         /// </summary>
         public int MaintenanceBlockDurationHours { get; set; } = 12;
+
+        // ===== DIAGNOSTICS LOG PATHS =====
+
+        /// <summary>
+        /// JSON-serialized list of global diagnostics log paths/wildcards
+        /// to include in the diagnostics ZIP package for all tenants.
+        /// Each entry: { "path": "...", "description": "...", "isBuiltIn": true }
+        /// </summary>
+        public string DiagnosticsGlobalLogPathsJson { get; set; }
+
+        /// <summary>
+        /// Returns the deserialized list of global diagnostics log paths.
+        /// </summary>
+        public List<DiagnosticsLogPath> GetDiagnosticsGlobalLogPaths()
+        {
+            if (string.IsNullOrEmpty(DiagnosticsGlobalLogPathsJson))
+                return new List<DiagnosticsLogPath>();
+            try
+            {
+                return JsonSerializer.Deserialize<List<DiagnosticsLogPath>>(DiagnosticsGlobalLogPathsJson,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+                    ?? new List<DiagnosticsLogPath>();
+            }
+            catch
+            {
+                return new List<DiagnosticsLogPath>();
+            }
+        }
 
         /// <summary>
         /// Creates default configuration

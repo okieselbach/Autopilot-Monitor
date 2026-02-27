@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
 
 namespace AutopilotMonitor.Shared.Models
 {
@@ -202,6 +203,34 @@ namespace AutopilotMonitor.Shared.Models
         /// null = use agent default (100).
         /// </summary>
         public int? MaxBatchSize { get; set; }
+
+        // ===== DIAGNOSTICS LOG PATHS =====
+
+        /// <summary>
+        /// JSON-serialized list of tenant-specific additional log paths/wildcards
+        /// to include in the diagnostics ZIP package (additive to global paths).
+        /// Each entry: { "path": "...", "description": "...", "isBuiltIn": false }
+        /// </summary>
+        public string DiagnosticsLogPathsJson { get; set; }
+
+        /// <summary>
+        /// Returns the deserialized list of tenant-specific diagnostics log paths.
+        /// </summary>
+        public List<DiagnosticsLogPath> GetDiagnosticsLogPaths()
+        {
+            if (string.IsNullOrEmpty(DiagnosticsLogPathsJson))
+                return new List<DiagnosticsLogPath>();
+            try
+            {
+                return JsonSerializer.Deserialize<List<DiagnosticsLogPath>>(DiagnosticsLogPathsJson,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+                    ?? new List<DiagnosticsLogPath>();
+            }
+            catch
+            {
+                return new List<DiagnosticsLogPath>();
+            }
+        }
 
         // ===== DIAGNOSTICS SETTINGS =====
 

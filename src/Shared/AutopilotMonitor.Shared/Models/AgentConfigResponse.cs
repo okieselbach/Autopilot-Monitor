@@ -104,6 +104,13 @@ namespace AutopilotMonitor.Shared.Models
         /// Default: "Off"
         /// </summary>
         public string DiagnosticsUploadMode { get; set; } = "Off";
+
+        /// <summary>
+        /// Merged list of log paths/wildcards to include in the diagnostics ZIP package.
+        /// Global entries (IsBuiltIn=true) come first, followed by tenant-specific additions.
+        /// The agent validates each path against DiagnosticsPathGuards before collection.
+        /// </summary>
+        public List<DiagnosticsLogPath> DiagnosticsLogPaths { get; set; } = new List<DiagnosticsLogPath>();
     }
 
     /// <summary>

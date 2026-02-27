@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using AutopilotMonitor.Agent.Core.Logging;
 using AutopilotMonitor.Shared;
+using AutopilotMonitor.Shared.Models;
 
 namespace AutopilotMonitor.Agent.Core.Configuration
 {
@@ -155,6 +157,13 @@ namespace AutopilotMonitor.Agent.Core.Configuration
         /// Default: "Off"
         /// </summary>
         public string DiagnosticsUploadMode { get; set; } = "Off";
+
+        /// <summary>
+        /// Merged list of log paths/wildcards to include in the diagnostics ZIP package.
+        /// Received from the backend config (global + tenant-specific).
+        /// Each entry is validated against DiagnosticsPathGuards before use.
+        /// </summary>
+        public List<DiagnosticsLogPath> DiagnosticsLogPaths { get; set; } = new List<DiagnosticsLogPath>();
 
         /// <summary>
         /// Validates the configuration

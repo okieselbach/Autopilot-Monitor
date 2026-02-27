@@ -118,6 +118,23 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                         // 3. IME logs
                         AddLogFiles(archive, ImeLogFolder, "ImeLogs", "IntuneManagementExtension*.log");
                         AddLogFiles(archive, ImeLogFolder, "ImeLogs", "AppWorkload*.log");
+
+                        // 4. Configured additional log paths (global + tenant, validated by guards)
+                        foreach (var entry in _configuration.DiagnosticsLogPaths ?? new System.Collections.Generic.List<Shared.Models.DiagnosticsLogPath>())
+                        {
+                            if (!Collectors.DiagnosticsPathGuards.IsDiagnosticsPathAllowed(entry.Path))
+                            {
+                                _logger.Warning($"Diagnostics path blocked by guard: {entry.Path}");
+                                continue;
+                            }
+                            var expandedPath = Environment.ExpandEnvironmentVariables(entry.Path);
+                            var folder = Path.GetDirectoryName(expandedPath);
+                            var pattern = Path.GetFileName(expandedPath);
+                            if (string.IsNullOrEmpty(folder)) continue;
+                            if (string.IsNullOrEmpty(pattern) || !pattern.Contains(".")) pattern = "*";
+                            var zipFolder = $"AdditionalLogs/{Path.GetFileName(folder)}";
+                            AddLogFiles(archive, folder, zipFolder, pattern);
+                        }
                     }
 
                     zipBytes = ms.ToArray();

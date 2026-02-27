@@ -270,6 +270,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             _configuration.MaxBatchSize = config.MaxBatchSize;
             _configuration.DiagnosticsUploadEnabled = config.DiagnosticsUploadEnabled;
             _configuration.DiagnosticsUploadMode = config.DiagnosticsUploadMode;
+            _configuration.DiagnosticsLogPaths = config.DiagnosticsLogPaths ?? new System.Collections.Generic.List<AutopilotMonitor.Shared.Models.DiagnosticsLogPath>();
 
             // Apply log level from remote config
             if (Enum.TryParse<Logging.AgentLogLevel>(config.LogLevel, ignoreCase: true, out var remoteLogLevel))

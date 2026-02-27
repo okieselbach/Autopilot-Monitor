@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Net;
 using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Functions.Services;
@@ -94,10 +95,15 @@ namespace AutopilotMonitor.Functions.Functions
                 // Get built-in IME log patterns for smart enrollment tracking
                 var imeLogPatterns = BuiltInImeLogPatterns.GetAll();
 
+                // Merge global + tenant-specific diagnostics log paths
+                var globalDiagPaths = adminConfig.GetDiagnosticsGlobalLogPaths();
+                var tenantDiagPaths = tenantConfig.GetDiagnosticsLogPaths();
+                var diagLogPaths = globalDiagPaths.Concat(tenantDiagPaths).ToList();
+
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(new AgentConfigResponse
                 {
-                    ConfigVersion = 8, // mTLS migration: agent sends cert via TLS, routes moved under /api/agent/
+                    ConfigVersion = 9, // diagnostics log paths now configurable via portal
                     UploadIntervalSeconds = 30,
                     SelfDestructOnComplete = tenantConfig.SelfDestructOnComplete ?? true,
                     KeepLogFile = tenantConfig.KeepLogFile ?? false,
@@ -111,6 +117,7 @@ namespace AutopilotMonitor.Functions.Functions
                     MaxBatchSize = tenantConfig.MaxBatchSize ?? 100,
                     DiagnosticsUploadEnabled = !string.IsNullOrEmpty(tenantConfig.DiagnosticsBlobSasUrl),
                     DiagnosticsUploadMode = tenantConfig.DiagnosticsUploadMode ?? "Off",
+                    DiagnosticsLogPaths = diagLogPaths,
                     Collectors = collectors,
                     GatherRules = gatherRules,
                     ImeLogPatterns = imeLogPatterns

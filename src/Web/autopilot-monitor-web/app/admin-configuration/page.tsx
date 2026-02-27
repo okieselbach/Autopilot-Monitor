@@ -37,6 +37,12 @@ const EXPORT_V1_PHASE_ORDER = ["Start", "Device Preparation", "Device Setup",
 const EXPORT_V2_PHASE_ORDER = ["Start", "Device Preparation", "App Installation",
   "Finalizing Setup", "Complete", "Failed"];
 
+interface DiagnosticsLogPath {
+  path: string;
+  description: string;
+  isBuiltIn: boolean;
+}
+
 interface AdminConfiguration {
   partitionKey: string;
   rowKey: string;
@@ -47,6 +53,7 @@ interface AdminConfiguration {
   maxCollectorDurationHours?: number;
   maxSessionWindowHours?: number;
   maintenanceBlockDurationHours?: number;
+  diagnosticsGlobalLogPathsJson?: string;
   customSettings?: string;
 }
 
@@ -93,6 +100,12 @@ export default function AdminConfigurationPage() {
   const [triggeringMaintenance, setTriggeringMaintenance] = useState(false);
   const [maintenanceDate, setMaintenanceDate] = useState<string>("");
   const [reseedingRules, setReseedingRules] = useState(false);
+  const [reseedingGatherRules, setReseedingGatherRules] = useState(false);
+  // Diagnostics Log Paths state
+  const [globalDiagPaths, setGlobalDiagPaths] = useState<DiagnosticsLogPath[]>([]);
+  const [newDiagPath, setNewDiagPath] = useState("");
+  const [newDiagDesc, setNewDiagDesc] = useState("");
+  const [savingDiagPaths, setSavingDiagPaths] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
@@ -195,6 +208,11 @@ export default function AdminConfigurationPage() {
         setMaxCollectorDurationHours(data.maxCollectorDurationHours ?? 4);
         setMaxSessionWindowHours(data.maxSessionWindowHours ?? 24);
         setMaintenanceBlockDurationHours(data.maintenanceBlockDurationHours ?? 12);
+        try {
+          setGlobalDiagPaths(data.diagnosticsGlobalLogPathsJson ? JSON.parse(data.diagnosticsGlobalLogPathsJson) : []);
+        } catch {
+          setGlobalDiagPaths([]);
+        }
       } catch (err) {
         console.error("Error fetching admin configuration:", err);
         setError(err instanceof Error ? err.message : "Failed to load admin configuration");
@@ -323,6 +341,74 @@ export default function AdminConfigurationPage() {
     }
   };
 
+  const handleReseedGatherRules = async () => {
+    try {
+      setReseedingGatherRules(true);
+      setError(null);
+      setSuccessMessage(null);
+
+      const token = await getAccessToken();
+      if (!token) {
+        throw new Error('Failed to get access token');
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/gather-rules/reseed`, {
+        method: "POST",
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to reseed gather rules: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      setSuccessMessage(result.message || "Gather rules reseeded successfully!");
+      setTimeout(() => setSuccessMessage(null), 5000);
+    } catch (err) {
+      console.error("Error reseeding gather rules:", err);
+      setError(err instanceof Error ? err.message : "Failed to reseed gather rules");
+    } finally {
+      setReseedingGatherRules(false);
+    }
+  };
+
+  const handleSaveDiagPaths = async (paths: DiagnosticsLogPath[]) => {
+    if (!adminConfig) return;
+    try {
+      setSavingDiagPaths(true);
+      setError(null);
+      setSuccessMessage(null);
+
+      const token = await getAccessToken();
+      if (!token) throw new Error("Failed to get access token");
+
+      const updatedConfig: AdminConfiguration = {
+        ...adminConfig,
+        diagnosticsGlobalLogPathsJson: JSON.stringify(paths),
+      };
+
+      const response = await fetch(`${API_BASE_URL}/api/global/config`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(updatedConfig),
+      });
+
+      if (!response.ok) throw new Error(`Failed to save diagnostics paths: ${response.statusText}`);
+
+      const result = await response.json();
+      setAdminConfig(result.config);
+      setGlobalDiagPaths(paths);
+      setSuccessMessage("Global diagnostics log paths saved successfully!");
+      setTimeout(() => setSuccessMessage(null), 4000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save diagnostics paths");
+    } finally {
+      setSavingDiagPaths(false);
+    }
+  };
+
   const handleSaveAdminConfig = async () => {
     if (!adminConfig) return;
 
@@ -379,6 +465,11 @@ export default function AdminConfigurationPage() {
     setMaxCollectorDurationHours(adminConfig.maxCollectorDurationHours ?? 4);
     setMaxSessionWindowHours(adminConfig.maxSessionWindowHours ?? 24);
     setMaintenanceBlockDurationHours(adminConfig.maintenanceBlockDurationHours ?? 12);
+    try {
+      setGlobalDiagPaths(adminConfig.diagnosticsGlobalLogPathsJson ? JSON.parse(adminConfig.diagnosticsGlobalLogPathsJson) : []);
+    } catch {
+      setGlobalDiagPaths([]);
+    }
     setSuccessMessage(null);
     setError(null);
   };
@@ -1314,6 +1405,180 @@ export default function AdminConfigurationPage() {
                       )}
                     </button>
                   </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Reseed Gather Rules */}
+            <div className="bg-gradient-to-br from-amber-50 to-orange-50 dark:from-gray-800 dark:to-gray-800 border-2 border-amber-300 dark:border-amber-700 rounded-lg shadow-lg">
+              <div className="p-6 border-b border-amber-200 dark:border-amber-700 bg-gradient-to-r from-amber-100 to-orange-100 dark:from-amber-900/40 dark:to-orange-900/40">
+                <div className="flex items-center space-x-2">
+                  <svg className="w-6 h-6 text-amber-600 dark:text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  <div>
+                    <h2 className="text-xl font-semibold text-amber-900 dark:text-amber-100">Reseed Gather Rules</h2>
+                    <p className="text-sm text-amber-600 dark:text-amber-300 mt-1">Re-import all built-in gather rules from code into Azure Table Storage</p>
+                  </div>
+                </div>
+              </div>
+              <div className="p-6">
+                <div className="flex items-start space-x-4">
+                  <div className="flex-1">
+                    <p className="text-sm text-amber-900 dark:text-gray-200 mb-4">
+                      This operation performs a full re-import of all built-in gather rules:
+                    </p>
+                    <ul className="text-sm text-amber-900 dark:text-gray-200 space-y-1 mb-4 ml-4">
+                      <li className="flex items-start">
+                        <span className="text-amber-500 dark:text-amber-400 mr-2">•</span>
+                        <span>Deletes all existing global built-in rules from the table</span>
+                      </li>
+                      <li className="flex items-start">
+                        <span className="text-amber-500 dark:text-amber-400 mr-2">•</span>
+                        <span>Writes all current code-defined rules as fresh entries</span>
+                      </li>
+                      <li className="flex items-start">
+                        <span className="text-amber-500 dark:text-amber-400 mr-2">•</span>
+                        <span>Tenant-specific custom rules and overrides are not affected</span>
+                      </li>
+                    </ul>
+                    <div className="bg-white dark:bg-gray-700 border border-orange-300 dark:border-amber-600 rounded-lg p-3 mb-4">
+                      <div className="flex items-start space-x-2">
+                        <svg className="w-5 h-5 text-orange-600 dark:text-amber-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                        </svg>
+                        <p className="text-sm text-gray-800 dark:text-gray-200">
+                          <strong>Use after deployments</strong> that add, remove, or modify built-in gather rules to ensure Azure Table Storage reflects the latest code definitions.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex-shrink-0">
+                    <button
+                      onClick={handleReseedGatherRules}
+                      disabled={reseedingGatherRules}
+                      className="px-6 py-3 bg-gradient-to-r from-amber-600 to-orange-600 text-white rounded-lg hover:from-amber-700 hover:to-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md hover:shadow-lg flex items-center space-x-2"
+                    >
+                      {reseedingGatherRules ? (
+                        <>
+                          <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                          <span>Reseeding...</span>
+                        </>
+                      ) : (
+                        <>
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                          </svg>
+                          <span>Reseed Now</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Diagnostics Log Paths */}
+            <div className="bg-gradient-to-br from-teal-50 to-cyan-50 dark:from-gray-800 dark:to-gray-800 border-2 border-teal-300 dark:border-teal-700 rounded-lg shadow-lg">
+              <div className="p-6 border-b border-teal-200 dark:border-teal-700 bg-gradient-to-r from-teal-100 to-cyan-100 dark:from-teal-900/40 dark:to-cyan-900/40">
+                <div className="flex items-center space-x-2">
+                  <svg className="w-6 h-6 text-teal-600 dark:text-teal-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  <div>
+                    <h2 className="text-xl font-semibold text-teal-900 dark:text-teal-100">Diagnostics Log Paths</h2>
+                    <p className="text-sm text-teal-600 dark:text-teal-300 mt-1">Global log file paths included in diagnostics packages for all tenants. Tenants may add their own paths in Settings.</p>
+                  </div>
+                </div>
+              </div>
+              <div className="p-6 space-y-4">
+                {/* Info box */}
+                <div className="bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-700 rounded-lg p-3 flex items-start space-x-2">
+                  <svg className="w-4 h-4 text-teal-600 dark:text-teal-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <p className="text-xs text-teal-700 dark:text-teal-300">
+                    All paths are validated on the agent against an allowlist of safe prefixes (DiagnosticsPathGuards). Wildcards are only allowed in the last path segment. Environment variables are expanded by the agent.
+                  </p>
+                </div>
+
+                {/* Current paths list */}
+                {loadingConfig ? (
+                  <div className="flex items-center space-x-2 text-sm text-gray-500">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-teal-600"></div>
+                    <span>Loading...</span>
+                  </div>
+                ) : globalDiagPaths.length === 0 ? (
+                  <p className="text-sm text-gray-500 dark:text-gray-400 italic">No global paths configured yet.</p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {globalDiagPaths.map((entry, idx) => (
+                      <div key={idx} className="flex items-center space-x-1 bg-teal-100 dark:bg-teal-900/40 border border-teal-300 dark:border-teal-700 rounded-full px-3 py-1 text-sm">
+                        <span className="font-mono text-teal-900 dark:text-teal-100">{entry.path}</span>
+                        {entry.description && (
+                          <span className="text-teal-600 dark:text-teal-400 text-xs ml-1">— {entry.description}</span>
+                        )}
+                        <button
+                          onClick={() => {
+                            const updated = globalDiagPaths.filter((_, i) => i !== idx);
+                            setGlobalDiagPaths(updated);
+                          }}
+                          className="ml-1 text-teal-500 hover:text-red-600 dark:hover:text-red-400 transition-colors"
+                          title="Remove"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Add new path */}
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    type="text"
+                    placeholder="Path or wildcard (e.g. C:\Windows\Panther\*.log)"
+                    value={newDiagPath}
+                    onChange={(e) => setNewDiagPath(e.target.value)}
+                    className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-gray-100 bg-white dark:bg-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500 font-mono"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Description (optional)"
+                    value={newDiagDesc}
+                    onChange={(e) => setNewDiagDesc(e.target.value)}
+                    className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-gray-100 bg-white dark:bg-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+                  />
+                  <button
+                    onClick={() => {
+                      const p = newDiagPath.trim();
+                      if (!p) return;
+                      setGlobalDiagPaths([...globalDiagPaths, { path: p, description: newDiagDesc.trim(), isBuiltIn: true }]);
+                      setNewDiagPath("");
+                      setNewDiagDesc("");
+                    }}
+                    disabled={!newDiagPath.trim()}
+                    className="px-4 py-2 bg-teal-600 text-white rounded-lg text-sm font-medium hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+                  >
+                    Add
+                  </button>
+                </div>
+
+                {/* Save button */}
+                <div className="flex justify-end pt-2">
+                  <button
+                    onClick={() => handleSaveDiagPaths(globalDiagPaths)}
+                    disabled={savingDiagPaths || !adminConfig}
+                    className="px-6 py-2 bg-gradient-to-r from-teal-600 to-cyan-600 text-white rounded-lg text-sm font-medium hover:from-teal-700 hover:to-cyan-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md hover:shadow-lg flex items-center space-x-2"
+                  >
+                    {savingDiagPaths ? (
+                      <><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div><span>Saving...</span></>
+                    ) : (
+                      <span>Save Global Paths</span>
+                    )}
+                  </button>
                 </div>
               </div>
             </div>
