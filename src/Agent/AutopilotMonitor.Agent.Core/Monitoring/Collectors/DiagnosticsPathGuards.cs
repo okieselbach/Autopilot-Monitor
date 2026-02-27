@@ -30,7 +30,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             @"C:\ProgramData\AutopilotMonitor",
 
             // Intune Management Extension
-            @"C:\ProgramData\Microsoft\IntuneManagementExtension",
+            @"C:\ProgramData\Microsoft\IntuneManagementExtension\Logs",
 
             // Windows Setup & OOBE
             @"C:\Windows\Panther",

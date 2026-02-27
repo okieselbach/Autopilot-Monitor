@@ -140,6 +140,15 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
+        /// Deletes a built-in gather rule from the global partition (Galactic Admin only).
+        /// </summary>
+        public async Task<bool> DeleteGlobalRuleAsync(string ruleId)
+        {
+            _seeded = false;
+            return await _storageService.DeleteGatherRuleAsync("global", ruleId);
+        }
+
+        /// <summary>
         /// Re-imports all built-in gather rules into the global partition.
         /// Deletes old global built-in rules and writes current code definitions.
         /// </summary>

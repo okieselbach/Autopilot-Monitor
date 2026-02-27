@@ -209,7 +209,7 @@ export function SectionGatherRules() {
             <p className="font-medium text-gray-900">Allowed Path Prefixes</p>
             <GuardToggle label="Show allowed file path prefixes">
               <div className="bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs font-mono space-y-0.5">
-                <p>C:\ProgramData\Microsoft\IntuneManagementExtension</p>
+                <p>C:\ProgramData\Microsoft\IntuneManagementExtension\Logs</p>
                 <p>C:\Windows\CCM\Logs</p>
                 <p>C:\Windows\Logs</p>
                 <p>C:\Windows\Panther</p>

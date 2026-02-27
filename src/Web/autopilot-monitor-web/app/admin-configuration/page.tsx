@@ -1145,62 +1145,58 @@ export default function AdminConfigurationPage() {
                                   : 'bg-white border-gray-200 hover:border-green-300'
                               }`}
                             >
-                              <div className="flex items-center justify-between">
-                                <div className="flex-1">
-                                  <div className="flex items-center space-x-2">
-                                    <h3 className="font-semibold text-gray-900 text-lg">
-                                      {tenant.domainName || tenant.tenantId}
-                                    </h3>
-                                    {tenant.disabled && (
-                                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                                        Suspended
-                                      </span>
-                                    )}
-                                    {previewApproved.has(tenant.tenantId) ? (
-                                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                                        Preview
-                                      </span>
-                                    ) : (
-                                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
-                                        Waitlist
-                                      </span>
-                                    )}
-                                    {tenant.validateAutopilotDevice && (
-                                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                                        Ready
-                                      </span>
-                                    )}
-                                  </div>
-                                  <p className="text-sm text-gray-500 mt-1">
-                                    Tenant ID: {tenant.tenantId}
-                                  </p>
-                                </div>
-                                <div className="flex items-center space-x-2 ml-4">
-                                  <button
-                                    onClick={() => handleTogglePreview(tenant.tenantId)}
-                                    disabled={togglingPreviewTenant === tenant.tenantId}
-                                    className={`px-3 py-2 text-sm rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                                      previewApproved.has(tenant.tenantId)
-                                        ? 'bg-amber-500 text-white hover:bg-amber-600'
-                                        : 'bg-blue-600 text-white hover:bg-blue-700'
-                                    }`}
-                                  >
-                                    {togglingPreviewTenant === tenant.tenantId
-                                      ? "..."
-                                      : previewApproved.has(tenant.tenantId)
-                                      ? "Revoke"
-                                      : "Approve"}
-                                  </button>
-                                  <button
-                                    onClick={() => {
-                                      setEditingTenant(tenant);
-                                      fetchTenantAdmins(tenant.tenantId);
-                                    }}
-                                    className="px-4 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-                                  >
-                                    Edit
-                                  </button>
-                                </div>
+                              <h3 className="font-semibold text-gray-900 text-lg">
+                                {tenant.domainName || tenant.tenantId}
+                              </h3>
+                              <p className="text-sm text-gray-500 mt-0.5">
+                                Tenant ID: {tenant.tenantId}
+                              </p>
+                              <div className="flex flex-wrap items-center gap-2 mt-2">
+                                {tenant.disabled && (
+                                  <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                                    Suspended
+                                  </span>
+                                )}
+                                {previewApproved.has(tenant.tenantId) ? (
+                                  <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                    Preview
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
+                                    Waitlist
+                                  </span>
+                                )}
+                                {tenant.validateAutopilotDevice && (
+                                  <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                    Ready
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2 mt-3">
+                                <button
+                                  onClick={() => handleTogglePreview(tenant.tenantId)}
+                                  disabled={togglingPreviewTenant === tenant.tenantId}
+                                  className={`px-3 py-2 text-sm rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                                    previewApproved.has(tenant.tenantId)
+                                      ? 'bg-amber-500 text-white hover:bg-amber-600'
+                                      : 'bg-blue-600 text-white hover:bg-blue-700'
+                                  }`}
+                                >
+                                  {togglingPreviewTenant === tenant.tenantId
+                                    ? "..."
+                                    : previewApproved.has(tenant.tenantId)
+                                    ? "Revoke"
+                                    : "Approve"}
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setEditingTenant(tenant);
+                                    fetchTenantAdmins(tenant.tenantId);
+                                  }}
+                                  className="px-4 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                                >
+                                  Edit
+                                </button>
                               </div>
                             </div>
                           ))}
@@ -1266,76 +1262,72 @@ export default function AdminConfigurationPage() {
                   </div>
                 </div>
               </div>
-              <div className="p-6">
-                <div className="flex items-start space-x-4">
-                  <div className="flex-1">
-                    <p className="text-sm text-purple-900 dark:text-gray-200 mb-4">
-                      Manually trigger the daily maintenance job which includes:
+              <div className="p-6 space-y-4">
+                <p className="text-sm text-purple-900 dark:text-gray-200">
+                  Manually trigger the daily maintenance job which includes:
+                </p>
+                <ul className="text-sm text-purple-900 dark:text-gray-200 space-y-1 ml-4">
+                  <li className="flex items-start">
+                    <span className="text-purple-500 dark:text-purple-400 mr-2">•</span>
+                    <span>Mark stalled sessions as timed out</span>
+                  </li>
+                  <li className="flex items-start">
+                    <span className="text-purple-500 dark:text-purple-400 mr-2">•</span>
+                    <span>Aggregate metrics into historical snapshots (with automatic catch-up for missed days)</span>
+                  </li>
+                  <li className="flex items-start">
+                    <span className="text-purple-500 dark:text-purple-400 mr-2">•</span>
+                    <span>Clean up old data based on retention policies</span>
+                  </li>
+                </ul>
+                <div className="bg-purple-50 dark:bg-gray-700 border border-purple-200 dark:border-purple-600 rounded-lg p-4">
+                  <label className="block text-sm font-medium text-purple-800 dark:text-purple-200 mb-1">
+                    Target Date (optional)
+                  </label>
+                  <input
+                    type="date"
+                    value={maintenanceDate}
+                    onChange={(e) => setMaintenanceDate(e.target.value)}
+                    max={new Date(Date.now() - 86400000).toISOString().split('T')[0]}
+                    className="w-full max-w-xs px-3 py-2 border border-purple-300 dark:border-purple-600 rounded-lg text-sm bg-white dark:bg-gray-600 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                  />
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                    Leave empty to run the standard maintenance with automatic catch-up (aggregates any missed days within the last 7 days).
+                    Select a specific date to manually aggregate metrics for that day, e.g. to backfill data older than 7 days.
+                  </p>
+                </div>
+                <div className="bg-white dark:bg-gray-700 border border-purple-300 dark:border-purple-600 rounded-lg p-3">
+                  <div className="flex items-start space-x-2">
+                    <svg className="w-5 h-5 text-purple-600 dark:text-purple-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                    <p className="text-sm text-gray-800 dark:text-gray-200">
+                      <strong>Warning:</strong> This operation runs across all tenants and may take several minutes to complete.
+                      Use this only for testing or when immediate cleanup is needed.
                     </p>
-                    <ul className="text-sm text-purple-900 dark:text-gray-200 space-y-1 mb-4 ml-4">
-                      <li className="flex items-start">
-                        <span className="text-purple-500 dark:text-purple-400 mr-2">•</span>
-                        <span>Mark stalled sessions as timed out</span>
-                      </li>
-                      <li className="flex items-start">
-                        <span className="text-purple-500 dark:text-purple-400 mr-2">•</span>
-                        <span>Aggregate metrics into historical snapshots (with automatic catch-up for missed days)</span>
-                      </li>
-                      <li className="flex items-start">
-                        <span className="text-purple-500 dark:text-purple-400 mr-2">•</span>
-                        <span>Clean up old data based on retention policies</span>
-                      </li>
-                    </ul>
-                    <div className="bg-purple-50 dark:bg-gray-700 border border-purple-200 dark:border-purple-600 rounded-lg p-4 mb-4">
-                      <label className="block text-sm font-medium text-purple-800 dark:text-purple-200 mb-1">
-                        Target Date (optional)
-                      </label>
-                      <input
-                        type="date"
-                        value={maintenanceDate}
-                        onChange={(e) => setMaintenanceDate(e.target.value)}
-                        max={new Date(Date.now() - 86400000).toISOString().split('T')[0]}
-                        className="w-full max-w-xs px-3 py-2 border border-purple-300 dark:border-purple-600 rounded-lg text-sm bg-white dark:bg-gray-600 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                      />
-                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-                        Leave empty to run the standard maintenance with automatic catch-up (aggregates any missed days within the last 7 days).
-                        Select a specific date to manually aggregate metrics for that day, e.g. to backfill data older than 7 days.
-                      </p>
-                    </div>
-                    <div className="bg-white dark:bg-gray-700 border border-purple-300 dark:border-purple-600 rounded-lg p-3 mb-4">
-                      <div className="flex items-start space-x-2">
-                        <svg className="w-5 h-5 text-purple-600 dark:text-purple-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </div>
+                </div>
+                <div className="flex justify-end pt-2">
+                  <button
+                    onClick={handleTriggerMaintenance}
+                    disabled={triggeringMaintenance}
+                    className="px-6 py-3 bg-gradient-to-r from-purple-600 to-violet-600 text-white rounded-lg hover:from-purple-700 hover:to-violet-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md hover:shadow-lg flex items-center space-x-2"
+                  >
+                    {triggeringMaintenance ? (
+                      <>
+                        <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                        <span>Running...</span>
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                         </svg>
-                        <p className="text-sm text-gray-800 dark:text-gray-200">
-                          <strong>Warning:</strong> This operation runs across all tenants and may take several minutes to complete.
-                          Use this only for testing or when immediate cleanup is needed.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex-shrink-0">
-                    <button
-                      onClick={handleTriggerMaintenance}
-                      disabled={triggeringMaintenance}
-                      className="px-6 py-3 bg-gradient-to-r from-purple-600 to-violet-600 text-white rounded-lg hover:from-purple-700 hover:to-violet-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md hover:shadow-lg flex items-center space-x-2"
-                    >
-                      {triggeringMaintenance ? (
-                        <>
-                          <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                          <span>Running...</span>
-                        </>
-                      ) : (
-                        <>
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                          </svg>
-                          <span>Run Now</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
+                        <span>Run Now</span>
+                      </>
+                    )}
+                  </button>
                 </div>
               </div>
             </div>
@@ -1353,58 +1345,54 @@ export default function AdminConfigurationPage() {
                   </div>
                 </div>
               </div>
-              <div className="p-6">
-                <div className="flex items-start space-x-4">
-                  <div className="flex-1">
-                    <p className="text-sm text-amber-900 dark:text-gray-200 mb-4">
-                      This operation performs a full re-import of all built-in analyze rules:
+              <div className="p-6 space-y-4">
+                <p className="text-sm text-amber-900 dark:text-gray-200">
+                  This operation performs a full re-import of all built-in analyze rules:
+                </p>
+                <ul className="text-sm text-amber-900 dark:text-gray-200 space-y-1 ml-4">
+                  <li className="flex items-start">
+                    <span className="text-amber-500 dark:text-amber-400 mr-2">•</span>
+                    <span>Deletes all existing global built-in rules from the table</span>
+                  </li>
+                  <li className="flex items-start">
+                    <span className="text-amber-500 dark:text-amber-400 mr-2">•</span>
+                    <span>Writes all current code-defined rules as fresh entries</span>
+                  </li>
+                  <li className="flex items-start">
+                    <span className="text-amber-500 dark:text-amber-400 mr-2">•</span>
+                    <span>Tenant-specific custom rules and overrides are not affected</span>
+                  </li>
+                </ul>
+                <div className="bg-white dark:bg-gray-700 border border-orange-300 dark:border-amber-600 rounded-lg p-3">
+                  <div className="flex items-start space-x-2">
+                    <svg className="w-5 h-5 text-orange-600 dark:text-amber-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                    <p className="text-sm text-gray-800 dark:text-gray-200">
+                      <strong>Use after deployments</strong> that add, remove, or modify built-in analyze rules to ensure Azure Table Storage reflects the latest code definitions.
                     </p>
-                    <ul className="text-sm text-amber-900 dark:text-gray-200 space-y-1 mb-4 ml-4">
-                      <li className="flex items-start">
-                        <span className="text-amber-500 dark:text-amber-400 mr-2">•</span>
-                        <span>Deletes all existing global built-in rules from the table</span>
-                      </li>
-                      <li className="flex items-start">
-                        <span className="text-amber-500 dark:text-amber-400 mr-2">•</span>
-                        <span>Writes all current code-defined rules as fresh entries</span>
-                      </li>
-                      <li className="flex items-start">
-                        <span className="text-amber-500 dark:text-amber-400 mr-2">•</span>
-                        <span>Tenant-specific custom rules and overrides are not affected</span>
-                      </li>
-                    </ul>
-                    <div className="bg-white dark:bg-gray-700 border border-orange-300 dark:border-amber-600 rounded-lg p-3 mb-4">
-                      <div className="flex items-start space-x-2">
-                        <svg className="w-5 h-5 text-orange-600 dark:text-amber-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </div>
+                </div>
+                <div className="flex justify-end pt-2">
+                  <button
+                    onClick={handleReseedAnalyzeRules}
+                    disabled={reseedingRules}
+                    className="px-6 py-3 bg-gradient-to-r from-amber-600 to-orange-600 text-white rounded-lg hover:from-amber-700 hover:to-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md hover:shadow-lg flex items-center space-x-2"
+                  >
+                    {reseedingRules ? (
+                      <>
+                        <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                        <span>Reseeding...</span>
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                         </svg>
-                        <p className="text-sm text-gray-800 dark:text-gray-200">
-                          <strong>Use after deployments</strong> that add, remove, or modify built-in analyze rules to ensure Azure Table Storage reflects the latest code definitions.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex-shrink-0">
-                    <button
-                      onClick={handleReseedAnalyzeRules}
-                      disabled={reseedingRules}
-                      className="px-6 py-3 bg-gradient-to-r from-amber-600 to-orange-600 text-white rounded-lg hover:from-amber-700 hover:to-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md hover:shadow-lg flex items-center space-x-2"
-                    >
-                      {reseedingRules ? (
-                        <>
-                          <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                          <span>Reseeding...</span>
-                        </>
-                      ) : (
-                        <>
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                          </svg>
-                          <span>Reseed Now</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
+                        <span>Reseed Now</span>
+                      </>
+                    )}
+                  </button>
                 </div>
               </div>
             </div>
@@ -1422,58 +1410,54 @@ export default function AdminConfigurationPage() {
                   </div>
                 </div>
               </div>
-              <div className="p-6">
-                <div className="flex items-start space-x-4">
-                  <div className="flex-1">
-                    <p className="text-sm text-amber-900 dark:text-gray-200 mb-4">
-                      This operation performs a full re-import of all built-in gather rules:
+              <div className="p-6 space-y-4">
+                <p className="text-sm text-amber-900 dark:text-gray-200">
+                  This operation performs a full re-import of all built-in gather rules:
+                </p>
+                <ul className="text-sm text-amber-900 dark:text-gray-200 space-y-1 ml-4">
+                  <li className="flex items-start">
+                    <span className="text-amber-500 dark:text-amber-400 mr-2">•</span>
+                    <span>Deletes all existing global built-in rules from the table</span>
+                  </li>
+                  <li className="flex items-start">
+                    <span className="text-amber-500 dark:text-amber-400 mr-2">•</span>
+                    <span>Writes all current code-defined rules as fresh entries</span>
+                  </li>
+                  <li className="flex items-start">
+                    <span className="text-amber-500 dark:text-amber-400 mr-2">•</span>
+                    <span>Tenant-specific custom rules and overrides are not affected</span>
+                  </li>
+                </ul>
+                <div className="bg-white dark:bg-gray-700 border border-orange-300 dark:border-amber-600 rounded-lg p-3">
+                  <div className="flex items-start space-x-2">
+                    <svg className="w-5 h-5 text-orange-600 dark:text-amber-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                    <p className="text-sm text-gray-800 dark:text-gray-200">
+                      <strong>Use after deployments</strong> that add, remove, or modify built-in gather rules to ensure Azure Table Storage reflects the latest code definitions.
                     </p>
-                    <ul className="text-sm text-amber-900 dark:text-gray-200 space-y-1 mb-4 ml-4">
-                      <li className="flex items-start">
-                        <span className="text-amber-500 dark:text-amber-400 mr-2">•</span>
-                        <span>Deletes all existing global built-in rules from the table</span>
-                      </li>
-                      <li className="flex items-start">
-                        <span className="text-amber-500 dark:text-amber-400 mr-2">•</span>
-                        <span>Writes all current code-defined rules as fresh entries</span>
-                      </li>
-                      <li className="flex items-start">
-                        <span className="text-amber-500 dark:text-amber-400 mr-2">•</span>
-                        <span>Tenant-specific custom rules and overrides are not affected</span>
-                      </li>
-                    </ul>
-                    <div className="bg-white dark:bg-gray-700 border border-orange-300 dark:border-amber-600 rounded-lg p-3 mb-4">
-                      <div className="flex items-start space-x-2">
-                        <svg className="w-5 h-5 text-orange-600 dark:text-amber-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </div>
+                </div>
+                <div className="flex justify-end pt-2">
+                  <button
+                    onClick={handleReseedGatherRules}
+                    disabled={reseedingGatherRules}
+                    className="px-6 py-3 bg-gradient-to-r from-amber-600 to-orange-600 text-white rounded-lg hover:from-amber-700 hover:to-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md hover:shadow-lg flex items-center space-x-2"
+                  >
+                    {reseedingGatherRules ? (
+                      <>
+                        <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                        <span>Reseeding...</span>
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                         </svg>
-                        <p className="text-sm text-gray-800 dark:text-gray-200">
-                          <strong>Use after deployments</strong> that add, remove, or modify built-in gather rules to ensure Azure Table Storage reflects the latest code definitions.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex-shrink-0">
-                    <button
-                      onClick={handleReseedGatherRules}
-                      disabled={reseedingGatherRules}
-                      className="px-6 py-3 bg-gradient-to-r from-amber-600 to-orange-600 text-white rounded-lg hover:from-amber-700 hover:to-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md hover:shadow-lg flex items-center space-x-2"
-                    >
-                      {reseedingGatherRules ? (
-                        <>
-                          <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                          <span>Reseeding...</span>
-                        </>
-                      ) : (
-                        <>
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                          </svg>
-                          <span>Reseed Now</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
+                        <span>Reseed Now</span>
+                      </>
+                    )}
+                  </button>
                 </div>
               </div>
             </div>

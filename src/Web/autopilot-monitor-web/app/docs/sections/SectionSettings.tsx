@@ -169,7 +169,7 @@ export function SectionSettings() {
             {showDiagGuards && (
               <div className="mt-1 bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs font-mono space-y-0.5">
                 <p>C:\ProgramData\AutopilotMonitor</p>
-                <p>C:\ProgramData\Microsoft\IntuneManagementExtension</p>
+                <p>C:\ProgramData\Microsoft\IntuneManagementExtension\Logs</p>
                 <p>C:\Windows\Panther</p>
                 <p>C:\Windows\Logs</p>
                 <p>C:\Windows\SetupDiag</p>

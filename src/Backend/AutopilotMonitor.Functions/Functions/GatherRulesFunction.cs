@@ -198,11 +198,30 @@ namespace AutopilotMonitor.Functions.Functions
                 return unauthorized;
             }
 
-            var success = await _ruleService.DeleteRuleAsync(tenantId, ruleId);
+            var globalDelete = req.Url.Query.Contains("global=true", StringComparison.OrdinalIgnoreCase);
+            if (globalDelete)
+            {
+                var upn = TenantHelper.GetUserIdentifier(req);
+                var isGalactic = await _galacticAdminService.IsGalacticAdminAsync(upn);
+                if (!isGalactic)
+                {
+                    var forbidden = req.CreateResponse(HttpStatusCode.Forbidden);
+                    await forbidden.WriteAsJsonAsync(new { success = false, message = "Galactic Admin privileges required for global rule deletion" });
+                    return forbidden;
+                }
 
-            var response = req.CreateResponse(success ? HttpStatusCode.OK : HttpStatusCode.InternalServerError);
-            await response.WriteAsJsonAsync(new { success, message = success ? "Rule deleted" : "Failed to delete rule" });
-            return response;
+                var success = await _ruleService.DeleteGlobalRuleAsync(ruleId);
+                var response = req.CreateResponse(success ? HttpStatusCode.OK : HttpStatusCode.InternalServerError);
+                await response.WriteAsJsonAsync(new { success, message = success ? "Global rule deleted" : "Failed to delete global rule" });
+                return response;
+            }
+            else
+            {
+                var success = await _ruleService.DeleteRuleAsync(tenantId, ruleId);
+                var response = req.CreateResponse(success ? HttpStatusCode.OK : HttpStatusCode.InternalServerError);
+                await response.WriteAsJsonAsync(new { success, message = success ? "Rule deleted" : "Failed to delete rule" });
+                return response;
+            }
         }
     }
 }

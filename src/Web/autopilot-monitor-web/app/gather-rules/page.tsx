@@ -235,7 +235,7 @@ export default function GatherRulesPage() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ enabled: !rule.enabled }),
+        body: JSON.stringify({ ...rule, enabled: !rule.enabled }),
       });
 
       if (!response.ok) {
@@ -255,9 +255,13 @@ export default function GatherRulesPage() {
     }
   };
 
-  // Delete custom rule
+  // Delete rule (custom rules for tenants, built-in global rules for Galactic Admins)
   const handleDeleteRule = async (rule: GatherRule) => {
-    if (!confirm(`Are you sure you want to delete the rule "${rule.title}"? This action cannot be undone.`)) {
+    const isGlobal = rule.isBuiltIn && isGalacticAdmin;
+    const confirmMsg = isGlobal
+      ? `Are you sure you want to delete the global built-in rule "${rule.title}"? This removes it for ALL tenants and cannot be undone.`
+      : `Are you sure you want to delete the rule "${rule.title}"? This action cannot be undone.`;
+    if (!confirm(confirmMsg)) {
       return;
     }
 
@@ -270,7 +274,8 @@ export default function GatherRulesPage() {
         throw new Error("Failed to get access token");
       }
 
-      const response = await fetch(`${API_BASE_URL}/api/gather-rules/${encodeURIComponent(rule.ruleId)}`, {
+      const url = `${API_BASE_URL}/api/gather-rules/${encodeURIComponent(rule.ruleId)}${isGlobal ? "?global=true" : ""}`;
+      const response = await fetch(url, {
         method: "DELETE",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -279,7 +284,7 @@ export default function GatherRulesPage() {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `Failed to delete rule: ${response.statusText}`);
+        throw new Error(errorData.message || errorData.error || `Failed to delete rule: ${response.statusText}`);
       }
 
       setRules((prev) => prev.filter((r) => r.ruleId !== rule.ruleId));
@@ -1389,11 +1394,12 @@ export default function GatherRulesPage() {
                                   <span>{rule.isBuiltIn ? "Edit (Global)" : "Edit"}</span>
                                 </button>
                               )}
-                              {!rule.isBuiltIn && (
+                              {(!rule.isBuiltIn || (rule.isBuiltIn && isGalacticAdmin)) && (
                                 <button
                                   onClick={() => handleDeleteRule(rule)}
                                   disabled={deletingRule === rule.ruleId}
                                   className="px-4 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-2"
+                                  title={rule.isBuiltIn ? "Delete global rule (Galactic Admin)" : "Delete rule"}
                                 >
                                   {deletingRule === rule.ruleId ? (
                                     <>
@@ -1405,7 +1411,7 @@ export default function GatherRulesPage() {
                                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                                       </svg>
-                                      <span>Delete</span>
+                                      <span>{rule.isBuiltIn ? "Delete (Global)" : "Delete"}</span>
                                     </>
                                   )}
                                 </button>

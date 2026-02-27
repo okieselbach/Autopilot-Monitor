@@ -72,7 +72,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         public static readonly IReadOnlyList<string> AllowedFilePrefixes = new[]
         {
             // Intune Management Extension logs
-            @"C:\ProgramData\Microsoft\IntuneManagementExtension",
+            @"C:\ProgramData\Microsoft\IntuneManagementExtension\Logs",
 
             // ConfigMgr / MECM client logs (hybrid scenarios)
             @"C:\Windows\CCM\Logs",
