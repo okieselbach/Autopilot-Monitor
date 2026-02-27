@@ -1646,6 +1646,31 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
+        /// Gets all app install summaries across all tenants (for galactic admin mode)
+        /// </summary>
+        public async Task<List<AppInstallSummary>> GetAllAppInstallSummariesAsync()
+        {
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.AppInstallSummaries);
+                var query = tableClient.QueryAsync<TableEntity>();
+
+                var summaries = new List<AppInstallSummary>();
+                await foreach (var entity in query)
+                {
+                    summaries.Add(MapToAppInstallSummary(entity));
+                }
+
+                return summaries;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to get all app install summaries");
+                return new List<AppInstallSummary>();
+            }
+        }
+
+        /// <summary>
         /// Deletes all app install summaries for a session
         /// </summary>
         public async Task<int> DeleteSessionAppInstallSummariesAsync(string tenantId, string sessionId)

@@ -168,8 +168,11 @@ export default function FleetHealthPage() {
       const token = await getAccessToken();
       if (!token) return;
       const days = range === "7d" ? 7 : range === "30d" ? 30 : 90;
+      const endpoint = galacticAdminMode
+        ? `${API_BASE_URL}/api/galactic/app-metrics?days=${days}`
+        : `${API_BASE_URL}/api/app-metrics?tenantId=${tenantId}&days=${days}`;
       const response = await fetch(
-        `${API_BASE_URL}/api/app-metrics?tenantId=${tenantId}&days=${days}`,
+        endpoint,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       if (response.ok) {
