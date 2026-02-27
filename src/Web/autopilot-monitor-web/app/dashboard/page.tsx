@@ -786,9 +786,19 @@ export default function Home() {
                         </td>
                         {galacticAdminMode && (
                           <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="text-xs font-mono text-gray-600">
-                              {session.tenantId}
-                            </div>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigator.clipboard.writeText(session.tenantId);
+                              }}
+                              className="group flex items-center gap-1 text-xs font-mono text-gray-600 hover:text-blue-600 transition-colors"
+                              title={session.tenantId}
+                            >
+                              <span>{session.tenantId.split('-').slice(0, 2).join('-')}</span>
+                              <svg className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                              </svg>
+                            </button>
                           </td>
                         )}
                         <td className="px-6 py-4 whitespace-nowrap">
