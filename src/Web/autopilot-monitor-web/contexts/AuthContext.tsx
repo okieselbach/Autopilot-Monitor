@@ -72,12 +72,23 @@ function AuthProviderInternal({ children }: { children: React.ReactNode }) {
         account: account,
       });
 
-      // Call backend API to get user info including galactic admin status
-      const response = await fetch(`${API_BASE_URL}/api/auth/me`, {
-        headers: {
-          'Authorization': `Bearer ${tokenResponse.accessToken}`,
-        },
-      });
+      // Call backend API to get user info including galactic admin status.
+      // 8-second timeout so a cold Azure Function start does not block the
+      // landing page spinner indefinitely — the catch block falls back to
+      // token claims so the user can still log in.
+      const authMeController = new AbortController();
+      const authMeTimeout = setTimeout(() => authMeController.abort(), 8000);
+      let response: Response;
+      try {
+        response = await fetch(`${API_BASE_URL}/api/auth/me`, {
+          headers: {
+            'Authorization': `Bearer ${tokenResponse.accessToken}`,
+          },
+          signal: authMeController.signal,
+        });
+      } finally {
+        clearTimeout(authMeTimeout);
+      }
 
       if (!response.ok) {
         if (response.status === 403) {
