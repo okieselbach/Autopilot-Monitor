@@ -462,7 +462,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             {
                 { "windowsEventId", eventId },
                 { "providerName", providerName ?? "" },
-                { "description", "truncated" }
+                { "description", "truncated" },
+                { "eventTime", timestamp.ToString("o") }
             };
 
             if (isBackfill)
@@ -677,11 +678,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                         return;
                 }
 
+                var eventTimestamp = record.TimeCreated ?? DateTime.UtcNow;
+
                 _onEventCollected(new EnrollmentEvent
                 {
                     SessionId = _sessionId,
                     TenantId = _tenantId,
-                    Timestamp = record.TimeCreated ?? DateTime.UtcNow,
+                    Timestamp = eventTimestamp,
                     EventType = eventType,
                     Severity = severity,
                     Source = "EspAndHelloTracker",
@@ -692,7 +695,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                         { "windowsEventId", eventId },
                         { "providerName", record.ProviderName ?? "" },
                         { "description", description },
-                        { "eventLogChannel", ShellCoreEventLogChannel }
+                        { "eventLogChannel", ShellCoreEventLogChannel },
+                        { "eventTime", eventTimestamp.ToString("o") }
                     }
                 });
 
