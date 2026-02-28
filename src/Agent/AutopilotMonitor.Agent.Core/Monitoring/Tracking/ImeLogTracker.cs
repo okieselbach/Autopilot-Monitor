@@ -140,7 +140,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 {
                     // Replace {GUID} placeholder with actual GUID capture regex
                     var regexStr = pattern.Pattern.Replace("{GUID}", GuidPattern);
-                    var regex = new Regex(regexStr, RegexOptions.IgnoreCase | RegexOptions.Compiled);
+                    var regex = new Regex(regexStr, RegexOptions.IgnoreCase | RegexOptions.Compiled, TimeSpan.FromSeconds(1));
 
                     var compiled = new CompiledPattern
                     {
@@ -439,11 +439,18 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                                 // Match against active patterns
                                 foreach (var pattern in _activePatterns)
                                 {
-                                    var match = pattern.Regex.Match(messageToMatch);
-                                    if (match.Success)
+                                    try
                                     {
-                                        WriteMatchLog(filePath, line, pattern.PatternId);
-                                        HandlePatternMatch(pattern, match, messageToMatch);
+                                        var match = pattern.Regex.Match(messageToMatch);
+                                        if (match.Success)
+                                        {
+                                            WriteMatchLog(filePath, line, pattern.PatternId);
+                                            HandlePatternMatch(pattern, match, messageToMatch);
+                                        }
+                                    }
+                                    catch (RegexMatchTimeoutException)
+                                    {
+                                        // Skip this pattern match to prevent ReDoS
                                     }
                                 }
                             }

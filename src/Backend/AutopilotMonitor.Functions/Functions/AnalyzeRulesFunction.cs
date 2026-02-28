@@ -16,11 +16,19 @@ namespace AutopilotMonitor.Functions.Functions
     {
         private readonly ILogger<AnalyzeRulesFunction> _logger;
         private readonly AnalyzeRuleService _ruleService;
+        private readonly TenantAdminsService _tenantAdminsService;
+        private readonly GalacticAdminService _galacticAdminService;
 
-        public AnalyzeRulesFunction(ILogger<AnalyzeRulesFunction> logger, AnalyzeRuleService ruleService)
+        public AnalyzeRulesFunction(
+            ILogger<AnalyzeRulesFunction> logger,
+            AnalyzeRuleService ruleService,
+            TenantAdminsService tenantAdminsService,
+            GalacticAdminService galacticAdminService)
         {
             _logger = logger;
             _ruleService = ruleService;
+            _tenantAdminsService = tenantAdminsService;
+            _galacticAdminService = galacticAdminService;
         }
 
         [Function("GetAnalyzeRules")]
@@ -52,6 +60,17 @@ namespace AutopilotMonitor.Functions.Functions
                 var unauthorized = req.CreateResponse(HttpStatusCode.Unauthorized);
                 await unauthorized.WriteAsJsonAsync(new { success = false, message = "Authentication required" });
                 return unauthorized;
+            }
+
+            // Require Tenant Admin or Galactic Admin for rule modifications
+            var userIdentifier = TenantHelper.GetUserIdentifier(req);
+            var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userIdentifier);
+            var isTenantAdmin = await _tenantAdminsService.IsTenantAdminAsync(tenantId, userIdentifier);
+            if (!isGalacticAdmin && !isTenantAdmin)
+            {
+                var forbidden = req.CreateResponse(HttpStatusCode.Forbidden);
+                await forbidden.WriteAsJsonAsync(new { success = false, message = "Access denied. Tenant Admin or Galactic Admin role required." });
+                return forbidden;
             }
 
             if (req.Headers.TryGetValues("Content-Length", out var clValues)
@@ -92,6 +111,17 @@ namespace AutopilotMonitor.Functions.Functions
                 return unauthorized;
             }
 
+            // Require Tenant Admin or Galactic Admin for rule modifications
+            var userIdentifier = TenantHelper.GetUserIdentifier(req);
+            var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userIdentifier);
+            var isTenantAdmin = await _tenantAdminsService.IsTenantAdminAsync(tenantId, userIdentifier);
+            if (!isGalacticAdmin && !isTenantAdmin)
+            {
+                var forbidden = req.CreateResponse(HttpStatusCode.Forbidden);
+                await forbidden.WriteAsJsonAsync(new { success = false, message = "Access denied. Tenant Admin or Galactic Admin role required." });
+                return forbidden;
+            }
+
             if (req.Headers.TryGetValues("Content-Length", out var clValues2)
                 && long.TryParse(clValues2.FirstOrDefault(), out var contentLength2)
                 && contentLength2 > 1_048_576) // 1 MB limit
@@ -129,6 +159,17 @@ namespace AutopilotMonitor.Functions.Functions
                 var unauthorized = req.CreateResponse(HttpStatusCode.Unauthorized);
                 await unauthorized.WriteAsJsonAsync(new { success = false, message = "Authentication required" });
                 return unauthorized;
+            }
+
+            // Require Tenant Admin or Galactic Admin for rule modifications
+            var userIdentifier = TenantHelper.GetUserIdentifier(req);
+            var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userIdentifier);
+            var isTenantAdmin = await _tenantAdminsService.IsTenantAdminAsync(tenantId, userIdentifier);
+            if (!isGalacticAdmin && !isTenantAdmin)
+            {
+                var forbidden = req.CreateResponse(HttpStatusCode.Forbidden);
+                await forbidden.WriteAsJsonAsync(new { success = false, message = "Access denied. Tenant Admin or Galactic Admin role required." });
+                return forbidden;
             }
 
             // Load the rule to determine its type (built-in/community vs. custom)

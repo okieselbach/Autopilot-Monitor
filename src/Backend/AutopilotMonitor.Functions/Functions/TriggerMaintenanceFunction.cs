@@ -121,7 +121,7 @@ namespace AutopilotMonitor.Functions.Functions
                 await errorResponse.WriteAsJsonAsync(new
                 {
                     success = false,
-                    error = ex.Message
+                    message = "Internal server error"
                 });
 
                 return errorResponse;

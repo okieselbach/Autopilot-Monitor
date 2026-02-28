@@ -115,7 +115,7 @@ namespace AutopilotMonitor.Functions.Functions
                 await response.WriteAsJsonAsync(new
                 {
                     success = false,
-                    message = $"Failed to fetch rules from GitHub: {ex.Message}. GitHub CDN may cache responses for up to 5 minutes after a merge."
+                    message = "Failed to fetch rules from GitHub. GitHub CDN may cache responses for up to 5 minutes after a merge."
                 });
                 return response;
             }

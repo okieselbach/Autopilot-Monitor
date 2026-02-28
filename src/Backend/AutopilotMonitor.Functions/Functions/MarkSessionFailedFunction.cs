@@ -13,11 +13,19 @@ namespace AutopilotMonitor.Functions.Functions
     {
         private readonly ILogger<MarkSessionFailedFunction> _logger;
         private readonly TableStorageService _storageService;
+        private readonly TenantAdminsService _tenantAdminsService;
+        private readonly GalacticAdminService _galacticAdminService;
 
-        public MarkSessionFailedFunction(ILogger<MarkSessionFailedFunction> logger, TableStorageService storageService)
+        public MarkSessionFailedFunction(
+            ILogger<MarkSessionFailedFunction> logger,
+            TableStorageService storageService,
+            TenantAdminsService tenantAdminsService,
+            GalacticAdminService galacticAdminService)
         {
             _logger = logger;
             _storageService = storageService;
+            _tenantAdminsService = tenantAdminsService;
+            _galacticAdminService = galacticAdminService;
         }
 
         [Function("MarkSessionFailed")]
@@ -44,6 +52,21 @@ namespace AutopilotMonitor.Functions.Functions
 
                 string tenantId = TenantHelper.GetTenantId(req);
                 string userIdentifier = TenantHelper.GetUserIdentifier(req);
+
+                // Require Tenant Admin or Galactic Admin for status modifications
+                var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userIdentifier);
+                var isTenantAdmin = await _tenantAdminsService.IsTenantAdminAsync(tenantId, userIdentifier);
+                if (!isGalacticAdmin && !isTenantAdmin)
+                {
+                    _logger.LogWarning($"Non-admin user {userIdentifier} attempted to mark session {sessionId} as failed");
+                    var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
+                    await forbiddenResponse.WriteAsJsonAsync(new
+                    {
+                        success = false,
+                        message = "Access denied. Tenant Admin or Galactic Admin role required."
+                    });
+                    return new MarkSessionFailedOutput { HttpResponse = forbiddenResponse };
+                }
 
                 _logger.LogInformation($"Marking session {sessionId} as failed for tenant {tenantId} by user {userIdentifier}");
 

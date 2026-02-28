@@ -11,11 +11,19 @@ namespace AutopilotMonitor.Functions.Functions
     {
         private readonly ILogger<DeleteSessionFunction> _logger;
         private readonly TableStorageService _storageService;
+        private readonly TenantAdminsService _tenantAdminsService;
+        private readonly GalacticAdminService _galacticAdminService;
 
-        public DeleteSessionFunction(ILogger<DeleteSessionFunction> logger, TableStorageService storageService)
+        public DeleteSessionFunction(
+            ILogger<DeleteSessionFunction> logger,
+            TableStorageService storageService,
+            TenantAdminsService tenantAdminsService,
+            GalacticAdminService galacticAdminService)
         {
             _logger = logger;
             _storageService = storageService;
+            _tenantAdminsService = tenantAdminsService;
+            _galacticAdminService = galacticAdminService;
         }
 
         [Function("DeleteSession")]
@@ -42,6 +50,21 @@ namespace AutopilotMonitor.Functions.Functions
 
                 var tenantId = TenantHelper.GetTenantId(req);
                 var userIdentifier = TenantHelper.GetUserIdentifier(req);
+
+                // Require Tenant Admin or Galactic Admin for destructive operations
+                var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userIdentifier);
+                var isTenantAdmin = await _tenantAdminsService.IsTenantAdminAsync(tenantId, userIdentifier);
+                if (!isGalacticAdmin && !isTenantAdmin)
+                {
+                    _logger.LogWarning($"Non-admin user {userIdentifier} attempted to delete session {sessionId}");
+                    var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
+                    await forbiddenResponse.WriteAsJsonAsync(new
+                    {
+                        success = false,
+                        message = "Access denied. Tenant Admin or Galactic Admin role required."
+                    });
+                    return forbiddenResponse;
+                }
 
                 _logger.LogInformation($"Deleting session {sessionId} for tenant {tenantId} by user {userIdentifier}");
 

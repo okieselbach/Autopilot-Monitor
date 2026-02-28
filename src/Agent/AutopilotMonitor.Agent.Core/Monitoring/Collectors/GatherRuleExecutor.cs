@@ -667,7 +667,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             Regex pattern;
             try
             {
-                pattern = new Regex(patternStr, RegexOptions.Compiled);
+                pattern = new Regex(patternStr, RegexOptions.Compiled, TimeSpan.FromSeconds(1));
             }
             catch (Exception ex)
             {
@@ -711,7 +711,15 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                             if (!CmTraceLogParser.TryParseLine(line, out entry))
                                 continue;
 
-                            var match = pattern.Match(entry.Message);
+                            Match match;
+                            try
+                            {
+                                match = pattern.Match(entry.Message);
+                            }
+                            catch (RegexMatchTimeoutException)
+                            {
+                                continue;
+                            }
                             if (!match.Success)
                                 continue;
 

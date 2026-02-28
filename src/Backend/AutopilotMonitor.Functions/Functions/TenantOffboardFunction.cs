@@ -1,6 +1,7 @@
 using System.Net;
 using AutopilotMonitor.Functions.Extensions;
 using AutopilotMonitor.Functions.Helpers;
+using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Functions.Services;
 using AutopilotMonitor.Shared;
 using Azure.Data.Tables;
@@ -75,6 +76,9 @@ public class TenantOffboardFunction
             return forbiddenResponse;
         }
 
+        // Validate tenantId format to prevent OData injection
+        SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
+
         _logger.LogWarning($"TENANT OFFBOARD initiated for tenant {tenantId} by {upn}");
 
         var result = new OffboardResult { TenantId = tenantId, InitiatedBy = upn!, InitiatedAt = DateTime.UtcNow };
@@ -122,7 +126,7 @@ public class TenantOffboardFunction
         {
             _logger.LogError(ex, $"Tenant offboard failed for tenant {tenantId}");
             result.Success = false;
-            result.Error = ex.Message;
+            result.Error = "Internal server error";
 
             var errorResponse = req.CreateResponse(HttpStatusCode.InternalServerError);
             await errorResponse.WriteAsJsonAsync(result);

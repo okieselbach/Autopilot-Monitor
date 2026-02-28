@@ -85,8 +85,7 @@ namespace AutopilotMonitor.Functions.Functions
                 await errorResponse.WriteAsJsonAsync(new
                 {
                     success = false,
-                    message = "Failed to compute usage metrics",
-                    error = ex.Message
+                    message = "Failed to compute usage metrics"
                 });
 
                 return errorResponse;

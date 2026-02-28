@@ -16,13 +16,19 @@ namespace AutopilotMonitor.Functions.Functions
     {
         private readonly ILogger<UpdateTenantConfigurationFunction> _logger;
         private readonly TenantConfigurationService _configService;
+        private readonly TenantAdminsService _tenantAdminsService;
+        private readonly GalacticAdminService _galacticAdminService;
 
         public UpdateTenantConfigurationFunction(
             ILogger<UpdateTenantConfigurationFunction> logger,
-            TenantConfigurationService configService)
+            TenantConfigurationService configService,
+            TenantAdminsService tenantAdminsService,
+            GalacticAdminService galacticAdminService)
         {
             _logger = logger;
             _configService = configService;
+            _tenantAdminsService = tenantAdminsService;
+            _galacticAdminService = galacticAdminService;
         }
 
         [Function("UpdateTenantConfiguration")]
@@ -58,6 +64,21 @@ namespace AutopilotMonitor.Functions.Functions
                     {
                         success = false,
                         message = "Access denied. You can only update your own tenant's configuration."
+                    });
+                    return forbiddenResponse;
+                }
+
+                // Require Tenant Admin or Galactic Admin for configuration changes
+                var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userIdentifier);
+                var isTenantAdmin = await _tenantAdminsService.IsTenantAdminAsync(tenantId, userIdentifier);
+                if (!isGalacticAdmin && !isTenantAdmin)
+                {
+                    _logger.LogWarning($"Non-admin user {userIdentifier} attempted to update configuration for tenant {tenantId}");
+                    var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
+                    await forbiddenResponse.WriteAsJsonAsync(new
+                    {
+                        success = false,
+                        message = "Access denied. Tenant Admin or Galactic Admin role required."
                     });
                     return forbiddenResponse;
                 }

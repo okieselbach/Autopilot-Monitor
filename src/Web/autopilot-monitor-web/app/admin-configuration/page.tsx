@@ -28,7 +28,7 @@ interface AdminConfiguration {
 
 export default function AdminConfigurationPage() {
   const router = useRouter();
-  const { getAccessToken } = useAuth();
+  const { getAccessToken, user } = useAuth();
   const [galacticAdminMode, setGalacticAdminMode] = useState(false);
   // Diagnostics Log Paths state
   const [globalDiagPaths, setGlobalDiagPaths] = useState<DiagnosticsLogPath[]>([]);
@@ -53,16 +53,16 @@ export default function AdminConfigurationPage() {
   // Preview Whitelist state
   const [previewApproved, setPreviewApproved] = useState<Set<string>>(new Set());
 
-  // Load galactic admin mode from localStorage
+  // Load galactic admin mode - use server-derived isGalacticAdmin as authoritative source
   useEffect(() => {
-    const galacticMode = localStorage.getItem("galacticAdminMode") === "true";
+    const galacticMode = user?.isGalacticAdmin === true;
     setGalacticAdminMode(galacticMode);
 
-    // Redirect if not in galactic admin mode
-    if (!galacticMode) {
+    // Redirect if not a galactic admin
+    if (user && !galacticMode) {
       router.push("/dashboard");
     }
-  }, [router]);
+  }, [router, user]);
 
   // Fetch admin configuration
   useEffect(() => {
@@ -263,7 +263,7 @@ export default function AdminConfigurationPage() {
   }
 
   return (
-    <ProtectedRoute>
+    <ProtectedRoute requireGalacticAdmin>
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
         {/* Header */}
         <header className="bg-white dark:bg-gray-800 shadow dark:shadow-gray-700">
