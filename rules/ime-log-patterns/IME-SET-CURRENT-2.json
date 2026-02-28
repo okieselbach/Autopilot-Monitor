@@ -1,0 +1,9 @@
+{
+  "$schema": "../schema/ime-log-pattern.schema.json",
+  "patternId": "IME-SET-CURRENT-2",
+  "category": "always",
+  "pattern": "\\[Win32App\\] ExecManager: processing targeted app.*?\\bid\\W+{GUID}",
+  "action": "setCurrentApp",
+  "description": "Detects when the IME ExecManager starts processing a targeted app, setting it as current.",
+  "enabled": true
+}

@@ -1,0 +1,37 @@
+{
+  "$schema": "../schema/analyze-rule.schema.json",
+  "ruleId": "ANALYZE-APP-004",
+  "title": "Insufficient Disk Space",
+  "description": "Detects when disk space is critically low during enrollment, which can cause app installation failures.",
+  "severity": "critical",
+  "category": "apps",
+  "enabled": true,
+  "baseConfidence": 75,
+  "conditions": [
+    {
+      "signal": "low_disk",
+      "source": "event_type",
+      "eventType": "performance_snapshot",
+      "dataField": "disk_free_gb",
+      "operator": "lt",
+      "value": "5",
+      "required": true
+    }
+  ],
+  "confidenceFactors": [
+    { "signal": "app_failed", "condition": "exists", "weight": 15 },
+    { "signal": "enrollment_failed", "condition": "exists", "weight": 10 }
+  ],
+  "explanation": "Performance monitoring shows disk free space dropped below 5 GB during enrollment. This can cause app installation failures, especially for large Win32 apps.",
+  "remediation": [
+    {
+      "title": "Free disk space",
+      "steps": [
+        "Check device disk size meets minimum requirements",
+        "Clean up temporary files and IME cache (C:\\Windows\\IMECache)",
+        "Consider using a larger disk image"
+      ]
+    }
+  ],
+  "tags": ["apps", "disk-space", "critical"]
+}

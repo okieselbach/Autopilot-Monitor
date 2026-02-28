@@ -1,0 +1,61 @@
+name: Validate & Combine Rules
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'rules/gather/**'
+      - 'rules/analyze/**'
+      - 'rules/ime-log-patterns/**'
+      - 'rules/schema/**'
+      - 'rules/scripts/**'
+  pull_request:
+    paths:
+      - 'rules/gather/**'
+      - 'rules/analyze/**'
+      - 'rules/ime-log-patterns/**'
+      - 'rules/schema/**'
+      - 'rules/scripts/**'
+
+jobs:
+  validate-and-combine:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install ajv-cli
+        run: npm install -g ajv-cli ajv-formats
+
+      - name: Validate Gather Rules
+        run: |
+          for f in rules/gather/*.json; do
+            echo "Validating $f..."
+            ajv validate -s rules/schema/gather-rule.schema.json -d "$f" --spec=draft2020 -c ajv-formats
+          done
+
+      - name: Validate Analyze Rules
+        run: |
+          for f in rules/analyze/*.json; do
+            echo "Validating $f..."
+            ajv validate -s rules/schema/analyze-rule.schema.json -d "$f" --spec=draft2020 -c ajv-formats
+          done
+
+      - name: Validate IME Log Patterns
+        run: |
+          for f in rules/ime-log-patterns/*.json; do
+            echo "Validating $f..."
+            ajv validate -s rules/schema/ime-log-pattern.schema.json -d "$f" --spec=draft2020 -c ajv-formats
+          done
+
+      - name: Combine rules into dist/
+        run: node rules/scripts/combine.js
+
+      - name: Commit dist/ changes
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: regenerate rules/dist from individual files"
+          file_pattern: "rules/dist/*"

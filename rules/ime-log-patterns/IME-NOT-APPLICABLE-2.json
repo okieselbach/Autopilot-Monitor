@@ -1,0 +1,9 @@
+{
+  "$schema": "../schema/ime-log-pattern.schema.json",
+  "patternId": "IME-NOT-APPLICABLE-2",
+  "category": "currentPhase",
+  "pattern": "\\[Win32App\\]\\[ReportingManager\\] Applicability state for app with id: {GUID} has been updated\\. Report delta: \\{\"\"ApplicabilityState\"\":\\{\"\"OldValue\"\":null,\"\"NewValue\"\":\"\"ScriptRequirementRuleNotMet\"\"",
+  "action": "updateStateSkipped",
+  "description": "Detects when an app's applicability state is set to ScriptRequirementRuleNotMet (PowerShell requirement script returned false).",
+  "enabled": true
+}

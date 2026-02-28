@@ -1,0 +1,63 @@
+{
+  "$schema": "../schema/analyze-rule.schema.json",
+  "ruleId": "ANALYZE-CORR-001",
+  "title": "Slow Network Causing App Installation Failure",
+  "description": "Correlates slow download speeds with app installation failures while disk space is adequate, confirming network as root cause (not disk).",
+  "severity": "high",
+  "category": "apps",
+  "enabled": false,
+  "trigger": "correlation",
+  "baseConfidence": 55,
+  "conditions": [
+    {
+      "signal": "app_failed",
+      "source": "event_type",
+      "eventType": "app_install_failed",
+      "operator": "exists",
+      "value": "",
+      "required": true
+    },
+    {
+      "signal": "download_events",
+      "source": "event_type",
+      "eventType": "download_progress",
+      "operator": "exists",
+      "value": "",
+      "required": true
+    },
+    {
+      "signal": "disk_ok",
+      "source": "event_type",
+      "eventType": "performance_snapshot",
+      "dataField": "disk_free_gb",
+      "operator": "gt",
+      "value": "10"
+    }
+  ],
+  "confidenceFactors": [
+    { "signal": "disk_ok", "condition": "exists", "weight": 15 },
+    { "signal": "multiple_failures", "condition": "count >= 2", "weight": 15 },
+    { "signal": "enrollment_failed", "condition": "exists", "weight": 15 }
+  ],
+  "confidenceThreshold": 50,
+  "explanation": "App installation failed while the device has sufficient disk space (>10 GB free). Download progress events indicate network-related issues are the likely root cause.\n\nThis rules out disk space as a factor and points to network bandwidth, proxy throttling, or CDN connectivity issues.",
+  "remediation": [
+    {
+      "title": "Investigate network throughput",
+      "steps": [
+        "Check bandwidth to *.delivery.mp.microsoft.com (CDN)",
+        "Verify proxy is not throttling large downloads",
+        "Consider enabling Delivery Optimization for peer-to-peer caching"
+      ]
+    },
+    {
+      "title": "Reduce download load",
+      "steps": [
+        "Stagger app deployments to reduce concurrent downloads",
+        "Pre-cache large apps using Delivery Optimization or ConfigMgr",
+        "Increase ESP timeout if downloads are slow but completing"
+      ]
+    }
+  ],
+  "tags": ["correlation", "apps", "network", "download", "root-cause"]
+}

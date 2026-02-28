@@ -1,0 +1,36 @@
+{
+  "$schema": "../schema/analyze-rule.schema.json",
+  "ruleId": "ANALYZE-APP-007",
+  "title": "Multiple App Installation Failures",
+  "description": "Detects when the app tracking summary reports multiple failed app installations.",
+  "severity": "high",
+  "category": "apps",
+  "enabled": true,
+  "baseConfidence": 75,
+  "conditions": [
+    {
+      "signal": "summary_errors",
+      "source": "event_type",
+      "eventType": "app_tracking_summary",
+      "dataField": "errorCount",
+      "operator": "gte",
+      "value": "2",
+      "required": true
+    }
+  ],
+  "confidenceFactors": [
+    { "signal": "enrollment_failed", "condition": "exists", "weight": 15 }
+  ],
+  "explanation": "The app tracking summary reports 2 or more failed app installations during enrollment. This suggests a systemic issue rather than an isolated app failure.",
+  "remediation": [
+    {
+      "title": "Review failed apps",
+      "steps": [
+        "Check the individual app_install_failed events for specific error patterns",
+        "Look for a common pattern (all MSI apps, all large apps, all from a specific publisher)",
+        "Consider whether a shared prerequisite or dependency is failing"
+      ]
+    }
+  ],
+  "tags": ["apps", "summary", "multiple-failures"]
+}

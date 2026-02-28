@@ -1,0 +1,9 @@
+{
+  "$schema": "../schema/ime-log-pattern.schema.json",
+  "patternId": "IME-NOT-APPLICABLE-3",
+  "category": "currentPhase",
+  "pattern": "\\[Win32App\\]\\[ReportingManager\\] Desired state for app with id: {GUID} has been updated\\. Report delta: \\{\"\"DesiredState\"\":\\{\"\"OldValue\"\":null,\"\"NewValue\"\":\"\"None\"\"",
+  "action": "updateStateSkipped",
+  "description": "Detects when an app's desired state is set to None (not targeted or not applicable).",
+  "enabled": true
+}

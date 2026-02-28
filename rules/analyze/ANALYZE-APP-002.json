@@ -1,0 +1,35 @@
+{
+  "$schema": "../schema/analyze-rule.schema.json",
+  "ruleId": "ANALYZE-APP-002",
+  "title": "App Installation Error",
+  "description": "Detects app installation failures with specific exit codes or HRESULT error codes and suggests fixes.",
+  "severity": "high",
+  "category": "apps",
+  "enabled": true,
+  "baseConfidence": 80,
+  "conditions": [
+    {
+      "signal": "install_error",
+      "source": "event_type",
+      "eventType": "app_install_failed",
+      "dataField": "message",
+      "operator": "regex",
+      "value": "16[0-9]{2}|0x80070[0-9a-fA-F]+|lpExitCode|unmapped.*exit",
+      "required": true
+    }
+  ],
+  "explanation": "An app installation failed with a specific error code. Common MSI exit codes: 1603 (Fatal error during installation), 1618 (Another installation already in progress), 1619 (Package could not be opened), 1625 (Installation prohibited by policy). Common HRESULT codes are also captured.",
+  "remediation": [
+    {
+      "title": "Investigate the error code",
+      "steps": [
+        "Check the error code in the rule finding details",
+        "Look up the specific error code in Microsoft documentation",
+        "Review the IME logs on the device: C:\\ProgramData\\Microsoft\\IntuneManagementExtension\\Logs\\IntuneManagementExtension.log",
+        "Verify all prerequisites for the app are met",
+        "Check if another installation was running concurrently (error 1618)"
+      ]
+    }
+  ],
+  "tags": ["apps", "msi", "error-code"]
+}

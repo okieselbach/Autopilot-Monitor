@@ -1,0 +1,9 @@
+{
+  "$schema": "../schema/ime-log-pattern.schema.json",
+  "patternId": "IME-SET-CURRENT-1",
+  "category": "always",
+  "pattern": "\\[Win32App\\] ProcessAppWithDependencies starts for {GUID} with name",
+  "action": "setCurrentApp",
+  "description": "Detects when IME begins processing an app with its dependency chain, setting it as the current app.",
+  "enabled": true
+}

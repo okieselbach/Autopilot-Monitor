@@ -1,0 +1,9 @@
+{
+  "$schema": "../schema/ime-log-pattern.schema.json",
+  "patternId": "IME-SKIP-APPLICABILITY-NOTMET",
+  "category": "currentPhase",
+  "pattern": "\\[Win32App\\] (?=.*?\\bapplicability\\b)(?=.*?NotMet\\b).*?\\bapp\\W+{GUID}\\b",
+  "action": "updateStateSkipped",
+  "description": "Detects when an app's applicability check returns NotMet (old log format with lookaheads).",
+  "enabled": true
+}

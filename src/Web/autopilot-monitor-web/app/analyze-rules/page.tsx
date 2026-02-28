@@ -103,6 +103,23 @@ const CATEGORY_COLORS: Record<string, { bg: string; text: string }> = {
   enrollment: { bg: "bg-indigo-100", text: "text-indigo-700" },
 };
 
+function downloadAsJson(data: unknown, filename: string) {
+  const json = JSON.stringify(data, null, 2);
+  const blob = new Blob([json], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function stripInternalFields(rule: AnalyzeRule) {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { isBuiltIn, isCommunity, createdAt, updatedAt, ...rest } = rule;
+  return rest;
+}
+
 function getSeverityColor(severity: string) {
   return SEVERITY_COLORS[severity.toLowerCase()] || SEVERITY_COLORS.info;
 }
@@ -233,7 +250,7 @@ export default function AnalyzeRulesPage() {
         throw new Error("Failed to get access token");
       }
 
-      const response = await fetch(`${API_BASE_URL}/api/analyze-rules`, {
+      const response = await fetch(`${API_BASE_URL}/api/rules/analyze`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -272,7 +289,7 @@ export default function AnalyzeRulesPage() {
         throw new Error("Failed to get access token");
       }
 
-      const response = await fetch(`${API_BASE_URL}/api/analyze-rules/${encodeURIComponent(rule.ruleId)}`, {
+      const response = await fetch(`${API_BASE_URL}/api/rules/analyze/${encodeURIComponent(rule.ruleId)}`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -313,7 +330,7 @@ export default function AnalyzeRulesPage() {
       }
 
       const isGlobalDelete = rule.isBuiltIn && isGalacticAdmin;
-      const url = `${API_BASE_URL}/api/analyze-rules/${encodeURIComponent(rule.ruleId)}${isGlobalDelete ? "?global=true" : ""}`;
+      const url = `${API_BASE_URL}/api/rules/analyze/${encodeURIComponent(rule.ruleId)}${isGlobalDelete ? "?global=true" : ""}`;
       const response = await fetch(url, {
         method: "DELETE",
         headers: {
@@ -369,7 +386,7 @@ export default function AnalyzeRulesPage() {
         relatedDocs: form.relatedDocs.filter(d => d.title.trim() && d.url.trim()),
       };
 
-      const response = await fetch(`${API_BASE_URL}/api/analyze-rules`, {
+      const response = await fetch(`${API_BASE_URL}/api/rules/analyze`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -439,7 +456,7 @@ export default function AnalyzeRulesPage() {
         author: isGlobalEdit ? rule.author : (user?.displayName || user?.upn || rule.author),
         version: bumpVersion(rule.version),
       };
-      const url = `${API_BASE_URL}/api/analyze-rules/${encodeURIComponent(rule.ruleId)}${isGlobalEdit ? "?global=true" : ""}`;
+      const url = `${API_BASE_URL}/api/rules/analyze/${encodeURIComponent(rule.ruleId)}${isGlobalEdit ? "?global=true" : ""}`;
 
       const response = await fetch(url, {
         method: "PUT",
@@ -496,6 +513,16 @@ export default function AnalyzeRulesPage() {
   const infoCount = rules.filter((r) => r.severity.toLowerCase() === "info").length;
 
   const uniqueCategories = Array.from(new Set(rules.map((r) => r.category.toLowerCase())));
+
+  const handleExportSingle = (rule: AnalyzeRule) => {
+    const cleaned = stripInternalFields(rule);
+    downloadAsJson({ "$schema": "../schema/analyze-rule.schema.json", ...cleaned }, `${rule.ruleId}.json`);
+  };
+
+  const handleExportAll = () => {
+    const cleaned = filteredRules.map(stripInternalFields);
+    downloadAsJson(cleaned, "analyze-rules-export.json");
+  };
 
   // Shared form fields renderer
   const renderFormFields = (
@@ -845,6 +872,11 @@ export default function AnalyzeRulesPage() {
                       <option value="custom">Custom</option>
                     </select>
                   </div>
+                  <div className="flex items-center gap-2">
+                  <button onClick={handleExportAll} className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors flex items-center space-x-2 text-sm font-medium whitespace-nowrap" title="Export all visible rules as JSON">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                    <span>Export All</span>
+                  </button>
                   <button onClick={() => { setShowCreateForm(!showCreateForm); if (showCreateForm) setNewRule({ ...EMPTY_FORM, conditions: [{ ...EMPTY_CONDITION }] }); }} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center space-x-2 text-sm font-medium whitespace-nowrap">
                     {showCreateForm ? (
                       <><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg><span>Cancel</span></>
@@ -852,6 +884,7 @@ export default function AnalyzeRulesPage() {
                       <><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg><span>Create Custom Rule</span></>
                     )}
                   </button>
+                  </div>
                 </div>
                 <div className="mt-3 text-sm text-gray-500">
                   Showing {filteredRules.length} of {totalRules} rule{totalRules !== 1 ? "s" : ""}
@@ -1087,6 +1120,10 @@ export default function AnalyzeRulesPage() {
 
                             {/* Actions */}
                             <div className="flex items-center justify-end space-x-3 pt-4 border-t border-gray-200">
+                              <button onClick={() => handleExportSingle(rule)} className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors flex items-center space-x-2" title="Export rule as JSON">
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                                <span>Export</span>
+                              </button>
                               {canEdit && (
                                 <button onClick={() => startEditing(rule)} className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center space-x-2" title={rule.isBuiltIn ? "Edit global rule (Galactic Admin)" : "Edit rule"}>
                                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>

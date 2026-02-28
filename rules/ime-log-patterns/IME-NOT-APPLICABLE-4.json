@@ -1,0 +1,9 @@
+{
+  "$schema": "../schema/ime-log-pattern.schema.json",
+  "patternId": "IME-NOT-APPLICABLE-4",
+  "category": "currentPhase",
+  "pattern": "\\[Win32App\\]\\[ReportingManager\\] Desired state for app with id: {GUID} has been updated\\. Report delta: \\{\"\"DesiredState\"\":\\{\"\"OldValue\"\":null,\"\"NewValue\"\":\"\"NotPresent\"\"",
+  "action": "updateStateSkipped",
+  "description": "Detects when an app's desired state is set to NotPresent (targeted for uninstall or not required).",
+  "enabled": true
+}

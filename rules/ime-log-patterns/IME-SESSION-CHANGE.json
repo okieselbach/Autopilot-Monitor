@@ -1,0 +1,9 @@
+{
+  "$schema": "../schema/ime-log-pattern.schema.json",
+  "patternId": "IME-SESSION-CHANGE",
+  "category": "always",
+  "pattern": "OnSessionChange:? (?<change>.*?)$",
+  "action": "imeSessionChange",
+  "description": "Detects Windows session change events (logon, logoff, lock, unlock) reported by IME.",
+  "enabled": true
+}

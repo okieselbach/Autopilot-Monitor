@@ -1556,6 +1556,101 @@ namespace AutopilotMonitor.Functions.Services
             };
         }
 
+        // ===== IME LOG PATTERNS METHODS =====
+
+        /// <summary>
+        /// Stores or updates an IME log pattern
+        /// PartitionKey: TenantId (or "global" for built-in), RowKey: PatternId
+        /// </summary>
+        public async Task<bool> StoreImeLogPatternAsync(ImeLogPattern pattern, string tenantId = "global")
+        {
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.ImeLogPatterns);
+
+                var entity = new TableEntity(tenantId, pattern.PatternId)
+                {
+                    ["Category"] = pattern.Category ?? string.Empty,
+                    ["Pattern"] = pattern.Pattern ?? string.Empty,
+                    ["Action"] = pattern.Action ?? string.Empty,
+                    ["ParametersJson"] = JsonConvert.SerializeObject(pattern.Parameters ?? new Dictionary<string, string>()),
+                    ["Enabled"] = pattern.Enabled,
+                    ["Description"] = pattern.Description ?? string.Empty,
+                    ["IsBuiltIn"] = pattern.IsBuiltIn
+                };
+
+                await tableClient.UpsertEntityAsync(entity);
+                _logger.LogDebug($"Stored IME log pattern {pattern.PatternId} for {tenantId}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to store IME log pattern {pattern.PatternId}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Gets IME log patterns for a partition (tenant or "global")
+        /// </summary>
+        public async Task<List<ImeLogPattern>> GetImeLogPatternsAsync(string partitionKey)
+        {
+            if (partitionKey != "global")
+                SecurityValidator.EnsureValidGuid(partitionKey, nameof(partitionKey));
+
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.ImeLogPatterns);
+                var query = tableClient.QueryAsync<TableEntity>(filter: $"PartitionKey eq '{partitionKey}'");
+
+                var patterns = new List<ImeLogPattern>();
+                await foreach (var entity in query)
+                {
+                    patterns.Add(MapToImeLogPattern(entity));
+                }
+
+                return patterns;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to get IME log patterns for {partitionKey}");
+                return new List<ImeLogPattern>();
+            }
+        }
+
+        /// <summary>
+        /// Deletes an IME log pattern
+        /// </summary>
+        public async Task<bool> DeleteImeLogPatternAsync(string tenantId, string patternId)
+        {
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.ImeLogPatterns);
+                await tableClient.DeleteEntityAsync(tenantId, patternId);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to delete IME log pattern {patternId}");
+                return false;
+            }
+        }
+
+        private ImeLogPattern MapToImeLogPattern(TableEntity entity)
+        {
+            return new ImeLogPattern
+            {
+                PatternId = entity.RowKey,
+                Category = entity.GetString("Category") ?? string.Empty,
+                Pattern = entity.GetString("Pattern") ?? string.Empty,
+                Action = entity.GetString("Action") ?? string.Empty,
+                Parameters = DeserializeJson<Dictionary<string, string>>(entity.GetString("ParametersJson")),
+                Enabled = entity.GetBoolean("Enabled") ?? true,
+                Description = entity.GetString("Description") ?? string.Empty,
+                IsBuiltIn = entity.GetBoolean("IsBuiltIn") ?? false
+            };
+        }
+
         // ===== APP INSTALL SUMMARIES METHODS =====
 
         /// <summary>

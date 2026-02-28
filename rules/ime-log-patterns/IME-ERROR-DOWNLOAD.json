@@ -1,0 +1,9 @@
+{
+  "$schema": "../schema/ime-log-pattern.schema.json",
+  "patternId": "IME-ERROR-DOWNLOAD",
+  "category": "currentPhase",
+  "pattern": "\\[Win32App\\]\\[ReportingManager\\] Download state for app with id: {GUID} has been updated\\. Report delta: \\{\"\"EnforcementState\"\":\\{\"\"OldValue\"\":\"\"InProgress\"\",\"\"NewValue\"\":\"\"ErrorDownloadingContent\"\"",
+  "action": "updateStateError",
+  "description": "Detects when an app's enforcement state transitions to ErrorDownloadingContent.",
+  "enabled": true
+}

@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/OliverKieselbach/Autopilot-Monitor/main/rules/schema/ime-log-pattern.schema.json",
+  "title": "Autopilot Monitor IME Log Pattern",
+  "description": "Defines a regex pattern for Intune Management Extension (IME) log parsing during Autopilot enrollment.",
+  "oneOf": [
+    { "$ref": "#/$defs/imeLogPattern" },
+    {
+      "type": "object",
+      "properties": {
+        "$schema": { "type": "string" },
+        "rules": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/imeLogPattern" }
+        }
+      },
+      "required": ["rules"],
+      "additionalProperties": false
+    }
+  ],
+  "$defs": {
+    "imeLogPattern": {
+      "type": "object",
+      "properties": {
+        "$schema": {
+          "type": "string",
+          "description": "JSON Schema reference for editor IntelliSense."
+        },
+        "patternId": {
+          "type": "string",
+          "description": "Unique pattern identifier (e.g., \"IME-ESP-PHASE\")."
+        },
+        "category": {
+          "type": "string",
+          "description": "Pattern category controlling when the pattern is active.",
+          "enum": ["always", "currentPhase", "otherPhases"]
+        },
+        "pattern": {
+          "type": "string",
+          "description": "Regex pattern string to match against IME log message content. Supports named capture groups. Uses {GUID} as placeholder for the standard GUID capture pattern."
+        },
+        "action": {
+          "type": "string",
+          "description": "Action to perform when the pattern matches. Must match an action handler in the agent's ImeLogTracker.",
+          "enum": [
+            "setCurrentApp",
+            "updateStateInstalled",
+            "updateStateDownloading",
+            "updateStateInstalling",
+            "updateStateSkipped",
+            "updateStateError",
+            "updateStatePostponed",
+            "espPhaseDetected",
+            "imeStarted",
+            "policiesDiscovered",
+            "ignoreCompletedApp",
+            "imeAgentVersion",
+            "espTrackStatus",
+            "updateName",
+            "updateWin32AppState",
+            "cancelStuckAndSetCurrent",
+            "imeSessionChange",
+            "imeImpersonation",
+            "enrollmentCompleted"
+          ]
+        },
+        "parameters": {
+          "type": "object",
+          "description": "Optional extra parameters for the action handler (all values are strings).",
+          "additionalProperties": { "type": "string" }
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of what this pattern detects and why."
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether this pattern is enabled. Set to false to add a pattern without activating it immediately.",
+          "default": true
+        }
+      },
+      "required": ["patternId", "category", "pattern", "action"],
+      "additionalProperties": false
+    }
+  }
+}

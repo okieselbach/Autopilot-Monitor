@@ -1,0 +1,10 @@
+{
+  "$schema": "../schema/ime-log-pattern.schema.json",
+  "patternId": "IME-ERROR-TIMEOUT",
+  "category": "currentPhase",
+  "pattern": "\\[Win32App\\] Installation is timeout",
+  "action": "updateStateError",
+  "parameters": { "useCurrentApp": "true" },
+  "description": "Detects when an app installation times out.",
+  "enabled": true
+}

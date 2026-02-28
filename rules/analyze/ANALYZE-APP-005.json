@@ -1,0 +1,33 @@
+{
+  "$schema": "../schema/analyze-rule.schema.json",
+  "ruleId": "ANALYZE-APP-005",
+  "title": "Content Download Timeout",
+  "description": "Detects when app content download times out or fails.",
+  "severity": "high",
+  "category": "apps",
+  "enabled": true,
+  "baseConfidence": 70,
+  "conditions": [
+    {
+      "signal": "download_timeout",
+      "source": "event_type",
+      "eventType": "app_install_failed",
+      "dataField": "errorPatternId",
+      "operator": "regex",
+      "value": "IME-DO-TIMEOUT|IME-ERROR-DOWNLOAD|IME-ERROR-NO-CONTENT",
+      "required": true
+    }
+  ],
+  "explanation": "App content download timed out or failed. This is usually caused by network issues, proxy interference, or CDN problems. The IME log shows a Delivery Optimization timeout or download content error.",
+  "remediation": [
+    {
+      "title": "Improve download speed",
+      "steps": [
+        "Check network bandwidth",
+        "Verify proxy doesn't block *.delivery.mp.microsoft.com",
+        "Consider Delivery Optimization configuration"
+      ]
+    }
+  ],
+  "tags": ["apps", "download", "timeout"]
+}

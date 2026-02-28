@@ -1,0 +1,57 @@
+{
+  "$schema": "../schema/analyze-rule.schema.json",
+  "ruleId": "ANALYZE-CORR-003",
+  "title": "Proxy Configuration Causing Download Failure",
+  "description": "Correlates an active proxy configuration with app download failures, suggesting the proxy is blocking or throttling Intune content delivery.",
+  "severity": "high",
+  "category": "apps",
+  "enabled": true,
+  "trigger": "correlation",
+  "baseConfidence": 60,
+  "conditions": [
+    {
+      "signal": "proxy_active",
+      "source": "event_type",
+      "eventType": "proxy_configuration",
+      "dataField": "proxyType",
+      "operator": "regex",
+      "value": "Proxy|PAC",
+      "required": true
+    },
+    {
+      "signal": "app_failed",
+      "source": "event_type",
+      "eventType": "app_install_failed",
+      "operator": "exists",
+      "value": "",
+      "required": true
+    }
+  ],
+  "confidenceFactors": [
+    { "signal": "download_timeout", "condition": "exists", "weight": 20 },
+    { "signal": "multiple_failures", "condition": "count >= 2", "weight": 15 },
+    { "signal": "enrollment_failed", "condition": "exists", "weight": 10 }
+  ],
+  "confidenceThreshold": 50,
+  "explanation": "A proxy (explicit or PAC-based) is configured on this device and app installations failed. Proxies can block or throttle downloads from *.delivery.mp.microsoft.com and other Intune CDN endpoints.\n\nThis is a common root cause when apps fail consistently on proxy-connected corporate networks.",
+  "remediation": [
+    {
+      "title": "Verify proxy bypass for Intune endpoints",
+      "steps": [
+        "Add *.delivery.mp.microsoft.com to proxy bypass list",
+        "Add *.do.dsp.mp.microsoft.com (Delivery Optimization) to bypass list",
+        "Add login.microsoftonline.com and *.manage.microsoft.com to bypass list",
+        "Verify the PAC file is reachable at enrollment time (before user login)"
+      ]
+    },
+    {
+      "title": "Check proxy authentication",
+      "steps": [
+        "Ensure the proxy does not require user authentication during OOBE/device phase",
+        "Consider using machine certificate-based proxy authentication",
+        "Test with proxy temporarily bypassed to confirm it is the root cause"
+      ]
+    }
+  ],
+  "tags": ["correlation", "apps", "proxy", "network", "download", "root-cause"]
+}

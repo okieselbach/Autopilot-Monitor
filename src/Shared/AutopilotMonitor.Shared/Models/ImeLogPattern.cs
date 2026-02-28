@@ -63,5 +63,17 @@ namespace AutopilotMonitor.Shared.Models
         /// Whether this pattern is enabled. Allows disabling patterns without removing them.
         /// </summary>
         public bool Enabled { get; set; } = true;
+
+        /// <summary>
+        /// Human-readable description of what this pattern detects and why.
+        /// Not used by the agent — purely for documentation and UI display.
+        /// </summary>
+        public string Description { get; set; }
+
+        /// <summary>
+        /// Whether this is a built-in pattern (shipped with the system).
+        /// Built-in patterns cannot be deleted, only disabled.
+        /// </summary>
+        public bool IsBuiltIn { get; set; } = true;
     }
 }

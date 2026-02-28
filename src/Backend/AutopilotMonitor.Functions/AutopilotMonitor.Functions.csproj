@@ -31,6 +31,12 @@
   <ItemGroup>
     <EmbeddedResource Include="Security\Certificates\intune-intermediate-ca.pem" />
     <EmbeddedResource Include="Security\Certificates\intune-root-ca.pem" />
+    <EmbeddedResource Include="..\..\..\rules\dist\gather-rules.json"
+                      LogicalName="AutopilotMonitor.Functions.Rules.gather-rules.json" />
+    <EmbeddedResource Include="..\..\..\rules\dist\analyze-rules.json"
+                      LogicalName="AutopilotMonitor.Functions.Rules.analyze-rules.json" />
+    <EmbeddedResource Include="..\..\..\rules\dist\ime-log-patterns.json"
+                      LogicalName="AutopilotMonitor.Functions.Rules.ime-log-patterns.json" />
   </ItemGroup>
 
 </Project>

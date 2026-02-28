@@ -20,6 +20,7 @@ namespace AutopilotMonitor.Functions.Functions
         private readonly TenantConfigurationService _configService;
         private readonly AdminConfigurationService _adminConfigService;
         private readonly GatherRuleService _gatherRuleService;
+        private readonly ImeLogPatternService _imeLogPatternService;
         private readonly RateLimitService _rateLimitService;
         private readonly AutopilotDeviceValidator _autopilotDeviceValidator;
 
@@ -28,6 +29,7 @@ namespace AutopilotMonitor.Functions.Functions
             TenantConfigurationService configService,
             AdminConfigurationService adminConfigService,
             GatherRuleService gatherRuleService,
+            ImeLogPatternService imeLogPatternService,
             RateLimitService rateLimitService,
             AutopilotDeviceValidator autopilotDeviceValidator)
         {
@@ -35,6 +37,7 @@ namespace AutopilotMonitor.Functions.Functions
             _configService = configService;
             _adminConfigService = adminConfigService;
             _gatherRuleService = gatherRuleService;
+            _imeLogPatternService = imeLogPatternService;
             _rateLimitService = rateLimitService;
             _autopilotDeviceValidator = autopilotDeviceValidator;
         }
@@ -92,8 +95,8 @@ namespace AutopilotMonitor.Functions.Functions
                 // Get active gather rules for this tenant (user-defined ad-hoc only)
                 var gatherRules = await _gatherRuleService.GetActiveRulesForTenantAsync(tenantId);
 
-                // Get built-in IME log patterns for smart enrollment tracking
-                var imeLogPatterns = BuiltInImeLogPatterns.GetAll();
+                // Get active IME log patterns for this tenant (from Table Storage)
+                var imeLogPatterns = await _imeLogPatternService.GetActivePatternsForTenantAsync(tenantId);
 
                 // Merge global + tenant-specific diagnostics log paths
                 var globalDiagPaths = adminConfig.GetDiagnosticsGlobalLogPaths();

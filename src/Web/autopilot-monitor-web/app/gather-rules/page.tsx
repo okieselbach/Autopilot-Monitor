@@ -122,6 +122,23 @@ const EMPTY_FORM: NewRuleForm = {
   outputSeverity: "info",
 };
 
+function downloadAsJson(data: unknown, filename: string) {
+  const json = JSON.stringify(data, null, 2);
+  const blob = new Blob([json], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function stripInternalFields(rule: GatherRule) {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { isBuiltIn, isCommunity, createdAt, updatedAt, ...rest } = rule;
+  return rest;
+}
+
 function formatTrigger(trigger: string) {
   switch (trigger) {
     case "phase_change": return "Phase Change";
@@ -190,7 +207,7 @@ export default function GatherRulesPage() {
         throw new Error("Failed to get access token");
       }
 
-      const response = await fetch(`${API_BASE_URL}/api/gather-rules`, {
+      const response = await fetch(`${API_BASE_URL}/api/rules/gather`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -229,7 +246,7 @@ export default function GatherRulesPage() {
         throw new Error("Failed to get access token");
       }
 
-      const response = await fetch(`${API_BASE_URL}/api/gather-rules/${encodeURIComponent(rule.ruleId)}`, {
+      const response = await fetch(`${API_BASE_URL}/api/rules/gather/${encodeURIComponent(rule.ruleId)}`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -274,7 +291,7 @@ export default function GatherRulesPage() {
         throw new Error("Failed to get access token");
       }
 
-      const url = `${API_BASE_URL}/api/gather-rules/${encodeURIComponent(rule.ruleId)}${isGlobal ? "?global=true" : ""}`;
+      const url = `${API_BASE_URL}/api/rules/gather/${encodeURIComponent(rule.ruleId)}${isGlobal ? "?global=true" : ""}`;
       const response = await fetch(url, {
         method: "DELETE",
         headers: {
@@ -360,7 +377,7 @@ export default function GatherRulesPage() {
         payload.triggerEventType = formData.triggerEventType.trim();
       }
 
-      const response = await fetch(`${API_BASE_URL}/api/gather-rules`, {
+      const response = await fetch(`${API_BASE_URL}/api/rules/gather`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -468,7 +485,7 @@ export default function GatherRulesPage() {
 
       // Galactic Admin editing a built-in rule = global update
       const isGlobalEdit = rule.isBuiltIn && isGalacticAdmin;
-      const url = `${API_BASE_URL}/api/gather-rules/${encodeURIComponent(rule.ruleId)}${isGlobalEdit ? "?global=true" : ""}`;
+      const url = `${API_BASE_URL}/api/rules/gather/${encodeURIComponent(rule.ruleId)}${isGlobalEdit ? "?global=true" : ""}`;
 
       const response = await fetch(url, {
         method: "PUT",
@@ -519,6 +536,16 @@ export default function GatherRulesPage() {
   const activeRules = rules.filter((r) => r.enabled).length;
   const builtInCount = rules.filter((r) => r.isBuiltIn).length;
   const customCount = rules.filter((r) => !r.isBuiltIn).length;
+
+  const handleExportSingle = (rule: GatherRule) => {
+    const cleaned = stripInternalFields(rule);
+    downloadAsJson({ "$schema": "../schema/gather-rule.schema.json", ...cleaned }, `${rule.ruleId}.json`);
+  };
+
+  const handleExportAll = () => {
+    const cleaned = filteredRules.map(stripInternalFields);
+    downloadAsJson(cleaned, "gather-rules-export.json");
+  };
 
   const getCategoryBadge = (category: string) => {
     const colors = CATEGORY_COLORS[category] || { bg: "bg-gray-100", text: "text-gray-700" };
@@ -994,6 +1021,19 @@ export default function GatherRulesPage() {
                     </select>
                   </div>
 
+                  <div className="flex items-center gap-2">
+                  {/* Export All Button */}
+                  <button
+                    onClick={handleExportAll}
+                    className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors flex items-center space-x-2 text-sm font-medium whitespace-nowrap"
+                    title="Export all visible rules as JSON"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
+                    <span>Export All</span>
+                  </button>
+
                   {/* Create Button */}
                   <button
                     onClick={() => {
@@ -1020,6 +1060,7 @@ export default function GatherRulesPage() {
                       </>
                     )}
                   </button>
+                  </div>
                 </div>
               </div>
 
@@ -1382,6 +1423,16 @@ export default function GatherRulesPage() {
 
                             {/* Actions */}
                             <div className="flex items-center justify-end space-x-3 pt-4 border-t border-gray-200">
+                              <button
+                                onClick={() => handleExportSingle(rule)}
+                                className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors flex items-center space-x-2"
+                                title="Export rule as JSON"
+                              >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                </svg>
+                                <span>Export</span>
+                              </button>
                               {canEdit && (
                                 <button
                                   onClick={() => startEditing(rule)}

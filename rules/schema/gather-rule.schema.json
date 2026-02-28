@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/OliverKieselbach/Autopilot-Monitor/main/rules/schema/gather-rule.schema.json",
+  "title": "Autopilot Monitor Gather Rule",
+  "description": "Defines what data the agent should collect from a Windows device during Autopilot enrollment.",
+  "oneOf": [
+    { "$ref": "#/$defs/gatherRule" },
+    {
+      "type": "object",
+      "properties": {
+        "$schema": { "type": "string" },
+        "rules": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/gatherRule" }
+        }
+      },
+      "required": ["rules"],
+      "additionalProperties": false
+    }
+  ],
+  "$defs": {
+    "gatherRule": {
+      "type": "object",
+      "properties": {
+        "$schema": {
+          "type": "string",
+          "description": "JSON Schema reference for editor IntelliSense."
+        },
+        "ruleId": {
+          "type": "string",
+          "description": "Unique rule identifier (e.g., \"GATHER-NET-001\").",
+          "pattern": "^GATHER-[A-Z]+-\\d{3}$"
+        },
+        "title": {
+          "type": "string",
+          "description": "Human-readable rule title (e.g., \"Collect WinHTTP Proxy Settings\")."
+        },
+        "description": {
+          "type": "string",
+          "description": "Detailed description of what this rule collects and why."
+        },
+        "category": {
+          "type": "string",
+          "description": "Rule category.",
+          "enum": ["network", "identity", "apps", "device", "esp", "enrollment"]
+        },
+        "version": {
+          "type": "string",
+          "description": "Semantic version of this rule (e.g., \"1.0.0\").",
+          "default": "1.0.0"
+        },
+        "author": {
+          "type": "string",
+          "description": "Author of this rule.",
+          "default": "Autopilot Monitor"
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether this rule is enabled. Set to false to add a rule without activating it immediately.",
+          "default": true
+        },
+        "collectorType": {
+          "type": "string",
+          "description": "Type of data collection.",
+          "enum": ["registry", "eventlog", "wmi", "file", "command_allowlisted", "logparser"]
+        },
+        "target": {
+          "type": "string",
+          "description": "Target for collection. Registry path, event log name, WMI query, file path, command string, or log file path depending on collectorType."
+        },
+        "parameters": {
+          "type": "object",
+          "description": "Additional parameters for the collector (all values are strings).",
+          "additionalProperties": { "type": "string" }
+        },
+        "trigger": {
+          "type": "string",
+          "description": "When to collect data.",
+          "enum": ["startup", "phase_change", "interval", "on_event"]
+        },
+        "intervalSeconds": {
+          "type": "integer",
+          "description": "Interval in seconds (only used when trigger = \"interval\").",
+          "minimum": 1
+        },
+        "triggerPhase": {
+          "type": "string",
+          "description": "Phase to trigger on (only used when trigger = \"phase_change\")."
+        },
+        "triggerEventType": {
+          "type": "string",
+          "description": "Event type to trigger on (only used when trigger = \"on_event\")."
+        },
+        "outputEventType": {
+          "type": "string",
+          "description": "EventType for the emitted event (e.g., \"gather_proxy_settings\")."
+        },
+        "outputSeverity": {
+          "type": "string",
+          "description": "Severity for the emitted event.",
+          "enum": ["Info", "Warning", "Error", "Critical"],
+          "default": "Info"
+        },
+        "tags": {
+          "type": "array",
+          "description": "Tags for filtering and categorization.",
+          "items": { "type": "string" },
+          "default": []
+        }
+      },
+      "required": ["ruleId", "title", "collectorType", "target", "trigger", "outputEventType"],
+      "additionalProperties": false
+    }
+  }
+}

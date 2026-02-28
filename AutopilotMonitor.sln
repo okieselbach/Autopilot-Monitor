@@ -19,6 +19,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Backend", "Backend", "{FE36
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AutopilotMonitor.Functions", "src\Backend\AutopilotMonitor.Functions\AutopilotMonitor.Functions.csproj", "{4BA82F07-39A9-4B80-A12D-3D4E4ACE6682}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AutopilotMonitor.Functions.Tests", "src\Backend\AutopilotMonitor.Functions.Tests\AutopilotMonitor.Functions.Tests.csproj", "{E3E0A5D8-4899-4F41-9D5F-CB858EF9F091}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -77,6 +79,18 @@ Global
 		{4BA82F07-39A9-4B80-A12D-3D4E4ACE6682}.Release|x64.Build.0 = Release|Any CPU
 		{4BA82F07-39A9-4B80-A12D-3D4E4ACE6682}.Release|x86.ActiveCfg = Release|Any CPU
 		{4BA82F07-39A9-4B80-A12D-3D4E4ACE6682}.Release|x86.Build.0 = Release|Any CPU
+		{E3E0A5D8-4899-4F41-9D5F-CB858EF9F091}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E3E0A5D8-4899-4F41-9D5F-CB858EF9F091}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E3E0A5D8-4899-4F41-9D5F-CB858EF9F091}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{E3E0A5D8-4899-4F41-9D5F-CB858EF9F091}.Debug|x64.Build.0 = Debug|Any CPU
+		{E3E0A5D8-4899-4F41-9D5F-CB858EF9F091}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{E3E0A5D8-4899-4F41-9D5F-CB858EF9F091}.Debug|x86.Build.0 = Debug|Any CPU
+		{E3E0A5D8-4899-4F41-9D5F-CB858EF9F091}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E3E0A5D8-4899-4F41-9D5F-CB858EF9F091}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E3E0A5D8-4899-4F41-9D5F-CB858EF9F091}.Release|x64.ActiveCfg = Release|Any CPU
+		{E3E0A5D8-4899-4F41-9D5F-CB858EF9F091}.Release|x64.Build.0 = Release|Any CPU
+		{E3E0A5D8-4899-4F41-9D5F-CB858EF9F091}.Release|x86.ActiveCfg = Release|Any CPU
+		{E3E0A5D8-4899-4F41-9D5F-CB858EF9F091}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -89,5 +103,6 @@ Global
 		{7252A85F-60EC-4CFA-B3A6-A204241FFBBC} = {096B6098-F141-7114-B090-72D1899D8853}
 		{FE360695-3F2B-1049-3887-35FBB5135923} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{4BA82F07-39A9-4B80-A12D-3D4E4ACE6682} = {FE360695-3F2B-1049-3887-35FBB5135923}
+		{E3E0A5D8-4899-4F41-9D5F-CB858EF9F091} = {FE360695-3F2B-1049-3887-35FBB5135923}
 	EndGlobalSection
 EndGlobal

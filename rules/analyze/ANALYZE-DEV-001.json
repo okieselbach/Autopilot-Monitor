@@ -1,0 +1,36 @@
+{
+  "$schema": "../schema/analyze-rule.schema.json",
+  "ruleId": "ANALYZE-DEV-001",
+  "title": "Windows Hello Provisioning Timeout",
+  "description": "Detects when Windows Hello for Business provisioning did not start within the expected timeframe after ESP completion.",
+  "severity": "warning",
+  "category": "device",
+  "enabled": true,
+  "baseConfidence": 60,
+  "conditions": [
+    {
+      "signal": "hello_timeout",
+      "source": "event_type",
+      "eventType": "hello_wait_timeout",
+      "operator": "exists",
+      "value": "",
+      "required": true
+    }
+  ],
+  "confidenceFactors": [
+    { "signal": "hello_policy_detected", "condition": "exists", "weight": 30 }
+  ],
+  "explanation": "Windows Hello for Business provisioning did not start within the expected time after ESP exit. This may indicate that the Hello policy is not configured, the device doesn't meet prerequisites, or there's a connectivity issue with the Key Registration Service.",
+  "remediation": [
+    {
+      "title": "Verify Windows Hello configuration",
+      "steps": [
+        "Check if Windows Hello for Business is configured in the tenant",
+        "Verify the policy targets the device/user correctly",
+        "Ensure the device has a TPM 2.0 (required for WHfB)",
+        "Check connectivity to the Key Registration Service (enterpriseregistration.windows.net)"
+      ]
+    }
+  ],
+  "tags": ["device", "hello", "timeout"]
+}

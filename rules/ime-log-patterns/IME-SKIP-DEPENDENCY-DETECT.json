@@ -1,0 +1,9 @@
+{
+  "$schema": "../schema/ime-log-pattern.schema.json",
+  "patternId": "IME-SKIP-DEPENDENCY-DETECT",
+  "category": "currentPhase",
+  "pattern": "\\[Win32App\\] app\\W+{GUID}\\b.*?\\bis a dependency\\b.*?\\bDetect Only mode\\b.*?\\bfinished processing",
+  "action": "updateStateSkipped",
+  "description": "Detects when a dependency app in Detect Only mode finishes processing (no install needed).",
+  "enabled": true
+}

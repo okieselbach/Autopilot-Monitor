@@ -1,0 +1,9 @@
+{
+  "$schema": "../schema/ime-log-pattern.schema.json",
+  "patternId": "IME-SET-CURRENT-3",
+  "category": "always",
+  "pattern": "\\[Win32App\\] ===Step=== Start to Present app {GUID}",
+  "action": "setCurrentApp",
+  "description": "Detects the start of app presentation step in IME, setting the app as current.",
+  "enabled": true
+}

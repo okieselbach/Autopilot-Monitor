@@ -1,0 +1,48 @@
+{
+  "$schema": "../schema/analyze-rule.schema.json",
+  "ruleId": "ANALYZE-APP-009",
+  "title": "App Download Stalled",
+  "description": "Detects when app downloads appear to have stalled, based on failed download progress events.",
+  "severity": "warning",
+  "category": "apps",
+  "enabled": false,
+  "trigger": "correlation",
+  "baseConfidence": 55,
+  "conditions": [
+    {
+      "signal": "download_failed",
+      "source": "event_type",
+      "eventType": "download_progress",
+      "dataField": "status",
+      "operator": "equals",
+      "value": "failed",
+      "required": true
+    },
+    {
+      "signal": "app_failed",
+      "source": "event_type",
+      "eventType": "app_install_failed",
+      "operator": "exists",
+      "value": "",
+      "required": true
+    }
+  ],
+  "confidenceFactors": [
+    { "signal": "proxy_active", "condition": "exists", "weight": 15 },
+    { "signal": "multiple_failures", "condition": "count >= 2", "weight": 15 }
+  ],
+  "confidenceThreshold": 50,
+  "explanation": "Download progress events show a failed download, and at least one app installation also failed. This pattern suggests content delivery issues preventing apps from being downloaded successfully.",
+  "remediation": [
+    {
+      "title": "Investigate download issues",
+      "steps": [
+        "Check network connectivity and bandwidth during the enrollment",
+        "Verify DNS resolution for *.delivery.mp.microsoft.com",
+        "Check if a proxy or firewall is blocking content delivery",
+        "Review Delivery Optimization settings and peer availability"
+      ]
+    }
+  ],
+  "tags": ["apps", "download", "stall", "correlation"]
+}

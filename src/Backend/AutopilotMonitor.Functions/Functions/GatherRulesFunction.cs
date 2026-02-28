@@ -27,7 +27,7 @@ namespace AutopilotMonitor.Functions.Functions
 
         [Function("GetGatherRules")]
         public async Task<HttpResponseData> GetRules(
-            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "gather-rules")] HttpRequestData req)
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "rules/gather")] HttpRequestData req)
         {
             var tenantId = TenantHelper.IsAuthenticated(req) ? TenantHelper.GetTenantId(req) : null;
             if (string.IsNullOrEmpty(tenantId))
@@ -46,7 +46,7 @@ namespace AutopilotMonitor.Functions.Functions
 
         [Function("CreateGatherRule")]
         public async Task<HttpResponseData> CreateRule(
-            [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "gather-rules")] HttpRequestData req)
+            [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "rules/gather")] HttpRequestData req)
         {
             var tenantId = TenantHelper.IsAuthenticated(req) ? TenantHelper.GetTenantId(req) : null;
             if (string.IsNullOrEmpty(tenantId))
@@ -83,7 +83,7 @@ namespace AutopilotMonitor.Functions.Functions
 
         [Function("UpdateGatherRule")]
         public async Task<HttpResponseData> UpdateRule(
-            [HttpTrigger(AuthorizationLevel.Anonymous, "put", Route = "gather-rules/{ruleId}")] HttpRequestData req,
+            [HttpTrigger(AuthorizationLevel.Anonymous, "put", Route = "rules/gather/{ruleId}")] HttpRequestData req,
             string ruleId)
         {
             var tenantId = TenantHelper.IsAuthenticated(req) ? TenantHelper.GetTenantId(req) : null;
@@ -141,53 +141,9 @@ namespace AutopilotMonitor.Functions.Functions
             }
         }
 
-        [Function("ReseedGatherRules")]
-        public async Task<HttpResponseData> ReseedRules(
-            [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "gather-rules/reseed")] HttpRequestData req)
-        {
-            try
-            {
-                if (!TenantHelper.IsAuthenticated(req))
-                {
-                    var unauthorized = req.CreateResponse(HttpStatusCode.Unauthorized);
-                    await unauthorized.WriteAsJsonAsync(new { success = false, message = "Authentication required" });
-                    return unauthorized;
-                }
-
-                var upn = TenantHelper.GetUserIdentifier(req);
-                if (!await _galacticAdminService.IsGalacticAdminAsync(upn))
-                {
-                    var forbidden = req.CreateResponse(HttpStatusCode.Forbidden);
-                    await forbidden.WriteAsJsonAsync(new { success = false, message = "Galactic Admin privileges required" });
-                    return forbidden;
-                }
-
-                _logger.LogInformation($"Reseed gather rules triggered by Galactic Admin {upn}");
-
-                var (deleted, written) = await _ruleService.ReseedBuiltInRulesAsync();
-
-                var response = req.CreateResponse(HttpStatusCode.OK);
-                await response.WriteAsJsonAsync(new
-                {
-                    success = true,
-                    message = $"Reseed complete: {deleted} old rules removed, {written} rules written from code.",
-                    deleted,
-                    written
-                });
-                return response;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error reseeding gather rules");
-                var response = req.CreateResponse(HttpStatusCode.InternalServerError);
-                await response.WriteAsJsonAsync(new { success = false, message = "Failed to reseed gather rules" });
-                return response;
-            }
-        }
-
         [Function("DeleteGatherRule")]
         public async Task<HttpResponseData> DeleteRule(
-            [HttpTrigger(AuthorizationLevel.Anonymous, "delete", Route = "gather-rules/{ruleId}")] HttpRequestData req,
+            [HttpTrigger(AuthorizationLevel.Anonymous, "delete", Route = "rules/gather/{ruleId}")] HttpRequestData req,
             string ruleId)
         {
             var tenantId = TenantHelper.IsAuthenticated(req) ? TenantHelper.GetTenantId(req) : null;

@@ -1,0 +1,9 @@
+{
+  "$schema": "../schema/ime-log-pattern.schema.json",
+  "patternId": "IME-SKIP-UNINSTALL-NOTDETECTED-2",
+  "category": "currentPhase",
+  "pattern": "\\[Win32App\\] NOT detected app {GUID}.*?skip un-installation",
+  "action": "updateStateSkipped",
+  "description": "Detects when an app is not detected and uninstall is skipped (alternate old log format).",
+  "enabled": true
+}

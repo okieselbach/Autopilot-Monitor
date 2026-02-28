@@ -1,0 +1,10 @@
+{
+  "$schema": "../schema/ime-log-pattern.schema.json",
+  "patternId": "IME-ERROR-REPORT",
+  "category": "currentPhase",
+  "pattern": "\\[Win32App\\]\\[ReportingManager\\] Execution state for app with id: {GUID} has been updated\\. Report delta: \\{\"\"EnforcementState\"\":\\{\"\"OldValue\"\":\"\"(?<from>\\w+)\"\",\"\"NewValue\"\":\"\"(?<to>\\w+)\"\"",
+  "action": "updateStateError",
+  "parameters": { "checkTo": "true" },
+  "description": "Captures enforcement state transitions via ReportingManager. Only triggers error when 'to' value indicates an error state.",
+  "enabled": true
+}

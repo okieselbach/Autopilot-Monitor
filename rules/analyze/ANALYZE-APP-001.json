@@ -1,0 +1,36 @@
+{
+  "$schema": "../schema/analyze-rule.schema.json",
+  "ruleId": "ANALYZE-APP-001",
+  "title": "Win32 App Detection Script Failure",
+  "description": "Detects when a Win32 app detection script fails or returns unexpected results.",
+  "severity": "warning",
+  "category": "apps",
+  "enabled": true,
+  "baseConfidence": 60,
+  "conditions": [
+    {
+      "signal": "detection_failure",
+      "source": "event_type",
+      "eventType": "app_install_failed",
+      "dataField": "message",
+      "operator": "regex",
+      "value": "detection|not detected|script.*fail|detection.*error|DetectionState|NotDetected",
+      "required": true
+    }
+  ],
+  "confidenceFactors": [
+    { "signal": "error_detail_match", "condition": "exists", "weight": 20 }
+  ],
+  "explanation": "A Win32 app detection script failed or did not detect the app after installation. This causes the app to appear as 'not installed' despite successful installation.",
+  "remediation": [
+    {
+      "title": "Fix detection rules",
+      "steps": [
+        "Review the app's detection rules in Intune",
+        "Verify file/registry paths are correct",
+        "Test detection script manually on a device"
+      ]
+    }
+  ],
+  "tags": ["apps", "detection", "win32"]
+}

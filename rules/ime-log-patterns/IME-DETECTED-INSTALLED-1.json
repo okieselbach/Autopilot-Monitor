@@ -1,0 +1,9 @@
+{
+  "$schema": "../schema/ime-log-pattern.schema.json",
+  "patternId": "IME-DETECTED-INSTALLED-1",
+  "category": "currentPhase",
+  "pattern": "\\[Win32App\\]\\[ReportingManager\\] Detection state for app with id: {GUID} has been updated\\. Report delta: \\{\"\"DetectionState\"\":\\{\"\"OldValue\"\":null,\"\"NewValue\"\":\"\"Installed\"\"",
+  "action": "updateStateInstalled",
+  "description": "Detects when an app's detection state transitions to Installed (new ReportingManager format).",
+  "enabled": true
+}

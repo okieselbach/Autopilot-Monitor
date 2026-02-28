@@ -1,0 +1,9 @@
+{
+  "$schema": "../schema/ime-log-pattern.schema.json",
+  "patternId": "IME-UPDATE-NAME-3",
+  "category": "currentPhase",
+  "pattern": "\\[Win32App\\] Processing app \\(id={GUID}, name = (?<name>.*?)\\)",
+  "action": "updateName",
+  "description": "Captures the app name from the Processing app log entry.",
+  "enabled": true
+}

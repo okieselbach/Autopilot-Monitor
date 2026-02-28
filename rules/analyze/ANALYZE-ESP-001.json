@@ -1,0 +1,37 @@
+{
+  "$schema": "../schema/analyze-rule.schema.json",
+  "ruleId": "ANALYZE-ESP-001",
+  "title": "ESP Blocking App Timeout",
+  "description": "Detects when the DeviceSetup phase of the ESP took longer than 30 minutes, indicating a stuck or very slow blocking app.",
+  "severity": "high",
+  "category": "esp",
+  "enabled": true,
+  "baseConfidence": 50,
+  "conditions": [
+    {
+      "signal": "esp_stalled",
+      "source": "phase_duration",
+      "eventType": "esp_phase_changed",
+      "dataField": "espPhase",
+      "operator": "equals",
+      "value": "DeviceSetup",
+      "required": true
+    }
+  ],
+  "confidenceFactors": [
+    { "signal": "long_esp", "condition": "phase_duration > 1800", "weight": 40 }
+  ],
+  "confidenceThreshold": 70,
+  "explanation": "The ESP DeviceSetup phase took more than 30 minutes. This indicates a blocking app is stuck installing, downloading very slowly, or has entered a retry loop.",
+  "remediation": [
+    {
+      "title": "Investigate blocking app",
+      "steps": [
+        "Identify which app is blocking (check ESP events)",
+        "Verify app content is downloadable",
+        "Consider reducing the number of blocking apps"
+      ]
+    }
+  ],
+  "tags": ["esp", "blocking", "timeout"]
+}

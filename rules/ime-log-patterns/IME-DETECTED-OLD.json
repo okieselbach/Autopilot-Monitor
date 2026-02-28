@@ -1,0 +1,9 @@
+{
+  "$schema": "../schema/ime-log-pattern.schema.json",
+  "patternId": "IME-DETECTED-OLD",
+  "category": "currentPhase",
+  "pattern": "\\[Win32App\\] Detected app {GUID} ",
+  "action": "updateStateInstalled",
+  "description": "Detects when an app is detected as installed (old log format).",
+  "enabled": true
+}

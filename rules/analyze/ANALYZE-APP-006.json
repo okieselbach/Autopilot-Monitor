@@ -1,0 +1,33 @@
+{
+  "$schema": "../schema/analyze-rule.schema.json",
+  "ruleId": "ANALYZE-APP-006",
+  "title": "Reboot Required Loop",
+  "description": "Detects when the same app installation is attempted 3 or more times, indicating a reboot-required loop.",
+  "severity": "high",
+  "category": "apps",
+  "enabled": true,
+  "baseConfidence": 70,
+  "conditions": [
+    {
+      "signal": "reboot_loop",
+      "source": "event_count",
+      "eventType": "app_install_started",
+      "dataField": "appId",
+      "operator": "count_per_group_gte",
+      "value": "3",
+      "required": true
+    }
+  ],
+  "explanation": "The same app has been installed 3 or more times during this enrollment. This typically indicates the app requires a reboot between install attempts, but the ESP is not honoring the reboot request, causing an install-detect-retry loop.",
+  "remediation": [
+    {
+      "title": "Fix reboot handling",
+      "steps": [
+        "Check if the app's return code mapping includes reboot codes (3010, 1641)",
+        "Verify ESP reboot behavior settings",
+        "Consider setting the app to 'Hard reboot' return code in Intune"
+      ]
+    }
+  ],
+  "tags": ["apps", "reboot", "loop"]
+}

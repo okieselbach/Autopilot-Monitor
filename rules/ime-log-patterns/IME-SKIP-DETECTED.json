@@ -1,0 +1,9 @@
+{
+  "$schema": "../schema/ime-log-pattern.schema.json",
+  "patternId": "IME-SKIP-DETECTED",
+  "category": "currentPhase",
+  "pattern": "\\[Win32App\\] Detected app {GUID}.*?skip next step",
+  "action": "updateStateSkipped",
+  "description": "Detects when an already-detected app is skipped for further processing steps (old log format).",
+  "enabled": true
+}

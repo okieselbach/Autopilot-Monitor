@@ -104,6 +104,8 @@ builder.Services.AddSingleton<TenantAdminsService>();
 builder.Services.AddSingleton<HealthCheckService>();
 builder.Services.AddSingleton<GatherRuleService>();
 builder.Services.AddSingleton<AnalyzeRuleService>();
+builder.Services.AddSingleton<ImeLogPatternService>();
+builder.Services.AddHttpClient<GitHubRuleRepository>();
 builder.Services.AddSingleton<MaintenanceService>();
 builder.Services.AddSingleton<BlockedDeviceService>();
 builder.Services.AddSingleton<AutopilotMonitor.Functions.Security.AutopilotDeviceValidator>();

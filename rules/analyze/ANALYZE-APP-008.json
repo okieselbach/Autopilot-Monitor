@@ -1,0 +1,32 @@
+{
+  "$schema": "../schema/analyze-rule.schema.json",
+  "ruleId": "ANALYZE-APP-008",
+  "title": "Slow App Installation",
+  "description": "Detects app installations that take longer than 10 minutes.",
+  "severity": "warning",
+  "category": "apps",
+  "enabled": true,
+  "baseConfidence": 70,
+  "conditions": [
+    {
+      "signal": "slow_app_install",
+      "source": "app_install_duration",
+      "eventType": "app_install_completed",
+      "operator": "gt",
+      "value": "600",
+      "required": true
+    }
+  ],
+  "explanation": "At least one app installation took longer than 10 minutes. This can indicate slow content delivery, installation overhead, or endpoint performance bottlenecks.",
+  "remediation": [
+    {
+      "title": "Analyze slow app behavior",
+      "steps": [
+        "Identify the affected app from matched evidence in the rule result",
+        "Check network throughput and proxy impact during app download",
+        "Consider moving large/non-critical apps out of ESP blocking scope"
+      ]
+    }
+  ],
+  "tags": ["apps", "performance", "slow-install", "warning"]
+}

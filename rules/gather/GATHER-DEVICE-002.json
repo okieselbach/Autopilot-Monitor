@@ -1,0 +1,21 @@
+{
+  "$schema": "../schema/gather-rule.schema.json",
+  "ruleId": "GATHER-DEVICE-002",
+  "title": "Collect last system startup event",
+  "description": "Collects the most recent Event ID 12 (Kernel-General) from the System log which indicates the last OS startup time.",
+  "category": "device",
+  "version": "1.0.0",
+  "author": "Autopilot Monitor",
+  "enabled": false,
+  "collectorType": "eventlog",
+  "target": "System",
+  "parameters": {
+    "eventId": "12",
+    "source": "Microsoft-Windows-Kernel-General",
+    "maxEntries": "1"
+  },
+  "trigger": "startup",
+  "outputEventType": "gather_last_startup_event",
+  "outputSeverity": "Info",
+  "tags": ["device", "startup", "boot"]
+}

@@ -1,0 +1,36 @@
+{
+  "$schema": "../schema/analyze-rule.schema.json",
+  "ruleId": "ANALYZE-ENRL-001",
+  "title": "Enrollment Failed",
+  "description": "Detects when the Autopilot enrollment has explicitly failed.",
+  "severity": "critical",
+  "category": "enrollment",
+  "enabled": true,
+  "baseConfidence": 95,
+  "conditions": [
+    {
+      "signal": "enrollment_failed",
+      "source": "event_type",
+      "eventType": "enrollment_failed",
+      "operator": "exists",
+      "value": "",
+      "required": true
+    }
+  ],
+  "confidenceFactors": [
+    { "signal": "app_failed", "condition": "exists", "weight": 5 }
+  ],
+  "explanation": "The Autopilot enrollment has explicitly failed. Check the enrollment_failed event details and other rule results for the root cause.",
+  "remediation": [
+    {
+      "title": "Investigate enrollment failure",
+      "steps": [
+        "Check the 'reason' field in the enrollment_failed event for specific failure details",
+        "Review other analyze rule results for correlated issues (disk space, network, app failures)",
+        "Check the device event timeline for the sequence of events leading to failure",
+        "Verify the Autopilot profile and ESP configuration in Intune"
+      ]
+    }
+  ],
+  "tags": ["enrollment", "failed", "critical"]
+}

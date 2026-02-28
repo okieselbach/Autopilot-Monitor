@@ -1,0 +1,10 @@
+{
+  "$schema": "../schema/ime-log-pattern.schema.json",
+  "patternId": "IME-ERROR-NO-CONTENT",
+  "category": "currentPhase",
+  "pattern": "\\[Win32App\\] Didn't get content info from service",
+  "action": "updateStateError",
+  "parameters": { "useCurrentApp": "true" },
+  "description": "Detects when IME cannot retrieve content info from the Intune service for the current app.",
+  "enabled": true
+}

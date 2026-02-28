@@ -1,0 +1,33 @@
+{
+  "$schema": "../schema/analyze-rule.schema.json",
+  "ruleId": "ANALYZE-APP-003",
+  "title": "App Dependency Chain Failure",
+  "description": "Detects when an app fails because a dependency app failed to install.",
+  "severity": "high",
+  "category": "apps",
+  "enabled": true,
+  "baseConfidence": 70,
+  "conditions": [
+    {
+      "signal": "dependency_failure",
+      "source": "event_type",
+      "eventType": "app_install_failed",
+      "dataField": "message",
+      "operator": "regex",
+      "value": "dependency|prerequisite|required app|depends on|Dependency",
+      "required": true
+    }
+  ],
+  "explanation": "An app installation failed because one of its dependency apps failed to install. Fix the dependency first, then retry.",
+  "remediation": [
+    {
+      "title": "Fix dependency chain",
+      "steps": [
+        "Identify which dependency app failed",
+        "Fix the dependency app first",
+        "Verify dependency chain order in Intune"
+      ]
+    }
+  ],
+  "tags": ["apps", "dependency"]
+}

@@ -1,0 +1,247 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/OliverKieselbach/Autopilot-Monitor/main/rules/schema/analyze-rule.schema.json",
+  "title": "Autopilot Monitor Analyze Rule",
+  "description": "Defines how to analyze collected events to detect issues during Autopilot enrollment.",
+  "oneOf": [
+    { "$ref": "#/$defs/analyzeRule" },
+    {
+      "type": "object",
+      "properties": {
+        "$schema": { "type": "string" },
+        "rules": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/analyzeRule" }
+        }
+      },
+      "required": ["rules"],
+      "additionalProperties": false
+    }
+  ],
+  "$defs": {
+    "analyzeRule": {
+      "type": "object",
+      "properties": {
+        "$schema": {
+          "type": "string",
+          "description": "JSON Schema reference for editor IntelliSense."
+        },
+        "ruleId": {
+          "type": "string",
+          "description": "Unique rule identifier (e.g., \"ANALYZE-APP-001\").",
+          "pattern": "^ANALYZE-[A-Z]+-\\d{3}$"
+        },
+        "title": {
+          "type": "string",
+          "description": "Human-readable rule title (e.g., \"Proxy Authentication Required\")."
+        },
+        "description": {
+          "type": "string",
+          "description": "Detailed description of what this rule detects."
+        },
+        "severity": {
+          "type": "string",
+          "description": "Severity level of the detected issue.",
+          "enum": ["info", "warning", "high", "critical"]
+        },
+        "category": {
+          "type": "string",
+          "description": "Rule category.",
+          "enum": ["network", "identity", "enrollment", "apps", "esp", "device"]
+        },
+        "version": {
+          "type": "string",
+          "description": "Semantic version of this rule (e.g., \"1.0.0\").",
+          "default": "1.0.0"
+        },
+        "author": {
+          "type": "string",
+          "description": "Author of this rule.",
+          "default": "Autopilot Monitor"
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether this rule is enabled. Set to false to add a rule without activating it immediately.",
+          "default": true
+        },
+        "trigger": {
+          "type": "string",
+          "description": "Rule trigger type: \"single\" matches individual events, \"correlation\" combines multiple event types.",
+          "enum": ["single", "correlation"],
+          "default": "single"
+        },
+        "conditions": {
+          "type": "array",
+          "description": "Conditions evaluated against the event stream. All required conditions must match for the rule to fire.",
+          "items": { "$ref": "#/$defs/ruleCondition" },
+          "minItems": 1
+        },
+        "baseConfidence": {
+          "type": "integer",
+          "description": "Base confidence score (0-100) when required conditions match.",
+          "minimum": 0,
+          "maximum": 100,
+          "default": 50
+        },
+        "confidenceFactors": {
+          "type": "array",
+          "description": "Additional factors that increase confidence when matched.",
+          "items": { "$ref": "#/$defs/confidenceFactor" },
+          "default": []
+        },
+        "confidenceThreshold": {
+          "type": "integer",
+          "description": "Minimum confidence score (0-100) to create a RuleResult.",
+          "minimum": 0,
+          "maximum": 100,
+          "default": 40
+        },
+        "explanation": {
+          "type": "string",
+          "description": "Detailed explanation of the detected issue. Supports markdown formatting."
+        },
+        "remediation": {
+          "type": "array",
+          "description": "Steps to remediate the detected issue.",
+          "items": { "$ref": "#/$defs/remediationStep" },
+          "default": []
+        },
+        "relatedDocs": {
+          "type": "array",
+          "description": "Links to relevant documentation.",
+          "items": { "$ref": "#/$defs/relatedDoc" },
+          "default": []
+        },
+        "tags": {
+          "type": "array",
+          "description": "Tags for filtering and categorization.",
+          "items": { "type": "string" },
+          "default": []
+        }
+      },
+      "required": ["ruleId", "title", "severity", "category", "conditions", "explanation"],
+      "additionalProperties": false
+    },
+    "ruleCondition": {
+      "type": "object",
+      "description": "A condition evaluated against the event stream.",
+      "properties": {
+        "signal": {
+          "type": "string",
+          "description": "Descriptive name for this signal (e.g., \"proxy_407_error\")."
+        },
+        "source": {
+          "type": "string",
+          "description": "Source of the signal.",
+          "enum": ["event_type", "event_data", "phase_duration", "event_count", "app_install_duration", "event_correlation"]
+        },
+        "eventType": {
+          "type": "string",
+          "description": "Event type to match on. For event_correlation: the first event type (Event A)."
+        },
+        "dataField": {
+          "type": "string",
+          "description": "Data field to match on. Uses dot notation for nested fields (e.g., \"data.errorCode\")."
+        },
+        "operator": {
+          "type": "string",
+          "description": "Comparison operator.",
+          "enum": ["equals", "contains", "regex", "gt", "lt", "gte", "lte", "exists", "count_gte"]
+        },
+        "value": {
+          "type": "string",
+          "description": "Value to compare against."
+        },
+        "required": {
+          "type": "boolean",
+          "description": "Whether this condition must match for the rule to fire. If false, it only contributes to confidence scoring.",
+          "default": false
+        },
+        "correlateEventType": {
+          "type": "string",
+          "description": "The second event type to correlate with (Event B). Only used when source = \"event_correlation\"."
+        },
+        "joinField": {
+          "type": "string",
+          "description": "Data field to join on — must have the same value in both Event A and Event B."
+        },
+        "timeWindowSeconds": {
+          "type": "integer",
+          "description": "Maximum time in seconds between Event A and Event B. Null or 0 means no time limit.",
+          "minimum": 0
+        },
+        "eventAFilterField": {
+          "type": "string",
+          "description": "Optional filter field on Event A (the first event)."
+        },
+        "eventAFilterOperator": {
+          "type": "string",
+          "description": "Operator for the Event A filter.",
+          "enum": ["equals", "contains", "regex", "gt", "lt", "gte", "lte", "exists", "count_gte"]
+        },
+        "eventAFilterValue": {
+          "type": "string",
+          "description": "Value for the Event A filter."
+        }
+      },
+      "required": ["signal", "source"],
+      "additionalProperties": false
+    },
+    "confidenceFactor": {
+      "type": "object",
+      "description": "A factor that increases confidence when matched.",
+      "properties": {
+        "signal": {
+          "type": "string",
+          "description": "Descriptive name for this factor."
+        },
+        "condition": {
+          "type": "string",
+          "description": "Condition expression (e.g., \"count >= 5\", \"exists\", \"duration > 300\")."
+        },
+        "weight": {
+          "type": "integer",
+          "description": "Confidence weight to add when this factor matches (0-100).",
+          "minimum": 0,
+          "maximum": 100
+        }
+      },
+      "required": ["signal", "condition", "weight"],
+      "additionalProperties": false
+    },
+    "remediationStep": {
+      "type": "object",
+      "description": "A remediation step with title and sub-steps.",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "Title of the remediation approach."
+        },
+        "steps": {
+          "type": "array",
+          "description": "Ordered steps to execute.",
+          "items": { "type": "string" }
+        }
+      },
+      "required": ["title", "steps"],
+      "additionalProperties": false
+    },
+    "relatedDoc": {
+      "type": "object",
+      "description": "A link to related documentation.",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "Display title for the link."
+        },
+        "url": {
+          "type": "string",
+          "description": "URL to the documentation.",
+          "format": "uri"
+        }
+      },
+      "required": ["title", "url"],
+      "additionalProperties": false
+    }
+  }
+}
