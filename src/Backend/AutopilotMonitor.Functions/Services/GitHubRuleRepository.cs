@@ -20,7 +20,7 @@ namespace AutopilotMonitor.Functions.Services
             _httpClient = httpClient;
             _logger = logger;
             _baseUrl = config["GitHub:RulesBaseUrl"]
-                ?? "https://raw.githubusercontent.com/OliverKieselbach/Autopilot-Monitor/main/rules";
+                ?? "https://raw.githubusercontent.com/okieselbach/Autopilot-Monitor/refs/heads/main/rules";
         }
 
         public async Task<List<GatherRule>> FetchGatherRulesAsync()

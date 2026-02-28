@@ -83,6 +83,7 @@ const V2_PHASE_ORDER = ["Start", "Device Preparation", "App Installation", "Fina
 // Lookup by phase number — Phase 3 has different names per enrollment type
 const V1_PHASE_NAMES: Record<number, string> = { [-1]: "Unknown", 0: "Start", 1: "Device Preparation", 2: "Device Setup", 3: "Apps (Device)",    4: "Account Setup", 5: "Apps (User)", 6: "Finalizing Setup", 7: "Complete", 99: "Failed" };
 const V2_PHASE_NAMES: Record<number, string> = { [-1]: "Unknown", 0: "Start", 1: "Device Preparation", 2: "Device Setup", 3: "App Installation", 4: "Account Setup", 5: "Apps (User)", 6: "Finalizing Setup", 7: "Complete", 99: "Failed" };
+const GUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 // Pure helper — groups a flat event list into phase buckets.
 // Extracted from the useMemo so it can be called multiple times for WhiteGlove split timelines.
@@ -140,11 +141,15 @@ export default function SessionDetailPage() {
     return false;
   });
 
-  // Use ref for debounce timeout to persist across renders
-  const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  // Debounce real-time event refreshes to avoid burst reads in Table Storage.
+  const eventRefreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const sessionIdRef = useRef(sessionId);
+  const sessionRef = useRef<Session | null>(null);
   const hasInitialFetch = useRef(false);
   const lastFetchedSessionId = useRef<string | null>(null);
+  const tenantIdRef = useRef<string>("");
+  const sessionTenantIdRef = useRef<string | null>(sessionTenantId);
+  const galacticAdminModeRef = useRef(galacticAdminMode);
 
   // Track if we've joined groups to prevent duplicate joins
   const hasJoinedGroups = useRef(false);
@@ -158,6 +163,38 @@ export default function SessionDetailPage() {
   const { tenantId } = useTenant();
   const { getAccessToken, user } = useAuth();
   const { addNotification } = useNotifications();
+
+  useEffect(() => {
+    sessionRef.current = session;
+  }, [session]);
+
+  useEffect(() => {
+    tenantIdRef.current = tenantId;
+  }, [tenantId]);
+
+  useEffect(() => {
+    sessionTenantIdRef.current = sessionTenantId;
+  }, [sessionTenantId]);
+
+  useEffect(() => {
+    galacticAdminModeRef.current = galacticAdminMode;
+  }, [galacticAdminMode]);
+
+  const resolveEffectiveTenantId = () => {
+    const knownSessionTenant = sessionTenantIdRef.current || sessionRef.current?.tenantId || null;
+    if (knownSessionTenant) return knownSessionTenant;
+    if (galacticAdminModeRef.current) return null;
+    return tenantIdRef.current || null;
+  };
+
+  const scheduleFetchEvents = (delayMs = 300) => {
+    if (eventRefreshTimeoutRef.current) {
+      clearTimeout(eventRefreshTimeoutRef.current);
+    }
+    eventRefreshTimeoutRef.current = setTimeout(() => {
+      fetchEvents();
+    }, delayMs);
+  };
 
   // Initial data fetch — wait for auth to be ready and a real tenantId before calling the backend.
   // TenantContext initializes to '' and updates once AuthContext finishes loading.
@@ -196,8 +233,7 @@ export default function SessionDetailPage() {
   // Uses "subscribe-then-fetch" pattern: join groups first, then re-fetch events
   // to catch anything that arrived before the group join completed.
   useEffect(() => {
-    // Use the session's tenant ID if available
-    const effectiveTenantId = sessionTenantId || tenantId;
+    const effectiveTenantId = resolveEffectiveTenantId();
     if (!sessionId || !isConnected || !effectiveTenantId) return;
 
     if (!hasJoinedGroups.current) {
@@ -213,7 +249,7 @@ export default function SessionDetailPage() {
         // Re-fetch events after group join to catch any SignalR messages
         // that were sent before the client joined the session group.
         // The frontend deduplicates by eventId, so no duplicates.
-        fetchEvents();
+        scheduleFetchEvents(0);
       };
       joinAndCatchUp();
     }
@@ -230,7 +266,7 @@ export default function SessionDetailPage() {
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, isConnected, sessionTenantId, tenantId]);
+  }, [sessionId, isConnected, sessionTenantId, tenantId, session?.tenantId, galacticAdminMode]);
 
   // Setup SignalR listener - re-register when connection changes
   useEffect(() => {
@@ -240,66 +276,46 @@ export default function SessionDetailPage() {
       console.log('Event stream signal received via SignalR:', data);
       if (data.sessionId !== sessionIdRef.current) return;
 
-      // Fetch full events from storage (single source of truth)
-      fetchEvents();
+      // Fetch full events from storage (single source of truth), but debounce bursts.
+      scheduleFetchEvents();
 
       // Session update from SignalR (no extra fetch needed)
       if (data.session) {
         setSession(data.session);
+        if (data.session.tenantId) {
+          setSessionTenantId(prev => prev || data.session!.tenantId);
+        }
       }
 
       // Rule results from SignalR (only on enrollment completion)
       if (data.newRuleResults && data.newRuleResults.length > 0) {
-        setAnalysisResults(prev => {
-          const existingIds = new Set(prev.map(r => r.ruleId));
-          const newResults = data.newRuleResults!.filter(r => !existingIds.has(r.ruleId));
-          return [...prev, ...newResults].sort((a, b) => b.confidenceScore - a.confidenceScore);
-        });
-      }
-    };
-
-    // Also listen for summary updates to update session details
-    const handleNewEvents = (data: { sessionId: string; tenantId: string; eventCount: number; sessionUpdate?: Partial<Session>; session?: Session }) => {
-      if (data.sessionId === sessionIdRef.current) {
-        // Merge delta update into existing session (no HTTP request needed!)
-        const update = data.sessionUpdate || data.session;
-        if (update) {
-          setSession(prev => prev ? { ...prev, ...update } : prev);
-        }
+        fetchAnalysisResults();
       }
     };
 
     on('eventStream', handleEventStream);
-    on('newevents', handleNewEvents);
 
     return () => {
       off('eventStream', handleEventStream);
-      off('newevents', handleNewEvents);
-      if (refreshTimeoutRef.current) {
-        clearTimeout(refreshTimeoutRef.current);
+      if (eventRefreshTimeoutRef.current) {
+        clearTimeout(eventRefreshTimeoutRef.current);
       }
     };
   }, [on, off]); // Re-register when SignalR connection changes
 
-  // Periodic catch-up fetch — fills any SignalR gaps every 30s when tab is visible
+  // Fallback polling only while SignalR is disconnected.
   useEffect(() => {
-    const effectiveTenantId = sessionTenantId || tenantId;
-    if (!sessionId || !effectiveTenantId) return;
+    const effectiveTenantId = resolveEffectiveTenantId();
+    if (!sessionId || !effectiveTenantId || isConnected) return;
     const interval = setInterval(() => {
       if (document.visibilityState === "visible") fetchEvents();
     }, 30_000);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, sessionTenantId, tenantId]);
+  }, [sessionId, sessionTenantId, tenantId, session?.tenantId, galacticAdminMode, isConnected]);
 
   const fetchSessionDetails = async () => {
     try {
-      // In galactic admin mode, fetch from the galactic endpoint (cross-tenant)
-      // Otherwise, use the current tenant's sessions
-      const endpoint = galacticAdminMode
-        ? `${API_BASE_URL}/api/galactic/sessions`
-        : `${API_BASE_URL}/api/sessions?tenantId=${tenantId}`;
-
       // Get access token and include Authorization header
       const token = await getAccessToken();
 
@@ -309,6 +325,14 @@ export default function SessionDetailPage() {
         hasInitialFetch.current = false;
         return;
       }
+
+      const knownTenantId = resolveEffectiveTenantId();
+      const endpoint = knownTenantId
+        ? `${API_BASE_URL}/api/sessions/${sessionId}?tenantId=${knownTenantId}`
+        : galacticAdminMode
+          ? `${API_BASE_URL}/api/galactic/sessions`
+          : `${API_BASE_URL}/api/sessions/${sessionId}`;
+
       const response = await fetch(endpoint, {
         headers: {
           'Authorization': `Bearer ${token}`
@@ -316,7 +340,7 @@ export default function SessionDetailPage() {
       });
       if (response.ok) {
         const data = await response.json();
-        const foundSession = data.sessions?.find((s: Session) => s.sessionId === sessionId);
+        const foundSession = data.session ?? data.sessions?.find((s: Session) => s.sessionId === sessionId);
         if (foundSession) {
           setSession(foundSession);
           // Store the session's tenant ID for subsequent requests
@@ -340,11 +364,12 @@ export default function SessionDetailPage() {
       fetchEventsQueued.current = true;
       return;
     }
+    const effectiveTenantId = resolveEffectiveTenantId();
+    if (!effectiveTenantId || !GUID_REGEX.test(effectiveTenantId)) {
+      return;
+    }
     fetchEventsInFlight.current = true;
     fetchEventsQueued.current = false;
-
-    // Use the session's tenant ID if available, otherwise fall back to current user's tenant ID
-    const effectiveTenantId = sessionTenantId || tenantId;
 
     try {
       // Get access token and include Authorization header
@@ -365,7 +390,17 @@ export default function SessionDetailPage() {
         // Replace entire event list with fresh data from Table Storage (canonical truth).
         // No merge needed — fetchEvents() is the single source; SignalR only signals.
         // phaseName is computed at render time in eventsByPhase useMemo (no race condition).
-        setEvents(data.events ?? []);
+        const fetchedEvents = Array.isArray(data.events) ? data.events : [];
+        setEvents(prevEvents => {
+          // Keep the last known-good snapshot if backend transiently returns an empty list.
+          if (fetchedEvents.length === 0 && prevEvents.length > 0) {
+            console.warn(
+              `[SessionDetail] Ignoring empty event refresh for session ${sessionIdRef.current} (tenant ${effectiveTenantId}); keeping ${prevEvents.length} cached events`
+            );
+            return prevEvents;
+          }
+          return fetchedEvents;
+        });
       } else {
         addNotification('error', 'Backend Error', `Failed to load session events: ${response.statusText}`, 'session-events-fetch-error');
       }
@@ -385,7 +420,8 @@ export default function SessionDetailPage() {
   };
 
   const fetchAnalysisResults = async (reanalyze = false) => {
-    const effectiveTenantId = sessionTenantId || tenantId;
+    const effectiveTenantId = resolveEffectiveTenantId();
+    if (!effectiveTenantId || !GUID_REGEX.test(effectiveTenantId)) return;
     try {
       setLoadingAnalysis(true);
       const token = await getAccessToken();
