@@ -448,6 +448,9 @@ namespace AutopilotMonitor.Functions.Functions
                     }).ToList<object>()
                     : null;
 
+                // Signal-only pattern: no full session object — the detail page already receives
+                // the session delta via the "newevents" message (tenant group) and fetches fresh
+                // events from Table Storage on receipt. Sending the full session here was redundant.
                 var eventsMessage = new SignalRMessageAction("eventStream")
                 {
                     GroupName = $"session-{request.TenantId}-{request.SessionId}",
@@ -455,7 +458,6 @@ namespace AutopilotMonitor.Functions.Functions
                         sessionId = request.SessionId,
                         tenantId = request.TenantId,
                         newEventCount = processedCount,
-                        session = updatedSession,
                         newRuleResults = slimRuleResults
                     } }
                 };

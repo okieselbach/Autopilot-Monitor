@@ -70,10 +70,40 @@ export function SignalRProvider({ children }: { children: React.ReactNode }) {
       setConnectionState(signalR.HubConnectionState.Reconnecting);
     });
 
-    newConnection.onreconnected((connectionId) => {
+    newConnection.onreconnected(async (connectionId) => {
       setConnectionState(signalR.HubConnectionState.Connected);
       retryCountRef.current = 0; // Reset retry count on successful reconnect
-      joinedGroupsRef.current.clear(); // Clear joined groups on reconnect - need to re-join
+
+      // Auto-rejoin all previously joined groups after reconnect.
+      // The server-side connection ID changed, so all group memberships are lost.
+      const previousGroups = Array.from(joinedGroupsRef.current);
+      joinedGroupsRef.current.clear();
+
+      for (const groupName of previousGroups) {
+        try {
+          const token = await getAccessToken();
+          const response = await fetch(`${API_BASE_URL}/api/realtime/groups/join`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ connectionId, groupName })
+          });
+
+          if (response.ok) {
+            joinedGroupsRef.current.add(groupName);
+          } else {
+            console.warn(`[SignalR] Failed to rejoin group ${groupName} after reconnect (status ${response.status})`);
+          }
+        } catch (error) {
+          console.warn(`[SignalR] Error rejoining group ${groupName} after reconnect:`, error);
+        }
+      }
+
+      if (previousGroups.length > 0) {
+        console.log(`[SignalR] Rejoined ${joinedGroupsRef.current.size}/${previousGroups.length} groups after reconnect`);
+      }
     });
 
     // Start connection

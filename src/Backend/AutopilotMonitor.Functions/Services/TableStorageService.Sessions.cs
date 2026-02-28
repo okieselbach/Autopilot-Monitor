@@ -243,7 +243,7 @@ namespace AutopilotMonitor.Functions.Services
         /// <summary>
         /// Gets all sessions for a tenant
         /// </summary>
-        public async Task<List<SessionSummary>> GetSessionsAsync(string tenantId, int maxResults = 100)
+        public async Task<List<SessionSummary>> GetSessionsAsync(string tenantId, int maxResults = 100, DateTime? since = null)
         {
             SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
 
@@ -252,10 +252,16 @@ namespace AutopilotMonitor.Functions.Services
                 var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
                 var sessions = new List<SessionSummary>();
 
-                // Query sessions by tenant (PartitionKey)
+                // Query sessions by tenant (PartitionKey), optionally filtered by StartedAt
                 // maxPerPage capped at 1000 (Azure Table Storage limit), pagination is automatic
+                var filter = $"PartitionKey eq '{tenantId}'";
+                if (since.HasValue)
+                {
+                    filter += $" and StartedAt ge datetime'{since.Value:yyyy-MM-ddTHH:mm:ss.fffffffZ}'";
+                }
+
                 var query = tableClient.QueryAsync<TableEntity>(
-                    filter: $"PartitionKey eq '{tenantId}'",
+                    filter: filter,
                     maxPerPage: Math.Min(maxResults, 1000)
                 );
 
@@ -279,16 +285,23 @@ namespace AutopilotMonitor.Functions.Services
         /// <summary>
         /// Gets all sessions across all tenants (for galactic admin mode)
         /// </summary>
-        public async Task<List<SessionSummary>> GetAllSessionsAsync(int maxResults = 100)
+        public async Task<List<SessionSummary>> GetAllSessionsAsync(int maxResults = 100, DateTime? since = null)
         {
             try
             {
                 var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
                 var sessions = new List<SessionSummary>();
 
-                // Query all sessions without tenant filter
+                // Query all sessions, optionally filtered by StartedAt to limit dataset size
                 // maxPerPage is capped at 1000 (Azure Table Storage limit); pagination is automatic
-                var query = tableClient.QueryAsync<TableEntity>(maxPerPage: Math.Min(maxResults, 1000));
+                string? filter = since.HasValue
+                    ? $"StartedAt ge datetime'{since.Value:yyyy-MM-ddTHH:mm:ss.fffffffZ}'"
+                    : null;
+
+                var query = tableClient.QueryAsync<TableEntity>(
+                    filter: filter,
+                    maxPerPage: Math.Min(maxResults, 1000)
+                );
 
                 await foreach (var entity in query)
                 {
@@ -329,14 +342,19 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
-        /// Updates the session status and current phase
+        /// Updates the session status and current phase.
+        /// Uses Merge mode to write only changed fields, reducing ETag conflicts under concurrency.
+        /// The caller (IngestEventsFunction) provides earliestEventTimestamp from the current batch;
+        /// no redundant Events-table scan is performed here.
+        /// Event count is maintained atomically by IncrementSessionEventCountAsync and is not
+        /// recounted here — avoiding an expensive full-partition scan on every status change.
         /// </summary>
         public async Task<bool> UpdateSessionStatusAsync(string tenantId, string sessionId, SessionStatus status, EnrollmentPhase? currentPhase = null, string? failureReason = null, DateTime? completedAt = null, DateTime? earliestEventTimestamp = null, DateTime? latestEventTimestamp = null)
         {
             SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
             SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
 
-            const int maxRetries = 3;
+            const int maxRetries = 5;
             int retryCount = 0;
 
             while (retryCount < maxRetries)
@@ -345,7 +363,7 @@ namespace AutopilotMonitor.Functions.Services
                 {
                     var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
 
-                    // Get the existing entity
+                    // Read the existing entity to check idempotency guards and compute derived fields
                     var entity = await tableClient.GetEntityAsync<TableEntity>(tenantId, sessionId);
                     var session = entity.Value;
 
@@ -361,6 +379,9 @@ namespace AutopilotMonitor.Functions.Services
                         }
                     }
 
+                    // Build a Merge update with only the fields that actually change
+                    var update = new TableEntity(tenantId, sessionId);
+
                     // Status promotion rule: a Pending session (WhiteGlove pre-provisioning complete)
                     // must not regress to InProgress via phase-change events from the resumed boot.
                     // The Pending → InProgress transition happens exclusively in StoreSessionAsync
@@ -368,35 +389,24 @@ namespace AutopilotMonitor.Functions.Services
                     if (status == SessionStatus.InProgress && existingStatusStr == SessionStatus.Pending.ToString())
                     {
                         _logger.LogInformation($"Session {sessionId} is Pending (WhiteGlove), preserving status (InProgress blocked by promotion rule)");
-                        // Phase, timestamps, and event count are still updated below.
+                        // Phase, timestamps are still updated below.
                     }
                     else
                     {
-                        // Update status
-                        session["Status"] = status.ToString();
+                        update["Status"] = status.ToString();
                     }
 
                     // Update current phase if provided
                     if (currentPhase.HasValue)
                     {
-                        session["CurrentPhase"] = (int)currentPhase.Value;
+                        update["CurrentPhase"] = (int)currentPhase.Value;
                     }
 
+                    // Align StartedAt with the earliest event timestamp provided by the caller
                     var currentStartedAt = session.GetDateTimeOffset("StartedAt")?.UtcDateTime ?? DateTime.MaxValue;
-                    var effectiveEarliest = earliestEventTimestamp;
-
-                    // Self-heal StartedAt by also looking at persisted events in case an older event
-                    // arrived in a previous request/batch.
-                    var earliestStoredEventTimestamp = await GetEarliestSessionEventTimestampAsync(tenantId, sessionId);
-                    if (earliestStoredEventTimestamp.HasValue &&
-                        (!effectiveEarliest.HasValue || earliestStoredEventTimestamp.Value < effectiveEarliest.Value))
+                    if (earliestEventTimestamp.HasValue && earliestEventTimestamp.Value < currentStartedAt)
                     {
-                        effectiveEarliest = earliestStoredEventTimestamp.Value;
-                    }
-
-                    if (effectiveEarliest.HasValue && effectiveEarliest.Value < currentStartedAt)
-                    {
-                        session["StartedAt"] = effectiveEarliest.Value;
+                        update["StartedAt"] = earliestEventTimestamp.Value;
                     }
 
                     // Set completion time if succeeded or failed
@@ -404,14 +414,14 @@ namespace AutopilotMonitor.Functions.Services
                     {
                         // Use the provided completedAt timestamp (from event) if available, otherwise use current time
                         var effectiveCompletedAt = completedAt ?? DateTime.UtcNow;
-                        session["CompletedAt"] = effectiveCompletedAt;
+                        update["CompletedAt"] = effectiveCompletedAt;
 
                         // Store accurate DurationSeconds based on first event timestamp (not registration StartedAt)
                         // The agent registers before events arrive, so registration StartedAt is always earlier
                         // than the actual enrollment start — using the first event gives the true enrollment duration.
-                        var durationStart = effectiveEarliest ?? currentStartedAt;
+                        var durationStart = earliestEventTimestamp ?? currentStartedAt;
                         if (durationStart < effectiveCompletedAt)
-                            session["DurationSeconds"] = (int)(effectiveCompletedAt - durationStart).TotalSeconds;
+                            update["DurationSeconds"] = (int)(effectiveCompletedAt - durationStart).TotalSeconds;
                     }
 
                     // Track the most recent event timestamp for excessive data sender detection
@@ -419,28 +429,18 @@ namespace AutopilotMonitor.Functions.Services
                     {
                         var currentLastEventAt = session.GetDateTimeOffset("LastEventAt")?.UtcDateTime;
                         if (!currentLastEventAt.HasValue || latestEventTimestamp.Value > currentLastEventAt.Value)
-                            session["LastEventAt"] = latestEventTimestamp.Value;
+                            update["LastEventAt"] = latestEventTimestamp.Value;
                     }
 
                     // Set failure reason if failed
                     if (status == SessionStatus.Failed && !string.IsNullOrEmpty(failureReason))
                     {
-                        session["FailureReason"] = failureReason;
+                        update["FailureReason"] = failureReason;
                     }
 
-                    // Update event count (full recount for accuracy on status changes)
-                    var eventsTableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Events);
-                    var partitionKey = $"{tenantId}_{sessionId}";
-                    var eventCountFilter = $"PartitionKey eq '{partitionKey}'";
-                    var eventCount = 0;
-                    await foreach (var _ in eventsTableClient.QueryAsync<TableEntity>(eventCountFilter, select: new[] { "RowKey" }))
-                    {
-                        eventCount++;
-                    }
-                    session["EventCount"] = eventCount;
-
-                    // Update entity with optimistic concurrency
-                    await tableClient.UpdateEntityAsync(session, session.ETag, TableUpdateMode.Replace);
+                    // Merge mode: only the fields set above are written; all other fields remain untouched.
+                    // This drastically reduces ETag conflicts when concurrent requests update different fields.
+                    await tableClient.UpdateEntityAsync(update, session.ETag, TableUpdateMode.Merge);
 
                     _logger.LogInformation($"Updated session {sessionId} status to {status}");
                     return true;
@@ -454,8 +454,9 @@ namespace AutopilotMonitor.Functions.Services
                         return false;
                     }
 
-                    // Exponential backoff: 50ms, 100ms, 200ms
-                    await Task.Delay(50 * (int)Math.Pow(2, retryCount - 1));
+                    // Exponential backoff with jitter to decorrelate concurrent retries
+                    var baseDelay = 50 * (int)Math.Pow(2, retryCount - 1);
+                    await Task.Delay(baseDelay + Random.Shared.Next(0, baseDelay));
                     _logger.LogDebug($"Retrying session {sessionId} update (attempt {retryCount}/{maxRetries})");
                 }
                 catch (Exception ex)
@@ -471,13 +472,15 @@ namespace AutopilotMonitor.Functions.Services
         /// <summary>
         /// Increments the session event count without touching status or phase fields.
         /// Uses Merge mode to safely handle concurrent updates.
+        /// The caller provides earliestEventTimestamp from the current batch;
+        /// no redundant Events-table scan is performed here.
         /// </summary>
         public async Task IncrementSessionEventCountAsync(string tenantId, string sessionId, int increment, DateTime? earliestEventTimestamp = null, DateTime? latestEventTimestamp = null)
         {
             SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
             SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
 
-            const int maxRetries = 3;
+            const int maxRetries = 5;
             int retryCount = 0;
 
             while (retryCount < maxRetries)
@@ -493,20 +496,11 @@ namespace AutopilotMonitor.Functions.Services
                         ["EventCount"] = currentCount + increment
                     };
 
+                    // Align StartedAt with the earliest event timestamp provided by the caller
                     var currentStartedAt = entity.Value.GetDateTimeOffset("StartedAt")?.UtcDateTime ?? DateTime.MaxValue;
-                    var effectiveEarliest = earliestEventTimestamp;
-
-                    // Self-heal StartedAt by checking already persisted events for this session.
-                    var earliestStoredEventTimestamp = await GetEarliestSessionEventTimestampAsync(tenantId, sessionId);
-                    if (earliestStoredEventTimestamp.HasValue &&
-                        (!effectiveEarliest.HasValue || earliestStoredEventTimestamp.Value < effectiveEarliest.Value))
+                    if (earliestEventTimestamp.HasValue && earliestEventTimestamp.Value < currentStartedAt)
                     {
-                        effectiveEarliest = earliestStoredEventTimestamp.Value;
-                    }
-
-                    if (effectiveEarliest.HasValue && effectiveEarliest.Value < currentStartedAt)
-                    {
-                        update["StartedAt"] = effectiveEarliest.Value;
+                        update["StartedAt"] = earliestEventTimestamp.Value;
                     }
 
                     // Track the most recent event timestamp for excessive data sender detection
@@ -528,7 +522,9 @@ namespace AutopilotMonitor.Functions.Services
                         _logger.LogWarning($"Failed to increment event count for session {sessionId} after {maxRetries} retries due to ETag conflicts");
                         return;
                     }
-                    await Task.Delay(50 * (int)Math.Pow(2, retryCount - 1));
+                    // Exponential backoff with jitter to decorrelate concurrent retries
+                    var baseDelay = 50 * (int)Math.Pow(2, retryCount - 1);
+                    await Task.Delay(baseDelay + Random.Shared.Next(0, baseDelay));
                 }
                 catch (Exception ex)
                 {

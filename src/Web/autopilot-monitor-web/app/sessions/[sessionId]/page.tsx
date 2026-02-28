@@ -225,19 +225,17 @@ export default function SessionDetailPage() {
   useEffect(() => {
     // Listen for event stream signal — backend sends a lightweight signal (no event payload).
     // Frontend fetches fresh events from Table Storage on receipt: canonical truth, no gaps.
-    const handleEventStream = (data: { sessionId: string; tenantId: string; newEventCount: number; session?: Session; newRuleResults?: RuleResult[] }) => {
+    const handleEventStream = (data: { sessionId: string; tenantId: string; newEventCount: number; newRuleResults?: RuleResult[] }) => {
       console.log('Event stream signal received via SignalR:', data);
       if (data.sessionId !== sessionIdRef.current) return;
 
       // Fetch full events from storage (single source of truth), but debounce bursts.
+      // Session updates arrive via the "newevents" message (tenant group) — no session
+      // object in this signal to keep payloads minimal.
       scheduleFetchEvents();
 
-      // Session update from SignalR (no extra fetch needed)
-      if (data.session) {
-        setSession(data.session);
-        if (data.session.tenantId) {
-          setSessionTenantId(prev => prev || data.session!.tenantId);
-        }
+      if (data.tenantId) {
+        setSessionTenantId(prev => prev || data.tenantId);
       }
 
       // Rule results from SignalR (only on enrollment completion)
@@ -246,10 +244,25 @@ export default function SessionDetailPage() {
       }
     };
 
+    // Listen for session delta updates via the tenant group ("newevents").
+    // This replaces the full session object that was previously sent inside "eventStream".
+    const handleNewEvents = (data: { sessionId: string; tenantId: string; sessionUpdate?: Partial<Session> }) => {
+      if (data.sessionId !== sessionIdRef.current) return;
+
+      if (data.sessionUpdate) {
+        setSession(prev => prev ? { ...prev, ...data.sessionUpdate } : prev);
+      }
+      if (data.tenantId) {
+        setSessionTenantId(prev => prev || data.tenantId);
+      }
+    };
+
     on('eventStream', handleEventStream);
+    on('newevents', handleNewEvents);
 
     return () => {
       off('eventStream', handleEventStream);
+      off('newevents', handleNewEvents);
       if (eventRefreshTimeoutRef.current) {
         clearTimeout(eventRefreshTimeoutRef.current);
       }

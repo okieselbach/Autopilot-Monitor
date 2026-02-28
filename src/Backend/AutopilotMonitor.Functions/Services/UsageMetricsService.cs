@@ -92,10 +92,10 @@ namespace AutopilotMonitor.Functions.Services
 
         private async Task<PlatformUsageMetrics> ComputeUsageMetricsInternalAsync()
         {
-            // Query all sessions (galactic admin only!)
-            // Note: This queries ALL sessions across ALL tenants - can handle millions of records
-            // Since this is on-demand only, we can afford to process large datasets
-            var allSessions = await _storageService.GetAllSessionsAsync(maxResults: 1000000);
+            // Query sessions from the last 90 days only — covers all displayed metrics (today/7d/30d)
+            // with a generous margin. Avoids loading the entire table into memory.
+            // "Total" counters use PlatformStats (cumulative, already tracked separately).
+            var allSessions = await _storageService.GetAllSessionsAsync(maxResults: 1000000, since: DateTime.UtcNow.AddDays(-90));
 
             var now = DateTime.UtcNow;
             var today = now.Date;
@@ -210,8 +210,8 @@ namespace AutopilotMonitor.Functions.Services
 
         private async Task<PlatformUsageMetrics> ComputeTenantUsageMetricsInternalAsync(string tenantId)
         {
-            // Query sessions for specific tenant only
-            var tenantSessions = await _storageService.GetSessionsAsync(tenantId, maxResults: 1000000);
+            // Query sessions for specific tenant only — last 90 days
+            var tenantSessions = await _storageService.GetSessionsAsync(tenantId, maxResults: 1000000, since: DateTime.UtcNow.AddDays(-90));
 
             var now = DateTime.UtcNow;
             var today = now.Date;
