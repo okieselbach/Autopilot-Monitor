@@ -392,25 +392,6 @@ export default function Navbar() {
                       </div>
                     )}
 
-                    {/* Preview Mode Toggle — visible when active or for galactic admins */}
-                    {(previewMode || user?.isGalacticAdmin) && (
-                      <div className="mb-1">
-                        <div className="flex items-center justify-between py-2 px-2.5 rounded-md bg-indigo-50">
-                          <div className="flex items-center gap-1.5">
-                            <svg className="w-4 h-4 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                            </svg>
-                            <span className="text-sm text-gray-700">Preview</span>
-                            {previewMode && <span className="text-[10px] text-indigo-700 font-semibold">ON</span>}
-                          </div>
-                          <button onClick={() => setPreviewMode(!previewMode)} className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${previewMode ? 'bg-indigo-600' : 'bg-gray-300'}`}>
-                            <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${previewMode ? 'translate-x-[18px]' : 'translate-x-[3px]'}`} />
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
                     {/* MONITORING */}
                     <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 mt-3 mb-1.5">Monitoring</p>
 
