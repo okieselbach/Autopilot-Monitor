@@ -2,7 +2,7 @@
   "$schema": "../schema/gather-rule.schema.json",
   "ruleId": "GATHER-DEVICE-001",
   "title": "Collect dsregcmd join status",
-  "description": "Runs dsregcmd /status to capture the Azure AD / Entra join state when the device enters the Device Preparation phase.",
+  "description": "Runs dsregcmd /status to capture the Azure AD / Entra join state when the device enters the Account Setup phase.",
   "category": "device",
   "version": "1.0.0",
   "author": "Autopilot Monitor",
@@ -10,7 +10,7 @@
   "collectorType": "command_allowlisted",
   "target": "dsregcmd /status",
   "trigger": "phase_change",
-  "triggerPhase": "DevicePreparation",
+  "triggerPhase": "AccountSetup",
   "outputEventType": "gather_dsregcmd_status",
   "outputSeverity": "Info",
   "tags": ["device", "entra", "join"]
