@@ -101,6 +101,7 @@ export default function AdminConfigurationPage() {
   const [maintenanceDate, setMaintenanceDate] = useState<string>("");
   const [reseedingRules, setReseedingRules] = useState(false);
   const [reseedingGatherRules, setReseedingGatherRules] = useState(false);
+  const [reseedingImePatterns, setReseedingImePatterns] = useState(false);
   const [fetchingFromGitHub, setFetchingFromGitHub] = useState(false);
   // Diagnostics Log Paths state
   const [globalDiagPaths, setGlobalDiagPaths] = useState<DiagnosticsLogPath[]>([]);
@@ -374,6 +375,40 @@ export default function AdminConfigurationPage() {
       setError(err instanceof Error ? err.message : "Failed to reseed gather rules");
     } finally {
       setReseedingGatherRules(false);
+    }
+  };
+
+  const handleReseedImePatterns = async () => {
+    try {
+      setReseedingImePatterns(true);
+      setError(null);
+      setSuccessMessage(null);
+
+      const token = await getAccessToken();
+      if (!token) {
+        throw new Error('Failed to get access token');
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/rules/reseed-from-github?type=ime`, {
+        method: "POST",
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || `Failed to reseed IME log patterns: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      setSuccessMessage(`IME log patterns reseeded from GitHub: ${result.ime?.deleted ?? 0} deleted, ${result.ime?.written ?? 0} written`);
+      setTimeout(() => setSuccessMessage(null), 5000);
+    } catch (err) {
+      console.error("Error reseeding IME log patterns:", err);
+      setError(err instanceof Error ? err.message : "Failed to reseed IME log patterns");
+    } finally {
+      setReseedingImePatterns(false);
     }
   };
 
@@ -1186,58 +1221,64 @@ export default function AdminConfigurationPage() {
                                   : 'bg-white border-gray-200 hover:border-green-300'
                               }`}
                             >
-                              <h3 className="font-semibold text-gray-900 text-lg">
-                                {tenant.domainName || tenant.tenantId}
-                              </h3>
-                              <p className="text-sm text-gray-500 mt-0.5">
-                                Tenant ID: {tenant.tenantId}
-                              </p>
-                              <div className="flex flex-wrap items-center gap-2 mt-2">
-                                {tenant.disabled && (
-                                  <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                                    Suspended
-                                  </span>
-                                )}
-                                {previewApproved.has(tenant.tenantId) ? (
-                                  <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                                    Preview
-                                  </span>
-                                ) : (
-                                  <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
-                                    Waitlist
-                                  </span>
-                                )}
-                                {tenant.validateAutopilotDevice && (
-                                  <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                                    Ready
-                                  </span>
-                                )}
-                              </div>
-                              <div className="flex items-center gap-2 mt-3">
-                                <button
-                                  onClick={() => handleTogglePreview(tenant.tenantId)}
-                                  disabled={togglingPreviewTenant === tenant.tenantId}
-                                  className={`px-3 py-2 text-sm rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                                    previewApproved.has(tenant.tenantId)
-                                      ? 'bg-amber-500 text-white hover:bg-amber-600'
-                                      : 'bg-blue-600 text-white hover:bg-blue-700'
-                                  }`}
-                                >
-                                  {togglingPreviewTenant === tenant.tenantId
-                                    ? "..."
-                                    : previewApproved.has(tenant.tenantId)
-                                    ? "Revoke"
-                                    : "Approve"}
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    setEditingTenant(tenant);
-                                    fetchTenantAdmins(tenant.tenantId);
-                                  }}
-                                  className="px-4 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-                                >
-                                  Edit
-                                </button>
+                              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                                <div>
+                                  <h3 className="font-semibold text-gray-900 text-lg">
+                                    {tenant.domainName || tenant.tenantId}
+                                  </h3>
+                                  <p className="text-sm text-gray-500 mt-0.5">
+                                    Tenant ID: {tenant.tenantId}
+                                  </p>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    {tenant.disabled && (
+                                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                                        Suspended
+                                      </span>
+                                    )}
+                                    {previewApproved.has(tenant.tenantId) ? (
+                                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                        Preview
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
+                                        Waitlist
+                                      </span>
+                                    )}
+                                    {tenant.validateAutopilotDevice && (
+                                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                        Ready
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      onClick={() => handleTogglePreview(tenant.tenantId)}
+                                      disabled={togglingPreviewTenant === tenant.tenantId}
+                                      className={`px-3 py-2 text-sm rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                                        previewApproved.has(tenant.tenantId)
+                                          ? 'bg-amber-500 text-white hover:bg-amber-600'
+                                          : 'bg-blue-600 text-white hover:bg-blue-700'
+                                      }`}
+                                    >
+                                      {togglingPreviewTenant === tenant.tenantId
+                                        ? "..."
+                                        : previewApproved.has(tenant.tenantId)
+                                        ? "Revoke"
+                                        : "Approve"}
+                                    </button>
+                                    <button
+                                      onClick={() => {
+                                        setEditingTenant(tenant);
+                                        fetchTenantAdmins(tenant.tenantId);
+                                      }}
+                                      className="px-4 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                                    >
+                                      Edit
+                                    </button>
+                                  </div>
+                                </div>
                               </div>
                             </div>
                           ))}
@@ -1439,7 +1480,7 @@ export default function AdminConfigurationPage() {
             </div>
 
             {/* Individual Reseed Sections */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {/* Reseed Analyze Rules */}
               <div className="bg-gradient-to-br from-amber-50 to-orange-50 dark:from-gray-800 dark:to-gray-800 border border-amber-200 dark:border-amber-700 rounded-lg shadow">
                 <div className="p-4 border-b border-amber-200 dark:border-amber-700 bg-gradient-to-r from-amber-100 to-orange-100 dark:from-amber-900/40 dark:to-orange-900/40">
@@ -1495,6 +1536,37 @@ export default function AdminConfigurationPage() {
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                           </svg>
                           <span>Reseed Gather</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Reseed IME Log Patterns */}
+              <div className="bg-gradient-to-br from-amber-50 to-orange-50 dark:from-gray-800 dark:to-gray-800 border border-amber-200 dark:border-amber-700 rounded-lg shadow">
+                <div className="p-4 border-b border-amber-200 dark:border-amber-700 bg-gradient-to-r from-amber-100 to-orange-100 dark:from-amber-900/40 dark:to-orange-900/40">
+                  <h3 className="text-lg font-semibold text-amber-900 dark:text-amber-100">Reseed IME Log Patterns</h3>
+                  <p className="text-xs text-amber-600 dark:text-amber-300 mt-1">Fetch and reseed only IME log patterns from GitHub</p>
+                </div>
+                <div className="p-4">
+                  <div className="flex justify-end">
+                    <button
+                      onClick={handleReseedImePatterns}
+                      disabled={reseedingImePatterns}
+                      className="px-4 py-2 bg-gradient-to-r from-amber-600 to-orange-600 text-white rounded-lg hover:from-amber-700 hover:to-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow flex items-center space-x-2 text-sm"
+                    >
+                      {reseedingImePatterns ? (
+                        <>
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                          <span>Reseeding...</span>
+                        </>
+                      ) : (
+                        <>
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                          </svg>
+                          <span>Reseed IME</span>
                         </>
                       )}
                     </button>
