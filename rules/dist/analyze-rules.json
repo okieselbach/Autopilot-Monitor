@@ -1,0 +1,898 @@
+{
+  "$schema": "../schema/analyze-rule.schema.json",
+  "rules": [
+    {
+      "ruleId": "ANALYZE-APP-001",
+      "title": "Win32 App Detection Script Failure",
+      "description": "Detects when a Win32 app detection script fails or returns unexpected results.",
+      "severity": "warning",
+      "category": "apps",
+      "enabled": true,
+      "baseConfidence": 60,
+      "conditions": [
+        {
+          "signal": "detection_failure",
+          "source": "event_type",
+          "eventType": "app_install_failed",
+          "dataField": "message",
+          "operator": "regex",
+          "value": "detection|not detected|script.*fail|detection.*error|DetectionState|NotDetected",
+          "required": true
+        }
+      ],
+      "confidenceFactors": [
+        {
+          "signal": "error_detail_match",
+          "condition": "exists",
+          "weight": 20
+        }
+      ],
+      "explanation": "A Win32 app detection script failed or did not detect the app after installation. This causes the app to appear as 'not installed' despite successful installation.",
+      "remediation": [
+        {
+          "title": "Fix detection rules",
+          "steps": [
+            "Review the app's detection rules in Intune",
+            "Verify file/registry paths are correct",
+            "Test detection script manually on a device"
+          ]
+        }
+      ],
+      "tags": [
+        "apps",
+        "detection",
+        "win32"
+      ]
+    },
+    {
+      "ruleId": "ANALYZE-APP-002",
+      "title": "App Installation Error",
+      "description": "Detects app installation failures with specific exit codes or HRESULT error codes and suggests fixes.",
+      "severity": "high",
+      "category": "apps",
+      "enabled": true,
+      "baseConfidence": 80,
+      "conditions": [
+        {
+          "signal": "install_error",
+          "source": "event_type",
+          "eventType": "app_install_failed",
+          "dataField": "message",
+          "operator": "regex",
+          "value": "16[0-9]{2}|0x80070[0-9a-fA-F]+|lpExitCode|unmapped.*exit",
+          "required": true
+        }
+      ],
+      "explanation": "An app installation failed with a specific error code. Common MSI exit codes: 1603 (Fatal error during installation), 1618 (Another installation already in progress), 1619 (Package could not be opened), 1625 (Installation prohibited by policy). Common HRESULT codes are also captured.",
+      "remediation": [
+        {
+          "title": "Investigate the error code",
+          "steps": [
+            "Check the error code in the rule finding details",
+            "Look up the specific error code in Microsoft documentation",
+            "Review the IME logs on the device: C:\\ProgramData\\Microsoft\\IntuneManagementExtension\\Logs\\IntuneManagementExtension.log",
+            "Verify all prerequisites for the app are met",
+            "Check if another installation was running concurrently (error 1618)"
+          ]
+        }
+      ],
+      "tags": [
+        "apps",
+        "msi",
+        "error-code"
+      ]
+    },
+    {
+      "ruleId": "ANALYZE-APP-003",
+      "title": "App Dependency Chain Failure",
+      "description": "Detects when an app fails because a dependency app failed to install.",
+      "severity": "high",
+      "category": "apps",
+      "enabled": true,
+      "baseConfidence": 70,
+      "conditions": [
+        {
+          "signal": "dependency_failure",
+          "source": "event_type",
+          "eventType": "app_install_failed",
+          "dataField": "message",
+          "operator": "regex",
+          "value": "dependency|prerequisite|required app|depends on|Dependency",
+          "required": true
+        }
+      ],
+      "explanation": "An app installation failed because one of its dependency apps failed to install. Fix the dependency first, then retry.",
+      "remediation": [
+        {
+          "title": "Fix dependency chain",
+          "steps": [
+            "Identify which dependency app failed",
+            "Fix the dependency app first",
+            "Verify dependency chain order in Intune"
+          ]
+        }
+      ],
+      "tags": [
+        "apps",
+        "dependency"
+      ]
+    },
+    {
+      "ruleId": "ANALYZE-APP-004",
+      "title": "Insufficient Disk Space",
+      "description": "Detects when disk space is critically low during enrollment, which can cause app installation failures.",
+      "severity": "critical",
+      "category": "apps",
+      "enabled": true,
+      "baseConfidence": 75,
+      "conditions": [
+        {
+          "signal": "low_disk",
+          "source": "event_type",
+          "eventType": "performance_snapshot",
+          "dataField": "disk_free_gb",
+          "operator": "lt",
+          "value": "5",
+          "required": true
+        }
+      ],
+      "confidenceFactors": [
+        {
+          "signal": "app_failed",
+          "condition": "exists",
+          "weight": 15
+        },
+        {
+          "signal": "enrollment_failed",
+          "condition": "exists",
+          "weight": 10
+        }
+      ],
+      "explanation": "Performance monitoring shows disk free space dropped below 5 GB during enrollment. This can cause app installation failures, especially for large Win32 apps.",
+      "remediation": [
+        {
+          "title": "Free disk space",
+          "steps": [
+            "Check device disk size meets minimum requirements",
+            "Clean up temporary files and IME cache (C:\\Windows\\IMECache)",
+            "Consider using a larger disk image"
+          ]
+        }
+      ],
+      "tags": [
+        "apps",
+        "disk-space",
+        "critical"
+      ]
+    },
+    {
+      "ruleId": "ANALYZE-APP-005",
+      "title": "Content Download Timeout",
+      "description": "Detects when app content download times out or fails.",
+      "severity": "high",
+      "category": "apps",
+      "enabled": true,
+      "baseConfidence": 70,
+      "conditions": [
+        {
+          "signal": "download_timeout",
+          "source": "event_type",
+          "eventType": "app_install_failed",
+          "dataField": "errorPatternId",
+          "operator": "regex",
+          "value": "IME-DO-TIMEOUT|IME-ERROR-DOWNLOAD|IME-ERROR-NO-CONTENT",
+          "required": true
+        }
+      ],
+      "explanation": "App content download timed out or failed. This is usually caused by network issues, proxy interference, or CDN problems. The IME log shows a Delivery Optimization timeout or download content error.",
+      "remediation": [
+        {
+          "title": "Improve download speed",
+          "steps": [
+            "Check network bandwidth",
+            "Verify proxy doesn't block *.delivery.mp.microsoft.com",
+            "Consider Delivery Optimization configuration"
+          ]
+        }
+      ],
+      "tags": [
+        "apps",
+        "download",
+        "timeout"
+      ]
+    },
+    {
+      "ruleId": "ANALYZE-APP-006",
+      "title": "Reboot Required Loop",
+      "description": "Detects when the same app installation is attempted 3 or more times, indicating a reboot-required loop.",
+      "severity": "high",
+      "category": "apps",
+      "enabled": true,
+      "baseConfidence": 70,
+      "conditions": [
+        {
+          "signal": "reboot_loop",
+          "source": "event_count",
+          "eventType": "app_install_started",
+          "dataField": "appId",
+          "operator": "count_per_group_gte",
+          "value": "3",
+          "required": true
+        }
+      ],
+      "explanation": "The same app has been installed 3 or more times during this enrollment. This typically indicates the app requires a reboot between install attempts, but the ESP is not honoring the reboot request, causing an install-detect-retry loop.",
+      "remediation": [
+        {
+          "title": "Fix reboot handling",
+          "steps": [
+            "Check if the app's return code mapping includes reboot codes (3010, 1641)",
+            "Verify ESP reboot behavior settings",
+            "Consider setting the app to 'Hard reboot' return code in Intune"
+          ]
+        }
+      ],
+      "tags": [
+        "apps",
+        "reboot",
+        "loop"
+      ]
+    },
+    {
+      "ruleId": "ANALYZE-APP-007",
+      "title": "Multiple App Installation Failures",
+      "description": "Detects when the app tracking summary reports multiple failed app installations.",
+      "severity": "high",
+      "category": "apps",
+      "enabled": true,
+      "baseConfidence": 75,
+      "conditions": [
+        {
+          "signal": "summary_errors",
+          "source": "event_type",
+          "eventType": "app_tracking_summary",
+          "dataField": "errorCount",
+          "operator": "gte",
+          "value": "2",
+          "required": true
+        }
+      ],
+      "confidenceFactors": [
+        {
+          "signal": "enrollment_failed",
+          "condition": "exists",
+          "weight": 15
+        }
+      ],
+      "explanation": "The app tracking summary reports 2 or more failed app installations during enrollment. This suggests a systemic issue rather than an isolated app failure.",
+      "remediation": [
+        {
+          "title": "Review failed apps",
+          "steps": [
+            "Check the individual app_install_failed events for specific error patterns",
+            "Look for a common pattern (all MSI apps, all large apps, all from a specific publisher)",
+            "Consider whether a shared prerequisite or dependency is failing"
+          ]
+        }
+      ],
+      "tags": [
+        "apps",
+        "summary",
+        "multiple-failures"
+      ]
+    },
+    {
+      "ruleId": "ANALYZE-APP-008",
+      "title": "Slow App Installation",
+      "description": "Detects app installations that take longer than 10 minutes.",
+      "severity": "warning",
+      "category": "apps",
+      "enabled": true,
+      "baseConfidence": 70,
+      "conditions": [
+        {
+          "signal": "slow_app_install",
+          "source": "app_install_duration",
+          "eventType": "app_install_completed",
+          "operator": "gt",
+          "value": "600",
+          "required": true
+        }
+      ],
+      "explanation": "At least one app installation took longer than 10 minutes. This can indicate slow content delivery, installation overhead, or endpoint performance bottlenecks.",
+      "remediation": [
+        {
+          "title": "Analyze slow app behavior",
+          "steps": [
+            "Identify the affected app from matched evidence in the rule result",
+            "Check network throughput and proxy impact during app download",
+            "Consider moving large/non-critical apps out of ESP blocking scope"
+          ]
+        }
+      ],
+      "tags": [
+        "apps",
+        "performance",
+        "slow-install",
+        "warning"
+      ]
+    },
+    {
+      "ruleId": "ANALYZE-APP-009",
+      "title": "App Download Stalled",
+      "description": "Detects when app downloads appear to have stalled, based on failed download progress events.",
+      "severity": "warning",
+      "category": "apps",
+      "enabled": false,
+      "trigger": "correlation",
+      "baseConfidence": 55,
+      "conditions": [
+        {
+          "signal": "download_failed",
+          "source": "event_type",
+          "eventType": "download_progress",
+          "dataField": "status",
+          "operator": "equals",
+          "value": "failed",
+          "required": true
+        },
+        {
+          "signal": "app_failed",
+          "source": "event_type",
+          "eventType": "app_install_failed",
+          "operator": "exists",
+          "value": "",
+          "required": true
+        }
+      ],
+      "confidenceFactors": [
+        {
+          "signal": "proxy_active",
+          "condition": "exists",
+          "weight": 15
+        },
+        {
+          "signal": "multiple_failures",
+          "condition": "count >= 2",
+          "weight": 15
+        }
+      ],
+      "confidenceThreshold": 50,
+      "explanation": "Download progress events show a failed download, and at least one app installation also failed. This pattern suggests content delivery issues preventing apps from being downloaded successfully.",
+      "remediation": [
+        {
+          "title": "Investigate download issues",
+          "steps": [
+            "Check network connectivity and bandwidth during the enrollment",
+            "Verify DNS resolution for *.delivery.mp.microsoft.com",
+            "Check if a proxy or firewall is blocking content delivery",
+            "Review Delivery Optimization settings and peer availability"
+          ]
+        }
+      ],
+      "tags": [
+        "apps",
+        "download",
+        "stall",
+        "correlation"
+      ]
+    },
+    {
+      "ruleId": "ANALYZE-APP-010",
+      "title": "App Reverted to Error After Successful Install",
+      "description": "Detects when a specific app (matched by appId) was first reported as successfully installed but subsequently reported an IME enforcement error — while enrollment completed successfully. The app may be broken post-enrollment.",
+      "severity": "warning",
+      "category": "apps",
+      "enabled": true,
+      "trigger": "correlation",
+      "baseConfidence": 75,
+      "conditions": [
+        {
+          "signal": "app_regression",
+          "source": "event_correlation",
+          "eventType": "app_install_completed",
+          "correlateEventType": "app_install_failed",
+          "joinField": "appId",
+          "dataField": "errorPatternId",
+          "operator": "equals",
+          "value": "IME-ERROR-REPORT",
+          "required": true
+        },
+        {
+          "signal": "enrollment_succeeded",
+          "source": "event_type",
+          "eventType": "enrollment_complete",
+          "operator": "exists",
+          "value": "",
+          "required": true
+        }
+      ],
+      "confidenceThreshold": 70,
+      "explanation": "An app was initially reported as **successfully installed** (`app_install_completed`) but the IME (Intune Management Extension) subsequently reported an **Error** state for the same app via an `IME-ERROR-REPORT` event — while the overall enrollment completed successfully.\n\nThis pattern occurs when the IME re-evaluates enforcement state after the initial install report and detects a failure, e.g. `EnforcementState` transitions from `Success` → `Error`. The affected app and its details are captured in the matched evidence.\n\nCommon causes:\n- A post-install detection check fails (detection rule mismatch)\n- The enforcement error code `-2016345060` (0x87D13B9C) indicates the app state diverged from expected\n- The app may appear installed in the ESP summary but is in an error state on the device\n\n**The enrollment succeeded, but the affected app requires attention.**",
+      "remediation": [
+        {
+          "title": "Investigate the app's post-install enforcement state",
+          "steps": [
+            "Note the appId and appName from the rule finding — these identify the exact affected app",
+            "Check the Intune portal: Devices > [Device] > Apps — confirm the current enforcement state of the app",
+            "Review IME logs on the device: C:\\ProgramData\\Microsoft\\IntuneManagementExtension\\Logs\\IntuneManagementExtension.log",
+            "Search the log for the appId and look for 'EnforcementState' transitions (Success → Error) near the enrollment time",
+            "Error -2016345060 (0x87D13B9C) typically indicates a detection failure after install — verify the app's detection rule in Intune",
+            "Trigger a manual sync (Company Portal or Settings > Accounts > Access work or school > Sync) to force re-evaluation"
+          ]
+        },
+        {
+          "title": "Fix detection or installation issues",
+          "steps": [
+            "If detection fails: correct the detection rule (file path, registry key, or PowerShell script) in the Intune app configuration",
+            "If the app itself is broken: redeploy or reassign the app to trigger a fresh install",
+            "Consider adding a post-install validation script to catch this scenario proactively"
+          ]
+        }
+      ],
+      "relatedDocs": [
+        {
+          "title": "Troubleshoot Win32 app installations",
+          "url": "https://learn.microsoft.com/en-us/troubleshoot/mem/intune/app-management/troubleshoot-win32-app-install"
+        },
+        {
+          "title": "Intune Management Extension logs",
+          "url": "https://learn.microsoft.com/en-us/mem/intune/apps/intune-management-extension"
+        }
+      ],
+      "tags": [
+        "apps",
+        "win32",
+        "enforcement",
+        "post-install",
+        "correlation"
+      ]
+    },
+    {
+      "ruleId": "ANALYZE-CORR-001",
+      "title": "Slow Network Causing App Installation Failure",
+      "description": "Correlates slow download speeds with app installation failures while disk space is adequate, confirming network as root cause (not disk).",
+      "severity": "high",
+      "category": "apps",
+      "enabled": false,
+      "trigger": "correlation",
+      "baseConfidence": 55,
+      "conditions": [
+        {
+          "signal": "app_failed",
+          "source": "event_type",
+          "eventType": "app_install_failed",
+          "operator": "exists",
+          "value": "",
+          "required": true
+        },
+        {
+          "signal": "download_events",
+          "source": "event_type",
+          "eventType": "download_progress",
+          "operator": "exists",
+          "value": "",
+          "required": true
+        },
+        {
+          "signal": "disk_ok",
+          "source": "event_type",
+          "eventType": "performance_snapshot",
+          "dataField": "disk_free_gb",
+          "operator": "gt",
+          "value": "10"
+        }
+      ],
+      "confidenceFactors": [
+        {
+          "signal": "disk_ok",
+          "condition": "exists",
+          "weight": 15
+        },
+        {
+          "signal": "multiple_failures",
+          "condition": "count >= 2",
+          "weight": 15
+        },
+        {
+          "signal": "enrollment_failed",
+          "condition": "exists",
+          "weight": 15
+        }
+      ],
+      "confidenceThreshold": 50,
+      "explanation": "App installation failed while the device has sufficient disk space (>10 GB free). Download progress events indicate network-related issues are the likely root cause.\n\nThis rules out disk space as a factor and points to network bandwidth, proxy throttling, or CDN connectivity issues.",
+      "remediation": [
+        {
+          "title": "Investigate network throughput",
+          "steps": [
+            "Check bandwidth to *.delivery.mp.microsoft.com (CDN)",
+            "Verify proxy is not throttling large downloads",
+            "Consider enabling Delivery Optimization for peer-to-peer caching"
+          ]
+        },
+        {
+          "title": "Reduce download load",
+          "steps": [
+            "Stagger app deployments to reduce concurrent downloads",
+            "Pre-cache large apps using Delivery Optimization or ConfigMgr",
+            "Increase ESP timeout if downloads are slow but completing"
+          ]
+        }
+      ],
+      "tags": [
+        "correlation",
+        "apps",
+        "network",
+        "download",
+        "root-cause"
+      ]
+    },
+    {
+      "ruleId": "ANALYZE-CORR-002",
+      "title": "Disk Space Exhaustion Caused Installation Failure",
+      "description": "Correlates declining disk free space with app installation failure, confirming insufficient storage as root cause.",
+      "severity": "critical",
+      "category": "apps",
+      "enabled": true,
+      "trigger": "correlation",
+      "baseConfidence": 65,
+      "conditions": [
+        {
+          "signal": "low_disk",
+          "source": "event_type",
+          "eventType": "performance_snapshot",
+          "dataField": "disk_free_gb",
+          "operator": "lt",
+          "value": "5",
+          "required": true
+        },
+        {
+          "signal": "app_failed",
+          "source": "event_type",
+          "eventType": "app_install_failed",
+          "operator": "exists",
+          "value": "",
+          "required": true
+        }
+      ],
+      "confidenceFactors": [
+        {
+          "signal": "multiple_failures",
+          "condition": "count >= 2",
+          "weight": 15
+        },
+        {
+          "signal": "enrollment_failed",
+          "condition": "exists",
+          "weight": 10
+        }
+      ],
+      "confidenceThreshold": 50,
+      "explanation": "**Root cause confirmed:** Performance monitoring shows disk free space dropped below 5 GB during enrollment, and apps failed to install. The device likely ran out of storage during app installation.\n\nThis is common when deploying many large Win32 apps to devices with small drives (64 GB or 128 GB).",
+      "remediation": [
+        {
+          "title": "Reduce disk consumption during enrollment",
+          "steps": [
+            "Review total size of all apps deployed during ESP",
+            "Move non-critical apps to post-ESP deployment",
+            "Use MSIX or Store apps instead of Win32 where possible (smaller footprint)",
+            "Clean up IME cache: C:\\Windows\\IMECache"
+          ]
+        },
+        {
+          "title": "Use devices with larger drives",
+          "steps": [
+            "Minimum 128 GB recommended for standard deployments",
+            "256 GB recommended when deploying large app suites (Office, Visual Studio, etc.)"
+          ]
+        }
+      ],
+      "tags": [
+        "correlation",
+        "apps",
+        "disk-space",
+        "performance",
+        "root-cause"
+      ]
+    },
+    {
+      "ruleId": "ANALYZE-CORR-003",
+      "title": "Proxy Configuration Causing Download Failure",
+      "description": "Correlates an active proxy configuration with app download failures, suggesting the proxy is blocking or throttling Intune content delivery.",
+      "severity": "high",
+      "category": "apps",
+      "enabled": true,
+      "trigger": "correlation",
+      "baseConfidence": 60,
+      "conditions": [
+        {
+          "signal": "proxy_active",
+          "source": "event_type",
+          "eventType": "proxy_configuration",
+          "dataField": "proxyType",
+          "operator": "regex",
+          "value": "Proxy|PAC",
+          "required": true
+        },
+        {
+          "signal": "app_failed",
+          "source": "event_type",
+          "eventType": "app_install_failed",
+          "operator": "exists",
+          "value": "",
+          "required": true
+        }
+      ],
+      "confidenceFactors": [
+        {
+          "signal": "download_timeout",
+          "condition": "exists",
+          "weight": 20
+        },
+        {
+          "signal": "multiple_failures",
+          "condition": "count >= 2",
+          "weight": 15
+        },
+        {
+          "signal": "enrollment_failed",
+          "condition": "exists",
+          "weight": 10
+        }
+      ],
+      "confidenceThreshold": 50,
+      "explanation": "A proxy (explicit or PAC-based) is configured on this device and app installations failed. Proxies can block or throttle downloads from *.delivery.mp.microsoft.com and other Intune CDN endpoints.\n\nThis is a common root cause when apps fail consistently on proxy-connected corporate networks.",
+      "remediation": [
+        {
+          "title": "Verify proxy bypass for Intune endpoints",
+          "steps": [
+            "Add *.delivery.mp.microsoft.com to proxy bypass list",
+            "Add *.do.dsp.mp.microsoft.com (Delivery Optimization) to bypass list",
+            "Add login.microsoftonline.com and *.manage.microsoft.com to bypass list",
+            "Verify the PAC file is reachable at enrollment time (before user login)"
+          ]
+        },
+        {
+          "title": "Check proxy authentication",
+          "steps": [
+            "Ensure the proxy does not require user authentication during OOBE/device phase",
+            "Consider using machine certificate-based proxy authentication",
+            "Test with proxy temporarily bypassed to confirm it is the root cause"
+          ]
+        }
+      ],
+      "tags": [
+        "correlation",
+        "apps",
+        "proxy",
+        "network",
+        "download",
+        "root-cause"
+      ]
+    },
+    {
+      "ruleId": "ANALYZE-DEV-001",
+      "title": "Windows Hello Provisioning Timeout",
+      "description": "Detects when Windows Hello for Business provisioning did not start within the expected timeframe after ESP completion.",
+      "severity": "warning",
+      "category": "device",
+      "enabled": true,
+      "baseConfidence": 60,
+      "conditions": [
+        {
+          "signal": "hello_timeout",
+          "source": "event_type",
+          "eventType": "hello_wait_timeout",
+          "operator": "exists",
+          "value": "",
+          "required": true
+        }
+      ],
+      "confidenceFactors": [
+        {
+          "signal": "hello_policy_detected",
+          "condition": "exists",
+          "weight": 30
+        }
+      ],
+      "explanation": "Windows Hello for Business provisioning did not start within the expected time after ESP exit. This may indicate that the Hello policy is not configured, the device doesn't meet prerequisites, or there's a connectivity issue with the Key Registration Service.",
+      "remediation": [
+        {
+          "title": "Verify Windows Hello configuration",
+          "steps": [
+            "Check if Windows Hello for Business is configured in the tenant",
+            "Verify the policy targets the device/user correctly",
+            "Ensure the device has a TPM 2.0 (required for WHfB)",
+            "Check connectivity to the Key Registration Service (enterpriseregistration.windows.net)"
+          ]
+        }
+      ],
+      "tags": [
+        "device",
+        "hello",
+        "timeout"
+      ]
+    },
+    {
+      "ruleId": "ANALYZE-DEV-002",
+      "title": "High Memory Usage During Enrollment",
+      "description": "Detects when memory usage exceeds 90% during enrollment, which can cause app installation failures or system instability.",
+      "severity": "warning",
+      "category": "device",
+      "enabled": true,
+      "baseConfidence": 55,
+      "conditions": [
+        {
+          "signal": "high_memory",
+          "source": "event_type",
+          "eventType": "performance_snapshot",
+          "dataField": "memory_used_percent",
+          "operator": "gt",
+          "value": "90",
+          "required": true
+        }
+      ],
+      "confidenceFactors": [
+        {
+          "signal": "app_failed",
+          "condition": "exists",
+          "weight": 20
+        },
+        {
+          "signal": "enrollment_failed",
+          "condition": "exists",
+          "weight": 15
+        }
+      ],
+      "explanation": "Memory usage exceeded 90% during enrollment. High memory pressure can cause app installation failures, system slowdowns, and ESP timeouts.",
+      "remediation": [
+        {
+          "title": "Reduce memory pressure",
+          "steps": [
+            "Review which apps are being installed concurrently during ESP",
+            "Consider staggering resource-heavy installations",
+            "Check minimum RAM requirements for the device (8 GB recommended)",
+            "Investigate if background services are consuming excessive memory"
+          ]
+        }
+      ],
+      "tags": [
+        "device",
+        "memory",
+        "performance"
+      ]
+    },
+    {
+      "ruleId": "ANALYZE-ENRL-001",
+      "title": "Enrollment Failed",
+      "description": "Detects when the Autopilot enrollment has explicitly failed.",
+      "severity": "critical",
+      "category": "enrollment",
+      "enabled": true,
+      "baseConfidence": 95,
+      "conditions": [
+        {
+          "signal": "enrollment_failed",
+          "source": "event_type",
+          "eventType": "enrollment_failed",
+          "operator": "exists",
+          "value": "",
+          "required": true
+        }
+      ],
+      "confidenceFactors": [
+        {
+          "signal": "app_failed",
+          "condition": "exists",
+          "weight": 5
+        }
+      ],
+      "explanation": "The Autopilot enrollment has explicitly failed. Check the enrollment_failed event details and other rule results for the root cause.",
+      "remediation": [
+        {
+          "title": "Investigate enrollment failure",
+          "steps": [
+            "Check the 'reason' field in the enrollment_failed event for specific failure details",
+            "Review other analyze rule results for correlated issues (disk space, network, app failures)",
+            "Check the device event timeline for the sequence of events leading to failure",
+            "Verify the Autopilot profile and ESP configuration in Intune"
+          ]
+        }
+      ],
+      "tags": [
+        "enrollment",
+        "failed",
+        "critical"
+      ]
+    },
+    {
+      "ruleId": "ANALYZE-ESP-001",
+      "title": "ESP Blocking App Timeout",
+      "description": "Detects when the DeviceSetup phase of the ESP took longer than 30 minutes, indicating a stuck or very slow blocking app.",
+      "severity": "high",
+      "category": "esp",
+      "enabled": true,
+      "baseConfidence": 50,
+      "conditions": [
+        {
+          "signal": "esp_stalled",
+          "source": "phase_duration",
+          "eventType": "esp_phase_changed",
+          "dataField": "espPhase",
+          "operator": "equals",
+          "value": "DeviceSetup",
+          "required": true
+        }
+      ],
+      "confidenceFactors": [
+        {
+          "signal": "long_esp",
+          "condition": "phase_duration > 1800",
+          "weight": 40
+        }
+      ],
+      "confidenceThreshold": 70,
+      "explanation": "The ESP DeviceSetup phase took more than 30 minutes. This indicates a blocking app is stuck installing, downloading very slowly, or has entered a retry loop.",
+      "remediation": [
+        {
+          "title": "Investigate blocking app",
+          "steps": [
+            "Identify which app is blocking (check ESP events)",
+            "Verify app content is downloadable",
+            "Consider reducing the number of blocking apps"
+          ]
+        }
+      ],
+      "tags": [
+        "esp",
+        "blocking",
+        "timeout"
+      ]
+    },
+    {
+      "ruleId": "ANALYZE-ESP-003",
+      "title": "Enrollment Duration Exceeded 60 Minutes",
+      "description": "Detects when the total Autopilot enrollment takes longer than 60 minutes.",
+      "severity": "high",
+      "category": "esp",
+      "enabled": true,
+      "baseConfidence": 50,
+      "conditions": [
+        {
+          "signal": "long_enrollment",
+          "source": "phase_duration",
+          "eventType": "esp_phase_changed",
+          "dataField": "espPhase",
+          "operator": "equals",
+          "value": "DeviceSetup",
+          "required": true
+        }
+      ],
+      "confidenceFactors": [
+        {
+          "signal": "long_esp",
+          "condition": "phase_duration > 3600",
+          "weight": 40
+        }
+      ],
+      "confidenceThreshold": 70,
+      "explanation": "The Autopilot enrollment exceeded 60 minutes. This is unusually long and may indicate stuck apps, slow network, or policy conflicts. The default ESP timeout is 60 minutes, after which the enrollment may be marked as failed.",
+      "remediation": [
+        {
+          "title": "Investigate long enrollment",
+          "steps": [
+            "Check the app installation timeline - identify which app took the longest",
+            "Review download speeds in the performance data",
+            "Consider reducing the number of ESP-blocking apps",
+            "Check if the ESP timeout policy is configured (default: 60 min)"
+          ]
+        }
+      ],
+      "tags": [
+        "esp",
+        "timeout",
+        "duration"
+      ]
+    }
+  ]
+}
