@@ -22,7 +22,6 @@ interface DiagnosticsSectionProps {
   setDiagnosticsBlobSasUrl: (value: string) => void;
   diagnosticsUploadMode: string;
   setDiagnosticsUploadMode: (value: string) => void;
-  diagnosticsSasExpiry: Date | null;
   tenantDiagPaths: DiagnosticsLogPath[];
   setTenantDiagPaths: (value: DiagnosticsLogPath[]) => void;
   globalDiagPaths: DiagnosticsLogPath[];
@@ -37,7 +36,6 @@ export default function DiagnosticsSection({
   setDiagnosticsBlobSasUrl,
   diagnosticsUploadMode,
   setDiagnosticsUploadMode,
-  diagnosticsSasExpiry,
   tenantDiagPaths,
   setTenantDiagPaths,
   globalDiagPaths,
@@ -46,6 +44,9 @@ export default function DiagnosticsSection({
   newDiagDesc,
   setNewDiagDesc,
 }: DiagnosticsSectionProps) {
+  // Compute SAS expiry directly from the current URL value so feedback is instant
+  const diagnosticsSasExpiry = parseSasExpiry(diagnosticsBlobSasUrl);
+
   return (
     <div id="diagnostics" className="bg-white rounded-lg shadow">
       <div className="p-6 border-b border-gray-200 bg-gradient-to-r from-amber-50 to-orange-50">

@@ -121,7 +121,7 @@ export default function SettingsPage() {
   // Diagnostics package state
   const [diagnosticsBlobSasUrl, setDiagnosticsBlobSasUrl] = useState("");
   const [diagnosticsUploadMode, setDiagnosticsUploadMode] = useState("Off");
-  const [diagnosticsSasExpiry, setDiagnosticsSasExpiry] = useState<Date | null>(null);
+
   const [tenantDiagPaths, setTenantDiagPaths] = useState<DiagnosticsLogPath[]>([]);
   const [globalDiagPaths, setGlobalDiagPaths] = useState<DiagnosticsLogPath[]>([]);
   const [newDiagPath, setNewDiagPath] = useState("");
@@ -222,7 +222,6 @@ export default function SettingsPage() {
         // Parse SAS expiry and fire notification to bell if needed
         if (sasUrl) {
           const expiry = parseSasExpiry(sasUrl);
-          setDiagnosticsSasExpiry(expiry);
           if (expiry) {
             const now = new Date();
             const daysRemaining = Math.ceil((expiry.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
@@ -889,7 +888,7 @@ export default function SettingsPage() {
               setDiagnosticsBlobSasUrl={setDiagnosticsBlobSasUrl}
               diagnosticsUploadMode={diagnosticsUploadMode}
               setDiagnosticsUploadMode={setDiagnosticsUploadMode}
-              diagnosticsSasExpiry={diagnosticsSasExpiry}
+
               tenantDiagPaths={tenantDiagPaths}
               setTenantDiagPaths={setTenantDiagPaths}
               globalDiagPaths={globalDiagPaths}
