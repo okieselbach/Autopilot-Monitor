@@ -6,7 +6,10 @@ namespace AutopilotMonitor.Functions.Services
 {
     /// <summary>
     /// Service for managing gather rules (what data the agent should collect)
-    /// Merges global built-in rules with tenant-specific overrides
+    /// Merges global built-in/community rules with tenant-specific custom rules.
+    /// Enabled/disabled state for built-in and community rules is stored separately
+    /// in the RuleStates table, so rule definitions can be updated centrally without
+    /// losing per-tenant enabled/disabled preferences.
     /// </summary>
     public class GatherRuleService
     {
@@ -21,48 +24,12 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
-        /// Gets all active gather rules for a tenant
-        /// Merges global built-in rules with tenant-specific overrides/custom rules
+        /// Gets all active gather rules for a tenant (enabled only)
         /// </summary>
         public async Task<List<GatherRule>> GetActiveRulesForTenantAsync(string tenantId)
         {
-            await EnsureBuiltInRulesSeededAsync();
-
-            // Get global built-in rules
-            var globalRules = await _storageService.GetGatherRulesAsync("global");
-
-            // Get tenant-specific rules (overrides + custom)
-            var tenantRules = await _storageService.GetGatherRulesAsync(tenantId);
-
-            // Create lookup of tenant overrides by RuleId
-            var tenantOverrides = tenantRules.ToDictionary(r => r.RuleId, r => r);
-
-            var mergedRules = new List<GatherRule>();
-
-            // Merge: tenant override takes precedence over global
-            foreach (var globalRule in globalRules)
-            {
-                if (tenantOverrides.TryGetValue(globalRule.RuleId, out var tenantOverride))
-                {
-                    // Tenant has an override for this rule (e.g., disabled it)
-                    mergedRules.Add(tenantOverride);
-                    tenantOverrides.Remove(globalRule.RuleId);
-                }
-                else
-                {
-                    // Use global rule as-is
-                    mergedRules.Add(globalRule);
-                }
-            }
-
-            // Add remaining tenant-specific custom rules
-            foreach (var customRule in tenantOverrides.Values)
-            {
-                mergedRules.Add(customRule);
-            }
-
-            // Return only enabled rules
-            return mergedRules.Where(r => r.Enabled).ToList();
+            var rules = await GetAllRulesForTenantAsync(tenantId);
+            return rules.Where(r => r.Enabled).ToList();
         }
 
         /// <summary>
@@ -72,29 +39,28 @@ namespace AutopilotMonitor.Functions.Services
         {
             await EnsureBuiltInRulesSeededAsync();
 
+            // Global rules: built-in + community (single source of truth for definitions)
             var globalRules = await _storageService.GetGatherRulesAsync("global");
+
+            // Tenant rules: only custom rules (IsBuiltIn=false, IsCommunity=false)
             var tenantRules = await _storageService.GetGatherRulesAsync(tenantId);
-            var tenantOverrides = tenantRules.ToDictionary(r => r.RuleId, r => r);
+            var customRules = tenantRules.Where(r => !r.IsBuiltIn && !r.IsCommunity).ToList();
+
+            // Per-tenant enabled/disabled states for global rules
+            var ruleStates = await _storageService.GetRuleStatesAsync(tenantId);
 
             var mergedRules = new List<GatherRule>();
 
-            foreach (var globalRule in globalRules)
+            // Apply tenant state overrides to global rules
+            foreach (var rule in globalRules)
             {
-                if (tenantOverrides.TryGetValue(globalRule.RuleId, out var tenantOverride))
-                {
-                    mergedRules.Add(tenantOverride);
-                    tenantOverrides.Remove(globalRule.RuleId);
-                }
-                else
-                {
-                    mergedRules.Add(globalRule);
-                }
+                if (ruleStates.TryGetValue(rule.RuleId, out var enabled))
+                    rule.Enabled = enabled;
+                mergedRules.Add(rule);
             }
 
-            foreach (var customRule in tenantOverrides.Values)
-            {
-                mergedRules.Add(customRule);
-            }
+            // Add tenant-specific custom rules
+            mergedRules.AddRange(customRules);
 
             return mergedRules;
         }
@@ -105,61 +71,54 @@ namespace AutopilotMonitor.Functions.Services
         public async Task<bool> CreateRuleAsync(string tenantId, GatherRule rule)
         {
             rule.IsBuiltIn = false;
+            rule.IsCommunity = false;
             rule.CreatedAt = DateTime.UtcNow;
             rule.UpdatedAt = DateTime.UtcNow;
             return await _storageService.StoreGatherRuleAsync(rule, tenantId);
         }
 
         /// <summary>
-        /// Updates a gather rule (enable/disable or modify)
-        /// For built-in rules, creates a tenant override
+        /// Updates a gather rule.
+        /// For built-in/community rules: only the enabled/disabled state is stored (per tenant).
+        /// For custom rules: the full rule is updated in the tenant partition.
         /// </summary>
         public async Task<bool> UpdateRuleAsync(string tenantId, GatherRule rule)
         {
+            if (rule.IsBuiltIn || rule.IsCommunity)
+            {
+                return await _storageService.StoreRuleStateAsync(tenantId, rule.RuleId, rule.Enabled);
+            }
+
             rule.UpdatedAt = DateTime.UtcNow;
             return await _storageService.StoreGatherRuleAsync(rule, tenantId);
         }
 
         /// <summary>
-        /// Updates a built-in gather rule globally (Galactic Admin only)
-        /// Modifies the global definition that all tenants inherit
+        /// Deletes a gather rule.
+        /// For built-in/community rules: removes the tenant's state override (resets to rule default).
+        /// For custom rules: deletes the rule from the tenant partition.
         /// </summary>
-        public async Task<bool> UpdateGlobalRuleAsync(GatherRule rule)
+        public async Task<bool> DeleteRuleAsync(string tenantId, GatherRule rule)
         {
-            rule.UpdatedAt = DateTime.UtcNow;
-            rule.IsBuiltIn = true;
-            return await _storageService.StoreGatherRuleAsync(rule, "global");
-        }
+            if (rule.IsBuiltIn || rule.IsCommunity)
+            {
+                return await _storageService.DeleteRuleStateAsync(tenantId, rule.RuleId);
+            }
 
-        /// <summary>
-        /// Deletes a custom gather rule (cannot delete built-in rules)
-        /// </summary>
-        public async Task<bool> DeleteRuleAsync(string tenantId, string ruleId)
-        {
-            return await _storageService.DeleteGatherRuleAsync(tenantId, ruleId);
-        }
-
-        /// <summary>
-        /// Deletes a built-in gather rule from the global partition (Galactic Admin only).
-        /// </summary>
-        public async Task<bool> DeleteGlobalRuleAsync(string ruleId)
-        {
-            _seeded = false;
-            return await _storageService.DeleteGatherRuleAsync("global", ruleId);
+            return await _storageService.DeleteGatherRuleAsync(tenantId, rule.RuleId);
         }
 
         /// <summary>
         /// Re-imports all built-in gather rules into the global partition.
         /// Deletes old global built-in rules and writes current code definitions.
+        /// Tenant RuleStates are preserved.
         /// </summary>
         public async Task<(int deleted, int written)> ReseedBuiltInRulesAsync()
         {
             _logger.LogInformation("Reseeding built-in gather rules (full re-import)...");
 
-            // 1. Get existing global rules
             var existingGlobalRules = await _storageService.GetGatherRulesAsync("global");
 
-            // 2. Delete all existing global built-in rules
             var deleted = 0;
             foreach (var rule in existingGlobalRules.Where(r => r.IsBuiltIn))
             {
@@ -168,7 +127,6 @@ namespace AutopilotMonitor.Functions.Services
             }
             _logger.LogInformation($"Deleted {deleted} old global built-in gather rules");
 
-            // 3. Write current code definitions
             var builtInRules = BuiltInGatherRules.GetAll();
             foreach (var rule in builtInRules)
             {
@@ -176,7 +134,6 @@ namespace AutopilotMonitor.Functions.Services
             }
             _logger.LogInformation($"Written {builtInRules.Count} built-in gather rules from code");
 
-            // Reset seed flag so next request picks up fresh data
             _seeded = false;
 
             return (deleted, builtInRules.Count);
@@ -184,7 +141,7 @@ namespace AutopilotMonitor.Functions.Services
 
         /// <summary>
         /// Seeds built-in gather rules if not already done.
-        /// Also updates existing built-in rules when the code definitions change.
+        /// Also updates existing built-in rules when the code definitions change (version or key fields).
         /// </summary>
         private async Task EnsureBuiltInRulesSeededAsync()
         {
@@ -204,7 +161,6 @@ namespace AutopilotMonitor.Functions.Services
             }
             else
             {
-                // Update existing built-in rules to pick up code changes (e.g. fixed Target values)
                 var existingLookup = existingRules.ToDictionary(r => r.RuleId, r => r);
                 var updated = 0;
 
@@ -212,8 +168,13 @@ namespace AutopilotMonitor.Functions.Services
                 {
                     if (existingLookup.TryGetValue(rule.RuleId, out var existing))
                     {
-                        if (existing.Target != rule.Target || existing.Description != rule.Description
-                            || existing.Title != rule.Title || existing.CollectorType != rule.CollectorType)
+                        if (existing.Version != rule.Version
+                            || existing.Target != rule.Target
+                            || existing.Description != rule.Description
+                            || existing.Title != rule.Title
+                            || existing.CollectorType != rule.CollectorType
+                            || existing.Trigger != rule.Trigger
+                            || existing.TriggerPhase != rule.TriggerPhase)
                         {
                             await _storageService.StoreGatherRuleAsync(rule, "global");
                             updated++;

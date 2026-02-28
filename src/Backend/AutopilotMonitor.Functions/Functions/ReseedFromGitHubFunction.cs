@@ -132,7 +132,7 @@ namespace AutopilotMonitor.Functions.Functions
         {
             var existing = await _storageService.GetGatherRulesAsync("global");
             var deleted = 0;
-            foreach (var rule in existing.Where(r => r.IsBuiltIn))
+            foreach (var rule in existing.Where(r => r.IsBuiltIn || r.IsCommunity))
             {
                 await _storageService.DeleteGatherRuleAsync("global", rule.RuleId);
                 deleted++;
@@ -140,7 +140,9 @@ namespace AutopilotMonitor.Functions.Functions
 
             foreach (var rule in rules)
             {
-                rule.IsBuiltIn = true;
+                // Community rules keep IsCommunity=true from JSON; all others are built-in
+                if (!rule.IsCommunity)
+                    rule.IsBuiltIn = true;
                 rule.CreatedAt = DateTime.UtcNow;
                 rule.UpdatedAt = DateTime.UtcNow;
                 await _storageService.StoreGatherRuleAsync(rule, "global");
@@ -154,7 +156,7 @@ namespace AutopilotMonitor.Functions.Functions
         {
             var existing = await _storageService.GetAnalyzeRulesAsync("global");
             var deleted = 0;
-            foreach (var rule in existing.Where(r => r.IsBuiltIn))
+            foreach (var rule in existing.Where(r => r.IsBuiltIn || r.IsCommunity))
             {
                 await _storageService.DeleteAnalyzeRuleAsync("global", rule.RuleId);
                 deleted++;
@@ -162,7 +164,9 @@ namespace AutopilotMonitor.Functions.Functions
 
             foreach (var rule in rules)
             {
-                rule.IsBuiltIn = true;
+                // Community rules keep IsCommunity=true from JSON; all others are built-in
+                if (!rule.IsCommunity)
+                    rule.IsBuiltIn = true;
                 rule.CreatedAt = DateTime.UtcNow;
                 rule.UpdatedAt = DateTime.UtcNow;
                 await _storageService.StoreAnalyzeRuleAsync(rule, "global");

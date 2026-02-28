@@ -195,7 +195,6 @@ export default function AnalyzeRulesPage() {
   const router = useRouter();
   const { tenantId } = useTenant();
   const { getAccessToken, user } = useAuth();
-  const isGalacticAdmin = user?.isGalacticAdmin ?? false;
 
   const [rules, setRules] = useState<AnalyzeRule[]>([]);
   const [loading, setLoading] = useState(true);
@@ -329,8 +328,7 @@ export default function AnalyzeRulesPage() {
         throw new Error("Failed to get access token");
       }
 
-      const isGlobalDelete = rule.isBuiltIn && isGalacticAdmin;
-      const url = `${API_BASE_URL}/api/rules/analyze/${encodeURIComponent(rule.ruleId)}${isGlobalDelete ? "?global=true" : ""}`;
+      const url = `${API_BASE_URL}/api/rules/analyze/${encodeURIComponent(rule.ruleId)}`;
       const response = await fetch(url, {
         method: "DELETE",
         headers: {
@@ -435,8 +433,6 @@ export default function AnalyzeRulesPage() {
         throw new Error("Failed to get access token");
       }
 
-      const isGlobalEdit = rule.isBuiltIn && isGalacticAdmin;
-
       const payload = {
         ...rule,
         title: form.title.trim(),
@@ -451,12 +447,10 @@ export default function AnalyzeRulesPage() {
         confidenceFactors: form.confidenceFactors.filter(f => f.signal.trim()),
         remediation: form.remediation.filter(r => r.title.trim()),
         relatedDocs: form.relatedDocs.filter(d => d.title.trim() && d.url.trim()),
-        // Galactic admin editing a global rule: preserve "Autopilot Monitor" as author but still bump version.
-        // All other edits: set author to the logged-in user.
-        author: isGlobalEdit ? rule.author : (user?.displayName || user?.upn || rule.author),
+        author: user?.displayName || user?.upn || rule.author,
         version: bumpVersion(rule.version),
       };
-      const url = `${API_BASE_URL}/api/rules/analyze/${encodeURIComponent(rule.ruleId)}${isGlobalEdit ? "?global=true" : ""}`;
+      const url = `${API_BASE_URL}/api/rules/analyze/${encodeURIComponent(rule.ruleId)}`;
 
       const response = await fetch(url, {
         method: "PUT",
@@ -473,7 +467,7 @@ export default function AnalyzeRulesPage() {
       }
 
       setEditingRuleId(null);
-      showSuccess(`Rule "${editForm.title}" updated successfully${isGlobalEdit ? " (global)" : ""}!`);
+      showSuccess(`Rule "${editForm.title}" updated successfully!`);
       await fetchRules();
     } catch (err) {
       console.error("Error saving rule:", err);
@@ -498,8 +492,9 @@ export default function AnalyzeRulesPage() {
 
     const matchesType =
       typeFilter === "all" ||
-      (typeFilter === "builtin" && rule.isBuiltIn) ||
-      (typeFilter === "custom" && !rule.isBuiltIn);
+      (typeFilter === "builtin" && rule.isBuiltIn && !rule.isCommunity) ||
+      (typeFilter === "community" && rule.isCommunity) ||
+      (typeFilter === "custom" && !rule.isBuiltIn && !rule.isCommunity);
 
     return matchesSearch && matchesSeverity && matchesCategory && matchesType;
   });
@@ -869,6 +864,7 @@ export default function AnalyzeRulesPage() {
                     <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
                       <option value="all">All Types</option>
                       <option value="builtin">Built-in</option>
+                      <option value="community">Community</option>
                       <option value="custom">Custom</option>
                     </select>
                   </div>
@@ -974,7 +970,7 @@ export default function AnalyzeRulesPage() {
                     const isEditing = editingRuleId === rule.ruleId;
                     const sevColor = getSeverityColor(rule.severity);
                     const catColor = getCategoryColor(rule.category);
-                    const canEdit = isGalacticAdmin || !rule.isBuiltIn;
+                    const canEdit = !rule.isBuiltIn && !rule.isCommunity;
 
                     return (
                       <div
@@ -1125,14 +1121,14 @@ export default function AnalyzeRulesPage() {
                                 <span>Export</span>
                               </button>
                               {canEdit && (
-                                <button onClick={() => startEditing(rule)} className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center space-x-2" title={rule.isBuiltIn ? "Edit global rule (Galactic Admin)" : "Edit rule"}>
+                                <button onClick={() => startEditing(rule)} className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center space-x-2" title="Edit rule">
                                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                                  <span>{rule.isBuiltIn ? "Edit (Global)" : "Edit"}</span>
+                                  <span>Edit</span>
                                 </button>
                               )}
-                              {(!rule.isBuiltIn || isGalacticAdmin) && (
-                                <button onClick={() => handleDeleteRule(rule)} disabled={deletingRuleId === rule.ruleId} className="px-4 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-2" title={rule.isBuiltIn ? "Delete global rule (Galactic Admin)" : "Delete rule"}>
-                                  {deletingRuleId === rule.ruleId ? (<><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div><span>Deleting...</span></>) : (<><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg><span>{rule.isBuiltIn ? "Delete (Global)" : "Delete"}</span></>)}
+                              {!rule.isBuiltIn && !rule.isCommunity && (
+                                <button onClick={() => handleDeleteRule(rule)} disabled={deletingRuleId === rule.ruleId} className="px-4 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-2" title="Delete rule">
+                                  {deletingRuleId === rule.ruleId ? (<><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div><span>Deleting...</span></>) : (<><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg><span>Delete</span></>)}
                                 </button>
                               )}
                             </div>
@@ -1147,9 +1143,6 @@ export default function AnalyzeRulesPage() {
                                 <svg className="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                                 <h4 className="text-sm font-semibold text-gray-900">
                                   Editing: {rule.ruleId}
-                                  {rule.isBuiltIn && isGalacticAdmin && (
-                                    <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700 border border-amber-200">Global Edit</span>
-                                  )}
                                 </h4>
                               </div>
                               {/* JSON Mode Toggle */}
@@ -1159,11 +1152,7 @@ export default function AnalyzeRulesPage() {
                               </div>
                             </div>
 
-                            {rule.isBuiltIn && isGalacticAdmin && (
-                              <div className="mb-4 bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800">
-                                <strong>Galactic Admin:</strong> Changes will apply globally to all tenants that haven&apos;t overridden this rule.
-                              </div>
-                            )}
+
 
                             {jsonModeEdit ? (
                               <div className="space-y-3">

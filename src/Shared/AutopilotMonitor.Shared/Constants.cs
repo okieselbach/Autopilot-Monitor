@@ -144,6 +144,7 @@ namespace AutopilotMonitor.Shared
             public const string GatherRules    = "GatherRules";
             public const string AnalyzeRules   = "AnalyzeRules";
             public const string ImeLogPatterns = "ImeLogPatterns";
+            public const string RuleStates     = "RuleStates";
 
             // App metrics tables
             public const string AppInstallSummaries = "AppInstallSummaries";
@@ -178,6 +179,7 @@ namespace AutopilotMonitor.Shared
                 GatherRules,
                 AnalyzeRules,
                 ImeLogPatterns,
+                RuleStates,
                 AppInstallSummaries,
                 PlatformStats,
                 TenantConfiguration,

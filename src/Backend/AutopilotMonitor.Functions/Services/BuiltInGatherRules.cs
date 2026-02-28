@@ -24,7 +24,9 @@ namespace AutopilotMonitor.Functions.Services
 
             foreach (var rule in rules)
             {
-                rule.IsBuiltIn = true;
+                // Community rules keep IsCommunity=true from JSON; all others are built-in
+                if (!rule.IsCommunity)
+                    rule.IsBuiltIn = true;
             }
 
             return rules;

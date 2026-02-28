@@ -5,7 +5,10 @@ namespace AutopilotMonitor.Functions.Services
 {
     /// <summary>
     /// Service for managing analyze rules (how to interpret collected events)
-    /// Merges global built-in rules with tenant-specific overrides
+    /// Merges global built-in/community rules with tenant-specific custom rules.
+    /// Enabled/disabled state for built-in and community rules is stored separately
+    /// in the RuleStates table, so rule definitions can be updated centrally without
+    /// losing per-tenant enabled/disabled preferences.
     /// </summary>
     public class AnalyzeRuleService
     {
@@ -20,38 +23,12 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
-        /// Gets all active analyze rules for a tenant
-        /// Merges global built-in rules with tenant-specific overrides/custom rules
+        /// Gets all active analyze rules for a tenant (enabled only)
         /// </summary>
         public async Task<List<AnalyzeRule>> GetActiveRulesForTenantAsync(string tenantId)
         {
-            await EnsureBuiltInRulesSeededAsync();
-
-            var globalRules = await _storageService.GetAnalyzeRulesAsync("global");
-            var tenantRules = await _storageService.GetAnalyzeRulesAsync(tenantId);
-            var tenantOverrides = tenantRules.ToDictionary(r => r.RuleId, r => r);
-
-            var mergedRules = new List<AnalyzeRule>();
-
-            foreach (var globalRule in globalRules)
-            {
-                if (tenantOverrides.TryGetValue(globalRule.RuleId, out var tenantOverride))
-                {
-                    mergedRules.Add(tenantOverride);
-                    tenantOverrides.Remove(globalRule.RuleId);
-                }
-                else
-                {
-                    mergedRules.Add(globalRule);
-                }
-            }
-
-            foreach (var customRule in tenantOverrides.Values)
-            {
-                mergedRules.Add(customRule);
-            }
-
-            return mergedRules.Where(r => r.Enabled).ToList();
+            var rules = await GetAllRulesForTenantAsync(tenantId);
+            return rules.Where(r => r.Enabled).ToList();
         }
 
         /// <summary>
@@ -61,29 +38,28 @@ namespace AutopilotMonitor.Functions.Services
         {
             await EnsureBuiltInRulesSeededAsync();
 
+            // Global rules: built-in + community (single source of truth for definitions)
             var globalRules = await _storageService.GetAnalyzeRulesAsync("global");
+
+            // Tenant rules: only custom rules (IsBuiltIn=false, IsCommunity=false)
             var tenantRules = await _storageService.GetAnalyzeRulesAsync(tenantId);
-            var tenantOverrides = tenantRules.ToDictionary(r => r.RuleId, r => r);
+            var customRules = tenantRules.Where(r => !r.IsBuiltIn && !r.IsCommunity).ToList();
+
+            // Per-tenant enabled/disabled states for global rules
+            var ruleStates = await _storageService.GetRuleStatesAsync(tenantId);
 
             var mergedRules = new List<AnalyzeRule>();
 
-            foreach (var globalRule in globalRules)
+            // Apply tenant state overrides to global rules
+            foreach (var rule in globalRules)
             {
-                if (tenantOverrides.TryGetValue(globalRule.RuleId, out var tenantOverride))
-                {
-                    mergedRules.Add(tenantOverride);
-                    tenantOverrides.Remove(globalRule.RuleId);
-                }
-                else
-                {
-                    mergedRules.Add(globalRule);
-                }
+                if (ruleStates.TryGetValue(rule.RuleId, out var enabled))
+                    rule.Enabled = enabled;
+                mergedRules.Add(rule);
             }
 
-            foreach (var customRule in tenantOverrides.Values)
-            {
-                mergedRules.Add(customRule);
-            }
+            // Add tenant-specific custom rules
+            mergedRules.AddRange(customRules);
 
             return mergedRules;
         }
@@ -94,70 +70,62 @@ namespace AutopilotMonitor.Functions.Services
         public async Task<bool> CreateRuleAsync(string tenantId, AnalyzeRule rule)
         {
             rule.IsBuiltIn = false;
+            rule.IsCommunity = false;
             rule.CreatedAt = DateTime.UtcNow;
             rule.UpdatedAt = DateTime.UtcNow;
             return await _storageService.StoreAnalyzeRuleAsync(rule, tenantId);
         }
 
         /// <summary>
-        /// Updates an analyze rule (enable/disable or modify)
-        /// For built-in rules, creates a tenant override
+        /// Updates an analyze rule.
+        /// For built-in/community rules: only the enabled/disabled state is stored (per tenant).
+        /// For custom rules: the full rule is updated in the tenant partition.
         /// </summary>
         public async Task<bool> UpdateRuleAsync(string tenantId, AnalyzeRule rule)
         {
+            if (rule.IsBuiltIn || rule.IsCommunity)
+            {
+                return await _storageService.StoreRuleStateAsync(tenantId, rule.RuleId, rule.Enabled);
+            }
+
             rule.UpdatedAt = DateTime.UtcNow;
             return await _storageService.StoreAnalyzeRuleAsync(rule, tenantId);
         }
 
         /// <summary>
-        /// Updates a built-in analyze rule globally (Galactic Admin only)
-        /// Modifies the global definition that all tenants inherit
+        /// Deletes an analyze rule.
+        /// For built-in/community rules: removes the tenant's state override (resets to rule default).
+        /// For custom rules: deletes the rule from the tenant partition.
         /// </summary>
-        public async Task<bool> UpdateGlobalRuleAsync(AnalyzeRule rule)
+        public async Task<bool> DeleteRuleAsync(string tenantId, AnalyzeRule rule)
         {
-            rule.UpdatedAt = DateTime.UtcNow;
-            rule.IsBuiltIn = true;
-            return await _storageService.StoreAnalyzeRuleAsync(rule, "global");
-        }
+            if (rule.IsBuiltIn || rule.IsCommunity)
+            {
+                return await _storageService.DeleteRuleStateAsync(tenantId, rule.RuleId);
+            }
 
-        /// <summary>
-        /// Deletes a custom analyze rule for a tenant
-        /// </summary>
-        public async Task<bool> DeleteRuleAsync(string tenantId, string ruleId)
-        {
-            return await _storageService.DeleteAnalyzeRuleAsync(tenantId, ruleId);
-        }
-
-        /// <summary>
-        /// Deletes a global built-in analyze rule (Galactic Admin only)
-        /// </summary>
-        public async Task<bool> DeleteGlobalRuleAsync(string ruleId)
-        {
-            _logger.LogInformation($"Deleting global analyze rule: {ruleId}");
-            return await _storageService.DeleteAnalyzeRuleAsync("global", ruleId);
+            return await _storageService.DeleteAnalyzeRuleAsync(tenantId, rule.RuleId);
         }
 
         /// <summary>
         /// Re-imports all built-in analyze rules into the global partition.
         /// Deletes old global built-in rules and writes current code definitions.
+        /// Tenant RuleStates are preserved.
         /// </summary>
         public async Task<(int deleted, int written)> ReseedBuiltInRulesAsync()
         {
             _logger.LogInformation("Reseeding built-in analyze rules (full re-import)...");
 
-            // 1. Get existing global rules
             var existingGlobalRules = await _storageService.GetAnalyzeRulesAsync("global");
 
-            // 2. Delete all existing global built-in rules
             var deleted = 0;
             foreach (var rule in existingGlobalRules.Where(r => r.IsBuiltIn))
             {
                 await _storageService.DeleteAnalyzeRuleAsync("global", rule.RuleId);
                 deleted++;
             }
-            _logger.LogInformation($"Deleted {deleted} old global built-in rules");
+            _logger.LogInformation($"Deleted {deleted} old global built-in analyze rules");
 
-            // 3. Write current code definitions
             var builtInRules = BuiltInAnalyzeRules.GetAll();
             foreach (var rule in builtInRules)
             {
@@ -165,7 +133,6 @@ namespace AutopilotMonitor.Functions.Services
             }
             _logger.LogInformation($"Written {builtInRules.Count} built-in analyze rules from code");
 
-            // Reset seed flag so next request picks up fresh data
             _seeded = false;
 
             return (deleted, builtInRules.Count);
@@ -173,7 +140,7 @@ namespace AutopilotMonitor.Functions.Services
 
         /// <summary>
         /// Seeds built-in analyze rules if not already done.
-        /// Also updates existing built-in rules when code definitions change.
+        /// Also updates existing built-in rules when the code definitions change (version or key fields).
         /// </summary>
         private async Task EnsureBuiltInRulesSeededAsync()
         {
@@ -193,7 +160,6 @@ namespace AutopilotMonitor.Functions.Services
             }
             else
             {
-                // Update existing built-in rules to pick up code changes and add new rules
                 var existingLookup = existingRules.ToDictionary(r => r.RuleId, r => r);
                 var updated = 0;
 
@@ -201,9 +167,11 @@ namespace AutopilotMonitor.Functions.Services
                 {
                     if (existingLookup.TryGetValue(rule.RuleId, out var existing))
                     {
-                        if (existing.Title != rule.Title || existing.Description != rule.Description
-                            || existing.Severity != rule.Severity || existing.Trigger != rule.Trigger
-                            || existing.Enabled != rule.Enabled)
+                        if (existing.Version != rule.Version
+                            || existing.Title != rule.Title
+                            || existing.Description != rule.Description
+                            || existing.Severity != rule.Severity
+                            || existing.Trigger != rule.Trigger)
                         {
                             await _storageService.StoreAnalyzeRuleAsync(rule, "global");
                             updated++;
@@ -211,7 +179,7 @@ namespace AutopilotMonitor.Functions.Services
                     }
                     else
                     {
-                        // New built-in rule added in code (e.g. correlation rules)
+                        // New built-in rule added in code
                         await _storageService.StoreAnalyzeRuleAsync(rule, "global");
                         updated++;
                     }

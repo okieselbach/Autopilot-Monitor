@@ -1341,6 +1341,7 @@ namespace AutopilotMonitor.Functions.Services
                     ["Author"] = rule.Author ?? "Autopilot Monitor",
                     ["Enabled"] = rule.Enabled,
                     ["IsBuiltIn"] = rule.IsBuiltIn,
+                    ["IsCommunity"] = rule.IsCommunity,
                     ["CollectorType"] = rule.CollectorType ?? string.Empty,
                     ["Target"] = rule.Target ?? string.Empty,
                     ["ParametersJson"] = JsonConvert.SerializeObject(rule.Parameters ?? new Dictionary<string, string>()),
@@ -1412,6 +1413,84 @@ namespace AutopilotMonitor.Functions.Services
             }
         }
 
+        // ===== RULE STATES METHODS =====
+
+        /// <summary>
+        /// Stores or updates the enabled/disabled state for a built-in or community rule per tenant
+        /// PartitionKey: TenantId, RowKey: RuleId
+        /// </summary>
+        public async Task<bool> StoreRuleStateAsync(string tenantId, string ruleId, bool enabled)
+        {
+            SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
+
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.RuleStates);
+
+                var entity = new TableEntity(tenantId, ruleId)
+                {
+                    ["Enabled"] = enabled,
+                    ["UpdatedAt"] = DateTime.UtcNow
+                };
+
+                await tableClient.UpsertEntityAsync(entity);
+                _logger.LogDebug($"Stored rule state {ruleId} for {tenantId}: enabled={enabled}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to store rule state {ruleId} for {tenantId}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Gets all rule states for a tenant as a dictionary of ruleId → enabled
+        /// </summary>
+        public async Task<Dictionary<string, bool>> GetRuleStatesAsync(string tenantId)
+        {
+            SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
+
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.RuleStates);
+                var query = tableClient.QueryAsync<TableEntity>(filter: $"PartitionKey eq '{tenantId}'");
+
+                var states = new Dictionary<string, bool>();
+                await foreach (var entity in query)
+                {
+                    states[entity.RowKey] = entity.GetBoolean("Enabled") ?? true;
+                }
+
+                return states;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to get rule states for {tenantId}");
+                return new Dictionary<string, bool>();
+            }
+        }
+
+        /// <summary>
+        /// Deletes the rule state for a tenant (resets to rule's default enabled state)
+        /// </summary>
+        public async Task<bool> DeleteRuleStateAsync(string tenantId, string ruleId)
+        {
+            SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
+
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.RuleStates);
+                await tableClient.DeleteEntityAsync(tenantId, ruleId);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to delete rule state {ruleId} for {tenantId}");
+                return false;
+            }
+        }
+
         private GatherRule MapToGatherRule(TableEntity entity)
         {
             return new GatherRule
@@ -1424,6 +1503,7 @@ namespace AutopilotMonitor.Functions.Services
                 Author = entity.GetString("Author") ?? "Autopilot Monitor",
                 Enabled = entity.GetBoolean("Enabled") ?? true,
                 IsBuiltIn = entity.GetBoolean("IsBuiltIn") ?? false,
+                IsCommunity = entity.GetBoolean("IsCommunity") ?? false,
                 CollectorType = entity.GetString("CollectorType") ?? string.Empty,
                 Target = entity.GetString("Target") ?? string.Empty,
                 Parameters = DeserializeJson<Dictionary<string, string>>(entity.GetString("ParametersJson")),
@@ -1461,6 +1541,8 @@ namespace AutopilotMonitor.Functions.Services
                     ["Author"] = rule.Author ?? "Autopilot Monitor",
                     ["Enabled"] = rule.Enabled,
                     ["IsBuiltIn"] = rule.IsBuiltIn,
+                    ["IsCommunity"] = rule.IsCommunity,
+                    ["Trigger"] = rule.Trigger ?? "single",
                     ["ConditionsJson"] = JsonConvert.SerializeObject(rule.Conditions ?? new List<RuleCondition>()),
                     ["BaseConfidence"] = rule.BaseConfidence,
                     ["ConfidenceFactorsJson"] = JsonConvert.SerializeObject(rule.ConfidenceFactors ?? new List<ConfidenceFactor>()),
@@ -1543,6 +1625,8 @@ namespace AutopilotMonitor.Functions.Services
                 Author = entity.GetString("Author") ?? "Autopilot Monitor",
                 Enabled = entity.GetBoolean("Enabled") ?? true,
                 IsBuiltIn = entity.GetBoolean("IsBuiltIn") ?? false,
+                IsCommunity = entity.GetBoolean("IsCommunity") ?? false,
+                Trigger = entity.GetString("Trigger") ?? "single",
                 Conditions = DeserializeJson<List<RuleCondition>>(entity.GetString("ConditionsJson")),
                 BaseConfidence = entity.GetInt32("BaseConfidence") ?? 50,
                 ConfidenceFactors = DeserializeJson<List<ConfidenceFactor>>(entity.GetString("ConfidenceFactorsJson")),

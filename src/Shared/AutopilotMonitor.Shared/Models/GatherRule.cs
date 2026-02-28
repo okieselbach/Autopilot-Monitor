@@ -51,6 +51,13 @@ namespace AutopilotMonitor.Shared.Models
         /// </summary>
         public bool IsBuiltIn { get; set; } = true;
 
+        /// <summary>
+        /// Whether this is a community-contributed rule
+        /// Community rules behave like built-in rules (read-only, state stored separately)
+        /// but are displayed with a distinct "Community" badge in the portal
+        /// </summary>
+        public bool IsCommunity { get; set; } = false;
+
         // ===== WHAT TO COLLECT =====
 
         /// <summary>

@@ -151,7 +151,6 @@ export default function GatherRulesPage() {
   const router = useRouter();
   const { tenantId } = useTenant();
   const { getAccessToken, user } = useAuth();
-  const isGalacticAdmin = user?.isGalacticAdmin ?? false;
 
   const [rules, setRules] = useState<GatherRule[]>([]);
   const [loading, setLoading] = useState(true);
@@ -272,13 +271,9 @@ export default function GatherRulesPage() {
     }
   };
 
-  // Delete rule (custom rules for tenants, built-in global rules for Galactic Admins)
+  // Delete rule (custom rules only)
   const handleDeleteRule = async (rule: GatherRule) => {
-    const isGlobal = rule.isBuiltIn && isGalacticAdmin;
-    const confirmMsg = isGlobal
-      ? `Are you sure you want to delete the global built-in rule "${rule.title}"? This removes it for ALL tenants and cannot be undone.`
-      : `Are you sure you want to delete the rule "${rule.title}"? This action cannot be undone.`;
-    if (!confirm(confirmMsg)) {
+    if (!confirm(`Are you sure you want to delete the rule "${rule.title}"? This action cannot be undone.`)) {
       return;
     }
 
@@ -291,7 +286,7 @@ export default function GatherRulesPage() {
         throw new Error("Failed to get access token");
       }
 
-      const url = `${API_BASE_URL}/api/rules/gather/${encodeURIComponent(rule.ruleId)}${isGlobal ? "?global=true" : ""}`;
+      const url = `${API_BASE_URL}/api/rules/gather/${encodeURIComponent(rule.ruleId)}`;
       const response = await fetch(url, {
         method: "DELETE",
         headers: {
@@ -306,7 +301,7 @@ export default function GatherRulesPage() {
 
       setRules((prev) => prev.filter((r) => r.ruleId !== rule.ruleId));
       if (expandedRuleId === rule.ruleId) setExpandedRuleId(null);
-      showSuccess(`Rule "${rule.title}" deleted successfully!`);
+      showSuccess(`Rule "${rule.title}" deleted.`);
     } catch (err) {
       console.error("Error deleting rule:", err);
       showError(err instanceof Error ? err.message : "Failed to delete rule");
@@ -483,9 +478,7 @@ export default function GatherRulesPage() {
         payload.triggerEventType = formData.triggerEventType.trim();
       }
 
-      // Galactic Admin editing a built-in rule = global update
-      const isGlobalEdit = rule.isBuiltIn && isGalacticAdmin;
-      const url = `${API_BASE_URL}/api/rules/gather/${encodeURIComponent(rule.ruleId)}${isGlobalEdit ? "?global=true" : ""}`;
+      const url = `${API_BASE_URL}/api/rules/gather/${encodeURIComponent(rule.ruleId)}`;
 
       const response = await fetch(url, {
         method: "PUT",
@@ -504,7 +497,7 @@ export default function GatherRulesPage() {
       setEditingRuleId(null);
       setJsonModeEdit(false);
       setJsonError(null);
-      showSuccess(`Rule "${formData.title}" updated successfully${isGlobalEdit ? " (global)" : ""}!`);
+      showSuccess(`Rule "${formData.title}" updated successfully!`);
       await fetchRules();
     } catch (err) {
       console.error("Error saving rule:", err);
@@ -525,8 +518,9 @@ export default function GatherRulesPage() {
 
     const matchesType =
       typeFilter === "all" ||
-      (typeFilter === "builtin" && rule.isBuiltIn) ||
-      (typeFilter === "custom" && !rule.isBuiltIn);
+      (typeFilter === "builtin" && rule.isBuiltIn && !rule.isCommunity) ||
+      (typeFilter === "community" && rule.isCommunity) ||
+      (typeFilter === "custom" && !rule.isBuiltIn && !rule.isCommunity);
 
     return matchesSearch && matchesCategory && matchesType;
   });
@@ -534,8 +528,9 @@ export default function GatherRulesPage() {
   // Summary stats
   const totalRules = rules.length;
   const activeRules = rules.filter((r) => r.enabled).length;
-  const builtInCount = rules.filter((r) => r.isBuiltIn).length;
-  const customCount = rules.filter((r) => !r.isBuiltIn).length;
+  const builtInCount = rules.filter((r) => r.isBuiltIn && !r.isCommunity).length;
+  const communityCount = rules.filter((r) => r.isCommunity).length;
+  const customCount = rules.filter((r) => !r.isBuiltIn && !r.isCommunity).length;
 
   const handleExportSingle = (rule: GatherRule) => {
     const cleaned = stripInternalFields(rule);
@@ -955,8 +950,8 @@ export default function GatherRulesPage() {
                   <div className="mt-1 text-2xl font-bold text-emerald-600">{activeRules}</div>
                 </div>
                 <div className="bg-white rounded-lg shadow p-4">
-                  <div className="text-sm font-medium text-gray-500">Built-in</div>
-                  <div className="mt-1 text-2xl font-bold text-blue-600">{builtInCount}</div>
+                  <div className="text-sm font-medium text-gray-500">Built-in / Community</div>
+                  <div className="mt-1 text-2xl font-bold text-blue-600">{builtInCount + communityCount}</div>
                 </div>
                 <div className="bg-white rounded-lg shadow p-4">
                   <div className="text-sm font-medium text-gray-500">Custom</div>
@@ -1017,6 +1012,7 @@ export default function GatherRulesPage() {
                     >
                       <option value="all">All Types</option>
                       <option value="builtin">Built-in</option>
+                      <option value="community">Community</option>
                       <option value="custom">Custom</option>
                     </select>
                   </div>
@@ -1196,7 +1192,7 @@ export default function GatherRulesPage() {
                     const isExpanded = expandedRuleId === rule.ruleId;
                     const isEditing = editingRuleId === rule.ruleId;
                     const catColor = CATEGORY_COLORS[rule.category] || { bg: "bg-gray-100", text: "text-gray-700" };
-                    const canEdit = isGalacticAdmin || !rule.isBuiltIn;
+                    const canEdit = !rule.isBuiltIn && !rule.isCommunity;
 
                     return (
                       <div
@@ -1437,20 +1433,20 @@ export default function GatherRulesPage() {
                                 <button
                                   onClick={() => startEditing(rule)}
                                   className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center space-x-2"
-                                  title={rule.isBuiltIn ? "Edit global rule (Galactic Admin)" : "Edit rule"}
+                                  title="Edit rule"
                                 >
                                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                                   </svg>
-                                  <span>{rule.isBuiltIn ? "Edit (Global)" : "Edit"}</span>
+                                  <span>Edit</span>
                                 </button>
                               )}
-                              {(!rule.isBuiltIn || (rule.isBuiltIn && isGalacticAdmin)) && (
+                              {!rule.isBuiltIn && !rule.isCommunity && (
                                 <button
                                   onClick={() => handleDeleteRule(rule)}
                                   disabled={deletingRule === rule.ruleId}
                                   className="px-4 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-2"
-                                  title={rule.isBuiltIn ? "Delete global rule (Galactic Admin)" : "Delete rule"}
+                                  title="Delete rule"
                                 >
                                   {deletingRule === rule.ruleId ? (
                                     <>
@@ -1462,7 +1458,7 @@ export default function GatherRulesPage() {
                                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                                       </svg>
-                                      <span>{rule.isBuiltIn ? "Delete (Global)" : "Delete"}</span>
+                                      <span>Delete</span>
                                     </>
                                   )}
                                 </button>
@@ -1481,11 +1477,6 @@ export default function GatherRulesPage() {
                                 </svg>
                                 <h4 className="text-sm font-semibold text-gray-900">
                                   Editing: {rule.ruleId}
-                                  {rule.isBuiltIn && isGalacticAdmin && (
-                                    <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700 border border-amber-200">
-                                      Global Edit
-                                    </span>
-                                  )}
                                 </h4>
                               </div>
                               {/* JSON Mode Toggle */}
@@ -1494,12 +1485,6 @@ export default function GatherRulesPage() {
                                 <button onClick={() => { setJsonText(JSON.stringify(editForm, null, 2)); setJsonModeEdit(true); setJsonError(null); }} className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${jsonModeEdit ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>JSON</button>
                               </div>
                             </div>
-
-                            {rule.isBuiltIn && isGalacticAdmin && (
-                              <div className="mb-4 bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800">
-                                <strong>Galactic Admin:</strong> Changes will apply globally to all tenants that haven&apos;t overridden this rule.
-                              </div>
-                            )}
 
                             {jsonModeEdit ? (
                               <div className="space-y-3">
