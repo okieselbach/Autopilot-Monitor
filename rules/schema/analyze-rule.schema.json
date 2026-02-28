@@ -146,7 +146,7 @@
         "operator": {
           "type": "string",
           "description": "Comparison operator.",
-          "enum": ["equals", "contains", "regex", "gt", "lt", "gte", "lte", "exists", "count_gte"]
+          "enum": ["equals", "contains", "regex", "gt", "lt", "gte", "lte", "exists", "count_gte", "count_per_group_gte"]
         },
         "value": {
           "type": "string",
@@ -177,7 +177,7 @@
         "eventAFilterOperator": {
           "type": "string",
           "description": "Operator for the Event A filter.",
-          "enum": ["equals", "contains", "regex", "gt", "lt", "gte", "lte", "exists", "count_gte"]
+          "enum": ["equals", "contains", "regex", "gt", "lt", "gte", "lte", "exists", "count_gte", "count_per_group_gte"]
         },
         "eventAFilterValue": {
           "type": "string",
