@@ -7,6 +7,11 @@ import { ProtectedRoute } from "../../components/ProtectedRoute";
 import { useTenant } from "../../contexts/TenantContext";
 import { useAuth } from "../../contexts/AuthContext";
 import { API_BASE_URL } from "@/lib/config";
+import { downloadAsJson, stripInternalFields } from "@/lib/rulePageHelpers";
+import { StatCard } from "@/components/rules/StatCard";
+import { RuleFilterBar } from "@/components/rules/RuleFilterBar";
+import { EmptyState } from "@/components/rules/EmptyState";
+import { FormJsonToggle, JsonModeToggleButtons } from "@/components/rules/FormJsonToggle";
 
 interface ImeLogPattern {
   patternId: string;
@@ -82,22 +87,6 @@ const EMPTY_FORM: PatternForm = {
   enabled: true,
 };
 
-function downloadAsJson(data: unknown, filename: string) {
-  const json = JSON.stringify(data, null, 2);
-  const blob = new Blob([json], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-function stripInternalFields(pattern: ImeLogPattern) {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { isBuiltIn, ...rest } = pattern;
-  return rest;
-}
 
 export default function ImeLogPatternsPage() {
   const router = useRouter();
@@ -413,120 +402,50 @@ export default function ImeLogPatternsPage() {
 
               {/* Summary Stats */}
               <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
-                <div className="bg-white rounded-lg shadow p-4">
-                  <div className="text-sm font-medium text-gray-500">Total Patterns</div>
-                  <div className="mt-1 text-2xl font-bold text-gray-900">{totalPatterns}</div>
-                </div>
-                <div className="bg-white rounded-lg shadow p-4">
-                  <div className="text-sm font-medium text-gray-500">Active</div>
-                  <div className="mt-1 text-2xl font-bold text-emerald-600">{activePatterns}</div>
-                </div>
-                <div className="bg-white rounded-lg shadow p-4">
-                  <div className="text-sm font-medium text-gray-500">Always</div>
-                  <div className="mt-1 text-2xl font-bold text-emerald-600">{alwaysCount}</div>
-                </div>
-                <div className="bg-white rounded-lg shadow p-4">
-                  <div className="text-sm font-medium text-gray-500">Current Phase</div>
-                  <div className="mt-1 text-2xl font-bold text-blue-600">{currentPhaseCount}</div>
-                </div>
-                <div className="bg-white rounded-lg shadow p-4">
-                  <div className="text-sm font-medium text-gray-500">Other Phases</div>
-                  <div className="mt-1 text-2xl font-bold text-purple-600">{otherPhasesCount}</div>
-                </div>
+                <StatCard label="Total Patterns" value={totalPatterns} />
+                <StatCard label="Active" value={activePatterns} valueColor="text-emerald-600" />
+                <StatCard label="Always" value={alwaysCount} valueColor="text-emerald-600" />
+                <StatCard label="Current Phase" value={currentPhaseCount} valueColor="text-blue-600" />
+                <StatCard label="Other Phases" value={otherPhasesCount} valueColor="text-purple-600" />
               </div>
 
               {/* Filter Bar + Export */}
-              <div className="bg-white rounded-lg shadow p-4">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                  <div className="flex flex-col sm:flex-row gap-3 flex-1">
-                    {/* Search */}
-                    <div className="relative flex-1 max-w-md">
-                      <input
-                        type="text"
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        placeholder="Search by pattern ID, regex, action..."
-                        autoComplete="off"
-                        className="w-full px-4 py-2 pl-10 pr-10 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
-                      />
-                      <svg className="absolute left-3 top-2.5 w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                      </svg>
-                      {searchQuery && (
-                        <button
-                          onClick={() => setSearchQuery("")}
-                          className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600 transition-colors"
-                          title="Clear search"
-                        >
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                          </svg>
-                        </button>
-                      )}
-                    </div>
-
-                    {/* Category Filter */}
-                    <select
-                      value={categoryFilter}
-                      onChange={(e) => setCategoryFilter(e.target.value)}
-                      className="px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
-                    >
-                      <option value="all">All Categories</option>
-                      <option value="always">Always</option>
-                      <option value="currentPhase">Current Phase</option>
-                      <option value="otherPhases">Other Phases</option>
-                    </select>
-
-                    {/* Action Filter */}
-                    <select
-                      value={actionFilter}
-                      onChange={(e) => setActionFilter(e.target.value)}
-                      className="px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
-                    >
-                      <option value="all">All Actions</option>
-                      {uniqueActions.map((a) => (
-                        <option key={a} value={a}>{ACTION_LABELS[a] || a}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {/* Export All Button */}
-                  <button
-                    onClick={handleExportAll}
-                    className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors flex items-center space-x-2 text-sm font-medium whitespace-nowrap"
-                    title="Export all visible patterns as JSON"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                    </svg>
-                    <span>Export All ({filteredPatterns.length})</span>
-                  </button>
-                </div>
-              </div>
+              <RuleFilterBar
+                searchQuery={searchQuery}
+                onSearchChange={setSearchQuery}
+                searchPlaceholder="Search by pattern ID, regex, action..."
+                filters={[
+                  {
+                    label: "Category",
+                    value: categoryFilter,
+                    onChange: setCategoryFilter,
+                    options: [
+                      { value: "all", label: "All Categories" },
+                      { value: "always", label: "Always" },
+                      { value: "currentPhase", label: "Current Phase" },
+                      { value: "otherPhases", label: "Other Phases" },
+                    ],
+                  },
+                  {
+                    label: "Action",
+                    value: actionFilter,
+                    onChange: setActionFilter,
+                    options: [
+                      { value: "all", label: "All Actions" },
+                      ...uniqueActions.map((a) => ({ value: a, label: ACTION_LABELS[a] || a })),
+                    ],
+                  },
+                ]}
+                onExportAll={handleExportAll}
+              />
 
               {/* Patterns List */}
               {filteredPatterns.length === 0 ? (
-                <div className="bg-white rounded-lg shadow p-8 text-center">
-                  <svg className="w-12 h-12 text-gray-400 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  <h3 className="mt-4 text-lg font-medium text-gray-900">No patterns found</h3>
-                  <p className="mt-2 text-sm text-gray-500">
-                    Try adjusting your search or filter criteria.
-                  </p>
-                  {(searchQuery || categoryFilter !== "all" || actionFilter !== "all") && (
-                    <button
-                      onClick={() => {
-                        setSearchQuery("");
-                        setCategoryFilter("all");
-                        setActionFilter("all");
-                      }}
-                      className="mt-2 text-sm text-indigo-600 hover:text-indigo-800 transition-colors"
-                    >
-                      Clear all filters
-                    </button>
-                  )}
-                </div>
+                <EmptyState
+                  message="Try adjusting your search or filter criteria."
+                  onClearFilters={() => { setSearchQuery(""); setCategoryFilter("all"); setActionFilter("all"); }}
+                  showClearButton={!!(searchQuery || categoryFilter !== "all" || actionFilter !== "all")}
+                />
               ) : (
                 filteredPatterns.map((pattern) => {
                   const isExpanded = expandedPatternId === pattern.patternId;
@@ -746,10 +665,14 @@ export default function ImeLogPatternsPage() {
                               </h4>
                             </div>
                             {/* JSON Mode Toggle */}
-                            <div className="flex items-center bg-gray-100 rounded-lg p-1">
-                              <button onClick={() => { setJsonModeEdit(false); setJsonError(null); }} className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${!jsonModeEdit ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>Form</button>
-                              <button onClick={() => { setJsonText(JSON.stringify(editForm, null, 2)); setJsonModeEdit(true); setJsonError(null); }} className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${jsonModeEdit ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>JSON</button>
-                            </div>
+                            <JsonModeToggleButtons
+                              jsonMode={jsonModeEdit}
+                              onToggleMode={(mode) => {
+                                if (mode) { setJsonText(JSON.stringify(editForm, null, 2)); }
+                                setJsonModeEdit(mode);
+                                setJsonError(null);
+                              }}
+                            />
                           </div>
 
                           <div className="mb-4 bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800">
@@ -762,32 +685,30 @@ export default function ImeLogPatternsPage() {
                             </div>
                           )}
 
-                          {jsonModeEdit ? (
-                            <div className="space-y-3">
-                              <div className="flex items-center justify-between">
-                                <p className="text-sm text-gray-600">Edit the pattern as JSON.</p>
-                                <button type="button" onClick={() => {
-                                  try {
-                                    const parsed = JSON.parse(jsonText) as PatternForm;
-                                    if (!parsed.pattern) throw new Error("JSON must include pattern");
-                                    setEditForm({ ...editForm, ...parsed });
-                                    setJsonModeEdit(false);
-                                    setJsonError(null);
-                                  } catch (e) {
-                                    setJsonError(e instanceof Error ? e.message : "Invalid JSON");
-                                  }
-                                }} className="text-xs text-indigo-600 hover:text-indigo-800 font-medium whitespace-nowrap ml-4">Apply JSON &rarr;</button>
-                              </div>
-                              {jsonError && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{jsonError}</p>}
-                              <textarea
-                                value={jsonText}
-                                onChange={(e) => setJsonText(e.target.value)}
-                                rows={15}
-                                className="w-full font-mono text-sm border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-900"
-                                spellCheck={false}
-                              />
-                            </div>
-                          ) : (
+                          <FormJsonToggle
+                            jsonMode={jsonModeEdit}
+                            onToggleMode={(mode) => {
+                              if (mode) { setJsonText(JSON.stringify(editForm, null, 2)); }
+                              setJsonModeEdit(mode);
+                              setJsonError(null);
+                            }}
+                            jsonText={jsonText}
+                            onJsonTextChange={(text) => setJsonText(text)}
+                            jsonError={jsonError}
+                            onApplyJson={() => {
+                              try {
+                                const parsed = JSON.parse(jsonText) as PatternForm;
+                                if (!parsed.pattern) throw new Error("JSON must include pattern");
+                                setEditForm({ ...editForm, ...parsed });
+                                setJsonModeEdit(false);
+                                setJsonError(null);
+                              } catch (e) {
+                                setJsonError(e instanceof Error ? e.message : "Invalid JSON");
+                              }
+                            }}
+                            textareaRows={15}
+                            description="Edit the pattern as JSON."
+                          >
                             <div className="space-y-4">
                               {/* Category */}
                               <div>
@@ -926,7 +847,7 @@ export default function ImeLogPatternsPage() {
                                 </div>
                               </div>
                             </div>
-                          )}
+                          </FormJsonToggle>
 
                           {/* Save/Cancel buttons */}
                           <div className="flex items-center justify-end space-x-3 mt-6 pt-4 border-t border-gray-200">

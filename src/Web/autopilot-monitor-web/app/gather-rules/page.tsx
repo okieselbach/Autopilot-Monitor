@@ -7,6 +7,11 @@ import { ProtectedRoute } from "../../components/ProtectedRoute";
 import { useTenant } from "../../contexts/TenantContext";
 import { useAuth } from "../../contexts/AuthContext";
 import { API_BASE_URL } from "@/lib/config";
+import { downloadAsJson, stripInternalFields, bumpVersion } from "@/lib/rulePageHelpers";
+import { StatCard } from "@/components/rules/StatCard";
+import { RuleFilterBar } from "@/components/rules/RuleFilterBar";
+import { EmptyState } from "@/components/rules/EmptyState";
+import { FormJsonToggle, JsonModeToggleButtons } from "@/components/rules/FormJsonToggle";
 
 interface GatherRule {
   ruleId: string;
@@ -122,22 +127,6 @@ const EMPTY_FORM: NewRuleForm = {
   outputSeverity: "info",
 };
 
-function downloadAsJson(data: unknown, filename: string) {
-  const json = JSON.stringify(data, null, 2);
-  const blob = new Blob([json], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-function stripInternalFields(rule: GatherRule) {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { isBuiltIn, isCommunity, createdAt, updatedAt, ...rest } = rule;
-  return rest;
-}
 
 function formatTrigger(trigger: string) {
   switch (trigger) {
@@ -444,14 +433,6 @@ export default function GatherRulesPage() {
       if (!token) {
         throw new Error("Failed to get access token");
       }
-
-      // Increment version: "1.0" → "1.1", "1.9" → "1.10", "2" → "2.1", unknown → "1.1"
-      const bumpVersion = (v: string): string => {
-        const parts = (v ?? "1.0").split(".");
-        const major = parts[0] ?? "1";
-        const minor = parseInt(parts[1] ?? "0", 10);
-        return `${major}.${minor + 1}`;
-      };
 
       const payload: Record<string, unknown> = {
         ...rule,
@@ -941,124 +922,49 @@ export default function GatherRulesPage() {
 
               {/* Summary Stats */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                <div className="bg-white rounded-lg shadow p-4">
-                  <div className="text-sm font-medium text-gray-500">Total Rules</div>
-                  <div className="mt-1 text-2xl font-bold text-gray-900">{totalRules}</div>
-                </div>
-                <div className="bg-white rounded-lg shadow p-4">
-                  <div className="text-sm font-medium text-gray-500">Active Rules</div>
-                  <div className="mt-1 text-2xl font-bold text-emerald-600">{activeRules}</div>
-                </div>
-                <div className="bg-white rounded-lg shadow p-4">
-                  <div className="text-sm font-medium text-gray-500">Built-in / Community</div>
-                  <div className="mt-1 text-2xl font-bold text-blue-600">{builtInCount + communityCount}</div>
-                </div>
-                <div className="bg-white rounded-lg shadow p-4">
-                  <div className="text-sm font-medium text-gray-500">Custom</div>
-                  <div className="mt-1 text-2xl font-bold text-purple-600">{customCount}</div>
-                </div>
+                <StatCard label="Total Rules" value={totalRules} />
+                <StatCard label="Active Rules" value={activeRules} valueColor="text-emerald-600" />
+                <StatCard label="Built-in / Community" value={builtInCount + communityCount} valueColor="text-blue-600" />
+                <StatCard label="Custom" value={customCount} valueColor="text-purple-600" />
               </div>
 
               {/* Filter Bar + Create Button */}
-              <div className="bg-white rounded-lg shadow p-4">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                  <div className="flex flex-col sm:flex-row gap-3 flex-1">
-                    {/* Search */}
-                    <div className="relative flex-1 max-w-md">
-                      <input
-                        type="text"
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        placeholder="Search by title or rule ID..."
-                        autoComplete="off"
-                        className="w-full px-4 py-2 pl-10 pr-10 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
-                      />
-                      <svg className="absolute left-3 top-2.5 w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                      </svg>
-                      {searchQuery && (
-                        <button
-                          onClick={() => setSearchQuery("")}
-                          className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600 transition-colors"
-                          title="Clear search"
-                        >
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                          </svg>
-                        </button>
-                      )}
-                    </div>
-
-                    {/* Category Filter */}
-                    <select
-                      value={categoryFilter}
-                      onChange={(e) => setCategoryFilter(e.target.value)}
-                      className="px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
-                    >
-                      <option value="all">All Categories</option>
-                      <option value="network">Network</option>
-                      <option value="identity">Identity</option>
-                      <option value="apps">Apps</option>
-                      <option value="device">Device</option>
-                      <option value="esp">ESP</option>
-                      <option value="enrollment">Enrollment</option>
-                    </select>
-
-                    {/* Type Filter */}
-                    <select
-                      value={typeFilter}
-                      onChange={(e) => setTypeFilter(e.target.value)}
-                      className="px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
-                    >
-                      <option value="all">All Types</option>
-                      <option value="builtin">Built-in</option>
-                      <option value="community">Community</option>
-                      <option value="custom">Custom</option>
-                    </select>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                  {/* Export All Button */}
-                  <button
-                    onClick={handleExportAll}
-                    className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors flex items-center space-x-2 text-sm font-medium whitespace-nowrap"
-                    title="Export all visible rules as JSON"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                    </svg>
-                    <span>Export All</span>
-                  </button>
-
-                  {/* Create Button */}
-                  <button
-                    onClick={() => {
-                      setShowCreateForm(!showCreateForm);
-                      if (showCreateForm) {
-                        setNewRule({ ...EMPTY_FORM });
-                      }
-                    }}
-                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center space-x-2 text-sm font-medium whitespace-nowrap"
-                  >
-                    {showCreateForm ? (
-                      <>
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                        <span>Cancel</span>
-                      </>
-                    ) : (
-                      <>
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                        </svg>
-                        <span>Create Custom Rule</span>
-                      </>
-                    )}
-                  </button>
-                  </div>
-                </div>
-              </div>
+              <RuleFilterBar
+                searchQuery={searchQuery}
+                onSearchChange={setSearchQuery}
+                searchPlaceholder="Search by title or rule ID..."
+                filters={[
+                  {
+                    label: "Category",
+                    value: categoryFilter,
+                    onChange: setCategoryFilter,
+                    options: [
+                      { value: "all", label: "All Categories" },
+                      { value: "network", label: "Network" },
+                      { value: "identity", label: "Identity" },
+                      { value: "apps", label: "Apps" },
+                      { value: "device", label: "Device" },
+                      { value: "esp", label: "ESP" },
+                      { value: "enrollment", label: "Enrollment" },
+                    ],
+                  },
+                  {
+                    label: "Type",
+                    value: typeFilter,
+                    onChange: setTypeFilter,
+                    options: [
+                      { value: "all", label: "All Types" },
+                      { value: "builtin", label: "Built-in" },
+                      { value: "community", label: "Community" },
+                      { value: "custom", label: "Custom" },
+                    ],
+                  },
+                ]}
+                onExportAll={handleExportAll}
+                onCreateNew={() => { setShowCreateForm(!showCreateForm); if (showCreateForm) setNewRule({ ...EMPTY_FORM }); }}
+                createLabel="Create Custom Rule"
+                showCreateForm={showCreateForm}
+              />
 
               {/* Create Custom Rule Form */}
               {showCreateForm && (
@@ -1075,41 +981,43 @@ export default function GatherRulesPage() {
                         </div>
                       </div>
                       {/* JSON Mode Toggle */}
-                      <div className="flex items-center bg-gray-100 rounded-lg p-1">
-                        <button onClick={() => { setJsonModeCreate(false); setJsonError(null); }} className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${!jsonModeCreate ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>Form</button>
-                        <button onClick={() => { setJsonText(JSON.stringify(newRule, null, 2)); setJsonModeCreate(true); setJsonError(null); }} className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${jsonModeCreate ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>JSON</button>
-                      </div>
+                      <JsonModeToggleButtons
+                        jsonMode={jsonModeCreate}
+                        onToggleMode={(mode) => {
+                          if (mode) { setJsonText(JSON.stringify(newRule, null, 2)); }
+                          setJsonModeCreate(mode);
+                          setJsonError(null);
+                        }}
+                      />
                     </div>
                   </div>
                   <div className="p-6">
-                    {jsonModeCreate ? (
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                          <p className="text-sm text-gray-600">Edit the rule as JSON. All fields are supported including <code className="bg-gray-100 px-1 rounded text-xs">parameters</code> for collector-specific options.</p>
-                          <button type="button" onClick={() => {
-                            try {
-                              const parsed = JSON.parse(jsonText) as NewRuleForm;
-                              if (!parsed.ruleId && !parsed.title) throw new Error("JSON must include at least ruleId and title");
-                              setNewRule({ ...EMPTY_FORM, ...parsed });
-                              setJsonModeCreate(false);
-                              setJsonError(null);
-                            } catch (e) {
-                              setJsonError(e instanceof Error ? e.message : "Invalid JSON");
-                            }
-                          }} className="text-xs text-indigo-600 hover:text-indigo-800 font-medium whitespace-nowrap ml-4">Apply JSON &rarr;</button>
-                        </div>
-                        {jsonError && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{jsonError}</p>}
-                        <textarea
-                          value={jsonText}
-                          onChange={(e) => { setJsonText(e.target.value); setJsonError(null); }}
-                          rows={20}
-                          spellCheck={false}
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm font-mono text-gray-900 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 resize-y"
-                        />
-                      </div>
-                    ) : (
-                      renderFormFields(newRule, setNewRule, true)
-                    )}
+                    <FormJsonToggle
+                      jsonMode={jsonModeCreate}
+                      onToggleMode={(mode) => {
+                        if (mode) { setJsonText(JSON.stringify(newRule, null, 2)); }
+                        setJsonModeCreate(mode);
+                        setJsonError(null);
+                      }}
+                      jsonText={jsonText}
+                      onJsonTextChange={(text) => { setJsonText(text); setJsonError(null); }}
+                      jsonError={jsonError}
+                      onApplyJson={() => {
+                        try {
+                          const parsed = JSON.parse(jsonText) as NewRuleForm;
+                          if (!parsed.ruleId && !parsed.title) throw new Error("JSON must include at least ruleId and title");
+                          setNewRule({ ...EMPTY_FORM, ...parsed });
+                          setJsonModeCreate(false);
+                          setJsonError(null);
+                        } catch (e) {
+                          setJsonError(e instanceof Error ? e.message : "Invalid JSON");
+                        }
+                      }}
+                      textareaRows={20}
+                      description='Edit the rule as JSON. All fields are supported including <code class="bg-gray-100 px-1 rounded text-xs">parameters</code> for collector-specific options.'
+                    >
+                      {renderFormFields(newRule, setNewRule, true)}
+                    </FormJsonToggle>
 
                     {/* Action Buttons */}
                     <div className="flex items-center justify-end space-x-3 pt-4 mt-5 border-t border-gray-200">
@@ -1169,24 +1077,11 @@ export default function GatherRulesPage() {
                 </div>
 
                 {filteredRules.length === 0 ? (
-                  <div className="bg-white rounded-lg shadow p-8 text-center">
-                    <svg className="w-12 h-12 text-gray-300 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                    </svg>
-                    <p className="text-gray-500">No rules match your filters.</p>
-                    {(searchQuery || categoryFilter !== "all" || typeFilter !== "all") && (
-                      <button
-                        onClick={() => {
-                          setSearchQuery("");
-                          setCategoryFilter("all");
-                          setTypeFilter("all");
-                        }}
-                        className="mt-2 text-sm text-indigo-600 hover:text-indigo-800 transition-colors"
-                      >
-                        Clear all filters
-                      </button>
-                    )}
-                  </div>
+                  <EmptyState
+                    message="No rules match your filters."
+                    onClearFilters={() => { setSearchQuery(""); setCategoryFilter("all"); setTypeFilter("all"); }}
+                    showClearButton={!!(searchQuery || categoryFilter !== "all" || typeFilter !== "all")}
+                  />
                 ) : (
                   filteredRules.map((rule) => {
                     const isExpanded = expandedRuleId === rule.ruleId;
@@ -1480,40 +1375,42 @@ export default function GatherRulesPage() {
                                 </h4>
                               </div>
                               {/* JSON Mode Toggle */}
-                              <div className="flex items-center bg-gray-100 rounded-lg p-1">
-                                <button onClick={() => { setJsonModeEdit(false); setJsonError(null); }} className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${!jsonModeEdit ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>Form</button>
-                                <button onClick={() => { setJsonText(JSON.stringify(editForm, null, 2)); setJsonModeEdit(true); setJsonError(null); }} className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${jsonModeEdit ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>JSON</button>
-                              </div>
+                              <JsonModeToggleButtons
+                                jsonMode={jsonModeEdit}
+                                onToggleMode={(mode) => {
+                                  if (mode) { setJsonText(JSON.stringify(editForm, null, 2)); }
+                                  setJsonModeEdit(mode);
+                                  setJsonError(null);
+                                }}
+                              />
                             </div>
 
-                            {jsonModeEdit ? (
-                              <div className="space-y-3">
-                                <div className="flex items-center justify-between">
-                                  <p className="text-sm text-gray-600">Edit the rule as JSON. All fields are supported including <code className="bg-gray-100 px-1 rounded text-xs">parameters</code> for collector-specific options.</p>
-                                  <button type="button" onClick={() => {
-                                    try {
-                                      const parsed = JSON.parse(jsonText) as NewRuleForm;
-                                      if (!parsed.title) throw new Error("JSON must include title");
-                                      setEditForm({ ...editForm, ...parsed });
-                                      setJsonModeEdit(false);
-                                      setJsonError(null);
-                                    } catch (e) {
-                                      setJsonError(e instanceof Error ? e.message : "Invalid JSON");
-                                    }
-                                  }} className="text-xs text-indigo-600 hover:text-indigo-800 font-medium whitespace-nowrap ml-4">Apply JSON &rarr;</button>
-                                </div>
-                                {jsonError && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{jsonError}</p>}
-                                <textarea
-                                  value={jsonText}
-                                  onChange={(e) => { setJsonText(e.target.value); setJsonError(null); }}
-                                  rows={20}
-                                  spellCheck={false}
-                                  className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm font-mono text-gray-900 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 resize-y"
-                                />
-                              </div>
-                            ) : (
-                              renderFormFields(editForm, setEditForm, false)
-                            )}
+                            <FormJsonToggle
+                              jsonMode={jsonModeEdit}
+                              onToggleMode={(mode) => {
+                                if (mode) { setJsonText(JSON.stringify(editForm, null, 2)); }
+                                setJsonModeEdit(mode);
+                                setJsonError(null);
+                              }}
+                              jsonText={jsonText}
+                              onJsonTextChange={(text) => { setJsonText(text); setJsonError(null); }}
+                              jsonError={jsonError}
+                              onApplyJson={() => {
+                                try {
+                                  const parsed = JSON.parse(jsonText) as NewRuleForm;
+                                  if (!parsed.title) throw new Error("JSON must include title");
+                                  setEditForm({ ...editForm, ...parsed });
+                                  setJsonModeEdit(false);
+                                  setJsonError(null);
+                                } catch (e) {
+                                  setJsonError(e instanceof Error ? e.message : "Invalid JSON");
+                                }
+                              }}
+                              textareaRows={20}
+                              description='Edit the rule as JSON. All fields are supported including <code class="bg-gray-100 px-1 rounded text-xs">parameters</code> for collector-specific options.'
+                            >
+                              {renderFormFields(editForm, setEditForm, false)}
+                            </FormJsonToggle>
 
                             {/* Action Buttons */}
                             <div className="flex items-center justify-end space-x-3 pt-4 mt-5 border-t border-gray-200">

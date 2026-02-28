@@ -7,6 +7,11 @@ import { ProtectedRoute } from "../../components/ProtectedRoute";
 import { useTenant } from "../../contexts/TenantContext";
 import { useAuth } from "../../contexts/AuthContext";
 import { API_BASE_URL } from "@/lib/config";
+import { downloadAsJson, stripInternalFields, bumpVersion } from "@/lib/rulePageHelpers";
+import { StatCard } from "@/components/rules/StatCard";
+import { RuleFilterBar } from "@/components/rules/RuleFilterBar";
+import { EmptyState } from "@/components/rules/EmptyState";
+import { FormJsonToggle, JsonModeToggleButtons } from "@/components/rules/FormJsonToggle";
 
 interface RelatedDoc {
   title: string;
@@ -103,22 +108,6 @@ const CATEGORY_COLORS: Record<string, { bg: string; text: string }> = {
   enrollment: { bg: "bg-indigo-100", text: "text-indigo-700" },
 };
 
-function downloadAsJson(data: unknown, filename: string) {
-  const json = JSON.stringify(data, null, 2);
-  const blob = new Blob([json], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-function stripInternalFields(rule: AnalyzeRule) {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { isBuiltIn, isCommunity, createdAt, updatedAt, ...rest } = rule;
-  return rest;
-}
 
 function getSeverityColor(severity: string) {
   return SEVERITY_COLORS[severity.toLowerCase()] || SEVERITY_COLORS.info;
@@ -165,13 +154,6 @@ const EMPTY_FORM: RuleForm = {
   remediation: [],
   relatedDocs: [],
 };
-
-function bumpVersion(v: string): string {
-  const parts = (v ?? "1.0").split(".");
-  const major = parts[0] ?? "1";
-  const minor = parseInt(parts[1] ?? "0", 10);
-  return `${major}.${minor + 1}`;
-}
 
 function ruleToForm(rule: AnalyzeRule): RuleForm {
   return {
@@ -811,81 +793,58 @@ export default function AnalyzeRulesPage() {
             <div className="space-y-6">
               {/* Summary Stats */}
               <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
-                <div className="bg-white rounded-lg shadow p-4">
-                  <p className="text-sm text-gray-500">Total</p>
-                  <p className="text-2xl font-bold text-gray-900">{totalRules}</p>
-                </div>
-                <div className="bg-white rounded-lg shadow p-4">
-                  <p className="text-sm text-gray-500">Active</p>
-                  <p className="text-2xl font-bold text-green-600">{activeRules}</p>
-                </div>
-                <div className="bg-white rounded-lg shadow p-4 border-l-4 border-red-400">
-                  <p className="text-sm text-gray-500">Critical</p>
-                  <p className="text-2xl font-bold text-red-600">{criticalCount}</p>
-                </div>
-                <div className="bg-white rounded-lg shadow p-4 border-l-4 border-orange-400">
-                  <p className="text-sm text-gray-500">High</p>
-                  <p className="text-2xl font-bold text-orange-600">{highCount}</p>
-                </div>
-                <div className="bg-white rounded-lg shadow p-4 border-l-4 border-yellow-400">
-                  <p className="text-sm text-gray-500">Warning</p>
-                  <p className="text-2xl font-bold text-yellow-600">{warningCount}</p>
-                </div>
-                <div className="bg-white rounded-lg shadow p-4 border-l-4 border-blue-400">
-                  <p className="text-sm text-gray-500">Info</p>
-                  <p className="text-2xl font-bold text-blue-600">{infoCount}</p>
-                </div>
+                <StatCard label="Total" value={totalRules} />
+                <StatCard label="Active" value={activeRules} valueColor="text-green-600" />
+                <StatCard label="Critical" value={criticalCount} borderColor="border-red-400" valueColor="text-red-600" />
+                <StatCard label="High" value={highCount} borderColor="border-orange-400" valueColor="text-orange-600" />
+                <StatCard label="Warning" value={warningCount} borderColor="border-yellow-400" valueColor="text-yellow-600" />
+                <StatCard label="Info" value={infoCount} borderColor="border-blue-400" valueColor="text-blue-600" />
               </div>
 
               {/* Filter Bar + Create Button */}
-              <div className="bg-white rounded-lg shadow p-4">
-                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                  <div className="flex flex-col md:flex-row md:items-center md:space-x-4 space-y-3 md:space-y-0 flex-1">
-                    <div className="flex-1 relative">
-                      <svg className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-                      <input type="text" placeholder="Search by title or rule ID..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-lg text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors" />
-                      {searchQuery && (
-                        <button onClick={() => setSearchQuery("")} className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600" title="Clear search">
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                        </button>
-                      )}
-                    </div>
-                    <select value={severityFilter} onChange={(e) => setSeverityFilter(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
-                      <option value="all">All Severities</option>
-                      <option value="critical">Critical</option>
-                      <option value="high">High</option>
-                      <option value="warning">Warning</option>
-                      <option value="info">Info</option>
-                    </select>
-                    <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
-                      <option value="all">All Categories</option>
-                      {uniqueCategories.map((cat) => (<option key={cat} value={cat}>{cat.charAt(0).toUpperCase() + cat.slice(1)}</option>))}
-                    </select>
-                    <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
-                      <option value="all">All Types</option>
-                      <option value="builtin">Built-in</option>
-                      <option value="community">Community</option>
-                      <option value="custom">Custom</option>
-                    </select>
-                  </div>
-                  <div className="flex items-center gap-2">
-                  <button onClick={handleExportAll} className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors flex items-center space-x-2 text-sm font-medium whitespace-nowrap" title="Export all visible rules as JSON">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-                    <span>Export All</span>
-                  </button>
-                  <button onClick={() => { setShowCreateForm(!showCreateForm); if (showCreateForm) setNewRule({ ...EMPTY_FORM, conditions: [{ ...EMPTY_CONDITION }] }); }} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center space-x-2 text-sm font-medium whitespace-nowrap">
-                    {showCreateForm ? (
-                      <><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg><span>Cancel</span></>
-                    ) : (
-                      <><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg><span>Create Custom Rule</span></>
-                    )}
-                  </button>
-                  </div>
-                </div>
-                <div className="mt-3 text-sm text-gray-500">
-                  Showing {filteredRules.length} of {totalRules} rule{totalRules !== 1 ? "s" : ""}
-                </div>
-              </div>
+              <RuleFilterBar
+                searchQuery={searchQuery}
+                onSearchChange={setSearchQuery}
+                searchPlaceholder="Search by title or rule ID..."
+                filters={[
+                  {
+                    label: "Severity",
+                    value: severityFilter,
+                    onChange: setSeverityFilter,
+                    options: [
+                      { value: "all", label: "All Severities" },
+                      { value: "critical", label: "Critical" },
+                      { value: "high", label: "High" },
+                      { value: "warning", label: "Warning" },
+                      { value: "info", label: "Info" },
+                    ],
+                  },
+                  {
+                    label: "Category",
+                    value: categoryFilter,
+                    onChange: setCategoryFilter,
+                    options: [
+                      { value: "all", label: "All Categories" },
+                      ...uniqueCategories.map((cat) => ({ value: cat, label: cat.charAt(0).toUpperCase() + cat.slice(1) })),
+                    ],
+                  },
+                  {
+                    label: "Type",
+                    value: typeFilter,
+                    onChange: setTypeFilter,
+                    options: [
+                      { value: "all", label: "All Types" },
+                      { value: "builtin", label: "Built-in" },
+                      { value: "community", label: "Community" },
+                      { value: "custom", label: "Custom" },
+                    ],
+                  },
+                ]}
+                onExportAll={handleExportAll}
+                onCreateNew={() => { setShowCreateForm(!showCreateForm); if (showCreateForm) setNewRule({ ...EMPTY_FORM, conditions: [{ ...EMPTY_CONDITION }] }); }}
+                createLabel="Create Custom Rule"
+                showCreateForm={showCreateForm}
+              />
 
               {/* Create Custom Rule Form */}
               {showCreateForm && (
@@ -900,41 +859,43 @@ export default function AnalyzeRulesPage() {
                         </div>
                       </div>
                       {/* JSON Mode Toggle */}
-                      <div className="flex items-center bg-gray-100 rounded-lg p-1">
-                        <button onClick={() => { setJsonModeCreate(false); setJsonError(null); }} className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${!jsonModeCreate ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>Form</button>
-                        <button onClick={() => { setJsonText(JSON.stringify(newRule, null, 2)); setJsonModeCreate(true); setJsonError(null); }} className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${jsonModeCreate ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>JSON</button>
-                      </div>
+                      <JsonModeToggleButtons
+                        jsonMode={jsonModeCreate}
+                        onToggleMode={(mode) => {
+                          if (mode) { setJsonText(JSON.stringify(newRule, null, 2)); }
+                          setJsonModeCreate(mode);
+                          setJsonError(null);
+                        }}
+                      />
                     </div>
                   </div>
                   <div className="p-6">
-                    {jsonModeCreate ? (
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                          <p className="text-sm text-gray-600">Edit the rule as JSON. All fields are supported including <code className="bg-gray-100 px-1 rounded text-xs">event_correlation</code> condition properties.</p>
-                          <button type="button" onClick={() => {
-                            try {
-                              const parsed = JSON.parse(jsonText) as RuleForm;
-                              if (!parsed.ruleId && !parsed.title) throw new Error("JSON must include at least ruleId and title");
-                              setNewRule({ ...EMPTY_FORM, ...parsed });
-                              setJsonModeCreate(false);
-                              setJsonError(null);
-                            } catch (e) {
-                              setJsonError(e instanceof Error ? e.message : "Invalid JSON");
-                            }
-                          }} className="text-xs text-indigo-600 hover:text-indigo-800 font-medium whitespace-nowrap ml-4">Apply JSON →</button>
-                        </div>
-                        {jsonError && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{jsonError}</p>}
-                        <textarea
-                          value={jsonText}
-                          onChange={(e) => { setJsonText(e.target.value); setJsonError(null); }}
-                          rows={30}
-                          spellCheck={false}
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm font-mono text-gray-900 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 resize-y"
-                        />
-                      </div>
-                    ) : (
-                      renderFormFields(newRule, setNewRule, true)
-                    )}
+                    <FormJsonToggle
+                      jsonMode={jsonModeCreate}
+                      onToggleMode={(mode) => {
+                        if (mode) { setJsonText(JSON.stringify(newRule, null, 2)); }
+                        setJsonModeCreate(mode);
+                        setJsonError(null);
+                      }}
+                      jsonText={jsonText}
+                      onJsonTextChange={(text) => { setJsonText(text); setJsonError(null); }}
+                      jsonError={jsonError}
+                      onApplyJson={() => {
+                        try {
+                          const parsed = JSON.parse(jsonText) as RuleForm;
+                          if (!parsed.ruleId && !parsed.title) throw new Error("JSON must include at least ruleId and title");
+                          setNewRule({ ...EMPTY_FORM, ...parsed });
+                          setJsonModeCreate(false);
+                          setJsonError(null);
+                        } catch (e) {
+                          setJsonError(e instanceof Error ? e.message : "Invalid JSON");
+                        }
+                      }}
+                      textareaRows={30}
+                      description='Edit the rule as JSON. All fields are supported including <code class="bg-gray-100 px-1 rounded text-xs">event_correlation</code> condition properties.'
+                    >
+                      {renderFormFields(newRule, setNewRule, true)}
+                    </FormJsonToggle>
                     <div className="flex items-center justify-end space-x-3 pt-4 mt-5 border-t border-gray-200">
                       <button onClick={() => { setShowCreateForm(false); setJsonModeCreate(false); setJsonError(null); setNewRule({ ...EMPTY_FORM, conditions: [{ ...EMPTY_CONDITION }] }); }} disabled={creating} className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-medium">Cancel</button>
                       <button onClick={() => {
@@ -959,10 +920,11 @@ export default function AnalyzeRulesPage() {
 
               {/* Rules List */}
               {filteredRules.length === 0 ? (
-                <div className="bg-white rounded-lg shadow p-8 text-center">
-                  <svg className="w-12 h-12 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                  <p className="text-gray-500">{rules.length === 0 ? "No analyze rules found." : "No rules match your current filters."}</p>
-                </div>
+                <EmptyState
+                  message={rules.length === 0 ? "No analyze rules found." : "No rules match your current filters."}
+                  onClearFilters={() => { setSearchQuery(""); setSeverityFilter("all"); setCategoryFilter("all"); setTypeFilter("all"); }}
+                  showClearButton={!!(searchQuery || severityFilter !== "all" || categoryFilter !== "all" || typeFilter !== "all")}
+                />
               ) : (
                 <div className="space-y-3">
                   {filteredRules.map((rule) => {
@@ -1146,42 +1108,42 @@ export default function AnalyzeRulesPage() {
                                 </h4>
                               </div>
                               {/* JSON Mode Toggle */}
-                              <div className="flex items-center bg-gray-100 rounded-lg p-1">
-                                <button onClick={() => { setJsonModeEdit(false); setJsonError(null); }} className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${!jsonModeEdit ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>Form</button>
-                                <button onClick={() => { setJsonText(JSON.stringify(editForm, null, 2)); setJsonModeEdit(true); setJsonError(null); }} className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${jsonModeEdit ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>JSON</button>
-                              </div>
+                              <JsonModeToggleButtons
+                                jsonMode={jsonModeEdit}
+                                onToggleMode={(mode) => {
+                                  if (mode) { setJsonText(JSON.stringify(editForm, null, 2)); }
+                                  setJsonModeEdit(mode);
+                                  setJsonError(null);
+                                }}
+                              />
                             </div>
 
-
-
-                            {jsonModeEdit ? (
-                              <div className="space-y-3">
-                                <div className="flex items-center justify-between">
-                                  <p className="text-sm text-gray-600">Edit the rule as JSON. All fields are supported including <code className="bg-gray-100 px-1 rounded text-xs">event_correlation</code> condition properties.</p>
-                                  <button type="button" onClick={() => {
-                                    try {
-                                      const parsed = JSON.parse(jsonText) as RuleForm;
-                                      if (!parsed.title) throw new Error("JSON must include title");
-                                      setEditForm({ ...editForm, ...parsed });
-                                      setJsonModeEdit(false);
-                                      setJsonError(null);
-                                    } catch (e) {
-                                      setJsonError(e instanceof Error ? e.message : "Invalid JSON");
-                                    }
-                                  }} className="text-xs text-indigo-600 hover:text-indigo-800 font-medium whitespace-nowrap ml-4">Apply JSON →</button>
-                                </div>
-                                {jsonError && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{jsonError}</p>}
-                                <textarea
-                                  value={jsonText}
-                                  onChange={(e) => { setJsonText(e.target.value); setJsonError(null); }}
-                                  rows={30}
-                                  spellCheck={false}
-                                  className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm font-mono text-gray-900 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 resize-y"
-                                />
-                              </div>
-                            ) : (
-                              renderFormFields(editForm, setEditForm, false)
-                            )}
+                            <FormJsonToggle
+                              jsonMode={jsonModeEdit}
+                              onToggleMode={(mode) => {
+                                if (mode) { setJsonText(JSON.stringify(editForm, null, 2)); }
+                                setJsonModeEdit(mode);
+                                setJsonError(null);
+                              }}
+                              jsonText={jsonText}
+                              onJsonTextChange={(text) => { setJsonText(text); setJsonError(null); }}
+                              jsonError={jsonError}
+                              onApplyJson={() => {
+                                try {
+                                  const parsed = JSON.parse(jsonText) as RuleForm;
+                                  if (!parsed.title) throw new Error("JSON must include title");
+                                  setEditForm({ ...editForm, ...parsed });
+                                  setJsonModeEdit(false);
+                                  setJsonError(null);
+                                } catch (e) {
+                                  setJsonError(e instanceof Error ? e.message : "Invalid JSON");
+                                }
+                              }}
+                              textareaRows={30}
+                              description='Edit the rule as JSON. All fields are supported including <code class="bg-gray-100 px-1 rounded text-xs">event_correlation</code> condition properties.'
+                            >
+                              {renderFormFields(editForm, setEditForm, false)}
+                            </FormJsonToggle>
 
                             <div className="flex items-center justify-end space-x-3 pt-4 mt-5 border-t border-gray-200">
                               <button onClick={() => { setEditingRuleId(null); setJsonModeEdit(false); setJsonError(null); }} disabled={saving} className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-medium">Cancel</button>
