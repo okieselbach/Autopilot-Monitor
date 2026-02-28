@@ -305,7 +305,7 @@ export default function DiagnosisPage() {
                   </svg>
                   <div>
                     <h1 className="text-3xl font-bold text-gray-900">
-                      DIAGNOSIS
+                      Diagnosis
                     </h1>
                     <p className="text-sm text-gray-500">
                       Session{" "}
