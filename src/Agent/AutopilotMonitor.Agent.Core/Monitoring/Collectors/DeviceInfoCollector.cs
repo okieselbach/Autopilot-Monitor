@@ -44,10 +44,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         {
             _logger.Info("EnrollmentTracker: collecting device info (at start)");
 
-            CollectOSInfo();
-            CollectBootTime();
-            CollectNetworkAdapters();
-            CollectDnsConfiguration();
+            CollectOSInfoAndBootTime();
+            CollectNetworkAndDnsConfiguration();
             CollectProxyConfiguration();
             var enrollmentType = CollectAutopilotProfile();
             CollectSecureBootStatus();
@@ -71,66 +69,57 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             // Add more collectors here as needed
         }
 
-        private void CollectBootTime()
+        /// <summary>
+        /// Collects OS info and boot time in a single WMI query against Win32_OperatingSystem.
+        /// Previously these were three separate queries (Caption, LastBootUpTime via two searchers);
+        /// consolidated to a single round-trip.
+        /// Emits two events (os_info, boot_time) for backward compatibility.
+        /// </summary>
+        private void CollectOSInfoAndBootTime()
         {
+            string osName = string.Empty;
+            var bootData = new Dictionary<string, object>();
+
+            // Single WMI query for both Caption (OS name) and LastBootUpTime
             try
             {
-                var data = new Dictionary<string, object>();
-
-                // Query WMI for OS boot time
-                using (var searcher = new ManagementObjectSearcher("SELECT LastBootUpTime FROM Win32_OperatingSystem"))
+                using (var searcher = new ManagementObjectSearcher("SELECT Caption, LastBootUpTime FROM Win32_OperatingSystem"))
                 {
                     foreach (ManagementObject obj in searcher.Get())
                     {
+                        osName = obj["Caption"]?.ToString() ?? string.Empty;
+
                         var lastBootUpTimeStr = obj["LastBootUpTime"]?.ToString();
                         if (!string.IsNullOrEmpty(lastBootUpTimeStr))
                         {
-                            // WMI time format: yyyyMMddHHmmss.ffffff+/-UUU
-                            // ManagementDateTimeConverter.ToDateTime returns DateTimeKind.Local,
-                            // so we must explicitly convert to UTC and tag it as UTC to ensure
-                            // correct ISO 8601 serialization with Z suffix.
                             var bootTimeLocal = ManagementDateTimeConverter.ToDateTime(lastBootUpTimeStr);
                             var bootTimeUtc = DateTime.SpecifyKind(bootTimeLocal.ToUniversalTime(), DateTimeKind.Utc);
 
-                            data["bootTimeUtc"] = bootTimeUtc.ToString("o"); // always ends with Z
-                            data["bootTime"] = bootTimeUtc.ToString("o");    // keep for compat, also UTC
+                            bootData["bootTimeUtc"] = bootTimeUtc.ToString("o");
+                            bootData["bootTime"] = bootTimeUtc.ToString("o");
 
-                            // Calculate uptime using UTC to avoid local-clock drift
                             var uptime = DateTime.UtcNow - bootTimeUtc;
-                            data["uptimeMinutes"] = (int)uptime.TotalMinutes;
-                            data["uptimeHours"] = uptime.TotalHours;
+                            bootData["uptimeMinutes"] = (int)uptime.TotalMinutes;
+                            bootData["uptimeHours"] = uptime.TotalHours;
 
                             _logger.Debug($"Boot time (UTC): {bootTimeUtc:o}, Uptime: {uptime.TotalMinutes:F1} minutes");
-                            break;
                         }
+                        break;
                     }
                 }
-
-                if (!data.ContainsKey("bootTime"))
-                {
-                    data["note"] = "Boot time could not be determined";
-                }
-
-                EmitDeviceInfoEvent("boot_time",
-                    data.ContainsKey("bootTime")
-                        ? $"Last boot: {data["bootTime"]}"
-                        : "Boot time unavailable",
-                    data);
             }
             catch (Exception ex)
             {
-                _logger.Warning($"EnrollmentTracker: failed to collect boot time: {ex.Message}");
+                _logger.Warning($"EnrollmentTracker: failed to query Win32_OperatingSystem: {ex.Message}");
             }
-        }
 
-        private void CollectOSInfo()
-        {
+            // Emit os_info event
             try
             {
                 var data = new Dictionary<string, object>
                 {
                     { "version", Environment.OSVersion.Version.ToString() },
-                    { "osVersion", GetOsName() },
+                    { "osVersion", osName },
                     { "edition", (Registry.GetValue(RegKeyWindowsCurrentVersion, "EditionID", string.Empty) ?? string.Empty).ToString() },
                     { "compositionEdition", (Registry.GetValue(RegKeyWindowsCurrentVersion, "CompositionEditionID", string.Empty) ?? string.Empty).ToString() },
                     { "currentBuild", (Registry.GetValue(RegKeyWindowsCurrentVersion, "CurrentBuild", string.Empty) ?? string.Empty).ToString() },
@@ -168,42 +157,47 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             {
                 _logger.Warning($"EnrollmentTracker: failed to collect OS info: {ex.Message}");
             }
-        }
 
-        private string GetOsName()
-        {
-            var osName = string.Empty;
-
+            // Emit boot_time event
             try
             {
-                using (var searcher = new ManagementObjectSearcher("SELECT Caption FROM Win32_OperatingSystem"))
+                if (!bootData.ContainsKey("bootTime"))
                 {
-                    foreach (ManagementObject obj in searcher.Get())
-                    {
-                        osName = obj["Caption"]?.ToString() ?? string.Empty;
-                        break;
-                    }
+                    bootData["note"] = "Boot time could not be determined";
                 }
-            }
-            catch
-            {
-                // prevent OS info collection from failing the tracker
-            }
 
-            return osName;
+                EmitDeviceInfoEvent("boot_time",
+                    bootData.ContainsKey("bootTime")
+                        ? $"Last boot: {bootData["bootTime"]}"
+                        : "Boot time unavailable",
+                    bootData);
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"EnrollmentTracker: failed to emit boot time event: {ex.Message}");
+            }
         }
 
-        private void CollectNetworkAdapters()
+        /// <summary>
+        /// Collects network adapter and DNS configuration in a single WMI query.
+        /// Previously these were two separate queries against Win32_NetworkAdapterConfiguration;
+        /// consolidated to halve the WMI round-trips (each creates a new COM connection).
+        /// Emits two events (network_adapters, dns_configuration) for backward compatibility.
+        /// </summary>
+        private void CollectNetworkAndDnsConfiguration()
         {
             try
             {
                 var adapters = new List<Dictionary<string, object>>();
+                var dnsServers = new List<Dictionary<string, object>>();
+
                 using (var searcher = new ManagementObjectSearcher(
                     "SELECT Description, IPAddress, IPSubnet, DefaultIPGateway, MACAddress, DHCPEnabled, DHCPServer, DNSServerSearchOrder " +
                     "FROM Win32_NetworkAdapterConfiguration WHERE IPEnabled = True"))
                 {
                     foreach (ManagementObject obj in searcher.Get())
                     {
+                        // Network adapter info
                         var adapter = new Dictionary<string, object>
                         {
                             { "description", obj["Description"]?.ToString() },
@@ -225,32 +219,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                             adapter["gateways"] = string.Join(", ", gateways);
 
                         adapters.Add(adapter);
-                    }
-                }
 
-                EmitDeviceInfoEvent("network_adapters", "Network adapters configuration",
-                    new Dictionary<string, object>
-                    {
-                        { "adapterCount", adapters.Count },
-                        { "adapters", adapters }
-                    });
-            }
-            catch (Exception ex)
-            {
-                _logger.Warning($"EnrollmentTracker: failed to collect network adapters: {ex.Message}");
-            }
-        }
-
-        private void CollectDnsConfiguration()
-        {
-            try
-            {
-                var dnsServers = new List<Dictionary<string, object>>();
-                using (var searcher = new ManagementObjectSearcher(
-                    "SELECT Description, DNSServerSearchOrder FROM Win32_NetworkAdapterConfiguration WHERE IPEnabled = True"))
-                {
-                    foreach (ManagementObject obj in searcher.Get())
-                    {
+                        // DNS info (extracted from the same result set)
                         var servers = obj["DNSServerSearchOrder"] as string[];
                         if (servers != null && servers.Length > 0)
                         {
@@ -263,6 +233,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     }
                 }
 
+                EmitDeviceInfoEvent("network_adapters", "Network adapters configuration",
+                    new Dictionary<string, object>
+                    {
+                        { "adapterCount", adapters.Count },
+                        { "adapters", adapters }
+                    });
+
                 EmitDeviceInfoEvent("dns_configuration", "DNS server configuration",
                     new Dictionary<string, object>
                     {
@@ -271,7 +248,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             }
             catch (Exception ex)
             {
-                _logger.Warning($"EnrollmentTracker: failed to collect DNS config: {ex.Message}");
+                _logger.Warning($"EnrollmentTracker: failed to collect network/DNS config: {ex.Message}");
             }
         }
 
