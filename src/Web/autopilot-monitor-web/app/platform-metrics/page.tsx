@@ -23,6 +23,7 @@ interface AgentMetricsData {
   net_total_bytes_up?: number;
   net_total_bytes_down?: number;
   net_total_requests?: number;
+  agent_version?: string;
 }
 
 interface EnrollmentEvent {
@@ -97,6 +98,7 @@ export default function PlatformMetricsPage() {
   const [sessionMetrics, setSessionMetrics] = useState<SessionAgentMetrics[]>([]);
   const [sampleSize, setSampleSize] = useState(20);
   const [error, setError] = useState<string | null>(null);
+  const [versionFilter, setVersionFilter] = useState<string>('all');
 
   // ── Fetch sessions + their events ──────────────────────────────────────────
 
@@ -200,24 +202,48 @@ export default function PlatformMetricsPage() {
     fetchMetrics();
   }, [fetchMetrics]);
 
-  // ── Aggregated stats across all sessions ───────────────────────────────────
+  // ── Resolve agent version per session (prefer snapshot data, fallback to session registration) ──
+
+  const resolveVersion = useCallback((sm: SessionAgentMetrics): string => {
+    const fromSnapshot = sm.snapshots.find((s) => s.agent_version)?.agent_version;
+    return fromSnapshot || sm.session.agentVersion || 'unknown';
+  }, []);
+
+  // ── Available versions for filter dropdown ─────────────────────────────────
+
+  const availableVersions = useMemo(() => {
+    const versions = new Set<string>();
+    for (const sm of sessionMetrics) {
+      versions.add(resolveVersion(sm));
+    }
+    return Array.from(versions).sort();
+  }, [sessionMetrics, resolveVersion]);
+
+  // ── Filtered metrics based on version filter ───────────────────────────────
+
+  const filteredMetrics = useMemo(() => {
+    if (versionFilter === 'all') return sessionMetrics;
+    return sessionMetrics.filter((sm) => resolveVersion(sm) === versionFilter);
+  }, [sessionMetrics, versionFilter, resolveVersion]);
+
+  // ── Aggregated stats across filtered sessions ──────────────────────────────
 
   const globalStats = useMemo(() => {
-    if (sessionMetrics.length === 0) return null;
+    if (filteredMetrics.length === 0) return null;
 
-    const allCpuAvgs = sessionMetrics.map((s) => s.avgCpu);
-    const allCpuMaxes = sessionMetrics.map((s) => s.maxCpu);
-    const allWsAvgs = sessionMetrics.map((s) => s.avgWorkingSet);
-    const allWsMaxes = sessionMetrics.map((s) => s.maxWorkingSet);
-    const allPbAvgs = sessionMetrics.map((s) => s.avgPrivateBytes);
-    const allLatAvgs = sessionMetrics.filter((s) => s.avgLatency > 0).map((s) => s.avgLatency);
-    const allBytesUp = sessionMetrics.map((s) => s.totalBytesUp);
-    const allBytesDown = sessionMetrics.map((s) => s.totalBytesDown);
-    const allRequests = sessionMetrics.map((s) => s.totalRequests);
-    const totalSnapshots = sessionMetrics.reduce((sum, s) => sum + s.snapshots.length, 0);
+    const allCpuAvgs = filteredMetrics.map((s) => s.avgCpu);
+    const allCpuMaxes = filteredMetrics.map((s) => s.maxCpu);
+    const allWsAvgs = filteredMetrics.map((s) => s.avgWorkingSet);
+    const allWsMaxes = filteredMetrics.map((s) => s.maxWorkingSet);
+    const allPbAvgs = filteredMetrics.map((s) => s.avgPrivateBytes);
+    const allLatAvgs = filteredMetrics.filter((s) => s.avgLatency > 0).map((s) => s.avgLatency);
+    const allBytesUp = filteredMetrics.map((s) => s.totalBytesUp);
+    const allBytesDown = filteredMetrics.map((s) => s.totalBytesDown);
+    const allRequests = filteredMetrics.map((s) => s.totalRequests);
+    const totalSnapshots = filteredMetrics.reduce((sum, s) => sum + s.snapshots.length, 0);
 
     return {
-      sessionsAnalyzed: sessionMetrics.length,
+      sessionsAnalyzed: filteredMetrics.length,
       totalSnapshots,
       cpu: {
         avg: avg(allCpuAvgs),
@@ -239,20 +265,20 @@ export default function PlatformMetricsPage() {
         p95Latency: pN(allLatAvgs, 95),
       },
     };
-  }, [sessionMetrics]);
+  }, [filteredMetrics]);
 
-  // ── Agent version distribution ─────────────────────────────────────────────
+  // ── Agent version distribution (always from all sessions, not filtered) ────
 
   const versionDistribution = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const sm of sessionMetrics) {
-      const v = sm.session.agentVersion || 'unknown';
+      const v = resolveVersion(sm);
       counts[v] = (counts[v] || 0) + 1;
     }
     return Object.entries(counts)
       .sort((a, b) => b[1] - a[1])
       .map(([version, count]) => ({ version, count, pct: (count / sessionMetrics.length) * 100 }));
-  }, [sessionMetrics]);
+  }, [sessionMetrics, resolveVersion]);
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -283,6 +309,21 @@ export default function PlatformMetricsPage() {
                   <option value={50}>50</option>
                   <option value={100}>100</option>
                 </select>
+                {availableVersions.length > 1 && (
+                  <>
+                    <label className="text-sm text-gray-500">Agent version:</label>
+                    <select
+                      value={versionFilter}
+                      onChange={(e) => setVersionFilter(e.target.value)}
+                      className="text-sm border border-gray-300 rounded-md px-2 py-1"
+                    >
+                      <option value="all">All versions</option>
+                      {availableVersions.map((v) => (
+                        <option key={v} value={v}>{v}</option>
+                      ))}
+                    </select>
+                  </>
+                )}
                 <button
                   onClick={fetchMetrics}
                   disabled={loading}
@@ -412,7 +453,7 @@ export default function PlatformMetricsPage() {
                 <div className="bg-white shadow rounded-lg p-6">
                   <h3 className="text-sm font-semibold text-gray-900 mb-4">CPU % per Session (avg)</h3>
                   <div className="space-y-2">
-                    {sessionMetrics
+                    {filteredMetrics
                       .sort((a, b) => b.avgCpu - a.avgCpu)
                       .slice(0, 10)
                       .map((sm) => {
@@ -441,7 +482,7 @@ export default function PlatformMetricsPage() {
                 <div className="bg-white shadow rounded-lg p-6">
                   <h3 className="text-sm font-semibold text-gray-900 mb-4">Working Set per Session (avg MB)</h3>
                   <div className="space-y-2">
-                    {sessionMetrics
+                    {filteredMetrics
                       .sort((a, b) => b.avgWorkingSet - a.avgWorkingSet)
                       .slice(0, 10)
                       .map((sm) => {
@@ -470,12 +511,12 @@ export default function PlatformMetricsPage() {
                 <div className="bg-white shadow rounded-lg p-6">
                   <h3 className="text-sm font-semibold text-gray-900 mb-4">Network per Session (total bytes)</h3>
                   <div className="space-y-2">
-                    {sessionMetrics
+                    {filteredMetrics
                       .sort((a, b) => (b.totalBytesUp + b.totalBytesDown) - (a.totalBytesUp + a.totalBytesDown))
                       .slice(0, 10)
                       .map((sm) => {
                         const total = sm.totalBytesUp + sm.totalBytesDown;
-                        const maxTotal = globalStats.network.maxBytesUp + max(sessionMetrics.map(s => s.totalBytesDown));
+                        const maxTotal = globalStats.network.maxBytesUp + max(filteredMetrics.map(s => s.totalBytesDown));
                         const barWidth = maxTotal > 0 ? (total / maxTotal) * 100 : 0;
                         return (
                           <div key={sm.session.sessionId} className="flex items-center gap-3">
@@ -496,13 +537,27 @@ export default function PlatformMetricsPage() {
 
                 {/* Agent Version Distribution */}
                 <div className="bg-white shadow rounded-lg p-6">
-                  <h3 className="text-sm font-semibold text-gray-900 mb-4">Agent Version Distribution</h3>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-sm font-semibold text-gray-900">Agent Version Distribution</h3>
+                    {versionFilter !== 'all' && (
+                      <button
+                        onClick={() => setVersionFilter('all')}
+                        className="text-xs text-purple-600 hover:text-purple-800 transition-colors"
+                      >
+                        Clear filter
+                      </button>
+                    )}
+                  </div>
                   {versionDistribution.length === 0 ? (
                     <p className="text-sm text-gray-500">No version data available</p>
                   ) : (
                     <div className="space-y-2">
                       {versionDistribution.map((v) => (
-                        <div key={v.version} className="flex items-center gap-3">
+                        <button
+                          key={v.version}
+                          onClick={() => setVersionFilter(versionFilter === v.version ? 'all' : v.version)}
+                          className={`flex items-center gap-3 w-full text-left rounded-md px-1 py-0.5 transition-colors ${versionFilter === v.version ? 'bg-purple-50 ring-1 ring-purple-300' : 'hover:bg-gray-50'}`}
+                        >
                           <span className="text-xs font-mono text-gray-600 w-24 truncate" title={v.version}>
                             {v.version}
                           </span>
@@ -512,7 +567,7 @@ export default function PlatformMetricsPage() {
                           <span className="text-xs text-gray-500 w-16 text-right">
                             {v.count} ({v.pct.toFixed(0)}%)
                           </span>
-                        </div>
+                        </button>
                       ))}
                     </div>
                   )}
@@ -552,7 +607,7 @@ export default function PlatformMetricsPage() {
             </>
           )}
 
-          {!loading && !error && sessionMetrics.length === 0 && (
+          {!loading && !error && filteredMetrics.length === 0 && (
             <div className="text-center py-20 text-gray-500">
               <svg className="mx-auto h-12 w-12 text-gray-300 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />

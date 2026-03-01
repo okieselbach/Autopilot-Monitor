@@ -322,6 +322,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                         EmitEvent,
                         _apiClient.NetworkMetrics,
                         _logger,
+                        _agentVersion,
                         selfMetricsInterval,
                         maxCollectorDurationHours
                     );

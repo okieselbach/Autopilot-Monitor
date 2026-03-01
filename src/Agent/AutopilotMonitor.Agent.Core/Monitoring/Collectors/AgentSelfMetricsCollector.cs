@@ -18,6 +18,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         private readonly AgentLogger _logger;
         private readonly string _sessionId;
         private readonly string _tenantId;
+        private readonly string _agentVersion;
         private readonly Action<EnrollmentEvent> _onEventCollected;
         private readonly NetworkMetrics _networkMetrics;
         private readonly int _intervalSeconds;
@@ -37,6 +38,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             Action<EnrollmentEvent> onEventCollected,
             NetworkMetrics networkMetrics,
             AgentLogger logger,
+            string agentVersion = "unknown",
             int intervalSeconds = 60,
             int maxDurationHours = 4)
         {
@@ -45,6 +47,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             _onEventCollected = onEventCollected ?? throw new ArgumentNullException(nameof(onEventCollected));
             _networkMetrics = networkMetrics ?? throw new ArgumentNullException(nameof(networkMetrics));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _agentVersion = string.IsNullOrWhiteSpace(agentVersion) ? "unknown" : agentVersion;
             _intervalSeconds = intervalSeconds;
             _maxDurationHours = maxDurationHours;
         }
@@ -114,7 +117,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     return;
                 }
 
-                var data = new Dictionary<string, object>();
+                var data = new Dictionary<string, object>
+                {
+                    { "agent_version", _agentVersion }
+                };
                 var now = DateTime.UtcNow;
 
                 // --- Process metrics (no WMI, no PerformanceCounter) ---

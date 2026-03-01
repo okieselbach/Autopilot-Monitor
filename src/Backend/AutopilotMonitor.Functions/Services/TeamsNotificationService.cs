@@ -133,6 +133,86 @@ namespace AutopilotMonitor.Functions.Services
             }
         }
 
+        /// <summary>
+        /// Sends a WhiteGlove pre-provisioning notification to the given Teams Incoming Webhook URL.
+        /// This method is non-fatal: exceptions are caught and logged as warnings.
+        /// </summary>
+        public async Task SendWhiteGloveNotificationAsync(
+            string webhookUrl,
+            string? deviceName,
+            string? serialNumber,
+            string? manufacturer,
+            string? model,
+            bool success,
+            TimeSpan? duration)
+        {
+            if (string.IsNullOrEmpty(webhookUrl))
+                return;
+
+            try
+            {
+                var title = success ? "🔵 WhiteGlove Pre-Provisioning Completed" : "❌ WhiteGlove Pre-Provisioning Failed";
+                var themeColor = success ? "0078D4" : "FF0000";
+                var summary = success
+                    ? $"WhiteGlove Pre-Provisioning Completed: {deviceName ?? "Unknown Device"}"
+                    : $"WhiteGlove Pre-Provisioning Failed: {deviceName ?? "Unknown Device"}";
+
+                var durationText = duration.HasValue
+                    ? $"{(int)duration.Value.TotalMinutes}m {duration.Value.Seconds}s"
+                    : "–";
+
+                var hardwareText = BuildHardwareText(manufacturer, model);
+
+                var facts = new[]
+                {
+                    new { name = "Device", value = deviceName ?? "–" },
+                    new { name = "Serial", value = serialNumber ?? "–" },
+                    new { name = "Hardware", value = hardwareText },
+                    new { name = "Duration", value = durationText }
+                };
+
+                var card = new
+                {
+                    type = "MessageCard",
+                    context = "http://schema.org/extensions",
+                    themeColor,
+                    summary,
+                    sections = new[]
+                    {
+                        new { activityTitle = title, facts }
+                    }
+                };
+
+                var json = JsonConvert.SerializeObject(card, new JsonSerializerSettings
+                {
+                    ContractResolver = new Newtonsoft.Json.Serialization.DefaultContractResolver
+                    {
+                        NamingStrategy = new Newtonsoft.Json.Serialization.CamelCaseNamingStrategy()
+                    }
+                });
+
+                json = json.Replace("\"type\":", "\"@type\":")
+                           .Replace("\"context\":", "\"@context\":");
+
+                var content = new StringContent(json, Encoding.UTF8, "application/json");
+                var response = await _http.PostAsync(webhookUrl, content);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    var body = await response.Content.ReadAsStringAsync();
+                    _logger.LogWarning($"Teams webhook returned {(int)response.StatusCode}: {body}");
+                }
+                else
+                {
+                    _logger.LogInformation($"Teams WhiteGlove notification sent for device '{deviceName}' (success={success})");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, $"Failed to send Teams WhiteGlove notification for device '{deviceName}'");
+            }
+        }
+
         private static string BuildHardwareText(string? manufacturer, string? model)
         {
             var parts = new[]

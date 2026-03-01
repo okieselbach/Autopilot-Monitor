@@ -32,6 +32,10 @@ namespace AutopilotMonitor.Functions.Services
                 int eventCount = 0;
                 DateTime? completedAt = null;
                 string failureReason = string.Empty;
+                bool isPreProvisioned = registration.IsPreProvisioned;
+                DateTime? lastEventAt = null;
+                int? durationSeconds = null;
+                string? diagnosticsBlobName = null;
 
                 try
                 {
@@ -47,6 +51,14 @@ namespace AutopilotMonitor.Functions.Services
                     eventCount = existingEntity.GetInt32("EventCount") ?? eventCount;
                     completedAt = existingEntity.GetDateTimeOffset("CompletedAt")?.UtcDateTime;
                     failureReason = existingEntity.GetString("FailureReason") ?? string.Empty;
+
+                    // Preserve fields set by Merge-mode updates (SetSessionPreProvisionedAsync,
+                    // UpdateSessionStatusAsync, UpdateSessionDiagnosticsBlobAsync) that would
+                    // otherwise be lost by the UpsertEntity (Replace) below.
+                    isPreProvisioned = existingEntity.GetBoolean("IsPreProvisioned") ?? isPreProvisioned;
+                    lastEventAt = existingEntity.GetDateTimeOffset("LastEventAt")?.UtcDateTime;
+                    durationSeconds = existingEntity.GetInt32("DurationSeconds");
+                    diagnosticsBlobName = existingEntity.GetString("DiagnosticsBlobName");
 
                     // WhiteGlove resumption: if the existing session was in Pending state,
                     // this re-registration means the user has received the device and booted it.
@@ -82,7 +94,7 @@ namespace AutopilotMonitor.Functions.Services
                     ["AutopilotProfileName"] = registration.AutopilotProfileName ?? string.Empty,
                     ["AutopilotProfileId"] = registration.AutopilotProfileId ?? string.Empty,
                     ["IsUserDriven"] = registration.IsUserDriven,
-                    ["IsPreProvisioned"] = registration.IsPreProvisioned,
+                    ["IsPreProvisioned"] = isPreProvisioned,
                     ["StartedAt"] = startedAt,
                     ["AgentVersion"] = registration.AgentVersion ?? string.Empty,
                     ["EnrollmentType"] = registration.EnrollmentType ?? "v1",
@@ -96,6 +108,15 @@ namespace AutopilotMonitor.Functions.Services
 
                 if (!string.IsNullOrWhiteSpace(failureReason))
                     entity["FailureReason"] = failureReason;
+
+                if (lastEventAt.HasValue)
+                    entity["LastEventAt"] = lastEventAt.Value;
+
+                if (durationSeconds.HasValue)
+                    entity["DurationSeconds"] = durationSeconds.Value;
+
+                if (!string.IsNullOrWhiteSpace(diagnosticsBlobName))
+                    entity["DiagnosticsBlobName"] = diagnosticsBlobName;
 
                 await tableClient.UpsertEntityAsync(entity);
                 _logger.LogInformation($"Stored session {registration.SessionId}");
@@ -349,7 +370,7 @@ namespace AutopilotMonitor.Functions.Services
         /// Event count is maintained atomically by IncrementSessionEventCountAsync and is not
         /// recounted here — avoiding an expensive full-partition scan on every status change.
         /// </summary>
-        public async Task<bool> UpdateSessionStatusAsync(string tenantId, string sessionId, SessionStatus status, EnrollmentPhase? currentPhase = null, string? failureReason = null, DateTime? completedAt = null, DateTime? earliestEventTimestamp = null, DateTime? latestEventTimestamp = null)
+        public async Task<bool> UpdateSessionStatusAsync(string tenantId, string sessionId, SessionStatus status, EnrollmentPhase? currentPhase = null, string? failureReason = null, DateTime? completedAt = null, DateTime? earliestEventTimestamp = null, DateTime? latestEventTimestamp = null, bool? isPreProvisioned = null)
         {
             SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
             SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
@@ -442,6 +463,12 @@ namespace AutopilotMonitor.Functions.Services
                         update["FailureReason"] = failureReason;
                     }
 
+                    // Set IsPreProvisioned flag atomically with the status update (WhiteGlove)
+                    if (isPreProvisioned.HasValue)
+                    {
+                        update["IsPreProvisioned"] = isPreProvisioned.Value;
+                    }
+
                     // Merge mode: only the fields set above are written; all other fields remain untouched.
                     // This drastically reduces ETag conflicts when concurrent requests update different fields.
                     await tableClient.UpdateEntityAsync(update, session.ETag, TableUpdateMode.Merge);
@@ -454,8 +481,83 @@ namespace AutopilotMonitor.Functions.Services
                     retryCount++;
                     if (retryCount >= maxRetries)
                     {
-                        _logger.LogWarning($"Failed to update session {sessionId} status after {maxRetries} retries due to ETag conflicts");
-                        return false;
+                        // All ETag-based retries exhausted. Perform one final unconditional write
+                        // to guarantee the status transition succeeds. This is safe because:
+                        // 1. Merge mode only touches fields we explicitly set
+                        // 2. We re-read and re-check the idempotency guard below
+                        // 3. The fields we write are authoritative from this code path
+                        _logger.LogWarning($"Session {sessionId}: ETag retries exhausted, attempting unconditional merge write for status={status}");
+
+                        try
+                        {
+                            var forceTableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
+                            var freshEntity = await forceTableClient.GetEntityAsync<TableEntity>(tenantId, sessionId);
+                            var freshSession = freshEntity.Value;
+
+                            // Re-check idempotency: do not overwrite a terminal state
+                            var freshStatusStr = freshSession.GetString("Status");
+                            if ((status == SessionStatus.Succeeded || status == SessionStatus.Failed) &&
+                                (freshStatusStr == SessionStatus.Succeeded.ToString() || freshStatusStr == SessionStatus.Failed.ToString()))
+                            {
+                                _logger.LogInformation($"Session {sessionId} reached terminal state '{freshStatusStr}' during retries, skipping force write");
+                                return false;
+                            }
+
+                            var forceUpdate = new TableEntity(tenantId, sessionId);
+
+                            if (status == SessionStatus.InProgress && freshStatusStr == SessionStatus.Pending.ToString())
+                            {
+                                _logger.LogInformation($"Session {sessionId} is Pending (WhiteGlove), preserving status in force write");
+                            }
+                            else
+                            {
+                                forceUpdate["Status"] = status.ToString();
+                            }
+
+                            if (currentPhase.HasValue)
+                                forceUpdate["CurrentPhase"] = (int)currentPhase.Value;
+
+                            var freshStartedAt = freshSession.GetDateTimeOffset("StartedAt")?.UtcDateTime ?? DateTime.MaxValue;
+                            if (earliestEventTimestamp.HasValue && earliestEventTimestamp.Value < freshStartedAt)
+                                forceUpdate["StartedAt"] = earliestEventTimestamp.Value;
+
+                            if (status == SessionStatus.Succeeded || status == SessionStatus.Failed)
+                            {
+                                var effectiveCompletedAt = completedAt ?? DateTime.UtcNow;
+                                forceUpdate["CompletedAt"] = effectiveCompletedAt;
+
+                                var earliestStoredEvent = await GetEarliestSessionEventTimestampAsync(tenantId, sessionId);
+                                var durationStart = earliestStoredEvent ?? freshStartedAt;
+                                if (earliestEventTimestamp.HasValue && earliestEventTimestamp.Value < durationStart)
+                                    durationStart = earliestEventTimestamp.Value;
+
+                                if (durationStart < effectiveCompletedAt)
+                                    forceUpdate["DurationSeconds"] = (int)(effectiveCompletedAt - durationStart).TotalSeconds;
+                            }
+
+                            if (latestEventTimestamp.HasValue)
+                            {
+                                var freshLastEventAt = freshSession.GetDateTimeOffset("LastEventAt")?.UtcDateTime;
+                                if (!freshLastEventAt.HasValue || latestEventTimestamp.Value > freshLastEventAt.Value)
+                                    forceUpdate["LastEventAt"] = latestEventTimestamp.Value;
+                            }
+
+                            if (status == SessionStatus.Failed && !string.IsNullOrEmpty(failureReason))
+                                forceUpdate["FailureReason"] = failureReason;
+
+                            if (isPreProvisioned.HasValue)
+                                forceUpdate["IsPreProvisioned"] = isPreProvisioned.Value;
+
+                            // Unconditional merge write — ETag.All bypasses concurrency check
+                            await forceTableClient.UpdateEntityAsync(forceUpdate, ETag.All, TableUpdateMode.Merge);
+                            _logger.LogInformation($"Force-updated session {sessionId} status to {status} (unconditional merge after ETag exhaustion)");
+                            return true;
+                        }
+                        catch (Exception forceEx)
+                        {
+                            _logger.LogError(forceEx, $"Force-write also failed for session {sessionId} status update to {status}");
+                            return false;
+                        }
                     }
 
                     // Exponential backoff with jitter to decorrelate concurrent retries

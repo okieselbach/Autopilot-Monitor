@@ -151,6 +151,7 @@ namespace AutopilotMonitor.Functions.Functions
                 EnrollmentEvent? gatherCompletionEvent = null;
                 EnrollmentEvent? diagnosticsUploadedEvent = null;
                 EnrollmentEvent? whiteGloveEvent = null;
+                EnrollmentEvent? espFailureEvent = null;
                 string? failureReason = null;
                 DateTime? earliestEventTimestamp = null;
                 DateTime? latestEventTimestamp = null;
@@ -197,6 +198,10 @@ namespace AutopilotMonitor.Functions.Functions
                     {
                         whiteGloveEvent = evt;
                     }
+                    else if (evt.EventType == "esp_failure")
+                    {
+                        espFailureEvent = evt;
+                    }
 
                     // Track app install events for per-app metrics
                     AggregateAppInstallEvent(evt, request.TenantId, request.SessionId, appInstallUpdates);
@@ -212,6 +217,7 @@ namespace AutopilotMonitor.Functions.Functions
                 // statusTransitioned = true only when this is the FIRST time the session reaches Succeeded/Failed
                 // (UpdateSessionStatusAsync returns false if already in a terminal state — idempotency guard)
                 bool statusTransitioned = false;
+                bool whiteGloveStatusTransitioned = false;
                 if (completionEvent != null)
                 {
                     // Enrollment completed successfully - use event timestamp for accurate duration
@@ -263,23 +269,19 @@ namespace AutopilotMonitor.Functions.Functions
                 else if (whiteGloveEvent != null)
                 {
                     // WhiteGlove pre-provisioning completed — transition to Pending
-                    statusTransitioned = await _storageService.UpdateSessionStatusAsync(
+                    // IsPreProvisioned is set atomically in the same merge write to prevent
+                    // the race condition where status update fails but IsPreProvisioned succeeds.
+                    whiteGloveStatusTransitioned = await _storageService.UpdateSessionStatusAsync(
                         request.TenantId,
                         request.SessionId,
                         SessionStatus.Pending,
                         whiteGloveEvent.Phase,
                         earliestEventTimestamp: earliestEventTimestamp,
-                        latestEventTimestamp: latestEventTimestamp
+                        latestEventTimestamp: latestEventTimestamp,
+                        isPreProvisioned: true
                     );
 
-                    // Mark session as pre-provisioned for UI display (split timeline)
-                    await _storageService.SetSessionPreProvisionedAsync(
-                        request.TenantId,
-                        request.SessionId,
-                        true
-                    );
-
-                    _logger.LogInformation("{SessionPrefix} Status: Pending (WhiteGlove pre-provisioning complete)", sessionPrefix);
+                    _logger.LogInformation("{SessionPrefix} Status: Pending (WhiteGlove pre-provisioning complete, transitioned={Transitioned})", sessionPrefix, whiteGloveStatusTransitioned);
                 }
                 else if (lastPhaseChangeEvent != null)
                 {
@@ -380,6 +382,49 @@ namespace AutopilotMonitor.Functions.Functions
                                 failureReason: failureReason,
                                 duration: duration);
                         }
+                    }
+                }
+
+                // Send Teams notification on WhiteGlove pre-provisioning completion (fire-and-forget, non-fatal)
+                // Only send when whiteGloveStatusTransitioned=true to prevent duplicates on retry/double-upload
+                if (whiteGloveStatusTransitioned && whiteGloveEvent != null)
+                {
+                    var tenantConfig = await _configService.GetConfigurationAsync(request.TenantId);
+                    if (!string.IsNullOrEmpty(tenantConfig.TeamsWebhookUrl) && tenantConfig.TeamsNotifyOnSuccess)
+                    {
+                        var duration = updatedSession?.DurationSeconds != null
+                            ? TimeSpan.FromSeconds(updatedSession.DurationSeconds.Value)
+                            : (TimeSpan?)null;
+                        _ = _teamsNotificationService.SendWhiteGloveNotificationAsync(
+                            tenantConfig.TeamsWebhookUrl,
+                            updatedSession?.DeviceName,
+                            updatedSession?.SerialNumber,
+                            updatedSession?.Manufacturer,
+                            updatedSession?.Model,
+                            success: true,
+                            duration: duration);
+                    }
+                }
+
+                // Send Teams notification on WhiteGlove pre-provisioning failure via esp_failure (fire-and-forget, non-fatal)
+                // Only notify if the session is already pre-provisioned (IsPreProvisioned=true), meaning we are in a
+                // WhiteGlove scenario. For normal enrollments, esp_failure is handled via enrollment_failed.
+                if (espFailureEvent != null && updatedSession?.IsPreProvisioned == true)
+                {
+                    var tenantConfig = await _configService.GetConfigurationAsync(request.TenantId);
+                    if (!string.IsNullOrEmpty(tenantConfig.TeamsWebhookUrl) && tenantConfig.TeamsNotifyOnFailure)
+                    {
+                        var duration = updatedSession?.DurationSeconds != null
+                            ? TimeSpan.FromSeconds(updatedSession.DurationSeconds.Value)
+                            : (TimeSpan?)null;
+                        _ = _teamsNotificationService.SendWhiteGloveNotificationAsync(
+                            tenantConfig.TeamsWebhookUrl,
+                            updatedSession?.DeviceName,
+                            updatedSession?.SerialNumber,
+                            updatedSession?.Manufacturer,
+                            updatedSession?.Model,
+                            success: false,
+                            duration: duration);
                     }
                 }
 

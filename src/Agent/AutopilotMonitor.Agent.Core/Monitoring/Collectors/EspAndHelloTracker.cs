@@ -642,7 +642,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                         // Use robust pattern: OOBE_ESP*Exiting* instead of full string CommercialOOBE_ESPProgress_Page_Exiting
                         // Fix 26.02.26 - RegEx was not preceisely matching as we used Exit instead of Exiting, which is the actual value in the event description.
                         //                Updated to check for Exiting to reliably detect ESP exit events. Compare with event samples from real devices listed above.
-                        else if (description.Contains("ESPProgress_Failure", StringComparison.OrdinalIgnoreCase))
+                        else if (description.Contains("ESPProgress_Failure", StringComparison.OrdinalIgnoreCase)
+                              || description.Contains("ESPProgress_Failed", StringComparison.OrdinalIgnoreCase)
+                              || description.Contains("ESPProgress_Timeout", StringComparison.OrdinalIgnoreCase)
+                              || description.Contains("ESPProgress_Abort", StringComparison.OrdinalIgnoreCase)
+                              || description.Contains("WhiteGlove_Failed", StringComparison.OrdinalIgnoreCase)
+                              || description.Contains("WhiteGlove_Failure", StringComparison.OrdinalIgnoreCase))
                         {
                             eventType = "esp_failure";
                             severity = EventSeverity.Error;
