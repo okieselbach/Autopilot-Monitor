@@ -108,6 +108,7 @@ builder.Services.AddSingleton<ImeLogPatternService>();
 builder.Services.AddHttpClient<GitHubRuleRepository>();
 builder.Services.AddSingleton<MaintenanceService>();
 builder.Services.AddSingleton<BlockedDeviceService>();
+builder.Services.AddSingleton<SessionReportService>();
 builder.Services.AddSingleton<AutopilotMonitor.Functions.Security.AutopilotDeviceValidator>();
 builder.Services.AddHttpClient<TeamsNotificationService>();
 builder.Services.AddHttpClient<TelegramNotificationService>();

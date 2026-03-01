@@ -18,6 +18,8 @@ import PhaseTimeline from "./components/PhaseTimeline";
 import EventTimeline from "./components/EventTimeline";
 import AnalysisResultsSection from "./components/AnalysisResultsSection";
 import MarkFailedModal from "./components/MarkFailedModal";
+import ReportSessionModal from "./components/ReportSessionModal";
+import { generateUiExport, generateCsvExport, SessionExportEvent } from "@/lib/sessionExportUtils";
 
 export interface EnrollmentEvent {
   eventId: string;
@@ -77,6 +79,8 @@ export default function SessionDetailPage() {
   const [loading, setLoading] = useState(true);
   const [severityFilters, setSeverityFilters] = useState<Set<string>>(new Set(["Info", "Warning", "Error", "Critical"]));
   const [showMarkFailedConfirm, setShowMarkFailedConfirm] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [reportSubmitting, setReportSubmitting] = useState(false);
   const [analysisResults, setAnalysisResults] = useState<RuleResult[]>([]);
   const [loadingAnalysis, setLoadingAnalysis] = useState(false);
   const [analysisExpanded, setAnalysisExpanded] = useState(true);
@@ -455,6 +459,69 @@ export default function SessionDetailPage() {
     setShowMarkFailedConfirm(false);
   };
 
+  const handleSubmitReport = async (
+    comment: string, email: string,
+    screenshotBase64: string | null, screenshotFileName: string | null,
+    agentLogBase64: string | null, agentLogFileName: string | null
+  ) => {
+    const effectiveTenantId = sessionTenantId || tenantId;
+    try {
+      setReportSubmitting(true);
+      const token = await getAccessToken();
+      if (!token) {
+        addNotification('error', 'Authentication Error', 'Failed to get access token.', 'report-auth-error');
+        return;
+      }
+
+      // Generate TXT and CSV exports from the events currently loaded
+      const exportEvents: SessionExportEvent[] = events.map(e => ({
+        ...e,
+        tenantId: effectiveTenantId || '',
+      }));
+      const timelineExportTxt = generateUiExport(exportEvents, sessionId, effectiveTenantId || '');
+      const eventsCsv = generateCsvExport(exportEvents);
+
+      const response = await fetch(
+        `${API_BASE_URL}/api/sessions/${sessionId}/report?tenantId=${effectiveTenantId}`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            tenantId: effectiveTenantId,
+            sessionId,
+            comment,
+            email,
+            sessionData: session,
+            eventsData: events,
+            analysisResultsData: analysisResults,
+            timelineExportTxt,
+            eventsCsv,
+            screenshotBase64,
+            screenshotFileName,
+            agentLogBase64,
+            agentLogFileName
+          })
+        }
+      );
+
+      if (response.ok) {
+        setShowReportModal(false);
+        addNotification('success', 'Report Submitted', 'Session report has been submitted for analysis.', 'report-success');
+      } else {
+        const data = await response.json().catch(() => null);
+        addNotification('error', 'Report Failed', data?.message || 'Failed to submit report.', 'report-error');
+      }
+    } catch (err) {
+      console.error('Error submitting report:', err);
+      addNotification('error', 'Report Failed', 'Unable to submit report. Please check your connection.', 'report-error');
+    } finally {
+      setReportSubmitting(false);
+    }
+  };
+
   const toggleSeverityFilter = (severity: string) => {
     setSeverityFilters(prev => {
       const next = new Set(prev);
@@ -697,6 +764,17 @@ export default function SessionDetailPage() {
                 Mark as Failed
               </button>
             )}
+            {adminMode && (
+              <button
+                onClick={() => setShowReportModal(true)}
+                className="px-4 py-2 bg-white border border-blue-300 text-blue-700 rounded-md hover:bg-blue-50 transition-colors flex items-center gap-2 text-sm"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+                </svg>
+                Report Session
+              </button>
+            )}
           </div>
         </div>
       </header>
@@ -787,6 +865,17 @@ export default function SessionDetailPage() {
           session={session}
           onConfirm={confirmMarkFailed}
           onCancel={cancelMarkFailed}
+        />
+
+        {/* Report Session Modal */}
+        <ReportSessionModal
+          show={showReportModal}
+          session={session}
+          events={events}
+          analysisResults={analysisResults}
+          onSubmit={handleSubmitReport}
+          onCancel={() => setShowReportModal(false)}
+          submitting={reportSubmitting}
         />
 
       </main>

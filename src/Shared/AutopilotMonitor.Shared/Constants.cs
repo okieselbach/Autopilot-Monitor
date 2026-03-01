@@ -165,6 +165,9 @@ namespace AutopilotMonitor.Shared
             // Device blocking
             public const string BlockedDevices = "BlockedDevices";
 
+            // Session reports (feedback from Tenant Admins)
+            public const string SessionReports = "SessionReports";
+
             /// <summary>
             /// Returns all table names for initialization
             /// </summary>
@@ -188,7 +191,8 @@ namespace AutopilotMonitor.Shared
                 TenantAdmins,
                 PreviewWhitelist,
                 PreviewConfig,
-                BlockedDevices
+                BlockedDevices,
+                SessionReports
             };
         }
     }

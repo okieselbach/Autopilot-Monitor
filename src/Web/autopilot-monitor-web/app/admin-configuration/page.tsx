@@ -11,6 +11,7 @@ import { DiagnosticsLogPathsSection, DiagnosticsLogPath } from "./components/Dia
 import { DeviceBlockSection } from "./components/DeviceBlockSection";
 import { SessionExportSection } from "./components/SessionExportSection";
 import { AdminConfigSettingsSection } from "./components/AdminConfigSettingsSection";
+import { SessionReportsSection } from "./components/SessionReportsSection";
 
 interface AdminConfiguration {
   partitionKey: string;
@@ -372,6 +373,12 @@ export default function AdminConfigurationPage() {
               getAccessToken={getAccessToken}
               setError={setError}
               setSuccessMessage={setSuccessMessage}
+            />
+
+            {/* Session Reports (Private Preview) */}
+            <SessionReportsSection
+              getAccessToken={getAccessToken}
+              setError={setError}
             />
           </div>
         </main>
