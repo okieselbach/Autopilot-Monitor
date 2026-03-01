@@ -26,11 +26,37 @@ export function SessionReportsSection({
   const [reports, setReports] = useState<SessionReport[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedReport, setSelectedReport] = useState<SessionReport | null>(null);
+  const [downloadingBlob, setDownloadingBlob] = useState<string | null>(null);
 
   useEffect(() => {
     fetchReports();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const handleDownload = async (blobName: string) => {
+    try {
+      setDownloadingBlob(blobName);
+      const token = await getAccessToken();
+      if (!token) throw new Error("Failed to get access token");
+
+      const res = await fetch(
+        `${API_BASE_URL}/api/galactic/session-reports/download-url?blobName=${encodeURIComponent(blobName)}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!res.ok) throw new Error(`Failed to get download URL: ${res.statusText}`);
+      const data = await res.json();
+      if (!data.downloadUrl) throw new Error("No download URL returned");
+
+      const a = document.createElement("a");
+      a.href = data.downloadUrl;
+      a.download = blobName;
+      a.click();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to download report");
+    } finally {
+      setDownloadingBlob(null);
+    }
+  };
 
   const fetchReports = async () => {
     try {
@@ -187,7 +213,29 @@ export function SessionReportsSection({
                 </div>
               </dl>
 
-              <div className="mt-6 flex justify-end">
+              <div className="mt-6 flex items-center justify-between">
+                <button
+                  onClick={() => handleDownload(selectedReport.blobName)}
+                  disabled={downloadingBlob === selectedReport.blobName}
+                  className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white rounded-md transition-colors text-sm font-medium"
+                >
+                  {downloadingBlob === selectedReport.blobName ? (
+                    <>
+                      <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                      </svg>
+                      Preparing...
+                    </>
+                  ) : (
+                    <>
+                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                      </svg>
+                      Download ZIP
+                    </>
+                  )}
+                </button>
                 <button
                   onClick={() => setSelectedReport(null)}
                   className="px-4 py-2 bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200 rounded-md hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors"
