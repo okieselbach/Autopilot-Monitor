@@ -186,7 +186,8 @@ namespace AutopilotMonitor.Functions.Services
                         Email = entity.GetString("Email") ?? string.Empty,
                         BlobName = entity.GetString("BlobName") ?? string.Empty,
                         SubmittedBy = entity.GetString("SubmittedBy") ?? string.Empty,
-                        SubmittedAt = entity.GetDateTimeOffset("SubmittedAt")?.UtcDateTime ?? DateTime.MinValue
+                        SubmittedAt = entity.GetDateTimeOffset("SubmittedAt")?.UtcDateTime ?? DateTime.MinValue,
+                        AdminNote = entity.GetString("AdminNote") ?? string.Empty
                     });
                 }
             }
@@ -197,6 +198,37 @@ namespace AutopilotMonitor.Functions.Services
             }
 
             return results;
+        }
+
+        /// <summary>
+        /// Updates the AdminNote field for a report identified by reportId.
+        /// </summary>
+        public async Task<bool> UpdateAdminNoteAsync(string reportId, string adminNote)
+        {
+            var tableClient = _storageService.GetTableServiceClient().GetTableClient(Constants.TableNames.SessionReports);
+
+            // Find the entity by scanning for matching ReportId
+            TableEntity? found = null;
+            await foreach (var entity in tableClient.QueryAsync<TableEntity>(e => e.PartitionKey == "reports"))
+            {
+                if (entity.GetString("ReportId") == reportId)
+                {
+                    found = entity;
+                    break;
+                }
+            }
+
+            if (found == null)
+            {
+                _logger.LogWarning("UpdateAdminNote: report {ReportId} not found", reportId);
+                return false;
+            }
+
+            found["AdminNote"] = adminNote ?? string.Empty;
+            await tableClient.UpsertEntityAsync(found, TableUpdateMode.Merge);
+
+            _logger.LogInformation("Updated AdminNote for report {ReportId}", reportId);
+            return true;
         }
 
         private static void AddJsonEntry(ZipArchive archive, string name, object data)

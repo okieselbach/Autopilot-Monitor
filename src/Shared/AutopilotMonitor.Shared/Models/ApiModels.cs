@@ -241,5 +241,6 @@ namespace AutopilotMonitor.Shared.Models
         public string BlobName { get; set; }
         public string SubmittedBy { get; set; }
         public DateTime SubmittedAt { get; set; }
+        public string AdminNote { get; set; }
     }
 }

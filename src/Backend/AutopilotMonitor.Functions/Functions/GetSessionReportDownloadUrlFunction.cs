@@ -1,7 +1,6 @@
 using System.Net;
 using System.Web;
 using Azure.Storage.Blobs;
-using Azure.Storage.Sas;
 using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Services;
 using Microsoft.Azure.Functions.Worker;
@@ -84,16 +83,9 @@ namespace AutopilotMonitor.Functions.Functions
                     return notFoundResponse;
                 }
 
-                var sasBuilder = new BlobSasBuilder
-                {
-                    BlobContainerName = ContainerName,
-                    BlobName = blobName,
-                    Resource = "b",
-                    ExpiresOn = DateTimeOffset.UtcNow.AddMinutes(15)
-                };
-                sasBuilder.SetPermissions(BlobSasPermissions.Read);
-
-                var downloadUrl = blobClient.GenerateSasUri(sasBuilder).ToString();
+                // The connection string uses a service-level SAS token, so the blob URI
+                // already contains the access token — no separate SAS generation needed.
+                var downloadUrl = blobClient.Uri.ToString();
 
                 _logger.LogInformation("Generated session report download URL for blob {BlobName}", blobName);
 

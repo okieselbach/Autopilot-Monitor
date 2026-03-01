@@ -12,11 +12,40 @@ interface SessionReport {
   blobName: string;
   submittedBy: string;
   submittedAt: string;
+  adminNote?: string;
 }
 
 interface SessionReportsSectionProps {
   getAccessToken: () => Promise<string | null>;
   setError: (error: string | null) => void;
+}
+
+function CopyButton({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(value).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+  return (
+    <button
+      onClick={handleCopy}
+      title="Copy to clipboard"
+      className="ml-1.5 p-0.5 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+    >
+      {copied ? (
+        <svg className="w-3.5 h-3.5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+        </svg>
+      ) : (
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+        </svg>
+      )}
+    </button>
+  );
 }
 
 export function SessionReportsSection({
@@ -27,11 +56,21 @@ export function SessionReportsSection({
   const [loading, setLoading] = useState(false);
   const [selectedReport, setSelectedReport] = useState<SessionReport | null>(null);
   const [downloadingBlob, setDownloadingBlob] = useState<string | null>(null);
+  const [adminNoteValue, setAdminNoteValue] = useState("");
+  const [savingNote, setSavingNote] = useState(false);
+  const [noteSaveResult, setNoteSaveResult] = useState<"saved" | string | null>(null);
 
   useEffect(() => {
     fetchReports();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (selectedReport) {
+      setAdminNoteValue(selectedReport.adminNote ?? "");
+      setNoteSaveResult(null);
+    }
+  }, [selectedReport]);
 
   const handleDownload = async (blobName: string) => {
     try {
@@ -55,6 +94,39 @@ export function SessionReportsSection({
       setError(err instanceof Error ? err.message : "Failed to download report");
     } finally {
       setDownloadingBlob(null);
+    }
+  };
+
+  const handleSaveAdminNote = async () => {
+    if (!selectedReport) return;
+    try {
+      setSavingNote(true);
+      setNoteSaveResult(null);
+      const token = await getAccessToken();
+      if (!token) throw new Error("Failed to get access token");
+
+      const res = await fetch(
+        `${API_BASE_URL}/api/galactic/session-reports/${selectedReport.reportId}/note`,
+        {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ adminNote: adminNoteValue }),
+        }
+      );
+      if (!res.ok) throw new Error(`Failed to save note: ${res.statusText}`);
+
+      // Update local state
+      const updated = { ...selectedReport, adminNote: adminNoteValue };
+      setSelectedReport(updated);
+      setReports(prev => prev.map(r => r.reportId === selectedReport.reportId ? updated : r));
+      setNoteSaveResult("saved");
+    } catch (err) {
+      setNoteSaveResult(err instanceof Error ? err.message : "Failed to save note");
+    } finally {
+      setSavingNote(false);
     }
   };
 
@@ -126,6 +198,7 @@ export function SessionReportsSection({
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Tenant</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Submitted By</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Comment</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Admin Note</th>
                 </tr>
               </thead>
               <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
@@ -149,6 +222,18 @@ export function SessionReportsSection({
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300 truncate max-w-xs">
                       {r.comment || <span className="text-gray-400 italic">no comment</span>}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">
+                      {r.adminNote ? (
+                        <div className="flex items-center gap-1.5">
+                          <svg className="w-4 h-4 text-indigo-500 dark:text-indigo-400 shrink-0" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 000-1.41l-2.34-2.34a1 1 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z" />
+                          </svg>
+                          <span className="truncate max-w-[140px]">{r.adminNote}</span>
+                        </div>
+                      ) : (
+                        <span className="text-gray-300 dark:text-gray-600">—</span>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -179,15 +264,24 @@ export function SessionReportsSection({
               <dl className="space-y-3 text-sm">
                 <div>
                   <dt className="font-medium text-gray-500 dark:text-gray-400">Session ID</dt>
-                  <dd className="font-mono text-gray-900 dark:text-gray-100 mt-0.5">{selectedReport.sessionId}</dd>
+                  <dd className="font-mono text-gray-900 dark:text-gray-100 mt-0.5 flex items-center">
+                    {selectedReport.sessionId}
+                    <CopyButton value={selectedReport.sessionId} />
+                  </dd>
                 </div>
                 <div>
                   <dt className="font-medium text-gray-500 dark:text-gray-400">Tenant ID</dt>
-                  <dd className="font-mono text-gray-900 dark:text-gray-100 mt-0.5">{selectedReport.tenantId}</dd>
+                  <dd className="font-mono text-gray-900 dark:text-gray-100 mt-0.5 flex items-center">
+                    {selectedReport.tenantId}
+                    <CopyButton value={selectedReport.tenantId} />
+                  </dd>
                 </div>
                 <div>
                   <dt className="font-medium text-gray-500 dark:text-gray-400">Submitted By</dt>
-                  <dd className="text-gray-900 dark:text-gray-100 mt-0.5">{selectedReport.submittedBy}</dd>
+                  <dd className="text-gray-900 dark:text-gray-100 mt-0.5 flex items-center">
+                    {selectedReport.submittedBy}
+                    <CopyButton value={selectedReport.submittedBy} />
+                  </dd>
                 </div>
                 <div>
                   <dt className="font-medium text-gray-500 dark:text-gray-400">Submitted At</dt>
@@ -195,8 +289,10 @@ export function SessionReportsSection({
                 </div>
                 <div>
                   <dt className="font-medium text-gray-500 dark:text-gray-400">Email</dt>
-                  <dd className="text-gray-900 dark:text-gray-100 mt-0.5">
-                    {selectedReport.email || <span className="text-gray-400 italic">not provided</span>}
+                  <dd className="text-gray-900 dark:text-gray-100 mt-0.5 flex items-center">
+                    {selectedReport.email
+                      ? <><span>{selectedReport.email}</span><CopyButton value={selectedReport.email} /></>
+                      : <span className="text-gray-400 italic">not provided</span>}
                   </dd>
                 </div>
                 <div>
@@ -209,6 +305,55 @@ export function SessionReportsSection({
                   <dt className="font-medium text-gray-500 dark:text-gray-400">Blob Name</dt>
                   <dd className="font-mono text-xs text-gray-700 dark:text-gray-300 mt-0.5 break-all bg-gray-50 dark:bg-gray-700/50 rounded p-2">
                     {selectedReport.blobName}
+                  </dd>
+                </div>
+
+                {/* Admin Note */}
+                <div className="pt-1 border-t border-gray-100 dark:border-gray-700">
+                  <dt className="font-medium text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+                    <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 000-1.41l-2.34-2.34a1 1 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z" />
+                    </svg>
+                    Admin Note
+                  </dt>
+                  <dd className="mt-1.5">
+                    <textarea
+                      value={adminNoteValue}
+                      onChange={e => { setAdminNoteValue(e.target.value); setNoteSaveResult(null); }}
+                      rows={3}
+                      placeholder="Add an internal note about this report..."
+                      className="w-full text-sm rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none placeholder:text-gray-400"
+                    />
+                    <div className="flex items-center justify-between mt-1.5">
+                      <div className="text-xs">
+                        {noteSaveResult === "saved" && (
+                          <span className="text-green-600 dark:text-green-400 flex items-center gap-1">
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            </svg>
+                            Saved
+                          </span>
+                        )}
+                        {noteSaveResult && noteSaveResult !== "saved" && (
+                          <span className="text-red-600 dark:text-red-400">{noteSaveResult}</span>
+                        )}
+                      </div>
+                      <button
+                        onClick={handleSaveAdminNote}
+                        disabled={savingNote}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white rounded-md transition-colors text-xs font-medium"
+                      >
+                        {savingNote ? (
+                          <>
+                            <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                            </svg>
+                            Saving...
+                          </>
+                        ) : "Save Note"}
+                      </button>
+                    </div>
                   </dd>
                 </div>
               </dl>
