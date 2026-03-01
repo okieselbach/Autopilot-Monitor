@@ -111,6 +111,12 @@ namespace AutopilotMonitor.Shared.Models
         /// The agent validates each path against DiagnosticsPathGuards before collection.
         /// </summary>
         public List<DiagnosticsLogPath> DiagnosticsLogPaths { get; set; } = new List<DiagnosticsLogPath>();
+
+        /// <summary>
+        /// Configuration for agent-side security and configuration analyzers.
+        /// Controls which analyzers run and their per-analyzer parameters.
+        /// </summary>
+        public AnalyzerConfiguration Analyzers { get; set; } = new AnalyzerConfiguration();
     }
 
     /// <summary>
@@ -155,5 +161,29 @@ namespace AutopilotMonitor.Shared.Models
         {
             return new CollectorConfiguration();
         }
+    }
+
+    /// <summary>
+    /// Configuration for agent-side analyzers (security and configuration checks).
+    /// Analyzers differ from collectors: they run checks, produce a confidence-scored finding,
+    /// and emit a single structured event — rather than streaming raw telemetry data.
+    /// </summary>
+    public class AnalyzerConfiguration
+    {
+        /// <summary>
+        /// Whether to run the LocalAdminAnalyzer at startup and shutdown.
+        /// Detects pre-enrollment local admin account creation (Autopilot bypass technique).
+        /// Default: true
+        /// </summary>
+        public bool EnableLocalAdminAnalyzer { get; set; } = true;
+
+        /// <summary>
+        /// Additional local account names considered expected on a newly enrolled device.
+        /// These are merged (union) with the built-in defaults:
+        /// Administrator, Guest, DefaultAccount, WDAGUtilityAccount, Public, Default.
+        /// Any local account not in the merged list will be flagged.
+        /// Default: empty list (built-in defaults only)
+        /// </summary>
+        public List<string> LocalAdminAllowedAccounts { get; set; } = new List<string>();
     }
 }

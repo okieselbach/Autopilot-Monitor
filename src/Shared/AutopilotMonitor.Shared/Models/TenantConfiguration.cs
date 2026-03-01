@@ -204,6 +204,40 @@ namespace AutopilotMonitor.Shared.Models
         /// </summary>
         public int? MaxBatchSize { get; set; }
 
+        // ===== AGENT ANALYZER SETTINGS =====
+
+        /// <summary>
+        /// Whether the LocalAdminAnalyzer is enabled for this tenant's devices.
+        /// null = use agent default (true).
+        /// </summary>
+        public bool? EnableLocalAdminAnalyzer { get; set; } = null;
+
+        /// <summary>
+        /// JSON-serialized list of additional local account names that are considered expected
+        /// on a newly enrolled device (merged with built-in defaults on the agent).
+        /// Example: ["SupportAdmin", "TechDesk"]
+        /// </summary>
+        public string LocalAdminAllowedAccountsJson { get; set; }
+
+        /// <summary>
+        /// Returns the deserialized list of additional allowed local admin account names.
+        /// </summary>
+        public List<string> GetLocalAdminAllowedAccounts()
+        {
+            if (string.IsNullOrEmpty(LocalAdminAllowedAccountsJson))
+                return new List<string>();
+            try
+            {
+                return JsonSerializer.Deserialize<List<string>>(LocalAdminAllowedAccountsJson,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+                    ?? new List<string>();
+            }
+            catch
+            {
+                return new List<string>();
+            }
+        }
+
         // ===== DIAGNOSTICS LOG PATHS =====
 
         /// <summary>

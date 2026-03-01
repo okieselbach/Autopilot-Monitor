@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using AutopilotMonitor.Agent.Core.Configuration;
 using AutopilotMonitor.Agent.Core.Logging;
+using AutopilotMonitor.Agent.Core.Monitoring.Analyzers;
 using AutopilotMonitor.Agent.Core.Monitoring.Collectors;
 using AutopilotMonitor.Agent.Core.Monitoring.Network;
 using AutopilotMonitor.Agent.Core.Monitoring.Replay;
@@ -53,6 +54,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 
         // Diagnostics package upload
         private readonly DiagnosticsPackageService _diagnosticsService;
+
+        // Agent-side security and configuration analyzers
+        private readonly List<IAgentAnalyzer> _analyzers = new List<IAgentAnalyzer>();
 
         // Auth failure circuit breaker
         private int _consecutiveAuthFailures = 0;
@@ -157,6 +161,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 
             // Start gather rule executor
             StartGatherRuleExecutor();
+
+            // Initialize and run startup analyzers (security/configuration checks)
+            InitializeAnalyzers();
+            RunStartupAnalyzers();
 
             _logger.Info("Monitoring service started");
         }
@@ -406,6 +414,83 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         }
 
         /// <summary>
+        /// Initializes agent analyzers from remote config.
+        /// Called once during Start(), after all collectors are started.
+        /// </summary>
+        private void InitializeAnalyzers()
+        {
+            _analyzers.Clear();
+
+            var analyzerConfig = _remoteConfigService?.CurrentConfig?.Analyzers ?? new AnalyzerConfiguration();
+
+            if (analyzerConfig.EnableLocalAdminAnalyzer)
+            {
+                _analyzers.Add(new LocalAdminAnalyzer(
+                    _configuration.SessionId,
+                    _configuration.TenantId,
+                    EmitEvent,
+                    _logger,
+                    analyzerConfig.LocalAdminAllowedAccounts
+                ));
+                _logger.Info("LocalAdminAnalyzer registered");
+            }
+            else
+            {
+                _logger.Info("LocalAdminAnalyzer disabled by remote config");
+            }
+
+            _logger.Info($"Analyzers initialized: {_analyzers.Count} active");
+        }
+
+        /// <summary>
+        /// Runs all registered analyzers at agent startup.
+        /// Failures in individual analyzers are caught and logged — they do not block startup.
+        /// </summary>
+        private void RunStartupAnalyzers()
+        {
+            if (_analyzers.Count == 0)
+                return;
+
+            _logger.Info($"Running {_analyzers.Count} startup analyzer(s)");
+
+            foreach (var analyzer in _analyzers)
+            {
+                try
+                {
+                    analyzer.AnalyzeAtStartup();
+                }
+                catch (Exception ex)
+                {
+                    _logger.Error($"Analyzer {analyzer.Name} threw during startup", ex);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Runs all registered analyzers at shutdown / enrollment completion.
+        /// Emits end-state findings for delta detection against the startup results.
+        /// </summary>
+        private void RunShutdownAnalyzers()
+        {
+            if (_analyzers.Count == 0)
+                return;
+
+            _logger.Info($"Running {_analyzers.Count} shutdown analyzer(s)");
+
+            foreach (var analyzer in _analyzers)
+            {
+                try
+                {
+                    analyzer.AnalyzeAtShutdown();
+                }
+                catch (Exception ex)
+                {
+                    _logger.Error($"Analyzer {analyzer.Name} threw during shutdown", ex);
+                }
+            }
+        }
+
+        /// <summary>
         /// Registers the session with the backend
         /// </summary>
         private async Task RegisterSessionAsync()
@@ -464,6 +549,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 
             // Stop event collectors
             StopEventCollectors();
+
+            // Run shutdown analyzers before final event (captures end-state for delta detection)
+            RunShutdownAnalyzers();
 
             // Emit final event
             EmitEvent(new EnrollmentEvent
@@ -895,7 +983,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 StopEventCollectors();
                 _spool.StopWatching();
 
-                // Step 2: Upload all remaining events
+                // Step 1.5: Run shutdown analyzers to capture end-state (delta from startup)
+                RunShutdownAnalyzers();
+
+                // Step 2: Upload all remaining events (includes analyzer findings)
                 _logger.Info("Uploading final events...");
                 await UploadEventsAsync();
 

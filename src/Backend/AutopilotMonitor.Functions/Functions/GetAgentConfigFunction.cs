@@ -106,7 +106,7 @@ namespace AutopilotMonitor.Functions.Functions
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(new AgentConfigResponse
                 {
-                    ConfigVersion = 9, // diagnostics log paths now configurable via portal
+                    ConfigVersion = 10, // agent-side analyzers (LocalAdminAnalyzer) with AnalyzerConfiguration
                     UploadIntervalSeconds = 30,
                     SelfDestructOnComplete = tenantConfig.SelfDestructOnComplete ?? true,
                     KeepLogFile = tenantConfig.KeepLogFile ?? false,
@@ -122,6 +122,11 @@ namespace AutopilotMonitor.Functions.Functions
                     DiagnosticsUploadMode = tenantConfig.DiagnosticsUploadMode ?? "Off",
                     DiagnosticsLogPaths = diagLogPaths,
                     Collectors = collectors,
+                    Analyzers = new AnalyzerConfiguration
+                    {
+                        EnableLocalAdminAnalyzer = tenantConfig.EnableLocalAdminAnalyzer ?? true,
+                        LocalAdminAllowedAccounts = tenantConfig.GetLocalAdminAllowedAccounts()
+                    },
                     GatherRules = gatherRules,
                     ImeLogPatterns = imeLogPatterns
                 });
