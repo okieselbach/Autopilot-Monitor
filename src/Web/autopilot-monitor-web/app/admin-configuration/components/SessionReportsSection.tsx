@@ -38,7 +38,7 @@ export function SessionReportsSection({
       const token = await getAccessToken();
       if (!token) throw new Error("Failed to get access token");
 
-      const res = await fetch(`${API_BASE_URL}/api/session-reports`, {
+      const res = await fetch(`${API_BASE_URL}/api/galactic/session-reports`, {
         headers: { Authorization: `Bearer ${token}` }
       });
 

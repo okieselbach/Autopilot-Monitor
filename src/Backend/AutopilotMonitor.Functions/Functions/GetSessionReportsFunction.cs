@@ -25,7 +25,7 @@ namespace AutopilotMonitor.Functions.Functions
 
         [Function("GetSessionReports")]
         public async Task<HttpResponseData> Run(
-            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "session-reports")] HttpRequestData req)
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "galactic/session-reports")] HttpRequestData req)
         {
             _logger.LogInformation("GetSessionReports function processing request");
 
