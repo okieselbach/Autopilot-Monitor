@@ -283,27 +283,20 @@ namespace AutopilotMonitor.Functions.Functions
 
                     _logger.LogInformation("{SessionPrefix} Status: Pending (WhiteGlove pre-provisioning complete, transitioned={Transitioned})", sessionPrefix, whiteGloveStatusTransitioned);
                 }
-                else if (lastPhaseChangeEvent != null)
-                {
-                    // Update current phase (still in progress)
-                    await _storageService.UpdateSessionStatusAsync(
-                        request.TenantId,
-                        request.SessionId,
-                        SessionStatus.InProgress,
-                        lastPhaseChangeEvent.Phase,
-                        earliestEventTimestamp: earliestEventTimestamp,
-                        latestEventTimestamp: latestEventTimestamp
-                    );
-                }
                 else if (processedCount > 0)
                 {
-                    // No status change — lightweight event count increment only
+                    // Lightweight update — no status change. Status is only set by key events
+                    // (enrollment_complete, enrollment_failed, whiteglove_complete, gather_rules).
+                    // Phase-change events only update CurrentPhase + timestamps + EventCount.
+                    // This eliminates redundant InProgress writes that cause ETag contention and
+                    // the race condition where a whiteglove_complete status update could be overwritten.
                     await _storageService.IncrementSessionEventCountAsync(
                         request.TenantId,
                         request.SessionId,
                         processedCount,
                         earliestEventTimestamp,
-                        latestEventTimestamp
+                        latestEventTimestamp,
+                        currentPhase: lastPhaseChangeEvent?.Phase
                     );
                 }
 
@@ -357,6 +350,18 @@ namespace AutopilotMonitor.Functions.Functions
 
                 // Retrieve updated session data to include in SignalR messages
                 var updatedSession = await _storageService.GetSessionAsync(request.TenantId, request.SessionId);
+
+                // Verify whiteglove status update was persisted — return error so agent retries if not.
+                // Events are already stored (idempotent UpsertReplace), only the session update needs retry.
+                if (whiteGloveEvent != null && updatedSession?.IsPreProvisioned != true)
+                {
+                    _logger.LogError(
+                        "{SessionPrefix} CRITICAL: WhiteGlove status update not persisted. " +
+                        "IsPreProvisioned={IsPreProvisioned}, Status={Status}. Returning 500 for agent retry.",
+                        sessionPrefix, updatedSession?.IsPreProvisioned, updatedSession?.Status);
+                    return await CreateErrorResponse(req, HttpStatusCode.InternalServerError,
+                        "WhiteGlove session status update failed");
+                }
 
                 // Send Teams notification on enrollment completion (fire-and-forget, non-fatal)
                 // Only send when statusTransitioned=true to prevent duplicates on retry/double-upload
@@ -459,7 +464,8 @@ namespace AutopilotMonitor.Functions.Functions
                     updatedSession.EventCount,
                     updatedSession.DurationSeconds,
                     updatedSession.CompletedAt,
-                    updatedSession.DiagnosticsBlobName
+                    updatedSession.DiagnosticsBlobName,
+                    updatedSession.IsPreProvisioned
                 } : null;
 
                 var summaryMessage = new SignalRMessageAction("newevents")

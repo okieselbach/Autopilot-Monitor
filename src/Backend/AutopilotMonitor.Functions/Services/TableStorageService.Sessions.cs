@@ -403,19 +403,12 @@ namespace AutopilotMonitor.Functions.Services
                     // Build a Merge update with only the fields that actually change
                     var update = new TableEntity(tenantId, sessionId);
 
-                    // Status promotion rule: a Pending session (WhiteGlove pre-provisioning complete)
-                    // must not regress to InProgress via phase-change events from the resumed boot.
-                    // The Pending → InProgress transition happens exclusively in StoreSessionAsync
-                    // (agent re-registration at Boot 2).
-                    if (status == SessionStatus.InProgress && existingStatusStr == SessionStatus.Pending.ToString())
-                    {
-                        _logger.LogInformation($"Session {sessionId} is Pending (WhiteGlove), preserving status (InProgress blocked by promotion rule)");
-                        // Phase, timestamps are still updated below.
-                    }
-                    else
-                    {
-                        update["Status"] = status.ToString();
-                    }
+                    // InProgress is never passed here from IngestEventsFunction — status transitions
+                    // are limited to Succeeded, Failed, Pending. The Pending→InProgress regression is
+                    // structurally impossible because phase_changed events use IncrementSessionEventCountAsync
+                    // (which never touches Status). Only StoreSessionAsync (re-registration) transitions
+                    // Pending→InProgress for WhiteGlove Part 2.
+                    update["Status"] = status.ToString();
 
                     // Update current phase if provided
                     if (currentPhase.HasValue)
@@ -505,14 +498,7 @@ namespace AutopilotMonitor.Functions.Services
 
                             var forceUpdate = new TableEntity(tenantId, sessionId);
 
-                            if (status == SessionStatus.InProgress && freshStatusStr == SessionStatus.Pending.ToString())
-                            {
-                                _logger.LogInformation($"Session {sessionId} is Pending (WhiteGlove), preserving status in force write");
-                            }
-                            else
-                            {
-                                forceUpdate["Status"] = status.ToString();
-                            }
+                            forceUpdate["Status"] = status.ToString();
 
                             if (currentPhase.HasValue)
                                 forceUpdate["CurrentPhase"] = (int)currentPhase.Value;
@@ -581,7 +567,7 @@ namespace AutopilotMonitor.Functions.Services
         /// The caller provides earliestEventTimestamp from the current batch;
         /// no redundant Events-table scan is performed here.
         /// </summary>
-        public async Task IncrementSessionEventCountAsync(string tenantId, string sessionId, int increment, DateTime? earliestEventTimestamp = null, DateTime? latestEventTimestamp = null)
+        public async Task IncrementSessionEventCountAsync(string tenantId, string sessionId, int increment, DateTime? earliestEventTimestamp = null, DateTime? latestEventTimestamp = null, EnrollmentPhase? currentPhase = null)
         {
             SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
             SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
@@ -601,6 +587,12 @@ namespace AutopilotMonitor.Functions.Services
                     {
                         ["EventCount"] = currentCount + increment
                     };
+
+                    // Update current phase if a phase-change event was in the batch
+                    if (currentPhase.HasValue)
+                    {
+                        update["CurrentPhase"] = (int)currentPhase.Value;
+                    }
 
                     // Align StartedAt with the earliest event timestamp provided by the caller
                     var currentStartedAt = entity.Value.GetDateTimeOffset("StartedAt")?.UtcDateTime ?? DateTime.MaxValue;
