@@ -416,16 +416,16 @@ namespace AutopilotMonitor.Functions.Services
                         var effectiveCompletedAt = completedAt ?? DateTime.UtcNow;
                         update["CompletedAt"] = effectiveCompletedAt;
 
-                        // Store accurate DurationSeconds based on first event timestamp (not registration StartedAt)
-                        // The agent registers before events arrive, so registration StartedAt is always earlier
-                        // than the actual enrollment start — using the first event gives the true enrollment duration.
-                        // Use the effective StartedAt (already corrected by earlier batches via the StartedAt
-                        // alignment above), taking the minimum with the current batch's earliest timestamp.
-                        var effectiveStartedAt = earliestEventTimestamp.HasValue && earliestEventTimestamp.Value < currentStartedAt
-                            ? earliestEventTimestamp.Value
-                            : currentStartedAt;
-                        if (effectiveStartedAt < effectiveCompletedAt)
-                            update["DurationSeconds"] = (int)(effectiveCompletedAt - effectiveStartedAt).TotalSeconds;
+                        // Read earliest event from Events table — authoritative source, immune to
+                        // concurrent StartedAt update races. This is a single-row lookup (maxPerPage: 1)
+                        // and only happens once per session lifecycle (at completion).
+                        var earliestStoredEvent = await GetEarliestSessionEventTimestampAsync(tenantId, sessionId);
+                        var durationStart = earliestStoredEvent ?? currentStartedAt;
+                        if (earliestEventTimestamp.HasValue && earliestEventTimestamp.Value < durationStart)
+                            durationStart = earliestEventTimestamp.Value;
+
+                        if (durationStart < effectiveCompletedAt)
+                            update["DurationSeconds"] = (int)(effectiveCompletedAt - durationStart).TotalSeconds;
                     }
 
                     // Track the most recent event timestamp for excessive data sender detection
@@ -708,15 +708,10 @@ namespace AutopilotMonitor.Functions.Services
                 Status = status,
                 FailureReason = entity.GetString("FailureReason") ?? string.Empty,
                 EventCount = SafeGetInt32(entity, "EventCount") ?? 0,
-                DurationSeconds = SafeGetInt32(entity, "DurationSeconds") switch
-                {
-                    // Stored duration is valid — use it directly
-                    int d when d > 0 => d,
-                    // Duration missing or zero (bug from batch-split race) — recompute from timestamps
-                    _ => completedAt.HasValue
+                DurationSeconds = SafeGetInt32(entity, "DurationSeconds")
+                    ?? (completedAt.HasValue
                         ? (int)(completedAt.Value - startedAt).TotalSeconds
-                        : (int)(DateTime.UtcNow - startedAt).TotalSeconds
-                },
+                        : (int)(DateTime.UtcNow - startedAt).TotalSeconds),
                 EnrollmentType = entity.GetString("EnrollmentType") ?? "v1",
                 DiagnosticsBlobName = entity.GetString("DiagnosticsBlobName"),
                 LastEventAt = SafeGetDateTime(entity, "LastEventAt"),
