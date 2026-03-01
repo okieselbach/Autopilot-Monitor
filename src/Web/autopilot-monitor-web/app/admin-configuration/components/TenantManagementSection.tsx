@@ -185,7 +185,7 @@ export function TenantManagementSection({
 
       const isCurrentlyApproved = previewApproved.has(tenantId);
 
-      const response = await fetch(`${API_BASE_URL}/api/preview-whitelist/${tenantId}`, {
+      const response = await fetch(`${API_BASE_URL}/api/preview/whitelist/${tenantId}`, {
         method: isCurrentlyApproved ? "DELETE" : "POST",
         headers: { 'Authorization': `Bearer ${token}` }
       });

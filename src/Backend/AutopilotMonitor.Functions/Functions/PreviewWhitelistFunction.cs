@@ -36,13 +36,13 @@ public class PreviewWhitelistFunction
     }
 
     /// <summary>
-    /// GET /api/preview-whitelist
+    /// GET /api/preview/whitelist
     /// Returns all approved tenants.
     /// </summary>
     [Function("GetPreviewWhitelist")]
     [Authorize]
     public async Task<HttpResponseData> GetAll(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "preview-whitelist")] HttpRequestData req,
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "preview/whitelist")] HttpRequestData req,
         FunctionContext context)
     {
         var principal = context.GetUser();
@@ -65,13 +65,13 @@ public class PreviewWhitelistFunction
     }
 
     /// <summary>
-    /// POST /api/preview-whitelist/{tenantId}
+    /// POST /api/preview/whitelist/{tenantId}
     /// Approves a tenant for Private Preview.
     /// </summary>
     [Function("ApprovePreviewTenant")]
     [Authorize]
     public async Task<HttpResponseData> Approve(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "preview-whitelist/{tenantId}")] HttpRequestData req,
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "preview/whitelist/{tenantId}")] HttpRequestData req,
         string tenantId,
         FunctionContext context)
     {
@@ -146,13 +146,13 @@ public class PreviewWhitelistFunction
     }
 
     /// <summary>
-    /// DELETE /api/preview-whitelist/{tenantId}
+    /// DELETE /api/preview/whitelist/{tenantId}
     /// Revokes a tenant's Private Preview access.
     /// </summary>
     [Function("RevokePreviewTenant")]
     [Authorize]
     public async Task<HttpResponseData> Revoke(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "delete", Route = "preview-whitelist/{tenantId}")] HttpRequestData req,
+        [HttpTrigger(AuthorizationLevel.Anonymous, "delete", Route = "preview/whitelist/{tenantId}")] HttpRequestData req,
         string tenantId,
         FunctionContext context)
     {

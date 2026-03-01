@@ -128,7 +128,7 @@ export default function AdminConfigurationPage() {
         fetch(`${API_BASE_URL}/api/config/all`, {
           headers: { 'Authorization': `Bearer ${token}` }
         }),
-        fetch(`${API_BASE_URL}/api/preview-whitelist`, {
+        fetch(`${API_BASE_URL}/api/preview/whitelist`, {
           headers: { 'Authorization': `Bearer ${token}` }
         })
       ]);
