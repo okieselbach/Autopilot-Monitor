@@ -55,20 +55,28 @@ namespace AutopilotMonitor.Functions.Services
             using var zipStream = new MemoryStream();
             using (var archive = new ZipArchive(zipStream, ZipArchiveMode.Create, leaveOpen: true))
             {
-                AddJsonEntry(archive, "session.json", request.SessionData);
-                AddJsonEntry(archive, "events.json", request.EventsData);
-                AddJsonEntry(archive, "analysis-results.json", request.AnalysisResultsData);
-
-                // Timeline TXT export (UI representation)
-                if (!string.IsNullOrEmpty(request.TimelineExportTxt))
+                // Session row as CSV
+                if (!string.IsNullOrEmpty(request.SessionCsv))
                 {
-                    AddTextEntry(archive, "timeline.txt", request.TimelineExportTxt);
+                    AddTextEntry(archive, "session.csv", request.SessionCsv);
                 }
 
                 // Events CSV export (raw table data)
                 if (!string.IsNullOrEmpty(request.EventsCsv))
                 {
                     AddTextEntry(archive, "events.csv", request.EventsCsv);
+                }
+
+                // Analysis rule results CSV
+                if (!string.IsNullOrEmpty(request.RuleResultsCsv))
+                {
+                    AddTextEntry(archive, "ruleresults.csv", request.RuleResultsCsv);
+                }
+
+                // Timeline TXT export (UI representation)
+                if (!string.IsNullOrEmpty(request.TimelineExportTxt))
+                {
+                    AddTextEntry(archive, "timeline.txt", request.TimelineExportTxt);
                 }
 
                 // Report metadata

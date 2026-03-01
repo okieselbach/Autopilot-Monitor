@@ -19,7 +19,7 @@ import EventTimeline from "./components/EventTimeline";
 import AnalysisResultsSection from "./components/AnalysisResultsSection";
 import MarkFailedModal from "./components/MarkFailedModal";
 import ReportSessionModal from "./components/ReportSessionModal";
-import { generateUiExport, generateCsvExport, SessionExportEvent } from "@/lib/sessionExportUtils";
+import { generateUiExport, generateCsvExport, generateSessionCsvExport, generateRuleResultsCsvExport, SessionExportEvent } from "@/lib/sessionExportUtils";
 
 export interface EnrollmentEvent {
   eventId: string;
@@ -37,6 +37,8 @@ export interface EnrollmentEvent {
 
 export interface RuleResult {
   resultId: string;
+  sessionId: string;
+  tenantId: string;
   ruleId: string;
   ruleTitle: string;
   severity: string;
@@ -57,6 +59,7 @@ export interface Session {
   manufacturer: string;
   model: string;
   startedAt: string;
+  completedAt?: string;
   status: string;
   currentPhase: number;
   eventCount: number;
@@ -64,7 +67,13 @@ export interface Session {
   failureReason?: string;
   enrollmentType?: string; // "v1" | "v2" — absent for sessions before this feature
   diagnosticsBlobName?: string;
+  lastEventAt?: string;
   isPreProvisioned?: boolean;
+  osBuild?: string;
+  osEdition?: string;
+  osLanguage?: string;
+  isUserDriven?: boolean;
+  agentVersion?: string;
 }
 
 const GUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -480,6 +489,8 @@ export default function SessionDetailPage() {
       }));
       const timelineExportTxt = generateUiExport(exportEvents, sessionId, effectiveTenantId || '');
       const eventsCsv = generateCsvExport(exportEvents);
+      const sessionCsv = session ? generateSessionCsvExport(session) : '';
+      const ruleResultsCsv = generateRuleResultsCsvExport(analysisResults);
 
       const response = await fetch(
         `${API_BASE_URL}/api/sessions/${sessionId}/report?tenantId=${effectiveTenantId}`,
@@ -494,11 +505,10 @@ export default function SessionDetailPage() {
             sessionId,
             comment,
             email,
-            sessionData: session,
-            eventsData: events,
-            analysisResultsData: analysisResults,
-            timelineExportTxt,
+            sessionCsv,
             eventsCsv,
+            ruleResultsCsv,
+            timelineExportTxt,
             screenshotBase64,
             screenshotFileName,
             agentLogBase64,

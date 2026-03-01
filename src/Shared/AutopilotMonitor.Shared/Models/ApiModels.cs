@@ -165,6 +165,13 @@ namespace AutopilotMonitor.Shared.Models
         /// Set when a whiteglove_complete event is processed.
         /// </summary>
         public bool IsPreProvisioned { get; set; }
+
+        // Device detail fields — stored in the Sessions table but omitted from earlier versions
+        public string OsBuild { get; set; }
+        public string OsEdition { get; set; }
+        public string OsLanguage { get; set; }
+        public bool IsUserDriven { get; set; }
+        public string AgentVersion { get; set; }
     }
 
     /// <summary>
@@ -190,20 +197,17 @@ namespace AutopilotMonitor.Shared.Models
         public string Comment { get; set; }
         public string Email { get; set; }
 
-        /// <summary>Session object as captured by the frontend</summary>
-        public object SessionData { get; set; }
-
-        /// <summary>Events array as captured by the frontend</summary>
-        public object EventsData { get; set; }
-
-        /// <summary>Analysis results array as captured by the frontend</summary>
-        public object AnalysisResultsData { get; set; }
+        /// <summary>Session row as CSV (single data row with header)</summary>
+        public string SessionCsv { get; set; }
 
         /// <summary>Pre-generated UI timeline export (TXT)</summary>
         public string TimelineExportTxt { get; set; }
 
-        /// <summary>Pre-generated raw table export (CSV)</summary>
+        /// <summary>Pre-generated raw events table export (CSV)</summary>
         public string EventsCsv { get; set; }
+
+        /// <summary>Pre-generated analysis rule results export (CSV)</summary>
+        public string RuleResultsCsv { get; set; }
 
         /// <summary>Base64-encoded screenshot image (optional)</summary>
         public string ScreenshotBase64 { get; set; }

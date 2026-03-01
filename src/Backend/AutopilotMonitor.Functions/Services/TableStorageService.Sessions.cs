@@ -807,7 +807,12 @@ namespace AutopilotMonitor.Functions.Services
                 EnrollmentType = entity.GetString("EnrollmentType") ?? "v1",
                 DiagnosticsBlobName = entity.GetString("DiagnosticsBlobName"),
                 LastEventAt = SafeGetDateTime(entity, "LastEventAt"),
-                IsPreProvisioned = entity.GetBoolean("IsPreProvisioned") ?? false
+                IsPreProvisioned = entity.GetBoolean("IsPreProvisioned") ?? false,
+                OsBuild = entity.GetString("OsBuild") ?? string.Empty,
+                OsEdition = entity.GetString("OsEdition") ?? string.Empty,
+                OsLanguage = entity.GetString("OsLanguage") ?? string.Empty,
+                IsUserDriven = entity.GetBoolean("IsUserDriven") ?? false,
+                AgentVersion = entity.GetString("AgentVersion") ?? string.Empty
             };
         }
 
