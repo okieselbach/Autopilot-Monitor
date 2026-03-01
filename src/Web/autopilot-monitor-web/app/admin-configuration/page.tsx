@@ -352,6 +352,13 @@ export default function AdminConfigurationPage() {
               onSave={handleSaveDiagPaths}
             />
 
+            {/* Maintenance + Reseed Sections */}
+            <MaintenanceSection
+              getAccessToken={getAccessToken}
+              setError={setError}
+              setSuccessMessage={setSuccessMessage}
+            />
+
             {/* Device Block Management */}
             <DeviceBlockSection
               tenants={tenants}
@@ -362,13 +369,6 @@ export default function AdminConfigurationPage() {
               savingConfig={savingConfig}
               adminConfigExists={!!adminConfig}
               onSaveAdminConfig={handleSaveAdminConfig}
-              getAccessToken={getAccessToken}
-              setError={setError}
-              setSuccessMessage={setSuccessMessage}
-            />
-
-            {/* Maintenance + Reseed Sections */}
-            <MaintenanceSection
               getAccessToken={getAccessToken}
               setError={setError}
               setSuccessMessage={setSuccessMessage}
