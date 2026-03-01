@@ -83,6 +83,51 @@ namespace AutopilotMonitor.Functions.Services
             }
         }
 
+        /// <summary>
+        /// Sends a Telegram notification when a Tenant Admin submits a session report.
+        /// Best-effort — silently no-ops if the webhook URL is not configured.
+        /// </summary>
+        public async Task SendSessionReportAsync(string tenantId, string submittedBy, string sessionId, string reportId, string comment)
+        {
+            try
+            {
+                var webhookUrl = await GetWebhookUrlAsync();
+                if (string.IsNullOrWhiteSpace(webhookUrl))
+                {
+                    _logger.LogDebug("Telegram webhook URL not configured — skipping session report notification");
+                    return;
+                }
+
+                var commentLine = string.IsNullOrWhiteSpace(comment) ? "" : $"\nComment: {comment}";
+                var payload = new
+                {
+                    chat_id = "-1003632442830",
+                    text = $"New Session Report submitted!\nTenantID: {tenantId}\nBy: {submittedBy}\nSessionID: {sessionId}\nReportID: {reportId}{commentLine}"
+                };
+
+                var json = JsonConvert.SerializeObject(payload);
+                var content = new StringContent(json, Encoding.UTF8, "application/json");
+                var response = await _http.PostAsync(webhookUrl, content);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    var body = await response.Content.ReadAsStringAsync();
+                    _logger.LogWarning(
+                        "Telegram webhook returned {StatusCode} for session report {ReportId}: {Body}",
+                        (int)response.StatusCode, reportId, body);
+                }
+                else
+                {
+                    _logger.LogInformation(
+                        "Telegram session report notification sent for report {ReportId}", reportId);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to send Telegram session report notification for {ReportId}", reportId);
+            }
+        }
+
         private async Task<string?> GetWebhookUrlAsync()
         {
             try

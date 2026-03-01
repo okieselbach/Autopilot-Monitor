@@ -15,19 +15,22 @@ namespace AutopilotMonitor.Functions.Functions
         private readonly TableStorageService _storageService;
         private readonly TenantAdminsService _tenantAdminsService;
         private readonly GalacticAdminService _galacticAdminService;
+        private readonly TelegramNotificationService _telegramNotificationService;
 
         public SubmitSessionReportFunction(
             ILogger<SubmitSessionReportFunction> logger,
             SessionReportService sessionReportService,
             TableStorageService storageService,
             TenantAdminsService tenantAdminsService,
-            GalacticAdminService galacticAdminService)
+            GalacticAdminService galacticAdminService,
+            TelegramNotificationService telegramNotificationService)
         {
             _logger = logger;
             _sessionReportService = sessionReportService;
             _storageService = storageService;
             _tenantAdminsService = tenantAdminsService;
             _galacticAdminService = galacticAdminService;
+            _telegramNotificationService = telegramNotificationService;
         }
 
         [Function("SubmitSessionReport")]
@@ -93,24 +96,31 @@ namespace AutopilotMonitor.Functions.Functions
                 // Submit report
                 var metadata = await _sessionReportService.SubmitReportAsync(request, userIdentifier);
 
-                // Log audit entry
-                await _storageService.LogAuditEntryAsync(
-                    request.TenantId,
-                    "CREATE",
-                    "SessionReport",
-                    metadata.ReportId,
-                    userIdentifier,
-                    new Dictionary<string, string>
-                    {
-                        { "Action", "SubmitSessionReport" },
-                        { "SessionId", sessionId },
-                        { "BlobName", metadata.BlobName },
-                        { "HasComment", (!string.IsNullOrEmpty(request.Comment)).ToString() },
-                        { "HasEmail", (!string.IsNullOrEmpty(request.Email)).ToString() },
-                        { "HasScreenshot", (!string.IsNullOrEmpty(request.ScreenshotBase64)).ToString() },
-                        { "HasAgentLog", (!string.IsNullOrEmpty(request.AgentLogBase64)).ToString() }
-                    }
-                );
+                // Log audit entry — skip for Galactic Admins
+                if (!isGalacticAdmin)
+                {
+                    await _storageService.LogAuditEntryAsync(
+                        request.TenantId,
+                        "CREATE",
+                        "SessionReport",
+                        metadata.ReportId,
+                        userIdentifier,
+                        new Dictionary<string, string>
+                        {
+                            { "Action", "SubmitSessionReport" },
+                            { "SessionId", sessionId },
+                            { "BlobName", metadata.BlobName },
+                            { "HasComment", (!string.IsNullOrEmpty(request.Comment)).ToString() },
+                            { "HasEmail", (!string.IsNullOrEmpty(request.Email)).ToString() },
+                            { "HasScreenshot", (!string.IsNullOrEmpty(request.ScreenshotBase64)).ToString() },
+                            { "HasAgentLog", (!string.IsNullOrEmpty(request.AgentLogBase64)).ToString() }
+                        }
+                    );
+                }
+
+                // Telegram notification — best effort
+                _ = _telegramNotificationService.SendSessionReportAsync(
+                    request.TenantId, userIdentifier, sessionId, metadata.ReportId, request.Comment ?? string.Empty);
 
                 _logger.LogInformation("Session report submitted: ReportId={ReportId}, Session={SessionId}, By={User}",
                     metadata.ReportId, sessionId, userIdentifier);
