@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
@@ -26,6 +27,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
         private readonly string _model;
         private readonly string _serialNumber;
         private readonly Logging.AgentLogger _logger;
+        private readonly NetworkMetrics _networkMetrics = new NetworkMetrics();
+
+        /// <summary>
+        /// Exposes the network metrics counters for AgentSelfMetricsCollector to read.
+        /// </summary>
+        public NetworkMetrics NetworkMetrics => _networkMetrics;
 
         public BackendApiClient(string baseUrl, AgentConfiguration configuration = null, Logging.AgentLogger logger = null)
         {
@@ -120,14 +127,31 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
             // Add additional security headers for device authorization (client cert is at TLS layer, but we can add hardware info in headers for whitelist validation and Autopilot device verification)
             AddSecurityHeaders(httpRequest);
 
-            var httpResponse = await _httpClient.SendAsync(httpRequest);
-            ThrowOnAuthFailure(httpResponse);
-            httpResponse.EnsureSuccessStatusCode();
+            var sw = Stopwatch.StartNew();
+            var failed = false;
+            long bytesDown = 0;
+            try
+            {
+                var httpResponse = await _httpClient.SendAsync(httpRequest);
+                ThrowOnAuthFailure(httpResponse);
+                httpResponse.EnsureSuccessStatusCode();
 
-            var responseJson = await httpResponse.Content.ReadAsStringAsync();
-            var response = JsonConvert.DeserializeObject<IngestEventsResponse>(responseJson);
+                var responseJson = await httpResponse.Content.ReadAsStringAsync();
+                bytesDown = Encoding.UTF8.GetByteCount(responseJson);
+                var response = JsonConvert.DeserializeObject<IngestEventsResponse>(responseJson);
 
-            return response;
+                return response;
+            }
+            catch
+            {
+                failed = true;
+                throw;
+            }
+            finally
+            {
+                sw.Stop();
+                _networkMetrics.RecordRequest(compressedContent.Length, bytesDown, sw.ElapsedMilliseconds, failed);
+            }
         }
 
         /// <summary>
@@ -140,12 +164,29 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
             var httpRequest = new HttpRequestMessage(HttpMethod.Get, url);
             AddSecurityHeaders(httpRequest);
 
-            var response = await _httpClient.SendAsync(httpRequest);
-            response.EnsureSuccessStatusCode();
+            var sw = Stopwatch.StartNew();
+            var failed = false;
+            long bytesDown = 0;
+            try
+            {
+                var response = await _httpClient.SendAsync(httpRequest);
+                response.EnsureSuccessStatusCode();
 
-            var responseJson = await response.Content.ReadAsStringAsync();
-            var result = JsonConvert.DeserializeObject<AgentConfigResponse>(responseJson);
-            return result;
+                var responseJson = await response.Content.ReadAsStringAsync();
+                bytesDown = Encoding.UTF8.GetByteCount(responseJson);
+                var result = JsonConvert.DeserializeObject<AgentConfigResponse>(responseJson);
+                return result;
+            }
+            catch
+            {
+                failed = true;
+                throw;
+            }
+            finally
+            {
+                sw.Stop();
+                _networkMetrics.RecordRequest(0, bytesDown, sw.ElapsedMilliseconds, failed);
+            }
         }
 
         /// <summary>
@@ -170,6 +211,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
         private async Task<TResponse> PostAsync<TRequest, TResponse>(string url, TRequest data)
         {
             var json = JsonConvert.SerializeObject(data);
+            var bytesUp = Encoding.UTF8.GetByteCount(json);
 
             var httpRequest = new HttpRequestMessage(HttpMethod.Post, url)
             {
@@ -179,14 +221,31 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
             // Add additional security headers for device authorization (client cert is at TLS layer, but we can add hardware info in headers for whitelist validation and Autopilot device verification)
             AddSecurityHeaders(httpRequest);
 
-            var response = await _httpClient.SendAsync(httpRequest);
-            ThrowOnAuthFailure(response);
-            response.EnsureSuccessStatusCode();
+            var sw = Stopwatch.StartNew();
+            var failed = false;
+            long bytesDown = 0;
+            try
+            {
+                var response = await _httpClient.SendAsync(httpRequest);
+                ThrowOnAuthFailure(response);
+                response.EnsureSuccessStatusCode();
 
-            var responseJson = await response.Content.ReadAsStringAsync();
-            var result = JsonConvert.DeserializeObject<TResponse>(responseJson);
+                var responseJson = await response.Content.ReadAsStringAsync();
+                bytesDown = Encoding.UTF8.GetByteCount(responseJson);
+                var result = JsonConvert.DeserializeObject<TResponse>(responseJson);
 
-            return result;
+                return result;
+            }
+            catch
+            {
+                failed = true;
+                throw;
+            }
+            finally
+            {
+                sw.Stop();
+                _networkMetrics.RecordRequest(bytesUp, bytesDown, sw.ElapsedMilliseconds, failed);
+            }
         }
 
         /// <summary>

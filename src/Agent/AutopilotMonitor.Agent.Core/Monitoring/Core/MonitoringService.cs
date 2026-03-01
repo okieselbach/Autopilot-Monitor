@@ -39,6 +39,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 
         // Optional collectors (toggled via remote config)
         private PerformanceCollector _performanceCollector;
+        private AgentSelfMetricsCollector _agentSelfMetricsCollector;
 
         // Smart enrollment tracking (replaces DownloadProgressCollector + EspUiStateCollector)
         private EnrollmentTracker _enrollmentTracker;
@@ -311,6 +312,22 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 );
                 _performanceCollector.Start();
 
+                // AgentSelfMetricsCollector: measures the agent's own CPU, memory, and network footprint
+                if (collectors?.EnableAgentSelfMetrics != false)
+                {
+                    var selfMetricsInterval = collectors?.AgentSelfMetricsIntervalSeconds ?? 60;
+                    _agentSelfMetricsCollector = new AgentSelfMetricsCollector(
+                        _configuration.SessionId,
+                        _configuration.TenantId,
+                        EmitEvent,
+                        _apiClient.NetworkMetrics,
+                        _logger,
+                        selfMetricsInterval,
+                        maxCollectorDurationHours
+                    );
+                    _agentSelfMetricsCollector.Start();
+                }
+
                 // EnrollmentTracker: smart enrollment tracking with IME log parsing
                 // (replaces DownloadProgressCollector + EspUiStateCollector)
                 // Skip when log replay is active - LogReplayService starts its own EnrollmentTracker
@@ -348,6 +365,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             _performanceCollector?.Stop();
             _performanceCollector?.Dispose();
             _performanceCollector = null;
+
+            _agentSelfMetricsCollector?.Stop();
+            _agentSelfMetricsCollector?.Dispose();
+            _agentSelfMetricsCollector = null;
 
             _enrollmentTracker?.Stop();
             _enrollmentTracker?.Dispose();
@@ -991,6 +1012,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             _espAndHelloTracker?.Dispose();
             _logReplay?.Dispose();
             _performanceCollector?.Dispose();
+            _agentSelfMetricsCollector?.Dispose();
             _enrollmentTracker?.Dispose();
             _gatherRuleExecutor?.Dispose();
             _remoteConfigService?.Dispose();

@@ -137,6 +137,18 @@ namespace AutopilotMonitor.Shared.Models
         public int MaxCollectorDurationHours { get; set; } = 4;
 
         /// <summary>
+        /// Enable the agent self-metrics collector (process CPU, memory, network traffic).
+        /// Default: true
+        /// </summary>
+        public bool EnableAgentSelfMetrics { get; set; } = true;
+
+        /// <summary>
+        /// Interval in seconds for agent self-metrics snapshots.
+        /// Default: 60 seconds
+        /// </summary>
+        public int AgentSelfMetricsIntervalSeconds { get; set; } = 60;
+
+        /// <summary>
         /// Creates default collector configuration
         /// </summary>
         public static CollectorConfiguration CreateDefault()
