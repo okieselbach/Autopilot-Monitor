@@ -53,6 +53,29 @@ export default function ChangelogPage() {
             <div>
               <div className="flex items-center gap-3 mb-3">
                 <span className="text-xs font-mono font-semibold text-gray-400 uppercase tracking-wider">
+                  2026-03-01 - 16:00 CET
+                </span>
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                  Pre-Provisioning (WhiteGlove)
+                </span>
+              </div>
+              <h2 className="text-base font-semibold text-gray-900 mb-2">
+                Ongoing improvements to Pre-Provisioning support (still testing)
+              </h2>
+              <p className="text-sm text-gray-600 leading-relaxed">
+                I'm continuously improving support for Pre-Provisioning (White Glove) scenarios.
+                The session timeline should now better reflect the provisioning process better, and I'm 
+                working on improving the accuracy of event categorization and timing for these sessions.
+                If you are using Pre-Provisioning and notice any discrepancies in the timeline or data, 
+                please share your Feedback with me via GitHub Issues. Your feedback is invaluable in 
+                helping me enhance support for these scenarios.
+                Expect a "Report Session" button in the timeline view soon to make sharing feedback and logs easier!
+              </p>
+            </div>
+
+            <div>
+              <div className="flex items-center gap-3 mb-3">
+                <span className="text-xs font-mono font-semibold text-gray-400 uppercase tracking-wider">
                   2026-02-27 - 21:38 CET
                 </span>
                 <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
