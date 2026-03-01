@@ -25,7 +25,7 @@ namespace AutopilotMonitor.Functions.Functions
 
         [Function("GetGalacticAppMetrics")]
         public async Task<HttpResponseData> Run(
-            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "galactic/app-metrics")] HttpRequestData req)
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "galactic/metrics/app")] HttpRequestData req)
         {
             try
             {

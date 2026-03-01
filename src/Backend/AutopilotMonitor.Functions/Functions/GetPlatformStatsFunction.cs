@@ -23,7 +23,7 @@ namespace AutopilotMonitor.Functions.Functions
 
         [Function("GetPlatformStats")]
         public async Task<HttpResponseData> Run(
-            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "platform-stats")] HttpRequestData req)
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "stats/platform")] HttpRequestData req)
         {
             try
             {

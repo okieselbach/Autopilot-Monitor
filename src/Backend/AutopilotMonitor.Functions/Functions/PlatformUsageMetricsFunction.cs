@@ -27,12 +27,12 @@ namespace AutopilotMonitor.Functions.Functions
         }
 
         /// <summary>
-        /// GET /api/platform/usage-metrics - Compute and return platform usage metrics
+        /// GET /api/galactic/metrics/usage - Compute and return platform usage metrics
         /// On-demand computation with 5-minute cache (Galactic Admin only)
         /// </summary>
         [Function("GetPlatformUsageMetrics")]
         public async Task<HttpResponseData> Run(
-            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "platform/usage-metrics")]
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "galactic/metrics/usage")]
             HttpRequestData req)
         {
             _logger.LogInformation("Platform usage metrics requested");

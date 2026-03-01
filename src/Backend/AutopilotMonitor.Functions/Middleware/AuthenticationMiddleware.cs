@@ -41,7 +41,7 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
     private static readonly string[] _anonymousRoutes =
     {
         "/api/health",
-        "/api/platform-stats",
+        "/api/stats/platform",
         "/api/agent/register-session",
         "/api/agent/ingest",
         "/api/agent/config",

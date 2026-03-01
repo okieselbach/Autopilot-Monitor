@@ -24,12 +24,12 @@ namespace AutopilotMonitor.Functions.Functions
         }
 
         /// <summary>
-        /// GET /api/usage-metrics?tenantId={tenantId} - Compute and return tenant-specific usage metrics
+        /// GET /api/metrics/usage?tenantId={tenantId} - Compute and return tenant-specific usage metrics
         /// On-demand computation with 5-minute cache (Tenant Admin)
         /// </summary>
         [Function("GetTenantUsageMetrics")]
         public async Task<HttpResponseData> Run(
-            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "usage-metrics")]
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "metrics/usage")]
             HttpRequestData req)
         {
             _logger.LogInformation("Tenant usage metrics requested");

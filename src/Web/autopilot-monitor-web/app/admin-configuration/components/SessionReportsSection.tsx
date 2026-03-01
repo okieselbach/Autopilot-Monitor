@@ -42,6 +42,11 @@ export function SessionReportsSection({
         headers: { Authorization: `Bearer ${token}` }
       });
 
+      if (res.status === 404) {
+        // Table/container doesn't exist yet — no reports submitted so far
+        setReports([]);
+        return;
+      }
       if (!res.ok) throw new Error(`Failed to load reports: ${res.statusText}`);
       const data = await res.json();
       setReports(data.reports ?? []);
@@ -63,9 +68,6 @@ export function SessionReportsSection({
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-xl font-semibold text-indigo-900 dark:text-indigo-100">Session Reports</h2>
-              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300">
-                Private Preview
-              </span>
             </div>
             <p className="text-sm text-indigo-600 dark:text-indigo-300 mt-1">
               Sessions reported by Tenant Admins for analysis

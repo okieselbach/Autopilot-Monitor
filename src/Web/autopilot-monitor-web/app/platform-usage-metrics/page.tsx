@@ -96,7 +96,7 @@ export default function PlatformUsageMetricsPage() {
         throw new Error('Failed to get access token');
       }
 
-      const response = await fetch(`${API_BASE_URL}/api/platform/usage-metrics`, {
+      const response = await fetch(`${API_BASE_URL}/api/galactic/metrics/usage`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }

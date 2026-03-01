@@ -85,7 +85,7 @@ export default function UsageMetricsPage() {
         return;
       }
 
-      const response = await fetch(`${API_BASE_URL}/api/usage-metrics?tenantId=${tenantId}`, {
+      const response = await fetch(`${API_BASE_URL}/api/metrics/usage?tenantId=${tenantId}`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }

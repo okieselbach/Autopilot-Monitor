@@ -4,6 +4,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Text;
 using System.Threading.Tasks;
+using Azure;
 using Azure.Data.Tables;
 using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
@@ -172,19 +173,27 @@ namespace AutopilotMonitor.Functions.Services
             var tableClient = _storageService.GetTableServiceClient().GetTableClient(Constants.TableNames.SessionReports);
             var results = new List<SessionReportMetadata>();
 
-            await foreach (var entity in tableClient.QueryAsync<TableEntity>(e => e.PartitionKey == "reports"))
+            try
             {
-                results.Add(new SessionReportMetadata
+                await foreach (var entity in tableClient.QueryAsync<TableEntity>(e => e.PartitionKey == "reports"))
                 {
-                    ReportId = entity.GetString("ReportId") ?? string.Empty,
-                    TenantId = entity.GetString("TenantId") ?? string.Empty,
-                    SessionId = entity.GetString("SessionId") ?? string.Empty,
-                    Comment = entity.GetString("Comment") ?? string.Empty,
-                    Email = entity.GetString("Email") ?? string.Empty,
-                    BlobName = entity.GetString("BlobName") ?? string.Empty,
-                    SubmittedBy = entity.GetString("SubmittedBy") ?? string.Empty,
-                    SubmittedAt = entity.GetDateTimeOffset("SubmittedAt")?.UtcDateTime ?? DateTime.MinValue
-                });
+                    results.Add(new SessionReportMetadata
+                    {
+                        ReportId = entity.GetString("ReportId") ?? string.Empty,
+                        TenantId = entity.GetString("TenantId") ?? string.Empty,
+                        SessionId = entity.GetString("SessionId") ?? string.Empty,
+                        Comment = entity.GetString("Comment") ?? string.Empty,
+                        Email = entity.GetString("Email") ?? string.Empty,
+                        BlobName = entity.GetString("BlobName") ?? string.Empty,
+                        SubmittedBy = entity.GetString("SubmittedBy") ?? string.Empty,
+                        SubmittedAt = entity.GetDateTimeOffset("SubmittedAt")?.UtcDateTime ?? DateTime.MinValue
+                    });
+                }
+            }
+            catch (RequestFailedException ex) when (ex.Status == 404)
+            {
+                // Table doesn't exist yet — no reports have been submitted
+                _logger.LogDebug("SessionReports table does not exist yet, returning empty list");
             }
 
             return results;

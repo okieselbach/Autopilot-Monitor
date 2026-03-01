@@ -322,6 +322,12 @@ export default function AdminConfigurationPage() {
               setSuccessMessage={setSuccessMessage}
             />
 
+            {/* Session Reports */}
+            <SessionReportsSection
+              getAccessToken={getAccessToken}
+              setError={setError}
+            />
+
             {/* Session Event Export */}
             <SessionExportSection
               tenants={tenants}
@@ -373,12 +379,6 @@ export default function AdminConfigurationPage() {
               getAccessToken={getAccessToken}
               setError={setError}
               setSuccessMessage={setSuccessMessage}
-            />
-
-            {/* Session Reports (Private Preview) */}
-            <SessionReportsSection
-              getAccessToken={getAccessToken}
-              setError={setError}
             />
           </div>
         </main>
