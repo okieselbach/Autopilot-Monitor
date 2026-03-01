@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Session, EnrollmentEvent, RuleResult } from "../page";
 
 const MAX_AGENT_LOG_SIZE = 5 * 1024 * 1024; // 5 MB
@@ -27,6 +27,15 @@ export default function ReportSessionModal({
   const [screenshotFile, setScreenshotFile] = useState<File | null>(null);
   const [agentLogFile, setAgentLogFile] = useState<File | null>(null);
   const [agentLogError, setAgentLogError] = useState<string | null>(null);
+  const [submitResult, setSubmitResult] = useState<'success' | 'error' | null>(null);
+  const [submitErrorMessage, setSubmitErrorMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (show) {
+      setSubmitResult(null);
+      setSubmitErrorMessage(null);
+    }
+  }, [show]);
 
   if (!show || !session) return null;
 
@@ -63,17 +72,28 @@ export default function ReportSessionModal({
       agentLogFileName = agentLogFile.name;
     }
 
-    await onSubmit(comment, email, screenshotBase64, screenshotFileName, agentLogBase64, agentLogFileName);
-    // Reset form on successful submit
-    setComment("");
-    setEmail("");
-    setScreenshotFile(null);
-    setAgentLogFile(null);
-    setAgentLogError(null);
+    try {
+      await onSubmit(comment, email, screenshotBase64, screenshotFileName, agentLogBase64, agentLogFileName);
+      setSubmitResult('success');
+      setComment("");
+      setEmail("");
+      setScreenshotFile(null);
+      setAgentLogFile(null);
+      setAgentLogError(null);
+    } catch (err: any) {
+      setSubmitResult('error');
+      setSubmitErrorMessage(err?.message || 'Failed to submit report.');
+    }
+  };
+
+  const handleClose = () => {
+    setSubmitResult(null);
+    setSubmitErrorMessage(null);
+    onCancel();
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={onCancel}>
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={handleClose}>
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <div className="p-6">
           {/* Header */}
@@ -91,117 +111,160 @@ export default function ReportSessionModal({
             </div>
           </div>
 
-          {/* Explanation */}
-          <p className="text-sm text-gray-700 dark:text-gray-300 mb-4">
-            Submit this session for analysis by the Autopilot Monitor team. The event timeline,
-            session data, analysis results, and UI exports will be included so discrepancies
-            can be analyzed and improvements made.
-          </p>
+          {/* Submit result feedback */}
+          {submitResult === 'success' && (
+            <div className="mb-4 p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg flex items-start gap-3">
+              <svg className="w-5 h-5 text-green-600 dark:text-green-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <div>
+                <p className="text-sm font-semibold text-green-800 dark:text-green-300">Report submitted successfully</p>
+                <p className="text-sm text-green-700 dark:text-green-400 mt-0.5">
+                  The session has been submitted for analysis by the Autopilot Monitor team.
+                </p>
+              </div>
+            </div>
+          )}
 
-          {/* Comment */}
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Comment <span className="text-gray-400">(optional)</span>
-            </label>
-            <textarea
-              value={comment}
-              onChange={e => setComment(e.target.value)}
-              placeholder="Describe what seems incorrect or unexpected..."
-              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              rows={3}
-              disabled={submitting}
-            />
-          </div>
+          {submitResult === 'error' && (
+            <div className="mb-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg flex items-start gap-3">
+              <svg className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <div>
+                <p className="text-sm font-semibold text-red-800 dark:text-red-300">Failed to submit report</p>
+                <p className="text-sm text-red-700 dark:text-red-400 mt-0.5">{submitErrorMessage}</p>
+              </div>
+            </div>
+          )}
 
-          {/* Email */}
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Email <span className="text-gray-400">(optional)</span>
-            </label>
-            <input
-              type="email"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              placeholder="your.email@company.com"
-              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              disabled={submitting}
-            />
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-              No guarantee of response. Issues may be silently fixed &mdash; check the changelog.
-            </p>
-          </div>
+          {/* Form — hidden after successful submit */}
+          {submitResult !== 'success' && (
+            <>
+              {/* Explanation */}
+              <p className="text-sm text-gray-700 dark:text-gray-300 mb-4">
+                Submit this session for analysis by the Autopilot Monitor team. The event timeline,
+                session data, analysis results, and UI exports will be included so discrepancies
+                can be analyzed and improvements made.
+              </p>
 
-          {/* Agent Log File */}
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Agent Log <span className="text-gray-400">(optional, max 5 MB)</span>
-            </label>
-            <input
-              type="file"
-              accept=".log,.txt"
-              onChange={e => handleAgentLogChange(e.target.files?.[0] || null)}
-              className="w-full text-sm text-gray-500 dark:text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 dark:file:bg-blue-900/40 dark:file:text-blue-300"
-              disabled={submitting}
-            />
-            {agentLogError && (
-              <p className="text-xs text-red-600 dark:text-red-400 mt-1">{agentLogError}</p>
-            )}
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-              Located at %ProgramData%\AutopilotMonitor\Logs\ on the device.
-            </p>
-          </div>
+              {/* Comment */}
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Comment <span className="text-gray-400">(optional)</span>
+                </label>
+                <textarea
+                  value={comment}
+                  onChange={e => setComment(e.target.value)}
+                  placeholder="Describe what seems incorrect or unexpected..."
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  rows={3}
+                  disabled={submitting}
+                />
+              </div>
 
-          {/* Screenshot */}
-          <div className="mb-6">
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Screenshot <span className="text-gray-400">(optional)</span>
-            </label>
-            <input
-              type="file"
-              accept="image/*"
-              onChange={e => setScreenshotFile(e.target.files?.[0] || null)}
-              className="w-full text-sm text-gray-500 dark:text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 dark:file:bg-blue-900/40 dark:file:text-blue-300"
-              disabled={submitting}
-            />
-          </div>
+              {/* Email */}
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Email <span className="text-gray-400">(optional)</span>
+                </label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                  placeholder="your.email@company.com"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  disabled={submitting}
+                />
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  No guarantee of response. Issues may be silently fixed &mdash; check the changelog.
+                </p>
+              </div>
 
-          {/* Data summary */}
-          <div className="bg-gray-50 dark:bg-gray-700/50 rounded-md p-3 mb-6 text-xs text-gray-600 dark:text-gray-300">
-            <p className="font-medium mb-1">Data included in report:</p>
-            <ul className="list-disc list-inside space-y-0.5">
-              <li>Session metadata (device, status, duration)</li>
-              <li>{events.length} event{events.length !== 1 ? "s" : ""} from timeline</li>
-              <li>{analysisResults.length} analysis result{analysisResults.length !== 1 ? "s" : ""}</li>
-              <li>Timeline export (TXT)</li>
-              <li>Table export (CSV)</li>
-              {agentLogFile && <li>Agent log: {agentLogFile.name} ({(agentLogFile.size / 1024).toFixed(0)} KB)</li>}
-              {screenshotFile && <li>Screenshot: {screenshotFile.name}</li>}
-            </ul>
-          </div>
+              {/* Agent Log File */}
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Agent Log <span className="text-gray-400">(optional, max 5 MB)</span>
+                </label>
+                <input
+                  type="file"
+                  accept=".log,.txt"
+                  onChange={e => handleAgentLogChange(e.target.files?.[0] || null)}
+                  className="w-full text-sm text-gray-500 dark:text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 dark:file:bg-blue-900/40 dark:file:text-blue-300"
+                  disabled={submitting}
+                />
+                {agentLogError && (
+                  <p className="text-xs text-red-600 dark:text-red-400 mt-1">{agentLogError}</p>
+                )}
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Located at %ProgramData%\AutopilotMonitor\Logs\ on the device.
+                </p>
+              </div>
+
+              {/* Screenshot */}
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Screenshot <span className="text-gray-400">(optional)</span>
+                </label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={e => setScreenshotFile(e.target.files?.[0] || null)}
+                  className="w-full text-sm text-gray-500 dark:text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 dark:file:bg-blue-900/40 dark:file:text-blue-300"
+                  disabled={submitting}
+                />
+              </div>
+
+              {/* Data summary */}
+              <div className="bg-gray-50 dark:bg-gray-700/50 rounded-md p-3 mb-6 text-xs text-gray-600 dark:text-gray-300">
+                <p className="font-medium mb-1">Data included in report:</p>
+                <ul className="list-disc list-inside space-y-0.5">
+                  <li>Session metadata (device, status, duration)</li>
+                  <li>{events.length} event{events.length !== 1 ? "s" : ""} from timeline</li>
+                  <li>{analysisResults.length} analysis result{analysisResults.length !== 1 ? "s" : ""}</li>
+                  <li>Timeline export (TXT)</li>
+                  <li>Table export (CSV)</li>
+                  {agentLogFile && <li>Agent log: {agentLogFile.name} ({(agentLogFile.size / 1024).toFixed(0)} KB)</li>}
+                  {screenshotFile && <li>Screenshot: {screenshotFile.name}</li>}
+                </ul>
+              </div>
+            </>
+          )}
 
           {/* Actions */}
           <div className="flex justify-end gap-3">
-            <button
-              onClick={onCancel}
-              disabled={submitting}
-              className="px-4 py-2 bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200 rounded-md hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors disabled:opacity-50"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleSubmit}
-              disabled={submitting || !!agentLogError}
-              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center gap-2"
-            >
-              {submitting ? (
-                <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                  Submitting...
-                </>
-              ) : (
-                "Submit Report"
-              )}
-            </button>
+            {submitResult === 'success' ? (
+              <button
+                onClick={handleClose}
+                className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
+              >
+                Close
+              </button>
+            ) : (
+              <>
+                <button
+                  onClick={handleClose}
+                  disabled={submitting}
+                  className="px-4 py-2 bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200 rounded-md hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSubmit}
+                  disabled={submitting || !!agentLogError}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+                >
+                  {submitting ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      Submitting...
+                    </>
+                  ) : (
+                    "Submit Report"
+                  )}
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>

@@ -470,7 +470,7 @@ export default function SessionDetailPage() {
       const token = await getAccessToken();
       if (!token) {
         addNotification('error', 'Authentication Error', 'Failed to get access token.', 'report-auth-error');
-        return;
+        throw new Error('Failed to get access token.');
       }
 
       // Generate TXT and CSV exports from the events currently loaded
@@ -508,15 +508,20 @@ export default function SessionDetailPage() {
       );
 
       if (response.ok) {
-        setShowReportModal(false);
         addNotification('success', 'Report Submitted', 'Session report has been submitted for analysis.', 'report-success');
       } else {
         const data = await response.json().catch(() => null);
-        addNotification('error', 'Report Failed', data?.message || 'Failed to submit report.', 'report-error');
+        const message = data?.message || 'Failed to submit report.';
+        addNotification('error', 'Report Failed', message, 'report-error');
+        throw new Error(message);
       }
-    } catch (err) {
-      console.error('Error submitting report:', err);
-      addNotification('error', 'Report Failed', 'Unable to submit report. Please check your connection.', 'report-error');
+    } catch (err: any) {
+      // Re-throw so the modal can show inline error feedback.
+      // Only log unexpected errors (not the ones we threw ourselves above).
+      if (!err?.message?.includes('Failed to submit report') && !err?.message?.includes('Failed to get access token')) {
+        console.error('Error submitting report:', err);
+      }
+      throw err;
     } finally {
       setReportSubmitting(false);
     }
