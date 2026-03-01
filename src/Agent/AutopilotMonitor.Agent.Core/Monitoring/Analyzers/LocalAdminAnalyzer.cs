@@ -34,17 +34,20 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Analyzers
         private readonly AgentLogger _logger;
         private readonly List<string> _allowedAccounts;
 
-        // Built-in accounts always present on a freshly imaged Windows device.
-        // "Public" and "Default" are profile folders, not user accounts, but appear in C:\Users.
+        // Built-in accounts and profile folders always present on a freshly imaged Windows device.
+        // "Public", "Default", "Default User", "All Users" are folders/junctions in C:\Users, not user accounts.
+        // "defaultuser0" is a temporary OOBE/Autopilot system account created during enrollment.
         private static readonly List<string> BuiltInAllowedAccounts = new List<string>
         {
             "Administrator",
             "Guest",
             "DefaultAccount",
             "WDAGUtilityAccount",
-            "Public",
-            "Default",
-            "Default User"
+            "defaultuser0",    // Temporary OOBE/Autopilot system account, present during enrollment
+            "Public",          // Profile folder (not a user account)
+            "Default",         // Default user profile template
+            "Default User",    // Symlink to Default in some Windows versions
+            "All Users"        // Junction pointing to C:\ProgramData, always present
         };
 
         public string Name => "LocalAdminAnalyzer";
