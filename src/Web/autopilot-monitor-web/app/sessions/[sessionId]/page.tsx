@@ -506,18 +506,46 @@ export default function SessionDetailPage() {
   const whiteGloveSplitSequence = useMemo(() => {
     if (!isWhiteGloveSession) return -1;
     const wgEvent = events.find(e => e.eventType === "whiteglove_complete");
+
+    // Anchor the split relative to whiteglove_complete, robust against reboots
+    // in both Part 1 (pre-prov) and Part 2 (user enrollment).
+    const agentStarts = events
+      .filter(e => e.eventType === "agent_started")
+      .sort((a, b) => a.sequence - b.sequence);
+
+    if (wgEvent && agentStarts.length >= 2) {
+      // Normal: first agent_started AFTER whiteglove_complete = Part 2 start
+      const nextStart = agentStarts.find(a => a.sequence > wgEvent.sequence);
+      if (nextStart) return nextStart.sequence - 1;
+
+      // Race condition: whiteglove_complete arrived after the Part 2 boot
+      // (Windows writes Event 62407 after reboot). The LAST agent_started
+      // before wgEvent is the Part 2 start.
+      const preWgStarts = agentStarts.filter(a => a.sequence < wgEvent.sequence);
+      if (preWgStarts.length >= 2) {
+        return preWgStarts[preWgStarts.length - 1].sequence - 1;
+      }
+    }
+
+    // Single boot (pre-prov only, user hasn't enrolled yet): use whiteglove_complete
     return wgEvent?.sequence ?? -1;
   }, [events, isWhiteGloveSession]);
 
-  // For WhiteGlove sessions: split filtered events into pre-provisioning and user-enrollment parts
+  // For WhiteGlove sessions: split filtered events into pre-provisioning and user-enrollment parts.
+  // whiteglove_complete is always assigned to pre-prov, even if its sequence is higher than the
+  // split (race condition: Windows writes the event after the reboot).
   const preProvEvents = useMemo(() => {
     if (!isWhiteGloveSession || whiteGloveSplitSequence < 0) return [] as EnrollmentEvent[];
-    return filteredEvents.filter(e => e.sequence <= whiteGloveSplitSequence);
+    return filteredEvents.filter(e =>
+      e.sequence <= whiteGloveSplitSequence || e.eventType === "whiteglove_complete"
+    );
   }, [filteredEvents, isWhiteGloveSession, whiteGloveSplitSequence]);
 
   const userEnrollEvents = useMemo(() => {
     if (!isWhiteGloveSession || whiteGloveSplitSequence < 0) return [] as EnrollmentEvent[];
-    return filteredEvents.filter(e => e.sequence > whiteGloveSplitSequence);
+    return filteredEvents.filter(e =>
+      e.sequence > whiteGloveSplitSequence && e.eventType !== "whiteglove_complete"
+    );
   }, [filteredEvents, isWhiteGloveSession, whiteGloveSplitSequence]);
 
   // Group events by phase — single timeline for normal sessions, two groups for WhiteGlove
