@@ -53,16 +53,6 @@ namespace AutopilotMonitor.Shared.Models
         public string OsLanguage { get; set; }
 
         /// <summary>
-        /// Autopilot profile name (if detectable)
-        /// </summary>
-        public string AutopilotProfileName { get; set; }
-
-        /// <summary>
-        /// Autopilot profile ID (if detectable)
-        /// </summary>
-        public string AutopilotProfileId { get; set; }
-
-        /// <summary>
         /// Whether this is user-driven enrollment
         /// </summary>
         public bool IsUserDriven { get; set; }

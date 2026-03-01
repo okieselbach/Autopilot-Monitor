@@ -321,11 +321,25 @@ export default function AdminConfigurationPage() {
               setSuccessMessage={setSuccessMessage}
             />
 
-            {/* Maintenance + Reseed Sections */}
-            <MaintenanceSection
+            {/* Session Event Export */}
+            <SessionExportSection
+              tenants={tenants}
               getAccessToken={getAccessToken}
-              setError={setError}
-              setSuccessMessage={setSuccessMessage}
+            />
+
+            {/* Global Settings */}
+            <AdminConfigSettingsSection
+              loadingConfig={loadingConfig}
+              savingConfig={savingConfig}
+              adminConfig={adminConfig}
+              globalRateLimit={globalRateLimit}
+              setGlobalRateLimit={setGlobalRateLimit}
+              platformStatsBlobSasUrl={platformStatsBlobSasUrl}
+              setPlatformStatsBlobSasUrl={setPlatformStatsBlobSasUrl}
+              maxCollectorDurationHours={maxCollectorDurationHours}
+              setMaxCollectorDurationHours={setMaxCollectorDurationHours}
+              onSave={handleSaveAdminConfig}
+              onReset={handleResetAdminConfig}
             />
 
             {/* Diagnostics Log Paths */}
@@ -353,25 +367,11 @@ export default function AdminConfigurationPage() {
               setSuccessMessage={setSuccessMessage}
             />
 
-            {/* Session Event Export */}
-            <SessionExportSection
-              tenants={tenants}
+            {/* Maintenance + Reseed Sections */}
+            <MaintenanceSection
               getAccessToken={getAccessToken}
-            />
-
-            {/* Global Settings */}
-            <AdminConfigSettingsSection
-              loadingConfig={loadingConfig}
-              savingConfig={savingConfig}
-              adminConfig={adminConfig}
-              globalRateLimit={globalRateLimit}
-              setGlobalRateLimit={setGlobalRateLimit}
-              platformStatsBlobSasUrl={platformStatsBlobSasUrl}
-              setPlatformStatsBlobSasUrl={setPlatformStatsBlobSasUrl}
-              maxCollectorDurationHours={maxCollectorDurationHours}
-              setMaxCollectorDurationHours={setMaxCollectorDurationHours}
-              onSave={handleSaveAdminConfig}
-              onReset={handleResetAdminConfig}
+              setError={setError}
+              setSuccessMessage={setSuccessMessage}
             />
           </div>
         </main>

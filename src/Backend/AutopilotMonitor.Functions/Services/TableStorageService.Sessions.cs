@@ -91,8 +91,6 @@ namespace AutopilotMonitor.Functions.Services
                     ["OsBuild"] = registration.OsBuild ?? string.Empty,
                     ["OsEdition"] = registration.OsEdition ?? string.Empty,
                     ["OsLanguage"] = registration.OsLanguage ?? string.Empty,
-                    ["AutopilotProfileName"] = registration.AutopilotProfileName ?? string.Empty,
-                    ["AutopilotProfileId"] = registration.AutopilotProfileId ?? string.Empty,
                     ["IsUserDriven"] = registration.IsUserDriven,
                     ["IsPreProvisioned"] = isPreProvisioned,
                     ["StartedAt"] = startedAt,
