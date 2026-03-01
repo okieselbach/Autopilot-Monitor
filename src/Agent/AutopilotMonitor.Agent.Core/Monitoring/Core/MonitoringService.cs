@@ -147,10 +147,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 }
             });
 
-            // Collect and emit device geo-location (if enabled)
+            // Collect and emit device geo-location asynchronously — HTTP call, not on critical path
             if (_configuration.EnableGeoLocation)
             {
-                EmitGeoLocationEvent();
+                Task.Run(EmitGeoLocationEvent);
             }
 
             // Start event collectors (HelloCollector + optional based on remote config)
@@ -443,27 +443,34 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         }
 
         /// <summary>
-        /// Runs all registered analyzers at agent startup.
-        /// Failures in individual analyzers are caught and logged — they do not block startup.
+        /// Runs all registered analyzers at agent startup — asynchronously on the ThreadPool
+        /// so they do not block or delay the agent start sequence.
+        /// Emitted events will be picked up by the spool watcher and uploaded normally.
         /// </summary>
         private void RunStartupAnalyzers()
         {
             if (_analyzers.Count == 0)
                 return;
 
-            _logger.Info($"Running {_analyzers.Count} startup analyzer(s)");
+            // Capture the list snapshot — _analyzers is not modified after Start()
+            var analyzers = new List<IAgentAnalyzer>(_analyzers);
 
-            foreach (var analyzer in _analyzers)
+            _logger.Info($"Scheduling {analyzers.Count} startup analyzer(s) on background thread");
+
+            Task.Run(() =>
             {
-                try
+                foreach (var analyzer in analyzers)
                 {
-                    analyzer.AnalyzeAtStartup();
+                    try
+                    {
+                        analyzer.AnalyzeAtStartup();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Error($"Analyzer {analyzer.Name} threw during startup", ex);
+                    }
                 }
-                catch (Exception ex)
-                {
-                    _logger.Error($"Analyzer {analyzer.Name} threw during startup", ex);
-                }
-            }
+            });
         }
 
         /// <summary>

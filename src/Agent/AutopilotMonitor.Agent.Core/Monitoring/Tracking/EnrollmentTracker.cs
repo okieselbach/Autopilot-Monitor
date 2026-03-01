@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
+using System.Threading.Tasks;
 using AutopilotMonitor.Agent.Core.Logging;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Win32;
@@ -119,11 +120,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         {
             _logger.Info("EnrollmentTracker: starting");
 
-            // Collect and emit consolidated device info events
-            CollectDeviceInfo();
-
-            // Start IME log tracking
+            // Start IME log tracking immediately — this is the critical enrollment watcher.
+            // Device info collection (WMI + registry) runs in the background so it doesn't
+            // delay the ImeLogTracker from catching early enrollment events.
             _imeLogTracker.Start();
+
+            // Collect and emit device info asynchronously (3 WMI queries + 5+ registry reads)
+            Task.Run(CollectDeviceInfo);
 
             // Start periodic summary timer (30s, starts when app tracking begins)
             _summaryTimer = new Timer(SummaryTimerCallback, null, Timeout.Infinite, Timeout.Infinite);
