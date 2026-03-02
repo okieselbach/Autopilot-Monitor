@@ -224,7 +224,9 @@ namespace AutopilotMonitor.Functions.Services
                 { "DiagnosticsLogPathsJson", config.DiagnosticsLogPathsJson },
                 { "TeamsWebhookUrl", config.TeamsWebhookUrl },
                 { "TeamsNotifyOnSuccess", config.TeamsNotifyOnSuccess },
-                { "TeamsNotifyOnFailure", config.TeamsNotifyOnFailure }
+                { "TeamsNotifyOnFailure", config.TeamsNotifyOnFailure },
+                { "EnableLocalAdminAnalyzer", config.EnableLocalAdminAnalyzer },
+                { "LocalAdminAllowedAccountsJson", config.LocalAdminAllowedAccountsJson }
             };
 
             return entity;
@@ -267,7 +269,9 @@ namespace AutopilotMonitor.Functions.Services
                 DiagnosticsLogPathsJson = entity.GetString("DiagnosticsLogPathsJson"),
                 TeamsWebhookUrl = entity.GetString("TeamsWebhookUrl"),
                 TeamsNotifyOnSuccess = entity.GetBoolean("TeamsNotifyOnSuccess") ?? true,
-                TeamsNotifyOnFailure = entity.GetBoolean("TeamsNotifyOnFailure") ?? true
+                TeamsNotifyOnFailure = entity.GetBoolean("TeamsNotifyOnFailure") ?? true,
+                EnableLocalAdminAnalyzer = entity.GetBoolean("EnableLocalAdminAnalyzer"),
+                LocalAdminAllowedAccountsJson = entity.GetString("LocalAdminAllowedAccountsJson")
             };
         }
     }

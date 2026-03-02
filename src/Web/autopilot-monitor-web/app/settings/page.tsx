@@ -12,6 +12,7 @@ import AutopilotValidationSection from "./components/AutopilotValidationSection"
 import AdminManagementSection from "./components/AdminManagementSection";
 import HardwareWhitelistSection from "./components/HardwareWhitelistSection";
 import AgentSettingsSection from "./components/AgentSettingsSection";
+import AgentAnalyzersSection from "./components/AgentAnalyzersSection";
 import TeamsNotificationsSection from "./components/TeamsNotificationsSection";
 import DiagnosticsSection, { parseSasExpiry } from "./components/DiagnosticsSection";
 import DataManagementSection from "./components/DataManagementSection";
@@ -54,6 +55,9 @@ export interface TenantConfiguration {
   diagnosticsBlobSasUrl?: string;
   diagnosticsUploadMode?: string;
   diagnosticsLogPathsJson?: string;
+  // Agent analyzer settings
+  enableLocalAdminAnalyzer?: boolean;
+  localAdminAllowedAccountsJson?: string;
 }
 
 export interface TenantAdmin {
@@ -129,6 +133,11 @@ export default function SettingsPage() {
   const [newDiagPath, setNewDiagPath] = useState("");
   const [newDiagDesc, setNewDiagDesc] = useState("");
 
+  // Agent analyzer settings state
+  const [enableLocalAdminAnalyzer, setEnableLocalAdminAnalyzer] = useState(true);
+  const [localAdminAllowedAccounts, setLocalAdminAllowedAccounts] = useState<string[]>([]);
+  const [newAllowedAccount, setNewAllowedAccount] = useState("");
+
   // Derived: true when form differs from last-saved config
   const hasUnsavedChanges = useMemo(() => {
     if (!config) return false;
@@ -155,6 +164,10 @@ export default function SettingsPage() {
       diagnosticsUploadMode !== (config.diagnosticsUploadMode ?? "Off") ||
       JSON.stringify(tenantDiagPaths) !== JSON.stringify(
         config.diagnosticsLogPathsJson ? (() => { try { return JSON.parse(config.diagnosticsLogPathsJson!); } catch { return []; } })() : []
+      ) ||
+      enableLocalAdminAnalyzer !== (config.enableLocalAdminAnalyzer ?? true) ||
+      JSON.stringify(localAdminAllowedAccounts) !== JSON.stringify(
+        config.localAdminAllowedAccountsJson ? (() => { try { return JSON.parse(config.localAdminAllowedAccountsJson!); } catch { return []; } })() : []
       )
     );
   }, [
@@ -165,6 +178,7 @@ export default function SettingsPage() {
     rebootOnComplete, rebootDelaySeconds, enableGeoLocation, enableImeMatchLog,
     logLevel, teamsWebhookUrl, teamsNotifyOnSuccess, teamsNotifyOnFailure,
     diagnosticsBlobSasUrl, diagnosticsUploadMode, tenantDiagPaths,
+    enableLocalAdminAnalyzer, localAdminAllowedAccounts,
   ]);
 
   // Fetch configuration
@@ -221,6 +235,12 @@ export default function SettingsPage() {
           setTenantDiagPaths(data.diagnosticsLogPathsJson ? JSON.parse(data.diagnosticsLogPathsJson) : []);
         } catch {
           setTenantDiagPaths([]);
+        }
+        setEnableLocalAdminAnalyzer(data.enableLocalAdminAnalyzer ?? true);
+        try {
+          setLocalAdminAllowedAccounts(data.localAdminAllowedAccountsJson ? JSON.parse(data.localAdminAllowedAccountsJson) : []);
+        } catch {
+          setLocalAdminAllowedAccounts([]);
         }
 
         // Parse SAS expiry and fire notification to bell if needed
@@ -428,6 +448,8 @@ export default function SettingsPage() {
         diagnosticsBlobSasUrl: diagnosticsBlobSasUrl || undefined,
         diagnosticsUploadMode,
         diagnosticsLogPathsJson: tenantDiagPaths.length > 0 ? JSON.stringify(tenantDiagPaths) : undefined,
+        enableLocalAdminAnalyzer,
+        localAdminAllowedAccountsJson: localAdminAllowedAccounts.length > 0 ? JSON.stringify(localAdminAllowedAccounts) : undefined,
       };
 
       const token = await getAccessToken();
@@ -879,6 +901,15 @@ export default function SettingsPage() {
               setEnableImeMatchLog={setEnableImeMatchLog}
               logLevel={logLevel}
               setLogLevel={setLogLevel}
+            />
+
+            <AgentAnalyzersSection
+              enableLocalAdminAnalyzer={enableLocalAdminAnalyzer}
+              setEnableLocalAdminAnalyzer={setEnableLocalAdminAnalyzer}
+              localAdminAllowedAccounts={localAdminAllowedAccounts}
+              setLocalAdminAllowedAccounts={setLocalAdminAllowedAccounts}
+              newAllowedAccount={newAllowedAccount}
+              setNewAllowedAccount={setNewAllowedAccount}
             />
 
             <TeamsNotificationsSection
