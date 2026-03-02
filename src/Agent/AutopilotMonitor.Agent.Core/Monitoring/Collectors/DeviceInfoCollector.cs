@@ -362,7 +362,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     EventType = "enrollment_type_detected",
                     Severity = EventSeverity.Info,
                     Source = "EnrollmentTracker",
-                    Phase = EnrollmentPhase.Start,
+                    Phase = EnrollmentPhase.Unknown,
                     Message = detectedType == "v2"
                         ? "Enrollment type: Autopilot v2 (Windows Device Preparation)"
                         : "Enrollment type: Autopilot v1 (Classic ESP)",

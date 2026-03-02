@@ -82,7 +82,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Analyzers
         public void AnalyzeAtStartup()
         {
             _logger.Info($"{Name}: Running startup analysis");
-            RunAnalysis("startup", EnrollmentPhase.Start);
+            RunAnalysis("startup", EnrollmentPhase.Unknown);
         }
 
         public void AnalyzeAtShutdown()
