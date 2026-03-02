@@ -388,7 +388,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 
                 ProcessHelloEvent(
                     eventId,
-                    record.TimeCreated ?? DateTime.UtcNow,
+                    (record.TimeCreated ?? DateTime.UtcNow).ToUniversalTime(),
                     record.ProviderName ?? "",
                     isBackfill: false);
             }
@@ -683,7 +683,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                         return;
                 }
 
-                var eventTimestamp = record.TimeCreated ?? DateTime.UtcNow;
+                var eventTimestamp = (record.TimeCreated ?? DateTime.UtcNow).ToUniversalTime();
 
                 _onEventCollected(new EnrollmentEvent
                 {
@@ -979,7 +979,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     if (latestEventId.HasValue)
                     {
                         _logger.Info($"Backfill found recent Hello terminal event: EventID {latestEventId.Value} at {latestTimestamp:O}");
-                        ProcessHelloEvent(latestEventId.Value, latestTimestamp == DateTime.MinValue ? DateTime.UtcNow : latestTimestamp, latestProvider, isBackfill: true);
+                        ProcessHelloEvent(latestEventId.Value, (latestTimestamp == DateTime.MinValue ? DateTime.UtcNow : latestTimestamp).ToUniversalTime(), latestProvider, isBackfill: true);
                     }
                     else
                     {

@@ -13,6 +13,18 @@ namespace AutopilotMonitor.Functions.Services
         // ===== SESSION MANAGEMENT METHODS =====
 
         /// <summary>
+        /// Ensures a DateTime value has DateTimeKind.Utc before writing to Azure Table Storage.
+        /// The Azure Data Tables SDK throws NotSupportedException for DateTime values with Kind=Local.
+        /// This guards against timestamps that lost their UTC kind during JSON round-trips (e.g. agent spool).
+        /// </summary>
+        private static DateTime EnsureUtc(DateTime dt) => dt.Kind switch
+        {
+            DateTimeKind.Utc => dt,
+            DateTimeKind.Local => dt.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(dt, DateTimeKind.Utc) // Unspecified: assume UTC
+        };
+
+        /// <summary>
         /// Stores a session registration
         /// </summary>
         public async Task<bool> StoreSessionAsync(SessionRegistration registration)
@@ -93,7 +105,7 @@ namespace AutopilotMonitor.Functions.Services
                     ["OsLanguage"] = registration.OsLanguage ?? string.Empty,
                     ["IsUserDriven"] = registration.IsUserDriven,
                     ["IsPreProvisioned"] = isPreProvisioned,
-                    ["StartedAt"] = startedAt,
+                    ["StartedAt"] = EnsureUtc(startedAt),
                     ["AgentVersion"] = registration.AgentVersion ?? string.Empty,
                     ["EnrollmentType"] = registration.EnrollmentType ?? "v1",
                     ["CurrentPhase"] = currentPhase,
@@ -102,13 +114,13 @@ namespace AutopilotMonitor.Functions.Services
                 };
 
                 if (completedAt.HasValue)
-                    entity["CompletedAt"] = completedAt.Value;
+                    entity["CompletedAt"] = EnsureUtc(completedAt.Value);
 
                 if (!string.IsNullOrWhiteSpace(failureReason))
                     entity["FailureReason"] = failureReason;
 
                 if (lastEventAt.HasValue)
-                    entity["LastEventAt"] = lastEventAt.Value;
+                    entity["LastEventAt"] = EnsureUtc(lastEventAt.Value);
 
                 if (durationSeconds.HasValue)
                     entity["DurationSeconds"] = durationSeconds.Value;
@@ -418,14 +430,14 @@ namespace AutopilotMonitor.Functions.Services
                     var currentStartedAt = session.GetDateTimeOffset("StartedAt")?.UtcDateTime ?? DateTime.MaxValue;
                     if (earliestEventTimestamp.HasValue && earliestEventTimestamp.Value < currentStartedAt)
                     {
-                        update["StartedAt"] = earliestEventTimestamp.Value;
+                        update["StartedAt"] = EnsureUtc(earliestEventTimestamp.Value);
                     }
 
                     // Set completion time if succeeded or failed
                     if (status == SessionStatus.Succeeded || status == SessionStatus.Failed)
                     {
                         // Use the provided completedAt timestamp (from event) if available, otherwise use current time
-                        var effectiveCompletedAt = completedAt ?? DateTime.UtcNow;
+                        var effectiveCompletedAt = EnsureUtc(completedAt ?? DateTime.UtcNow);
                         update["CompletedAt"] = effectiveCompletedAt;
 
                         // Read earliest event from Events table — authoritative source, immune to
@@ -445,7 +457,7 @@ namespace AutopilotMonitor.Functions.Services
                     {
                         var currentLastEventAt = session.GetDateTimeOffset("LastEventAt")?.UtcDateTime;
                         if (!currentLastEventAt.HasValue || latestEventTimestamp.Value > currentLastEventAt.Value)
-                            update["LastEventAt"] = latestEventTimestamp.Value;
+                            update["LastEventAt"] = EnsureUtc(latestEventTimestamp.Value);
                     }
 
                     // Set failure reason if failed
@@ -503,11 +515,11 @@ namespace AutopilotMonitor.Functions.Services
 
                             var freshStartedAt = freshSession.GetDateTimeOffset("StartedAt")?.UtcDateTime ?? DateTime.MaxValue;
                             if (earliestEventTimestamp.HasValue && earliestEventTimestamp.Value < freshStartedAt)
-                                forceUpdate["StartedAt"] = earliestEventTimestamp.Value;
+                                forceUpdate["StartedAt"] = EnsureUtc(earliestEventTimestamp.Value);
 
                             if (status == SessionStatus.Succeeded || status == SessionStatus.Failed)
                             {
-                                var effectiveCompletedAt = completedAt ?? DateTime.UtcNow;
+                                var effectiveCompletedAt = EnsureUtc(completedAt ?? DateTime.UtcNow);
                                 forceUpdate["CompletedAt"] = effectiveCompletedAt;
 
                                 var earliestStoredEvent = await GetEarliestSessionEventTimestampAsync(tenantId, sessionId);
@@ -523,7 +535,7 @@ namespace AutopilotMonitor.Functions.Services
                             {
                                 var freshLastEventAt = freshSession.GetDateTimeOffset("LastEventAt")?.UtcDateTime;
                                 if (!freshLastEventAt.HasValue || latestEventTimestamp.Value > freshLastEventAt.Value)
-                                    forceUpdate["LastEventAt"] = latestEventTimestamp.Value;
+                                    forceUpdate["LastEventAt"] = EnsureUtc(latestEventTimestamp.Value);
                             }
 
                             if (status == SessionStatus.Failed && !string.IsNullOrEmpty(failureReason))
@@ -613,7 +625,7 @@ namespace AutopilotMonitor.Functions.Services
                     var currentStartedAt = entity.Value.GetDateTimeOffset("StartedAt")?.UtcDateTime ?? DateTime.MaxValue;
                     if (earliestEventTimestamp.HasValue && earliestEventTimestamp.Value < currentStartedAt)
                     {
-                        update["StartedAt"] = earliestEventTimestamp.Value;
+                        update["StartedAt"] = EnsureUtc(earliestEventTimestamp.Value);
                     }
 
                     // Track the most recent event timestamp for excessive data sender detection
@@ -621,7 +633,7 @@ namespace AutopilotMonitor.Functions.Services
                     {
                         var currentLastEventAt = entity.Value.GetDateTimeOffset("LastEventAt")?.UtcDateTime;
                         if (!currentLastEventAt.HasValue || latestEventTimestamp.Value > currentLastEventAt.Value)
-                            update["LastEventAt"] = latestEventTimestamp.Value;
+                            update["LastEventAt"] = EnsureUtc(latestEventTimestamp.Value);
                     }
 
                     await tableClient.UpdateEntityAsync(update, entity.Value.ETag, TableUpdateMode.Merge);
