@@ -694,30 +694,24 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
-        /// Sets the IsPreProvisioned flag on an existing session (Merge-mode, single field update).
+        /// Sets the IsPreProvisioned flag on an existing session (unconditional Merge-mode write).
+        /// Uses ETag.All to bypass optimistic-concurrency conflicts, making this suitable as a
+        /// last-resort fallback when ETag-based updates have been exhausted.
         /// </summary>
         public async Task SetSessionPreProvisionedAsync(string tenantId, string sessionId, bool isPreProvisioned)
         {
             SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
             SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
 
-            try
-            {
-                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
-                var entity = await tableClient.GetEntityAsync<TableEntity>(tenantId, sessionId);
+            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
 
-                var update = new TableEntity(tenantId, sessionId)
-                {
-                    ["IsPreProvisioned"] = isPreProvisioned
-                };
-
-                await tableClient.UpdateEntityAsync(update, entity.Value.ETag, Azure.Data.Tables.TableUpdateMode.Merge);
-                _logger.LogInformation($"Set IsPreProvisioned={isPreProvisioned} for session {sessionId}");
-            }
-            catch (Exception ex)
+            var update = new TableEntity(tenantId, sessionId)
             {
-                _logger.LogError(ex, $"Failed to set IsPreProvisioned for session {sessionId}");
-            }
+                ["IsPreProvisioned"] = isPreProvisioned
+            };
+
+            await tableClient.UpdateEntityAsync(update, ETag.All, TableUpdateMode.Merge);
+            _logger.LogInformation($"Set IsPreProvisioned={isPreProvisioned} for session {sessionId} (unconditional merge)");
         }
 
         /// <summary>

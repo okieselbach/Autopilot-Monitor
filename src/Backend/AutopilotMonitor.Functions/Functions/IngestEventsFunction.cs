@@ -281,6 +281,24 @@ namespace AutopilotMonitor.Functions.Functions
                         isPreProvisioned: true
                     );
 
+                    // Fallback: if the optimistic-concurrency merge failed despite internal retries
+                    // (5 ETag retries + force-write), use an unconditional single-field write to at
+                    // least persist the critical IsPreProvisioned flag.
+                    if (!whiteGloveStatusTransitioned)
+                    {
+                        _logger.LogWarning("{SessionPrefix} WhiteGlove UpdateSessionStatusAsync failed, attempting unconditional fallback for IsPreProvisioned", sessionPrefix);
+                        try
+                        {
+                            await _storageService.SetSessionPreProvisionedAsync(request.TenantId, request.SessionId, true);
+                            whiteGloveStatusTransitioned = true;
+                            _logger.LogInformation("{SessionPrefix} WhiteGlove fallback succeeded: IsPreProvisioned set via unconditional merge", sessionPrefix);
+                        }
+                        catch (Exception fallbackEx)
+                        {
+                            _logger.LogError(fallbackEx, "{SessionPrefix} WhiteGlove fallback SetSessionPreProvisionedAsync also failed", sessionPrefix);
+                        }
+                    }
+
                     _logger.LogInformation("{SessionPrefix} Status: Pending (WhiteGlove pre-provisioning complete, transitioned={Transitioned})", sessionPrefix, whiteGloveStatusTransitioned);
                 }
                 else if (processedCount > 0)
@@ -351,16 +369,19 @@ namespace AutopilotMonitor.Functions.Functions
                 // Retrieve updated session data to include in SignalR messages
                 var updatedSession = await _storageService.GetSessionAsync(request.TenantId, request.SessionId);
 
-                // Verify whiteglove status update was persisted — return error so agent retries if not.
-                // Events are already stored (idempotent UpsertReplace), only the session update needs retry.
+                // Log warning if WhiteGlove status update was not persisted despite retries and fallback.
+                // Events are already stored (idempotent UpsertReplace). Do NOT return 500 here:
+                // the agent retries the same batch containing whiteglove_complete, hitting the same
+                // failing update path, creating a self-reinforcing 500 loop that blocks spool drain
+                // and causes data loss on the monitoring session. Returning 200 lets the agent
+                // drain its spool; the session may need manual correction in the worst case.
                 if (whiteGloveEvent != null && updatedSession?.IsPreProvisioned != true)
                 {
                     _logger.LogError(
-                        "{SessionPrefix} CRITICAL: WhiteGlove status update not persisted. " +
-                        "IsPreProvisioned={IsPreProvisioned}, Status={Status}. Returning 500 for agent retry.",
+                        "{SessionPrefix} WhiteGlove status update not persisted after retries and fallback. " +
+                        "IsPreProvisioned={IsPreProvisioned}, Status={Status}. " +
+                        "Proceeding with 200 to allow agent spool drain.",
                         sessionPrefix, updatedSession?.IsPreProvisioned, updatedSession?.Status);
-                    return await CreateErrorResponse(req, HttpStatusCode.InternalServerError,
-                        "WhiteGlove session status update failed");
                 }
 
                 // Send Teams notification on enrollment completion (fire-and-forget, non-fatal)
