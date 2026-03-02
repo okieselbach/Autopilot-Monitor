@@ -25,6 +25,23 @@ namespace AutopilotMonitor.Functions.Services
         };
 
         /// <summary>
+        /// Azure Table Storage limits string properties to 64KB (32K UTF-16 chars).
+        /// Truncate to 30,000 chars to leave buffer for multi-byte characters.
+        /// </summary>
+        private const int MaxTableStorageStringLength = 30000;
+
+        private string TruncateForTableStorage(string value, string propertyName, string eventId)
+        {
+            if (string.IsNullOrEmpty(value) || value.Length <= MaxTableStorageStringLength)
+                return value;
+
+            _logger.LogWarning("Truncating {PropertyName} for event {EventId}: {OriginalLength} chars -> {MaxLength} chars",
+                propertyName, eventId, value.Length, MaxTableStorageStringLength);
+
+            return value.Substring(0, MaxTableStorageStringLength) + "... [truncated]";
+        }
+
+        /// <summary>
         /// Stores a session registration
         /// </summary>
         public async Task<bool> StoreSessionAsync(SessionRegistration registration)
@@ -168,11 +185,13 @@ namespace AutopilotMonitor.Functions.Services
                     ["Severity"] = (int)evt.Severity,
                     ["Source"] = evt.Source ?? string.Empty,
                     ["Phase"] = (int)evt.Phase,
-                    ["Message"] = evt.Message ?? string.Empty,
+                    ["Message"] = TruncateForTableStorage(evt.Message ?? string.Empty, "Message", evt.EventId),
                     ["Sequence"] = evt.Sequence,
-                    ["DataJson"] = evt.Data != null && evt.Data.Count > 0
-                        ? JsonConvert.SerializeObject(evt.Data)
-                        : string.Empty
+                    ["DataJson"] = TruncateForTableStorage(
+                        evt.Data != null && evt.Data.Count > 0
+                            ? JsonConvert.SerializeObject(evt.Data)
+                            : string.Empty,
+                        "DataJson", evt.EventId)
                 };
 
                 await tableClient.UpsertEntityAsync(entity);
@@ -238,11 +257,13 @@ namespace AutopilotMonitor.Functions.Services
                                 ["Severity"] = (int)evt.Severity,
                                 ["Source"] = evt.Source ?? string.Empty,
                                 ["Phase"] = (int)evt.Phase,
-                                ["Message"] = evt.Message ?? string.Empty,
+                                ["Message"] = TruncateForTableStorage(evt.Message ?? string.Empty, "Message", evt.EventId),
                                 ["Sequence"] = evt.Sequence,
-                                ["DataJson"] = evt.Data != null && evt.Data.Count > 0
-                                    ? JsonConvert.SerializeObject(evt.Data)
-                                    : string.Empty
+                                ["DataJson"] = TruncateForTableStorage(
+                                    evt.Data != null && evt.Data.Count > 0
+                                        ? JsonConvert.SerializeObject(evt.Data)
+                                        : string.Empty,
+                                    "DataJson", evt.EventId)
                             };
 
                             return new TableTransactionAction(TableTransactionActionType.UpsertReplace, entity);
