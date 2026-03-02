@@ -449,6 +449,8 @@ namespace AutopilotMonitor.Functions.Services
                 P95DurationMinutes = p95Duration,
                 P99DurationMinutes = p99Duration,
                 UniqueTenants = tenantId == "global" ? sessions.Select(s => s.TenantId).Distinct().Count() : 0,
+                UserDrivenSessions = sessions.Count(s => s.IsUserDriven),
+                WhiteGloveSessions = sessions.Count(s => s.IsPreProvisioned),
                 UniqueUsers = uniqueUsers,
                 LoginCount = loginCount,
                 TopManufacturers = JsonConvert.SerializeObject(manufacturers),

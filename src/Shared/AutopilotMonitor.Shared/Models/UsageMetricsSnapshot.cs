@@ -98,6 +98,18 @@ namespace AutopilotMonitor.Shared.Models
         /// </summary>
         public int LoginCount { get; set; }
 
+        // ===== DEPLOYMENT TYPE METRICS =====
+
+        /// <summary>
+        /// Number of user-driven deployment sessions
+        /// </summary>
+        public int UserDrivenSessions { get; set; }
+
+        /// <summary>
+        /// Number of white glove (pre-provisioned) deployment sessions
+        /// </summary>
+        public int WhiteGloveSessions { get; set; }
+
         // ===== HARDWARE METRICS (Top 5 only for storage efficiency) =====
 
         /// <summary>

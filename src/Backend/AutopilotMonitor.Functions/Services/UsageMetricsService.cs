@@ -184,6 +184,17 @@ namespace AutopilotMonitor.Functions.Services
                     .ToList()
             };
 
+            // Deployment Type Metrics
+            var userDrivenCount = allSessions.Count(s => s.IsUserDriven);
+            var whiteGloveCount = allSessions.Count(s => s.IsPreProvisioned);
+            var deploymentTypeMetrics = new DeploymentTypeMetrics
+            {
+                UserDriven = userDrivenCount,
+                WhiteGlove = whiteGloveCount,
+                UserDrivenPercentage = totalCount > 0 ? Math.Round((userDrivenCount / (double)totalCount) * 100, 1) : 0,
+                WhiteGlovePercentage = totalCount > 0 ? Math.Round((whiteGloveCount / (double)totalCount) * 100, 1) : 0
+            };
+
             // Platform Stats (cumulative since release)
             var platformStats = await _storageService.GetPlatformStatsAsync();
 
@@ -194,6 +205,7 @@ namespace AutopilotMonitor.Functions.Services
                 Users = userMetrics,
                 Performance = performanceMetrics,
                 Hardware = hardwareMetrics,
+                DeploymentTypes = deploymentTypeMetrics,
                 PlatformStats = platformStats != null ? new PlatformStats
                 {
                     TotalEnrollments = platformStats.TotalEnrollments,
@@ -294,13 +306,25 @@ namespace AutopilotMonitor.Functions.Services
                     .ToList();
             }
 
+            // Deployment Type Metrics
+            var userDrivenCount = tenantSessions.Count(s => s.IsUserDriven);
+            var whiteGloveCount = tenantSessions.Count(s => s.IsPreProvisioned);
+            var deploymentTypeMetrics = new DeploymentTypeMetrics
+            {
+                UserDriven = userDrivenCount,
+                WhiteGlove = whiteGloveCount,
+                UserDrivenPercentage = totalCount > 0 ? Math.Round((userDrivenCount / (double)totalCount) * 100, 1) : 0,
+                WhiteGlovePercentage = totalCount > 0 ? Math.Round((whiteGloveCount / (double)totalCount) * 100, 1) : 0
+            };
+
             return new PlatformUsageMetrics
             {
                 Sessions = sessionMetrics,
                 Tenants = tenantMetrics,
                 Users = userMetrics,
                 Performance = performanceMetrics,
-                Hardware = hardwareMetrics
+                Hardware = hardwareMetrics,
+                DeploymentTypes = deploymentTypeMetrics
             };
         }
 

@@ -49,6 +49,13 @@ interface HardwareMetrics {
   topModels: HardwareCount[];
 }
 
+interface DeploymentTypeMetrics {
+  userDriven: number;
+  whiteGlove: number;
+  userDrivenPercentage: number;
+  whiteGlovePercentage: number;
+}
+
 interface PlatformStats {
   totalEnrollments: number;
   totalUsers: number;
@@ -66,6 +73,7 @@ interface PlatformUsageMetrics {
   users: UserMetrics;
   performance: PerformanceMetrics;
   hardware: HardwareMetrics;
+  deploymentTypes: DeploymentTypeMetrics;
   platformStats?: PlatformStats;
   computedAt: string;
   computeDurationMs: number;
@@ -260,6 +268,47 @@ export default function PlatformUsageMetricsPage() {
             <div className="bg-white rounded-lg shadow p-6">
               <div className="text-sm text-gray-500 mb-1">Success Rate</div>
               <div className="text-3xl font-bold text-gray-900">{metrics.sessions.successRate}%</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Deployment Types */}
+        <div className="mb-6">
+          <h2 className="text-xl font-semibold text-gray-900 mb-4">Deployment Types</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="bg-white rounded-lg shadow p-6">
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <div className="text-sm text-gray-500 mb-1">User Driven</div>
+                  <div className="text-3xl font-bold text-blue-600">{metrics.deploymentTypes.userDriven.toLocaleString()}</div>
+                </div>
+                <div className="text-right">
+                  <span className="text-2xl font-semibold text-blue-500">{metrics.deploymentTypes.userDrivenPercentage}%</span>
+                </div>
+              </div>
+              <div className="w-full bg-gray-200 rounded-full h-2.5">
+                <div
+                  className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
+                  style={{ width: `${metrics.deploymentTypes.userDrivenPercentage}%` }}
+                ></div>
+              </div>
+            </div>
+            <div className="bg-white rounded-lg shadow p-6">
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <div className="text-sm text-gray-500 mb-1">Pre-Provisioned</div>
+                  <div className="text-3xl font-bold text-purple-600">{metrics.deploymentTypes.whiteGlove.toLocaleString()}</div>
+                </div>
+                <div className="text-right">
+                  <span className="text-2xl font-semibold text-purple-500">{metrics.deploymentTypes.whiteGlovePercentage}%</span>
+                </div>
+              </div>
+              <div className="w-full bg-gray-200 rounded-full h-2.5">
+                <div
+                  className="bg-purple-600 h-2.5 rounded-full transition-all duration-300"
+                  style={{ width: `${metrics.deploymentTypes.whiteGlovePercentage}%` }}
+                ></div>
+              </div>
             </div>
           </div>
         </div>
