@@ -287,7 +287,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 { "hasErrors", HasError },
                 { "isAllCompleted", IsAllCompleted() },
                 { "ignoredCount", IgnoreList.Count },
-                { "apps", this.Select(x => x.ToEventData()).ToList() }
+                // State-breakdown for UI progress displays (replaces the full "apps" array
+                // which could exceed Azure Table Storage's 64KB property limit with 150+ apps)
+                { "downloading", this.Count(x => x.InstallationState == AppInstallationState.Downloading) },
+                { "installing", this.Count(x => x.InstallationState == AppInstallationState.Installing) },
+                { "installed", this.Count(x => x.InstallationState == AppInstallationState.Installed) },
+                { "skipped", this.Count(x => x.InstallationState == AppInstallationState.Skipped) },
+                { "failed", this.Count(x => x.InstallationState == AppInstallationState.Error || x.InstallationState == AppInstallationState.Postponed) },
+                { "pending", this.Count(x => x.InstallationState < AppInstallationState.Downloading) }
             };
         }
 

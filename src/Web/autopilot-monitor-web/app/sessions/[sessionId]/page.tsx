@@ -9,6 +9,7 @@ import { useNotifications } from "../../../contexts/NotificationContext";
 import { ProtectedRoute } from '../../../components/ProtectedRoute';
 import PerformanceChart from '../../../components/PerformanceChart';
 import DownloadProgress from '../../../components/DownloadProgress';
+import InstallProgress from '../../../components/InstallProgress';
 import { API_BASE_URL } from "@/lib/config";
 
 import { V1_PHASE_NAMES, V2_PHASE_NAMES, V1_PHASE_ORDER, V2_PHASE_ORDER } from "./utils/phaseConstants";
@@ -555,6 +556,25 @@ export default function SessionDetailPage() {
     [events, severityFilters]
   );
 
+  // Extract latest app_tracking_summary state-breakdown for progress headers
+  const appSummaryStats = useMemo(() => {
+    const summaryEvents = events.filter(e => e.eventType === "app_tracking_summary");
+    if (summaryEvents.length === 0) return null;
+    const latest = summaryEvents[summaryEvents.length - 1];
+    const d = latest.data;
+    if (!d) return null;
+    return {
+      totalApps: parseInt(d.totalApps ?? "0", 10),
+      completedApps: parseInt(d.completedApps ?? "0", 10),
+      downloading: parseInt(d.downloading ?? "0", 10),
+      installing: parseInt(d.installing ?? "0", 10),
+      installed: parseInt(d.installed ?? "0", 10),
+      skipped: parseInt(d.skipped ?? "0", 10),
+      failed: parseInt(d.failed ?? "0", 10),
+      pending: parseInt(d.pending ?? "0", 10),
+    };
+  }, [events]);
+
   const isGatherRulesSession = session?.enrollmentType === "gather_rules";
   // For gather_rules sessions: if the completed event is present, derive status as Succeeded
   // (the backend never sets this status automatically for one-shot gather runs).
@@ -839,12 +859,23 @@ export default function SessionDetailPage() {
             />
           )}
 
-          {/* Download Progress (from download_progress, app_download_started, app_install_skipped, or app_tracking_summary events) */}
+          {/* Download Progress (from download_progress, app_download_started, app_install_skipped events) */}
           {!isGatherRulesSession && (
             <DownloadProgress
               events={events.filter(
-                e => e.eventType === "download_progress" || e.eventType === "app_download_started" || e.eventType === "app_install_skipped" || e.eventType === "app_tracking_summary"
+                e => e.eventType === "download_progress" || e.eventType === "app_download_started" || e.eventType === "app_install_skipped"
               )}
+              summaryStats={appSummaryStats}
+            />
+          )}
+
+          {/* Install Progress (from app_install_started, app_install_completed, app_install_failed, app_install_skipped events) */}
+          {!isGatherRulesSession && (
+            <InstallProgress
+              events={events.filter(
+                e => e.eventType === "app_install_started" || e.eventType === "app_install_completed" || e.eventType === "app_install_failed" || e.eventType === "app_install_skipped"
+              )}
+              summaryStats={appSummaryStats}
             />
           )}
 

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AutopilotMonitor.Agent.Core.Logging;
@@ -32,6 +33,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         private string _enrollmentType = "v1"; // "v1" = Autopilot Classic/ESP, "v2" = Windows Device Preparation
         private bool _isWaitingForHello = false; // Track if we're waiting for Hello to complete before sending enrollment_complete
         private bool _finalDeviceInfoCollected = false; // Ensure final device info is emitted only once
+        private string _lastEmittedSummaryHash; // Track last emitted state-breakdown to avoid redundant summary events
 
         // Default IME log folder
         private const string DefaultImeLogFolder = @"%ProgramData%\Microsoft\IntuneManagementExtension\Logs";
@@ -399,6 +401,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 Message = message,
                 Data = app.ToEventData()
             });
+
+            // Emit summary immediately if state-breakdown counters changed (instant UI updates)
+            EmitAppTrackingSummaryIfChanged();
         }
 
         private void HandlePoliciesDiscovered(string policiesJson)
@@ -652,16 +657,23 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
 
         private void SummaryTimerCallback(object state)
         {
-            if (_imeLogTracker?.PackageStates?.CountAll > 0)
-            {
-                EmitAppTrackingSummary();
-            }
+            // Only emit if state-breakdown counters changed since last emission (backstop for missed events)
+            EmitAppTrackingSummaryIfChanged();
         }
 
-        private void EmitAppTrackingSummary()
+        /// <summary>
+        /// Emits app_tracking_summary only if state-breakdown counters changed since last emission.
+        /// Called both event-driven (from HandleAppStateChanged) and periodically (30s timer backstop).
+        /// </summary>
+        private void EmitAppTrackingSummaryIfChanged()
         {
             var states = _imeLogTracker?.PackageStates;
             if (states == null || states.CountAll == 0) return;
+
+            var hash = GetSummaryHash(states);
+            if (hash == _lastEmittedSummaryHash) return;
+
+            _lastEmittedSummaryHash = hash;
 
             _emitEvent(new EnrollmentEvent
             {
@@ -675,6 +687,38 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                           (states.HasError ? $" ({states.ErrorCount} errors)" : ""),
                 Data = states.GetSummaryData()
             });
+        }
+
+        /// <summary>
+        /// Emits app_tracking_summary unconditionally (for final summary on completion).
+        /// </summary>
+        private void EmitAppTrackingSummary()
+        {
+            var states = _imeLogTracker?.PackageStates;
+            if (states == null || states.CountAll == 0) return;
+
+            _lastEmittedSummaryHash = GetSummaryHash(states);
+
+            _emitEvent(new EnrollmentEvent
+            {
+                SessionId = _sessionId,
+                TenantId = _tenantId,
+                EventType = "app_tracking_summary",
+                Severity = states.HasError ? EventSeverity.Warning : EventSeverity.Info,
+                Source = "EnrollmentTracker",
+                Phase = EnrollmentPhase.Unknown,
+                Message = $"App tracking: {states.CountCompleted}/{states.CountAll} completed" +
+                          (states.HasError ? $" ({states.ErrorCount} errors)" : ""),
+                Data = states.GetSummaryData()
+            });
+        }
+
+        private static string GetSummaryHash(AppPackageStateList states)
+        {
+            return $"{states.CountAll}_{states.CountCompleted}_{states.ErrorCount}_" +
+                   $"{states.Count(x => x.InstallationState == AppInstallationState.Downloading)}_" +
+                   $"{states.Count(x => x.InstallationState == AppInstallationState.Installing)}_" +
+                   $"{states.Count(x => x.InstallationState == AppInstallationState.Installed)}";
         }
 
         public void Dispose()

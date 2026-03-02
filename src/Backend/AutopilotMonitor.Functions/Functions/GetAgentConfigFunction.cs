@@ -107,7 +107,7 @@ namespace AutopilotMonitor.Functions.Functions
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(new AgentConfigResponse
                 {
-                    ConfigVersion = 10, // agent-side analyzers (LocalAdminAnalyzer) with AnalyzerConfiguration
+                    ConfigVersion = 11, // app_tracking_summary: replaced apps array with state-breakdown counters + event-driven emission
                     UploadIntervalSeconds = 30,
                     SelfDestructOnComplete = tenantConfig.SelfDestructOnComplete ?? true,
                     KeepLogFile = tenantConfig.KeepLogFile ?? false,

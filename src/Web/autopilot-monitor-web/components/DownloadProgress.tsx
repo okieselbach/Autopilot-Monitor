@@ -8,8 +8,19 @@ interface DownloadEvent {
   data?: Record<string, any>;
 }
 
+interface SummaryStats {
+  totalApps?: number;
+  downloading?: number;
+  installed?: number;
+  installing?: number;
+  skipped?: number;
+  failed?: number;
+  pending?: number;
+}
+
 interface DownloadProgressProps {
   events: DownloadEvent[];
+  summaryStats?: SummaryStats | null;
 }
 
 interface DownloadItem {
@@ -41,7 +52,7 @@ function formatSpeed(bps: number): string {
   return `${(bps / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
 }
 
-export default function DownloadProgress({ events }: DownloadProgressProps) {
+export default function DownloadProgress({ events, summaryStats }: DownloadProgressProps) {
   const downloads = useMemo(() => {
     if (events.length === 0) return [];
 
@@ -141,6 +152,14 @@ export default function DownloadProgress({ events }: DownloadProgressProps) {
   const completedCount = downloads.filter(d => d.isComplete && !d.isSkipped).length;
   const skippedCount = downloads.filter(d => d.isSkipped).length;
 
+  // "X of Y downloaded" from summary stats: apps past download phase / total apps that actually download
+  const totalDownloadable = summaryStats?.totalApps != null && summaryStats?.skipped != null && summaryStats?.pending != null
+    ? summaryStats.totalApps - summaryStats.skipped
+    : null;
+  const downloadedCount = summaryStats?.installed != null && summaryStats?.installing != null && summaryStats?.failed != null
+    ? summaryStats.installed + summaryStats.installing + summaryStats.failed
+    : null;
+
   return (
     <div className="bg-white shadow rounded-lg p-6 mb-6">
       <button
@@ -152,7 +171,11 @@ export default function DownloadProgress({ events }: DownloadProgressProps) {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
           </svg>
           <h2 className="text-lg font-semibold text-gray-900">Download Progress</h2>
-          <span className="text-xs text-gray-400">({downloads.length} {downloads.length === 1 ? 'download' : 'downloads'})</span>
+          {totalDownloadable != null && downloadedCount != null ? (
+            <span className="text-xs text-gray-400">({downloadedCount} of {totalDownloadable} downloaded)</span>
+          ) : (
+            <span className="text-xs text-gray-400">({downloads.length} {downloads.length === 1 ? 'download' : 'downloads'})</span>
+          )}
           <div className="flex items-center space-x-2 text-xs">
             {activeCount > 0 && (
               <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium">

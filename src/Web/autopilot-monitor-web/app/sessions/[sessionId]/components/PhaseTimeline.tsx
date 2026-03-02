@@ -37,7 +37,7 @@ export default function PhaseTimeline({ currentPhase, completedPhases, events = 
     const trackingSummary = phaseEvents.find(e => e.eventType === "app_tracking_summary");
     if (trackingSummary?.data) {
       const d = trackingSummary.data;
-      const completed = parseInt(d.appsCompleted ?? "0", 10);
+      const completed = parseInt(d.completedApps ?? d.appsCompleted ?? "0", 10);
       const total = parseInt(d.totalApps ?? "0", 10);
       if (total > 0) {
         return `Installing apps (${completed}/${total})`;
