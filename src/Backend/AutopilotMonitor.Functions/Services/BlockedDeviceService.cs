@@ -157,6 +157,50 @@ namespace AutopilotMonitor.Functions.Services
             return result;
         }
 
+        /// <summary>
+        /// Returns all currently active (non-expired) blocked devices across ALL tenants.
+        /// Also cleans up expired entries from Table Storage as a side-effect.
+        /// </summary>
+        public async Task<List<BlockedDeviceEntry>> GetAllBlockedDevicesAsync()
+        {
+            var tableClient = _storageService.GetTableServiceClient().GetTableClient(Constants.TableNames.BlockedDevices);
+            var result = new List<BlockedDeviceEntry>();
+            var expiredKeys = new List<(string partitionKey, string rowKey)>();
+            var now = DateTime.UtcNow;
+
+            await foreach (var entity in tableClient.QueryAsync<TableEntity>())
+            {
+                var unblockAt = entity.GetDateTimeOffset("UnblockAt")?.UtcDateTime ?? DateTime.MinValue;
+
+                if (now >= unblockAt)
+                {
+                    expiredKeys.Add((entity.PartitionKey, entity.RowKey));
+                    continue;
+                }
+
+                result.Add(new BlockedDeviceEntry
+                {
+                    TenantId = entity.PartitionKey,
+                    SerialNumber = entity.GetString("SerialNumber") ?? DecodeRowKey(entity.RowKey),
+                    BlockedAt = entity.GetDateTimeOffset("BlockedAt")?.UtcDateTime ?? now,
+                    UnblockAt = unblockAt,
+                    BlockedByEmail = entity.GetString("BlockedByEmail"),
+                    DurationHours = entity.GetInt32("DurationHours") ?? 12,
+                    Reason = entity.GetString("Reason"),
+                    Action = entity.GetString("Action") ?? "Block"
+                });
+            }
+
+            // Clean up expired entries (fire-and-forget, best effort)
+            foreach (var (pk, rk) in expiredKeys)
+            {
+                try { await tableClient.DeleteEntityAsync(pk, rk); }
+                catch { /* best effort */ }
+            }
+
+            return result;
+        }
+
         // -----------------------------------------------------------------------
         // Private helpers
         // -----------------------------------------------------------------------

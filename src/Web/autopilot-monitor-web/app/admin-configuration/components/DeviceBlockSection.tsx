@@ -54,6 +54,7 @@ export function DeviceBlockSection({
   const [blockAction, setBlockAction] = useState<"Block" | "Kill">("Block");
   const [killingDevice, setKillingDevice] = useState<string | null>(null);
   const [blockListTenantId, setBlockListTenantId] = useState("");
+  const [loadingAllBlocked, setLoadingAllBlocked] = useState(false);
 
   const fetchBlockedDevices = async (tenantId: string) => {
     if (!tenantId) return;
@@ -71,6 +72,25 @@ export function DeviceBlockSection({
       setError(err instanceof Error ? err.message : "Failed to load blocked devices");
     } finally {
       setLoadingBlockedDevices(false);
+    }
+  };
+
+  const fetchAllBlockedDevices = async () => {
+    try {
+      setLoadingAllBlocked(true);
+      const token = await getAccessToken();
+      if (!token) throw new Error("Failed to get access token");
+      const response = await fetch(`${API_BASE_URL}/api/galactic/devices/blocked`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) throw new Error(`Failed to load blocked devices: ${response.statusText}`);
+      const data = await response.json();
+      setBlockedDevices(data.blocked ?? []);
+      setBlockListTenantId("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load all blocked devices");
+    } finally {
+      setLoadingAllBlocked(false);
     }
   };
 
@@ -335,10 +355,26 @@ export function DeviceBlockSection({
             </div>
             <button
               onClick={() => fetchBlockedDevices(blockListTenantId)}
-              disabled={!blockListTenantId || loadingBlockedDevices}
+              disabled={!blockListTenantId || loadingBlockedDevices || loadingAllBlocked}
               className="px-4 py-2 bg-red-100 dark:bg-red-900/40 text-red-800 dark:text-red-200 border border-red-300 dark:border-red-600 rounded-lg text-sm font-medium hover:bg-red-200 disabled:opacity-50"
             >
-              {loadingBlockedDevices ? "Loading..." : "Load"}
+              {loadingBlockedDevices && !loadingAllBlocked ? "Loading..." : "Load"}
+            </button>
+            <button
+              onClick={fetchAllBlockedDevices}
+              disabled={loadingAllBlocked || loadingBlockedDevices}
+              className="px-4 py-2 bg-purple-100 dark:bg-purple-900/40 text-purple-800 dark:text-purple-200 border border-purple-300 dark:border-purple-600 rounded-lg text-sm font-medium hover:bg-purple-200 disabled:opacity-50 flex items-center gap-1.5"
+            >
+              {loadingAllBlocked ? (
+                <><div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-purple-600"></div><span>Loading...</span></>
+              ) : (
+                <>
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <span>All Tenants</span>
+                </>
+              )}
             </button>
           </div>
           {blockedDevices.length > 0 ? (
@@ -347,6 +383,7 @@ export function DeviceBlockSection({
                 <thead className="text-xs text-red-800 dark:text-red-200 uppercase bg-red-100 dark:bg-red-900/30">
                   <tr>
                     <th className="px-3 py-2">Serial Number</th>
+                    {!blockListTenantId && <th className="px-3 py-2">Tenant</th>}
                     <th className="px-3 py-2">Type</th>
                     <th className="px-3 py-2">Blocked Since</th>
                     <th className="px-3 py-2">Expires At</th>
@@ -357,8 +394,19 @@ export function DeviceBlockSection({
                 </thead>
                 <tbody className="divide-y divide-red-100 dark:divide-red-900/30">
                   {blockedDevices.map((d) => (
-                    <tr key={d.serialNumber} className="bg-white dark:bg-gray-800">
+                    <tr key={`${d.tenantId}:${d.serialNumber}`} className="bg-white dark:bg-gray-800">
                       <td className="px-3 py-2 font-mono font-medium text-gray-900 dark:text-gray-100">{d.serialNumber}</td>
+                      {!blockListTenantId && (
+                        <td className="px-3 py-2">
+                          <button
+                            onClick={() => navigator.clipboard.writeText(d.tenantId)}
+                            className="text-xs font-mono text-gray-500 hover:text-blue-600 transition-colors"
+                            title={d.tenantId}
+                          >
+                            {d.tenantId.split("-").slice(0, 2).join("-")}...
+                          </button>
+                        </td>
+                      )}
                       <td className="px-3 py-2">
                         {d.action === "Kill" ? (
                           <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-red-700 text-white">Kill</span>
