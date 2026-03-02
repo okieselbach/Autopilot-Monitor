@@ -152,6 +152,24 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 }
             });
 
+            // WhiteGlove Part 2 detection: if the previous boot completed pre-provisioning,
+            // emit a whiteglove_resumed event so the backend transitions Pending → InProgress.
+            if (_sessionPersistence.IsWhiteGloveResume())
+            {
+                _logger.Info("WhiteGlove Part 2 detected — emitting whiteglove_resumed event");
+                EmitEvent(new EnrollmentEvent
+                {
+                    SessionId = _configuration.SessionId,
+                    TenantId = _configuration.TenantId,
+                    EventType = "whiteglove_resumed",
+                    Severity = EventSeverity.Info,
+                    Source = "Agent",
+                    Phase = EnrollmentPhase.Start,
+                    Message = "WhiteGlove Part 2 — user enrollment started after pre-provisioning"
+                });
+                _sessionPersistence.ClearWhiteGloveComplete();
+            }
+
             // Collect and emit device geo-location asynchronously — HTTP call, not on critical path
             if (_configuration.EnableGeoLocation)
             {
@@ -503,55 +521,69 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         }
 
         /// <summary>
-        /// Registers the session with the backend
+        /// Registers the session with the backend. Retries with exponential backoff
+        /// to handle network not being ready during OOBE boot (WhiteGlove Part 2).
         /// </summary>
         private async Task RegisterSessionAsync()
         {
-            try
+            const int maxAttempts = 5;
+
+            var registration = new SessionRegistration
             {
-                _logger.Info("Registering session with backend");
+                SessionId = _configuration.SessionId,
+                TenantId = _configuration.TenantId,
+                SerialNumber = DeviceInfoProvider.GetSerialNumber(),
+                Manufacturer = DeviceInfoProvider.GetManufacturer(),
+                Model = DeviceInfoProvider.GetModel(),
+                DeviceName = Environment.MachineName,
+                OsBuild = Environment.OSVersion.Version.ToString(),
+                OsEdition = DeviceInfoProvider.GetOsEdition(),
+                OsLanguage = System.Globalization.CultureInfo.CurrentCulture.Name,
+                StartedAt = DateTime.UtcNow,
+                AgentVersion = _agentVersion,
+                EnrollmentType = EnrollmentTracker.DetectEnrollmentTypeStatic()
+            };
 
-                var registration = new SessionRegistration
+            for (int attempt = 1; attempt <= maxAttempts; attempt++)
+            {
+                try
                 {
-                    SessionId = _configuration.SessionId,
-                    TenantId = _configuration.TenantId,
-                    SerialNumber = DeviceInfoProvider.GetSerialNumber(),
-                    Manufacturer = DeviceInfoProvider.GetManufacturer(),
-                    Model = DeviceInfoProvider.GetModel(),
-                    DeviceName = Environment.MachineName,
-                    OsBuild = Environment.OSVersion.Version.ToString(),
-                    OsEdition = DeviceInfoProvider.GetOsEdition(),
-                    OsLanguage = System.Globalization.CultureInfo.CurrentCulture.Name,
-                    StartedAt = DateTime.UtcNow,
-                    AgentVersion = _agentVersion,
-                    EnrollmentType = EnrollmentTracker.DetectEnrollmentTypeStatic()
-                };
+                    _logger.Info($"Registering session with backend (attempt {attempt}/{maxAttempts})");
 
-                var response = await _apiClient.RegisterSessionAsync(registration);
+                    var response = await _apiClient.RegisterSessionAsync(registration);
 
-                if (response.Success)
-                {
-                    _logger.Info($"Session registered successfully: {response.SessionId}");
-                }
-                else
-                {
+                    if (response.Success)
+                    {
+                        _logger.Info($"Session registered successfully: {response.SessionId}");
+                        return;
+                    }
+
                     _logger.Warning($"Session registration failed: {response.Message}");
                 }
-            }
-            catch (BackendAuthException ex)
-            {
-                _logger.Error($"Session registration authentication failed: {ex.Message}");
-                HandleAuthFailure();
-            }
-            catch (Exception ex)
-            {
-                _logger.Error("Failed to register session", ex);
+                catch (BackendAuthException ex)
+                {
+                    _logger.Error($"Session registration authentication failed: {ex.Message}");
+                    HandleAuthFailure();
+                    return; // Auth failure is not retryable
+                }
+                catch (Exception ex)
+                {
+                    _logger.Error($"Failed to register session (attempt {attempt}/{maxAttempts})", ex);
 
-                // Report to emergency channel — one-shot, no threshold needed.
-                // EmergencyReporter dedup ensures RegisterSessionFailed:null sent only once per session.
-                _ = _emergencyReporter.TrySendAsync(
-                    AgentErrorType.RegisterSessionFailed,
-                    ex.Message);
+                    if (attempt == maxAttempts)
+                    {
+                        // Report to emergency channel on final failure
+                        _ = _emergencyReporter.TrySendAsync(
+                            AgentErrorType.RegisterSessionFailed,
+                            ex.Message);
+                        return;
+                    }
+                }
+
+                // Exponential backoff: 2s, 4s, 8s, 16s
+                var delaySeconds = (int)Math.Pow(2, attempt);
+                _logger.Info($"Retrying session registration in {delaySeconds}s");
+                await Task.Delay(delaySeconds * 1000);
             }
         }
 
@@ -1110,7 +1142,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 _sessionPersistence.SaveSequence(Interlocked.Read(ref _eventSequence));
                 _logger.Info($"Sequence counter persisted at {Interlocked.Read(ref _eventSequence)} for next boot");
 
-                // Step 5: Exit — session.id + session.seq survive so the agent resumes on next boot.
+                // Step 5: Mark WhiteGlove Part 1 as complete so the next boot (Part 2)
+                // can signal the backend to transition Pending → InProgress.
+                _sessionPersistence.SaveWhiteGloveComplete();
+                _logger.Info("WhiteGlove marker persisted for Part 2 detection");
+
+                // Step 6: Exit — session.id + session.seq + whiteglove.complete survive so
+                // the agent resumes on next boot.
                 //         No DeleteSessionId, no WriteEnrollmentCompleteMarker, no self-destruct.
                 //         The Windows Autopilot shutdown will power off the device;
                 //         the Scheduled Task restarts the agent on the user's first boot.

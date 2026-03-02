@@ -151,6 +151,7 @@ namespace AutopilotMonitor.Functions.Functions
                 EnrollmentEvent? gatherCompletionEvent = null;
                 EnrollmentEvent? diagnosticsUploadedEvent = null;
                 EnrollmentEvent? whiteGloveEvent = null;
+                EnrollmentEvent? whiteGloveResumedEvent = null;
                 EnrollmentEvent? espFailureEvent = null;
                 string? failureReason = null;
                 DateTime? earliestEventTimestamp = null;
@@ -197,6 +198,10 @@ namespace AutopilotMonitor.Functions.Functions
                     else if (evt.EventType == "whiteglove_complete")
                     {
                         whiteGloveEvent = evt;
+                    }
+                    else if (evt.EventType == "whiteglove_resumed")
+                    {
+                        whiteGloveResumedEvent = evt;
                     }
                     else if (evt.EventType == "esp_failure")
                     {
@@ -303,10 +308,34 @@ namespace AutopilotMonitor.Functions.Functions
 
                     _logger.LogInformation("{SessionPrefix} Status: Pending (WhiteGlove pre-provisioning complete, transitioned={Transitioned})", sessionPrefix, whiteGloveStatusTransitioned);
                 }
+                else if (whiteGloveResumedEvent != null)
+                {
+                    // WhiteGlove Part 2: agent signals that user enrollment started after
+                    // pre-provisioning. Transition Pending → InProgress only if the session
+                    // is actually in Pending state — prevents overwriting Succeeded/Failed
+                    // if the event arrives late.
+                    var currentSession = await _storageService.GetSessionAsync(request.TenantId, request.SessionId);
+                    if (currentSession?.Status == SessionStatus.Pending)
+                    {
+                        await _storageService.UpdateSessionStatusAsync(
+                            request.TenantId,
+                            request.SessionId,
+                            SessionStatus.InProgress,
+                            whiteGloveResumedEvent.Phase,
+                            earliestEventTimestamp: earliestEventTimestamp,
+                            latestEventTimestamp: latestEventTimestamp
+                        );
+                        _logger.LogInformation("{SessionPrefix} Status: InProgress (WhiteGlove Part 2 resumed)", sessionPrefix);
+                    }
+                    else
+                    {
+                        _logger.LogInformation("{SessionPrefix} WhiteGlove resumed skipped, session already {Status}", sessionPrefix, currentSession?.Status);
+                    }
+                }
                 else if (processedCount > 0)
                 {
                     // Lightweight update — no status change. Status is only set by key events
-                    // (enrollment_complete, enrollment_failed, whiteglove_complete, gather_rules).
+                    // (enrollment_complete, enrollment_failed, whiteglove_complete, whiteglove_resumed, gather_rules).
                     // Phase-change events only update CurrentPhase + timestamps + EventCount.
                     // This eliminates redundant InProgress writes that cause ETag contention and
                     // the race condition where a whiteglove_complete status update could be overwritten.

@@ -10,6 +10,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
     {
         private readonly string _sessionFilePath;
         private readonly string _sequenceFilePath;
+        private readonly string _whiteGloveMarkerPath;
         private readonly object _lockObject = new object();
 
         public SessionPersistence(string dataDirectory)
@@ -26,6 +27,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 
             _sessionFilePath = Path.Combine(dataDirectory, "session.id");
             _sequenceFilePath = Path.Combine(dataDirectory, "session.seq");
+            _whiteGloveMarkerPath = Path.Combine(dataDirectory, "whiteglove.complete");
         }
 
         /// <summary>
@@ -78,6 +80,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                         File.Delete(_sessionFilePath);
                     if (File.Exists(_sequenceFilePath))
                         File.Delete(_sequenceFilePath);
+                    if (File.Exists(_whiteGloveMarkerPath))
+                        File.Delete(_whiteGloveMarkerPath);
                 }
                 catch (Exception)
                 {
@@ -142,6 +146,44 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             lock (_lockObject)
             {
                 try { if (File.Exists(_sequenceFilePath)) File.Delete(_sequenceFilePath); }
+                catch { }
+            }
+        }
+
+        /// <summary>
+        /// Persists a marker indicating WhiteGlove Part 1 completed.
+        /// On the next boot the agent reads this marker, emits a whiteglove_resumed
+        /// event, and clears it — giving the backend an explicit signal to transition
+        /// the session from Pending to InProgress for Part 2.
+        /// </summary>
+        public void SaveWhiteGloveComplete()
+        {
+            lock (_lockObject)
+            {
+                try { File.WriteAllText(_whiteGloveMarkerPath, "1"); }
+                catch { }
+            }
+        }
+
+        /// <summary>
+        /// Returns true if a WhiteGlove Part 1 marker exists, indicating this boot is Part 2.
+        /// </summary>
+        public bool IsWhiteGloveResume()
+        {
+            lock (_lockObject)
+            {
+                return File.Exists(_whiteGloveMarkerPath);
+            }
+        }
+
+        /// <summary>
+        /// Removes the WhiteGlove marker after the whiteglove_resumed event has been emitted.
+        /// </summary>
+        public void ClearWhiteGloveComplete()
+        {
+            lock (_lockObject)
+            {
+                try { if (File.Exists(_whiteGloveMarkerPath)) File.Delete(_whiteGloveMarkerPath); }
                 catch { }
             }
         }
