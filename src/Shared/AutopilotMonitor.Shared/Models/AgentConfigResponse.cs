@@ -155,6 +155,12 @@ namespace AutopilotMonitor.Shared.Models
         public int AgentSelfMetricsIntervalSeconds { get; set; } = 60;
 
         /// <summary>
+        /// Seconds to wait for the Windows Hello wizard after ESP exit.
+        /// Default: 30 seconds
+        /// </summary>
+        public int HelloWaitTimeoutSeconds { get; set; } = 30;
+
+        /// <summary>
         /// Creates default collector configuration
         /// </summary>
         public static CollectorConfiguration CreateDefault()

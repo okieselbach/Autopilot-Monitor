@@ -228,12 +228,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             try
             {
                 // Start ESP and Hello tracker (ESP exit, WhiteGlove, and WHfB provisioning tracking)
+                var helloTimeout = _remoteConfigService?.CurrentConfig?.Collectors?.HelloWaitTimeoutSeconds
+                    ?? _configuration.HelloWaitTimeoutSeconds;
                 _espAndHelloTracker = new EspAndHelloTracker(
                     _configuration.SessionId,
                     _configuration.TenantId,
                     EmitEvent,
                     _logger,
-                    _configuration.HelloWaitTimeoutSeconds
+                    helloTimeout
                 );
                 _espAndHelloTracker.Start();
 

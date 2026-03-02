@@ -89,7 +89,8 @@ namespace AutopilotMonitor.Functions.Functions
                 {
                     EnablePerformanceCollector = tenantConfig.EnablePerformanceCollector,
                     PerformanceIntervalSeconds = tenantConfig.PerformanceCollectorIntervalSeconds,
-                    MaxCollectorDurationHours = adminConfig.MaxCollectorDurationHours
+                    MaxCollectorDurationHours = adminConfig.MaxCollectorDurationHours,
+                    HelloWaitTimeoutSeconds = tenantConfig.HelloWaitTimeoutSeconds
                 };
 
                 // Get active gather rules for this tenant (user-defined ad-hoc only)

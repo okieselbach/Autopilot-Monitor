@@ -139,6 +139,12 @@ namespace AutopilotMonitor.Shared.Models
         /// </summary>
         public int PerformanceCollectorIntervalSeconds { get; set; } = 30;
 
+        /// <summary>
+        /// Seconds to wait for the Windows Hello wizard after ESP exit
+        /// Default: 30 seconds
+        /// </summary>
+        public int HelloWaitTimeoutSeconds { get; set; } = 30;
+
         // ===== AGENT AUTH CIRCUIT BREAKER =====
 
         /// <summary>

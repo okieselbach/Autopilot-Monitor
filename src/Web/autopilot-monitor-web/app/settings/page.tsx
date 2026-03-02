@@ -37,6 +37,7 @@ export interface TenantConfiguration {
   // Agent collector settings
   enablePerformanceCollector: boolean;
   performanceCollectorIntervalSeconds: number;
+  helloWaitTimeoutSeconds?: number;
   // Agent behavior
   selfDestructOnComplete?: boolean;
   keepLogFile?: boolean;
@@ -102,6 +103,7 @@ export default function SettingsPage() {
   // Collector settings state
   const [enablePerformanceCollector, setEnablePerformanceCollector] = useState(true);
   const [performanceCollectorInterval, setPerformanceCollectorInterval] = useState(30);
+  const [helloWaitTimeoutSeconds, setHelloWaitTimeoutSeconds] = useState(30);
   const [autopilotConsentInProgress, setAutopilotConsentInProgress] = useState(false);
 
   // Agent behavior state
@@ -138,6 +140,7 @@ export default function SettingsPage() {
       sessionTimeoutHours !== config.sessionTimeoutHours ||
       enablePerformanceCollector !== config.enablePerformanceCollector ||
       performanceCollectorInterval !== config.performanceCollectorIntervalSeconds ||
+      helloWaitTimeoutSeconds !== (config.helloWaitTimeoutSeconds ?? 30) ||
       selfDestructOnComplete !== (config.selfDestructOnComplete ?? true) ||
       keepLogFile !== (config.keepLogFile ?? false) ||
       rebootOnComplete !== (config.rebootOnComplete ?? false) ||
@@ -158,7 +161,7 @@ export default function SettingsPage() {
     config,
     manufacturerWhitelist, modelWhitelist, validateAutopilotDevice,
     dataRetentionDays, sessionTimeoutHours, enablePerformanceCollector,
-    performanceCollectorInterval, selfDestructOnComplete, keepLogFile,
+    performanceCollectorInterval, helloWaitTimeoutSeconds, selfDestructOnComplete, keepLogFile,
     rebootOnComplete, rebootDelaySeconds, enableGeoLocation, enableImeMatchLog,
     logLevel, teamsWebhookUrl, teamsNotifyOnSuccess, teamsNotifyOnFailure,
     diagnosticsBlobSasUrl, diagnosticsUploadMode, tenantDiagPaths,
@@ -200,6 +203,7 @@ export default function SettingsPage() {
         setSessionTimeoutHours(data.sessionTimeoutHours ?? 5);
         setEnablePerformanceCollector(data.enablePerformanceCollector ?? true);
         setPerformanceCollectorInterval(data.performanceCollectorIntervalSeconds ?? 30);
+        setHelloWaitTimeoutSeconds(data.helloWaitTimeoutSeconds ?? 30);
         setSelfDestructOnComplete(data.selfDestructOnComplete ?? true);
         setKeepLogFile(data.keepLogFile ?? false);
         setRebootOnComplete(data.rebootOnComplete ?? false);
@@ -410,6 +414,7 @@ export default function SettingsPage() {
         sessionTimeoutHours,
         enablePerformanceCollector,
         performanceCollectorIntervalSeconds: performanceCollectorInterval,
+        helloWaitTimeoutSeconds,
         selfDestructOnComplete,
         keepLogFile,
         rebootOnComplete,
@@ -858,6 +863,8 @@ export default function SettingsPage() {
               setEnablePerformanceCollector={setEnablePerformanceCollector}
               performanceCollectorInterval={performanceCollectorInterval}
               setPerformanceCollectorInterval={setPerformanceCollectorInterval}
+              helloWaitTimeoutSeconds={helloWaitTimeoutSeconds}
+              setHelloWaitTimeoutSeconds={setHelloWaitTimeoutSeconds}
               selfDestructOnComplete={selfDestructOnComplete}
               setSelfDestructOnComplete={setSelfDestructOnComplete}
               keepLogFile={keepLogFile}

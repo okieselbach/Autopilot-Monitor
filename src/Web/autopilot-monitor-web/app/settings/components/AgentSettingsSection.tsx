@@ -5,6 +5,8 @@ interface AgentSettingsSectionProps {
   setEnablePerformanceCollector: (value: boolean) => void;
   performanceCollectorInterval: number;
   setPerformanceCollectorInterval: (value: number) => void;
+  helloWaitTimeoutSeconds: number;
+  setHelloWaitTimeoutSeconds: (value: number) => void;
   selfDestructOnComplete: boolean;
   setSelfDestructOnComplete: (value: boolean) => void;
   keepLogFile: boolean;
@@ -26,6 +28,8 @@ export default function AgentSettingsSection({
   setEnablePerformanceCollector,
   performanceCollectorInterval,
   setPerformanceCollectorInterval,
+  helloWaitTimeoutSeconds,
+  setHelloWaitTimeoutSeconds,
   selfDestructOnComplete,
   setSelfDestructOnComplete,
   keepLogFile,
@@ -86,6 +90,28 @@ export default function AgentSettingsSection({
             >
               <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${enablePerformanceCollector ? 'translate-x-6' : 'translate-x-1'}`} />
             </button>
+          </div>
+
+          {/* Hello Wait Timeout */}
+          <div className="flex items-center justify-between p-4 rounded-lg border border-gray-200 hover:border-emerald-200 transition-colors">
+            <div className="flex-1">
+              <div className="flex items-center space-x-2">
+                <p className="font-medium text-gray-900">Hello Wait Timeout</p>
+              </div>
+              <p className="text-sm text-gray-500 mt-1">Seconds to wait for the Windows Hello wizard after ESP exit</p>
+              <div className="mt-2 flex items-center space-x-2">
+                <span className="text-sm text-gray-600">Timeout:</span>
+                <input
+                  type="number"
+                  min="10"
+                  max="120"
+                  value={helloWaitTimeoutSeconds}
+                  onChange={(e) => setHelloWaitTimeoutSeconds(parseInt(e.target.value) || 30)}
+                  className="w-20 px-2 py-1 border border-gray-300 rounded text-sm text-gray-900 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                />
+                <span className="text-sm text-gray-500">seconds</span>
+              </div>
+            </div>
           </div>
 
         </div>
