@@ -133,18 +133,8 @@ export default function InstallProgress({ events, summaryStats }: InstallProgres
 
   const [expanded, setExpanded] = useState(true);
 
-  if (installs.length === 0) return null;
-
-  const activeCount = installs.filter(d => d.state === "Installing").length;
-  const completedCount = installs.filter(d => d.state === "Installed").length;
-  const failedCount = installs.filter(d => d.state === "Failed").length;
-  const skippedCount = installs.filter(d => d.state === "Skipped").length;
-
-  // Use summary stats for "X of Y" if available, fall back to local event counts
-  const totalFromSummary = summaryStats?.totalApps;
-  const installedFromSummary = summaryStats?.installed;
-
   // Calculate total wall-clock duration (earliest start → latest completion)
+  // Must be before the early return to keep hooks in stable order across renders.
   const totalDuration = useMemo(() => {
     let earliest = Infinity;
     let latest = -Infinity;
@@ -163,6 +153,17 @@ export default function InstallProgress({ events, summaryStats }: InstallProgres
     }
     return null;
   }, [installs]);
+
+  if (installs.length === 0) return null;
+
+  const activeCount = installs.filter(d => d.state === "Installing").length;
+  const completedCount = installs.filter(d => d.state === "Installed").length;
+  const failedCount = installs.filter(d => d.state === "Failed").length;
+  const skippedCount = installs.filter(d => d.state === "Skipped").length;
+
+  // Use summary stats for "X of Y" if available, fall back to local event counts
+  const totalFromSummary = summaryStats?.totalApps;
+  const installedFromSummary = summaryStats?.installed;
 
   return (
     <div className="bg-white shadow rounded-lg p-6 mb-6">

@@ -371,7 +371,7 @@ export function DeviceBlockSection({
                       <td className="px-3 py-2 text-gray-600 dark:text-gray-400">{d.blockedByEmail}</td>
                       <td className="px-3 py-2 text-gray-600 dark:text-gray-400">{d.reason || "\u2014"}</td>
                       <td className="px-3 py-2">
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-col gap-1">
                           {d.action !== "Kill" && (
                             <button
                               onClick={() => handleKillDevice(d)}

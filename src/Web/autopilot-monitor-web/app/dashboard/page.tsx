@@ -116,7 +116,7 @@ export default function Home() {
   };
 
   const fetchBlockedDevices = async (currentSessions: Session[]) => {
-    if (!adminMode || !user?.isGalacticAdmin) {
+    if (!adminMode || !galacticAdminMode) {
       setBlockedDevicesSet(new Set());
       return;
     }
@@ -337,12 +337,12 @@ export default function Home() {
     localStorage.setItem('galacticAdminMode', galacticAdminMode.toString());
   }, [galacticAdminMode]);
 
-  // Clear blocked devices set when admin mode or galactic admin status changes
+  // Clear blocked devices set when admin mode or galactic admin mode is turned off
   useEffect(() => {
-    if (!adminMode || !user?.isGalacticAdmin) {
+    if (!adminMode || !galacticAdminMode) {
       setBlockedDevicesSet(new Set());
     }
-  }, [adminMode, user?.isGalacticAdmin]);
+  }, [adminMode, galacticAdminMode]);
 
   // Disable galactic admin mode if user is not a galactic admin
   useEffect(() => {
