@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import { EnrollmentEvent } from "../page";
 import { V1_PHASES, V2_PHASES } from "../utils/phaseConstants";
 
@@ -9,9 +10,10 @@ interface PhaseTimelineProps {
   events?: EnrollmentEvent[];
   sessionStatus?: string;
   enrollmentType?: string;
+  isPreProvisioned?: boolean;
 }
 
-export default function PhaseTimeline({ currentPhase, completedPhases, events = [], sessionStatus, enrollmentType }: PhaseTimelineProps) {
+export default function PhaseTimeline({ currentPhase, completedPhases, events = [], sessionStatus, enrollmentType, isPreProvisioned }: PhaseTimelineProps) {
   const phases = enrollmentType === "v2" ? V2_PHASES : V1_PHASES;
 
   // Derive current activity for the active phase from events
@@ -244,74 +246,114 @@ export default function PhaseTimeline({ currentPhase, completedPhases, events = 
     return 'bg-gray-300';
   };
 
-  return (
-    <div className="w-full py-4">
-      <div className="flex w-full">
-        {phases.map((phase, index) => {
-          const status = getPhaseStatus(phase.id);
-          const prevStatus = index > 0 ? getPhaseStatus(phases[index - 1].id) : null;
-          const connColor = index > 0 ? getConnectorColor(phases[index - 1].id) : '';
-          const showArrow = prevStatus === 'current' || prevStatus === 'failed';
+  // WhiteGlove V1: determine where to visually split pre-provisioning from user enrollment.
+  // Pre-provisioning covers phases 0-3 (Start → Apps Device), user enrollment covers 4-7.
+  const isWhiteGloveV1 = isPreProvisioned && enrollmentType !== "v2";
+  const preProvPhaseIds = new Set([0, 1, 2, 3]);
+  const splitIndex = isWhiteGloveV1
+    ? phases.findIndex(p => !preProvPhaseIds.has(p.id))
+    : -1;
 
-          return (
-            <div key={phase.id} className="flex-1 relative flex flex-col items-center min-w-0">
-              {/* Connector line from previous phase center to this phase center */}
-              {index > 0 && (
-                <div
-                  className={`absolute h-1 ${connColor}`}
-                  style={{ top: '22px', left: '-50%', right: '50%' }}
-                />
-              )}
-              {/* Arrow when previous phase is current or failed */}
-              {index > 0 && showArrow && (
-                <div
-                  className="absolute z-20"
-                  style={{ top: '16px', left: 'calc(50% - 36px)' }}
-                >
-                  <div
-                    className={`w-0 h-0 border-t-[8px] border-t-transparent border-b-[8px] border-b-transparent border-l-[12px] ${
-                      connColor === 'bg-green-500' ? 'border-l-green-500' :
-                      connColor === 'bg-red-500' ? 'border-l-red-500' : 'border-l-gray-300'
-                    }`}
-                    style={{
-                      filter: connColor === 'bg-green-500'
-                        ? 'drop-shadow(0 0 3px rgba(34, 197, 94, 0.5))'
-                        : connColor === 'bg-red-500'
-                        ? 'drop-shadow(0 0 3px rgba(239, 68, 68, 0.5))'
-                        : 'drop-shadow(0 0 3px rgba(209, 213, 219, 0.5))'
-                    }}
-                  />
-                </div>
-              )}
-              {/* Circle - centered, on top of connector */}
-              <div className={`relative z-10 w-12 h-12 rounded-full flex items-center justify-center border-2 transition-all font-semibold ${getPhaseColor(status)}`}>
-                {status === 'completed' ? '✓' : status === 'failed' ? '✕' : phase.id + 1}
-              </div>
-              {/* Labels - centered below circle */}
-              <div className="mt-3 text-center">
-                <div className="text-xs font-medium text-gray-700 whitespace-nowrap">
-                  {phase.shortName}
-                </div>
-                {(status === 'completed' || status === 'failed') && getPhaseDuration(phase.id) && (
-                  <div className={`mt-0.5 text-[10px] ${
-                    status === 'failed' ? 'text-red-400' :
-                    isSubPhase(phase.id) ? 'text-gray-400 italic' : 'text-gray-500 font-medium'
-                  }`}>
-                    {isSubPhase(phase.id) ? `(${getPhaseDuration(phase.id)})` : getPhaseDuration(phase.id)}
-                  </div>
-                )}
-                {status === 'failed' && (
-                  <div className="mt-0.5 text-[10px] text-red-500 font-semibold">Failed</div>
-                )}
-                {status === 'current' && getCurrentActivity(phase.id) && (
-                  <div className="mt-1 max-w-[140px]">
-                    <div className="text-[10px] text-blue-600 font-medium line-clamp-2 animate-pulse" title={getCurrentActivity(phase.id) || undefined}>
-                      {getCurrentActivity(phase.id)}
-                    </div>
-                  </div>
-                )}
+  const renderPhaseNode = (phase: typeof phases[number], index: number) => {
+    const status = getPhaseStatus(phase.id);
+    const prevStatus = index > 0 ? getPhaseStatus(phases[index - 1].id) : null;
+    const connColor = index > 0 ? getConnectorColor(phases[index - 1].id) : '';
+    const showArrow = prevStatus === 'current' || prevStatus === 'failed';
+    const isSplitBoundary = isWhiteGloveV1 && index === splitIndex;
+
+    return (
+      <div key={phase.id} className="flex-1 relative flex flex-col items-center min-w-0">
+        {/* Connector line — suppress at WhiteGlove split boundary */}
+        {index > 0 && !isSplitBoundary && (
+          <div
+            className={`absolute h-1 ${connColor}`}
+            style={{ top: '22px', left: '-50%', right: '50%' }}
+          />
+        )}
+        {/* Arrow when previous phase is current or failed — suppress at split boundary */}
+        {index > 0 && showArrow && !isSplitBoundary && (
+          <div
+            className="absolute z-20"
+            style={{ top: '16px', left: 'calc(50% - 36px)' }}
+          >
+            <div
+              className={`w-0 h-0 border-t-[8px] border-t-transparent border-b-[8px] border-b-transparent border-l-[12px] ${
+                connColor === 'bg-green-500' ? 'border-l-green-500' :
+                connColor === 'bg-red-500' ? 'border-l-red-500' : 'border-l-gray-300'
+              }`}
+              style={{
+                filter: connColor === 'bg-green-500'
+                  ? 'drop-shadow(0 0 3px rgba(34, 197, 94, 0.5))'
+                  : connColor === 'bg-red-500'
+                  ? 'drop-shadow(0 0 3px rgba(239, 68, 68, 0.5))'
+                  : 'drop-shadow(0 0 3px rgba(209, 213, 219, 0.5))'
+              }}
+            />
+          </div>
+        )}
+        {/* Circle */}
+        <div className={`relative z-10 w-12 h-12 rounded-full flex items-center justify-center border-2 transition-all font-semibold ${getPhaseColor(status)}`}>
+          {status === 'completed' ? '✓' : status === 'failed' ? '✕' : phase.id + 1}
+        </div>
+        {/* Labels */}
+        <div className="mt-3 text-center">
+          <div className="text-xs font-medium text-gray-700 whitespace-nowrap">
+            {phase.shortName}
+          </div>
+          {(status === 'completed' || status === 'failed') && getPhaseDuration(phase.id) && (
+            <div className={`mt-0.5 text-[10px] ${
+              status === 'failed' ? 'text-red-400' :
+              isSubPhase(phase.id) ? 'text-gray-400 italic' : 'text-gray-500 font-medium'
+            }`}>
+              {isSubPhase(phase.id) ? `(${getPhaseDuration(phase.id)})` : getPhaseDuration(phase.id)}
+            </div>
+          )}
+          {status === 'failed' && (
+            <div className="mt-0.5 text-[10px] text-red-500 font-semibold">Failed</div>
+          )}
+          {status === 'current' && getCurrentActivity(phase.id) && (
+            <div className="mt-1 max-w-[140px]">
+              <div className="text-[10px] text-blue-600 font-medium line-clamp-2 animate-pulse" title={getCurrentActivity(phase.id) || undefined}>
+                {getCurrentActivity(phase.id)}
               </div>
             </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="w-full py-4">
+      {/* Group labels for WhiteGlove sessions */}
+      {isWhiteGloveV1 && splitIndex > 0 && (
+        <div className="flex w-full mb-3">
+          <div style={{ flex: splitIndex }} className="text-center">
+            <span className="text-xs font-semibold text-amber-700 bg-amber-50 px-2.5 py-0.5 rounded-full border border-amber-200">
+              Pre-Provisioning
+            </span>
+          </div>
+          <div className="w-8 flex-shrink-0" />
+          <div style={{ flex: phases.length - splitIndex }} className="text-center">
+            <span className="text-xs font-semibold text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200">
+              User Enrollment
+            </span>
+          </div>
+        </div>
+      )}
+      <div className="flex w-full">
+        {phases.map((phase, index) => {
+          const isSplitPoint = isWhiteGloveV1 && index === splitIndex;
+          return (
+            <React.Fragment key={phase.id}>
+              {/* Vertical dashed separator at the WhiteGlove split point */}
+              {isSplitPoint && (
+                <div className="flex-shrink-0 flex flex-col items-center justify-start px-1" style={{ width: '32px' }}>
+                  <div className="w-px h-12 border-l-2 border-dashed border-gray-300" style={{ marginTop: '10px' }} />
+                </div>
+              )}
+              {renderPhaseNode(phase, index)}
+            </React.Fragment>
           );
         })}
       </div>

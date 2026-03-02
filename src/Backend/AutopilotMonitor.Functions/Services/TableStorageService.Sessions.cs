@@ -65,6 +65,7 @@ namespace AutopilotMonitor.Functions.Services
                 DateTime? lastEventAt = null;
                 int? durationSeconds = null;
                 string? diagnosticsBlobName = null;
+                DateTime? resumedAt = null;
 
                 try
                 {
@@ -88,6 +89,7 @@ namespace AutopilotMonitor.Functions.Services
                     lastEventAt = existingEntity.GetDateTimeOffset("LastEventAt")?.UtcDateTime;
                     durationSeconds = existingEntity.GetInt32("DurationSeconds");
                     diagnosticsBlobName = existingEntity.GetString("DiagnosticsBlobName");
+                    resumedAt = existingEntity.GetDateTimeOffset("ResumedAt")?.UtcDateTime;
 
                     // WhiteGlove resumption: if the existing session was in Pending state,
                     // this re-registration means the user has received the device and booted it.
@@ -96,6 +98,9 @@ namespace AutopilotMonitor.Functions.Services
                     {
                         _logger.LogInformation($"Session {registration.SessionId} resuming from Pending (WhiteGlove Part 2)");
                         status = SessionStatus.InProgress.ToString();
+                        // Store ResumedAt as fallback if whiteglove_resumed event hasn't set it yet
+                        if (!resumedAt.HasValue)
+                            resumedAt = registration.StartedAt;
                     }
                 }
                 catch (RequestFailedException ex) when (ex.Status == 404)
@@ -144,6 +149,9 @@ namespace AutopilotMonitor.Functions.Services
 
                 if (!string.IsNullOrWhiteSpace(diagnosticsBlobName))
                     entity["DiagnosticsBlobName"] = diagnosticsBlobName;
+
+                if (resumedAt.HasValue)
+                    entity["ResumedAt"] = EnsureUtc(resumedAt.Value);
 
                 await tableClient.UpsertEntityAsync(entity);
                 _logger.LogInformation($"Stored session {registration.SessionId}");
@@ -401,7 +409,7 @@ namespace AutopilotMonitor.Functions.Services
         /// Event count is maintained atomically by IncrementSessionEventCountAsync and is not
         /// recounted here — avoiding an expensive full-partition scan on every status change.
         /// </summary>
-        public async Task<bool> UpdateSessionStatusAsync(string tenantId, string sessionId, SessionStatus status, EnrollmentPhase? currentPhase = null, string? failureReason = null, DateTime? completedAt = null, DateTime? earliestEventTimestamp = null, DateTime? latestEventTimestamp = null, bool? isPreProvisioned = null, bool? isUserDriven = null)
+        public async Task<bool> UpdateSessionStatusAsync(string tenantId, string sessionId, SessionStatus status, EnrollmentPhase? currentPhase = null, string? failureReason = null, DateTime? completedAt = null, DateTime? earliestEventTimestamp = null, DateTime? latestEventTimestamp = null, bool? isPreProvisioned = null, bool? isUserDriven = null, DateTime? resumedAt = null)
         {
             SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
             SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
@@ -499,6 +507,13 @@ namespace AutopilotMonitor.Functions.Services
                         update["IsUserDriven"] = isUserDriven.Value;
                     }
 
+                    // Store ResumedAt timestamp for WhiteGlove Part 2 (user enrollment start).
+                    // Used to compute Duration 2 (user enrollment only) for Teams notifications.
+                    if (resumedAt.HasValue)
+                    {
+                        update["ResumedAt"] = EnsureUtc(resumedAt.Value);
+                    }
+
                     // Merge mode: only the fields set above are written; all other fields remain untouched.
                     // This drastically reduces ETag conflicts when concurrent requests update different fields.
                     await tableClient.UpdateEntityAsync(update, session.ETag, TableUpdateMode.Merge);
@@ -573,6 +588,9 @@ namespace AutopilotMonitor.Functions.Services
 
                             if (isUserDriven.HasValue)
                                 forceUpdate["IsUserDriven"] = isUserDriven.Value;
+
+                            if (resumedAt.HasValue)
+                                forceUpdate["ResumedAt"] = EnsureUtc(resumedAt.Value);
 
                             // Unconditional merge write — ETag.All bypasses concurrency check
                             await forceTableClient.UpdateEntityAsync(forceUpdate, ETag.All, TableUpdateMode.Merge);
@@ -871,6 +889,7 @@ namespace AutopilotMonitor.Functions.Services
                 DiagnosticsBlobName = entity.GetString("DiagnosticsBlobName"),
                 LastEventAt = SafeGetDateTime(entity, "LastEventAt"),
                 IsPreProvisioned = entity.GetBoolean("IsPreProvisioned") ?? false,
+                ResumedAt = SafeGetDateTime(entity, "ResumedAt"),
                 OsBuild = entity.GetString("OsBuild") ?? string.Empty,
                 OsEdition = entity.GetString("OsEdition") ?? string.Empty,
                 OsLanguage = entity.GetString("OsLanguage") ?? string.Empty,

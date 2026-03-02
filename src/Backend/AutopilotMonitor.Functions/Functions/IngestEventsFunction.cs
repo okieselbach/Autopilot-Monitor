@@ -330,7 +330,8 @@ namespace AutopilotMonitor.Functions.Functions
                             whiteGloveResumedEvent.Phase,
                             earliestEventTimestamp: earliestEventTimestamp,
                             latestEventTimestamp: latestEventTimestamp,
-                            isUserDriven: true
+                            isUserDriven: true,
+                            resumedAt: whiteGloveResumedEvent.Timestamp
                         );
                         _logger.LogInformation("{SessionPrefix} Status: InProgress (WhiteGlove Part 2 resumed, IsUserDriven=true)", sessionPrefix);
                     }
@@ -436,6 +437,16 @@ namespace AutopilotMonitor.Functions.Functions
                             var duration = updatedSession?.DurationSeconds != null
                                 ? TimeSpan.FromSeconds(updatedSession.DurationSeconds.Value)
                                 : (TimeSpan?)null;
+
+                            // For WhiteGlove sessions: show user enrollment duration only (Duration 2)
+                            // instead of the full wall-clock time which includes the pre-provisioning pause.
+                            if (updatedSession?.IsPreProvisioned == true && updatedSession?.ResumedAt != null)
+                            {
+                                var completionTime = completionEvent?.Timestamp ?? failureEvent?.Timestamp;
+                                if (completionTime.HasValue)
+                                    duration = completionTime.Value - updatedSession.ResumedAt.Value;
+                            }
+
                             _ = _teamsNotificationService.SendEnrollmentNotificationAsync(
                                 tenantConfig.TeamsWebhookUrl,
                                 updatedSession?.DeviceName,

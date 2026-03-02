@@ -151,11 +151,11 @@ namespace AutopilotMonitor.Functions.Services
 
             try
             {
-                var title = success ? "🔵 WhiteGlove Pre-Provisioning Completed" : "❌ WhiteGlove Pre-Provisioning Failed";
+                var title = success ? "🔵 Pre-Provisioning Completed" : "❌ Pre-Provisioning Failed";
                 var themeColor = success ? "0078D4" : "FF0000";
                 var summary = success
-                    ? $"WhiteGlove Pre-Provisioning Completed: {deviceName ?? "Unknown Device"}"
-                    : $"WhiteGlove Pre-Provisioning Failed: {deviceName ?? "Unknown Device"}";
+                    ? $"Pre-Provisioning Completed: {deviceName ?? "Unknown Device"}"
+                    : $"Pre-Provisioning Failed: {deviceName ?? "Unknown Device"}";
 
                 var durationText = duration.HasValue
                     ? $"{(int)duration.Value.TotalMinutes}m {duration.Value.Seconds}s"

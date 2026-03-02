@@ -24,6 +24,8 @@ interface EventTimelineProps {
   userEnrollGrouped: { eventsByPhase: Record<string, EnrollmentEvent[]>; orderedPhases: string[] };
   userEnrollEvents: EnrollmentEvent[];
   isGalacticAdmin?: boolean;
+  preProvDuration?: string | null;
+  userEnrollDuration?: string | null;
 }
 
 export default function EventTimeline({
@@ -46,9 +48,11 @@ export default function EventTimeline({
   userEnrollGrouped,
   userEnrollEvents,
   isGalacticAdmin,
+  preProvDuration,
+  userEnrollDuration,
 }: EventTimelineProps) {
   return (
-    <>
+    <div className="space-y-6">
       {/* Severity filters + Expand/Collapse — shared controls above the timeline(s) */}
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs font-medium text-gray-500">Filter:</span>
@@ -104,6 +108,9 @@ export default function EventTimeline({
             <div className="flex items-center gap-3 mb-6">
               <h2 className="text-xl font-semibold text-gray-900">Pre-Provisioning Part</h2>
               <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-amber-100 text-amber-800">WhiteGlove</span>
+              {preProvDuration && (
+                <span className="text-sm text-gray-500">{preProvDuration}</span>
+              )}
             </div>
             {preProvGrouped.orderedPhases.length === 0 ? (
               <div className="text-gray-500 text-center py-8">No events found.</div>
@@ -123,12 +130,24 @@ export default function EventTimeline({
             )}
           </div>
 
+          {/* Visual separator between the two WhiteGlove parts */}
+          {userEnrollEvents.length > 0 && (
+            <div className="flex items-center gap-4 px-4">
+              <div className="flex-1 border-t-2 border-dashed border-gray-300"></div>
+              <span className="text-xs text-gray-400 font-medium whitespace-nowrap">Device sealed / powered off</span>
+              <div className="flex-1 border-t-2 border-dashed border-gray-300"></div>
+            </div>
+          )}
+
           {/* User Enrollment Part */}
           {userEnrollEvents.length > 0 ? (
             <div className="bg-white shadow rounded-lg p-6">
               <div className="flex items-center gap-3 mb-6">
                 <h2 className="text-xl font-semibold text-gray-900">User Enrollment Part</h2>
                 <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">Resumed</span>
+                {userEnrollDuration && (
+                  <span className="text-sm text-gray-500">{userEnrollDuration}</span>
+                )}
               </div>
               {userEnrollGrouped.orderedPhases.length === 0 ? (
                 <div className="text-gray-500 text-center py-8">No events found.</div>
@@ -188,7 +207,7 @@ export default function EventTimeline({
           )}
         </div>
       )}
-    </>
+    </div>
   );
 }
 

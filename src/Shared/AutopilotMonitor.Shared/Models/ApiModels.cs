@@ -172,6 +172,13 @@ namespace AutopilotMonitor.Shared.Models
         /// </summary>
         public bool IsPreProvisioned { get; set; }
 
+        /// <summary>
+        /// Timestamp when the WhiteGlove session resumed for user enrollment (Part 2).
+        /// Set when the agent sends a whiteglove_resumed event or re-registers from Pending state.
+        /// Used to compute the user enrollment duration (Duration 2) for Teams notifications.
+        /// </summary>
+        public DateTime? ResumedAt { get; set; }
+
         // Device detail fields — stored in the Sessions table but omitted from earlier versions
         public string OsBuild { get; set; }
         public string OsEdition { get; set; }

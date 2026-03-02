@@ -650,6 +650,44 @@ export default function SessionDetailPage() {
     );
   }, [filteredEvents, isWhiteGloveSession, whiteGloveSplitSequence]);
 
+  // Compute per-block durations for WhiteGlove sessions (using unfiltered events for accuracy).
+  // Duration 1 = pre-provisioning, Duration 2 = user enrollment, combined = D1 + D2 (pause excluded).
+  const whiteGloveDurations = useMemo(() => {
+    if (!isWhiteGloveSession || whiteGloveSplitSequence < 0) {
+      return { preProvDuration: null as string | null, userEnrollDuration: null as string | null, combinedDuration: null as string | null };
+    }
+
+    const preProvEvts = events.filter(e =>
+      e.sequence <= whiteGloveSplitSequence || e.eventType === "whiteglove_complete"
+    );
+    const userEnrollEvts = events.filter(e =>
+      e.sequence > whiteGloveSplitSequence && e.eventType !== "whiteglove_complete"
+    );
+
+    const calcMs = (evts: EnrollmentEvent[]): number => {
+      if (evts.length === 0) return 0;
+      const ts = evts.map(e => new Date(e.timestamp).getTime());
+      return Math.max(...ts) - Math.min(...ts);
+    };
+
+    const fmt = (ms: number): string | null => {
+      const sec = Math.round(ms / 1000);
+      if (sec < 1) return null;
+      if (sec < 60) return `${sec}s`;
+      if (sec < 3600) return `${Math.floor(sec / 60)}m ${sec % 60}s`;
+      return `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}m`;
+    };
+
+    const preProvMs = calcMs(preProvEvts);
+    const userEnrollMs = calcMs(userEnrollEvts);
+
+    return {
+      preProvDuration: fmt(preProvMs),
+      userEnrollDuration: fmt(userEnrollMs),
+      combinedDuration: fmt(preProvMs + userEnrollMs),
+    };
+  }, [events, isWhiteGloveSession, whiteGloveSplitSequence]);
+
   // Group events by phase — single timeline for normal sessions, two groups for WhiteGlove
   const { eventsByPhase, orderedPhases } = useMemo(() => {
     if (isWhiteGloveSession) return { eventsByPhase: {} as Record<string, EnrollmentEvent[]>, orderedPhases: [] as string[] };
@@ -818,7 +856,7 @@ export default function SessionDetailPage() {
           {session && (
             <SessionInfoCard
               session={session}
-              enrollmentDuration={enrollmentDurationFromEvents}
+              enrollmentDuration={isWhiteGloveSession && whiteGloveDurations.combinedDuration ? whiteGloveDurations.combinedDuration : enrollmentDurationFromEvents}
               displayStatus={displayStatus}
               isGatherRulesSession={isGatherRulesSession}
             />
@@ -837,6 +875,7 @@ export default function SessionDetailPage() {
                 events={events}
                 sessionStatus={session.status}
                 enrollmentType={session.enrollmentType}
+                isPreProvisioned={isWhiteGloveSession}
               />
             </div>
           )}
@@ -900,6 +939,8 @@ export default function SessionDetailPage() {
             userEnrollGrouped={userEnrollGrouped}
             userEnrollEvents={userEnrollEvents}
             isGalacticAdmin={user?.isGalacticAdmin}
+            preProvDuration={whiteGloveDurations.preProvDuration}
+            userEnrollDuration={whiteGloveDurations.userEnrollDuration}
           />
         </div>
 
