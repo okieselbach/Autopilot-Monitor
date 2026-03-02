@@ -29,6 +29,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         private readonly Timer _uploadTimer;
         private readonly Timer _debounceTimer;
         private readonly object _timerLock = new object();
+        private readonly SemaphoreSlim _uploadSemaphore = new(1, 1);
         private readonly ManualResetEventSlim _completionEvent = new(false);
         private long _eventSequence; // Initialized from persistence + spool ceiling in constructor
         private readonly SessionPersistence _sessionPersistence;
@@ -840,6 +841,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 
         private async Task UploadEventsAsync()
         {
+            // Prevent concurrent uploads — if one is already in flight, skip this call.
+            // The events will be picked up by the next trigger or debounce timer.
+            if (!_uploadSemaphore.Wait(0))
+                return;
+
             try
             {
                 var events = _spool.GetBatch(_configuration.MaxBatchSize);
@@ -923,6 +929,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                         httpStatusCode: null,
                         sequenceNumber: _eventSequence);
                 }
+            }
+            finally
+            {
+                _uploadSemaphore.Release();
             }
         }
 
