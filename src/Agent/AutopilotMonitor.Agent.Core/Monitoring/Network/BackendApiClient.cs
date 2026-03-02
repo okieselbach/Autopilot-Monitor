@@ -6,6 +6,7 @@ using System.Linq;
 using System.Net.Http;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using AutopilotMonitor.Agent.Core.Configuration;
 using AutopilotMonitor.Agent.Core.Security;
@@ -206,6 +207,39 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
             };
             var response = await PostAsync<GetDiagnosticsUploadUrlRequest, GetDiagnosticsUploadUrlResponse>(url, request);
             return response;
+        }
+
+        /// <summary>
+        /// Sends a critical error report to the emergency channel endpoint.
+        /// Fire-and-forget: swallows all exceptions so a failure here never cascades.
+        /// Uses a 5-second per-request timeout so it cannot block the upload loop.
+        /// </summary>
+        public async Task ReportAgentErrorAsync(AgentErrorReport report)
+        {
+            try
+            {
+                var url = $"{_baseUrl}{Constants.ApiEndpoints.ReportAgentError}";
+                var json = JsonConvert.SerializeObject(report);
+
+                var httpRequest = new HttpRequestMessage(HttpMethod.Post, url)
+                {
+                    Content = new StringContent(json, Encoding.UTF8, "application/json")
+                };
+
+                // Security validation on the backend requires tenant ID before parsing the body
+                httpRequest.Headers.Add("X-Tenant-Id", report.TenantId);
+
+                // Hardware headers are required for full security validation
+                AddSecurityHeaders(httpRequest);
+
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                await _httpClient.SendAsync(httpRequest, cts.Token);
+                // Response status is deliberately ignored — endpoint always returns 200
+            }
+            catch
+            {
+                // Swallow all exceptions — the emergency channel must never cascade failures
+            }
         }
 
         private async Task<TResponse> PostAsync<TRequest, TResponse>(string url, TRequest data)

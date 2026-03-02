@@ -62,6 +62,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         private int _consecutiveAuthFailures = 0;
         private DateTime? _firstAuthFailureTime = null;
 
+        // Non-auth upload failure tracking for the emergency channel
+        private int _consecutiveUploadFailures = 0;
+        private EmergencyReporter _emergencyReporter;
+
         public MonitoringService(AgentConfiguration configuration, AgentLogger logger, string agentVersion)
         {
             _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
@@ -75,6 +79,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 
             _spool = new EventSpool(_configuration.SpoolDirectory);
             _apiClient = new BackendApiClient(_configuration.ApiBaseUrl, _configuration, _logger);
+            _emergencyReporter = new EmergencyReporter(_apiClient, _configuration.SessionId, _configuration.TenantId, agentVersion, _logger);
             _cleanupService = new CleanupService(_configuration, _logger);
             _diagnosticsService = new DiagnosticsPackageService(_configuration, _logger, _apiClient);
 
@@ -832,9 +837,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     _spool.RemoveEvents(events);
                     _logger.Info($"Uploaded {response.EventsProcessed} events");
 
-                    // Reset auth failure counter on success
+                    // Reset failure counters on success
                     _consecutiveAuthFailures = 0;
                     _firstAuthFailureTime = null;
+                    _consecutiveUploadFailures = 0;
                 }
                 else
                 {
@@ -848,7 +854,19 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             }
             catch (Exception ex)
             {
+                _consecutiveUploadFailures++;
                 _logger.Error("Error uploading events", ex);
+
+                // After N consecutive non-auth failures, signal the emergency channel once.
+                // The EmergencyReporter deduplicates further calls for the same error category.
+                if (_consecutiveUploadFailures == EmergencyReporter.ConsecutiveFailureThreshold)
+                {
+                    _ = _emergencyReporter.TrySendAsync(
+                        AgentErrorType.IngestFailed,
+                        ex.Message,
+                        httpStatusCode: null,
+                        sequenceNumber: _eventSequence);
+                }
             }
         }
 

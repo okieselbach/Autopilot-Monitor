@@ -73,6 +73,7 @@ namespace AutopilotMonitor.Shared
             public const string GatherRules              = "/api/rules/gather";
             public const string AnalyzeRules             = "/api/rules/analyze";
             public const string GetDiagnosticsUploadUrl  = "/api/agent/upload-url";
+            public const string ReportAgentError         = "/api/agent/error";
             public const string BlockDevice              = "/api/devices/block";
             public const string GetBlockedDevices        = "/api/devices/blocked";
             public const string ImeLogPatterns           = "/api/rules/ime-log-patterns";
