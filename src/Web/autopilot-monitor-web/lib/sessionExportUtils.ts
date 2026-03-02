@@ -174,41 +174,32 @@ export function generateRuleResultsCsvExport(results: RuleResultCsvData[]): stri
   return "\uFEFF" + header + "\n" + rows.join("\n");
 }
 
-export function generateUiExport(events: SessionExportEvent[], sessionId: string, tenantId: string) {
-  const isV1 = events.some(e => e.phase === 2);
-  const phaseNames = isV1 ? EXPORT_V1_PHASE_NAMES : EXPORT_V2_PHASE_NAMES;
-  const phaseOrder = isV1 ? EXPORT_V1_PHASE_ORDER : EXPORT_V2_PHASE_ORDER;
-
-  const sorted = [...events].sort((a, b) => a.sequence - b.sequence);
-
-  // Replicate eventsByPhase useMemo logic: assign Unknown-phase events to active named phase
+function groupEventsByPhase(
+  eventsToGroup: SessionExportEvent[],
+  phaseNames: Record<number, string>,
+  phaseOrder: string[]
+): Record<string, SessionExportEvent[]> {
   const grouped: Record<string, SessionExportEvent[]> = {};
   phaseOrder.forEach(p => { grouped[p] = []; });
-
   let lastNamedPhase = phaseOrder[0];
-  for (const ev of sorted) {
+  for (const ev of eventsToGroup) {
     const name = phaseNames[ev.phase];
     if (name && name !== "Unknown") {
       lastNamedPhase = name;
       if (grouped[name]) grouped[name].push({ ...ev, phaseName: name });
     } else {
-      // Unknown phase — insert into currently active named phase
       if (grouped[lastNamedPhase]) grouped[lastNamedPhase].push({ ...ev, phaseName: "Unknown" });
     }
   }
+  return grouped;
+}
 
-  const pad = (s: string, len: number) => s.padEnd(len);
-  const severityLabel = (s: string) => pad(s ?? "Unknown", 7);
-
-  const lines: string[] = [];
-  lines.push("AUTOPILOT MONITOR \u2014 SESSION EVENT EXPORT");
-  lines.push("=========================================");
-  lines.push(`Session ID   : ${sessionId}`);
-  lines.push(`Tenant ID    : ${tenantId}`);
-  lines.push(`Exported at  : ${new Date().toISOString()}`);
-  lines.push(`Total events : ${events.length}`);
-  lines.push(`Enrollment   : ${isV1 ? "V1" : "V2"}`);
-
+function renderPhaseBlocks(
+  lines: string[],
+  grouped: Record<string, SessionExportEvent[]>,
+  phaseOrder: string[],
+  severityLabel: (s: string) => string
+) {
   for (const phase of phaseOrder) {
     const phaseEvents = grouped[phase] ?? [];
     lines.push("");
@@ -228,6 +219,122 @@ export function generateUiExport(events: SessionExportEvent[], sessionId: string
           lines.push(`  Data: ${JSON.stringify(ev.data)}`);
         }
       }
+    }
+  }
+}
+
+export function generateUiExport(
+  events: SessionExportEvent[],
+  sessionId: string,
+  tenantId: string,
+  sessionStatus?: string
+) {
+  const isV1 = events.some(e => e.phase === 2);
+  const phaseNames = isV1 ? EXPORT_V1_PHASE_NAMES : EXPORT_V2_PHASE_NAMES;
+  const phaseOrder = isV1 ? EXPORT_V1_PHASE_ORDER : EXPORT_V2_PHASE_ORDER;
+
+  const sorted = [...events].sort((a, b) => a.sequence - b.sequence);
+
+  // Detect WhiteGlove / Pre-Provisioning session (mirrors UI logic)
+  const isWhiteGlove = sorted.some(e => e.eventType === "whiteglove_complete");
+
+  const pad = (s: string, len: number) => s.padEnd(len);
+  const severityLabel = (s: string) => pad(s ?? "Unknown", 7);
+
+  const lines: string[] = [];
+  lines.push("AUTOPILOT MONITOR \u2014 SESSION EVENT EXPORT");
+  lines.push("=========================================");
+  lines.push(`Session ID   : ${sessionId}`);
+  lines.push(`Tenant ID    : ${tenantId}`);
+  lines.push(`Exported at  : ${new Date().toISOString()}`);
+  lines.push(`Total events : ${events.length}`);
+  lines.push(`Enrollment   : ${isV1 ? "V1" : "V2"}`);
+  if (isWhiteGlove) {
+    lines.push(`Session type : WhiteGlove (Pre-Provisioning)`);
+  }
+
+  if (!isWhiteGlove) {
+    // Standard single timeline
+    const grouped = groupEventsByPhase(sorted, phaseNames, phaseOrder);
+    renderPhaseBlocks(lines, grouped, phaseOrder, severityLabel);
+  } else {
+    // WhiteGlove session: two-part timeline, matching the UI split logic.
+    //
+    // UI TIMELINE BEHAVIOUR (reproduced here):
+    //   The session page shows two separate timelines for WhiteGlove sessions:
+    //
+    //   ┌──────────────────────────────────────────┐
+    //   │  Pre-Provisioning Part  [WhiteGlove]     │  ← amber badge
+    //   │  (phases up to and including the         │
+    //   │   "whiteglove_complete" event)            │
+    //   └──────────────────────────────────────────┘
+    //
+    //   followed by one of two states:
+    //
+    //   A) User Enrollment Part [Resumed]           ← blue badge
+    //      (phases from the next agent_started boot
+    //       after whiteglove_complete)
+    //
+    //   B) *** AWAITING USER ENROLLMENT ***
+    //      "Pre-provisioning is complete. The
+    //       timeline will continue when the user
+    //       powers on the device."
+    //      (shown when no user-enrollment events
+    //       exist and session status is "Pending")
+    //
+    // SPLIT POINT CALCULATION (mirrors EventTimeline.tsx):
+    //   Normal:   first agent_started AFTER whiteglove_complete  → split = that event's sequence - 1
+    //   Fallback: if whiteglove_complete arrived after Part 2 boot, use the second-to-last
+    //             agent_started before whiteglove_complete        → split = that event's sequence - 1
+    //   Single:   only pre-prov part present                     → split = whiteglove_complete.sequence
+
+    const wgCompleteEv = sorted.find(e => e.eventType === "whiteglove_complete");
+    const wgSeq = wgCompleteEv?.sequence ?? sorted[sorted.length - 1]?.sequence ?? 0;
+
+    const agentStartedEvs = sorted.filter(e => e.eventType === "agent_started");
+    const afterWg = agentStartedEvs.filter(e => e.sequence > wgSeq);
+
+    let splitSeq: number;
+    if (afterWg.length > 0) {
+      splitSeq = afterWg[0].sequence - 1;
+    } else {
+      const beforeWg = agentStartedEvs.filter(e => e.sequence < wgSeq);
+      if (beforeWg.length >= 2) {
+        splitSeq = beforeWg[beforeWg.length - 2].sequence - 1;
+      } else {
+        splitSeq = wgSeq;
+      }
+    }
+
+    const preProvEvents = sorted.filter(e =>
+      e.sequence <= splitSeq || e.eventType === "whiteglove_complete"
+    );
+    const userEnrollEvents = sorted.filter(e =>
+      e.sequence > splitSeq && e.eventType !== "whiteglove_complete"
+    );
+
+    // --- Pre-Provisioning Part ---
+    lines.push("");
+    lines.push("#".repeat(43));
+    lines.push(`  PRE-PROVISIONING PART  [WhiteGlove]`);
+    lines.push("#".repeat(43));
+    const preProvGrouped = groupEventsByPhase(preProvEvents, phaseNames, phaseOrder);
+    renderPhaseBlocks(lines, preProvGrouped, phaseOrder, severityLabel);
+
+    // --- User Enrollment Part or Awaiting Banner ---
+    lines.push("");
+    if (userEnrollEvents.length > 0) {
+      lines.push("#".repeat(43));
+      lines.push(`  USER ENROLLMENT PART  [Resumed]`);
+      lines.push("#".repeat(43));
+      const userEnrollGrouped = groupEventsByPhase(userEnrollEvents, phaseNames, phaseOrder);
+      renderPhaseBlocks(lines, userEnrollGrouped, phaseOrder, severityLabel);
+    } else {
+      // Mirrors the "Awaiting User Enrollment" banner shown in the UI when
+      // there are no user-enrollment events and the session is still Pending.
+      lines.push("*** AWAITING USER ENROLLMENT ***");
+      lines.push("Pre-provisioning is complete. The timeline will continue when the user powers on the device.");
+      if (sessionStatus) lines.push(`Session status: ${sessionStatus}`);
     }
   }
 

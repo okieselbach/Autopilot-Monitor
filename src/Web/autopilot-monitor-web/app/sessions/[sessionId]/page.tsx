@@ -487,7 +487,7 @@ export default function SessionDetailPage() {
         ...e,
         tenantId: effectiveTenantId || '',
       }));
-      const timelineExportTxt = generateUiExport(exportEvents, sessionId, effectiveTenantId || '');
+      const timelineExportTxt = generateUiExport(exportEvents, sessionId, effectiveTenantId || '', session?.status);
       const eventsCsv = generateCsvExport(exportEvents);
       const sessionCsv = session ? generateSessionCsvExport(session) : '';
       const ruleResultsCsv = generateRuleResultsCsvExport(analysisResults);
