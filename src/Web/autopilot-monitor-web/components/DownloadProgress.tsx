@@ -20,6 +20,7 @@ interface DownloadItem {
   lastUpdated: string;
   lastUpdatedMs: number;
   isComplete: boolean;
+  isSkipped: boolean;
   firstSeenIndex: number;
   eventData?: Record<string, any>;
 }
@@ -65,24 +66,30 @@ export default function DownloadProgress({ events }: DownloadProgressProps) {
       const reportedRateBps = parseFloat(d.download_rate_bps ?? d.downloadRateBps ?? "0");
       const status = d.status ?? "";
       const isDownloadStartEvent = evt.eventType === "app_download_started";
+      const isSkippedEvent = evt.eventType === "app_install_skipped";
+      const progressPercent = parseInt(d.progress_percent ?? d.progressPercent ?? "0", 10);
       const eventTs = new Date(evt.timestamp).getTime();
 
-      // Determine if complete: explicit status or bytes comparison
-      const isComplete = status === "completed" || status === "failed" || (bytesTotal > 0 && bytesDownloaded >= bytesTotal);
+      // Determine if complete: explicit status, bytes comparison, or 100% progress with no byte data
+      const isComplete = status === "completed" || status === "failed"
+        || (bytesTotal > 0 && bytesDownloaded >= bytesTotal)
+        || (progressPercent >= 100 && bytesDownloaded === 0 && bytesTotal === 0);
 
-      // Skip if bytesTotal is too small (< 1 KB) AND not explicitly completed/failed
-      if (bytesTotal > 0 && bytesTotal < 1024 && status !== "completed" && status !== "failed") {
+      // Skip if bytesTotal is too small (< 1 KB) AND not explicitly completed/failed/skipped
+      if (bytesTotal > 0 && bytesTotal < 1024 && status !== "completed" && status !== "failed" && !isSkippedEvent) {
         continue;
       }
 
-      // Skip if no download activity yet (0 bytes downloaded, not completed/failed)
+      // Skip if no download activity yet (0 bytes downloaded, not completed/failed/skipped)
       // This makes downloads appear dynamically as they start
       if (
         bytesDownloaded === 0 &&
         bytesTotal === 0 &&
         status !== "completed" &&
         status !== "failed" &&
-        !isDownloadStartEvent
+        !isDownloadStartEvent &&
+        !isSkippedEvent &&
+        progressPercent < 100
       ) {
         continue;
       }
@@ -113,6 +120,7 @@ export default function DownloadProgress({ events }: DownloadProgressProps) {
         lastUpdated: evt.timestamp,
         lastUpdatedMs: Number.isFinite(eventTs) ? eventTs : (existing?.lastUpdatedMs ?? Date.now()),
         isComplete,
+        isSkipped: isSkippedEvent || (existing?.isSkipped ?? false),
         firstSeenIndex: existing?.firstSeenIndex ?? insertionIndex++,
         eventData: d,
       });
@@ -129,8 +137,9 @@ export default function DownloadProgress({ events }: DownloadProgressProps) {
 
   if (downloads.length === 0) return null;
 
-  const activeCount = downloads.filter(d => !d.isComplete).length;
-  const completedCount = downloads.filter(d => d.isComplete).length;
+  const activeCount = downloads.filter(d => !d.isComplete && !d.isSkipped).length;
+  const completedCount = downloads.filter(d => d.isComplete && !d.isSkipped).length;
+  const skippedCount = downloads.filter(d => d.isSkipped).length;
 
   return (
     <div className="bg-white shadow rounded-lg p-6 mb-6">
@@ -155,6 +164,11 @@ export default function DownloadProgress({ events }: DownloadProgressProps) {
                 {completedCount} completed
               </span>
             )}
+            {skippedCount > 0 && (
+              <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-medium">
+                {skippedCount} skipped
+              </span>
+            )}
           </div>
         </div>
         <span className="text-gray-400">{expanded ? '▼' : '▶'}</span>
@@ -164,7 +178,7 @@ export default function DownloadProgress({ events }: DownloadProgressProps) {
         {downloads.map((dl) => {
           const progressPercent = dl.bytesTotal > 0
             ? Math.min(100, (dl.bytesDownloaded / dl.bytesTotal) * 100)
-            : 0;
+            : (dl.isComplete ? 100 : 0);
 
           return <DownloadItem key={dl.appName} download={dl} progressPercent={progressPercent} />;
         })}
@@ -176,15 +190,24 @@ export default function DownloadProgress({ events }: DownloadProgressProps) {
 function DownloadItem({ download: dl, progressPercent }: { download: DownloadItem; progressPercent: number }) {
   const [showDetails, setShowDetails] = useState(false);
   const hasKnownTotal = dl.bytesTotal > 0;
-  const showProgressBar = hasKnownTotal || !dl.isComplete;
+  const showProgressBar = !dl.isSkipped && (hasKnownTotal || dl.isComplete || !dl.isComplete);
+
+  // Determine container styling
+  const containerClass = dl.isSkipped
+    ? "bg-gray-50 border border-gray-300"
+    : dl.isComplete
+      ? "bg-green-50 border border-green-200"
+      : "bg-gray-50 border border-gray-200";
 
   return (
-            <div
-              className={`rounded-lg p-3 ${dl.isComplete ? "bg-green-50 border border-green-200" : "bg-gray-50 border border-gray-200"}`}
-            >
+            <div className={`rounded-lg p-3 ${containerClass}`}>
               <div className="flex items-center justify-between mb-1">
                 <div className="flex items-center space-x-2 min-w-0">
-                  {dl.isComplete ? (
+                  {dl.isSkipped ? (
+                    <svg className="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+                    </svg>
+                  ) : dl.isComplete ? (
                     <svg className="w-4 h-4 text-green-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
@@ -193,10 +216,13 @@ function DownloadItem({ download: dl, progressPercent }: { download: DownloadIte
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                     </svg>
                   )}
-                  <span className="text-sm font-medium text-gray-900 truncate">{dl.appName}</span>
+                  <span className={`text-sm font-medium truncate ${dl.isSkipped ? "text-gray-500" : "text-gray-900"}`}>{dl.appName}</span>
+                  {dl.isSkipped && (
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-gray-200 text-gray-600 font-medium">Skipped</span>
+                  )}
                 </div>
                 <div className="flex items-center space-x-3 text-xs text-gray-500 flex-shrink-0 ml-2">
-                  {!dl.isComplete && dl.downloadRateBps > 0 && (
+                  {!dl.isComplete && !dl.isSkipped && dl.downloadRateBps > 0 && (
                     <span className="font-medium text-blue-600">{formatSpeed(dl.downloadRateBps)}</span>
                   )}
                   {dl.eventData && Object.keys(dl.eventData).length > 0 && (
@@ -210,30 +236,32 @@ function DownloadItem({ download: dl, progressPercent }: { download: DownloadIte
                 </div>
               </div>
 
-              {/* Progress bar */}
-              {showProgressBar && (
+              {/* Progress bar - not shown for skipped apps */}
+              {showProgressBar && !dl.isSkipped && (
                 <div className="mt-1">
                   <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
                     <div
                       className={`h-full rounded-full transition-all duration-500 ${
                         dl.isComplete ? "bg-green-500" : "bg-blue-500"
                       }`}
-                      style={{ width: `${hasKnownTotal ? progressPercent : 0}%` }}
+                      style={{ width: `${progressPercent}%` }}
                     />
                   </div>
                   <div className="flex items-center justify-between mt-1 text-xs text-gray-500">
                     <span>
                       {hasKnownTotal
                         ? `${formatBytes(dl.bytesDownloaded)} / ${formatBytes(dl.bytesTotal)}`
-                        : `${formatBytes(dl.bytesDownloaded)} downloaded`}
+                        : dl.isComplete
+                          ? "Completed"
+                          : `${formatBytes(dl.bytesDownloaded)} downloaded`}
                     </span>
-                    <span>{hasKnownTotal ? `${progressPercent.toFixed(0)}%` : "started"}</span>
+                    <span>{progressPercent > 0 ? `${progressPercent.toFixed(0)}%` : "started"}</span>
                   </div>
                 </div>
               )}
 
-              {/* If no total size known, show downloaded amount */}
-              {dl.bytesTotal === 0 && dl.bytesDownloaded > 0 && (
+              {/* If no total size known, show downloaded amount (not for skipped or completed-with-no-bytes) */}
+              {!dl.isSkipped && !dl.isComplete && dl.bytesTotal === 0 && dl.bytesDownloaded > 0 && (
                 <div className="mt-1 text-xs text-gray-500">
                   Downloaded: {formatBytes(dl.bytesDownloaded)}
                   {dl.downloadRateBps > 0 && ` at ${formatSpeed(dl.downloadRateBps)}`}

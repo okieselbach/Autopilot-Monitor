@@ -839,11 +839,11 @@ export default function SessionDetailPage() {
             />
           )}
 
-          {/* Download Progress (from download_progress, app_download_started, or app_tracking_summary events) */}
+          {/* Download Progress (from download_progress, app_download_started, app_install_skipped, or app_tracking_summary events) */}
           {!isGatherRulesSession && (
             <DownloadProgress
               events={events.filter(
-                e => e.eventType === "download_progress" || e.eventType === "app_download_started" || e.eventType === "app_tracking_summary"
+                e => e.eventType === "download_progress" || e.eventType === "app_download_started" || e.eventType === "app_install_skipped" || e.eventType === "app_tracking_summary"
               )}
             />
           )}
