@@ -238,6 +238,10 @@ function EventRow({ event, isGalacticAdmin }: { event: EnrollmentEvent; isGalact
   const [copied, setCopied] = useState(false);
   const detailData = useMemo(() => normalizeEventDataForDisplay(event.data), [event.data]);
 
+  // Detect truncated data: backend sets _rawDataJson when DataJson could not be parsed
+  const rawDataJson = detailData?._rawDataJson as string | undefined;
+  const isTruncated = typeof rawDataJson === "string";
+
   // Gather rule console output detection — use source, not eventType,
   // because users can name gather rule event types freely.
   const isGatherEvent = event.source === "GatherRuleExecutor";
@@ -265,7 +269,7 @@ function EventRow({ event, isGalacticAdmin }: { event: EnrollmentEvent; isGalact
     }
   };
 
-  const hasDetails = detailData && Object.keys(detailData).length > 0;
+  const hasDetails = isTruncated || (detailData && Object.keys(detailData).length > 0);
 
   return (
     <div className="bg-gray-50 rounded-lg p-3 hover:bg-gray-100 transition-colors">
@@ -338,8 +342,20 @@ function EventRow({ event, isGalacticAdmin }: { event: EnrollmentEvent; isGalact
         </div>
       )}
 
+      {/* Truncated data: show raw string as-is when JSON parsing failed */}
+      {showDetails && isTruncated && (
+        <div className="mt-3">
+          <div className="flex items-center gap-2 mb-1.5">
+            <span className="text-xs font-medium text-amber-600">Data truncated (exceeded 64KB storage limit)</span>
+          </div>
+          <div className="p-3 bg-gray-900 rounded text-xs text-gray-100 font-mono overflow-x-auto max-h-96 overflow-y-auto">
+            <pre className="whitespace-pre-wrap break-words">{rawDataJson}</pre>
+          </div>
+        </div>
+      )}
+
       {/* Non-gather (or gather without output): raw JSON details */}
-      {showDetails && !hasGatherOutput && detailData && (
+      {showDetails && !isTruncated && !hasGatherOutput && detailData && (
         <div className="mt-3 p-3 bg-gray-900 rounded text-xs text-gray-100 font-mono overflow-x-auto">
           <pre>{JSON.stringify(detailData, null, 2)}</pre>
         </div>

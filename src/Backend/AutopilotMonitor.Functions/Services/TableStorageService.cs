@@ -227,7 +227,12 @@ namespace AutopilotMonitor.Functions.Services
             }
             catch
             {
-                return new Dictionary<string, object>();
+                // JSON may be truncated (64KB Table Storage limit) — preserve the raw
+                // string so the UI can still display it for debugging.
+                return new Dictionary<string, object>
+                {
+                    ["_rawDataJson"] = dataJson
+                };
             }
         }
 
