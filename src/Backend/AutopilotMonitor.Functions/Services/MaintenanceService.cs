@@ -259,7 +259,7 @@ namespace AutopilotMonitor.Functions.Services
                             if (string.IsNullOrEmpty(session.SerialNumber))
                                 continue;
 
-                            var (isBlocked, _) = await _blockedDeviceService.IsBlockedAsync(tenantId, session.SerialNumber);
+                            var (isBlocked, _, _) = await _blockedDeviceService.IsBlockedAsync(tenantId, session.SerialNumber);
                             if (isBlocked)
                                 continue;
 

@@ -48,6 +48,7 @@ export default function Home() {
   const [showBlockConfirm, setShowBlockConfirm] = useState(false);
   const [sessionToBlock, setSessionToBlock] = useState<{ serialNumber: string; tenantId: string; deviceName?: string } | null>(null);
   const [blockingDevice, setBlockingDevice] = useState(false);
+  const [blockedDevicesSet, setBlockedDevicesSet] = useState<Set<string>>(new Set());
   const [adminMode, setAdminMode] = useState(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('adminMode') === 'true';
@@ -102,6 +103,7 @@ export default function Home() {
         const data = await response.json();
         const allSessions = data.sessions || [];
         setSessions(allSessions);
+        fetchBlockedDevices(allSessions);
       } else {
         addNotification('error', 'Backend Error', `Failed to fetch sessions: ${response.statusText}`, 'backend-error');
       }
@@ -110,6 +112,48 @@ export default function Home() {
       addNotification('error', 'Backend Not Reachable', 'Unable to connect to the backend API. Please ensure the backend server is running.', 'backend-unreachable');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchBlockedDevices = async (currentSessions: Session[]) => {
+    if (!adminMode || !user?.isGalacticAdmin) {
+      setBlockedDevicesSet(new Set());
+      return;
+    }
+
+    try {
+      const token = await getAccessToken();
+      if (!token) return;
+
+      const tenantIds = galacticAdminMode
+        ? [...new Set(currentSessions.map(s => s.tenantId))]
+        : tenantId ? [tenantId] : [];
+
+      if (tenantIds.length === 0) {
+        setBlockedDevicesSet(new Set());
+        return;
+      }
+
+      const results = await Promise.allSettled(
+        tenantIds.map(tid =>
+          fetch(`${API_BASE_URL}/api/devices/blocked?tenantId=${encodeURIComponent(tid)}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          }).then(res => res.ok ? res.json() : { blocked: [] })
+        )
+      );
+
+      const newSet = new Set<string>();
+      results.forEach(result => {
+        if (result.status === "fulfilled" && result.value?.blocked) {
+          for (const device of result.value.blocked) {
+            newSet.add(`${device.tenantId}:${device.serialNumber}`);
+          }
+        }
+      });
+
+      setBlockedDevicesSet(newSet);
+    } catch (error) {
+      console.error("Failed to fetch blocked devices:", error);
     }
   };
 
@@ -293,6 +337,13 @@ export default function Home() {
     localStorage.setItem('galacticAdminMode', galacticAdminMode.toString());
   }, [galacticAdminMode]);
 
+  // Clear blocked devices set when admin mode or galactic admin status changes
+  useEffect(() => {
+    if (!adminMode || !user?.isGalacticAdmin) {
+      setBlockedDevicesSet(new Set());
+    }
+  }, [adminMode, user?.isGalacticAdmin]);
+
   // Disable galactic admin mode if user is not a galactic admin
   useEffect(() => {
     if (user && !user.isGalacticAdmin && galacticAdminMode) {
@@ -432,6 +483,11 @@ export default function Home() {
         setShowBlockConfirm(false);
         setSessionToBlock(null);
         addNotification('success', 'Device Blocked', `Device ${sessionToBlock.deviceName || sessionToBlock.serialNumber} blocked for 24 hours.`);
+        setBlockedDevicesSet(prev => {
+          const next = new Set(prev);
+          next.add(`${sessionToBlock.tenantId}:${sessionToBlock.serialNumber}`);
+          return next;
+        });
       } else {
         const data = await response.json();
         alert(`Fehler beim Blocken: ${data.message || 'Unbekannter Fehler'}`);
@@ -489,7 +545,8 @@ export default function Home() {
       session.status,
       session.sessionId,
       new Date(session.startedAt).toLocaleString(),
-      `${Math.round(session.durationSeconds / 60)} min`
+      `${Math.round(session.durationSeconds / 60)} min`,
+      blockedDevicesSet.has(`${session.tenantId}:${session.serialNumber}`) ? "blocked" : ""
     ].join(" ").toLowerCase();
 
     return searchableText.includes(query);
@@ -866,7 +923,20 @@ export default function Home() {
                           </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <StatusBadge status={session.status} failureReason={session.failureReason} />
+                          <div className="flex items-center gap-1.5">
+                            <StatusBadge status={session.status} failureReason={session.failureReason} />
+                            {blockedDevicesSet.has(`${session.tenantId}:${session.serialNumber}`) && (
+                              <span
+                                className="px-2 inline-flex items-center gap-1 text-xs leading-5 font-semibold rounded-full bg-orange-100 text-orange-800"
+                                title="Device is currently blocked"
+                              >
+                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                                </svg>
+                                Blocked
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-500">
                           {session.eventCount}

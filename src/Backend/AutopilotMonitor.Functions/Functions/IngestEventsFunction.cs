@@ -94,20 +94,25 @@ namespace AutopilotMonitor.Functions.Functions
 
                 if (!string.IsNullOrEmpty(serialNumberHeader))
                 {
-                    var (isBlocked, unblockAt) = await _blockedDeviceService.IsBlockedAsync(tenantIdHeader, serialNumberHeader);
+                    var (isBlocked, unblockAt, blockAction) = await _blockedDeviceService.IsBlockedAsync(tenantIdHeader, serialNumberHeader);
                     if (isBlocked)
                     {
+                        var isKill = string.Equals(blockAction, "Kill", StringComparison.OrdinalIgnoreCase);
+
                         _logger.LogWarning(
-                            "Rejected ingest from blocked device: TenantId={TenantId}, SerialNumber={SerialNumber}, UnblockAt={UnblockAt}",
-                            tenantIdHeader, serialNumberHeader, unblockAt);
+                            "{Action} ingest from device: TenantId={TenantId}, SerialNumber={SerialNumber}, UnblockAt={UnblockAt}",
+                            isKill ? "KILL signal for" : "Rejected", tenantIdHeader, serialNumberHeader, unblockAt);
 
                         var blockedHttpResponse = req.CreateResponse(System.Net.HttpStatusCode.OK);
                         await blockedHttpResponse.WriteAsJsonAsync(new IngestEventsResponse
                         {
                             Success = false,
                             DeviceBlocked = true,
+                            DeviceKillSignal = isKill,
                             UnblockAt = unblockAt,
-                            Message = "Device is temporarily blocked by an administrator.",
+                            Message = isKill
+                                ? "Device has been issued a remote kill signal."
+                                : "Device is temporarily blocked by an administrator.",
                             ProcessedAt = DateTime.UtcNow
                         });
                         return new IngestEventsOutput

@@ -20,8 +20,8 @@ namespace AutopilotMonitor.Functions.Services
         private readonly ILogger<BlockedDeviceService> _logger;
 
         // Cache key: "tenantId|serialNumber" (lower-cased serial number for case-insensitive matching)
-        // Cache value: UnblockAt (UTC). Expired entries are treated as unblocked.
-        private readonly ConcurrentDictionary<string, DateTime> _cache = new(StringComparer.OrdinalIgnoreCase);
+        // Cache value: BlockCacheEntry with UnblockAt and Action. Expired entries are treated as unblocked.
+        private readonly ConcurrentDictionary<string, BlockCacheEntry> _cache = new(StringComparer.OrdinalIgnoreCase);
 
         // Tracks which tenants have had their block list loaded into the cache.
         // Lazy loading: populated on first lookup per tenant.
@@ -36,11 +36,12 @@ namespace AutopilotMonitor.Functions.Services
         /// <summary>
         /// Checks whether a device is currently blocked.
         /// Fast path: in-memory cache (loaded lazily per tenant from Table Storage).
+        /// Returns the action type ("Block" or "Kill") so callers can differentiate.
         /// </summary>
-        public async Task<(bool isBlocked, DateTime? unblockAt)> IsBlockedAsync(string tenantId, string serialNumber)
+        public async Task<(bool isBlocked, DateTime? unblockAt, string action)> IsBlockedAsync(string tenantId, string serialNumber)
         {
             if (string.IsNullOrEmpty(tenantId) || string.IsNullOrEmpty(serialNumber))
-                return (false, null);
+                return (false, null, "Block");
 
             // Lazy-load block list for this tenant if not yet done
             if (!_loadedTenants.ContainsKey(tenantId))
@@ -49,22 +50,23 @@ namespace AutopilotMonitor.Functions.Services
             }
 
             var cacheKey = BuildCacheKey(tenantId, serialNumber);
-            if (_cache.TryGetValue(cacheKey, out var unblockAt))
+            if (_cache.TryGetValue(cacheKey, out var entry))
             {
-                if (DateTime.UtcNow < unblockAt)
-                    return (true, unblockAt);
+                if (DateTime.UtcNow < entry.UnblockAt)
+                    return (true, entry.UnblockAt, entry.Action);
 
                 // Block has expired — remove from cache
                 _cache.TryRemove(cacheKey, out _);
             }
 
-            return (false, null);
+            return (false, null, "Block");
         }
 
         /// <summary>
         /// Blocks a device for the specified duration. Updates both Table Storage and the in-memory cache.
+        /// <paramref name="action"/> is "Block" (stop uploads) or "Kill" (remote self-destruct).
         /// </summary>
-        public async Task BlockDeviceAsync(string tenantId, string serialNumber, int durationHours, string blockedByEmail, string? reason = null)
+        public async Task BlockDeviceAsync(string tenantId, string serialNumber, int durationHours, string blockedByEmail, string? reason = null, string action = "Block")
         {
             var now = DateTime.UtcNow;
             var unblockAt = now.AddHours(durationHours);
@@ -76,7 +78,8 @@ namespace AutopilotMonitor.Functions.Services
                 ["UnblockAt"] = unblockAt,
                 ["BlockedByEmail"] = blockedByEmail ?? string.Empty,
                 ["DurationHours"] = durationHours,
-                ["Reason"] = reason ?? string.Empty
+                ["Reason"] = reason ?? string.Empty,
+                ["Action"] = action ?? "Block"
             };
 
             var tableClient = _storageService.GetTableServiceClient().GetTableClient(Constants.TableNames.BlockedDevices);
@@ -84,11 +87,11 @@ namespace AutopilotMonitor.Functions.Services
 
             // Update cache immediately
             var cacheKey = BuildCacheKey(tenantId, serialNumber);
-            _cache[cacheKey] = unblockAt;
+            _cache[cacheKey] = new BlockCacheEntry { UnblockAt = unblockAt, Action = action ?? "Block" };
 
             _logger.LogWarning(
-                "Device blocked: TenantId={TenantId}, SerialNumber={SerialNumber}, BlockedBy={BlockedBy}, Until={UnblockAt}, Reason={Reason}",
-                tenantId, serialNumber, blockedByEmail, unblockAt, reason);
+                "Device {Action}: TenantId={TenantId}, SerialNumber={SerialNumber}, BlockedBy={BlockedBy}, Until={UnblockAt}, Reason={Reason}",
+                action, tenantId, serialNumber, blockedByEmail, unblockAt, reason);
         }
 
         /// <summary>
@@ -143,7 +146,8 @@ namespace AutopilotMonitor.Functions.Services
                     UnblockAt = unblockAt,
                     BlockedByEmail = entity.GetString("BlockedByEmail"),
                     DurationHours = entity.GetInt32("DurationHours") ?? 12,
-                    Reason = entity.GetString("Reason")
+                    Reason = entity.GetString("Reason"),
+                    Action = entity.GetString("Action") ?? "Block"
                 });
             }
 
@@ -174,7 +178,11 @@ namespace AutopilotMonitor.Functions.Services
                     if (unblockAt <= now) continue; // Skip expired
 
                     var serialNumber = entity.GetString("SerialNumber") ?? DecodeRowKey(entity.RowKey);
-                    _cache[BuildCacheKey(tenantId, serialNumber)] = unblockAt;
+                    _cache[BuildCacheKey(tenantId, serialNumber)] = new BlockCacheEntry
+                    {
+                        UnblockAt = unblockAt,
+                        Action = entity.GetString("Action") ?? "Block"
+                    };
                 }
 
                 _logger.LogDebug("Loaded block list for tenant {TenantId}", tenantId);
@@ -194,6 +202,12 @@ namespace AutopilotMonitor.Functions.Services
                 try { await tableClient.DeleteEntityAsync(tenantId, rowKey); }
                 catch { /* best effort */ }
             }
+        }
+
+        private class BlockCacheEntry
+        {
+            public DateTime UnblockAt { get; set; }
+            public string Action { get; set; } = "Block";
         }
 
         private static string BuildCacheKey(string tenantId, string serialNumber)
@@ -219,5 +233,6 @@ namespace AutopilotMonitor.Functions.Services
         public string BlockedByEmail { get; set; } = string.Empty;
         public int DurationHours { get; set; }
         public string? Reason { get; set; }
+        public string Action { get; set; } = "Block";
     }
 }

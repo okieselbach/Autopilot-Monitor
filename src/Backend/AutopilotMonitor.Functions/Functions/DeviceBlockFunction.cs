@@ -86,6 +86,7 @@ namespace AutopilotMonitor.Functions.Functions
                 var serialNumber = json["serialNumber"]?.ToString();
                 var durationHours = json["durationHours"]?.Value<int>() ?? 12;
                 var reason = json["reason"]?.ToString();
+                var action = json["action"]?.ToString() ?? "Block";
 
                 if (string.IsNullOrEmpty(tenantId) || string.IsNullOrEmpty(serialNumber))
                     return await BadRequestAsync(req, "tenantId and serialNumber are required");
@@ -93,18 +94,29 @@ namespace AutopilotMonitor.Functions.Functions
                 if (durationHours < 1 || durationHours > 720) // max 30 days
                     return await BadRequestAsync(req, "durationHours must be between 1 and 720");
 
-                await _blockedDeviceService.BlockDeviceAsync(tenantId, serialNumber, durationHours, userIdentifier, reason);
+                if (!string.Equals(action, "Block", StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(action, "Kill", StringComparison.OrdinalIgnoreCase))
+                    return await BadRequestAsync(req, "action must be 'Block' or 'Kill'");
 
+                // Normalize casing
+                action = string.Equals(action, "Kill", StringComparison.OrdinalIgnoreCase) ? "Kill" : "Block";
+
+                await _blockedDeviceService.BlockDeviceAsync(tenantId, serialNumber, durationHours, userIdentifier, reason, action);
+
+                var isKill = action == "Kill";
                 _logger.LogWarning(
-                    "Galactic Admin {User} blocked device {SerialNumber} in tenant {TenantId} for {Hours}h. Reason: {Reason}",
-                    userIdentifier, serialNumber, tenantId, durationHours, reason);
+                    "Galactic Admin {User} {Action} device {SerialNumber} in tenant {TenantId} for {Hours}h. Reason: {Reason}",
+                    userIdentifier, isKill ? "issued KILL signal to" : "blocked", serialNumber, tenantId, durationHours, reason);
 
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(new
                 {
                     success = true,
-                    message = $"Device {serialNumber} blocked for {durationHours} hours.",
-                    unblockAt = DateTime.UtcNow.AddHours(durationHours)
+                    message = isKill
+                        ? $"Device {serialNumber} issued remote kill signal for {durationHours} hours."
+                        : $"Device {serialNumber} blocked for {durationHours} hours.",
+                    unblockAt = DateTime.UtcNow.AddHours(durationHours),
+                    action
                 });
                 return response;
             }

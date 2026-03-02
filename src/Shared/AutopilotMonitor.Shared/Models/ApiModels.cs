@@ -68,6 +68,12 @@ namespace AutopilotMonitor.Shared.Models
         /// When the block expires (only populated if DeviceBlocked is true)
         /// </summary>
         public DateTime? UnblockAt { get; set; }
+
+        /// <summary>
+        /// Whether the device has been issued a remote kill signal (graceful self-destruct).
+        /// The agent should execute its self-destruct routine and exit.
+        /// </summary>
+        public bool DeviceKillSignal { get; set; }
     }
 
     /// <summary>

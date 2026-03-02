@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { API_BASE_URL } from "@/lib/config";
 import { TenantConfiguration } from "./TenantManagementSection";
+import { TenantSearchSelect } from "./TenantSearchSelect";
 import { SessionExportEvent, generateCsvExport, generateUiExport } from "@/lib/sessionExportUtils";
 
 function downloadFile(content: string, filename: string, mimeType: string) {
@@ -88,37 +89,12 @@ export function SessionExportSection({
             </div>
             <div>
               <label className="block text-sm font-medium text-teal-900 dark:text-teal-100 mb-1">Tenant ID</label>
-              {tenants.length > 0 ? (
-                <div className="space-y-1.5">
-                  <select
-                    value={tenants.some(t => t.tenantId === exportTenantId) ? exportTenantId : ""}
-                    onChange={e => { if (e.target.value) setExportTenantId(e.target.value); }}
-                    className="w-full px-3 py-2 border border-teal-300 dark:border-teal-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
-                  >
-                    <option value="">&mdash; select tenant &mdash;</option>
-                    {[...tenants].sort((a, b) => (a.domainName || a.tenantId).localeCompare(b.domainName || b.tenantId)).map(t => (
-                      <option key={t.tenantId} value={t.tenantId}>
-                        {t.domainName ? `${t.domainName} (${t.tenantId})` : t.tenantId}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    type="text"
-                    placeholder="or enter Tenant ID directly"
-                    value={exportTenantId}
-                    onChange={e => setExportTenantId(e.target.value)}
-                    className="w-full px-3 py-2 border border-teal-300 dark:border-teal-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
-                  />
-                </div>
-              ) : (
-                <input
-                  type="text"
-                  placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                  value={exportTenantId}
-                  onChange={e => setExportTenantId(e.target.value)}
-                  className="w-full px-3 py-2 border border-teal-300 dark:border-teal-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
-                />
-              )}
+              <TenantSearchSelect
+                tenants={tenants}
+                value={exportTenantId}
+                onChange={setExportTenantId}
+                focusRingClass="focus:ring-teal-500 focus:border-teal-500"
+              />
             </div>
           </div>
 

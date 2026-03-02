@@ -859,6 +859,21 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 
                 var response = await _apiClient.IngestEventsAsync(request);
 
+                if (response.DeviceKillSignal)
+                {
+                    _logger.Warning("=== REMOTE KILL SIGNAL received from administrator. Initiating self-destruct... ===");
+
+                    // Stop all timers — no further uploads
+                    _uploadTimer?.Change(Timeout.Infinite, Timeout.Infinite);
+                    _debounceTimer?.Change(Timeout.Infinite, Timeout.Infinite);
+
+                    // Force self-destruct regardless of current config, respecting KeepLogFile from tenant config
+                    _configuration.SelfDestructOnComplete = true;
+                    _cleanupService.ExecuteSelfDestruct();
+                    Environment.Exit(0);
+                    return;
+                }
+
                 if (response.DeviceBlocked)
                 {
                     var unblockMsg = response.UnblockAt.HasValue

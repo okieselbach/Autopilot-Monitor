@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { API_BASE_URL } from "@/lib/config";
 import { TenantConfiguration } from "./TenantManagementSection";
+import { TenantSearchSelect } from "./TenantSearchSelect";
 
 interface BlockedDevice {
   tenantId: string;
@@ -12,6 +13,7 @@ interface BlockedDevice {
   blockedByEmail: string;
   durationHours: number;
   reason?: string;
+  action?: string;
 }
 
 interface DeviceBlockSectionProps {
@@ -49,6 +51,7 @@ export function DeviceBlockSection({
   const [blockedDevices, setBlockedDevices] = useState<BlockedDevice[]>([]);
   const [loadingBlockedDevices, setLoadingBlockedDevices] = useState(false);
   const [unblockingDevice, setUnblockingDevice] = useState<string | null>(null);
+  const [blockAction, setBlockAction] = useState<"Block" | "Kill">("Block");
   const [blockListTenantId, setBlockListTenantId] = useState("");
 
   const fetchBlockedDevices = async (tenantId: string) => {
@@ -72,6 +75,11 @@ export function DeviceBlockSection({
 
   const handleBlockDevice = async () => {
     if (!blockSerialNumber.trim() || !blockTenantId.trim()) return;
+
+    if (blockAction === "Kill" && !confirm(
+      `REMOTE KILL: This will permanently shut down the agent on device "${blockSerialNumber.trim()}" and remove all agent files. This cannot be undone. Continue?`
+    )) return;
+
     try {
       setBlockingDevice(true);
       setError(null);
@@ -85,14 +93,20 @@ export function DeviceBlockSection({
           serialNumber: blockSerialNumber.trim(),
           durationHours: blockDurationHours,
           reason: blockReason.trim() || undefined,
+          action: blockAction,
         }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.message || response.statusText);
-      setSuccessMessage(`Device ${blockSerialNumber.trim()} blocked for ${blockDurationHours}h.`);
+      setSuccessMessage(
+        blockAction === "Kill"
+          ? `Device ${blockSerialNumber.trim()} issued remote kill signal for ${blockDurationHours}h.`
+          : `Device ${blockSerialNumber.trim()} blocked for ${blockDurationHours}h.`
+      );
       setTimeout(() => setSuccessMessage(null), 4000);
       setBlockSerialNumber("");
       setBlockReason("");
+      setBlockAction("Block");
       if (blockListTenantId === blockTenantId) await fetchBlockedDevices(blockTenantId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to block device");
@@ -191,9 +205,9 @@ export function DeviceBlockSection({
           </button>
         </div>
 
-        {/* Block a device form */}
+        {/* Block / Kill a device form */}
         <div>
-          <h3 className="text-sm font-semibold text-red-900 dark:text-red-100 mb-3">Block a Device</h3>
+          <h3 className="text-sm font-semibold text-red-900 dark:text-red-100 mb-3">Block or Kill a Device</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Serial Number</label>
@@ -207,15 +221,22 @@ export function DeviceBlockSection({
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Tenant ID</label>
-              <select
+              <TenantSearchSelect
+                tenants={tenants}
                 value={blockTenantId}
-                onChange={(e) => setBlockTenantId(e.target.value)}
+                onChange={setBlockTenantId}
+                focusRingClass="focus:ring-red-500 focus:border-red-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Action</label>
+              <select
+                value={blockAction}
+                onChange={(e) => setBlockAction(e.target.value as "Block" | "Kill")}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-gray-100 bg-white dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500"
               >
-                <option value="">&mdash; select tenant &mdash;</option>
-                {tenants.map((t) => (
-                  <option key={t.tenantId} value={t.tenantId}>{t.domainName ? `${t.domainName} (${t.tenantId})` : t.tenantId}</option>
-                ))}
+                <option value="Block">Block (stop uploads)</option>
+                <option value="Kill">Kill (remote shutdown)</option>
               </select>
             </div>
             <div>
@@ -229,7 +250,7 @@ export function DeviceBlockSection({
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-gray-100 bg-white dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500"
               />
             </div>
-            <div>
+            <div className="sm:col-span-2">
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Reason (optional)</label>
               <input
                 type="text"
@@ -240,15 +261,26 @@ export function DeviceBlockSection({
               />
             </div>
           </div>
+          {blockAction === "Kill" && (
+            <div className="mt-3 p-3 bg-red-100 dark:bg-red-900/40 border border-red-300 dark:border-red-700 rounded-lg">
+              <p className="text-xs text-red-800 dark:text-red-200 font-medium">
+                The agent will execute its self-destruct routine: remove the Scheduled Task and delete all agent files. This is irreversible once the agent picks up the signal.
+              </p>
+            </div>
+          )}
           <button
             onClick={handleBlockDevice}
             disabled={blockingDevice || !blockSerialNumber.trim() || !blockTenantId}
-            className="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 disabled:opacity-50 flex items-center space-x-2"
+            className={`mt-4 px-4 py-2 text-white rounded-lg text-sm font-medium disabled:opacity-50 flex items-center space-x-2 ${
+              blockAction === "Kill"
+                ? "bg-red-800 hover:bg-red-900 dark:bg-red-700 dark:hover:bg-red-800"
+                : "bg-red-600 hover:bg-red-700"
+            }`}
           >
             {blockingDevice ? (
-              <><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div><span>Blocking...</span></>
+              <><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div><span>{blockAction === "Kill" ? "Sending Kill..." : "Blocking..."}</span></>
             ) : (
-              <span>Block Device</span>
+              <span>{blockAction === "Kill" ? "Send Kill Signal" : "Block Device"}</span>
             )}
           </button>
         </div>
@@ -259,16 +291,12 @@ export function DeviceBlockSection({
           <div className="flex items-end gap-3 mb-4">
             <div className="flex-1">
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Tenant</label>
-              <select
+              <TenantSearchSelect
+                tenants={tenants}
                 value={blockListTenantId}
-                onChange={(e) => setBlockListTenantId(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-gray-100 bg-white dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500"
-              >
-                <option value="">&mdash; select tenant &mdash;</option>
-                {tenants.map((t) => (
-                  <option key={t.tenantId} value={t.tenantId}>{t.domainName ? `${t.domainName} (${t.tenantId})` : t.tenantId}</option>
-                ))}
-              </select>
+                onChange={setBlockListTenantId}
+                focusRingClass="focus:ring-red-500 focus:border-red-500"
+              />
             </div>
             <button
               onClick={() => fetchBlockedDevices(blockListTenantId)}
@@ -284,8 +312,9 @@ export function DeviceBlockSection({
                 <thead className="text-xs text-red-800 dark:text-red-200 uppercase bg-red-100 dark:bg-red-900/30">
                   <tr>
                     <th className="px-3 py-2">Serial Number</th>
+                    <th className="px-3 py-2">Type</th>
                     <th className="px-3 py-2">Blocked Since</th>
-                    <th className="px-3 py-2">Unblocks At</th>
+                    <th className="px-3 py-2">Expires At</th>
                     <th className="px-3 py-2">Blocked By</th>
                     <th className="px-3 py-2">Reason</th>
                     <th className="px-3 py-2">Action</th>
@@ -295,6 +324,13 @@ export function DeviceBlockSection({
                   {blockedDevices.map((d) => (
                     <tr key={d.serialNumber} className="bg-white dark:bg-gray-800">
                       <td className="px-3 py-2 font-mono font-medium text-gray-900 dark:text-gray-100">{d.serialNumber}</td>
+                      <td className="px-3 py-2">
+                        {d.action === "Kill" ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-red-700 text-white">Kill</span>
+                        ) : (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-orange-200 dark:bg-orange-800 text-orange-800 dark:text-orange-200">Block</span>
+                        )}
+                      </td>
                       <td className="px-3 py-2 text-gray-600 dark:text-gray-400">{new Date(d.blockedAt).toLocaleString()}</td>
                       <td className="px-3 py-2 text-orange-600 dark:text-orange-400 font-medium">{new Date(d.unblockAt).toLocaleString()}</td>
                       <td className="px-3 py-2 text-gray-600 dark:text-gray-400">{d.blockedByEmail}</td>
@@ -305,7 +341,7 @@ export function DeviceBlockSection({
                           disabled={unblockingDevice === d.serialNumber}
                           className="px-3 py-1 bg-green-600 text-white rounded text-xs font-medium hover:bg-green-700 disabled:opacity-50"
                         >
-                          {unblockingDevice === d.serialNumber ? "Unblocking..." : "Unblock"}
+                          {unblockingDevice === d.serialNumber ? "Removing..." : "Remove"}
                         </button>
                       </td>
                     </tr>
