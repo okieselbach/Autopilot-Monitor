@@ -267,6 +267,7 @@ export default function DownloadProgress({ events, summaryStats }: DownloadProgr
 
 function DownloadItem({ download: dl, progressPercent }: { download: DownloadItem; progressPercent: number }) {
   const [showDetails, setShowDetails] = useState(false);
+  const [showDoStats, setShowDoStats] = useState(false);
   const hasKnownTotal = dl.bytesTotal > 0;
   const showProgressBar = !dl.isSkipped && (hasKnownTotal || dl.isComplete || !dl.isComplete);
 
@@ -346,61 +347,67 @@ function DownloadItem({ download: dl, progressPercent }: { download: DownloadIte
                 </div>
               )}
 
-              {/* Delivery Optimization stats */}
+              {/* Delivery Optimization stats (collapsible) */}
               {dl.doStats && dl.doStats.fileSize > 0 && (
-                <div className="mt-2 p-2 bg-blue-50 rounded border border-blue-100">
-                  <div className="flex items-center space-x-1 mb-1">
+                <div className="mt-2">
+                  <button
+                    onClick={() => setShowDoStats(!showDoStats)}
+                    className="flex items-center space-x-1 text-xs text-blue-600 hover:text-blue-800"
+                  >
                     <svg className="w-3.5 h-3.5 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                     </svg>
-                    <span className="text-xs font-medium text-blue-700">Delivery Optimization</span>
-                    <span className="text-xs text-blue-500">
-                      ({formatDoMode(dl.doStats.downloadMode)})
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-gray-600">
-                    <div>
-                      <span className="text-gray-500">Duration:</span>{" "}
-                      <span className="font-medium">{formatDoDuration(dl.doStats.downloadDuration)}</span>
-                    </div>
-                    <div>
-                      <span className="text-gray-500">File Size:</span>{" "}
-                      <span className="font-medium">{formatBytes(dl.doStats.fileSize)}</span>
-                    </div>
-                    <div>
-                      <span className="text-gray-500">From HTTP:</span>{" "}
-                      <span className="font-medium">{formatBytes(dl.doStats.bytesFromHttp)}</span>
-                    </div>
-                    <div>
-                      <span className="text-gray-500">From Peers:</span>{" "}
-                      <span className="font-medium">
-                        {formatBytes(dl.doStats.bytesFromPeers)}
-                        {dl.doStats.percentPeerCaching > 0 && (
-                          <span className="text-green-600 ml-1">({dl.doStats.percentPeerCaching}%)</span>
+                    <span className="font-medium">Delivery Optimization</span>
+                    <span className="text-blue-500">({formatDoMode(dl.doStats.downloadMode)})</span>
+                    <span className="text-blue-400">{showDoStats ? '▼' : '▶'}</span>
+                  </button>
+                  {showDoStats && (
+                    <div className="mt-1 p-2 bg-blue-50 rounded border border-blue-100">
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-gray-600">
+                        <div>
+                          <span className="text-gray-500">Duration:</span>{" "}
+                          <span className="font-medium">{formatDoDuration(dl.doStats.downloadDuration)}</span>
+                        </div>
+                        <div>
+                          <span className="text-gray-500">File Size:</span>{" "}
+                          <span className="font-medium">{formatBytes(dl.doStats.fileSize)}</span>
+                        </div>
+                        <div>
+                          <span className="text-gray-500">From HTTP:</span>{" "}
+                          <span className="font-medium">{formatBytes(dl.doStats.bytesFromHttp)}</span>
+                        </div>
+                        <div>
+                          <span className="text-gray-500">From Peers:</span>{" "}
+                          <span className="font-medium">
+                            {formatBytes(dl.doStats.bytesFromPeers)}
+                            {dl.doStats.percentPeerCaching > 0 && (
+                              <span className="text-green-600 ml-1">({dl.doStats.percentPeerCaching}%)</span>
+                            )}
+                          </span>
+                        </div>
+                        {dl.doStats.bytesFromPeers > 0 && (
+                          <div className="col-span-2 mt-1 text-xs text-gray-500">
+                            Peer breakdown: LAN {formatBytes(dl.doStats.bytesFromLanPeers)}
+                            {" | "}Group {formatBytes(dl.doStats.bytesFromGroupPeers)}
+                            {" | "}Internet {formatBytes(dl.doStats.bytesFromInternetPeers)}
+                          </div>
                         )}
-                      </span>
-                    </div>
-                    {dl.doStats.bytesFromPeers > 0 && (
-                      <div className="col-span-2 mt-1 text-xs text-gray-500">
-                        Peer breakdown: LAN {formatBytes(dl.doStats.bytesFromLanPeers)}
-                        {" | "}Group {formatBytes(dl.doStats.bytesFromGroupPeers)}
-                        {" | "}Internet {formatBytes(dl.doStats.bytesFromInternetPeers)}
                       </div>
-                    )}
-                  </div>
-                  {/* Peer vs HTTP visual bar */}
-                  <div className="mt-1.5 w-full h-1.5 bg-gray-200 rounded-full overflow-hidden flex">
-                    <div
-                      className="h-full bg-green-400"
-                      style={{ width: `${dl.doStats.percentPeerCaching}%` }}
-                      title={`${dl.doStats.percentPeerCaching}% from peers`}
-                    />
-                    <div
-                      className="h-full bg-blue-400"
-                      style={{ width: `${100 - dl.doStats.percentPeerCaching}%` }}
-                      title={`${100 - dl.doStats.percentPeerCaching}% from HTTP`}
-                    />
-                  </div>
+                      {/* Peer vs HTTP visual bar */}
+                      <div className="mt-1.5 w-full h-1.5 bg-gray-200 rounded-full overflow-hidden flex">
+                        <div
+                          className="h-full bg-green-400"
+                          style={{ width: `${dl.doStats.percentPeerCaching}%` }}
+                          title={`${dl.doStats.percentPeerCaching}% from peers`}
+                        />
+                        <div
+                          className="h-full bg-blue-400"
+                          style={{ width: `${100 - dl.doStats.percentPeerCaching}%` }}
+                          title={`${100 - dl.doStats.percentPeerCaching}% from HTTP`}
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
