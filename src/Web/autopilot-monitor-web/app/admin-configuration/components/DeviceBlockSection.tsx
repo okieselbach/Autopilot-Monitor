@@ -52,6 +52,7 @@ export function DeviceBlockSection({
   const [loadingBlockedDevices, setLoadingBlockedDevices] = useState(false);
   const [unblockingDevice, setUnblockingDevice] = useState<string | null>(null);
   const [blockAction, setBlockAction] = useState<"Block" | "Kill">("Block");
+  const [killingDevice, setKillingDevice] = useState<string | null>(null);
   const [blockListTenantId, setBlockListTenantId] = useState("");
 
   const fetchBlockedDevices = async (tenantId: string) => {
@@ -134,6 +135,40 @@ export function DeviceBlockSection({
       setError(err instanceof Error ? err.message : "Failed to unblock device");
     } finally {
       setUnblockingDevice(null);
+    }
+  };
+
+  const handleKillDevice = async (device: BlockedDevice) => {
+    if (!confirm(
+      `REMOTE KILL: This will permanently shut down the agent on device "${device.serialNumber}" and remove all agent files. This cannot be undone. Continue?`
+    )) return;
+
+    try {
+      setKillingDevice(device.serialNumber);
+      setError(null);
+      const token = await getAccessToken();
+      if (!token) throw new Error("Failed to get access token");
+      const remainingHours = Math.max(1, Math.ceil((new Date(device.unblockAt).getTime() - Date.now()) / 3600000));
+      const response = await fetch(`${API_BASE_URL}/api/devices/block`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          tenantId: device.tenantId,
+          serialNumber: device.serialNumber,
+          durationHours: remainingHours,
+          reason: device.reason || undefined,
+          action: "Kill",
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.message || response.statusText);
+      setSuccessMessage(`Device ${device.serialNumber} upgraded to kill signal.`);
+      setTimeout(() => setSuccessMessage(null), 4000);
+      await fetchBlockedDevices(device.tenantId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to send kill signal");
+    } finally {
+      setKillingDevice(null);
     }
   };
 
@@ -294,7 +329,7 @@ export function DeviceBlockSection({
               <TenantSearchSelect
                 tenants={tenants}
                 value={blockListTenantId}
-                onChange={setBlockListTenantId}
+                onChange={(id) => { setBlockListTenantId(id); if (id) fetchBlockedDevices(id); }}
                 focusRingClass="focus:ring-red-500 focus:border-red-500"
               />
             </div>
@@ -336,13 +371,24 @@ export function DeviceBlockSection({
                       <td className="px-3 py-2 text-gray-600 dark:text-gray-400">{d.blockedByEmail}</td>
                       <td className="px-3 py-2 text-gray-600 dark:text-gray-400">{d.reason || "\u2014"}</td>
                       <td className="px-3 py-2">
-                        <button
-                          onClick={() => handleUnblockDevice(d.tenantId, d.serialNumber)}
-                          disabled={unblockingDevice === d.serialNumber}
-                          className="px-3 py-1 bg-green-600 text-white rounded text-xs font-medium hover:bg-green-700 disabled:opacity-50"
-                        >
-                          {unblockingDevice === d.serialNumber ? "Removing..." : "Remove"}
-                        </button>
+                        <div className="flex items-center gap-2">
+                          {d.action !== "Kill" && (
+                            <button
+                              onClick={() => handleKillDevice(d)}
+                              disabled={killingDevice === d.serialNumber}
+                              className="px-3 py-1 bg-red-800 text-white rounded text-xs font-medium hover:bg-red-900 disabled:opacity-50"
+                            >
+                              {killingDevice === d.serialNumber ? "Killing..." : "Kill"}
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleUnblockDevice(d.tenantId, d.serialNumber)}
+                            disabled={unblockingDevice === d.serialNumber}
+                            className="px-3 py-1 bg-green-600 text-white rounded text-xs font-medium hover:bg-green-700 disabled:opacity-50"
+                          >
+                            {unblockingDevice === d.serialNumber ? "Removing..." : "Remove"}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}

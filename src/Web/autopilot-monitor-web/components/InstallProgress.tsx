@@ -144,6 +144,26 @@ export default function InstallProgress({ events, summaryStats }: InstallProgres
   const totalFromSummary = summaryStats?.totalApps;
   const installedFromSummary = summaryStats?.installed;
 
+  // Calculate total wall-clock duration (earliest start → latest completion)
+  const totalDuration = useMemo(() => {
+    let earliest = Infinity;
+    let latest = -Infinity;
+    for (const item of installs) {
+      if (item.startedAt) {
+        const t = new Date(item.startedAt).getTime();
+        if (t < earliest) earliest = t;
+      }
+      if (item.completedAt) {
+        const t = new Date(item.completedAt).getTime();
+        if (t > latest) latest = t;
+      }
+    }
+    if (earliest !== Infinity && latest !== -Infinity && latest > earliest) {
+      return latest - earliest;
+    }
+    return null;
+  }, [installs]);
+
   return (
     <div className="bg-white shadow rounded-lg p-6 mb-6">
       <button
@@ -158,6 +178,11 @@ export default function InstallProgress({ events, summaryStats }: InstallProgres
           {totalFromSummary != null && installedFromSummary != null && (
             <span className="text-xs text-gray-400">
               ({installedFromSummary} of {totalFromSummary} installed)
+            </span>
+          )}
+          {totalDuration != null && (
+            <span className="text-xs text-gray-400">
+              — Total: {formatDuration(totalDuration)}
             </span>
           )}
           <div className="flex items-center space-x-2 text-xs">
