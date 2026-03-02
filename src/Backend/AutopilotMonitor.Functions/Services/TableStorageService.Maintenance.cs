@@ -82,6 +82,44 @@ namespace AutopilotMonitor.Functions.Services
             }
         }
 
+        /// <summary>
+        /// Gets audit log entries across all tenants (Galactic Admin Mode)
+        /// </summary>
+        public async Task<List<AuditLogEntry>> GetAllAuditLogsAsync(int maxResults = 100)
+        {
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.AuditLogs);
+                var query = tableClient.QueryAsync<TableEntity>();
+
+                var logs = new List<AuditLogEntry>();
+                await foreach (var entity in query)
+                {
+                    logs.Add(new AuditLogEntry
+                    {
+                        Id = entity.RowKey,
+                        TenantId = entity.PartitionKey,
+                        Action = entity.GetString("Action") ?? string.Empty,
+                        EntityType = entity.GetString("EntityType") ?? string.Empty,
+                        EntityId = entity.GetString("EntityId") ?? string.Empty,
+                        PerformedBy = entity.GetString("PerformedBy") ?? string.Empty,
+                        Timestamp = entity.GetDateTimeOffset("Timestamp")?.UtcDateTime ?? DateTime.UtcNow,
+                        Details = entity.GetString("Details") ?? string.Empty
+                    });
+
+                    if (logs.Count >= maxResults) break;
+                }
+
+                // Sort by timestamp descending (most recent first)
+                return logs.OrderByDescending(l => l.Timestamp).Take(maxResults).ToList();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to get all audit logs");
+                return new List<AuditLogEntry>();
+            }
+        }
+
         // ===== DATA RETENTION METHODS =====
 
         /// <summary>
