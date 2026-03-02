@@ -282,16 +282,18 @@ namespace AutopilotMonitor.Functions.Functions
                     );
 
                     // Fallback: if the optimistic-concurrency merge failed despite internal retries
-                    // (5 ETag retries + force-write), use an unconditional single-field write to at
-                    // least persist the critical IsPreProvisioned flag.
+                    // (5 ETag retries + force-write), use an unconditional write to persist both
+                    // IsPreProvisioned and Status=Pending. UpdateSessionStatusAsync only retries
+                    // on ETag conflicts (412); any other transient error (429/503/timeout) causes
+                    // an immediate return false — this fallback bypasses that limitation.
                     if (!whiteGloveStatusTransitioned)
                     {
-                        _logger.LogWarning("{SessionPrefix} WhiteGlove UpdateSessionStatusAsync failed, attempting unconditional fallback for IsPreProvisioned", sessionPrefix);
+                        _logger.LogWarning("{SessionPrefix} WhiteGlove UpdateSessionStatusAsync failed, attempting unconditional fallback for IsPreProvisioned + Status", sessionPrefix);
                         try
                         {
-                            await _storageService.SetSessionPreProvisionedAsync(request.TenantId, request.SessionId, true);
+                            await _storageService.SetSessionPreProvisionedAsync(request.TenantId, request.SessionId, true, SessionStatus.Pending);
                             whiteGloveStatusTransitioned = true;
-                            _logger.LogInformation("{SessionPrefix} WhiteGlove fallback succeeded: IsPreProvisioned set via unconditional merge", sessionPrefix);
+                            _logger.LogInformation("{SessionPrefix} WhiteGlove fallback succeeded: IsPreProvisioned + Status=Pending set via unconditional merge", sessionPrefix);
                         }
                         catch (Exception fallbackEx)
                         {

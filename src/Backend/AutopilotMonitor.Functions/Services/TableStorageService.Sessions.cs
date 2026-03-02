@@ -547,7 +547,24 @@ namespace AutopilotMonitor.Functions.Services
                     // Exponential backoff with jitter to decorrelate concurrent retries
                     var baseDelay = 50 * (int)Math.Pow(2, retryCount - 1);
                     await Task.Delay(baseDelay + Random.Shared.Next(0, baseDelay));
-                    _logger.LogDebug($"Retrying session {sessionId} update (attempt {retryCount}/{maxRetries})");
+                    _logger.LogDebug($"Retrying session {sessionId} update (attempt {retryCount}/{maxRetries}) after ETag conflict");
+                }
+                catch (Azure.RequestFailedException ex) when (ex.Status == 429 || ex.Status == 503 || ex.Status == 408)
+                {
+                    // Transient Azure Table Storage errors — retry with backoff instead of
+                    // immediately returning false. Without this, a single throttle (429) or
+                    // service hiccup (503/408) during the WhiteGlove drain causes the entire
+                    // status update to fail silently, leaving the session in a broken state.
+                    retryCount++;
+                    if (retryCount >= maxRetries)
+                    {
+                        _logger.LogError(ex, $"Session {sessionId}: transient error {ex.Status} persisted after {maxRetries} retries for status={status}");
+                        return false;
+                    }
+
+                    var baseDelay = 100 * (int)Math.Pow(2, retryCount - 1);
+                    await Task.Delay(baseDelay + Random.Shared.Next(0, baseDelay));
+                    _logger.LogWarning($"Session {sessionId}: transient error {ex.Status}, retrying (attempt {retryCount}/{maxRetries})");
                 }
                 catch (Exception ex)
                 {
@@ -694,11 +711,11 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
-        /// Sets the IsPreProvisioned flag on an existing session (unconditional Merge-mode write).
-        /// Uses ETag.All to bypass optimistic-concurrency conflicts, making this suitable as a
-        /// last-resort fallback when ETag-based updates have been exhausted.
+        /// Sets the IsPreProvisioned flag (and optionally Status) on an existing session via
+        /// unconditional Merge-mode write. Uses ETag.All to bypass optimistic-concurrency conflicts,
+        /// making this suitable as a last-resort fallback when ETag-based updates have been exhausted.
         /// </summary>
-        public async Task SetSessionPreProvisionedAsync(string tenantId, string sessionId, bool isPreProvisioned)
+        public async Task SetSessionPreProvisionedAsync(string tenantId, string sessionId, bool isPreProvisioned, SessionStatus? status = null)
         {
             SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
             SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
@@ -710,8 +727,13 @@ namespace AutopilotMonitor.Functions.Services
                 ["IsPreProvisioned"] = isPreProvisioned
             };
 
+            if (status.HasValue)
+            {
+                update["Status"] = status.Value.ToString();
+            }
+
             await tableClient.UpdateEntityAsync(update, ETag.All, TableUpdateMode.Merge);
-            _logger.LogInformation($"Set IsPreProvisioned={isPreProvisioned} for session {sessionId} (unconditional merge)");
+            _logger.LogInformation($"Set IsPreProvisioned={isPreProvisioned}, Status={status?.ToString() ?? "(unchanged)"} for session {sessionId} (unconditional merge)");
         }
 
         /// <summary>
