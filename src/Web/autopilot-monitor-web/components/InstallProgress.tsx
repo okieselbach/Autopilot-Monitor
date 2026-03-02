@@ -133,25 +133,18 @@ export default function InstallProgress({ events, summaryStats }: InstallProgres
 
   const [expanded, setExpanded] = useState(true);
 
-  // Calculate total wall-clock duration (earliest start → latest completion)
+  // Sum of individual install durations (actual time spent installing, not wall-clock)
   // Must be before the early return to keep hooks in stable order across renders.
   const totalDuration = useMemo(() => {
-    let earliest = Infinity;
-    let latest = -Infinity;
+    let sum = 0;
+    let hasAny = false;
     for (const item of installs) {
-      if (item.startedAt) {
-        const t = new Date(item.startedAt).getTime();
-        if (t < earliest) earliest = t;
-      }
-      if (item.completedAt) {
-        const t = new Date(item.completedAt).getTime();
-        if (t > latest) latest = t;
+      if (item.durationMs != null && item.durationMs > 0) {
+        sum += item.durationMs;
+        hasAny = true;
       }
     }
-    if (earliest !== Infinity && latest !== -Infinity && latest > earliest) {
-      return latest - earliest;
-    }
-    return null;
+    return hasAny ? sum : null;
   }, [installs]);
 
   if (installs.length === 0) return null;

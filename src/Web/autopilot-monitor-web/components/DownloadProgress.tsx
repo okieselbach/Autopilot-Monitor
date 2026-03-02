@@ -76,18 +76,32 @@ function formatDoMode(mode: number): string {
   }
 }
 
-function formatDoDuration(duration: string): string {
-  if (!duration) return "N/A";
+function formatDuration(ms: number): string {
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  if (minutes < 60) return `${minutes}m ${remainingSeconds}s`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return `${hours}h ${remainingMinutes}m`;
+}
+
+function parseDoDurationMs(duration: string): number {
+  if (!duration) return 0;
   const match = duration.match(/^(\d+):(\d+):(\d+)\.?(\d+)?$/);
-  if (!match) return duration;
+  if (!match) return 0;
   const hours = parseInt(match[1], 10);
   const mins = parseInt(match[2], 10);
   const secs = parseInt(match[3], 10);
-  const ms = match[4] ? parseInt(match[4].substring(0, 3), 10) : 0;
-  if (hours > 0) return `${hours}h ${mins}m ${secs}s`;
-  if (mins > 0) return `${mins}m ${secs}s`;
-  if (secs > 0) return ms > 0 ? `${secs}.${ms}s` : `${secs}s`;
-  return `${ms}ms`;
+  const frac = match[4] ? parseInt(match[4].padEnd(3, "0").substring(0, 3), 10) : 0;
+  return ((hours * 3600) + (mins * 60) + secs) * 1000 + frac;
+}
+
+function formatDoDuration(duration: string): string {
+  const ms = parseDoDurationMs(duration);
+  if (ms <= 0) return duration || "N/A";
+  return formatDuration(ms);
 }
 
 export default function DownloadProgress({ events, summaryStats }: DownloadProgressProps) {
@@ -201,6 +215,23 @@ export default function DownloadProgress({ events, summaryStats }: DownloadProgr
 
   const [expanded, setExpanded] = useState(true);
 
+  // Sum of individual download durations (from DO telemetry per app)
+  // Must be before the early return to keep hooks in stable order across renders.
+  const totalDuration = useMemo(() => {
+    let sum = 0;
+    let hasAny = false;
+    for (const dl of downloads) {
+      if (dl.doStats?.downloadDuration) {
+        const ms = parseDoDurationMs(dl.doStats.downloadDuration);
+        if (ms > 0) {
+          sum += ms;
+          hasAny = true;
+        }
+      }
+    }
+    return hasAny ? sum : null;
+  }, [downloads]);
+
   if (downloads.length === 0) return null;
 
   const activeCount = downloads.filter(d => !d.isComplete && !d.isSkipped).length;
@@ -230,6 +261,11 @@ export default function DownloadProgress({ events, summaryStats }: DownloadProgr
             <span className="text-xs text-gray-400">({downloadedCount} of {totalDownloadable} downloaded)</span>
           ) : (
             <span className="text-xs text-gray-400">({downloads.length} {downloads.length === 1 ? 'download' : 'downloads'})</span>
+          )}
+          {totalDuration != null && (
+            <span className="text-xs text-gray-400">
+              — Total: {formatDuration(totalDuration)}
+            </span>
           )}
           <div className="flex items-center space-x-2 text-xs">
             {activeCount > 0 && (
