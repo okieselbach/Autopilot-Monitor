@@ -115,6 +115,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
             var ndjson = CreateNdjson(request);
             var compressedContent = CompressWithGzip(ndjson);
 
+            _logger?.Debug($"IngestEventsAsync: POST {url} — {request.Events.Count} events, {compressedContent.Length} bytes compressed");
+
             var httpRequest = new HttpRequestMessage(HttpMethod.Post, url)
             {
                 Content = new ByteArrayContent(compressedContent)
@@ -164,6 +166,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
 
             var httpRequest = new HttpRequestMessage(HttpMethod.Get, url);
             AddSecurityHeaders(httpRequest);
+
+            _logger?.Debug($"GetAgentConfigAsync: GET {url}");
 
             var sw = Stopwatch.StartNew();
             var failed = false;

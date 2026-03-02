@@ -304,8 +304,17 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                         return (true, null);
                     }
 
-                    lastErrorCode = $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}";
+                    var statusCode = (int)response.StatusCode;
+                    lastErrorCode = $"HTTP {statusCode} {response.ReasonPhrase}";
                     var responseBody = await response.Content.ReadAsStringAsync();
+
+                    // Auth errors (401/403) are permanent — SAS token invalid or expired, retrying won't help
+                    if (statusCode == 401 || statusCode == 403)
+                    {
+                        _logger.Warning($"Blob upload auth error (not retryable): {lastErrorCode} - {responseBody}");
+                        return (false, lastErrorCode);
+                    }
+
                     _logger.Warning($"Blob upload attempt {attempt} failed: {lastErrorCode} - {responseBody}");
                 }
                 catch (Exception ex)

@@ -17,7 +17,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
     ///
     /// A failure in this reporter is silently swallowed — it must never cascade into the main loop.
     /// </summary>
-    internal class EmergencyReporter
+    public class EmergencyReporter
     {
         /// <summary>
         /// Number of consecutive upload failures required before the first emergency report is sent.

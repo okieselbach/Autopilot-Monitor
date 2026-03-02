@@ -19,6 +19,7 @@ namespace AutopilotMonitor.Agent.Core.Configuration
         private readonly string _tenantId;
         private readonly AgentLogger _logger;
         private readonly string _cacheFilePath;
+        private readonly EmergencyReporter _emergencyReporter;
 
         private AgentConfigResponse _currentConfig;
         private readonly object _configLock = new object();
@@ -37,11 +38,12 @@ namespace AutopilotMonitor.Agent.Core.Configuration
             }
         }
 
-        public RemoteConfigService(BackendApiClient apiClient, string tenantId, AgentLogger logger)
+        public RemoteConfigService(BackendApiClient apiClient, string tenantId, AgentLogger logger, EmergencyReporter emergencyReporter = null)
         {
             _apiClient = apiClient ?? throw new ArgumentNullException(nameof(apiClient));
             _tenantId = tenantId ?? throw new ArgumentNullException(nameof(tenantId));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _emergencyReporter = emergencyReporter;
 
             var cacheDir = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor\Config");
             _cacheFilePath = Path.Combine(cacheDir, "remote-config.json");
@@ -74,6 +76,14 @@ namespace AutopilotMonitor.Agent.Core.Configuration
             catch (Exception ex)
             {
                 _logger.Warning($"Failed to fetch remote config: {ex.Message}");
+
+                // Report to emergency channel if available (not available in --run-gather-rules mode)
+                if (_emergencyReporter != null)
+                {
+                    _ = _emergencyReporter.TrySendAsync(
+                        AgentErrorType.ConfigFetchFailed,
+                        ex.Message);
+                }
             }
 
             // Fall back to cached config

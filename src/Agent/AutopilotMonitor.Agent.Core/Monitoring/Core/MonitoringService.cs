@@ -252,7 +252,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         {
             try
             {
-                _remoteConfigService = new RemoteConfigService(_apiClient, _configuration.TenantId, _logger);
+                _remoteConfigService = new RemoteConfigService(_apiClient, _configuration.TenantId, _logger, _emergencyReporter);
                 _remoteConfigService.FetchConfigAsync().Wait(TimeSpan.FromSeconds(15));
                 ApplyRuntimeSettingsFromRemoteConfig();
             }
@@ -546,6 +546,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             catch (Exception ex)
             {
                 _logger.Error("Failed to register session", ex);
+
+                // Report to emergency channel — one-shot, no threshold needed.
+                // EmergencyReporter dedup ensures RegisterSessionFailed:null sent only once per session.
+                _ = _emergencyReporter.TrySendAsync(
+                    AgentErrorType.RegisterSessionFailed,
+                    ex.Message);
             }
         }
 
