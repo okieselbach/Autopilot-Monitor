@@ -93,6 +93,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         public Action<string> OnPoliciesDiscovered { get; set; }
         public Action OnAllAppsCompleted { get; set; }
         public Action OnUserSessionCompleted { get; set; }
+        public Action<AppPackageState> OnDoTelemetryReceived { get; set; }
 
         /// <summary>
         /// Access to the tracked package states
@@ -289,7 +290,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                         (AppRunAs)p.RunAs, (AppIntent)p.Intent, (AppTargeted)p.Targeted,
                         p.DependsOn != null ? new HashSet<string>(p.DependsOn) : new HashSet<string>(),
                         (AppInstallationState)p.InstallationState, p.DownloadingOrInstallingSeen,
-                        p.ProgressPercent, p.BytesDownloaded, p.BytesTotal);
+                        p.ProgressPercent, p.BytesDownloaded, p.BytesTotal,
+                        doFileSize: p.DoFileSize, doTotalBytesDownloaded: p.DoTotalBytesDownloaded,
+                        doBytesFromPeers: p.DoBytesFromPeers, doPercentPeerCaching: p.DoPercentPeerCaching,
+                        doBytesFromLanPeers: p.DoBytesFromLanPeers, doBytesFromGroupPeers: p.DoBytesFromGroupPeers,
+                        doBytesFromInternetPeers: p.DoBytesFromInternetPeers, doDownloadMode: p.DoDownloadMode,
+                        doDownloadDuration: p.DoDownloadDuration, doBytesFromHttp: p.DoBytesFromHttp,
+                        hasDoTelemetry: p.HasDoTelemetry);
                     _packageStates.Add(pkg);
                 }
             }
@@ -343,7 +350,18 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     DownloadingOrInstallingSeen = p.DownloadingOrInstallingSeen,
                     ProgressPercent = p.ProgressPercent,
                     BytesDownloaded = p.BytesDownloaded,
-                    BytesTotal = p.BytesTotal
+                    BytesTotal = p.BytesTotal,
+                    DoFileSize = p.DoFileSize,
+                    DoTotalBytesDownloaded = p.DoTotalBytesDownloaded,
+                    DoBytesFromPeers = p.DoBytesFromPeers,
+                    DoPercentPeerCaching = p.DoPercentPeerCaching,
+                    DoBytesFromLanPeers = p.DoBytesFromLanPeers,
+                    DoBytesFromGroupPeers = p.DoBytesFromGroupPeers,
+                    DoBytesFromInternetPeers = p.DoBytesFromInternetPeers,
+                    DoDownloadMode = p.DoDownloadMode,
+                    DoDownloadDuration = p.DoDownloadDuration,
+                    DoBytesFromHttp = p.DoBytesFromHttp,
+                    HasDoTelemetry = p.HasDoTelemetry
                 }).ToList(),
                 FilePositions = new Dictionary<string, FilePositionData>()
             };
@@ -605,6 +623,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                         HandleCancelStuckAndSetCurrent(id);
                         break;
 
+                    case "updatedotelemetry":
+                        var doTelJson = match.Groups["doTelJson"]?.Value;
+                        if (!string.IsNullOrEmpty(doTelJson))
+                            HandleDoTelemetry(doTelJson);
+                        break;
+
                     default:
                         _logger.Debug($"ImeLogTracker: unhandled action '{pattern.Action}' for pattern {pattern.PatternId}");
                         break;
@@ -614,6 +638,104 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             {
                 _logger.Warning($"ImeLogTracker: error handling match for {pattern.PatternId}: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Parses [DO TEL] JSON and links it to the correct app via FileId.
+        /// The FileId contains the app GUID in the format: ...intunewin-bin_{appGuid}_{number}
+        /// </summary>
+        private void HandleDoTelemetry(string json)
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(json);
+                var root = doc.RootElement;
+
+                // Extract app GUID from FileId
+                string fileId = root.TryGetProperty("FileId", out var fileIdProp)
+                    ? fileIdProp.GetString() : null;
+
+                if (string.IsNullOrEmpty(fileId))
+                {
+                    _logger.Debug("ImeLogTracker: DO TEL entry has no FileId, skipping");
+                    return;
+                }
+
+                string appId = ExtractAppIdFromDoFileId(fileId);
+                if (string.IsNullOrEmpty(appId))
+                {
+                    appId = _packageStates.CurrentPackageId;
+                    _logger.Debug($"ImeLogTracker: Could not extract app ID from DO FileId, using current app: {appId}");
+                }
+
+                if (string.IsNullOrEmpty(appId)) return;
+
+                var pkg = _packageStates.GetPackage(appId);
+                if (pkg == null)
+                {
+                    _logger.Debug($"ImeLogTracker: DO TEL for unknown app {appId}, skipping");
+                    return;
+                }
+
+                // Extract all DO fields
+                long fileSize = root.TryGetProperty("FileSize", out var p) && p.ValueKind == JsonValueKind.Number ? p.GetInt64() : 0;
+                long totalBytes = root.TryGetProperty("TotalBytesDownloaded", out p) && p.ValueKind == JsonValueKind.Number ? p.GetInt64() : 0;
+                long bytesFromPeers = root.TryGetProperty("BytesFromPeers", out p) && p.ValueKind == JsonValueKind.Number ? p.GetInt64() : 0;
+                int peerCachingPct = root.TryGetProperty("PercentPeerCaching", out p) && p.ValueKind == JsonValueKind.Number ? p.GetInt32() : 0;
+                long bytesLanPeers = root.TryGetProperty("BytesFromLanPeers", out p) && p.ValueKind == JsonValueKind.Number ? p.GetInt64() : 0;
+                long bytesGroupPeers = root.TryGetProperty("BytesFromGroupPeers", out p) && p.ValueKind == JsonValueKind.Number ? p.GetInt64() : 0;
+                long bytesInternetPeers = root.TryGetProperty("BytesFromInternetPeers", out p) && p.ValueKind == JsonValueKind.Number ? p.GetInt64() : 0;
+                int downloadMode = root.TryGetProperty("DownloadMode", out p) && p.ValueKind == JsonValueKind.Number ? p.GetInt32() : -1;
+                string downloadDuration = root.TryGetProperty("DownloadDuration", out p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null;
+                long bytesFromHttp = root.TryGetProperty("BytesFromHttp", out p) && p.ValueKind == JsonValueKind.Number ? p.GetInt64() : 0;
+
+                pkg.UpdateDoTelemetry(fileSize, totalBytes, bytesFromPeers, peerCachingPct,
+                    bytesLanPeers, bytesGroupPeers, bytesInternetPeers,
+                    downloadMode, downloadDuration, bytesFromHttp);
+
+                _logger.Info($"ImeLogTracker: DO TEL for {pkg.Name ?? appId}: " +
+                    $"size={fileSize}, peers={bytesFromPeers} ({peerCachingPct}%), " +
+                    $"http={bytesFromHttp}, mode={downloadMode}, duration={downloadDuration}");
+
+                OnDoTelemetryReceived?.Invoke(pkg);
+                _stateDirty = true;
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"ImeLogTracker: Failed to parse DO TEL JSON: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Extracts app GUID from DO FileId string.
+        /// Format: ...intunewin-bin_{appGuid}_{number}
+        /// Falls back to trying the second-to-last GUID-like segment.
+        /// </summary>
+        private static string ExtractAppIdFromDoFileId(string fileId)
+        {
+            // Primary: look for "intunewin-bin_" marker
+            const string marker = "intunewin-bin_";
+            var idx = fileId.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (idx >= 0)
+            {
+                var afterMarker = fileId.Substring(idx + marker.Length);
+                if (afterMarker.Length >= 36)
+                {
+                    var candidate = afterMarker.Substring(0, 36);
+                    if (Guid.TryParse(candidate, out var guid))
+                        return guid.ToString().ToLowerInvariant();
+                }
+            }
+
+            // Fallback: split by underscore and find GUIDs, take the second-to-last one
+            var segments = fileId.Split('_');
+            for (int i = segments.Length - 2; i >= 0; i--)
+            {
+                if (Guid.TryParse(segments[i], out var guid))
+                    return guid.ToString().ToLowerInvariant();
+            }
+
+            return null;
         }
 
         private void HandleImeStarted()

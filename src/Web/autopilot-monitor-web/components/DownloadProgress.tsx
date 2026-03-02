@@ -23,6 +23,18 @@ interface DownloadProgressProps {
   summaryStats?: SummaryStats | null;
 }
 
+interface DoStats {
+  fileSize: number;
+  bytesFromPeers: number;
+  bytesFromHttp: number;
+  percentPeerCaching: number;
+  downloadMode: number;
+  downloadDuration: string;
+  bytesFromLanPeers: number;
+  bytesFromGroupPeers: number;
+  bytesFromInternetPeers: number;
+}
+
 interface DownloadItem {
   appName: string;
   bytesDownloaded: number;
@@ -34,6 +46,7 @@ interface DownloadItem {
   isSkipped: boolean;
   firstSeenIndex: number;
   eventData?: Record<string, any>;
+  doStats?: DoStats | null;
 }
 
 function formatBytes(bytes: number): string {
@@ -50,6 +63,31 @@ function formatSpeed(bps: number): string {
   const sizes = ["B/s", "KB/s", "MB/s", "GB/s"];
   const i = Math.floor(Math.log(bps) / Math.log(k));
   return `${(bps / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
+}
+
+function formatDoMode(mode: number): string {
+  switch (mode) {
+    case 0: return "Background";
+    case 1: return "Foreground";
+    case 2: return "Bypass/LAN Only";
+    case 99: return "Simple";
+    case 100: return "Bypass";
+    default: return `Mode ${mode}`;
+  }
+}
+
+function formatDoDuration(duration: string): string {
+  if (!duration) return "N/A";
+  const match = duration.match(/^(\d+):(\d+):(\d+)\.?(\d+)?$/);
+  if (!match) return duration;
+  const hours = parseInt(match[1], 10);
+  const mins = parseInt(match[2], 10);
+  const secs = parseInt(match[3], 10);
+  const ms = match[4] ? parseInt(match[4].substring(0, 3), 10) : 0;
+  if (hours > 0) return `${hours}h ${mins}m ${secs}s`;
+  if (mins > 0) return `${mins}m ${secs}s`;
+  if (secs > 0) return ms > 0 ? `${secs}.${ms}s` : `${secs}s`;
+  return `${ms}ms`;
 }
 
 export default function DownloadProgress({ events, summaryStats }: DownloadProgressProps) {
@@ -123,6 +161,22 @@ export default function DownloadProgress({ events, summaryStats }: DownloadProgr
         }
       }
 
+      // Extract DO telemetry if present in event data
+      let doStats: DoStats | null = existing?.doStats ?? null;
+      if (d.doFileSize !== undefined || d.doBytesFromPeers !== undefined || d.doDownloadMode !== undefined) {
+        doStats = {
+          fileSize: parseInt(d.doFileSize ?? "0", 10),
+          bytesFromPeers: parseInt(d.doBytesFromPeers ?? "0", 10),
+          bytesFromHttp: parseInt(d.doBytesFromHttp ?? "0", 10),
+          percentPeerCaching: parseInt(d.doPercentPeerCaching ?? "0", 10),
+          downloadMode: parseInt(d.doDownloadMode ?? "-1", 10),
+          downloadDuration: d.doDownloadDuration ?? "",
+          bytesFromLanPeers: parseInt(d.doBytesFromLanPeers ?? "0", 10),
+          bytesFromGroupPeers: parseInt(d.doBytesFromGroupPeers ?? "0", 10),
+          bytesFromInternetPeers: parseInt(d.doBytesFromInternetPeers ?? "0", 10),
+        };
+      }
+
       downloadMap.set(appName, {
         appName,
         bytesDownloaded: isNaN(bytesDownloaded) ? 0 : bytesDownloaded,
@@ -134,6 +188,7 @@ export default function DownloadProgress({ events, summaryStats }: DownloadProgr
         isSkipped: isSkippedEvent || (existing?.isSkipped ?? false),
         firstSeenIndex: existing?.firstSeenIndex ?? insertionIndex++,
         eventData: d,
+        doStats,
       });
     }
 
@@ -288,6 +343,64 @@ function DownloadItem({ download: dl, progressPercent }: { download: DownloadIte
                 <div className="mt-1 text-xs text-gray-500">
                   Downloaded: {formatBytes(dl.bytesDownloaded)}
                   {dl.downloadRateBps > 0 && ` at ${formatSpeed(dl.downloadRateBps)}`}
+                </div>
+              )}
+
+              {/* Delivery Optimization stats */}
+              {dl.doStats && dl.doStats.fileSize > 0 && (
+                <div className="mt-2 p-2 bg-blue-50 rounded border border-blue-100">
+                  <div className="flex items-center space-x-1 mb-1">
+                    <svg className="w-3.5 h-3.5 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                    <span className="text-xs font-medium text-blue-700">Delivery Optimization</span>
+                    <span className="text-xs text-blue-500">
+                      ({formatDoMode(dl.doStats.downloadMode)})
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-gray-600">
+                    <div>
+                      <span className="text-gray-500">Duration:</span>{" "}
+                      <span className="font-medium">{formatDoDuration(dl.doStats.downloadDuration)}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-500">File Size:</span>{" "}
+                      <span className="font-medium">{formatBytes(dl.doStats.fileSize)}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-500">From HTTP:</span>{" "}
+                      <span className="font-medium">{formatBytes(dl.doStats.bytesFromHttp)}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-500">From Peers:</span>{" "}
+                      <span className="font-medium">
+                        {formatBytes(dl.doStats.bytesFromPeers)}
+                        {dl.doStats.percentPeerCaching > 0 && (
+                          <span className="text-green-600 ml-1">({dl.doStats.percentPeerCaching}%)</span>
+                        )}
+                      </span>
+                    </div>
+                    {dl.doStats.bytesFromPeers > 0 && (
+                      <div className="col-span-2 mt-1 text-xs text-gray-500">
+                        Peer breakdown: LAN {formatBytes(dl.doStats.bytesFromLanPeers)}
+                        {" | "}Group {formatBytes(dl.doStats.bytesFromGroupPeers)}
+                        {" | "}Internet {formatBytes(dl.doStats.bytesFromInternetPeers)}
+                      </div>
+                    )}
+                  </div>
+                  {/* Peer vs HTTP visual bar */}
+                  <div className="mt-1.5 w-full h-1.5 bg-gray-200 rounded-full overflow-hidden flex">
+                    <div
+                      className="h-full bg-green-400"
+                      style={{ width: `${dl.doStats.percentPeerCaching}%` }}
+                      title={`${dl.doStats.percentPeerCaching}% from peers`}
+                    />
+                    <div
+                      className="h-full bg-blue-400"
+                      style={{ width: `${100 - dl.doStats.percentPeerCaching}%` }}
+                      title={`${100 - dl.doStats.percentPeerCaching}% from HTTP`}
+                    />
+                  </div>
                 </div>
               )}
 

@@ -9,46 +9,37 @@ import { useNotifications } from '../../contexts/NotificationContext';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-interface AgentMetricsData {
-  agent_cpu_percent?: number;
-  agent_working_set_mb?: number;
-  agent_private_bytes_mb?: number;
-  agent_thread_count?: number;
-  agent_handle_count?: number;
-  net_requests?: number;
-  net_failures?: number;
-  net_bytes_up?: number;
-  net_bytes_down?: number;
-  net_avg_latency_ms?: number;
-  net_total_bytes_up?: number;
-  net_total_bytes_down?: number;
-  net_total_requests?: number;
-  agent_version?: string;
-}
-
-interface EnrollmentEvent {
-  eventType: string;
-  timestamp: string;
-  data?: AgentMetricsData;
-  sessionId?: string;
-}
-
-interface Session {
+interface SessionAgentMetricDTO {
   sessionId: string;
   tenantId: string;
-  serialNumber?: string;
+  deviceName?: string;
   manufacturer?: string;
   model?: string;
-  deviceName?: string;
   startedAt?: string;
   status?: string;
   agentVersion?: string;
+  snapshotCount: number;
+  totalBytesUp: number;
+  totalBytesDown: number;
+  totalRequests: number;
+  avgCpu: number;
+  maxCpu: number;
+  avgWorkingSet: number;
+  maxWorkingSet: number;
+  avgPrivateBytes: number;
+  avgLatency: number;
+}
+
+interface PlatformMetricsResponse {
+  sessions: SessionAgentMetricDTO[];
+  computedAt: string;
+  computeDurationMs: number;
+  fromCache: boolean;
 }
 
 interface SessionAgentMetrics {
-  session: Session;
-  snapshots: AgentMetricsData[];
-  // Final cumulative values from the last snapshot
+  session: { sessionId: string; tenantId: string; deviceName?: string; manufacturer?: string; model?: string; startedAt?: string; status?: string; agentVersion?: string };
+  snapshotCount: number;
   totalBytesUp: number;
   totalBytesDown: number;
   totalRequests: number;
@@ -99,8 +90,9 @@ export default function PlatformMetricsPage() {
   const [sampleSize, setSampleSize] = useState(20);
   const [error, setError] = useState<string | null>(null);
   const [versionFilter, setVersionFilter] = useState<string>('all');
+  const [cacheInfo, setCacheInfo] = useState<{ fromCache: boolean; computeDurationMs: number; computedAt: string } | null>(null);
 
-  // ── Fetch sessions + their events ──────────────────────────────────────────
+  // ── Fetch pre-computed metrics from backend (with 5-min cache) ────────────
 
   const fetchMetrics = useCallback(async () => {
     setLoading(true);
@@ -113,100 +105,62 @@ export default function PlatformMetricsPage() {
         return;
       }
 
-      // 1. Fetch all sessions (galactic endpoint)
-      const sessionsRes = await fetch(`${API_BASE_URL}/api/galactic/sessions`, {
+      const res = await fetch(`${API_BASE_URL}/api/galactic/metrics/platform`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!sessionsRes.ok) {
-        if (sessionsRes.status === 403) {
+
+      if (!res.ok) {
+        if (res.status === 403) {
           setError('Access denied. Galactic Admin privileges required.');
         } else {
-          setError(`Failed to fetch sessions: ${sessionsRes.status}`);
+          setError(`Failed to fetch platform metrics: ${res.status}`);
         }
         return;
       }
-      const sessionsData = await sessionsRes.json();
-      const allSessions: Session[] = Array.isArray(sessionsData)
-        ? sessionsData
-        : sessionsData.sessions || [];
 
-      // Sort by startedAt desc, take N most recent
-      const sorted = allSessions
-        .sort((a, b) => new Date(b.startedAt || 0).getTime() - new Date(a.startedAt || 0).getTime())
-        .slice(0, sampleSize);
+      const data: PlatformMetricsResponse = await res.json();
+      setCacheInfo({ fromCache: data.fromCache, computeDurationMs: data.computeDurationMs, computedAt: data.computedAt });
 
-      if (sorted.length === 0) {
-        setSessionMetrics([]);
-        return;
-      }
+      const mapped: SessionAgentMetrics[] = (data.sessions || []).map((s) => ({
+        session: {
+          sessionId: s.sessionId,
+          tenantId: s.tenantId,
+          deviceName: s.deviceName,
+          manufacturer: s.manufacturer,
+          model: s.model,
+          startedAt: s.startedAt,
+          status: s.status,
+          agentVersion: s.agentVersion,
+        },
+        snapshotCount: s.snapshotCount,
+        totalBytesUp: s.totalBytesUp,
+        totalBytesDown: s.totalBytesDown,
+        totalRequests: s.totalRequests,
+        avgCpu: s.avgCpu,
+        maxCpu: s.maxCpu,
+        avgWorkingSet: s.avgWorkingSet,
+        maxWorkingSet: s.maxWorkingSet,
+        avgPrivateBytes: s.avgPrivateBytes,
+        avgLatency: s.avgLatency,
+      }));
 
-      // 2. Fetch events for each session in parallel
-      const results = await Promise.allSettled(
-        sorted.map(async (session) => {
-          const eventsRes = await fetch(
-            `${API_BASE_URL}/api/sessions/${session.sessionId}/events?tenantId=${session.tenantId}`,
-            { headers: { Authorization: `Bearer ${token}` } }
-          );
-          if (!eventsRes.ok) return { session, events: [] as EnrollmentEvent[] };
-          const eventsData = await eventsRes.json();
-          const events: EnrollmentEvent[] = Array.isArray(eventsData.events) ? eventsData.events : [];
-          return { session, events };
-        })
-      );
-
-      // 3. Extract agent_metrics_snapshot events and compute per-session aggregates
-      const metricsPerSession: SessionAgentMetrics[] = [];
-
-      for (const result of results) {
-        if (result.status !== 'fulfilled') continue;
-        const { session, events } = result.value;
-        const snapshots = events
-          .filter((e) => e.eventType === 'agent_metrics_snapshot' && e.data)
-          .map((e) => e.data!);
-
-        if (snapshots.length === 0) continue;
-
-        const cpuValues = snapshots.map((s) => s.agent_cpu_percent ?? 0);
-        const wsValues = snapshots.map((s) => s.agent_working_set_mb ?? 0);
-        const pbValues = snapshots.map((s) => s.agent_private_bytes_mb ?? 0);
-        const latValues = snapshots.map((s) => s.net_avg_latency_ms ?? 0).filter((v) => v > 0);
-
-        // Last snapshot has cumulative totals
-        const last = snapshots[snapshots.length - 1];
-
-        metricsPerSession.push({
-          session,
-          snapshots,
-          totalBytesUp: last.net_total_bytes_up ?? 0,
-          totalBytesDown: last.net_total_bytes_down ?? 0,
-          totalRequests: last.net_total_requests ?? 0,
-          avgCpu: avg(cpuValues),
-          maxCpu: max(cpuValues),
-          avgWorkingSet: avg(wsValues),
-          maxWorkingSet: max(wsValues),
-          avgPrivateBytes: avg(pbValues),
-          avgLatency: avg(latValues),
-        });
-      }
-
-      setSessionMetrics(metricsPerSession);
+      setSessionMetrics(mapped);
     } catch (err) {
       console.error('Platform metrics fetch error:', err);
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
       setLoading(false);
     }
-  }, [getAccessToken, sampleSize, addNotification]);
+  }, [getAccessToken, addNotification]);
 
   useEffect(() => {
     fetchMetrics();
   }, [fetchMetrics]);
 
-  // ── Resolve agent version per session (prefer snapshot data, fallback to session registration) ──
+  // ── Resolve agent version per session (pre-resolved by backend) ──
 
   const resolveVersion = useCallback((sm: SessionAgentMetrics): string => {
-    const fromSnapshot = sm.snapshots.find((s) => s.agent_version)?.agent_version;
-    return fromSnapshot || sm.session.agentVersion || 'unknown';
+    return sm.session.agentVersion || 'unknown';
   }, []);
 
   // ── Available versions for filter dropdown ─────────────────────────────────
@@ -219,12 +173,16 @@ export default function PlatformMetricsPage() {
     return Array.from(versions).sort();
   }, [sessionMetrics, resolveVersion]);
 
-  // ── Filtered metrics based on version filter ───────────────────────────────
+  // ── Filtered metrics based on sample size and version filter ────────────────
 
   const filteredMetrics = useMemo(() => {
-    if (versionFilter === 'all') return sessionMetrics;
-    return sessionMetrics.filter((sm) => resolveVersion(sm) === versionFilter);
-  }, [sessionMetrics, versionFilter, resolveVersion]);
+    // Sort by startedAt desc and take sampleSize most recent
+    const sorted = [...sessionMetrics]
+      .sort((a, b) => new Date(b.session.startedAt || 0).getTime() - new Date(a.session.startedAt || 0).getTime())
+      .slice(0, sampleSize);
+    if (versionFilter === 'all') return sorted;
+    return sorted.filter((sm) => resolveVersion(sm) === versionFilter);
+  }, [sessionMetrics, sampleSize, versionFilter, resolveVersion]);
 
   // ── Aggregated stats across filtered sessions ──────────────────────────────
 
@@ -240,7 +198,7 @@ export default function PlatformMetricsPage() {
     const allBytesUp = filteredMetrics.map((s) => s.totalBytesUp);
     const allBytesDown = filteredMetrics.map((s) => s.totalBytesDown);
     const allRequests = filteredMetrics.map((s) => s.totalRequests);
-    const totalSnapshots = filteredMetrics.reduce((sum, s) => sum + s.snapshots.length, 0);
+    const totalSnapshots = filteredMetrics.reduce((sum, s) => sum + s.snapshotCount, 0);
 
     return {
       sessionsAnalyzed: filteredMetrics.length,
@@ -296,6 +254,13 @@ export default function PlatformMetricsPage() {
                   &larr; Back to Dashboard
                 </button>
                 <h1 className="text-3xl font-bold text-gray-900">Platform Metrics</h1>
+                {cacheInfo && (
+                  <p className="text-xs text-gray-400 mt-1">
+                    {cacheInfo.fromCache ? 'From cache' : `Computed in ${cacheInfo.computeDurationMs}ms`}
+                    {' · '}
+                    {new Date(cacheInfo.computedAt).toLocaleTimeString()}
+                  </p>
+                )}
               </div>
               <div className="flex items-center gap-3">
                 <label className="text-sm text-gray-500">Sessions to analyze:</label>
@@ -350,7 +315,7 @@ export default function PlatformMetricsPage() {
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                 </svg>
-                <span>Fetching agent metrics from {sampleSize} sessions...</span>
+                <span>Fetching agent metrics...</span>
               </div>
             </div>
           )}

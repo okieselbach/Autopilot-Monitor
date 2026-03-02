@@ -702,7 +702,8 @@ namespace AutopilotMonitor.Functions.Functions
                 evt.EventType == "app_install_failed" ||
                 evt.EventType == "app_download_started" ||
                 evt.EventType == "app_install_skipped" ||
-                evt.EventType == "download_progress";
+                evt.EventType == "download_progress" ||
+                evt.EventType == "do_telemetry";
 
             if (!isRelevant) return;
 
@@ -775,6 +776,30 @@ namespace AutopilotMonitor.Functions.Functions
                         : evt.Data?.ContainsKey("bytes_downloaded") == true ? "bytes_downloaded" : null;
                     if (bytesKey != null && long.TryParse(evt.Data![bytesKey]?.ToString(), out var bytes))
                         summary.DownloadBytes = Math.Max(summary.DownloadBytes, bytes);
+                    break;
+
+                case "do_telemetry":
+                    if (evt.Data != null)
+                    {
+                        if (evt.Data.ContainsKey("doFileSize") && long.TryParse(evt.Data["doFileSize"]?.ToString(), out var doFs))
+                            summary.DownloadBytes = Math.Max(summary.DownloadBytes, doFs);
+                        if (evt.Data.ContainsKey("doBytesFromPeers") && long.TryParse(evt.Data["doBytesFromPeers"]?.ToString(), out var doPeers))
+                            summary.DoBytesFromPeers = doPeers;
+                        if (evt.Data.ContainsKey("doBytesFromHttp") && long.TryParse(evt.Data["doBytesFromHttp"]?.ToString(), out var doHttp))
+                            summary.DoBytesFromHttp = doHttp;
+                        if (evt.Data.ContainsKey("doPercentPeerCaching") && int.TryParse(evt.Data["doPercentPeerCaching"]?.ToString(), out var doPct))
+                            summary.DoPercentPeerCaching = doPct;
+                        if (evt.Data.ContainsKey("doDownloadMode") && int.TryParse(evt.Data["doDownloadMode"]?.ToString(), out var doMode))
+                            summary.DoDownloadMode = doMode;
+                        if (evt.Data.ContainsKey("doDownloadDuration"))
+                            summary.DoDownloadDuration = evt.Data["doDownloadDuration"]?.ToString() ?? string.Empty;
+                        if (evt.Data.ContainsKey("doBytesFromLanPeers") && long.TryParse(evt.Data["doBytesFromLanPeers"]?.ToString(), out var doLan))
+                            summary.DoBytesFromLanPeers = doLan;
+                        if (evt.Data.ContainsKey("doBytesFromGroupPeers") && long.TryParse(evt.Data["doBytesFromGroupPeers"]?.ToString(), out var doGroup))
+                            summary.DoBytesFromGroupPeers = doGroup;
+                        if (evt.Data.ContainsKey("doBytesFromInternetPeers") && long.TryParse(evt.Data["doBytesFromInternetPeers"]?.ToString(), out var doInet))
+                            summary.DoBytesFromInternetPeers = doInet;
+                    }
                     break;
             }
 

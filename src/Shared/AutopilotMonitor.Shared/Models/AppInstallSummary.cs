@@ -35,5 +35,30 @@ namespace AutopilotMonitor.Shared.Models
 
         /// <summary>When this app install completed or failed</summary>
         public DateTime? CompletedAt { get; set; }
+
+        // Delivery Optimization telemetry
+        /// <summary>DO: bytes from all peer sources</summary>
+        public long DoBytesFromPeers { get; set; }
+
+        /// <summary>DO: bytes from HTTP (CDN)</summary>
+        public long DoBytesFromHttp { get; set; }
+
+        /// <summary>DO: percentage from P2P (0-100)</summary>
+        public int DoPercentPeerCaching { get; set; }
+
+        /// <summary>DO: download mode (0=Background, 1=Foreground, 2=Bypass/LAN, 99=Simple)</summary>
+        public int DoDownloadMode { get; set; } = -1;
+
+        /// <summary>DO: actual download duration (TimeSpan string)</summary>
+        public string DoDownloadDuration { get; set; } = string.Empty;
+
+        /// <summary>DO: bytes from LAN peers</summary>
+        public long DoBytesFromLanPeers { get; set; }
+
+        /// <summary>DO: bytes from group peers</summary>
+        public long DoBytesFromGroupPeers { get; set; }
+
+        /// <summary>DO: bytes from internet peers</summary>
+        public long DoBytesFromInternetPeers { get; set; }
     }
 }

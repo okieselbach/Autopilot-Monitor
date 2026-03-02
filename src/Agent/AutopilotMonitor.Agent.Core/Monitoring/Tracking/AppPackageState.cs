@@ -91,6 +91,19 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         public string ErrorPatternId { get; private set; }
         public string ErrorDetail { get; private set; }
 
+        // Delivery Optimization telemetry (populated from [DO TEL] log entries)
+        public long DoFileSize { get; private set; }
+        public long DoTotalBytesDownloaded { get; private set; }
+        public long DoBytesFromPeers { get; private set; }
+        public int DoPercentPeerCaching { get; private set; }
+        public long DoBytesFromLanPeers { get; private set; }
+        public long DoBytesFromGroupPeers { get; private set; }
+        public long DoBytesFromInternetPeers { get; private set; }
+        public int DoDownloadMode { get; private set; } = -1;
+        public string DoDownloadDuration { get; private set; }
+        public long DoBytesFromHttp { get; private set; }
+        public bool HasDoTelemetry { get; private set; }
+
         private static readonly Dictionary<Win32AppState, AppInstallationState> Win32StateMap =
             new Dictionary<Win32AppState, AppInstallationState>
             {
@@ -123,7 +136,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             HashSet<string> dependsOn,
             AppInstallationState installationState, bool downloadingOrInstallingSeen,
             int? progressPercent, long bytesDownloaded, long bytesTotal,
-            string errorPatternId = null, string errorDetail = null)
+            string errorPatternId = null, string errorDetail = null,
+            long doFileSize = 0, long doTotalBytesDownloaded = 0,
+            long doBytesFromPeers = 0, int doPercentPeerCaching = 0,
+            long doBytesFromLanPeers = 0, long doBytesFromGroupPeers = 0,
+            long doBytesFromInternetPeers = 0, int doDownloadMode = -1,
+            string doDownloadDuration = null, long doBytesFromHttp = 0,
+            bool hasDoTelemetry = false)
         {
             var pkg = new AppPackageState(id, listPos)
             {
@@ -139,7 +158,18 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 BytesTotal = bytesTotal,
                 ErrorPatternId = errorPatternId,
                 ErrorDetail = errorDetail,
-                InstallationStateLastChangedTicks = Stopwatch.GetTimestamp()
+                InstallationStateLastChangedTicks = Stopwatch.GetTimestamp(),
+                DoFileSize = doFileSize,
+                DoTotalBytesDownloaded = doTotalBytesDownloaded,
+                DoBytesFromPeers = doBytesFromPeers,
+                DoPercentPeerCaching = doPercentPeerCaching,
+                DoBytesFromLanPeers = doBytesFromLanPeers,
+                DoBytesFromGroupPeers = doBytesFromGroupPeers,
+                DoBytesFromInternetPeers = doBytesFromInternetPeers,
+                DoDownloadMode = doDownloadMode,
+                DoDownloadDuration = doDownloadDuration,
+                DoBytesFromHttp = doBytesFromHttp,
+                HasDoTelemetry = hasDoTelemetry
             };
             return pkg;
         }
@@ -208,6 +238,28 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         {
             ErrorPatternId = patternId;
             ErrorDetail = detail;
+        }
+
+        /// <summary>
+        /// Updates Delivery Optimization telemetry data for this app package.
+        /// Called when a [DO TEL] log entry is matched and linked to this app.
+        /// </summary>
+        public void UpdateDoTelemetry(long fileSize, long totalBytesDownloaded,
+            long bytesFromPeers, int percentPeerCaching,
+            long bytesFromLanPeers, long bytesFromGroupPeers, long bytesFromInternetPeers,
+            int downloadMode, string downloadDuration, long bytesFromHttp)
+        {
+            DoFileSize = fileSize;
+            DoTotalBytesDownloaded = totalBytesDownloaded;
+            DoBytesFromPeers = bytesFromPeers;
+            DoPercentPeerCaching = percentPeerCaching;
+            DoBytesFromLanPeers = bytesFromLanPeers;
+            DoBytesFromGroupPeers = bytesFromGroupPeers;
+            DoBytesFromInternetPeers = bytesFromInternetPeers;
+            DoDownloadMode = downloadMode;
+            DoDownloadDuration = downloadDuration;
+            DoBytesFromHttp = bytesFromHttp;
+            HasDoTelemetry = true;
         }
 
         /// <summary>
@@ -363,6 +415,20 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 data["errorPatternId"] = ErrorPatternId;
             if (!string.IsNullOrEmpty(ErrorDetail))
                 data["errorDetail"] = ErrorDetail;
+
+            if (HasDoTelemetry)
+            {
+                data["doFileSize"] = DoFileSize;
+                data["doTotalBytesDownloaded"] = DoTotalBytesDownloaded;
+                data["doBytesFromPeers"] = DoBytesFromPeers;
+                data["doPercentPeerCaching"] = DoPercentPeerCaching;
+                data["doBytesFromLanPeers"] = DoBytesFromLanPeers;
+                data["doBytesFromGroupPeers"] = DoBytesFromGroupPeers;
+                data["doBytesFromInternetPeers"] = DoBytesFromInternetPeers;
+                data["doDownloadMode"] = DoDownloadMode;
+                data["doDownloadDuration"] = DoDownloadDuration ?? "";
+                data["doBytesFromHttp"] = DoBytesFromHttp;
+            }
 
             return data;
         }

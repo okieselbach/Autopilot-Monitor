@@ -61,7 +61,8 @@
             "cancelStuckAndSetCurrent",
             "imeSessionChange",
             "imeImpersonation",
-            "enrollmentCompleted"
+            "enrollmentCompleted",
+            "updateDoTelemetry"
           ]
         },
         "parameters": {

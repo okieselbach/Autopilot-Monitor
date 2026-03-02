@@ -98,6 +98,7 @@ builder.Services.AddSingleton<TenantConfigurationService>();
 builder.Services.AddSingleton<AdminConfigurationService>();
 builder.Services.AddSingleton<RateLimitService>();
 builder.Services.AddSingleton<UsageMetricsService>();
+builder.Services.AddSingleton<PlatformMetricsService>();
 builder.Services.AddSingleton<GalacticAdminService>();
 builder.Services.AddSingleton<PreviewWhitelistService>();
 builder.Services.AddSingleton<TenantAdminsService>();

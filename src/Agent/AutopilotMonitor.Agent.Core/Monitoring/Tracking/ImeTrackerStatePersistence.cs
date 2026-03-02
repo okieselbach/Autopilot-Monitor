@@ -122,6 +122,19 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         public int? ProgressPercent { get; set; }
         public long BytesDownloaded { get; set; }
         public long BytesTotal { get; set; }
+
+        // Delivery Optimization telemetry
+        public long DoFileSize { get; set; }
+        public long DoTotalBytesDownloaded { get; set; }
+        public long DoBytesFromPeers { get; set; }
+        public int DoPercentPeerCaching { get; set; }
+        public long DoBytesFromLanPeers { get; set; }
+        public long DoBytesFromGroupPeers { get; set; }
+        public long DoBytesFromInternetPeers { get; set; }
+        public int DoDownloadMode { get; set; } = -1;
+        public string DoDownloadDuration { get; set; }
+        public long DoBytesFromHttp { get; set; }
+        public bool HasDoTelemetry { get; set; }
     }
 
     public class FilePositionData

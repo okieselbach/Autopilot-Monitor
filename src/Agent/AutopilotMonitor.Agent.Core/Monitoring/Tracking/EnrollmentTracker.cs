@@ -105,6 +105,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             _imeLogTracker.OnPoliciesDiscovered = HandlePoliciesDiscovered;
             _imeLogTracker.OnAllAppsCompleted = HandleAllAppsCompleted;
             _imeLogTracker.OnUserSessionCompleted = HandleUserSessionCompleted;
+            _imeLogTracker.OnDoTelemetryReceived = HandleDoTelemetryReceived;
 
             // Subscribe to EspAndHelloTracker completion event if available
             if (_espAndHelloTracker != null)
@@ -430,6 +431,39 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 _logger.Info($"EnrollmentTracker: All apps completed while in phase '{_lastEspPhase}'");
                 _logger.Info("EnrollmentTracker: Waiting for ESP exit or Hello wizard events to transition to FinalizingSetup");
             }
+        }
+
+        private void HandleDoTelemetryReceived(AppPackageState app)
+        {
+            _logger.Info($"EnrollmentTracker: DO telemetry received for {app.Name ?? app.Id}");
+
+            var phase = EnrollmentPhase.Unknown;
+
+            // Dedicated do_telemetry event for backend aggregation
+            _emitEvent(new EnrollmentEvent
+            {
+                SessionId = _sessionId,
+                TenantId = _tenantId,
+                EventType = "do_telemetry",
+                Severity = EventSeverity.Info,
+                Source = "ImeLogTracker",
+                Phase = phase,
+                Message = $"{app.Name ?? app.Id}: DO complete - {app.DoPercentPeerCaching}% peers, mode={app.DoDownloadMode}",
+                Data = app.ToEventData()
+            });
+
+            // Also emit download_progress so the UI picks up DO stats
+            _emitEvent(new EnrollmentEvent
+            {
+                SessionId = _sessionId,
+                TenantId = _tenantId,
+                EventType = "download_progress",
+                Severity = EventSeverity.Debug,
+                Source = "ImeLogTracker",
+                Phase = phase,
+                Message = $"{app.Name ?? app.Id}: DO telemetry received",
+                Data = app.ToEventData()
+            });
         }
 
         private void HandleUserSessionCompleted()

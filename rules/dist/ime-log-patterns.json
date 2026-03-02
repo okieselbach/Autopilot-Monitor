@@ -58,6 +58,14 @@
       "enabled": true
     },
     {
+      "patternId": "IME-DO-TEL",
+      "category": "currentPhase",
+      "pattern": "\\[DO TEL\\] = (?<doTelJson>\\{.*\\})",
+      "action": "updateDoTelemetry",
+      "description": "Captures Delivery Optimization telemetry JSON after a DO download completes. Contains file size, peer caching stats, download mode, and duration.",
+      "enabled": true
+    },
+    {
       "patternId": "IME-DO-TIMEOUT-1",
       "category": "currentPhase",
       "pattern": "\\[Win32App DO\\] DO download(?=.*?\\bnot finished\\b)(?=.*?\\btimeout\\b).*?intunewin-bin_{GUID}",
