@@ -283,7 +283,8 @@ namespace AutopilotMonitor.Functions.Functions
                         whiteGloveEvent.Phase,
                         earliestEventTimestamp: earliestEventTimestamp,
                         latestEventTimestamp: latestEventTimestamp,
-                        isPreProvisioned: true
+                        isPreProvisioned: true,
+                        isUserDriven: false
                     );
 
                     // Fallback: if the optimistic-concurrency merge failed despite internal retries
@@ -296,7 +297,7 @@ namespace AutopilotMonitor.Functions.Functions
                         _logger.LogWarning("{SessionPrefix} WhiteGlove UpdateSessionStatusAsync failed, attempting unconditional fallback for IsPreProvisioned + Status", sessionPrefix);
                         try
                         {
-                            await _storageService.SetSessionPreProvisionedAsync(request.TenantId, request.SessionId, true, SessionStatus.Pending);
+                            await _storageService.SetSessionPreProvisionedAsync(request.TenantId, request.SessionId, true, SessionStatus.Pending, isUserDriven: false);
                             whiteGloveStatusTransitioned = true;
                             _logger.LogInformation("{SessionPrefix} WhiteGlove fallback succeeded: IsPreProvisioned + Status=Pending set via unconditional merge", sessionPrefix);
                         }
@@ -323,9 +324,10 @@ namespace AutopilotMonitor.Functions.Functions
                             SessionStatus.InProgress,
                             whiteGloveResumedEvent.Phase,
                             earliestEventTimestamp: earliestEventTimestamp,
-                            latestEventTimestamp: latestEventTimestamp
+                            latestEventTimestamp: latestEventTimestamp,
+                            isUserDriven: true
                         );
-                        _logger.LogInformation("{SessionPrefix} Status: InProgress (WhiteGlove Part 2 resumed)", sessionPrefix);
+                        _logger.LogInformation("{SessionPrefix} Status: InProgress (WhiteGlove Part 2 resumed, IsUserDriven=true)", sessionPrefix);
                     }
                     else
                     {

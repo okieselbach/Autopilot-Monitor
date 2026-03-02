@@ -541,7 +541,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 OsLanguage = System.Globalization.CultureInfo.CurrentCulture.Name,
                 StartedAt = DateTime.UtcNow,
                 AgentVersion = _agentVersion,
-                EnrollmentType = EnrollmentTracker.DetectEnrollmentTypeStatic()
+                EnrollmentType = EnrollmentTracker.DetectEnrollmentTypeStatic(),
+                IsUserDriven = true
             };
 
             for (int attempt = 1; attempt <= maxAttempts; attempt++)

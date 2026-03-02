@@ -380,7 +380,7 @@ namespace AutopilotMonitor.Functions.Services
         /// Event count is maintained atomically by IncrementSessionEventCountAsync and is not
         /// recounted here — avoiding an expensive full-partition scan on every status change.
         /// </summary>
-        public async Task<bool> UpdateSessionStatusAsync(string tenantId, string sessionId, SessionStatus status, EnrollmentPhase? currentPhase = null, string? failureReason = null, DateTime? completedAt = null, DateTime? earliestEventTimestamp = null, DateTime? latestEventTimestamp = null, bool? isPreProvisioned = null)
+        public async Task<bool> UpdateSessionStatusAsync(string tenantId, string sessionId, SessionStatus status, EnrollmentPhase? currentPhase = null, string? failureReason = null, DateTime? completedAt = null, DateTime? earliestEventTimestamp = null, DateTime? latestEventTimestamp = null, bool? isPreProvisioned = null, bool? isUserDriven = null)
         {
             SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
             SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
@@ -472,6 +472,12 @@ namespace AutopilotMonitor.Functions.Services
                         update["IsPreProvisioned"] = isPreProvisioned.Value;
                     }
 
+                    // Set IsUserDriven flag atomically (WhiteGlove Part 1 → false, Part 2 → true)
+                    if (isUserDriven.HasValue)
+                    {
+                        update["IsUserDriven"] = isUserDriven.Value;
+                    }
+
                     // Merge mode: only the fields set above are written; all other fields remain untouched.
                     // This drastically reduces ETag conflicts when concurrent requests update different fields.
                     await tableClient.UpdateEntityAsync(update, session.ETag, TableUpdateMode.Merge);
@@ -543,6 +549,9 @@ namespace AutopilotMonitor.Functions.Services
 
                             if (isPreProvisioned.HasValue)
                                 forceUpdate["IsPreProvisioned"] = isPreProvisioned.Value;
+
+                            if (isUserDriven.HasValue)
+                                forceUpdate["IsUserDriven"] = isUserDriven.Value;
 
                             // Unconditional merge write — ETag.All bypasses concurrency check
                             await forceTableClient.UpdateEntityAsync(forceUpdate, ETag.All, TableUpdateMode.Merge);
@@ -727,7 +736,7 @@ namespace AutopilotMonitor.Functions.Services
         /// unconditional Merge-mode write. Uses ETag.All to bypass optimistic-concurrency conflicts,
         /// making this suitable as a last-resort fallback when ETag-based updates have been exhausted.
         /// </summary>
-        public async Task SetSessionPreProvisionedAsync(string tenantId, string sessionId, bool isPreProvisioned, SessionStatus? status = null)
+        public async Task SetSessionPreProvisionedAsync(string tenantId, string sessionId, bool isPreProvisioned, SessionStatus? status = null, bool? isUserDriven = null)
         {
             SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
             SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
@@ -744,8 +753,13 @@ namespace AutopilotMonitor.Functions.Services
                 update["Status"] = status.Value.ToString();
             }
 
+            if (isUserDriven.HasValue)
+            {
+                update["IsUserDriven"] = isUserDriven.Value;
+            }
+
             await tableClient.UpdateEntityAsync(update, ETag.All, TableUpdateMode.Merge);
-            _logger.LogInformation($"Set IsPreProvisioned={isPreProvisioned}, Status={status?.ToString() ?? "(unchanged)"} for session {sessionId} (unconditional merge)");
+            _logger.LogInformation($"Set IsPreProvisioned={isPreProvisioned}, Status={status?.ToString() ?? "(unchanged)"}, IsUserDriven={isUserDriven?.ToString() ?? "(unchanged)"} for session {sessionId} (unconditional merge)");
         }
 
         /// <summary>

@@ -128,6 +128,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             // Collect and emit device info asynchronously (3 WMI queries + 5+ registry reads)
             Task.Run(CollectDeviceInfo);
 
+            // TODO: Überdenken ob ein 30s timer hier wirklich immer gut ist, hab einen Fall gesehen mit 
+            // laaanger Wartephase in WhiteGlove weil ein 24H2 feature update reinkam und installiert wurde
+
             // Start periodic summary timer (30s, starts when app tracking begins)
             _summaryTimer = new Timer(SummaryTimerCallback, null, Timeout.Infinite, Timeout.Infinite);
 
