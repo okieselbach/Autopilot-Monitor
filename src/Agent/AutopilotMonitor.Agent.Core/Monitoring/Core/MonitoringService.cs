@@ -645,7 +645,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         {
             evt.Sequence = Interlocked.Increment(ref _eventSequence);
             _spool.Add(evt);
-            _logger.Debug($"Event emitted: {evt.EventType} - {evt.Message}");
+            _logger.Info($"Event emitted: {evt.EventType} - {evt.Message}");
 
             // Persist sequence periodically (every 50 events) + always on critical events
             if (evt.Sequence % 50 == 0 ||
@@ -660,7 +660,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             bool isPhaseTransition = false;
             if (evt.Phase != _lastPhase)
             {
-                _logger.Debug($"Phase transition detected: {_lastPhase?.ToString() ?? "null"} -> {evt.Phase}");
+                _logger.Info($"Phase transition: {_lastPhase?.ToString() ?? "null"} -> {evt.Phase}");
                 _lastPhase = evt.Phase;
                 isPhaseTransition = true;
 
@@ -751,7 +751,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 evt.EventType?.Contains("phase", StringComparison.OrdinalIgnoreCase) == true ||
                 isAppEvent)
             {
-                _logger.Debug($"Critical/Phase/App event detected ({evt.EventType}), triggering immediate upload (bypassing debounce)");
+                _logger.Info($"Triggering immediate upload for {evt.EventType} (bypassing debounce)");
                 Task.Run(() => UploadEventsAsync());
             }
         }
@@ -804,8 +804,6 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     return;
                 }
 
-                _logger.Debug($"Uploading {events.Count} events");
-
                 var request = new IngestEventsRequest
                 {
                     SessionId = _configuration.SessionId,
@@ -832,7 +830,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 if (response.Success)
                 {
                     _spool.RemoveEvents(events);
-                    _logger.Debug($"Successfully uploaded {response.EventsProcessed} events");
+                    _logger.Info($"Uploaded {response.EventsProcessed} events");
 
                     // Reset auth failure counter on success
                     _consecutiveAuthFailures = 0;

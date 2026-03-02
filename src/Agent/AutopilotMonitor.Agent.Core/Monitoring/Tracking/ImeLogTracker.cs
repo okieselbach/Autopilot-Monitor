@@ -701,17 +701,23 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
 
             if (string.IsNullOrEmpty(id) || string.IsNullOrEmpty(to)) return;
 
+            var pkg = _packageStates.GetPackage(id);
+            var label = pkg?.Name ?? id;
+
             if (string.Equals(to, "InProgress", StringComparison.OrdinalIgnoreCase))
             {
+                _logger.Info($"ImeLogTracker: ESP track status {label}: {from} -> InProgress");
                 _packageStates.SetCurrent(id);
                 UpdateStateWithCallback(id, AppInstallationState.Installing);
             }
             else if (string.Equals(to, "Completed", StringComparison.OrdinalIgnoreCase))
             {
+                _logger.Info($"ImeLogTracker: ESP track status {label}: {from} -> Completed");
                 UpdateStateWithCallback(id, AppInstallationState.Installed);
             }
             else if (string.Equals(to, "Error", StringComparison.OrdinalIgnoreCase))
             {
+                _logger.Info($"ImeLogTracker: ESP track status {label}: {from} -> Error");
                 UpdateStateWithCallback(id, AppInstallationState.Error, errorPatternId: "IME-ESP-TRACK-STATUS", errorDetail: $"ESP track status changed from {from} to {to}");
             }
         }
@@ -745,6 +751,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                                        currentPkg.InstallationState == AppInstallationState.InProgress ||
                                        currentPkg.InstallationState == AppInstallationState.Downloading))
             {
+                _logger.Info($"ImeLogTracker: cancelling stuck app {currentPkg.Name ?? _packageStates.CurrentPackageId} ({currentPkg.InstallationState}), switching to {newId}");
                 UpdateStateWithCallback(_packageStates.CurrentPackageId, AppInstallationState.Skipped);
             }
 
@@ -765,13 +772,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
 
             if (changed)
             {
-                _logger.Debug($"ImeLogTracker: {pkg.Name ?? id} state: {oldState} -> {newState}");
+                _logger.Info($"ImeLogTracker: {pkg.Name ?? id} state: {oldState} -> {newState}");
                 OnAppStateChanged?.Invoke(pkg, oldState, newState);
 
                 // Check if all apps are now completed - only fire once
                 if (!_allAppsCompletedFired && _packageStates.CountAll > 0 && _packageStates.IsAllCompleted())
                 {
                     _allAppsCompletedFired = true;
+                    _logger.Info($"ImeLogTracker: all {_packageStates.CountAll} apps completed");
                     OnAllAppsCompleted?.Invoke();
                 }
             }

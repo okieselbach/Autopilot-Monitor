@@ -90,7 +90,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     interval
                 );
                 _intervalTimers[rule.RuleId] = timer;
-                _logger.Debug($"  Interval rule {rule.RuleId} scheduled every {rule.IntervalSeconds}s");
+                _logger.Info($"  Interval rule {rule.RuleId} scheduled every {rule.IntervalSeconds}s");
             }
 
             _logger.Info($"GatherRuleExecutor: {_activeRules.Count(r => r.Trigger == "startup")} startup, " +
@@ -109,7 +109,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                 if (string.IsNullOrEmpty(rule.TriggerPhase) ||
                     string.Equals(rule.TriggerPhase, phaseName, StringComparison.OrdinalIgnoreCase))
                 {
-                    _logger.Debug($"Phase change triggered rule {rule.RuleId} (phase: {phaseName})");
+                    _logger.Info($"Phase change triggered rule {rule.RuleId} (phase: {phaseName})");
                     ThreadPool.QueueUserWorkItem(_ => ExecuteRule(rule));
                 }
             }
@@ -124,7 +124,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             {
                 if (string.Equals(rule.TriggerEventType, eventType, StringComparison.OrdinalIgnoreCase))
                 {
-                    _logger.Debug($"Event triggered rule {rule.RuleId} (event: {eventType})");
+                    _logger.Info($"Event triggered rule {rule.RuleId} (event: {eventType})");
                     ThreadPool.QueueUserWorkItem(_ => ExecuteRule(rule));
                 }
             }
@@ -134,7 +134,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         {
             try
             {
-                _logger.Debug($"Executing gather rule: {rule.RuleId} ({rule.Title})");
+                _logger.Info($"Executing gather rule: {rule.RuleId} ({rule.Title})");
 
                 Dictionary<string, object> result = null;
 
