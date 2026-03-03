@@ -55,6 +55,8 @@ export function SessionReportsSection({
   const [reports, setReports] = useState<SessionReport[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedReport, setSelectedReport] = useState<SessionReport | null>(null);
+  const [currentPage, setCurrentPage] = useState(0);
+  const pageSize = 5;
   const [downloadingBlob, setDownloadingBlob] = useState<string | null>(null);
   const [adminNoteValue, setAdminNoteValue] = useState("");
   const [savingNote, setSavingNote] = useState(false);
@@ -202,7 +204,7 @@ export function SessionReportsSection({
                 </tr>
               </thead>
               <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                {reports.map(r => (
+                {reports.slice(currentPage * pageSize, (currentPage + 1) * pageSize).map(r => (
                   <tr
                     key={r.reportId}
                     onClick={() => setSelectedReport(r)}
@@ -239,6 +241,34 @@ export function SessionReportsSection({
                 ))}
               </tbody>
             </table>
+
+            {/* Pagination */}
+            {reports.length > pageSize && (
+              <div className="flex items-center justify-between border-t border-gray-200 dark:border-gray-700 px-4 py-3 bg-gray-50 dark:bg-gray-700/50 rounded-b-md">
+                <span className="text-xs text-gray-500 dark:text-gray-400">
+                  {currentPage * pageSize + 1}–{Math.min((currentPage + 1) * pageSize, reports.length)} of {reports.length}
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setCurrentPage(p => p - 1)}
+                    disabled={currentPage === 0}
+                    className="px-2.5 py-1 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Previous
+                  </button>
+                  <span className="text-xs text-gray-500 dark:text-gray-400">
+                    {currentPage + 1} / {Math.ceil(reports.length / pageSize)}
+                  </span>
+                  <button
+                    onClick={() => setCurrentPage(p => p + 1)}
+                    disabled={(currentPage + 1) * pageSize >= reports.length}
+                    className="px-2.5 py-1 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
