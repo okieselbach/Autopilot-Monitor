@@ -73,7 +73,7 @@ export default function InstallProgress({ events, summaryStats }: InstallProgres
           appName,
           appId,
           state: "Installing",
-          startedAt: existing?.startedAt ?? eventTs,
+          startedAt: eventTs,
           isCompleted: false,
           isError: false,
           firstSeenIndex: existing?.firstSeenIndex ?? insertionIndex++,
