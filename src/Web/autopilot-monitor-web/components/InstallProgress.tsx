@@ -279,12 +279,6 @@ function InstallItemRow({ item }: { item: InstallItem }) {
           {item.durationMs != null && item.durationMs > 0 && (
             <span className="font-medium">{formatDuration(item.durationMs)}</span>
           )}
-          {/* DEBUG: remove after fixing duration */}
-          {item.startedAt && (
-            <span className="text-[10px] text-orange-500 font-mono">
-              S:{item.startedAt} E:{item.completedAt ?? "?"} D:{item.durationMs ?? "?"}
-            </span>
-          )}
           {item.eventData && Object.keys(item.eventData).length > 0 && (
             <button
               onClick={() => setShowDetails(!showDetails)}
