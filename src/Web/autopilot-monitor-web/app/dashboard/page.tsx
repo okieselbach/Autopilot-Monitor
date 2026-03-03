@@ -40,6 +40,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [serialValidationEnabled, setSerialValidationEnabled] = useState<boolean | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [sortColumn, setSortColumn] = useState<keyof Session | null>(null);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [currentPage, setCurrentPage] = useState(1);
@@ -398,10 +399,10 @@ export default function Home() {
     fetchSessions();
   }, [galacticAdminMode]);
 
-  // Reset to page 1 when search query or sort changes
+  // Reset to page 1 when search query, status filter, or sort changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, sortColumn, sortDirection]);
+  }, [searchQuery, statusFilter, sortColumn, sortDirection]);
 
   const deleteSession = (sessionId: string, sessionTenantId: string, deviceName?: string) => {
     setSessionToDelete({ sessionId, tenantId: sessionTenantId, deviceName });
@@ -518,8 +519,11 @@ export default function Home() {
     new Date(s.startedAt).toDateString() === new Date().toDateString()
   ).length;
 
-  // Filter sessions based on search query
+  // Filter sessions based on status filter and search query
   const filteredSessions = sessions.filter(session => {
+    // Apply status filter first
+    if (statusFilter && session.status !== statusFilter) return false;
+
     if (!searchQuery.trim()) return true;
 
     const query = searchQuery.toLowerCase().trim();
@@ -838,6 +842,45 @@ export default function Home() {
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                     </svg>
+                  </button>
+                )}
+              </div>
+
+              {/* Status Filter Badges */}
+              <div className="mb-4 flex items-center gap-2 flex-wrap">
+                {(["Succeeded", "InProgress", "Pending", "Failed"] as const).map((status) => {
+                  const config: Record<string, { bg: string; bgActive: string; text: string; label: string }> = {
+                    Succeeded: { bg: "bg-green-50 text-green-700 border-green-200 hover:bg-green-100", bgActive: "bg-green-600 text-white border-green-600", text: "text-green-600", label: "Succeeded" },
+                    InProgress: { bg: "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100", bgActive: "bg-blue-600 text-white border-blue-600", text: "text-blue-600", label: "In Progress" },
+                    Pending: { bg: "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100", bgActive: "bg-amber-500 text-white border-amber-500", text: "text-amber-600", label: "Pending" },
+                    Failed: { bg: "bg-red-50 text-red-700 border-red-200 hover:bg-red-100", bgActive: "bg-red-600 text-white border-red-600", text: "text-red-600", label: "Failed" },
+                  };
+                  const c = config[status];
+                  const count = sessions.filter(s => s.status === status).length;
+                  const isActive = statusFilter === status;
+                  return (
+                    <button
+                      key={status}
+                      onClick={() => setStatusFilter(isActive ? null : status)}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border transition-colors cursor-pointer ${isActive ? c.bgActive : c.bg}`}
+                    >
+                      {c.label}
+                      <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none ${isActive ? "bg-white/25" : "bg-black/5"}`}>
+                        {count}
+                      </span>
+                    </button>
+                  );
+                })}
+                {statusFilter && (
+                  <button
+                    onClick={() => setStatusFilter(null)}
+                    className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors cursor-pointer"
+                    title="Clear filter"
+                  >
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                    Clear
                   </button>
                 )}
               </div>
