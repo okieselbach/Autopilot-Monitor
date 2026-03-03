@@ -340,13 +340,13 @@ namespace AutopilotMonitor.Functions.Functions
                         _logger.LogInformation("{SessionPrefix} WhiteGlove resumed skipped, session already {Status}", sessionPrefix, currentSession?.Status);
                     }
                 }
-                else if (processedCount > 0)
+
+                // Always increment event count when events were stored, regardless of which
+                // status branch was taken above. UpdateSessionStatusAsync uses Merge-mode and
+                // does not touch EventCount, so this separate call is needed to keep the count
+                // accurate. Both methods have ETag retry logic; the second write retries on conflict.
+                if (processedCount > 0)
                 {
-                    // Lightweight update — no status change. Status is only set by key events
-                    // (enrollment_complete, enrollment_failed, whiteglove_complete, whiteglove_resumed, gather_rules).
-                    // Phase-change events only update CurrentPhase + timestamps + EventCount.
-                    // This eliminates redundant InProgress writes that cause ETag contention and
-                    // the race condition where a whiteglove_complete status update could be overwritten.
                     await _storageService.IncrementSessionEventCountAsync(
                         request.TenantId,
                         request.SessionId,

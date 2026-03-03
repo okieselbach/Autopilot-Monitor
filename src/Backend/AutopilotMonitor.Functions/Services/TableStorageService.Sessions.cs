@@ -469,16 +469,49 @@ namespace AutopilotMonitor.Functions.Services
                         var effectiveCompletedAt = EnsureUtc(completedAt ?? DateTime.UtcNow);
                         update["CompletedAt"] = effectiveCompletedAt;
 
-                        // Read earliest event from Events table — authoritative source, immune to
-                        // concurrent StartedAt update races. This is a single-row lookup (maxPerPage: 1)
-                        // and only happens once per session lifecycle (at completion).
-                        var earliestStoredEvent = await GetEarliestSessionEventTimestampAsync(tenantId, sessionId);
-                        var durationStart = earliestStoredEvent ?? currentStartedAt;
-                        if (earliestEventTimestamp.HasValue && earliestEventTimestamp.Value < durationStart)
-                            durationStart = earliestEventTimestamp.Value;
+                        // Check if this is a WhiteGlove session with a stored Part 1 duration
+                        var existingIsPreProvisioned = session.GetBoolean("IsPreProvisioned") ?? false;
+                        var existingResumedAt = session.GetDateTimeOffset("ResumedAt")?.UtcDateTime;
+                        var existingDurationSeconds = SafeGetInt32(session, "DurationSeconds");
 
-                        if (durationStart < effectiveCompletedAt)
-                            update["DurationSeconds"] = (int)(effectiveCompletedAt - durationStart).TotalSeconds;
+                        if (existingIsPreProvisioned && existingResumedAt.HasValue && existingDurationSeconds.HasValue)
+                        {
+                            // WhiteGlove: combined duration = Part 1 (stored) + Part 2 (ResumedAt → completion)
+                            // This excludes the pause between pre-provisioning and user enrollment.
+                            var part2Seconds = (int)(effectiveCompletedAt - existingResumedAt.Value).TotalSeconds;
+                            if (part2Seconds > 0)
+                                update["DurationSeconds"] = existingDurationSeconds.Value + part2Seconds;
+                        }
+                        else
+                        {
+                            // Standard session (or WhiteGlove without stored Part 1 data — fallback):
+                            // Read earliest event from Events table — authoritative source, immune to
+                            // concurrent StartedAt update races. This is a single-row lookup (maxPerPage: 1)
+                            // and only happens once per session lifecycle (at completion).
+                            var earliestStoredEvent = await GetEarliestSessionEventTimestampAsync(tenantId, sessionId);
+                            var durationStart = earliestStoredEvent ?? currentStartedAt;
+                            if (earliestEventTimestamp.HasValue && earliestEventTimestamp.Value < durationStart)
+                                durationStart = earliestEventTimestamp.Value;
+
+                            if (durationStart < effectiveCompletedAt)
+                                update["DurationSeconds"] = (int)(effectiveCompletedAt - durationStart).TotalSeconds;
+                        }
+                    }
+                    // WhiteGlove Part 1 complete: compute and store Part 1 duration (earliest event → latest event).
+                    // This value is used by the dashboard and serves as the authoritative Part 1 duration
+                    // for future Part 2 combined-duration calculations.
+                    else if (status == SessionStatus.Pending)
+                    {
+                        if (latestEventTimestamp.HasValue)
+                        {
+                            var earliestStoredEvent = await GetEarliestSessionEventTimestampAsync(tenantId, sessionId);
+                            var durationStart = earliestStoredEvent ?? currentStartedAt;
+                            if (earliestEventTimestamp.HasValue && earliestEventTimestamp.Value < durationStart)
+                                durationStart = earliestEventTimestamp.Value;
+
+                            if (durationStart < latestEventTimestamp.Value)
+                                update["DurationSeconds"] = (int)(latestEventTimestamp.Value - durationStart).TotalSeconds;
+                        }
                     }
 
                     // Track the most recent event timestamp for excessive data sender detection
@@ -564,13 +597,40 @@ namespace AutopilotMonitor.Functions.Services
                                 var effectiveCompletedAt = EnsureUtc(completedAt ?? DateTime.UtcNow);
                                 forceUpdate["CompletedAt"] = effectiveCompletedAt;
 
-                                var earliestStoredEvent = await GetEarliestSessionEventTimestampAsync(tenantId, sessionId);
-                                var durationStart = earliestStoredEvent ?? freshStartedAt;
-                                if (earliestEventTimestamp.HasValue && earliestEventTimestamp.Value < durationStart)
-                                    durationStart = earliestEventTimestamp.Value;
+                                var freshIsPreProvisioned = freshSession.GetBoolean("IsPreProvisioned") ?? false;
+                                var freshResumedAt = freshSession.GetDateTimeOffset("ResumedAt")?.UtcDateTime;
+                                var freshDurationSeconds = SafeGetInt32(freshSession, "DurationSeconds");
 
-                                if (durationStart < effectiveCompletedAt)
-                                    forceUpdate["DurationSeconds"] = (int)(effectiveCompletedAt - durationStart).TotalSeconds;
+                                if (freshIsPreProvisioned && freshResumedAt.HasValue && freshDurationSeconds.HasValue)
+                                {
+                                    // WhiteGlove: combined duration = Part 1 (stored) + Part 2 (ResumedAt → completion)
+                                    var part2Seconds = (int)(effectiveCompletedAt - freshResumedAt.Value).TotalSeconds;
+                                    if (part2Seconds > 0)
+                                        forceUpdate["DurationSeconds"] = freshDurationSeconds.Value + part2Seconds;
+                                }
+                                else
+                                {
+                                    var earliestStoredEvent = await GetEarliestSessionEventTimestampAsync(tenantId, sessionId);
+                                    var durationStart = earliestStoredEvent ?? freshStartedAt;
+                                    if (earliestEventTimestamp.HasValue && earliestEventTimestamp.Value < durationStart)
+                                        durationStart = earliestEventTimestamp.Value;
+
+                                    if (durationStart < effectiveCompletedAt)
+                                        forceUpdate["DurationSeconds"] = (int)(effectiveCompletedAt - durationStart).TotalSeconds;
+                                }
+                            }
+                            else if (status == SessionStatus.Pending)
+                            {
+                                if (latestEventTimestamp.HasValue)
+                                {
+                                    var earliestStoredEvent = await GetEarliestSessionEventTimestampAsync(tenantId, sessionId);
+                                    var durationStart = earliestStoredEvent ?? freshStartedAt;
+                                    if (earliestEventTimestamp.HasValue && earliestEventTimestamp.Value < durationStart)
+                                        durationStart = earliestEventTimestamp.Value;
+
+                                    if (durationStart < latestEventTimestamp.Value)
+                                        forceUpdate["DurationSeconds"] = (int)(latestEventTimestamp.Value - durationStart).TotalSeconds;
+                                }
                             }
 
                             if (latestEventTimestamp.HasValue)
@@ -881,10 +941,7 @@ namespace AutopilotMonitor.Functions.Services
                 Status = status,
                 FailureReason = entity.GetString("FailureReason") ?? string.Empty,
                 EventCount = SafeGetInt32(entity, "EventCount") ?? 0,
-                DurationSeconds = SafeGetInt32(entity, "DurationSeconds")
-                    ?? (completedAt.HasValue
-                        ? (int)(completedAt.Value - startedAt).TotalSeconds
-                        : (int)(DateTime.UtcNow - startedAt).TotalSeconds),
+                DurationSeconds = ComputeEffectiveDuration(entity, status, startedAt, completedAt),
                 EnrollmentType = entity.GetString("EnrollmentType") ?? "v1",
                 DiagnosticsBlobName = entity.GetString("DiagnosticsBlobName"),
                 LastEventAt = SafeGetDateTime(entity, "LastEventAt"),
@@ -896,6 +953,36 @@ namespace AutopilotMonitor.Functions.Services
                 IsUserDriven = entity.GetBoolean("IsUserDriven") ?? false,
                 AgentVersion = entity.GetString("AgentVersion") ?? string.Empty
             };
+        }
+
+        /// <summary>
+        /// Computes the effective duration for dashboard display.
+        /// For WhiteGlove Part 2 InProgress sessions: Part 1 stored duration + (now - ResumedAt).
+        /// For completed/Pending sessions: uses stored DurationSeconds (set by UpdateSessionStatusAsync).
+        /// For other InProgress sessions: falls back to wall-clock time from StartedAt.
+        /// </summary>
+        private int ComputeEffectiveDuration(TableEntity entity, SessionStatus status, DateTime startedAt, DateTime? completedAt)
+        {
+            var storedDuration = SafeGetInt32(entity, "DurationSeconds");
+            var isPreProvisioned = entity.GetBoolean("IsPreProvisioned") ?? false;
+            var resumedAt = SafeGetDateTime(entity, "ResumedAt");
+
+            // WhiteGlove Part 2 in progress: Part 1 duration (stored) + running Part 2 time
+            if (isPreProvisioned && resumedAt.HasValue && storedDuration.HasValue
+                && status == SessionStatus.InProgress)
+            {
+                var part2Running = (int)(DateTime.UtcNow - resumedAt.Value).TotalSeconds;
+                return storedDuration.Value + Math.Max(0, part2Running);
+            }
+
+            // All other cases: use stored value or compute fallback
+            if (storedDuration.HasValue)
+                return storedDuration.Value;
+
+            if (completedAt.HasValue)
+                return (int)(completedAt.Value - startedAt).TotalSeconds;
+
+            return (int)(DateTime.UtcNow - startedAt).TotalSeconds;
         }
 
         /// <summary>
