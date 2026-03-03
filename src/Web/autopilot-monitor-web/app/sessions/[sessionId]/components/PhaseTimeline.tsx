@@ -223,6 +223,12 @@ export default function PhaseTimeline({ currentPhase, completedPhases, events = 
       return 'pending';
     }
 
+    // WhiteGlove Pending: pre-provisioning is complete, all reached phases are done
+    if (sessionStatus === 'Pending') {
+      if (phaseId <= effectiveCurrentPhase) return 'completed';
+      return 'pending';
+    }
+
     // Normal in-progress logic (using effectiveCurrentPhase to stay in sync with events)
     if (phaseId === effectiveCurrentPhase) return 'current';
     if (phaseId < effectiveCurrentPhase) return 'completed';
