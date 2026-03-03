@@ -255,6 +255,7 @@ function EventRow({ event, isGalacticAdmin }: { event: EnrollmentEvent; isGalact
   const [showDetails, setShowDetails] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copiedDetail, setCopiedDetail] = useState(false);
   const detailData = useMemo(() => normalizeEventDataForDisplay(event.data), [event.data]);
 
   // Detect truncated data: backend sets _rawDataJson when DataJson could not be parsed
@@ -277,6 +278,16 @@ function EventRow({ event, isGalacticAdmin }: { event: EnrollmentEvent; isGalact
   const formattedOutput = hasGatherOutput
     ? gatherOutput.replace(/\r\n/g, "\n").replace(/\r/g, "\n")
     : null;
+
+  const copyDetailContent = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedDetail(true);
+      setTimeout(() => setCopiedDetail(false), 1400);
+    } catch (err) {
+      console.error('Failed to copy detail content:', err);
+    }
+  };
 
   const copyEventId = async () => {
     try {
@@ -335,7 +346,24 @@ function EventRow({ event, isGalacticAdmin }: { event: EnrollmentEvent; isGalact
               <span>{gatherCommand}</span>
             </div>
           )}
-          <div className="bg-gray-900 rounded-lg overflow-hidden">
+          <div className="bg-gray-900 rounded-lg overflow-hidden relative group/detail">
+            <button
+              type="button"
+              onClick={() => copyDetailContent(formattedOutput!)}
+              title={copiedDetail ? "Copied!" : "Copy to clipboard"}
+              className="absolute top-1.5 right-1.5 inline-flex items-center justify-center w-5 h-5 rounded border border-gray-600 bg-gray-800 text-gray-400 opacity-0 group-hover/detail:opacity-100 focus:opacity-100 hover:bg-gray-700 hover:text-gray-200 transition-opacity z-10"
+            >
+              {copiedDetail ? (
+                <svg className="w-3.5 h-3.5 text-green-400" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M16.704 5.29a1 1 0 010 1.42l-7.2 7.2a1 1 0 01-1.415 0l-3.2-3.2a1 1 0 111.414-1.42l2.493 2.494 6.493-6.494a1 1 0 011.415 0z" clipRule="evenodd" />
+                </svg>
+              ) : (
+                <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                  <path d="M6 2a2 2 0 00-2 2v8a2 2 0 002 2h1v-2H6V4h7v1h2V4a2 2 0 00-2-2H6z" />
+                  <path d="M9 7a2 2 0 00-2 2v7a2 2 0 002 2h7a2 2 0 002-2V9a2 2 0 00-2-2H9z" />
+                </svg>
+              )}
+            </button>
             <div className="px-3 py-2 max-h-96 overflow-y-auto overflow-x-auto">
               <pre className="text-xs text-gray-100 font-mono whitespace-pre">{formattedOutput}</pre>
             </div>
@@ -367,7 +395,24 @@ function EventRow({ event, isGalacticAdmin }: { event: EnrollmentEvent; isGalact
           <div className="flex items-center gap-2 mb-1.5">
             <span className="text-xs font-medium text-amber-600">Data truncated (exceeded 64KB storage limit)</span>
           </div>
-          <div className="p-3 bg-gray-900 rounded text-xs text-gray-100 font-mono overflow-x-auto max-h-96 overflow-y-auto">
+          <div className="p-3 bg-gray-900 rounded text-xs text-gray-100 font-mono overflow-x-auto max-h-96 overflow-y-auto relative group/detail">
+            <button
+              type="button"
+              onClick={() => copyDetailContent(rawDataJson!)}
+              title={copiedDetail ? "Copied!" : "Copy to clipboard"}
+              className="absolute top-1.5 right-1.5 inline-flex items-center justify-center w-5 h-5 rounded border border-gray-600 bg-gray-800 text-gray-400 opacity-0 group-hover/detail:opacity-100 focus:opacity-100 hover:bg-gray-700 hover:text-gray-200 transition-opacity z-10"
+            >
+              {copiedDetail ? (
+                <svg className="w-3.5 h-3.5 text-green-400" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M16.704 5.29a1 1 0 010 1.42l-7.2 7.2a1 1 0 01-1.415 0l-3.2-3.2a1 1 0 111.414-1.42l2.493 2.494 6.493-6.494a1 1 0 011.415 0z" clipRule="evenodd" />
+                </svg>
+              ) : (
+                <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                  <path d="M6 2a2 2 0 00-2 2v8a2 2 0 002 2h1v-2H6V4h7v1h2V4a2 2 0 00-2-2H6z" />
+                  <path d="M9 7a2 2 0 00-2 2v7a2 2 0 002 2h7a2 2 0 002-2V9a2 2 0 00-2-2H9z" />
+                </svg>
+              )}
+            </button>
             <pre className="whitespace-pre-wrap break-words">{rawDataJson}</pre>
           </div>
         </div>
@@ -375,7 +420,24 @@ function EventRow({ event, isGalacticAdmin }: { event: EnrollmentEvent; isGalact
 
       {/* Non-gather (or gather without output): raw JSON details */}
       {showDetails && !isTruncated && !hasGatherOutput && detailData && (
-        <div className="mt-3 p-3 bg-gray-900 rounded text-xs text-gray-100 font-mono overflow-x-auto">
+        <div className="mt-3 p-3 bg-gray-900 rounded text-xs text-gray-100 font-mono overflow-x-auto relative group/detail">
+          <button
+            type="button"
+            onClick={() => copyDetailContent(JSON.stringify(detailData, null, 2))}
+            title={copiedDetail ? "Copied!" : "Copy to clipboard"}
+            className="absolute top-1.5 right-1.5 inline-flex items-center justify-center w-5 h-5 rounded border border-gray-600 bg-gray-800 text-gray-400 opacity-0 group-hover/detail:opacity-100 focus:opacity-100 hover:bg-gray-700 hover:text-gray-200 transition-opacity z-10"
+          >
+            {copiedDetail ? (
+              <svg className="w-3.5 h-3.5 text-green-400" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M16.704 5.29a1 1 0 010 1.42l-7.2 7.2a1 1 0 01-1.415 0l-3.2-3.2a1 1 0 111.414-1.42l2.493 2.494 6.493-6.494a1 1 0 011.415 0z" clipRule="evenodd" />
+              </svg>
+            ) : (
+              <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                <path d="M6 2a2 2 0 00-2 2v8a2 2 0 002 2h1v-2H6V4h7v1h2V4a2 2 0 00-2-2H6z" />
+                <path d="M9 7a2 2 0 00-2 2v7a2 2 0 002 2h7a2 2 0 002-2V9a2 2 0 00-2-2H9z" />
+              </svg>
+            )}
+          </button>
           <pre>{JSON.stringify(detailData, null, 2)}</pre>
         </div>
       )}
