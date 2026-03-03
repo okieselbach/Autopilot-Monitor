@@ -69,6 +69,10 @@ export default function InstallProgress({ events, summaryStats }: InstallProgres
       const eventTs = evt.timestamp;
 
       if (evt.eventType === "app_install_started") {
+        // Don't reset an app that already completed — later batch re-scans
+        // would overwrite the real duration with near-zero timestamps.
+        // Allow restart after failure (retry).
+        if (existing?.state === "Installed") continue;
         installMap.set(appName, {
           appName,
           appId,
@@ -80,6 +84,8 @@ export default function InstallProgress({ events, summaryStats }: InstallProgres
           eventData: d,
         });
       } else if (evt.eventType === "app_install_completed") {
+        // Keep the first valid completion — don't let batch re-scans overwrite.
+        if (existing?.state === "Installed" && existing.durationMs != null) continue;
         const startTime = existing?.startedAt ? new Date(existing.startedAt).getTime() : null;
         const endTime = new Date(eventTs).getTime();
         const duration = startTime ? endTime - startTime : undefined;
@@ -97,6 +103,8 @@ export default function InstallProgress({ events, summaryStats }: InstallProgres
           eventData: d,
         });
       } else if (evt.eventType === "app_install_failed") {
+        // Don't downgrade from Installed to Failed.
+        if (existing?.state === "Installed") continue;
         const startTime = existing?.startedAt ? new Date(existing.startedAt).getTime() : null;
         const endTime = new Date(eventTs).getTime();
         const duration = startTime ? endTime - startTime : undefined;
@@ -116,6 +124,8 @@ export default function InstallProgress({ events, summaryStats }: InstallProgres
           eventData: d,
         });
       } else if (evt.eventType === "app_install_skipped") {
+        // Don't overwrite terminal states.
+        if (existing?.state === "Installed" || existing?.state === "Failed") continue;
         installMap.set(appName, {
           appName,
           appId,
