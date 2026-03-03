@@ -146,6 +146,13 @@ namespace AutopilotMonitor.Agent.Core.Configuration
         public int AuthFailureTimeoutMinutes { get; set; } = 0;
 
         /// <summary>
+        /// Maximum agent lifetime in minutes. Safety net to prevent zombie agents.
+        /// The agent emits enrollment_failed with failureType "agent_timeout" when this expires.
+        /// 0 = disabled (no lifetime limit). Default: 360 (6 hours).
+        /// </summary>
+        public int AgentMaxLifetimeMinutes { get; set; } = 360;
+
+        /// <summary>
         /// Whether diagnostics upload is configured for this tenant.
         /// When true, the agent requests a short-lived upload URL from the backend just before uploading.
         /// The SAS URL itself is never stored in config — it is fetched on-demand and used in memory only.

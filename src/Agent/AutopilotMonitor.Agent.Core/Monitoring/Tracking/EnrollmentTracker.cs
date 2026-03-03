@@ -35,6 +35,34 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         private bool _finalDeviceInfoCollected = false; // Ensure final device info is emitted only once
         private string _lastEmittedSummaryHash; // Track last emitted state-breakdown to avoid redundant summary events
 
+        // ESP failure handling (Phase 1)
+        private Timer _espFailureTimer;
+        private string _pendingEspFailureType;
+        private const int EspFailureGracePeriodSeconds = 60;
+        private static readonly HashSet<string> RecoverableEspFailureTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "ESPProgress_Timeout"
+        };
+
+        // Unified completion logic (Phase 3A)
+        private bool _espEverSeen;
+        private bool _espFinalExitSeen;
+        private bool _enrollmentCompleteEmitted;
+        private bool _desktopArrived;
+        private readonly DateTime _agentStartTimeUtc = DateTime.UtcNow;
+
+        // Device-Only ESP detection (Phase 3C)
+        private Timer _deviceOnlyEspTimer;
+        private const int DeviceOnlyEspTimerMinutes = 5;
+
+        // State persistence for crash recovery
+        private readonly EnrollmentStatePersistence _statePersistence;
+        private EnrollmentStateData _stateData = new EnrollmentStateData();
+        private bool _stateDirty;
+
+        // Completion check throttling (max 1x/min per source)
+        private readonly Dictionary<string, DateTime> _lastCompletionCheckBySource = new Dictionary<string, DateTime>();
+
         // Default IME log folder
         private const string DefaultImeLogFolder = @"%ProgramData%\Microsoft\IntuneManagementExtension\Logs";
 
@@ -115,8 +143,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             _espAndHelloTracker = espAndHelloTracker;
             _deviceInfoCollector = new Collectors.DeviceInfoCollector(sessionId, tenantId, emitEvent, logger);
 
-            // Create ImeLogTracker with state persistence directory
+            // State persistence for crash recovery
             var stateDirectory = @"%ProgramData%\AutopilotMonitor\State";
+            _statePersistence = new EnrollmentStatePersistence(stateDirectory, _logger);
+
+            // Create ImeLogTracker with state persistence directory
             _imeLogTracker = new ImeLogTracker(_imeLogFolder, _imeLogPatterns, _logger, matchLogPath: imeMatchLogPath, stateDirectory: stateDirectory);
             _imeLogTracker.SimulationMode = simulationMode;
             _imeLogTracker.SpeedFactor = speedFactor;
@@ -137,6 +168,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 _espAndHelloTracker.HelloCompleted += OnHelloCompleted;
                 _espAndHelloTracker.FinalizingSetupPhaseTriggered += OnFinalizingSetupPhaseTriggered;
                 _espAndHelloTracker.WhiteGloveCompleted += OnWhiteGloveCompleted;
+                _espAndHelloTracker.EspFailureDetected += OnEspFailureDetected;
             }
         }
 
@@ -146,6 +178,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         public void Start()
         {
             _logger.Info("EnrollmentTracker: starting");
+
+            // Load persisted state for crash recovery
+            LoadState();
 
             // Start IME log tracking immediately — this is the critical enrollment watcher.
             // Device info collection (WMI + registry) runs in the background so it doesn't
@@ -198,6 +233,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         {
             var result = _deviceInfoCollector.CollectAll();
             _enrollmentType = result.enrollmentType;
+            _stateData.EnrollmentType = _enrollmentType;
+            _stateDirty = true;
         }
 
         /// <summary>
@@ -228,6 +265,26 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             _logger.Info($"EnrollmentTracker: ESP phase changed from '{_lastEspPhase ?? "null"}' to '{phase}'");
             _lastEspPhase = phase;
             _hasAutoSwitchedToAppsPhase = false; // Reset when ESP phase changes
+            _espEverSeen = true;
+            _stateData.EspEverSeen = true;
+            _stateData.LastEspPhase = phase;
+            if (_stateData.EspFirstSeenUtc == null)
+                _stateData.EspFirstSeenUtc = DateTime.UtcNow;
+            RecordSignal($"esp_phase_{phase}");
+
+            // ESP phase change means ESP is progressing — cancel any pending failure grace period
+            CancelPendingEspFailure();
+
+            // Cancel device-only ESP timer if AccountSetup phase detected
+            if (string.Equals(phase, "AccountSetup", StringComparison.OrdinalIgnoreCase))
+            {
+                if (_deviceOnlyEspTimer != null)
+                {
+                    _logger.Info("EnrollmentTracker: AccountSetup detected — cancelling device-only ESP timer");
+                    _deviceOnlyEspTimer.Dispose();
+                    _deviceOnlyEspTimer = null;
+                }
+            }
 
             // Map ESP phase to EnrollmentPhase (phase change events)
             var enrollmentPhase = EnrollmentPhase.DeviceSetup;
@@ -358,6 +415,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     break;
 
                 case AppInstallationState.Installing:
+                    // Only emit the strategic event once when install actually starts.
+                    // Progress-only updates (oldState == Installing, just progress/bytes changed)
+                    // are skipped — same pattern as Downloading above.
+                    if (oldState == AppInstallationState.Installing)
+                        return;
                     eventType = "app_install_started";
                     break;
 
@@ -496,6 +558,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         private void HandleUserSessionCompleted()
         {
             _logger.Info("EnrollmentTracker: User session completed (detected from IME log)");
+            _stateData.ImePatternSeenUtc = DateTime.UtcNow;
+            RecordSignal("ime_pattern");
+
+            // User session completed successfully — cancel any pending ESP failure
+            CancelPendingEspFailure();
 
             // Stop summary timer if running
             _summaryTimer?.Change(Timeout.Infinite, Timeout.Infinite);
@@ -531,70 +598,41 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     // or when the agent is stopped/times out
                     return;
                 }
-
-                if (helloPolicyConfigured && helloCompleted)
-                {
-                    _logger.Info("EnrollmentTracker: Windows Hello provisioning has completed. Enrollment can complete.");
-                }
-                else
-                {
-                    _logger.Info("EnrollmentTracker: No Windows Hello policy detected. Enrollment can complete.");
-                }
             }
 
-            // Emit enrollment completed event
-            _emitEvent(new EnrollmentEvent
-            {
-                SessionId = _sessionId,
-                TenantId = _tenantId,
-                EventType = "enrollment_complete",
-                Severity = EventSeverity.Info,
-                Source = "ImeLogTracker",
-                Phase = EnrollmentPhase.Complete,
-                Message = "Autopilot enrollment completed successfully (user session completed)"
-            });
-
-            // Write enrollment complete marker for cleanup retry detection
-            WriteEnrollmentCompleteMarker();
-
-            // Clean up persisted tracker state so next enrollment starts fresh
-            _imeLogTracker?.DeleteState();
+            TryEmitEnrollmentComplete("ime_pattern");
         }
 
         /// <summary>
-        /// Called when Windows Hello provisioning completes (via HelloDetector event)
-        /// If we were waiting for Hello, now we can mark enrollment as complete
+        /// Called when Windows Hello provisioning completes (via EspAndHelloTracker event).
+        /// Multiple completion paths: IME pattern was waiting for Hello, ESP final exit + Hello composite,
+        /// or Desktop arrival + Hello.
         /// </summary>
         private void OnHelloCompleted(object sender, EventArgs e)
         {
-            _logger.Info("EnrollmentTracker: Received HelloCompleted event from HelloDetector");
+            _logger.Info("EnrollmentTracker: Received HelloCompleted event from EspAndHelloTracker");
+            _stateData.HelloResolvedUtc = DateTime.UtcNow;
+            RecordSignal("hello_resolved");
 
             if (_isWaitingForHello)
             {
-                _logger.Info("EnrollmentTracker: Hello provisioning completed while waiting - marking enrollment as complete now");
+                _logger.Info("EnrollmentTracker: Hello provisioning completed while waiting (IME path) - marking enrollment as complete now");
                 _isWaitingForHello = false;
-
-                // Emit enrollment completed event
-                _emitEvent(new EnrollmentEvent
-                {
-                    SessionId = _sessionId,
-                    TenantId = _tenantId,
-                    EventType = "enrollment_complete",
-                    Severity = EventSeverity.Info,
-                    Source = "EnrollmentTracker",
-                    Phase = EnrollmentPhase.Complete,
-                    Message = "Autopilot enrollment completed successfully (Hello provisioning completed)"
-                });
-
-                // Write enrollment complete marker for cleanup retry detection
-                WriteEnrollmentCompleteMarker();
-
-                // Clean up persisted tracker state so next enrollment starts fresh
-                _imeLogTracker?.DeleteState();
+                TryEmitEnrollmentComplete("ime_hello");
+            }
+            else if (_espFinalExitSeen)
+            {
+                _logger.Info("EnrollmentTracker: Hello completed + ESP final exit seen — composite completion");
+                TryEmitEnrollmentComplete("esp_hello_composite");
+            }
+            else if (_desktopArrived)
+            {
+                _logger.Info("EnrollmentTracker: Hello completed + desktop arrived — desktop-hello completion");
+                TryEmitEnrollmentComplete("desktop_hello");
             }
             else
             {
-                _logger.Debug("EnrollmentTracker: HelloCompleted event received but not waiting - ignoring");
+                _logger.Debug("EnrollmentTracker: HelloCompleted event received but no completion trigger active yet");
             }
         }
 
@@ -629,6 +667,96 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         }
 
         /// <summary>
+        /// Called when an ESP failure is detected (ESPProgress_Failure, _Timeout, _Abort, WhiteGlove_Failed, etc.).
+        /// Terminal failures emit enrollment_failed immediately.
+        /// Recoverable failures (e.g. ESPProgress_Timeout) get a grace period before failure.
+        /// </summary>
+        private void OnEspFailureDetected(object sender, string failureType)
+        {
+            _logger.Info($"EnrollmentTracker: ESP failure detected: {failureType}");
+
+            if (RecoverableEspFailureTypes.Contains(failureType))
+            {
+                // Recoverable failure — start grace period timer
+                _logger.Info($"EnrollmentTracker: '{failureType}' is recoverable — starting {EspFailureGracePeriodSeconds}s grace period");
+                _pendingEspFailureType = failureType;
+
+                // Cancel existing timer if any (e.g. second timeout event)
+                _espFailureTimer?.Dispose();
+                _espFailureTimer = new Timer(
+                    OnEspFailureGracePeriodExpired,
+                    null,
+                    TimeSpan.FromSeconds(EspFailureGracePeriodSeconds),
+                    TimeSpan.FromMilliseconds(-1));
+            }
+            else
+            {
+                // Terminal failure — emit enrollment_failed immediately
+                _logger.Info($"EnrollmentTracker: '{failureType}' is terminal — emitting enrollment_failed immediately");
+                EmitEnrollmentFailed(failureType, "esp_failure");
+            }
+        }
+
+        /// <summary>
+        /// Called when the ESP failure grace period expires without recovery.
+        /// Emits enrollment_failed.
+        /// </summary>
+        private void OnEspFailureGracePeriodExpired(object state)
+        {
+            var failureType = _pendingEspFailureType ?? "unknown";
+            _logger.Warning($"EnrollmentTracker: ESP failure grace period ({EspFailureGracePeriodSeconds}s) expired for '{failureType}' — emitting enrollment_failed");
+            _pendingEspFailureType = null;
+
+            EmitEnrollmentFailed(failureType, "esp_failure_grace_expired");
+        }
+
+        /// <summary>
+        /// Cancels any pending ESP failure grace period timer (called when recovery is detected).
+        /// </summary>
+        private void CancelPendingEspFailure()
+        {
+            if (_espFailureTimer != null)
+            {
+                _logger.Info($"EnrollmentTracker: ESP recovery detected — cancelling pending failure for '{_pendingEspFailureType}'");
+                _espFailureTimer.Dispose();
+                _espFailureTimer = null;
+                _pendingEspFailureType = null;
+            }
+        }
+
+        /// <summary>
+        /// Emits an enrollment_failed event. The MonitoringService handles shutdown identically to enrollment_complete.
+        /// </summary>
+        private void EmitEnrollmentFailed(string failureType, string failureSource)
+        {
+            // Stop summary timer
+            _summaryTimer?.Change(Timeout.Infinite, Timeout.Infinite);
+            _summaryTimerActive = false;
+
+            _emitEvent(new EnrollmentEvent
+            {
+                SessionId = _sessionId,
+                TenantId = _tenantId,
+                EventType = "enrollment_failed",
+                Severity = EventSeverity.Error,
+                Source = "EnrollmentTracker",
+                Phase = EnrollmentPhase.Complete,
+                Message = $"Autopilot enrollment failed: {failureType}",
+                Data = new Dictionary<string, object>
+                {
+                    { "failureType", failureType },
+                    { "failureSource", failureSource },
+                    { "signalsSeen", _stateData.SignalsSeen },
+                    { "agentUptimeSeconds", (DateTime.UtcNow - _agentStartTimeUtc).TotalSeconds }
+                }
+            });
+
+            // Clean up persisted tracker state
+            _imeLogTracker?.DeleteState();
+            _statePersistence.Delete();
+        }
+
+        /// <summary>
         /// Called when ESP exit or Hello wizard start is detected (via HelloDetector Shell-Core events)
         /// Triggers transition to FinalizingSetup phase
         /// </summary>
@@ -639,10 +767,20 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             // If ESP exiting, check which phase we're in
             if (reason == "esp_exiting")
             {
-                if (string.Equals(_lastEspPhase, "AccountSetup", StringComparison.OrdinalIgnoreCase))
+                _espEverSeen = true;
+
+                if (string.Equals(_lastEspPhase, "AccountSetup", StringComparison.OrdinalIgnoreCase) || _desktopArrived)
                 {
-                    // AccountSetup phase exiting - this is the final ESP exit, start Hello wait timer
-                    _logger.Info("EnrollmentTracker: AccountSetup phase exiting - enrollment nearing completion, starting Hello wait timer");
+                    // Final ESP exit: either AccountSetup phase detected OR desktop arrived (backup)
+                    var phaseInfo = string.Equals(_lastEspPhase, "AccountSetup", StringComparison.OrdinalIgnoreCase)
+                        ? "AccountSetup"
+                        : $"{_lastEspPhase ?? "unknown"} (desktop arrival backup)";
+                    _logger.Info($"EnrollmentTracker: ESP final exit from {phaseInfo} — marking _espFinalExitSeen, starting Hello wait timer");
+
+                    _espFinalExitSeen = true;
+                    _stateData.EspFinalExitSeen = true;
+                    _stateData.EspFinalExitUtc = DateTime.UtcNow;
+                    RecordSignal("esp_final_exit");
 
                     // Emit phase change event to FinalizingSetup
                     _emitEvent(new EnrollmentEvent
@@ -653,13 +791,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                         Severity = EventSeverity.Info,
                         Source = "EnrollmentTracker",
                         Phase = EnrollmentPhase.FinalizingSetup,
-                        Message = "ESP phase: FinalizingSetup (AccountSetup completed, waiting for final steps)",
+                        Message = $"ESP phase: FinalizingSetup ({phaseInfo} completed, waiting for final steps)",
                         Data = new Dictionary<string, object>
                         {
                             { "espPhase", "FinalizingSetup" },
                             { "autoDetected", true },
                             { "triggeredBy", reason },
-                            { "previousPhase", "AccountSetup" }
+                            { "previousPhase", _lastEspPhase ?? "unknown" },
+                            { "desktopArrivedBackup", _desktopArrived && !string.Equals(_lastEspPhase, "AccountSetup", StringComparison.OrdinalIgnoreCase) }
                         }
                     });
 
@@ -670,11 +809,16 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 }
                 else
                 {
-                    // DeviceSetup phase exiting - this is just transition to AccountSetup, not final
-                    _logger.Info($"EnrollmentTracker: ESP phase exiting from '{_lastEspPhase ?? "unknown"}' - intermediate transition, not starting Hello wait timer");
+                    // DeviceSetup phase exiting without desktop — intermediate transition (Device→Account) or device-only ESP
+                    _logger.Info($"EnrollmentTracker: ESP phase exiting from '{_lastEspPhase ?? "unknown"}' - intermediate transition, starting device-only ESP detection timer ({DeviceOnlyEspTimerMinutes}min)");
 
-                    // Don't emit FinalizingSetup event yet, this is not the final exit
-                    // The regular esp_phase_changed event will be emitted when we detect AccountSetup phase
+                    // Start device-only ESP detection timer
+                    _deviceOnlyEspTimer?.Dispose();
+                    _deviceOnlyEspTimer = new Timer(
+                        OnDeviceOnlyEspTimerExpired,
+                        null,
+                        TimeSpan.FromMinutes(DeviceOnlyEspTimerMinutes),
+                        TimeSpan.FromMilliseconds(-1));
                 }
             }
             else if (reason == "hello_wizard_started")
@@ -703,6 +847,245 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             }
         }
 
+        // ===== State Persistence =====
+
+        private void LoadState()
+        {
+            var loaded = _statePersistence.Load();
+            if (loaded == null)
+                return;
+
+            _espEverSeen = loaded.EspEverSeen;
+            _espFinalExitSeen = loaded.EspFinalExitSeen;
+            _desktopArrived = loaded.DesktopArrived;
+            _lastEspPhase = loaded.LastEspPhase;
+            _isWaitingForHello = loaded.IsWaitingForHello;
+            _enrollmentCompleteEmitted = loaded.EnrollmentCompleteEmitted;
+            _enrollmentType = loaded.EnrollmentType ?? _enrollmentType;
+            _stateData = loaded;
+
+            _logger.Info($"EnrollmentTracker: state restored — espEverSeen={_espEverSeen}, espFinalExitSeen={_espFinalExitSeen}, desktopArrived={_desktopArrived}, lastEspPhase={_lastEspPhase}, enrollmentCompleteEmitted={_enrollmentCompleteEmitted}");
+
+            // Restart Hello wait timer if needed after crash recovery
+            if ((_desktopArrived || _espFinalExitSeen) && _espAndHelloTracker != null && !_espAndHelloTracker.IsHelloCompleted)
+            {
+                _logger.Info("EnrollmentTracker: restarting Hello wait timer after state recovery");
+                _espAndHelloTracker.StartHelloWaitTimer();
+            }
+        }
+
+        private void RecordSignal(string signal)
+        {
+            if (!_stateData.SignalsSeen.Contains(signal))
+                _stateData.SignalsSeen.Add(signal);
+            _stateDirty = true;
+        }
+
+        // ===== Unified Completion Logic =====
+
+        /// <summary>
+        /// Central guard method for enrollment_complete emission. All completion paths route through here.
+        /// An _enrollmentCompleteEmitted flag prevents double emission.
+        /// Emits a throttled completion_check event on every call for observability.
+        /// </summary>
+        private void TryEmitEnrollmentComplete(string source)
+        {
+            if (_enrollmentCompleteEmitted)
+            {
+                _logger.Debug($"EnrollmentTracker: TryEmitEnrollmentComplete('{source}') — already emitted, skipping");
+                return;
+            }
+
+            if (string.IsNullOrEmpty(source))
+                return;
+
+            // Hello-Check: Hello must be resolved before we can complete
+            bool helloResolved = _espAndHelloTracker == null
+                || _espAndHelloTracker.IsHelloCompleted
+                || !_espAndHelloTracker.IsPolicyConfigured;
+
+            if (!helloResolved)
+            {
+                _logger.Info($"EnrollmentTracker: Completion source '{source}' ready but Hello still pending — not completing yet");
+                EmitCompletionCheck(source, "hello_pending", "hello_not_resolved");
+                return;
+            }
+
+            // Desktop-Arrival Gate: Only allow desktop_arrival when ESP is NOT actively running
+            // WDP v2 has no ESP — skip the gate entirely
+            if (source == "desktop_arrival" && _enrollmentType != "v2" && _espEverSeen && !_espFinalExitSeen)
+            {
+                _logger.Info("EnrollmentTracker: Desktop arrived but ESP still active — not completing yet");
+                EmitCompletionCheck(source, "blocked", "esp_active");
+                return;
+            }
+
+            _enrollmentCompleteEmitted = true;
+            _stateData.EnrollmentCompleteEmitted = true;
+
+            // Stop summary timer
+            _summaryTimer?.Change(Timeout.Infinite, Timeout.Infinite);
+            _summaryTimerActive = false;
+
+            var helloOutcome = _espAndHelloTracker?.HelloOutcome ?? "unknown";
+
+            var signalTimestamps = new Dictionary<string, string>();
+            if (_stateData.EspFirstSeenUtc.HasValue)
+                signalTimestamps["espFirstSeen"] = _stateData.EspFirstSeenUtc.Value.ToString("o");
+            if (_stateData.DesktopArrivedUtc.HasValue)
+                signalTimestamps["desktopArrived"] = _stateData.DesktopArrivedUtc.Value.ToString("o");
+            if (_stateData.EspFinalExitUtc.HasValue)
+                signalTimestamps["espFinalExit"] = _stateData.EspFinalExitUtc.Value.ToString("o");
+            if (_stateData.HelloResolvedUtc.HasValue)
+                signalTimestamps["helloResolved"] = _stateData.HelloResolvedUtc.Value.ToString("o");
+            if (_stateData.ImePatternSeenUtc.HasValue)
+                signalTimestamps["imePatternSeen"] = _stateData.ImePatternSeenUtc.Value.ToString("o");
+
+            _emitEvent(new EnrollmentEvent
+            {
+                SessionId = _sessionId,
+                TenantId = _tenantId,
+                EventType = "enrollment_complete",
+                Severity = EventSeverity.Info,
+                Source = "EnrollmentTracker",
+                Phase = EnrollmentPhase.Complete,
+                Message = $"Autopilot enrollment completed successfully (source: {source})",
+                Data = new Dictionary<string, object>
+                {
+                    { "completionSource", source },
+                    { "helloOutcome", helloOutcome },
+                    { "signalsSeen", _stateData.SignalsSeen },
+                    { "signalTimestamps", signalTimestamps },
+                    { "agentUptimeSeconds", (DateTime.UtcNow - _agentStartTimeUtc).TotalSeconds }
+                }
+            });
+
+            // Write enrollment complete marker for cleanup retry detection
+            WriteEnrollmentCompleteMarker();
+
+            // Clean up persisted tracker state so next enrollment starts fresh
+            _imeLogTracker?.DeleteState();
+            _statePersistence.Delete();
+        }
+
+        /// <summary>
+        /// Emits a throttled completion_check event for observability.
+        /// Max 1 event per minute per source to avoid flooding.
+        /// </summary>
+        private void EmitCompletionCheck(string source, string result, string reason)
+        {
+            // Throttle: max 1x per minute per source
+            var now = DateTime.UtcNow;
+            if (_lastCompletionCheckBySource.TryGetValue(source, out var lastEmit) && (now - lastEmit).TotalSeconds < 60)
+                return;
+            _lastCompletionCheckBySource[source] = now;
+
+            _emitEvent(new EnrollmentEvent
+            {
+                SessionId = _sessionId,
+                TenantId = _tenantId,
+                EventType = "completion_check",
+                Severity = EventSeverity.Info,
+                Source = "EnrollmentTracker",
+                Phase = EnrollmentPhase.Unknown,
+                Message = $"Completion source '{source}' evaluated — {result}",
+                Data = new Dictionary<string, object>
+                {
+                    { "source", source },
+                    { "result", result },
+                    { "reason", reason },
+                    { "espEverSeen", _espEverSeen },
+                    { "espFinalExitSeen", _espFinalExitSeen },
+                    { "desktopArrived", _desktopArrived },
+                    { "helloResolved", _espAndHelloTracker?.IsHelloCompleted ?? false },
+                    { "helloPolicyConfigured", _espAndHelloTracker?.IsPolicyConfigured ?? false },
+                    { "enrollmentType", _enrollmentType },
+                    { "lastEspPhase", _lastEspPhase ?? "none" }
+                }
+            });
+        }
+
+        /// <summary>
+        /// Called by MonitoringService when Desktop Arrival is detected (explorer.exe under a real user).
+        /// Corrects phase if needed, starts Hello wait timer in no-ESP scenarios, and attempts completion.
+        /// </summary>
+        public void NotifyDesktopArrived()
+        {
+            if (_desktopArrived)
+                return;
+
+            _desktopArrived = true;
+            _stateData.DesktopArrived = true;
+            _stateData.DesktopArrivedUtc = DateTime.UtcNow;
+            RecordSignal("desktop_arrived");
+            _logger.Info("EnrollmentTracker: Desktop arrival notified");
+
+            // Phase correction: If ESP was seen but AccountSetup was never detected by IME log,
+            // correct the phase and emit an event for the timeline
+            if (_espEverSeen && !string.Equals(_lastEspPhase, "AccountSetup", StringComparison.OrdinalIgnoreCase))
+            {
+                var previousPhase = _lastEspPhase ?? "unknown";
+                _lastEspPhase = "AccountSetup";
+                _logger.Info($"EnrollmentTracker: Desktop arrival confirmed AccountSetup phase (was: {previousPhase}) — phase corrected on timeline");
+
+                _emitEvent(new EnrollmentEvent
+                {
+                    SessionId = _sessionId,
+                    TenantId = _tenantId,
+                    EventType = "esp_phase_changed",
+                    Severity = EventSeverity.Info,
+                    Source = "DesktopArrivalDetector",
+                    Phase = EnrollmentPhase.AccountSetup,
+                    Message = $"ESP phase: AccountSetup (auto-detected from desktop arrival, was: {previousPhase})",
+                    Data = new Dictionary<string, object>
+                    {
+                        { "espPhase", "AccountSetup" },
+                        { "autoDetected", true },
+                        { "correctedBy", "desktop_arrival" },
+                        { "previousPhase", previousPhase }
+                    }
+                });
+            }
+
+            // Start Hello wait timer in no-ESP or post-ESP scenarios
+            // Without this, Hello would never timeout-resolve in no-ESP scenarios (WDP v2, ESP disabled)
+            if (_espAndHelloTracker != null && !_espAndHelloTracker.IsHelloCompleted)
+            {
+                _logger.Info("EnrollmentTracker: Desktop arrived with Hello pending — starting Hello wait timer");
+                _espAndHelloTracker.StartHelloWaitTimer();
+            }
+
+            TryEmitEnrollmentComplete("desktop_arrival");
+        }
+
+        /// <summary>
+        /// Called when the device-only ESP timer expires. If no AccountSetup phase started
+        /// and desktop is available, classify as device-only ESP and mark final exit.
+        /// </summary>
+        private void OnDeviceOnlyEspTimerExpired(object state)
+        {
+            // AccountSetup started meanwhile? Timer is obsolete
+            if (string.Equals(_lastEspPhase, "AccountSetup", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.Debug("EnrollmentTracker: Device-only ESP timer expired but AccountSetup detected — ignoring");
+                return;
+            }
+
+            if (_desktopArrived)
+            {
+                _logger.Info($"EnrollmentTracker: No AccountSetup phase after {DeviceOnlyEspTimerMinutes}min — classified as device-only ESP, desktop is active");
+                _espFinalExitSeen = true;
+                _stateData.EspFinalExitSeen = true;
+                _stateData.EspFinalExitUtc = DateTime.UtcNow;
+                RecordSignal("device_only_esp_final_exit");
+                _espAndHelloTracker?.StartHelloWaitTimer();
+            }
+            else
+            {
+                _logger.Info($"EnrollmentTracker: No AccountSetup phase after {DeviceOnlyEspTimerMinutes}min and no desktop yet — waiting for Desktop Arrival or Lifetime Timer");
+            }
+        }
+
         private void CollectDeviceInfoAtFinalizingSetup(string triggerReason)
         {
             if (_finalDeviceInfoCollected)
@@ -720,6 +1103,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         {
             // Only emit if state-breakdown counters changed since last emission (backstop for missed events)
             EmitAppTrackingSummaryIfChanged();
+
+            // Periodic state save (piggybacks on the existing 30s timer)
+            if (_stateDirty)
+            {
+                _stateDirty = false;
+                _statePersistence.Save(_stateData);
+            }
         }
 
         /// <summary>
@@ -786,14 +1176,17 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         {
             Stop();
 
-            // Unsubscribe from HelloDetector events
+            // Unsubscribe from EspAndHelloTracker events
             if (_espAndHelloTracker != null)
             {
                 _espAndHelloTracker.HelloCompleted -= OnHelloCompleted;
                 _espAndHelloTracker.FinalizingSetupPhaseTriggered -= OnFinalizingSetupPhaseTriggered;
                 _espAndHelloTracker.WhiteGloveCompleted -= OnWhiteGloveCompleted;
+                _espAndHelloTracker.EspFailureDetected -= OnEspFailureDetected;
             }
 
+            _espFailureTimer?.Dispose();
+            _deviceOnlyEspTimer?.Dispose();
             _summaryTimer?.Dispose();
             _imeLogTracker?.Dispose();
         }

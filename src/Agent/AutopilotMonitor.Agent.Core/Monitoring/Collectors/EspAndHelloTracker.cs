@@ -42,10 +42,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         private bool _espExitDetected = false;
         private bool _helloWizardStarted = false;
         private bool _whiteGloveDetected = false;
+        private string _detectedEspFailureType; // set during Shell-Core event processing, consumed after event emission
         private readonly object _stateLock = new object();
 
         private readonly int _helloWaitTimeoutSeconds;
-        private const int HelloCompletionTimeoutSeconds = 1500;
+        private const int HelloCompletionTimeoutSeconds = 300;
         private const int BackfillLookbackMinutes = 5;
 
         /// <summary>
@@ -65,6 +66,18 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         /// The device will shut down; the agent should terminate gracefully.
         /// </summary>
         public event EventHandler WhiteGloveCompleted;
+
+        /// <summary>
+        /// Fired when an ESP failure is detected (ESPProgress_Failure, _Timeout, _Abort, WhiteGlove_Failed, etc.).
+        /// The string argument is the structured failure type (e.g. "ESPProgress_Failure", "ESPProgress_Timeout").
+        /// </summary>
+        public event EventHandler<string> EspFailureDetected;
+
+        /// <summary>
+        /// Outcome of Hello provisioning. Set when Hello resolves (via events, timeout, or not configured).
+        /// Values: "completed", "timeout", "not_configured", "wizard_not_started", null (not yet resolved).
+        /// </summary>
+        public string HelloOutcome { get; private set; }
 
         private const string EventLogChannel = "Microsoft-Windows-User Device Registration/Admin";
         private const string ShellCoreEventLogChannel = "Microsoft-Windows-Shell-Core/Operational";
@@ -503,6 +516,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                 }
 
                 _isHelloCompleted = true;
+                HelloOutcome = "completed";
                 StopHelloCompletionTimerLocked();
                 return true;
             }
@@ -649,10 +663,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                               || description.Contains("WhiteGlove_Failed", StringComparison.OrdinalIgnoreCase)
                               || description.Contains("WhiteGlove_Failure", StringComparison.OrdinalIgnoreCase))
                         {
+                            var failureType = ExtractEspFailureType(description);
                             eventType = "esp_failure";
                             severity = EventSeverity.Error;
-                            message = "ESP (Enrollment Status Page) reported a failure";
-                            _logger.Warning("ESP failure detected via Shell-Core event 62407");
+                            message = $"ESP (Enrollment Status Page) reported a failure: {failureType}";
+                            _logger.Warning($"ESP failure detected via Shell-Core event 62407: {failureType}");
+                            _detectedEspFailureType = failureType;
                         }
                         else if (System.Text.RegularExpressions.Regex.IsMatch(description, @"OOBE_ESP.*Exiting", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
                         {
@@ -728,6 +744,20 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     }
                     catch { }
                 }
+
+                // Fire EspFailureDetected if this was an ESP failure event.
+                // Must happen AFTER the event has been emitted above so the
+                // esp_failure event is in the spool before the agent potentially shuts down.
+                if (eventType == "esp_failure" && _detectedEspFailureType != null)
+                {
+                    var failureType = _detectedEspFailureType;
+                    _detectedEspFailureType = null;
+                    try
+                    {
+                        EspFailureDetected?.Invoke(this, failureType);
+                    }
+                    catch { }
+                }
             }
             catch (Exception ex)
             {
@@ -797,6 +827,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                 _logger.Info("Hello policy not detected as enabled — assuming Hello is not configured or was skipped");
 
                 _isHelloCompleted = true;
+                HelloOutcome = "not_configured";
                 StopHelloCompletionTimerLocked();
 
                 // Emit event for tracking
@@ -913,6 +944,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 
                 _logger.Warning($"Hello completion timeout ({HelloCompletionTimeoutSeconds}s) expired after wizard start without terminal event");
                 _isHelloCompleted = true;
+                HelloOutcome = _helloWizardStarted ? "timeout" : "wizard_not_started";
                 StopHelloCompletionTimerLocked();
 
                 _onEventCollected(new EnrollmentEvent
@@ -939,6 +971,89 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                 {
                     _logger.Error("Error invoking HelloCompleted from completion timeout", ex);
                 }
+            }
+        }
+
+        /// <summary>
+        /// Extracts a structured failure type from the Shell-Core event description.
+        /// E.g. "ESPProgress_Failure", "ESPProgress_Timeout", "WhiteGlove_Failed".
+        /// </summary>
+        private static string ExtractEspFailureType(string description)
+        {
+            // Known failure type keywords to search for in order of specificity
+            string[] knownTypes = {
+                "ESPProgress_Failure",
+                "ESPProgress_Failed",
+                "ESPProgress_Timeout",
+                "ESPProgress_Abort",
+                "WhiteGlove_Failed",
+                "WhiteGlove_Failure"
+            };
+
+            foreach (var type in knownTypes)
+            {
+                if (description.Contains(type, StringComparison.OrdinalIgnoreCase))
+                    return type;
+            }
+
+            return "Unknown_ESP_Failure";
+        }
+
+        /// <summary>
+        /// Backfills recent ESP exit and failure events from Shell-Core log on startup.
+        /// Secondary recovery mechanism when state persistence is unavailable.
+        /// </summary>
+        public void BackfillRecentEspExitEvents()
+        {
+            try
+            {
+                var lookbackMs = BackfillLookbackMinutes * 60 * 1000;
+                var query = new EventLogQuery(
+                    ShellCoreEventLogChannel,
+                    PathType.LogName,
+                    $"*[System[(EventID=62407) and TimeCreated[timediff(@SystemTime) <= {lookbackMs}]]]");
+
+                using (var reader = new EventLogReader(query))
+                {
+                    for (EventRecord record = reader.ReadEvent(); record != null; record = reader.ReadEvent())
+                    {
+                        using (record)
+                        {
+                            var description = record.FormatDescription() ?? "";
+
+                            // Check for ESP exit
+                            if (System.Text.RegularExpressions.Regex.IsMatch(description, @"OOBE_ESP.*Exiting", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                            {
+                                lock (_stateLock)
+                                {
+                                    if (!_espExitDetected)
+                                    {
+                                        _espExitDetected = true;
+                                        _logger.Info("Backfill: ESP exit event found in recent Shell-Core logs");
+                                        try { FinalizingSetupPhaseTriggered?.Invoke(this, "esp_exiting"); } catch { }
+                                    }
+                                }
+                            }
+
+                            // Check for ESP failures
+                            if (description.Contains("ESPProgress_Failure", StringComparison.OrdinalIgnoreCase)
+                                || description.Contains("ESPProgress_Failed", StringComparison.OrdinalIgnoreCase)
+                                || description.Contains("ESPProgress_Timeout", StringComparison.OrdinalIgnoreCase)
+                                || description.Contains("ESPProgress_Abort", StringComparison.OrdinalIgnoreCase)
+                                || description.Contains("WhiteGlove_Failed", StringComparison.OrdinalIgnoreCase)
+                                || description.Contains("WhiteGlove_Failure", StringComparison.OrdinalIgnoreCase))
+                            {
+                                var failureType = ExtractEspFailureType(description);
+                                _logger.Info($"Backfill: ESP failure event found in recent Shell-Core logs: {failureType}");
+                                try { EspFailureDetected?.Invoke(this, failureType); } catch { }
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"ESP exit/failure event backfill failed: {ex.Message}");
             }
         }
 

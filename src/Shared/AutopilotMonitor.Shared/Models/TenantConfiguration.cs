@@ -166,6 +166,12 @@ namespace AutopilotMonitor.Shared.Models
         /// </summary>
         public int? AuthFailureTimeoutMinutes { get; set; }
 
+        /// <summary>
+        /// Maximum agent lifetime in minutes. Safety net to prevent zombie agents.
+        /// null = use default (360 = 6 hours). 0 = disabled (no lifetime limit).
+        /// </summary>
+        public int? AgentMaxLifetimeMinutes { get; set; }
+
         // ===== AGENT BEHAVIOR OVERRIDES =====
 
         /// <summary>

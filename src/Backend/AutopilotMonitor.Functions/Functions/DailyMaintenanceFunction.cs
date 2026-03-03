@@ -23,11 +23,13 @@ namespace AutopilotMonitor.Functions.Functions
         }
 
         /// <summary>
-        /// Timer trigger: Runs daily at 2:00 AM UTC
+        /// Timer trigger: Runs every 2 hours
         /// NCRONTAB format: {second} {minute} {hour} {day} {month} {day-of-week}
+        /// Reduced from daily (2:00 UTC) to every 2 hours to catch stalled sessions faster.
+        /// MarkStalledSessionsAsTimedOutAsync is idempotent (terminal states not overwritten).
         /// </summary>
         [Function("DailyMaintenance")]
-        public async Task Run([TimerTrigger("0 0 2 * * *")] object timer)
+        public async Task Run([TimerTrigger("0 0 */2 * * *")] object timer)
         {
             _logger.LogInformation("DailyMaintenance timer trigger fired");
             await _maintenanceService.RunAllAsync();

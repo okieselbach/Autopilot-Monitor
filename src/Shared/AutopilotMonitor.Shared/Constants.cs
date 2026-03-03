@@ -105,6 +105,10 @@ namespace AutopilotMonitor.Shared
             public const string EspUiState          = "esp_ui_state";
             public const string GatherResult        = "gather_result";
             public const string WhiteGloveComplete  = "whiteglove_complete";
+            public const string EnrollmentComplete  = "enrollment_complete";
+            public const string EnrollmentFailed    = "enrollment_failed";
+            public const string DesktopArrived      = "desktop_arrived";
+            public const string CompletionCheck     = "completion_check";
         }
 
         // -----------------------------------------------------------------------

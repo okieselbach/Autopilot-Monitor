@@ -163,6 +163,12 @@ namespace AutopilotMonitor.Shared.Models
         public int HelloWaitTimeoutSeconds { get; set; } = 30;
 
         /// <summary>
+        /// Maximum agent lifetime in minutes. Safety net to prevent zombie agents.
+        /// 0 = disabled (no lifetime limit). Default: 360 (6 hours).
+        /// </summary>
+        public int AgentMaxLifetimeMinutes { get; set; } = 360;
+
+        /// <summary>
         /// Creates default collector configuration
         /// </summary>
         public static CollectorConfiguration CreateDefault()

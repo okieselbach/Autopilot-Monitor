@@ -412,6 +412,17 @@ namespace AutopilotMonitor.Functions.Functions
                 // Retrieve updated session data to include in SignalR messages
                 var updatedSession = await _storageService.GetSessionAsync(request.TenantId, request.SessionId);
 
+                // Session age warning: log if session >4h old and still InProgress (observability only)
+                if (updatedSession != null && updatedSession.Status == SessionStatus.InProgress)
+                {
+                    var sessionAge = DateTime.UtcNow - updatedSession.StartedAt;
+                    if (sessionAge.TotalHours > 4)
+                    {
+                        _logger.LogWarning("Session {SessionId} (tenant {TenantId}) still InProgress after {Hours:F1}h — may be stuck",
+                            request.SessionId, request.TenantId, sessionAge.TotalHours);
+                    }
+                }
+
                 // Log warning if WhiteGlove status update was not persisted despite retries and fallback.
                 // Events are already stored (idempotent UpsertReplace). Do NOT return 500 here:
                 // the agent retries the same batch containing whiteglove_complete, hitting the same

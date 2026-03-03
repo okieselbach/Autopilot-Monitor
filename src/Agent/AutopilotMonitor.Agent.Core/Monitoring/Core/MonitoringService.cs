@@ -65,6 +65,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         private int _collectorIdleTimeoutMinutes = 15;
         private Timer _idleCheckTimer;
 
+        // Desktop arrival detection (no-ESP scenarios)
+        private DesktopArrivalDetector _desktopArrivalDetector;
+
+        // Agent max lifetime safety net
+        private Timer _maxLifetimeTimer;
+        private readonly DateTime _agentStartTimeUtc = DateTime.UtcNow;
+        private bool _enrollmentTerminalEventSeen;
+
         // Auth failure circuit breaker
         private int _consecutiveAuthFailures = 0;
         private DateTime? _firstAuthFailureTime = null;
@@ -407,6 +415,27 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     );
                     _enrollmentTracker.Start();
                 }
+
+                // Desktop arrival detector — detects real user desktop for no-ESP completion
+                _desktopArrivalDetector = new DesktopArrivalDetector(_logger);
+                _desktopArrivalDetector.DesktopArrived += OnDesktopArrived;
+                _desktopArrivalDetector.Start();
+
+                // Agent max lifetime safety net — prevents zombie agents
+                var maxLifetimeMinutes = collectors?.AgentMaxLifetimeMinutes ?? _configuration.AgentMaxLifetimeMinutes;
+                if (maxLifetimeMinutes > 0)
+                {
+                    _maxLifetimeTimer = new Timer(
+                        MaxLifetimeTimerCallback,
+                        null,
+                        TimeSpan.FromMinutes(maxLifetimeMinutes),
+                        Timeout.InfiniteTimeSpan);
+                    _logger.Info($"Agent max lifetime timer armed: {maxLifetimeMinutes} min");
+                }
+                else
+                {
+                    _logger.Info("Agent max lifetime timer disabled (0)");
+                }
             }
             catch (Exception ex)
             {
@@ -422,6 +451,16 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             _idleCheckTimer?.Dispose();
             _idleCheckTimer = null;
 
+            _maxLifetimeTimer?.Dispose();
+            _maxLifetimeTimer = null;
+
+            if (_desktopArrivalDetector != null)
+            {
+                _desktopArrivalDetector.DesktopArrived -= OnDesktopArrived;
+                _desktopArrivalDetector.Dispose();
+                _desktopArrivalDetector = null;
+            }
+
             _performanceCollector?.Stop();
             _performanceCollector?.Dispose();
             _performanceCollector = null;
@@ -433,6 +472,67 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             _enrollmentTracker?.Stop();
             _enrollmentTracker?.Dispose();
             _enrollmentTracker = null;
+        }
+
+        /// <summary>
+        /// Fires when the agent max lifetime expires. Emits enrollment_failed with failureType "agent_timeout".
+        /// The normal shutdown path (EmitEvent → enrollment_failed) handles everything from here.
+        /// </summary>
+        private void MaxLifetimeTimerCallback(object state)
+        {
+            if (_enrollmentTerminalEventSeen)
+            {
+                _logger.Debug("Max lifetime timer fired but terminal event already seen — ignoring");
+                return;
+            }
+
+            var uptimeMinutes = (DateTime.UtcNow - _agentStartTimeUtc).TotalMinutes;
+            _logger.Warning($"Agent max lifetime expired after {uptimeMinutes:F0} minutes — emitting enrollment_failed");
+
+            EmitEvent(new EnrollmentEvent
+            {
+                SessionId = _configuration.SessionId,
+                TenantId = _configuration.TenantId,
+                EventType = "enrollment_failed",
+                Severity = EventSeverity.Error,
+                Source = "MonitoringService",
+                Phase = EnrollmentPhase.Complete,
+                Message = $"Agent max lifetime expired ({uptimeMinutes:F0} min) — enrollment did not complete in time",
+                Data = new Dictionary<string, object>
+                {
+                    { "failureType", "agent_timeout" },
+                    { "failureSource", "max_lifetime_timer" },
+                    { "agentUptimeMinutes", Math.Round(uptimeMinutes, 1) }
+                }
+            });
+        }
+
+        /// <summary>
+        /// Fires when DesktopArrivalDetector detects explorer.exe under a real user.
+        /// Emits desktop_arrived event for the timeline and notifies EnrollmentTracker.
+        /// </summary>
+        private void OnDesktopArrived(object sender, EventArgs e)
+        {
+            if (_enrollmentTerminalEventSeen)
+            {
+                _logger.Debug("Desktop arrived but terminal event already seen — ignoring");
+                return;
+            }
+
+            // Emit informational event for the timeline (shows when user desktop appeared)
+            EmitEvent(new EnrollmentEvent
+            {
+                SessionId = _configuration.SessionId,
+                TenantId = _configuration.TenantId,
+                EventType = "desktop_arrived",
+                Severity = EventSeverity.Info,
+                Source = "DesktopArrivalDetector",
+                Phase = EnrollmentPhase.Unknown,
+                Message = "User desktop detected (explorer.exe under real user)"
+            });
+
+            // Notify EnrollmentTracker — it decides whether this triggers completion
+            _enrollmentTracker?.NotifyDesktopArrived();
         }
 
         /// <summary>
@@ -876,6 +976,15 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 evt.EventType == "enrollment_failed")
             {
                 _sessionPersistence.SaveSequence(evt.Sequence);
+            }
+
+            // Cancel max lifetime timer on terminal events
+            if (evt.EventType == "whiteglove_complete" ||
+                evt.EventType == "enrollment_complete" ||
+                evt.EventType == "enrollment_failed")
+            {
+                _enrollmentTerminalEventSeen = true;
+                _maxLifetimeTimer?.Change(Timeout.Infinite, Timeout.Infinite);
             }
 
             // Check if this is a phase transition

@@ -94,7 +94,8 @@ namespace AutopilotMonitor.Functions.Functions
                     EnablePerformanceCollector = tenantConfig.EnablePerformanceCollector,
                     PerformanceIntervalSeconds = tenantConfig.PerformanceCollectorIntervalSeconds,
                     CollectorIdleTimeoutMinutes = adminConfig.CollectorIdleTimeoutMinutes,
-                    HelloWaitTimeoutSeconds = tenantConfig.HelloWaitTimeoutSeconds
+                    HelloWaitTimeoutSeconds = tenantConfig.HelloWaitTimeoutSeconds,
+                    AgentMaxLifetimeMinutes = tenantConfig.AgentMaxLifetimeMinutes ?? 360
                 };
 
                 // Get active gather rules for this tenant (user-defined ad-hoc only)
@@ -111,7 +112,7 @@ namespace AutopilotMonitor.Functions.Functions
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(new AgentConfigResponse
                 {
-                    ConfigVersion = 12, // collector idle timeout: replaced MaxCollectorDurationHours with activity-aware CollectorIdleTimeoutMinutes
+                    ConfigVersion = 13, // session lifecycle: agent max lifetime, esp_failure → enrollment_failed, desktop arrival, multi-signal completion
                     UploadIntervalSeconds = 30,
                     SelfDestructOnComplete = tenantConfig.SelfDestructOnComplete ?? true,
                     KeepLogFile = tenantConfig.KeepLogFile ?? false,
