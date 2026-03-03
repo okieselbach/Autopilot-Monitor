@@ -48,12 +48,13 @@ namespace AutopilotMonitor.Shared.Models
         public string PlatformStatsBlobSasUrl { get; set; } = string.Empty;
 
         /// <summary>
-        /// Maximum duration in hours that interval-based collectors (e.g. PerformanceCollector)
-        /// keep running per session. After this time they stop automatically to prevent
-        /// excessive backend traffic when a device is stuck during enrollment.
-        /// 0 = no limit (run forever). Default: 4 hours.
+        /// Idle timeout in minutes for periodic collectors (Performance, AgentSelfMetrics).
+        /// When no real enrollment event (app install, ESP phase change, etc.) is detected
+        /// within this window, collectors stop automatically to prevent session bloat.
+        /// They restart automatically when new enrollment activity is detected.
+        /// 0 = disabled (collectors run indefinitely). Default: 15 minutes.
         /// </summary>
-        public int MaxCollectorDurationHours { get; set; } = 4;
+        public int CollectorIdleTimeoutMinutes { get; set; } = 15;
 
         // ===== MAINTENANCE AUTO-BLOCK SETTINGS =====
 
@@ -112,7 +113,7 @@ namespace AutopilotMonitor.Shared.Models
                 UpdatedBy = "System",
                 GlobalRateLimitRequestsPerMinute = 100,
                 PlatformStatsBlobSasUrl = string.Empty,
-                MaxCollectorDurationHours = 4,
+                CollectorIdleTimeoutMinutes = 15,
                 MaxSessionWindowHours = 24,
                 MaintenanceBlockDurationHours = 12
             };

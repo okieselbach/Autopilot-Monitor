@@ -137,10 +137,12 @@ namespace AutopilotMonitor.Shared.Models
         public int PerformanceIntervalSeconds { get; set; } = 30;
 
         /// <summary>
-        /// Maximum duration in hours that interval-based collectors run before stopping themselves.
-        /// 0 = no limit. Default: 4 hours.
+        /// Idle timeout in minutes for periodic collectors (Performance, AgentSelfMetrics).
+        /// Collectors stop after this many minutes without real enrollment activity and
+        /// restart automatically when new activity is detected.
+        /// 0 = disabled (collectors run indefinitely). Default: 15 minutes.
         /// </summary>
-        public int MaxCollectorDurationHours { get; set; } = 4;
+        public int CollectorIdleTimeoutMinutes { get; set; } = 15;
 
         /// <summary>
         /// Enable the agent self-metrics collector (process CPU, memory, network traffic).

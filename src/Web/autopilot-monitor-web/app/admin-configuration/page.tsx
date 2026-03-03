@@ -20,7 +20,7 @@ interface AdminConfiguration {
   updatedBy: string;
   globalRateLimitRequestsPerMinute: number;
   platformStatsBlobSasUrl?: string;
-  maxCollectorDurationHours?: number;
+  collectorIdleTimeoutMinutes?: number;
   maxSessionWindowHours?: number;
   maintenanceBlockDurationHours?: number;
   diagnosticsGlobalLogPathsJson?: string;
@@ -43,7 +43,7 @@ export default function AdminConfigurationPage() {
   const [savingConfig, setSavingConfig] = useState(false);
   const [globalRateLimit, setGlobalRateLimit] = useState(100);
   const [platformStatsBlobSasUrl, setPlatformStatsBlobSasUrl] = useState("");
-  const [maxCollectorDurationHours, setMaxCollectorDurationHours] = useState(4);
+  const [collectorIdleTimeoutMinutes, setCollectorIdleTimeoutMinutes] = useState(15);
   const [maxSessionWindowHours, setMaxSessionWindowHours] = useState(24);
   const [maintenanceBlockDurationHours, setMaintenanceBlockDurationHours] = useState(12);
 
@@ -94,7 +94,7 @@ export default function AdminConfigurationPage() {
         setAdminConfig(data);
         setGlobalRateLimit(data.globalRateLimitRequestsPerMinute);
         setPlatformStatsBlobSasUrl(data.platformStatsBlobSasUrl ?? "");
-        setMaxCollectorDurationHours(data.maxCollectorDurationHours ?? 4);
+        setCollectorIdleTimeoutMinutes(data.collectorIdleTimeoutMinutes ?? 15);
         setMaxSessionWindowHours(data.maxSessionWindowHours ?? 24);
         setMaintenanceBlockDurationHours(data.maintenanceBlockDurationHours ?? 12);
         try {
@@ -206,7 +206,7 @@ export default function AdminConfigurationPage() {
         ...adminConfig,
         globalRateLimitRequestsPerMinute: globalRateLimit,
         platformStatsBlobSasUrl: platformStatsBlobSasUrl.trim(),
-        maxCollectorDurationHours: maxCollectorDurationHours,
+        collectorIdleTimeoutMinutes: collectorIdleTimeoutMinutes,
         maxSessionWindowHours: maxSessionWindowHours,
         maintenanceBlockDurationHours: maintenanceBlockDurationHours,
       };
@@ -247,7 +247,7 @@ export default function AdminConfigurationPage() {
     if (!adminConfig) return;
     setGlobalRateLimit(adminConfig.globalRateLimitRequestsPerMinute);
     setPlatformStatsBlobSasUrl(adminConfig.platformStatsBlobSasUrl ?? "");
-    setMaxCollectorDurationHours(adminConfig.maxCollectorDurationHours ?? 4);
+    setCollectorIdleTimeoutMinutes(adminConfig.collectorIdleTimeoutMinutes ?? 15);
     setMaxSessionWindowHours(adminConfig.maxSessionWindowHours ?? 24);
     setMaintenanceBlockDurationHours(adminConfig.maintenanceBlockDurationHours ?? 12);
     try {
@@ -343,8 +343,8 @@ export default function AdminConfigurationPage() {
               setGlobalRateLimit={setGlobalRateLimit}
               platformStatsBlobSasUrl={platformStatsBlobSasUrl}
               setPlatformStatsBlobSasUrl={setPlatformStatsBlobSasUrl}
-              maxCollectorDurationHours={maxCollectorDurationHours}
-              setMaxCollectorDurationHours={setMaxCollectorDurationHours}
+              collectorIdleTimeoutMinutes={collectorIdleTimeoutMinutes}
+              setCollectorIdleTimeoutMinutes={setCollectorIdleTimeoutMinutes}
               onSave={handleSaveAdminConfig}
               onReset={handleResetAdminConfig}
             />

@@ -182,7 +182,7 @@ namespace AutopilotMonitor.Functions.Services
                 { "UpdatedBy", config.UpdatedBy },
                 { "GlobalRateLimitRequestsPerMinute", config.GlobalRateLimitRequestsPerMinute },
                 { "PlatformStatsBlobSasUrl", config.PlatformStatsBlobSasUrl ?? string.Empty },
-                { "MaxCollectorDurationHours", config.MaxCollectorDurationHours },
+                { "CollectorIdleTimeoutMinutes", config.CollectorIdleTimeoutMinutes },
                 { "MaxSessionWindowHours", config.MaxSessionWindowHours },
                 { "MaintenanceBlockDurationHours", config.MaintenanceBlockDurationHours },
                 { "DiagnosticsGlobalLogPathsJson", config.DiagnosticsGlobalLogPathsJson }
@@ -201,7 +201,7 @@ namespace AutopilotMonitor.Functions.Services
                 UpdatedBy = entity.GetString("UpdatedBy") ?? "Unknown",
                 GlobalRateLimitRequestsPerMinute = entity.GetInt32("GlobalRateLimitRequestsPerMinute") ?? 100,
                 PlatformStatsBlobSasUrl = entity.GetString("PlatformStatsBlobSasUrl") ?? string.Empty,
-                MaxCollectorDurationHours = entity.GetInt32("MaxCollectorDurationHours") ?? 4,
+                CollectorIdleTimeoutMinutes = entity.GetInt32("CollectorIdleTimeoutMinutes") ?? 15,
                 MaxSessionWindowHours = entity.GetInt32("MaxSessionWindowHours") ?? 24,
                 MaintenanceBlockDurationHours = entity.GetInt32("MaintenanceBlockDurationHours") ?? 12,
                 DiagnosticsGlobalLogPathsJson = entity.GetString("DiagnosticsGlobalLogPathsJson")

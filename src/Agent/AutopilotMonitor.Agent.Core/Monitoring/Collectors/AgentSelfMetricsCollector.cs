@@ -22,10 +22,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         private readonly Action<EnrollmentEvent> _onEventCollected;
         private readonly NetworkMetrics _networkMetrics;
         private readonly int _intervalSeconds;
-        private readonly int _maxDurationHours;
 
         private Timer _pollTimer;
-        private DateTime _startedAt;
 
         // Previous sample for delta calculations
         private TimeSpan _prevCpuTime;
@@ -39,8 +37,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             NetworkMetrics networkMetrics,
             AgentLogger logger,
             string agentVersion = "unknown",
-            int intervalSeconds = 60,
-            int maxDurationHours = 4)
+            int intervalSeconds = 60)
         {
             _sessionId = sessionId ?? throw new ArgumentNullException(nameof(sessionId));
             _tenantId = tenantId ?? throw new ArgumentNullException(nameof(tenantId));
@@ -49,15 +46,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _agentVersion = string.IsNullOrWhiteSpace(agentVersion) ? "unknown" : agentVersion;
             _intervalSeconds = intervalSeconds;
-            _maxDurationHours = maxDurationHours;
         }
 
         public void Start()
         {
-            var limitInfo = _maxDurationHours > 0 ? $", max duration: {_maxDurationHours}h" : ", no duration limit";
-            _logger.Info($"Starting AgentSelfMetrics collector (interval: {_intervalSeconds}s{limitInfo})");
-
-            _startedAt = DateTime.UtcNow;
+            _logger.Info($"Starting AgentSelfMetrics collector (interval: {_intervalSeconds}s)");
 
             // Prime the baseline for delta calculations
             try
@@ -93,30 +86,6 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         {
             try
             {
-                // Max duration guard — same pattern as PerformanceCollector
-                if (_maxDurationHours > 0 && (DateTime.UtcNow - _startedAt).TotalHours >= _maxDurationHours)
-                {
-                    _logger.Info($"AgentSelfMetrics collector max duration reached ({_maxDurationHours}h) — stopping");
-                    _onEventCollected(new EnrollmentEvent
-                    {
-                        SessionId = _sessionId,
-                        TenantId = _tenantId,
-                        Timestamp = DateTime.UtcNow,
-                        EventType = "agent_metrics_collector_stopped",
-                        Severity = EventSeverity.Info,
-                        Source = "AgentSelfMetricsCollector",
-                        Phase = EnrollmentPhase.Unknown,
-                        Message = $"AgentSelfMetrics collector stopped after {_maxDurationHours}h (max duration policy)",
-                        Data = new Dictionary<string, object>
-                        {
-                            { "reason", "max_duration_reached" },
-                            { "maxDurationHours", _maxDurationHours }
-                        }
-                    });
-                    Stop();
-                    return;
-                }
-
                 var data = new Dictionary<string, object>
                 {
                     { "agent_version", _agentVersion }

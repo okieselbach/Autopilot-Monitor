@@ -93,7 +93,7 @@ namespace AutopilotMonitor.Functions.Functions
                 {
                     EnablePerformanceCollector = tenantConfig.EnablePerformanceCollector,
                     PerformanceIntervalSeconds = tenantConfig.PerformanceCollectorIntervalSeconds,
-                    MaxCollectorDurationHours = adminConfig.MaxCollectorDurationHours,
+                    CollectorIdleTimeoutMinutes = adminConfig.CollectorIdleTimeoutMinutes,
                     HelloWaitTimeoutSeconds = tenantConfig.HelloWaitTimeoutSeconds
                 };
 
@@ -111,7 +111,7 @@ namespace AutopilotMonitor.Functions.Functions
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(new AgentConfigResponse
                 {
-                    ConfigVersion = 11, // app_tracking_summary: replaced apps array with state-breakdown counters + event-driven emission
+                    ConfigVersion = 12, // collector idle timeout: replaced MaxCollectorDurationHours with activity-aware CollectorIdleTimeoutMinutes
                     UploadIntervalSeconds = 30,
                     SelfDestructOnComplete = tenantConfig.SelfDestructOnComplete ?? true,
                     KeepLogFile = tenantConfig.KeepLogFile ?? false,

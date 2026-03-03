@@ -7,7 +7,7 @@ interface AdminConfiguration {
   updatedBy: string;
   globalRateLimitRequestsPerMinute: number;
   platformStatsBlobSasUrl?: string;
-  maxCollectorDurationHours?: number;
+  collectorIdleTimeoutMinutes?: number;
   maxSessionWindowHours?: number;
   maintenanceBlockDurationHours?: number;
   diagnosticsGlobalLogPathsJson?: string;
@@ -22,8 +22,8 @@ interface AdminConfigSettingsSectionProps {
   setGlobalRateLimit: (value: number) => void;
   platformStatsBlobSasUrl: string;
   setPlatformStatsBlobSasUrl: (value: string) => void;
-  maxCollectorDurationHours: number;
-  setMaxCollectorDurationHours: (value: number) => void;
+  collectorIdleTimeoutMinutes: number;
+  setCollectorIdleTimeoutMinutes: (value: number) => void;
   onSave: () => Promise<void>;
   onReset: () => void;
 }
@@ -36,8 +36,8 @@ export function AdminConfigSettingsSection({
   setGlobalRateLimit,
   platformStatsBlobSasUrl,
   setPlatformStatsBlobSasUrl,
-  maxCollectorDurationHours,
-  setMaxCollectorDurationHours,
+  collectorIdleTimeoutMinutes,
+  setCollectorIdleTimeoutMinutes,
   onSave,
   onReset,
 }: AdminConfigSettingsSectionProps) {
@@ -103,18 +103,18 @@ export function AdminConfigSettingsSection({
 
             <div>
               <label className="block">
-                <span className="text-indigo-900 dark:text-indigo-100 font-medium">Max Collector Duration (Hours)</span>
+                <span className="text-indigo-900 dark:text-indigo-100 font-medium">Collector Idle Timeout (Minutes)</span>
                 <p className="text-sm text-indigo-800 dark:text-gray-300 mb-2">
-                  Interval-based collectors (e.g. Performance Collector) stop automatically after this many hours per session.
-                  Prevents excessive backend traffic when a device is stuck during enrollment.
-                  Set to <strong>0</strong> to disable the limit (collectors run indefinitely).
+                  Periodic collectors (Performance, Agent Metrics) stop automatically after this many minutes without real enrollment activity
+                  (app installs, ESP phase changes, etc.). They restart automatically when new activity is detected.
+                  Set to <strong>0</strong> to disable (collectors run indefinitely).
                 </p>
                 <input
                   type="number"
                   min="0"
-                  max="168"
-                  value={maxCollectorDurationHours}
-                  onChange={(e) => setMaxCollectorDurationHours(parseInt(e.target.value) || 0)}
+                  max="120"
+                  value={collectorIdleTimeoutMinutes}
+                  onChange={(e) => setCollectorIdleTimeoutMinutes(parseInt(e.target.value) || 0)}
                   className="mt-1 block w-full px-4 py-2 border border-indigo-300 dark:border-indigo-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
                 />
               </label>
