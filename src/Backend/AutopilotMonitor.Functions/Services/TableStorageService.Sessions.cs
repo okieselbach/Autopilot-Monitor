@@ -62,6 +62,7 @@ namespace AutopilotMonitor.Functions.Services
                 DateTime? completedAt = null;
                 string failureReason = string.Empty;
                 bool isPreProvisioned = registration.IsPreProvisioned;
+                bool isHybridJoin = registration.IsHybridJoin;
                 DateTime? lastEventAt = null;
                 int? durationSeconds = null;
                 string? diagnosticsBlobName = null;
@@ -86,6 +87,7 @@ namespace AutopilotMonitor.Functions.Services
                     // UpdateSessionStatusAsync, UpdateSessionDiagnosticsBlobAsync) that would
                     // otherwise be lost by the UpsertEntity (Replace) below.
                     isPreProvisioned = existingEntity.GetBoolean("IsPreProvisioned") ?? isPreProvisioned;
+                    isHybridJoin = existingEntity.GetBoolean("IsHybridJoin") ?? isHybridJoin;
                     lastEventAt = existingEntity.GetDateTimeOffset("LastEventAt")?.UtcDateTime;
                     durationSeconds = existingEntity.GetInt32("DurationSeconds");
                     diagnosticsBlobName = existingEntity.GetString("DiagnosticsBlobName");
@@ -127,6 +129,7 @@ namespace AutopilotMonitor.Functions.Services
                     ["OsLanguage"] = registration.OsLanguage ?? string.Empty,
                     ["IsUserDriven"] = registration.IsUserDriven,
                     ["IsPreProvisioned"] = isPreProvisioned,
+                    ["IsHybridJoin"] = isHybridJoin,
                     ["StartedAt"] = EnsureUtc(startedAt),
                     ["AgentVersion"] = registration.AgentVersion ?? string.Empty,
                     ["EnrollmentType"] = registration.EnrollmentType ?? "v1",
@@ -946,6 +949,7 @@ namespace AutopilotMonitor.Functions.Services
                 DiagnosticsBlobName = entity.GetString("DiagnosticsBlobName"),
                 LastEventAt = SafeGetDateTime(entity, "LastEventAt"),
                 IsPreProvisioned = entity.GetBoolean("IsPreProvisioned") ?? false,
+                IsHybridJoin = entity.GetBoolean("IsHybridJoin") ?? false,
                 ResumedAt = SafeGetDateTime(entity, "ResumedAt"),
                 OsBuild = entity.GetString("OsBuild") ?? string.Empty,
                 OsEdition = entity.GetString("OsEdition") ?? string.Empty,

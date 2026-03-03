@@ -41,6 +41,30 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         private Collectors.DeviceInfoCollector _deviceInfoCollector;
 
         /// <summary>
+        /// Detects whether the Autopilot profile indicates Hybrid Azure AD Join
+        /// by reading CloudAssignedDomainJoinMethod from the AutopilotPolicyCache registry key.
+        /// Safe to call before EnrollmentTracker is instantiated.
+        /// Returns true if CloudAssignedDomainJoinMethod == 1.
+        /// </summary>
+        public static bool DetectHybridJoinStatic()
+        {
+            try
+            {
+                using (var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Provisioning\AutopilotPolicyCache"))
+                {
+                    if (key != null)
+                    {
+                        var domainJoinMethod = key.GetValue("CloudAssignedDomainJoinMethod")?.ToString();
+                        return domainJoinMethod == "1";
+                    }
+                }
+            }
+            catch { }
+
+            return false;
+        }
+
+        /// <summary>
         /// Detects whether this is an Autopilot v1 (Classic ESP) or v2 (Windows Device Preparation) enrollment
         /// by reading the Autopilot registry keys. Safe to call before EnrollmentTracker is instantiated.
         /// Returns "v2" if WDP indicators are present, "v1" otherwise.
@@ -171,7 +195,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         // ===== Device Info Collection =====
 
         private void CollectDeviceInfo()
-            => _enrollmentType = _deviceInfoCollector.CollectAll();
+        {
+            var result = _deviceInfoCollector.CollectAll();
+            _enrollmentType = result.enrollmentType;
+        }
 
         /// <summary>
         /// Collects device info that may change during enrollment (e.g., BitLocker enabled via policy).

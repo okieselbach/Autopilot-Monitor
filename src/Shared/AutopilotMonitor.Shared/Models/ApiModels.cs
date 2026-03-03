@@ -179,6 +179,12 @@ namespace AutopilotMonitor.Shared.Models
         /// </summary>
         public DateTime? ResumedAt { get; set; }
 
+        /// <summary>
+        /// Whether the Autopilot profile indicates Hybrid Azure AD Join.
+        /// Derived from CloudAssignedDomainJoinMethod == 1 in the Autopilot profile.
+        /// </summary>
+        public bool IsHybridJoin { get; set; }
+
         // Device detail fields — stored in the Sessions table but omitted from earlier versions
         public string OsBuild { get; set; }
         public string OsEdition { get; set; }

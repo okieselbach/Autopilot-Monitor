@@ -545,6 +545,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 StartedAt = DateTime.UtcNow,
                 AgentVersion = _agentVersion,
                 EnrollmentType = EnrollmentTracker.DetectEnrollmentTypeStatic(),
+                IsHybridJoin = EnrollmentTracker.DetectHybridJoinStatic(),
                 IsUserDriven = true
             };
 

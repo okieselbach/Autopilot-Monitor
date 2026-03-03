@@ -38,21 +38,21 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 
         /// <summary>
         /// Runs all device info collectors at agent startup.
-        /// Returns the detected enrollment type ("v1" or "v2") so the caller can track it.
+        /// Returns the detected enrollment type ("v1" or "v2") and whether the profile indicates Hybrid Join.
         /// </summary>
-        public string CollectAll()
+        public (string enrollmentType, bool isHybridJoin) CollectAll()
         {
             _logger.Info("EnrollmentTracker: collecting device info (at start)");
 
             CollectOSInfoAndBootTime();
             CollectNetworkAndDnsConfiguration();
             CollectProxyConfiguration();
-            var enrollmentType = CollectAutopilotProfile();
+            var profileResult = CollectAutopilotProfile();
             CollectSecureBootStatus();
             CollectBitLockerStatus();
             CollectAadJoinStatus();
 
-            return enrollmentType;
+            return profileResult;
         }
 
         /// <summary>
@@ -292,12 +292,15 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         }
 
         /// <summary>
-        /// Reads the Autopilot profile from registry and detects enrollment type.
-        /// Returns "v1" (Classic ESP) or "v2" (Windows Device Preparation).
+        /// Reads the Autopilot profile from registry and detects enrollment type and Hybrid Join status.
+        /// Returns enrollment type ("v1"/"v2") and whether the profile indicates Hybrid Azure AD Join.
+        /// Note: AutopilotMode and DomainJoinMethod reflect profile capabilities (what is allowed),
+        /// not the actual live enrollment state.
         /// </summary>
-        private string CollectAutopilotProfile()
+        private (string enrollmentType, bool isHybridJoin) CollectAutopilotProfile()
         {
             var detectedType = "v1";
+            var isHybridJoin = false;
 
             try
             {
@@ -327,7 +330,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                             }
                         }
 
-                        // Extract key values for enrollment type detection and UI display
+                        // Extract key values for enrollment type detection
                         var deviceReg = data.ContainsKey("CloudAssignedDeviceRegistration")
                             ? data["CloudAssignedDeviceRegistration"]?.ToString()
                             : null;
@@ -340,6 +343,52 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                             detectedType = "v2";
                         else
                             detectedType = "v1";
+
+                        // --- Interpret AutopilotMode (profile capability, not live state) ---
+                        // 0 = User Driven, 1 = Self Deploying, 2 = Pre-Provisioning (White Glove)
+                        var autopilotModeStr = data.ContainsKey("AutopilotMode")
+                            ? data["AutopilotMode"]?.ToString()
+                            : null;
+                        if (autopilotModeStr != null && int.TryParse(autopilotModeStr, out var autopilotMode))
+                        {
+                            string modeLabel;
+                            switch (autopilotMode)
+                            {
+                                case 0:  modeLabel = "User Driven"; break;
+                                case 1:  modeLabel = "Self Deploying"; break;
+                                case 2:  modeLabel = "Pre-Provisioning (White Glove)"; break;
+                                default: modeLabel = $"Unknown ({autopilotMode})"; break;
+                            }
+                            data["autopilotModeLabel"] = modeLabel;
+                            _logger.Info($"EnrollmentTracker: AutopilotMode={autopilotMode} ({modeLabel})");
+                        }
+
+                        // --- Interpret CloudAssignedDomainJoinMethod ---
+                        // 0 = Entra Join (Azure AD Join), 1 = Hybrid Azure AD Join
+                        var domainJoinMethodStr = data.ContainsKey("CloudAssignedDomainJoinMethod")
+                            ? data["CloudAssignedDomainJoinMethod"]?.ToString()
+                            : null;
+                        if (domainJoinMethodStr != null && int.TryParse(domainJoinMethodStr, out var domainJoinMethod))
+                        {
+                            string joinLabel;
+                            switch (domainJoinMethod)
+                            {
+                                case 0:  joinLabel = "Entra Join"; break;
+                                case 1:  joinLabel = "Hybrid Azure AD Join"; break;
+                                default: joinLabel = $"Unknown ({domainJoinMethod})"; break;
+                            }
+                            data["domainJoinMethodLabel"] = joinLabel;
+
+                            // Hybrid Join is reliably indicated by DomainJoinMethod == 1
+                            isHybridJoin = domainJoinMethod == 1;
+                        }
+
+                        data["isHybridJoin"] = isHybridJoin;
+
+                        if (isHybridJoin)
+                        {
+                            _logger.Info("EnrollmentTracker: Hybrid Azure AD Join profile detected");
+                        }
 
                         _logger.Info($"EnrollmentTracker: Read {data.Count} values from AutopilotPolicyCache");
                     }
@@ -376,7 +425,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                 _logger.Warning($"EnrollmentTracker: failed to collect autopilot profile: {ex.Message}");
             }
 
-            return detectedType;
+            return (detectedType, isHybridJoin);
         }
 
         private void CollectSecureBootStatus()

@@ -24,6 +24,7 @@ interface Session {
   durationSeconds: number;
   failureReason?: string;
   isPreProvisioned?: boolean;
+  isHybridJoin?: boolean;
 }
 
 interface TenantConfigurationSummary {
@@ -925,6 +926,14 @@ export default function Home() {
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="flex items-center gap-1.5">
                             <StatusBadge status={session.status} failureReason={session.failureReason} />
+                            {session.isHybridJoin && (
+                              <span
+                                className="px-2 inline-flex items-center gap-1 text-xs leading-5 font-semibold rounded-full bg-purple-100 text-purple-800"
+                                title="Hybrid Azure AD Join"
+                              >
+                                Hybrid
+                              </span>
+                            )}
                             {blockedDevicesSet.has(`${session.tenantId}:${session.serialNumber}`) && (
                               <span
                                 className="px-2 inline-flex items-center gap-1 text-xs leading-5 font-semibold rounded-full bg-orange-100 text-orange-800"

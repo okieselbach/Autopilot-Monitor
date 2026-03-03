@@ -77,6 +77,12 @@ namespace AutopilotMonitor.Shared.Models
         /// </summary>
         public string EnrollmentType { get; set; } = "v1";
 
+        /// <summary>
+        /// Whether the Autopilot profile indicates Hybrid Azure AD Join (CloudAssignedDomainJoinMethod == 1).
+        /// Derived from the profile at registration time.
+        /// </summary>
+        public bool IsHybridJoin { get; set; }
+
         public SessionRegistration()
         {
             SessionId = Guid.NewGuid().ToString();
