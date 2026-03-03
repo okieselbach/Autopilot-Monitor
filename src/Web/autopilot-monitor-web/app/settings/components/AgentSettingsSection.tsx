@@ -66,21 +66,24 @@ export default function AgentSettingsSection({
             <div className="flex-1">
               <div className="flex items-center space-x-2">
                 <p className="font-medium text-gray-900">Performance Collector</p>
-                <span className="text-xs px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700">Medium Traffic</span>
               </div>
               <p className="text-sm text-gray-500 mt-1">CPU, memory, disk metrics at configurable intervals</p>
               {enablePerformanceCollector && (
-                <div className="mt-2 flex items-center space-x-2">
-                  <span className="text-sm text-gray-600">Interval:</span>
-                  <input
-                    type="number"
-                    min="30"
-                    max="300"
-                    value={performanceCollectorInterval}
-                    onChange={(e) => setPerformanceCollectorInterval(parseInt(e.target.value) || 60)}
-                    className="w-20 px-2 py-1 border border-gray-300 rounded text-sm text-gray-900 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-                  />
-                  <span className="text-sm text-gray-500">seconds</span>
+                <div className="mt-2">
+                  <div className="flex items-center space-x-2">
+                    <span className="text-sm text-gray-600">Interval:</span>
+                    <input
+                      type="number"
+                      min={30}
+                      max={300}
+                      value={performanceCollectorInterval}
+                      onChange={(e) => setPerformanceCollectorInterval(parseInt(e.target.value) || 30)}
+                      onBlur={() => setPerformanceCollectorInterval(Math.max(30, Math.min(300, performanceCollectorInterval)))}
+                      className="w-20 px-2 py-1 border border-gray-300 rounded text-sm text-gray-900 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                    />
+                    <span className="text-sm text-gray-500">seconds</span>
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1">Minimum: 30 seconds, Maximum: 300 seconds (5 minutes)</p>
                 </div>
               )}
             </div>
@@ -99,17 +102,21 @@ export default function AgentSettingsSection({
                 <p className="font-medium text-gray-900">Hello Wait Timeout</p>
               </div>
               <p className="text-sm text-gray-500 mt-1">Seconds to wait for the Windows Hello wizard after ESP exit</p>
-              <div className="mt-2 flex items-center space-x-2">
-                <span className="text-sm text-gray-600">Timeout:</span>
-                <input
-                  type="number"
-                  min="10"
-                  max="120"
-                  value={helloWaitTimeoutSeconds}
-                  onChange={(e) => setHelloWaitTimeoutSeconds(parseInt(e.target.value) || 30)}
-                  className="w-20 px-2 py-1 border border-gray-300 rounded text-sm text-gray-900 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-                />
-                <span className="text-sm text-gray-500">seconds</span>
+              <div className="mt-2">
+                <div className="flex items-center space-x-2">
+                  <span className="text-sm text-gray-600">Timeout:</span>
+                  <input
+                    type="number"
+                    min={30}
+                    max={300}
+                    value={helloWaitTimeoutSeconds}
+                    onChange={(e) => setHelloWaitTimeoutSeconds(parseInt(e.target.value) || 30)}
+                    onBlur={() => setHelloWaitTimeoutSeconds(Math.max(30, Math.min(300, helloWaitTimeoutSeconds)))}
+                    className="w-20 px-2 py-1 border border-gray-300 rounded text-sm text-gray-900 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                  />
+                  <span className="text-sm text-gray-500">seconds</span>
+                </div>
+                <p className="text-xs text-gray-400 mt-1">Minimum: 30 seconds, Maximum: 300 seconds (5 minutes)</p>
               </div>
             </div>
           </div>
