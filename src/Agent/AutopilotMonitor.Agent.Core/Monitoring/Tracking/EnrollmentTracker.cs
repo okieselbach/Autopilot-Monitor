@@ -806,6 +806,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
 
                     // Start Hello wait timer (waits for Hello wizard to start or timeout)
                     _espAndHelloTracker?.StartHelloWaitTimer();
+
+                    // If Hello was already resolved (e.g., via EventLog backfill or Event 300/301
+                    // during AccountSetup), the composite signal can fire immediately.
+                    TryEmitEnrollmentComplete("esp_hello_composite");
                 }
                 else
                 {
@@ -911,11 +915,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 return;
             }
 
-            // Desktop-Arrival Gate: Only allow desktop_arrival when ESP is NOT actively running
-            // WDP v2 has no ESP — skip the gate entirely
-            if (source == "desktop_arrival" && _enrollmentType != "v2" && _espEverSeen && !_espFinalExitSeen)
+            // Desktop-Arrival Gate: Block desktop-based completion when ESP is still actively running.
+            // Both "desktop_arrival" (direct) and "desktop_hello" (Hello resolved after desktop arrival)
+            // must be gated — otherwise Hello timeout during active AccountSetup triggers premature completion.
+            // WDP v2 has no ESP — skip the gate entirely.
+            if ((source == "desktop_arrival" || source == "desktop_hello") && _enrollmentType != "v2" && _espEverSeen && !_espFinalExitSeen)
             {
-                _logger.Info("EnrollmentTracker: Desktop arrived but ESP still active — not completing yet");
+                _logger.Info($"EnrollmentTracker: Completion source '{source}' blocked — ESP still active");
                 EmitCompletionCheck(source, "blocked", "esp_active");
                 return;
             }
@@ -1047,11 +1053,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 });
             }
 
-            // Start Hello wait timer in no-ESP or post-ESP scenarios
-            // Without this, Hello would never timeout-resolve in no-ESP scenarios (WDP v2, ESP disabled)
-            if (_espAndHelloTracker != null && !_espAndHelloTracker.IsHelloCompleted)
+            // Start Hello wait timer ONLY when ESP is NOT actively running.
+            // During active ESP (AccountSetup runs in background with desktop visible),
+            // the Hello timer must wait until ESP exits (started in OnFinalizingSetupPhaseTriggered).
+            // Without this guard, Hello timeout-resolves while ESP still installs apps → premature completion.
+            if (_espAndHelloTracker != null && !_espAndHelloTracker.IsHelloCompleted
+                && (!_espEverSeen || _espFinalExitSeen))
             {
-                _logger.Info("EnrollmentTracker: Desktop arrived with Hello pending — starting Hello wait timer");
+                _logger.Info("EnrollmentTracker: Desktop arrived with Hello pending (no active ESP) — starting Hello wait timer");
                 _espAndHelloTracker.StartHelloWaitTimer();
             }
 
