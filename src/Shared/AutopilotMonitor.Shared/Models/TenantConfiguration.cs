@@ -91,6 +91,13 @@ namespace AutopilotMonitor.Shared.Models
         public bool ValidateAutopilotDevice { get; set; } = false;
 
         /// <summary>
+        /// Whether to validate devices against Intune Corporate Device Identifiers
+        /// (manufacturer + model + serial number via importedDeviceIdentities/searchExistingIdentities).
+        /// Requires Graph API integration (admin consent for DeviceManagementServiceConfig.ReadWrite.All)
+        /// </summary>
+        public bool ValidateCorporateIdentifier { get; set; } = false;
+
+        /// <summary>
         /// Emergency bypass for agent security gate (Galactic Admin use only).
         /// If true, agent requests are accepted even when ValidateAutopilotDevice is false.
         /// Default: false

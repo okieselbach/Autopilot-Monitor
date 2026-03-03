@@ -21,6 +21,7 @@ namespace AutopilotMonitor.Functions.Functions
         private readonly TenantConfigurationService _configService;
         private readonly RateLimitService _rateLimitService;
         private readonly AutopilotDeviceValidator _autopilotDeviceValidator;
+        private readonly CorporateIdentifierValidator _corporateIdentifierValidator;
         private readonly AnalyzeRuleService _analyzeRuleService;
         private readonly TeamsNotificationService _teamsNotificationService;
         private readonly BlockedDeviceService _blockedDeviceService;
@@ -31,6 +32,7 @@ namespace AutopilotMonitor.Functions.Functions
             TenantConfigurationService configService,
             RateLimitService rateLimitService,
             AutopilotDeviceValidator autopilotDeviceValidator,
+            CorporateIdentifierValidator corporateIdentifierValidator,
             AnalyzeRuleService analyzeRuleService,
             TeamsNotificationService teamsNotificationService,
             BlockedDeviceService blockedDeviceService)
@@ -40,6 +42,7 @@ namespace AutopilotMonitor.Functions.Functions
             _configService = configService;
             _rateLimitService = rateLimitService;
             _autopilotDeviceValidator = autopilotDeviceValidator;
+            _corporateIdentifierValidator = corporateIdentifierValidator;
             _analyzeRuleService = analyzeRuleService;
             _teamsNotificationService = teamsNotificationService;
             _blockedDeviceService = blockedDeviceService;
@@ -71,6 +74,7 @@ namespace AutopilotMonitor.Functions.Functions
                     _configService,
                     _rateLimitService,
                     _autopilotDeviceValidator,
+                    _corporateIdentifierValidator,
                     _logger
                 );
 

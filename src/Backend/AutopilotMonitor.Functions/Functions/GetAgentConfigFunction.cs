@@ -23,6 +23,7 @@ namespace AutopilotMonitor.Functions.Functions
         private readonly ImeLogPatternService _imeLogPatternService;
         private readonly RateLimitService _rateLimitService;
         private readonly AutopilotDeviceValidator _autopilotDeviceValidator;
+        private readonly CorporateIdentifierValidator _corporateIdentifierValidator;
 
         public GetAgentConfigFunction(
             ILogger<GetAgentConfigFunction> logger,
@@ -31,7 +32,8 @@ namespace AutopilotMonitor.Functions.Functions
             GatherRuleService gatherRuleService,
             ImeLogPatternService imeLogPatternService,
             RateLimitService rateLimitService,
-            AutopilotDeviceValidator autopilotDeviceValidator)
+            AutopilotDeviceValidator autopilotDeviceValidator,
+            CorporateIdentifierValidator corporateIdentifierValidator)
         {
             _logger = logger;
             _configService = configService;
@@ -40,6 +42,7 @@ namespace AutopilotMonitor.Functions.Functions
             _imeLogPatternService = imeLogPatternService;
             _rateLimitService = rateLimitService;
             _autopilotDeviceValidator = autopilotDeviceValidator;
+            _corporateIdentifierValidator = corporateIdentifierValidator;
         }
 
         [Function("GetAgentConfig")]
@@ -68,6 +71,7 @@ namespace AutopilotMonitor.Functions.Functions
                     _configService,
                     _rateLimitService,
                     _autopilotDeviceValidator,
+                    _corporateIdentifierValidator,
                     _logger
                 );
 

@@ -28,10 +28,11 @@ namespace AutopilotMonitor.Functions.Security
             TenantConfigurationService configService,
             RateLimitService rateLimitService,
             AutopilotDeviceValidator autopilotDeviceValidator,
+            CorporateIdentifierValidator corporateIdentifierValidator,
             ILogger logger,
             string? sessionId = null)
         {
-            var validator = new SecurityValidator(configService, rateLimitService, autopilotDeviceValidator, logger);
+            var validator = new SecurityValidator(configService, rateLimitService, autopilotDeviceValidator, corporateIdentifierValidator, logger);
             var validation = await validator.ValidateRequestAsync(req, tenantId, sessionId);
 
             if (!validation.IsValid)

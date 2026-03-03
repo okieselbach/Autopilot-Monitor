@@ -31,6 +31,7 @@ export interface TenantConfiguration {
   manufacturerWhitelist: string;
   modelWhitelist: string;
   validateAutopilotDevice: boolean;
+  validateCorporateIdentifier?: boolean;
   allowInsecureAgentRequests?: boolean;
   dataRetentionDays: number;
   sessionTimeoutHours: number;
@@ -101,6 +102,7 @@ export default function SettingsPage() {
   const [manufacturerWhitelist, setManufacturerWhitelist] = useState("Dell*,HP*,Lenovo*,Microsoft Corporation");
   const [modelWhitelist, setModelWhitelist] = useState("*");
   const [validateAutopilotDevice, setValidateAutopilotDevice] = useState(false);
+  const [validateCorporateIdentifier, setValidateCorporateIdentifier] = useState(false);
   const [dataRetentionDays, setDataRetentionDays] = useState(90);
   const [sessionTimeoutHours, setSessionTimeoutHours] = useState(5);
 
@@ -109,6 +111,12 @@ export default function SettingsPage() {
   const [performanceCollectorInterval, setPerformanceCollectorInterval] = useState(30);
   const [helloWaitTimeoutSeconds, setHelloWaitTimeoutSeconds] = useState(30);
   const [autopilotConsentInProgress, setAutopilotConsentInProgress] = useState(false);
+
+  // Preview mode (seeded via ?preview=1 in Navbar, persisted in localStorage)
+  const [previewMode, setPreviewMode] = useState(() => {
+    if (typeof window !== 'undefined') return localStorage.getItem('previewMode') === 'true';
+    return false;
+  });
 
   // Agent behavior state
   const [selfDestructOnComplete, setSelfDestructOnComplete] = useState(true);
@@ -138,6 +146,17 @@ export default function SettingsPage() {
   const [localAdminAllowedAccounts, setLocalAdminAllowedAccounts] = useState<string[]>([]);
   const [newAllowedAccount, setNewAllowedAccount] = useState("");
 
+  // Listen for previewMode changes from Navbar
+  useEffect(() => {
+    const handler = () => setPreviewMode(localStorage.getItem('previewMode') === 'true');
+    window.addEventListener('storage', handler);
+    window.addEventListener('localStorageChange', handler);
+    return () => {
+      window.removeEventListener('storage', handler);
+      window.removeEventListener('localStorageChange', handler);
+    };
+  }, []);
+
   // Derived: true when form differs from last-saved config
   const hasUnsavedChanges = useMemo(() => {
     if (!config) return false;
@@ -145,6 +164,7 @@ export default function SettingsPage() {
       manufacturerWhitelist !== config.manufacturerWhitelist ||
       modelWhitelist !== config.modelWhitelist ||
       validateAutopilotDevice !== config.validateAutopilotDevice ||
+      validateCorporateIdentifier !== (config.validateCorporateIdentifier ?? false) ||
       dataRetentionDays !== config.dataRetentionDays ||
       sessionTimeoutHours !== config.sessionTimeoutHours ||
       enablePerformanceCollector !== config.enablePerformanceCollector ||
@@ -172,7 +192,7 @@ export default function SettingsPage() {
     );
   }, [
     config,
-    manufacturerWhitelist, modelWhitelist, validateAutopilotDevice,
+    manufacturerWhitelist, modelWhitelist, validateAutopilotDevice, validateCorporateIdentifier,
     dataRetentionDays, sessionTimeoutHours, enablePerformanceCollector,
     performanceCollectorInterval, helloWaitTimeoutSeconds, selfDestructOnComplete, keepLogFile,
     rebootOnComplete, rebootDelaySeconds, enableGeoLocation, enableImeMatchLog,
@@ -213,6 +233,7 @@ export default function SettingsPage() {
         setManufacturerWhitelist(data.manufacturerWhitelist);
         setModelWhitelist(data.modelWhitelist);
         setValidateAutopilotDevice(data.validateAutopilotDevice);
+        setValidateCorporateIdentifier(data.validateCorporateIdentifier ?? false);
         setDataRetentionDays(data.dataRetentionDays ?? 90);
         setSessionTimeoutHours(data.sessionTimeoutHours ?? 5);
         setEnablePerformanceCollector(data.enablePerformanceCollector ?? true);
@@ -415,7 +436,7 @@ export default function SettingsPage() {
     pendingNavigationRef.current = null;
   };
 
-  const saveConfiguration = async (validateAutopilotDeviceOverride?: boolean) => {
+  const saveConfiguration = async (validateAutopilotDeviceOverride?: boolean, validateCorporateIdentifierOverride?: boolean) => {
     if (!tenantId || !config) return;
 
     try {
@@ -424,12 +445,14 @@ export default function SettingsPage() {
       setSuccessMessage(null);
 
       const autopilotDeviceValidationValue = validateAutopilotDeviceOverride ?? validateAutopilotDevice;
+      const corporateIdentifierValidationValue = validateCorporateIdentifierOverride ?? validateCorporateIdentifier;
 
       const updatedConfig: TenantConfiguration = {
         ...config,
         manufacturerWhitelist,
         modelWhitelist,
         validateAutopilotDevice: autopilotDeviceValidationValue,
+        validateCorporateIdentifier: corporateIdentifierValidationValue,
         dataRetentionDays,
         sessionTimeoutHours,
         enablePerformanceCollector,
@@ -474,6 +497,7 @@ export default function SettingsPage() {
       const result = await response.json();
       setConfig(result.config);
       setValidateAutopilotDevice(result.config.validateAutopilotDevice);
+      setValidateCorporateIdentifier(result.config.validateCorporateIdentifier ?? false);
       setSuccessMessage("Configuration saved successfully!");
       setTimeout(() => setSuccessMessage(null), 3000);
     } finally {
@@ -481,7 +505,7 @@ export default function SettingsPage() {
     }
   };
 
-  const beginAutopilotDeviceValidationEnableFlow = async () => {
+  const beginDeviceValidationConsentFlow = async (trigger: 'autopilot' | 'corporate') => {
     if (!tenantId) return;
 
     try {
@@ -514,7 +538,8 @@ export default function SettingsPage() {
         throw new Error("Backend did not return a consent URL.");
       }
 
-      sessionStorage.setItem("autopilotDeviceValidationPending", "true");
+      sessionStorage.setItem("deviceValidationConsentPending", "true");
+      sessionStorage.setItem("consentTrigger", trigger);
       window.location.href = data.consentUrl;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to start admin consent flow");
@@ -526,8 +551,10 @@ export default function SettingsPage() {
     const handleConsentCallback = async () => {
       if (!tenantId || !config) return;
 
-      const wasPending = sessionStorage.getItem("autopilotDeviceValidationPending") === "true";
-      if (!wasPending) return;
+      // Support both old and new sessionStorage keys for backward compatibility
+      const wasPendingNew = sessionStorage.getItem("deviceValidationConsentPending") === "true";
+      const wasPendingOld = sessionStorage.getItem("autopilotDeviceValidationPending") === "true";
+      if (!wasPendingNew && !wasPendingOld) return;
 
       const queryParams = new URLSearchParams(window.location.search);
       const adminConsent = queryParams.get("admin_consent");
@@ -538,7 +565,10 @@ export default function SettingsPage() {
         return;
       }
 
+      const trigger = sessionStorage.getItem("consentTrigger") ?? "autopilot";
+      sessionStorage.removeItem("deviceValidationConsentPending");
       sessionStorage.removeItem("autopilotDeviceValidationPending");
+      sessionStorage.removeItem("consentTrigger");
 
       if (consentError) {
         const errorText = consentErrorDescription
@@ -576,8 +606,13 @@ export default function SettingsPage() {
           throw new Error(statusData.message || "Consent is not active yet for this tenant.");
         }
 
-        await saveConfiguration(true);
-        setSuccessMessage("Autopilot Device Validation enabled. Backend agent endpoints are now unlocked for this tenant.");
+        if (trigger === "corporate") {
+          await saveConfiguration(undefined, true);
+          setSuccessMessage("Corporate Identifier Validation enabled. Backend agent endpoints are now unlocked for this tenant.");
+        } else {
+          await saveConfiguration(true);
+          setSuccessMessage("Autopilot Device Validation enabled. Backend agent endpoints are now unlocked for this tenant.");
+        }
         router.replace("/settings");
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to verify consent");
@@ -848,9 +883,12 @@ export default function SettingsPage() {
             <AutopilotValidationSection
               validateAutopilotDevice={validateAutopilotDevice}
               setValidateAutopilotDevice={setValidateAutopilotDevice}
+              validateCorporateIdentifier={validateCorporateIdentifier}
+              setValidateCorporateIdentifier={setValidateCorporateIdentifier}
               autopilotConsentInProgress={autopilotConsentInProgress}
               saving={saving}
-              onBeginConsent={beginAutopilotDeviceValidationEnableFlow}
+              onBeginConsent={beginDeviceValidationConsentFlow}
+              previewMode={previewMode}
             />
 
             {user?.isTenantAdmin && (

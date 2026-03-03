@@ -21,17 +21,20 @@ namespace AutopilotMonitor.Functions.Functions
         private readonly TenantConfigurationService _configService;
         private readonly RateLimitService _rateLimitService;
         private readonly AutopilotDeviceValidator _autopilotDeviceValidator;
+        private readonly CorporateIdentifierValidator _corporateIdentifierValidator;
 
         public GetDiagnosticsUploadUrlFunction(
             ILogger<GetDiagnosticsUploadUrlFunction> logger,
             TenantConfigurationService configService,
             RateLimitService rateLimitService,
-            AutopilotDeviceValidator autopilotDeviceValidator)
+            AutopilotDeviceValidator autopilotDeviceValidator,
+            CorporateIdentifierValidator corporateIdentifierValidator)
         {
             _logger = logger;
             _configService = configService;
             _rateLimitService = rateLimitService;
             _autopilotDeviceValidator = autopilotDeviceValidator;
+            _corporateIdentifierValidator = corporateIdentifierValidator;
         }
 
         [Function("GetDiagnosticsUploadUrl")]
@@ -76,6 +79,7 @@ namespace AutopilotMonitor.Functions.Functions
                     _configService,
                     _rateLimitService,
                     _autopilotDeviceValidator,
+                    _corporateIdentifierValidator,
                     _logger
                 );
 

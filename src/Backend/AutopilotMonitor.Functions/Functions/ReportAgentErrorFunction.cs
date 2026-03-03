@@ -28,6 +28,7 @@ namespace AutopilotMonitor.Functions.Functions
         private readonly TenantConfigurationService _configService;
         private readonly RateLimitService _rateLimitService;
         private readonly AutopilotDeviceValidator _autopilotDeviceValidator;
+        private readonly CorporateIdentifierValidator _corporateIdentifierValidator;
         private readonly TelemetryClient _telemetryClient;
 
         public ReportAgentErrorFunction(
@@ -35,12 +36,14 @@ namespace AutopilotMonitor.Functions.Functions
             TenantConfigurationService configService,
             RateLimitService rateLimitService,
             AutopilotDeviceValidator autopilotDeviceValidator,
+            CorporateIdentifierValidator corporateIdentifierValidator,
             TelemetryClient telemetryClient)
         {
             _logger = logger;
             _configService = configService;
             _rateLimitService = rateLimitService;
             _autopilotDeviceValidator = autopilotDeviceValidator;
+            _corporateIdentifierValidator = corporateIdentifierValidator;
             _telemetryClient = telemetryClient;
         }
 
@@ -69,6 +72,7 @@ namespace AutopilotMonitor.Functions.Functions
                     _configService,
                     _rateLimitService,
                     _autopilotDeviceValidator,
+                    _corporateIdentifierValidator,
                     _logger
                 );
 

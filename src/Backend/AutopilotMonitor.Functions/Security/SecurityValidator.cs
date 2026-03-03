@@ -44,17 +44,20 @@ namespace AutopilotMonitor.Functions.Security
         private readonly TenantConfigurationService _configService;
         private readonly RateLimitService _rateLimitService;
         private readonly AutopilotDeviceValidator _autopilotDeviceValidator;
+        private readonly CorporateIdentifierValidator _corporateIdentifierValidator;
         private readonly ILogger _logger;
 
         public SecurityValidator(
             TenantConfigurationService configService,
             RateLimitService rateLimitService,
             AutopilotDeviceValidator autopilotDeviceValidator,
+            CorporateIdentifierValidator corporateIdentifierValidator,
             ILogger logger)
         {
             _configService = configService;
             _rateLimitService = rateLimitService;
             _autopilotDeviceValidator = autopilotDeviceValidator;
+            _corporateIdentifierValidator = corporateIdentifierValidator;
             _logger = logger;
         }
 
@@ -95,16 +98,16 @@ namespace AutopilotMonitor.Functions.Security
             }
 
             // Security validation is always enforced (no longer configurable per tenant)
-            // Hard gate: tenant must enable Autopilot device validation before agent traffic is accepted.
+            // Hard gate: tenant must enable at least one device validation method before agent traffic is accepted.
             // Galactic Admins can set AllowInsecureAgentRequests=true in the config row for test tenants.
-            if (!config.ValidateAutopilotDevice && !config.AllowInsecureAgentRequests)
+            if (!config.ValidateAutopilotDevice && !config.ValidateCorporateIdentifier && !config.AllowInsecureAgentRequests)
             {
                 return new SecurityValidationResult
                 {
                     IsValid = false,
                     StatusCode = HttpStatusCode.Forbidden,
-                    ErrorMessage = "Autopilot device validation is required",
-                    Details = "Enable 'Autopilot Device Validation' in Configuration before using the agent ingestion endpoints."
+                    ErrorMessage = "Device validation is required",
+                    Details = "Enable 'Autopilot Device Validation' or 'Corporate Identifier Validation' in Configuration before using the agent ingestion endpoints."
                 };
             }
 
@@ -179,29 +182,50 @@ namespace AutopilotMonitor.Functions.Security
                 };
             }
 
-            // 4. Validate device against Intune Autopilot registration (admin consent needs to be given during setup)
-            string? serialNumber = null;
+            // 4. Validate device registration (Autopilot and/or Corporate Identifier)
+            string? serialNumber = req.Headers.Contains("X-Device-SerialNumber")
+                ? req.Headers.GetValues("X-Device-SerialNumber").FirstOrDefault()
+                : null;
             string? autopilotDeviceId = null;
+            bool deviceValidated = false;
+            string? deviceValidationError = null;
 
             if (config.ValidateAutopilotDevice)
             {
-                serialNumber = req.Headers.Contains("X-Device-SerialNumber")
-                    ? req.Headers.GetValues("X-Device-SerialNumber").FirstOrDefault()
-                    : null;
-
-                var serialValidation = await _autopilotDeviceValidator.ValidateAutopilotDeviceAsync(tenantId, serialNumber, sessionId);
-                if (!serialValidation.IsValid)
+                var autopilotResult = await _autopilotDeviceValidator.ValidateAutopilotDeviceAsync(tenantId, serialNumber, sessionId);
+                if (autopilotResult.IsValid)
                 {
-                    return new SecurityValidationResult
-                    {
-                        IsValid = false,
-                        StatusCode = HttpStatusCode.Forbidden,
-                        ErrorMessage = "Device not registered in Autopilot",
-                        Details = serialValidation.ErrorMessage
-                    };
+                    deviceValidated = true;
+                    autopilotDeviceId = autopilotResult.AutopilotDeviceId;
                 }
+                else
+                {
+                    deviceValidationError = autopilotResult.ErrorMessage;
+                }
+            }
 
-                autopilotDeviceId = serialValidation.AutopilotDeviceId;
+            if (!deviceValidated && config.ValidateCorporateIdentifier)
+            {
+                var corpResult = await _corporateIdentifierValidator.ValidateAsync(tenantId, manufacturer, model, serialNumber, sessionId);
+                if (corpResult.IsValid)
+                {
+                    deviceValidated = true;
+                }
+                else
+                {
+                    deviceValidationError = corpResult.ErrorMessage;
+                }
+            }
+
+            if ((config.ValidateAutopilotDevice || config.ValidateCorporateIdentifier) && !deviceValidated)
+            {
+                return new SecurityValidationResult
+                {
+                    IsValid = false,
+                    StatusCode = HttpStatusCode.Forbidden,
+                    ErrorMessage = "Device not registered",
+                    Details = deviceValidationError
+                };
             }
 
             // All checks passed

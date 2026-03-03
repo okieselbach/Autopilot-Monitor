@@ -15,20 +15,20 @@ public class AutopilotDeviceValidationConsentFunction
     private readonly IConfiguration _configuration;
     private readonly TenantAdminsService _tenantAdminsService;
     private readonly GalacticAdminService _galacticAdminService;
-    private readonly AutopilotDeviceValidator _autopilotDeviceValidator;
+    private readonly GraphTokenService _graphTokenService;
 
     public AutopilotDeviceValidationConsentFunction(
         ILogger<AutopilotDeviceValidationConsentFunction> logger,
         IConfiguration configuration,
         TenantAdminsService tenantAdminsService,
         GalacticAdminService galacticAdminService,
-        AutopilotDeviceValidator autopilotDeviceValidator)
+        GraphTokenService graphTokenService)
     {
         _logger = logger;
         _configuration = configuration;
         _tenantAdminsService = tenantAdminsService;
         _galacticAdminService = galacticAdminService;
-        _autopilotDeviceValidator = autopilotDeviceValidator;
+        _graphTokenService = graphTokenService;
     }
 
     [Function("GetAutopilotDeviceValidationConsentUrl")]
@@ -85,7 +85,7 @@ public class AutopilotDeviceValidationConsentFunction
             return authError;
         }
 
-        var result = await _autopilotDeviceValidator.GetConsentStatusAsync(tenantId);
+        var result = await _graphTokenService.GetConsentStatusAsync(tenantId);
         var response = req.CreateResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new
         {
