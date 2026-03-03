@@ -70,6 +70,7 @@ export interface Session {
   diagnosticsBlobName?: string;
   lastEventAt?: string;
   isPreProvisioned?: boolean;
+  isHybridJoin?: boolean;
   osBuild?: string;
   osEdition?: string;
   osLanguage?: string;
@@ -703,7 +704,7 @@ export default function SessionDetailPage() {
 
   const userEnrollGrouped = useMemo(() =>
     isWhiteGloveSession && userEnrollEvents.length > 0
-      ? groupEventsByPhase(userEnrollEvents, phaseNamesMap, phaseOrder)
+      ? groupEventsByPhase(userEnrollEvents, phaseNamesMap, phaseOrder, { preventPhaseRegression: true })
       : { eventsByPhase: {} as Record<string, EnrollmentEvent[]>, orderedPhases: [] as string[] },
     [userEnrollEvents, isWhiteGloveSession, phaseNamesMap, phaseOrder]
   );
@@ -1268,8 +1269,23 @@ function DeviceDetailsCard({ events }: { events: EnrollmentEvent[] }) {
               {hasValue(autopilotProfile.CloudAssignedOobeConfig) && <DetailRow label="OOBE Config" value={`${autopilotProfile.CloudAssignedOobeConfig}`} />}
               {hasValue(autopilotProfile.ZtdRegistrationId) && <DetailRow label="ZTD Registration ID" value={`${autopilotProfile.ZtdRegistrationId}`} />}
               {hasValue(autopilotProfile.AadDeviceId) && <DetailRow label="AAD Device ID" value={`${autopilotProfile.AadDeviceId}`} />}
+              {autopilotProfile.AutopilotMode !== undefined && (
+                <DetailRow label="Autopilot Mode" value={autopilotProfile.autopilotModeLabel ?? (
+                  `${autopilotProfile.AutopilotMode}` === "0" ? "User Driven" :
+                  `${autopilotProfile.AutopilotMode}` === "1" ? "Self Deploying" :
+                  `${autopilotProfile.AutopilotMode}` === "2" ? "Pre-Provisioning (White Glove)" :
+                  `${autopilotProfile.AutopilotMode}`
+                )} />
+              )}
               {autopilotProfile.CloudAssignedDomainJoinMethod !== undefined && (
-                <DetailRow label="Domain Join Method" value={`${autopilotProfile.CloudAssignedDomainJoinMethod}` === "0" ? "Entra Join" : `${autopilotProfile.CloudAssignedDomainJoinMethod}`} />
+                <DetailRow label="Domain Join Method" value={autopilotProfile.domainJoinMethodLabel ?? (
+                  `${autopilotProfile.CloudAssignedDomainJoinMethod}` === "0" ? "Entra Join" :
+                  `${autopilotProfile.CloudAssignedDomainJoinMethod}` === "1" ? "Hybrid Azure AD Join" :
+                  `${autopilotProfile.CloudAssignedDomainJoinMethod}`
+                )} />
+              )}
+              {autopilotProfile.HybridJoinSkipDCConnectivityCheck !== undefined && (
+                <DetailRow label="Skip DC Connectivity Check" value={`${autopilotProfile.HybridJoinSkipDCConnectivityCheck}` === "1" ? "Yes" : "No"} />
               )}
               {autopilotProfile.CloudAssignedForcedEnrollment !== undefined && (
                 <DetailRow label="Forced Enrollment" value={`${autopilotProfile.CloudAssignedForcedEnrollment}` === "1" ? "Yes" : "No"} />

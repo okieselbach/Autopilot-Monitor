@@ -2,22 +2,46 @@ import { EnrollmentEvent } from "../page";
 
 // Pure helper — groups a flat event list into phase buckets.
 // Extracted from the useMemo so it can be called multiple times for WhiteGlove split timelines.
+//
+// preventPhaseRegression: when true, once the phase advances past a certain point it cannot
+// regress to an earlier phase. Used for WhiteGlove Part 2 (User Enrollment) to absorb
+// mid-enrollment reboots that emit a new agent_started (Phase=Start) without disrupting the
+// timeline flow. The reboot events stay in whatever phase was active before the reboot.
 export function groupEventsByPhase(
   events: EnrollmentEvent[],
   phaseNamesMap: Record<number, string>,
-  phaseOrder: string[]
+  phaseOrder: string[],
+  options?: { preventPhaseRegression?: boolean }
 ): { eventsByPhase: Record<string, EnrollmentEvent[]>; orderedPhases: string[] } {
   const sortedEvents = [...events]
-    .sort((a, b) => a.sequence - b.sequence)
+    .sort((a, b) => {
+      const seqDiff = a.sequence - b.sequence;
+      if (seqDiff !== 0) return seqDiff;
+      // Fallback: timestamp breaks ties when sequence counter was not persisted before reboot
+      return (a.timestamp ?? "").localeCompare(b.timestamp ?? "");
+    })
     .map(e => ({ ...e, phaseName: phaseNamesMap[e.phase] ?? "Unknown" }));
 
+  const preventRegression = options?.preventPhaseRegression === true;
   const eventsByPhase: Record<string, EnrollmentEvent[]> = {};
   let currentActivePhaseName = "Start";
+  let maxPhaseIndex = 0;
 
   for (const event of sortedEvents) {
     let targetPhase = event.phaseName || "Unknown";
     if (targetPhase !== "Unknown") {
-      currentActivePhaseName = targetPhase;
+      if (preventRegression) {
+        const candidateIndex = phaseOrder.indexOf(targetPhase);
+        if (candidateIndex >= 0 && candidateIndex >= maxPhaseIndex) {
+          currentActivePhaseName = targetPhase;
+          maxPhaseIndex = candidateIndex;
+        } else {
+          // Phase would regress (e.g. reboot agent_started) — keep current phase
+          targetPhase = currentActivePhaseName;
+        }
+      } else {
+        currentActivePhaseName = targetPhase;
+      }
     } else {
       targetPhase = currentActivePhaseName;
     }

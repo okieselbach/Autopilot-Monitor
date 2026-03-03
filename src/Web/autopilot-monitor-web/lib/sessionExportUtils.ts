@@ -177,16 +177,31 @@ export function generateRuleResultsCsvExport(results: RuleResultCsvData[]): stri
 function groupEventsByPhase(
   eventsToGroup: SessionExportEvent[],
   phaseNames: Record<number, string>,
-  phaseOrder: string[]
+  phaseOrder: string[],
+  options?: { preventPhaseRegression?: boolean }
 ): Record<string, SessionExportEvent[]> {
+  const preventRegression = options?.preventPhaseRegression === true;
   const grouped: Record<string, SessionExportEvent[]> = {};
   phaseOrder.forEach(p => { grouped[p] = []; });
   let lastNamedPhase = phaseOrder[0];
+  let maxPhaseIndex = 0;
   for (const ev of eventsToGroup) {
     const name = phaseNames[ev.phase];
     if (name && name !== "Unknown") {
-      lastNamedPhase = name;
-      if (grouped[name]) grouped[name].push({ ...ev, phaseName: name });
+      if (preventRegression) {
+        const candidateIndex = phaseOrder.indexOf(name);
+        if (candidateIndex >= 0 && candidateIndex >= maxPhaseIndex) {
+          lastNamedPhase = name;
+          maxPhaseIndex = candidateIndex;
+          if (grouped[name]) grouped[name].push({ ...ev, phaseName: name });
+        } else {
+          // Phase would regress (e.g. reboot agent_started) — keep current phase
+          if (grouped[lastNamedPhase]) grouped[lastNamedPhase].push({ ...ev, phaseName: name });
+        }
+      } else {
+        lastNamedPhase = name;
+        if (grouped[name]) grouped[name].push({ ...ev, phaseName: name });
+      }
     } else {
       if (grouped[lastNamedPhase]) grouped[lastNamedPhase].push({ ...ev, phaseName: "Unknown" });
     }
@@ -309,9 +324,15 @@ export function generateUiExport(
     const preProvEvents = sorted.filter(e =>
       e.sequence <= splitSeq || e.eventType === "whiteglove_complete"
     );
+    // Sort Part 2 events by timestamp (primary) then sequence (secondary) to handle
+    // potential duplicate sequences from agent sequence counter not persisted before reboot.
     const userEnrollEvents = sorted.filter(e =>
       e.sequence > splitSeq && e.eventType !== "whiteglove_complete"
-    );
+    ).sort((a, b) => {
+      const tCmp = (a.timestamp ?? "").localeCompare(b.timestamp ?? "");
+      if (tCmp !== 0) return tCmp;
+      return (a.sequence ?? 0) - (b.sequence ?? 0);
+    });
 
     // --- Pre-Provisioning Part ---
     lines.push("");
@@ -327,7 +348,7 @@ export function generateUiExport(
       lines.push("#".repeat(43));
       lines.push(`  USER ENROLLMENT PART  [Resumed]`);
       lines.push("#".repeat(43));
-      const userEnrollGrouped = groupEventsByPhase(userEnrollEvents, phaseNames, phaseOrder);
+      const userEnrollGrouped = groupEventsByPhase(userEnrollEvents, phaseNames, phaseOrder, { preventPhaseRegression: true });
       renderPhaseBlocks(lines, userEnrollGrouped, phaseOrder, severityLabel);
     } else {
       // Mirrors the "Awaiting User Enrollment" banner shown in the UI when
