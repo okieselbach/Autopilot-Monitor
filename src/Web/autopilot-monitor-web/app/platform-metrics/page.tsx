@@ -61,6 +61,17 @@ function formatBytes(bytes: number): string {
   return `${val.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
+function formatVersion(version: string): string {
+  // "1.0.189.0+95a2ea7abc..." → "1.0.189+95a2ea7"
+  const plusIdx = version.indexOf('+');
+  let base = plusIdx >= 0 ? version.slice(0, plusIdx) : version;
+  const hash = plusIdx >= 0 ? version.slice(plusIdx + 1, plusIdx + 8) : '';
+  // Drop 4th segment (e.g. ".0") if present: "1.0.189.0" → "1.0.189"
+  const segments = base.split('.');
+  if (segments.length > 3) base = segments.slice(0, 3).join('.');
+  return hash ? `${base}+${hash}` : base;
+}
+
 function avg(values: number[]): number {
   if (values.length === 0) return 0;
   return values.reduce((a, b) => a + b, 0) / values.length;
@@ -284,7 +295,7 @@ export default function PlatformMetricsPage() {
                     >
                       <option value="all">All versions</option>
                       {availableVersions.map((v) => (
-                        <option key={v} value={v}>{v}</option>
+                        <option key={v} value={v}>{formatVersion(v)}</option>
                       ))}
                     </select>
                   </>
@@ -523,8 +534,8 @@ export default function PlatformMetricsPage() {
                           onClick={() => setVersionFilter(versionFilter === v.version ? 'all' : v.version)}
                           className={`flex items-center gap-3 w-full text-left rounded-md px-1 py-0.5 transition-colors ${versionFilter === v.version ? 'bg-purple-50 ring-1 ring-purple-300' : 'hover:bg-gray-50'}`}
                         >
-                          <span className="text-xs font-mono text-gray-600 w-24 truncate" title={v.version}>
-                            {v.version}
+                          <span className="text-xs font-mono text-gray-600 w-32 truncate" title={v.version}>
+                            {formatVersion(v.version)}
                           </span>
                           <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
                             <div className="h-full bg-purple-500 rounded-full" style={{ width: `${v.pct}%` }} />

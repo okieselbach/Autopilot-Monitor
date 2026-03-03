@@ -214,6 +214,7 @@ export default function DownloadProgress({ events, summaryStats }: DownloadProgr
   }, [events]);
 
   const [expanded, setExpanded] = useState(true);
+  const [showSkipped, setShowSkipped] = useState(false);
 
   // Sum of individual download durations (from DO telemetry per app)
   // Must be before the early return to keep hooks in stable order across renders.
@@ -231,6 +232,10 @@ export default function DownloadProgress({ events, summaryStats }: DownloadProgr
     }
     return hasAny ? sum : null;
   }, [downloads]);
+
+  const filteredDownloads = useMemo(() => {
+    return showSkipped ? downloads : downloads.filter(d => !d.isSkipped);
+  }, [downloads, showSkipped]);
 
   if (downloads.length === 0) return null;
 
@@ -279,9 +284,13 @@ export default function DownloadProgress({ events, summaryStats }: DownloadProgr
               </span>
             )}
             {skippedCount > 0 && (
-              <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-medium">
-                {skippedCount} skipped
-              </span>
+              <button
+                onClick={(e) => { e.stopPropagation(); setShowSkipped(!showSkipped); }}
+                className={`px-2 py-0.5 rounded-full font-medium transition-colors ${showSkipped ? "bg-gray-200 text-gray-700" : "bg-gray-100 text-gray-400"}`}
+                title={showSkipped ? "Hide skipped apps" : "Show skipped apps"}
+              >
+                {skippedCount} skipped {showSkipped ? "▾" : "▸"}
+              </button>
             )}
           </div>
         </div>
@@ -289,7 +298,7 @@ export default function DownloadProgress({ events, summaryStats }: DownloadProgr
       </button>
 
       {expanded && <div className="space-y-3 mt-4">
-        {downloads.map((dl) => {
+        {filteredDownloads.map((dl) => {
           const progressPercent = dl.bytesTotal > 0
             ? Math.min(100, (dl.bytesDownloaded / dl.bytesTotal) * 100)
             : (dl.isComplete ? 100 : 0);

@@ -132,6 +132,7 @@ export default function InstallProgress({ events, summaryStats }: InstallProgres
   }, [events]);
 
   const [expanded, setExpanded] = useState(true);
+  const [showSkipped, setShowSkipped] = useState(false);
 
   // Sum of individual install durations (actual time spent installing, not wall-clock)
   // Must be before the early return to keep hooks in stable order across renders.
@@ -146,6 +147,10 @@ export default function InstallProgress({ events, summaryStats }: InstallProgres
     }
     return hasAny ? sum : null;
   }, [installs]);
+
+  const filteredInstalls = useMemo(() => {
+    return showSkipped ? installs : installs.filter(d => d.state !== "Skipped");
+  }, [installs, showSkipped]);
 
   if (installs.length === 0) return null;
 
@@ -196,9 +201,13 @@ export default function InstallProgress({ events, summaryStats }: InstallProgres
               </span>
             )}
             {skippedCount > 0 && (
-              <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-medium">
-                {skippedCount} skipped
-              </span>
+              <button
+                onClick={(e) => { e.stopPropagation(); setShowSkipped(!showSkipped); }}
+                className={`px-2 py-0.5 rounded-full font-medium transition-colors ${showSkipped ? "bg-gray-200 text-gray-700" : "bg-gray-100 text-gray-400"}`}
+                title={showSkipped ? "Hide skipped apps" : "Show skipped apps"}
+              >
+                {skippedCount} skipped {showSkipped ? "▾" : "▸"}
+              </button>
             )}
           </div>
         </div>
@@ -206,7 +215,7 @@ export default function InstallProgress({ events, summaryStats }: InstallProgres
       </button>
 
       {expanded && <div className="space-y-3 mt-4">
-        {installs.map((item) => (
+        {filteredInstalls.map((item) => (
           <InstallItemRow key={item.appName} item={item} />
         ))}
       </div>}
