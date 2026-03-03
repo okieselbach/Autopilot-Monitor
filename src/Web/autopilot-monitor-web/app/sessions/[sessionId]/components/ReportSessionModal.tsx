@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { zipSync } from "fflate";
 import { Session, EnrollmentEvent, RuleResult } from "../page";
 
 const MAX_AGENT_LOG_SIZE = 5 * 1024 * 1024; // 5 MB
@@ -24,8 +25,8 @@ export default function ReportSessionModal({
 }: ReportSessionModalProps) {
   const [comment, setComment] = useState("");
   const [email, setEmail] = useState("");
-  const [screenshotFile, setScreenshotFile] = useState<File | null>(null);
-  const [agentLogFile, setAgentLogFile] = useState<File | null>(null);
+  const [screenshotFiles, setScreenshotFiles] = useState<File[]>([]);
+  const [agentLogFiles, setAgentLogFiles] = useState<File[]>([]);
   const [agentLogError, setAgentLogError] = useState<string | null>(null);
   const [submitResult, setSubmitResult] = useState<'success' | 'error' | null>(null);
   const [submitErrorMessage, setSubmitErrorMessage] = useState<string | null>(null);
@@ -39,14 +40,15 @@ export default function ReportSessionModal({
 
   if (!show || !session) return null;
 
-  const handleAgentLogChange = (file: File | null) => {
+  const handleAgentLogChange = (files: File[]) => {
     setAgentLogError(null);
-    if (file && file.size > MAX_AGENT_LOG_SIZE) {
-      setAgentLogError(`File too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum size is 5 MB.`);
-      setAgentLogFile(null);
+    const totalSize = files.reduce((sum, f) => sum + f.size, 0);
+    if (totalSize > MAX_AGENT_LOG_SIZE) {
+      setAgentLogError(`Files too large (${(totalSize / 1024 / 1024).toFixed(1)} MB total). Maximum size is 5 MB.`);
+      setAgentLogFiles([]);
       return;
     }
-    setAgentLogFile(file);
+    setAgentLogFiles(files);
   };
 
   const fileToBase64 = async (file: File): Promise<string> => {
@@ -62,14 +64,36 @@ export default function ReportSessionModal({
     let agentLogBase64: string | null = null;
     let agentLogFileName: string | null = null;
 
-    if (screenshotFile) {
-      screenshotBase64 = await fileToBase64(screenshotFile);
-      screenshotFileName = screenshotFile.name;
+    if (screenshotFiles.length === 1) {
+      screenshotBase64 = await fileToBase64(screenshotFiles[0]);
+      screenshotFileName = screenshotFiles[0].name;
+    } else if (screenshotFiles.length > 1) {
+      // Zip multiple screenshots client-side
+      const entries: Record<string, Uint8Array> = {};
+      for (const file of screenshotFiles) {
+        const buffer = await file.arrayBuffer();
+        entries[file.name] = new Uint8Array(buffer);
+      }
+      const zipped = zipSync(entries);
+      screenshotBase64 = btoa(
+        zipped.reduce((data, byte) => data + String.fromCharCode(byte), "")
+      );
+      screenshotFileName = "screenshots.zip";
     }
 
-    if (agentLogFile) {
-      agentLogBase64 = await fileToBase64(agentLogFile);
-      agentLogFileName = agentLogFile.name;
+    if (agentLogFiles.length === 1) {
+      agentLogBase64 = await fileToBase64(agentLogFiles[0]);
+      agentLogFileName = agentLogFiles[0].name;
+    } else if (agentLogFiles.length > 1) {
+      const entries: Record<string, Uint8Array> = {};
+      for (const file of agentLogFiles) {
+        entries[file.name] = new Uint8Array(await file.arrayBuffer());
+      }
+      const zipped = zipSync(entries);
+      agentLogBase64 = btoa(
+        zipped.reduce((data, byte) => data + String.fromCharCode(byte), "")
+      );
+      agentLogFileName = "agent-logs.zip";
     }
 
     try {
@@ -77,8 +101,8 @@ export default function ReportSessionModal({
       setSubmitResult('success');
       setComment("");
       setEmail("");
-      setScreenshotFile(null);
-      setAgentLogFile(null);
+      setScreenshotFiles([]);
+      setAgentLogFiles([]);
       setAgentLogError(null);
     } catch (err: any) {
       setSubmitResult('error');
@@ -184,12 +208,13 @@ export default function ReportSessionModal({
               {/* Agent Log File */}
               <div className="mb-4">
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Agent Log <span className="text-gray-400">(optional, max 5 MB)</span>
+                  Agent Logs <span className="text-gray-400">(optional, max 5 MB)</span>
                 </label>
                 <input
                   type="file"
-                  accept=".log,.txt"
-                  onChange={e => handleAgentLogChange(e.target.files?.[0] || null)}
+                  accept=".log,.txt,.zip"
+                  multiple
+                  onChange={e => handleAgentLogChange(e.target.files ? Array.from(e.target.files) : [])}
                   className="w-full text-sm text-gray-500 dark:text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 dark:file:bg-blue-900/40 dark:file:text-blue-300"
                   disabled={submitting}
                 />
@@ -199,17 +224,21 @@ export default function ReportSessionModal({
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                   Located at %ProgramData%\AutopilotMonitor\Logs\ on the device.
                 </p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                  Located at %ProgramData%\Microsoft\IntuneManagementExtension\Logs\ on the device.
+                </p>
               </div>
 
-              {/* Screenshot */}
+              {/* Screenshots */}
               <div className="mb-6">
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Screenshot <span className="text-gray-400">(optional)</span>
+                  Screenshots <span className="text-gray-400">(optional, multiple allowed)</span>
                 </label>
                 <input
                   type="file"
                   accept="image/*"
-                  onChange={e => setScreenshotFile(e.target.files?.[0] || null)}
+                  multiple
+                  onChange={e => setScreenshotFiles(e.target.files ? Array.from(e.target.files) : [])}
                   className="w-full text-sm text-gray-500 dark:text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 dark:file:bg-blue-900/40 dark:file:text-blue-300"
                   disabled={submitting}
                 />
@@ -224,8 +253,10 @@ export default function ReportSessionModal({
                   <li>{analysisResults.length} analysis result{analysisResults.length !== 1 ? "s" : ""}</li>
                   <li>Timeline export (TXT)</li>
                   <li>Table export (CSV)</li>
-                  {agentLogFile && <li>Agent log: {agentLogFile.name} ({(agentLogFile.size / 1024).toFixed(0)} KB)</li>}
-                  {screenshotFile && <li>Screenshot: {screenshotFile.name}</li>}
+                  {agentLogFiles.length === 1 && <li>Agent log: {agentLogFiles[0].name} ({(agentLogFiles[0].size / 1024).toFixed(0)} KB)</li>}
+                  {agentLogFiles.length > 1 && <li>{agentLogFiles.length} agent logs (will be zipped)</li>}
+                  {screenshotFiles.length === 1 && <li>Screenshot: {screenshotFiles[0].name}</li>}
+                  {screenshotFiles.length > 1 && <li>{screenshotFiles.length} screenshots (will be zipped)</li>}
                 </ul>
               </div>
             </>
