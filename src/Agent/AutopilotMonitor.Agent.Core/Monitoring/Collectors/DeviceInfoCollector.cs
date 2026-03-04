@@ -50,6 +50,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             var profileResult = CollectAutopilotProfile();
             CollectSecureBootStatus();
             CollectBitLockerStatus();
+            CollectTpmStatus();
             CollectAadJoinStatus();
 
             return profileResult;
@@ -488,6 +489,50 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             catch (Exception ex)
             {
                 _logger.Warning($"EnrollmentTracker: failed to collect BitLocker status: {ex.Message}");
+            }
+        }
+
+        private void CollectTpmStatus()
+        {
+            try
+            {
+                var data = new Dictionary<string, object>();
+
+                using (var searcher = new ManagementObjectSearcher(
+                    new ManagementScope(@"\\.\root\CIMV2\Security\MicrosoftTpm"),
+                    new ObjectQuery("SELECT IsActivated_InitialValue, IsEnabled_InitialValue, IsOwned_InitialValue, ManufacturerIdTxt, ManufacturerVersion, SpecVersion FROM Win32_Tpm")))
+                {
+                    foreach (ManagementObject obj in searcher.Get())
+                    {
+                        data["isActivated"] = obj["IsActivated_InitialValue"]?.ToString() == "True";
+                        data["isEnabled"] = obj["IsEnabled_InitialValue"]?.ToString() == "True";
+                        data["isOwned"] = obj["IsOwned_InitialValue"]?.ToString() == "True";
+                        data["manufacturerName"] = obj["ManufacturerIdTxt"]?.ToString();
+                        data["manufacturerVersion"] = obj["ManufacturerVersion"]?.ToString();
+
+                        // SpecVersion is comma-separated: "2.0, 0, 1.59" → first element is the spec version
+                        var specVersion = obj["SpecVersion"]?.ToString();
+                        if (!string.IsNullOrEmpty(specVersion))
+                        {
+                            var parts = specVersion.Split(',');
+                            data["specVersion"] = parts[0].Trim();
+                        }
+                    }
+                }
+
+                if (data.Count > 0)
+                {
+                    EmitDeviceInfoEvent("tpm_status", $"TPM: {data["manufacturerName"]} v{data["manufacturerVersion"]}", data);
+                }
+                else
+                {
+                    data["available"] = false;
+                    EmitDeviceInfoEvent("tpm_status", "TPM: not available", data);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"EnrollmentTracker: failed to collect TPM status: {ex.Message}");
             }
         }
 

@@ -1130,6 +1130,7 @@ function DeviceDetailsCard({ events }: { events: EnrollmentEvent[] }) {
   const imeVersion = getEventData("ime_agent_version");
   const bitLockerStatus = getEventData("bitlocker_status");
   const secureBootStatus = getEventData("secureboot_status");
+  const tpmStatus = getEventData("tpm_status");
   const deviceLocation = getEventData("device_location");
 
   // Check if we have any device detail events at all
@@ -1298,10 +1299,18 @@ function DeviceDetailsCard({ events }: { events: EnrollmentEvent[] }) {
           )}
 
           {/* Security */}
-          {(bitLockerStatus || secureBootStatus) && (
+          {(bitLockerStatus || secureBootStatus || tpmStatus) && (
             <DetailSection title="Security">
               {secureBootStatus && (
                 <DetailRow label="SecureBoot" value={secureBootStatus.uefiSecureBootEnabled ? "Enabled" : "Disabled"} />
+              )}
+              {tpmStatus && (
+                <>
+                  <DetailRow label="TPM" value={tpmStatus.available === false ? "Not Available" : `${tpmStatus.manufacturerName ?? "Unknown"} (${tpmStatus.manufacturerVersion ?? "?"})`} />
+                  {tpmStatus.specVersion && (
+                    <DetailRow label="TPM Spec Version" value={tpmStatus.specVersion} />
+                  )}
+                </>
               )}
               {bitLockerStatus && (
                 <>
