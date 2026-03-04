@@ -1,5 +1,3 @@
-"use client";
-
 import Link from "next/link";
 import { PublicPageHeader } from "../../components/PublicPageHeader";
 import { PublicSiteNavbar } from "../../components/PublicSiteNavbar";

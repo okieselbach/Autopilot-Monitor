@@ -1,7 +1,13 @@
 import type { Metadata } from "next";
+import { PublicSiteNavbar } from "../../components/PublicSiteNavbar";
+import { PublicPageHeader } from "../../components/PublicPageHeader";
+import { DocsSidebar } from "./DocsSidebar";
 
 export const metadata: Metadata = {
-  title: "Documentation",
+  title: {
+    template: "%s – Autopilot Monitor Docs",
+    default: "Documentation – Autopilot Monitor",
+  },
   description:
     "Complete setup and configuration guide for Autopilot Monitor. Learn how to deploy the bootstrapper via Intune, configure the agent, and start monitoring Windows Autopilot enrollments in real time.",
   keywords: [
@@ -29,5 +35,11 @@ export const metadata: Metadata = {
 };
 
 export default function DocsLayout({ children }: { children: React.ReactNode }) {
-  return <>{children}</>;
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <PublicSiteNavbar showSectionLinks={false} />
+      <PublicPageHeader title="Documentation" />
+      <DocsSidebar>{children}</DocsSidebar>
+    </div>
+  );
 }

@@ -1,56 +1,19 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { PublicSiteNavbar } from "../../components/PublicSiteNavbar";
-import { PublicPageHeader } from "../../components/PublicPageHeader";
-import { SectionPrivatePreview } from "./sections/SectionPrivatePreview";
-import { SectionOverview } from "./sections/SectionOverview";
-import { SectionSetup } from "./sections/SectionSetup";
-import { SectionAgentSetup } from "./sections/SectionAgentSetup";
-import { SectionSettings } from "./sections/SectionSettings";
-import { SectionGatherRules } from "./sections/SectionGatherRules";
-import { SectionAnalyzeRules } from "./sections/SectionAnalyzeRules";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { useState } from "react";
+import { NAV_SECTIONS } from "./docsNavSections";
 
-const NAV_SECTIONS = [
-  { id: "private-preview", label: "Private Preview" },
-  { id: "overview",        label: "Overview" },
-  { id: "setup",           label: "Setup" },
-  { id: "agent-setup",     label: "Agent Setup" },
-  { id: "settings",        label: "Settings" },
-  { id: "gather-rules",    label: "Gather Rules" },
-  { id: "analyze-rules",   label: "Analyze Rules" },
-];
-
-const SECTION_COMPONENTS: Record<string, () => JSX.Element> = {
-  "private-preview":  SectionPrivatePreview,
-  "overview":         SectionOverview,
-  "setup":            SectionSetup,
-  "agent-setup":      SectionAgentSetup,
-  "settings":         SectionSettings,
-  "gather-rules":     SectionGatherRules,
-  "analyze-rules":    SectionAnalyzeRules,
-};
-
-export default function DocsPage() {
-  const [activeSection, setActiveSection] = useState("overview");
+export function DocsSidebar({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
-  useEffect(() => {
-    const hash = window.location.hash.replace("#", "");
-    if (hash && NAV_SECTIONS.some((s) => s.id === hash)) {
-      setActiveSection(hash);
-    }
-  }, []);
-
-  const ActiveContent = SECTION_COMPONENTS[activeSection] ?? SectionOverview;
-
+  const activeSection = pathname.split("/").pop() ?? "overview";
   const activeLabel = NAV_SECTIONS.find((s) => s.id === activeSection)?.label ?? "Contents";
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <PublicSiteNavbar showSectionLinks={false} />
-      <PublicPageHeader title="Documentation" />
-
+    <>
       {/* Mobile sidebar overlay */}
       {mobileSidebarOpen && (
         <div
@@ -79,16 +42,17 @@ export default function DocsPage() {
         <ul className="p-3 space-y-0.5">
           {NAV_SECTIONS.map((s) => (
             <li key={s.id}>
-              <button
-                onClick={() => { setActiveSection(s.id); setMobileSidebarOpen(false); }}
-                className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
+              <Link
+                href={`/docs/${s.id}`}
+                onClick={() => setMobileSidebarOpen(false)}
+                className={`block w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
                   activeSection === s.id
                     ? "bg-blue-50 text-blue-700 font-semibold"
                     : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
                 }`}
               >
                 {s.label}
-              </button>
+              </Link>
             </li>
           ))}
         </ul>
@@ -106,23 +70,23 @@ export default function DocsPage() {
             <ul className="space-y-0.5">
               {NAV_SECTIONS.map((s) => (
                 <li key={s.id}>
-                  <button
-                    onClick={() => setActiveSection(s.id)}
-                    className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
+                  <Link
+                    href={`/docs/${s.id}`}
+                    className={`block px-3 py-2 rounded-md text-sm transition-colors ${
                       activeSection === s.id
                         ? "bg-blue-50 text-blue-700 font-semibold"
                         : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
                     }`}
                   >
                     {s.label}
-                  </button>
+                  </Link>
                 </li>
               ))}
             </ul>
           </nav>
         </aside>
 
-        {/* Content — only the active section is rendered */}
+        {/* Content */}
         <main className="flex-1 min-w-0 space-y-8">
 
           {/* Mobile: contents toggle bar */}
@@ -141,14 +105,14 @@ export default function DocsPage() {
             </button>
           </div>
 
-          <ActiveContent />
+          {children}
+
           <div className="text-center text-sm text-gray-500 pb-4">
             <p>Autopilot Monitor v1.0.0</p>
-            <p className="mt-1">Documentation last updated: {new Date().toLocaleDateString()}</p>
           </div>
         </main>
 
       </div>
-    </div>
+    </>
   );
 }
