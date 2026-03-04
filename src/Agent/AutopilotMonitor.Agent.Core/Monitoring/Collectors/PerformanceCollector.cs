@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Management;
+using System.Net.NetworkInformation;
 using System.Threading;
 using AutopilotMonitor.Agent.Core.Logging;
 using AutopilotMonitor.Shared.Models;
@@ -24,6 +25,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 
         private PerformanceCounter _cpuCounter;
         private PerformanceCounter _diskQueueCounter;
+
+        // Network throughput tracking
+        private string _activeNicId;
+        private string _activeNicName;
+        private long _prevBytesSent;
+        private long _prevBytesReceived;
+        private DateTime _prevNetSampleTime;
+        private bool _networkInitialized;
 
         public PerformanceCollector(string sessionId, string tenantId, Action<EnrollmentEvent> onEventCollected,
             AgentLogger logger, int intervalSeconds = 60)
@@ -50,6 +59,31 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             catch (Exception ex)
             {
                 _logger.Warning($"Failed to initialize performance counters: {ex.Message}");
+            }
+
+            // Initialize network throughput baseline
+            try
+            {
+                var activeNic = FindActiveNetworkInterface();
+                if (activeNic != null)
+                {
+                    _activeNicId = activeNic.Id;
+                    _activeNicName = activeNic.Description;
+                    var stats = activeNic.GetIPStatistics();
+                    _prevBytesSent = stats.BytesSent;
+                    _prevBytesReceived = stats.BytesReceived;
+                    _prevNetSampleTime = DateTime.UtcNow;
+                    _networkInitialized = true;
+                    _logger.Debug($"Network throughput tracking initialized on: {_activeNicName}");
+                }
+                else
+                {
+                    _logger.Debug("No active network interface found for throughput tracking");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug($"Failed to initialize network throughput baseline: {ex.Message}");
             }
 
             // Start with an initial delay, then poll on interval
@@ -129,6 +163,96 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     _logger.Debug($"Disk space query failed: {ex.Message}");
                 }
 
+                // Network throughput (bytes sent/received delta + rate)
+                try
+                {
+                    if (_networkInitialized)
+                    {
+                        // Re-find the NIC by cached ID
+                        NetworkInterface currentNic = null;
+                        try
+                        {
+                            foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
+                            {
+                                if (nic.Id == _activeNicId)
+                                {
+                                    currentNic = nic;
+                                    break;
+                                }
+                            }
+                        }
+                        catch { /* swallow */ }
+
+                        // If cached NIC is gone, try to find a new active one
+                        if (currentNic == null || currentNic.OperationalStatus != OperationalStatus.Up)
+                        {
+                            currentNic = FindActiveNetworkInterface();
+                            if (currentNic != null)
+                            {
+                                _activeNicId = currentNic.Id;
+                                _activeNicName = currentNic.Description;
+                                var freshStats = currentNic.GetIPStatistics();
+                                _prevBytesSent = freshStats.BytesSent;
+                                _prevBytesReceived = freshStats.BytesReceived;
+                                _prevNetSampleTime = DateTime.UtcNow;
+                                _logger.Debug($"Network throughput tracking switched to: {_activeNicName}");
+                            }
+                            else
+                            {
+                                _networkInitialized = false;
+                                _logger.Debug("Active network interface lost, throughput tracking paused");
+                            }
+                        }
+
+                        if (currentNic != null && currentNic.OperationalStatus == OperationalStatus.Up)
+                        {
+                            var stats = currentNic.GetIPStatistics();
+                            var now = DateTime.UtcNow;
+                            var elapsedSeconds = (now - _prevNetSampleTime).TotalSeconds;
+
+                            if (elapsedSeconds > 0)
+                            {
+                                var deltaSent = stats.BytesSent - _prevBytesSent;
+                                var deltaReceived = stats.BytesReceived - _prevBytesReceived;
+
+                                // Guard against counter reset (adapter reconnect)
+                                if (deltaSent < 0) deltaSent = 0;
+                                if (deltaReceived < 0) deltaReceived = 0;
+
+                                data["net_adapter"] = _activeNicName;
+                                data["net_bytes_sent_delta"] = deltaSent;
+                                data["net_bytes_received_delta"] = deltaReceived;
+                                data["net_send_rate_kbps"] = Math.Round(deltaSent * 8.0 / 1000.0 / elapsedSeconds, 1);
+                                data["net_receive_rate_kbps"] = Math.Round(deltaReceived * 8.0 / 1000.0 / elapsedSeconds, 1);
+                            }
+
+                            _prevBytesSent = stats.BytesSent;
+                            _prevBytesReceived = stats.BytesReceived;
+                            _prevNetSampleTime = now;
+                        }
+                    }
+                    else
+                    {
+                        // Try to re-initialize (e.g., network came up after boot)
+                        var activeNic = FindActiveNetworkInterface();
+                        if (activeNic != null)
+                        {
+                            _activeNicId = activeNic.Id;
+                            _activeNicName = activeNic.Description;
+                            var stats = activeNic.GetIPStatistics();
+                            _prevBytesSent = stats.BytesSent;
+                            _prevBytesReceived = stats.BytesReceived;
+                            _prevNetSampleTime = DateTime.UtcNow;
+                            _networkInitialized = true;
+                            _logger.Debug($"Network throughput tracking re-initialized on: {_activeNicName}");
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.Debug($"Network throughput collection failed: {ex.Message}");
+                }
+
                 if (data.Count > 0)
                 {
                     _onEventCollected(new EnrollmentEvent
@@ -142,7 +266,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                         Phase = EnrollmentPhase.Unknown,
                         Message = $"CPU: {(data.ContainsKey("cpu_percent") ? data["cpu_percent"] : "?")}%, " +
                                   $"Memory: {(data.ContainsKey("memory_used_percent") ? data["memory_used_percent"] : "?")}%, " +
-                                  $"Disk Free: {(data.ContainsKey("disk_free_gb") ? data["disk_free_gb"] : "?")} GB",
+                                  $"Disk Free: {(data.ContainsKey("disk_free_gb") ? data["disk_free_gb"] : "?")} GB" +
+                                  (data.ContainsKey("net_receive_rate_kbps")
+                                      ? $", Net: ↓{data["net_receive_rate_kbps"]} / ↑{data["net_send_rate_kbps"]} kbps"
+                                      : ""),
                         Data = data
                     });
                 }
@@ -151,6 +278,37 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             {
                 _logger.Warning($"Performance collection failed: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Finds the active network interface: Up, not Loopback/Tunnel, has a non-0.0.0.0 gateway.
+        /// </summary>
+        private static NetworkInterface FindActiveNetworkInterface()
+        {
+            try
+            {
+                var interfaces = NetworkInterface.GetAllNetworkInterfaces();
+                foreach (var nic in interfaces)
+                {
+                    if (nic.OperationalStatus != OperationalStatus.Up)
+                        continue;
+                    if (nic.NetworkInterfaceType == NetworkInterfaceType.Loopback ||
+                        nic.NetworkInterfaceType == NetworkInterfaceType.Tunnel)
+                        continue;
+
+                    var ipProps = nic.GetIPProperties();
+                    foreach (var gw in ipProps.GatewayAddresses)
+                    {
+                        if (gw.Address.ToString() != "0.0.0.0")
+                            return nic;
+                    }
+                }
+            }
+            catch
+            {
+                // Caller handles null
+            }
+            return null;
         }
 
         public void Dispose()

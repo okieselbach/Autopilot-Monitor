@@ -237,8 +237,11 @@ export default function PerformanceChart({ events }: PerformanceChartProps) {
     const memoryUsedPercent: number[] = [];
     const diskQueueValues: number[] = [];
     const diskFreeValues: number[] = [];
+    const netReceiveValues: number[] = [];
+    const netSendValues: number[] = [];
     const timestamps: string[] = [];
     const diskTimestamps: string[] = [];
+    const netTimestamps: string[] = [];
 
     for (const evt of events) {
       const d = evt.data;
@@ -262,6 +265,15 @@ export default function PerformanceChart({ events }: PerformanceChartProps) {
         diskFreeValues.push(dfg);
         diskTimestamps.push(new Date(evt.timestamp).toLocaleTimeString());
       }
+
+      // Network throughput (kbps → Mbps for display)
+      const netRecv = parseFloat(d.net_receive_rate_kbps ?? d.netReceiveRateKbps ?? "");
+      const netSend = parseFloat(d.net_send_rate_kbps ?? d.netSendRateKbps ?? "");
+      if (!isNaN(netRecv) && !isNaN(netSend)) {
+        netReceiveValues.push(netRecv / 1000); // kbps → Mbps
+        netSendValues.push(netSend / 1000);
+        netTimestamps.push(new Date(evt.timestamp).toLocaleTimeString());
+      }
     }
 
     const last = events[events.length - 1]?.data;
@@ -273,11 +285,16 @@ export default function PerformanceChart({ events }: PerformanceChartProps) {
       memoryUsedPercent,
       diskQueueValues,
       diskFreeValues,
+      netReceiveValues,
+      netSendValues,
       diskTimestamps,
+      netTimestamps,
       timestamps,
       latestCpu: cpuValues[cpuValues.length - 1] ?? 0,
       latestMemory: memoryUsedPercent[memoryUsedPercent.length - 1] ?? 0,
       latestDiskQueue: diskQueueValues[diskQueueValues.length - 1] ?? 0,
+      latestNetReceive: netReceiveValues[netReceiveValues.length - 1] ?? 0,
+      latestNetSend: netSendValues[netSendValues.length - 1] ?? 0,
       diskFreeGb,
       diskTotalGb,
       sampleCount: events.length,
@@ -298,8 +315,8 @@ export default function PerformanceChart({ events }: PerformanceChartProps) {
         <span className="text-xs text-gray-400">({metrics.sampleCount} samples)</span>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* CPU - top left */}
+      <div className={`grid grid-cols-1 sm:grid-cols-2 ${metrics.netReceiveValues.length >= 2 ? "lg:grid-cols-3" : "lg:grid-cols-4"} gap-4`}>
+        {/* CPU */}
         <div className="bg-gray-50 rounded-lg p-3">
           <div className="flex items-center justify-between mb-1">
             <span className="text-xs font-medium text-gray-500 uppercase">CPU</span>
@@ -397,6 +414,50 @@ export default function PerformanceChart({ events }: PerformanceChartProps) {
             <div className="text-xs text-gray-400 mt-2">No data</div>
           )}
         </div>
+
+        {/* Network Download */}
+        {metrics.netReceiveValues.length >= 2 && (
+          <div className="bg-gray-50 rounded-lg p-3">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs font-medium text-gray-500 uppercase">Net ↓</span>
+              <span className="text-sm font-semibold text-gray-900">
+                {metrics.latestNetReceive >= 1
+                  ? `${metrics.latestNetReceive.toFixed(1)} Mbps`
+                  : `${(metrics.latestNetReceive * 1000).toFixed(0)} kbps`}
+              </span>
+            </div>
+            <Sparkline
+              values={metrics.netReceiveValues}
+              maxValue={Math.max(1, ...metrics.netReceiveValues)}
+              color="#0891b2"
+              timestamps={metrics.netTimestamps}
+              unit=" Mbps"
+              formatValue={(v) => v >= 1 ? `${v.toFixed(1)} Mbps` : `${(v * 1000).toFixed(0)} kbps`}
+            />
+          </div>
+        )}
+
+        {/* Network Upload */}
+        {metrics.netSendValues.length >= 2 && (
+          <div className="bg-gray-50 rounded-lg p-3">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs font-medium text-gray-500 uppercase">Net ↑</span>
+              <span className="text-sm font-semibold text-gray-900">
+                {metrics.latestNetSend >= 1
+                  ? `${metrics.latestNetSend.toFixed(1)} Mbps`
+                  : `${(metrics.latestNetSend * 1000).toFixed(0)} kbps`}
+              </span>
+            </div>
+            <Sparkline
+              values={metrics.netSendValues}
+              maxValue={Math.max(1, ...metrics.netSendValues)}
+              color="#7c3aed"
+              timestamps={metrics.netTimestamps}
+              unit=" Mbps"
+              formatValue={(v) => v >= 1 ? `${v.toFixed(1)} Mbps` : `${(v * 1000).toFixed(0)} kbps`}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

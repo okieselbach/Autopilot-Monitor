@@ -1,8 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Management;
+using System.Net.NetworkInformation;
 using System.Text.Json;
+using System.Threading.Tasks;
 using AutopilotMonitor.Agent.Core.Logging;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Win32;
@@ -53,6 +56,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             CollectBitLockerStatus();
             CollectTpmStatus();
             CollectAadJoinStatus();
+            CollectActiveNetworkInterfaceInfo();
 
             return (profileResult.enrollmentType, profileResult.isHybridJoin, espConfig.skipUserStatusPage, espConfig.skipDeviceStatusPage);
         }
@@ -68,7 +72,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             // BitLocker can be enabled during enrollment via policy
             CollectBitLockerStatus();
 
-            // Add more collectors here as needed
+            // Re-collect active network interface info (link speed, WiFi signal may have changed)
+            CollectActiveNetworkInterfaceInfo();
         }
 
         /// <summary>
@@ -660,6 +665,173 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             }
 
             return (skipUser, skipDevice);
+        }
+
+        /// <summary>
+        /// Collects active network interface details (name, type, link speed, MAC) using
+        /// System.Net.NetworkInformation — instant, no process spawn.
+        /// If the active interface is WiFi, fires off a separate async task to collect
+        /// WiFi signal info via netsh (fire-and-forget, never blocks).
+        /// </summary>
+        private void CollectActiveNetworkInterfaceInfo()
+        {
+            try
+            {
+                var activeNic = FindActiveNetworkInterface();
+
+                if (activeNic == null)
+                {
+                    EmitDeviceInfoEvent("network_interface_info", "No active network interface found",
+                        new Dictionary<string, object> { { "status", "no_active_interface" } });
+                    return;
+                }
+
+                var data = new Dictionary<string, object>
+                {
+                    { "adapterName", activeNic.Name },
+                    { "adapterDescription", activeNic.Description },
+                    { "macAddress", activeNic.GetPhysicalAddress().ToString() },
+                    { "interfaceType", activeNic.NetworkInterfaceType.ToString() },
+                    { "linkSpeedMbps", activeNic.Speed / 1_000_000 },
+                    { "interfaceId", activeNic.Id }
+                };
+
+                var isWifi = activeNic.NetworkInterfaceType == NetworkInterfaceType.Wireless80211;
+                data["connectionType"] = isWifi ? "WiFi" : "Ethernet";
+
+                var gateways = activeNic.GetIPProperties().GatewayAddresses;
+                if (gateways.Count > 0)
+                {
+                    var gwList = new List<string>();
+                    foreach (var gw in gateways)
+                        gwList.Add(gw.Address.ToString());
+                    data["gateways"] = string.Join(", ", gwList);
+                }
+
+                var message = $"Active interface: {activeNic.Description} ({data["connectionType"]}, {data["linkSpeedMbps"]} Mbps)";
+                EmitDeviceInfoEvent("network_interface_info", message, data);
+
+                // Fire-and-forget WiFi signal collection — separate event, never blocks
+                if (isWifi)
+                {
+                    Task.Run(() => CollectWiFiSignalInfo());
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"EnrollmentTracker: failed to collect active network interface info: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Finds the active network interface: Up, not Loopback/Tunnel, has a non-0.0.0.0 gateway.
+        /// </summary>
+        private static NetworkInterface FindActiveNetworkInterface()
+        {
+            try
+            {
+                var interfaces = NetworkInterface.GetAllNetworkInterfaces();
+                foreach (var nic in interfaces)
+                {
+                    if (nic.OperationalStatus != OperationalStatus.Up)
+                        continue;
+                    if (nic.NetworkInterfaceType == NetworkInterfaceType.Loopback ||
+                        nic.NetworkInterfaceType == NetworkInterfaceType.Tunnel)
+                        continue;
+
+                    var ipProps = nic.GetIPProperties();
+                    foreach (var gw in ipProps.GatewayAddresses)
+                    {
+                        if (gw.Address.ToString() != "0.0.0.0")
+                            return nic;
+                    }
+                }
+            }
+            catch
+            {
+                // Caller handles null
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Collects WiFi signal info via netsh wlan show interfaces and emits a separate
+        /// wifi_signal_info event. Designed to run as fire-and-forget via Task.Run —
+        /// never blocks other collection. VMs without WiFi service simply get no event.
+        /// </summary>
+        private void CollectWiFiSignalInfo()
+        {
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "netsh.exe",
+                    Arguments = "wlan show interfaces",
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true
+                };
+
+                string output;
+                using (var process = Process.Start(psi))
+                {
+                    output = process.StandardOutput.ReadToEnd();
+                    process.WaitForExit(5000);
+                }
+
+                if (string.IsNullOrEmpty(output))
+                    return;
+
+                var data = new Dictionary<string, object>();
+
+                foreach (var line in output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var trimmed = line.Trim();
+                    var colonIndex = trimmed.IndexOf(':');
+                    if (colonIndex < 0) continue;
+
+                    var key = trimmed.Substring(0, colonIndex).Trim();
+                    var value = trimmed.Substring(colonIndex + 1).Trim();
+
+                    if (key.Equals("SSID", StringComparison.OrdinalIgnoreCase) &&
+                        !key.Equals("BSSID", StringComparison.OrdinalIgnoreCase))
+                    {
+                        data["wifiSsid"] = value;
+                    }
+                    else if (key.Equals("Signal", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (int.TryParse(value.TrimEnd('%'), out var signal))
+                            data["wifiSignalPercent"] = signal;
+                    }
+                    else if (key.Equals("Radio type", StringComparison.OrdinalIgnoreCase))
+                    {
+                        data["wifiRadioType"] = value;
+                    }
+                    else if (key.Equals("Channel", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (int.TryParse(value, out var channel))
+                            data["wifiChannel"] = channel;
+                    }
+                }
+
+                if (data.Count > 0)
+                {
+                    var message = data.ContainsKey("wifiSsid")
+                        ? $"WiFi: {data["wifiSsid"]}"
+                        : "WiFi signal info";
+                    if (data.ContainsKey("wifiSignalPercent"))
+                        message += $", Signal: {data["wifiSignalPercent"]}%";
+                    if (data.ContainsKey("wifiRadioType"))
+                        message += $" ({data["wifiRadioType"]})";
+
+                    EmitDeviceInfoEvent("wifi_signal_info", message, data);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug($"WiFi signal info collection failed: {ex.Message}");
+            }
         }
 
         private void EmitDeviceInfoEvent(string eventType, string message, Dictionary<string, object> data)

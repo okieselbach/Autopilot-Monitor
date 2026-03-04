@@ -1125,6 +1125,8 @@ function DeviceDetailsCard({ events }: { events: EnrollmentEvent[] }) {
   const networkAdapters = getEventData("network_adapters");
   const dnsConfig = getEventData("dns_configuration");
   const proxyConfig = getEventData("proxy_configuration");
+  const networkInterfaceInfo = getEventData("network_interface_info");
+  const wifiSignalInfo = getEventData("wifi_signal_info");
   const autopilotProfile = normalizeAutopilotProfile(getEventData("autopilot_profile"));
   const aadJoinStatus = getEventData("aad_join_status");
   const imeVersion = getEventData("ime_agent_version");
@@ -1134,8 +1136,8 @@ function DeviceDetailsCard({ events }: { events: EnrollmentEvent[] }) {
   const deviceLocation = getEventData("device_location");
 
   // Check if we have any device detail events at all
-  const hasData = agentStarted || bootTime || osInfo || networkAdapters || dnsConfig || proxyConfig || autopilotProfile ||
-                  aadJoinStatus || imeVersion || bitLockerStatus || secureBootStatus || deviceLocation;
+  const hasData = agentStarted || bootTime || osInfo || networkAdapters || dnsConfig || proxyConfig || networkInterfaceInfo || wifiSignalInfo ||
+                  autopilotProfile || aadJoinStatus || imeVersion || bitLockerStatus || secureBootStatus || deviceLocation;
 
   if (!hasData) return null;
 
@@ -1192,7 +1194,7 @@ function DeviceDetailsCard({ events }: { events: EnrollmentEvent[] }) {
           )}
 
           {/* Network */}
-          {(networkAdapters || dnsConfig || proxyConfig) && (
+          {(networkAdapters || dnsConfig || proxyConfig || networkInterfaceInfo || wifiSignalInfo) && (
             <DetailSection title="Network">
               {/* Network Adapters */}
               {networkAdapters && networkAdapters.adapters && (
@@ -1245,6 +1247,36 @@ function DeviceDetailsCard({ events }: { events: EnrollmentEvent[] }) {
                     </div>
                   );
                 })
+              )}
+
+              {/* Active Network Interface */}
+              {networkInterfaceInfo && networkInterfaceInfo.status !== "no_active_interface" && (
+                <div className="mt-3 pt-3 border-t border-gray-200">
+                  <div className="text-sm font-medium text-gray-700 mb-1">Active Interface</div>
+                  <DetailRow label="Connection" value={networkInterfaceInfo.connectionType === "WiFi" ? "WiFi" : "Ethernet"} />
+                  {networkInterfaceInfo.adapterDescription && <DetailRow label="Adapter" value={networkInterfaceInfo.adapterDescription} />}
+                  {networkInterfaceInfo.linkSpeedMbps !== undefined && (
+                    <DetailRow label="Link Speed" value={
+                      networkInterfaceInfo.linkSpeedMbps >= 1000
+                        ? `${(networkInterfaceInfo.linkSpeedMbps / 1000).toFixed(1)} Gbps`
+                        : `${networkInterfaceInfo.linkSpeedMbps} Mbps`
+                    } />
+                  )}
+                  {networkInterfaceInfo.gateways && <DetailRow label="Gateway" value={networkInterfaceInfo.gateways} />}
+                </div>
+              )}
+
+              {/* WiFi Signal */}
+              {wifiSignalInfo && (
+                <div className="mt-3 pt-3 border-t border-gray-200">
+                  <div className="text-sm font-medium text-gray-700 mb-1">WiFi</div>
+                  {wifiSignalInfo.wifiSsid && <DetailRow label="SSID" value={wifiSignalInfo.wifiSsid} />}
+                  {wifiSignalInfo.wifiSignalPercent !== undefined && (
+                    <DetailRow label="Signal" value={`${wifiSignalInfo.wifiSignalPercent}%`} />
+                  )}
+                  {wifiSignalInfo.wifiRadioType && <DetailRow label="Radio" value={wifiSignalInfo.wifiRadioType} />}
+                  {wifiSignalInfo.wifiChannel !== undefined && <DetailRow label="Channel" value={`${wifiSignalInfo.wifiChannel}`} />}
+                </div>
               )}
 
               {/* Proxy Configuration */}
