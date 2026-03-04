@@ -47,6 +47,7 @@ export function TenantManagementSection({
 }: TenantManagementSectionProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [showOnlyWaitlist, setShowOnlyWaitlist] = useState(false);
+  const [showOnlyReady, setShowOnlyReady] = useState(false);
   const [tenantSectionExpanded, setTenantSectionExpanded] = useState(false);
   const [editingTenant, setEditingTenant] = useState<TenantConfiguration | null>(null);
   const [savingTenant, setSavingTenant] = useState(false);
@@ -63,7 +64,8 @@ export function TenantManagementSection({
       t.tenantId.toLowerCase().includes(searchQuery.toLowerCase()) ||
       t.domainName.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesWaitlist = !showOnlyWaitlist || !previewApproved.has(t.tenantId);
-    return matchesSearch && matchesWaitlist;
+    const matchesReady = !showOnlyReady || t.validateAutopilotDevice;
+    return matchesSearch && matchesWaitlist && matchesReady;
   });
 
   // Statistics (always over all tenants, not filtered)
@@ -80,7 +82,7 @@ export function TenantManagementSection({
   // Reset to first page when search changes
   useEffect(() => {
     setCurrentPage(0);
-  }, [searchQuery, showOnlyWaitlist]);
+  }, [searchQuery, showOnlyWaitlist, showOnlyReady]);
 
   const handleSaveTenant = async (tenant: TenantConfiguration) => {
     try {
@@ -278,6 +280,21 @@ export function TenantManagementSection({
                   />
                 </div>
                 <button
+                  onClick={() => { setShowOnlyReady(v => !v); setCurrentPage(0); }}
+                  className={`flex items-center space-x-1 px-3 py-2 text-sm rounded-lg border transition-colors whitespace-nowrap ${
+                    showOnlyReady
+                      ? 'bg-blue-600 text-white border-blue-600'
+                      : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                  }`}
+                >
+                  {showOnlyReady && (
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                    </svg>
+                  )}
+                  <span>Ready</span>
+                </button>
+                <button
                   onClick={() => { setShowOnlyWaitlist(v => !v); setCurrentPage(0); }}
                   className={`flex items-center space-x-1 px-3 py-2 text-sm rounded-lg border transition-colors whitespace-nowrap ${
                     showOnlyWaitlist
@@ -292,7 +309,6 @@ export function TenantManagementSection({
                   )}
                   <span>Waitlist</span>
                 </button>
-                <span className="text-sm text-gray-600 whitespace-nowrap">{filteredTenants.length} tenant(s)</span>
               </div>
 
               {/* Tenant List */}
