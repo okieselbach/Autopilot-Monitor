@@ -107,6 +107,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         public bool EnrollmentCompleteEmitted { get; set; }
         public string EnrollmentType { get; set; }
 
+        // ESP configuration from registry (FirstSync\SkipUserStatusPage / SkipDeviceStatusPage)
+        public bool? SkipUserStatusPage { get; set; }
+        public bool? SkipDeviceStatusPage { get; set; }
+
         // Signal timestamps for audit trail
         public DateTime? EspFirstSeenUtc { get; set; }
         public DateTime? EspFinalExitUtc { get; set; }

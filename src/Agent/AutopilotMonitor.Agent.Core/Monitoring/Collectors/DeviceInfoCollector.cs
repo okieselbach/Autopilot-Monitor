@@ -38,9 +38,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 
         /// <summary>
         /// Runs all device info collectors at agent startup.
-        /// Returns the detected enrollment type ("v1" or "v2") and whether the profile indicates Hybrid Join.
+        /// Returns the detected enrollment type, Hybrid Join flag, and ESP skip configuration from registry.
         /// </summary>
-        public (string enrollmentType, bool isHybridJoin) CollectAll()
+        public (string enrollmentType, bool isHybridJoin, bool? skipUserStatusPage, bool? skipDeviceStatusPage) CollectAll()
         {
             _logger.Info("EnrollmentTracker: collecting device info (at start)");
 
@@ -48,12 +48,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             CollectNetworkAndDnsConfiguration();
             CollectProxyConfiguration();
             var profileResult = CollectAutopilotProfile();
+            var espConfig = CollectEspConfiguration();
             CollectSecureBootStatus();
             CollectBitLockerStatus();
             CollectTpmStatus();
             CollectAadJoinStatus();
 
-            return profileResult;
+            return (profileResult.enrollmentType, profileResult.isHybridJoin, espConfig.skipUserStatusPage, espConfig.skipDeviceStatusPage);
         }
 
         /// <summary>
@@ -579,6 +580,86 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             {
                 _logger.Warning($"EnrollmentTracker: failed to collect AAD join status: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Reads ESP skip configuration from the enrollment FirstSync registry key.
+        /// CSP SkipUserStatusPage/SkipDeviceStatusPage are written as DWORD:
+        /// 0xFFFFFFFF = skip (ESP page not shown), 0 = show, key missing = unknown.
+        /// We use defensive interpretation: non-null AND non-zero = skip.
+        /// </summary>
+        private (bool? skipUserStatusPage, bool? skipDeviceStatusPage) CollectEspConfiguration()
+        {
+            bool? skipUser = null;
+            bool? skipDevice = null;
+            string enrollmentGuid = null;
+
+            try
+            {
+                const string enrollmentsKeyPath = @"SOFTWARE\Microsoft\Enrollments";
+
+                using (var enrollmentsKey = Registry.LocalMachine.OpenSubKey(enrollmentsKeyPath))
+                {
+                    if (enrollmentsKey == null)
+                    {
+                        _logger.Debug("EnrollmentTracker: Enrollments registry key not found — ESP config unknown");
+                        return (null, null);
+                    }
+
+                    // Find the MDM enrollment entry (EnrollmentType == 6)
+                    foreach (var guid in enrollmentsKey.GetSubKeyNames())
+                    {
+                        using (var enrollmentKey = enrollmentsKey.OpenSubKey(guid))
+                        {
+                            if (enrollmentKey == null) continue;
+
+                            var enrollmentType = enrollmentKey.GetValue("EnrollmentType");
+                            if (enrollmentType == null || Convert.ToInt32(enrollmentType) != 6)
+                                continue;
+
+                            enrollmentGuid = guid;
+
+                            // Read FirstSync subkey
+                            using (var firstSyncKey = enrollmentKey.OpenSubKey("FirstSync"))
+                            {
+                                if (firstSyncKey == null)
+                                {
+                                    _logger.Debug($"EnrollmentTracker: FirstSync subkey not found for enrollment {guid}");
+                                    break;
+                                }
+
+                                var rawSkipUser = firstSyncKey.GetValue("SkipUserStatusPage");
+                                if (rawSkipUser != null)
+                                    skipUser = Convert.ToInt32(rawSkipUser) != 0;
+
+                                var rawSkipDevice = firstSyncKey.GetValue("SkipDeviceStatusPage");
+                                if (rawSkipDevice != null)
+                                    skipDevice = Convert.ToInt32(rawSkipDevice) != 0;
+                            }
+
+                            break; // Found the MDM enrollment entry
+                        }
+                    }
+                }
+
+                var data = new Dictionary<string, object>
+                {
+                    { "source", "registry_firstsync" }
+                };
+                if (enrollmentGuid != null) data["enrollmentGuid"] = enrollmentGuid;
+                if (skipUser.HasValue) data["skipUserStatusPage"] = skipUser.Value;
+                if (skipDevice.HasValue) data["skipDeviceStatusPage"] = skipDevice.Value;
+
+                var summary = $"SkipUser={skipUser?.ToString() ?? "unknown"}, SkipDevice={skipDevice?.ToString() ?? "unknown"}";
+                _logger.Info($"EnrollmentTracker: ESP configuration detected — {summary}");
+                EmitDeviceInfoEvent("esp_config_detected", $"ESP configuration: {summary}", data);
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"EnrollmentTracker: failed to collect ESP configuration: {ex.Message}");
+            }
+
+            return (skipUser, skipDevice);
         }
 
         private void EmitDeviceInfoEvent(string eventType, string message, Dictionary<string, object> data)

@@ -57,6 +57,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         private Timer _deviceOnlyEspTimer;
         private const int DeviceOnlyEspTimerMinutes = 5;
 
+        // ESP configuration from registry (FirstSync\SkipUserStatusPage / SkipDeviceStatusPage)
+        // null = unknown (registry keys not present), true = skip, false = show
+        private bool? _skipUserStatusPage;
+        private bool? _skipDeviceStatusPage;
+
         // Safety-net timer for waiting_for_hello state
         private Timer _waitingForHelloSafetyTimer;
         private const int WaitingForHelloSafetyTimeoutSeconds = 420; // 7 min — longer than Hello chain (330s)
@@ -241,7 +246,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         {
             var result = _deviceInfoCollector.CollectAll();
             _enrollmentType = result.enrollmentType;
+            _skipUserStatusPage = result.skipUserStatusPage;
+            _skipDeviceStatusPage = result.skipDeviceStatusPage;
             _stateData.EnrollmentType = _enrollmentType;
+            _stateData.SkipUserStatusPage = _skipUserStatusPage;
+            _stateData.SkipDeviceStatusPage = _skipDeviceStatusPage;
             _stateDirty = true;
         }
 
@@ -873,10 +882,44 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     // during AccountSetup), the composite signal can fire immediately.
                     TryEmitEnrollmentComplete("esp_hello_composite");
                 }
+                else if (_skipUserStatusPage == true)
+                {
+                    // Registry definitively says no AccountSetup expected → immediate device-only classification
+                    _logger.Info($"EnrollmentTracker: ESP phase exiting from '{_lastEspPhase ?? "unknown"}' — SkipUserStatusPage=true, classified as device-only ESP (registry)");
+
+                    _espFinalExitSeen = true;
+                    _stateData.EspFinalExitSeen = true;
+                    _stateData.EspFinalExitUtc = DateTime.UtcNow;
+                    RecordSignal("device_only_esp_registry");
+
+                    _emitEvent(new EnrollmentEvent
+                    {
+                        SessionId = _sessionId,
+                        TenantId = _tenantId,
+                        EventType = "esp_phase_changed",
+                        Severity = EventSeverity.Info,
+                        Source = "EnrollmentTracker",
+                        Phase = EnrollmentPhase.FinalizingSetup,
+                        Message = "ESP phase: FinalizingSetup (device-only ESP — SkipUserStatusPage confirmed via registry)",
+                        Data = new Dictionary<string, object>
+                        {
+                            { "espPhase", "FinalizingSetup" },
+                            { "autoDetected", true },
+                            { "triggeredBy", "device_only_esp_registry" },
+                            { "previousPhase", _lastEspPhase ?? "unknown" },
+                            { "skipUserStatusPage", true }
+                        }
+                    });
+
+                    CollectDeviceInfoAtFinalizingSetup("device_only_esp_registry");
+                    _espAndHelloTracker?.StartHelloWaitTimer();
+                    TryEmitEnrollmentComplete("device_only_esp_registry");
+                }
                 else
                 {
-                    // DeviceSetup phase exiting without desktop — intermediate transition (Device→Account) or device-only ESP
-                    _logger.Info($"EnrollmentTracker: ESP phase exiting from '{_lastEspPhase ?? "unknown"}' - intermediate transition, starting device-only ESP detection timer ({DeviceOnlyEspTimerMinutes}min)");
+                    // Registry keys unknown or SkipUserStatusPage=false → fallback to timer-based detection
+                    var fallbackReason = _skipUserStatusPage == null ? "registry keys not found" : "SkipUserStatusPage=false";
+                    _logger.Info($"EnrollmentTracker: ESP phase exiting from '{_lastEspPhase ?? "unknown"}' — {fallbackReason}, starting device-only ESP detection timer ({DeviceOnlyEspTimerMinutes}min)");
 
                     // Start device-only ESP detection timer
                     _deviceOnlyEspTimer?.Dispose();
@@ -928,6 +971,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             _isWaitingForHello = loaded.IsWaitingForHello;
             _enrollmentCompleteEmitted = loaded.EnrollmentCompleteEmitted;
             _enrollmentType = loaded.EnrollmentType ?? _enrollmentType;
+            _skipUserStatusPage = loaded.SkipUserStatusPage;
+            _skipDeviceStatusPage = loaded.SkipDeviceStatusPage;
             _stateData = loaded;
 
             _logger.Info($"EnrollmentTracker: state restored — espEverSeen={_espEverSeen}, espFinalExitSeen={_espFinalExitSeen}, desktopArrived={_desktopArrived}, lastEspPhase={_lastEspPhase}, enrollmentCompleteEmitted={_enrollmentCompleteEmitted}");
@@ -1083,7 +1128,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     { "helloResolved", _espAndHelloTracker?.IsHelloCompleted ?? false },
                     { "helloPolicyConfigured", _espAndHelloTracker?.IsPolicyConfigured ?? false },
                     { "enrollmentType", _enrollmentType },
-                    { "lastEspPhase", _lastEspPhase ?? "none" }
+                    { "lastEspPhase", _lastEspPhase ?? "none" },
+                    { "skipUserStatusPage", _skipUserStatusPage?.ToString() ?? "unknown" },
+                    { "skipDeviceStatusPage", _skipDeviceStatusPage?.ToString() ?? "unknown" }
                 }
             });
         }
