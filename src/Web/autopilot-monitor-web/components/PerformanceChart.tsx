@@ -315,7 +315,7 @@ export default function PerformanceChart({ events }: PerformanceChartProps) {
         <span className="text-xs text-gray-400">({metrics.sampleCount} samples)</span>
       </div>
 
-      <div className={`grid grid-cols-1 sm:grid-cols-2 ${metrics.netReceiveValues.length >= 2 ? "lg:grid-cols-3" : "lg:grid-cols-4"} gap-4`}>
+      <div className={`grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 ${metrics.netReceiveValues.length >= 2 ? "lg:grid-cols-6" : "lg:grid-cols-4"} gap-4`}>
         {/* CPU */}
         <div className="bg-gray-50 rounded-lg p-3">
           <div className="flex items-center justify-between mb-1">
