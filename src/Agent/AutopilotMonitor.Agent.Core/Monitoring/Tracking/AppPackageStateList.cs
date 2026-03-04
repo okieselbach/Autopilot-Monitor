@@ -284,6 +284,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 { "totalApps", CountAll },
                 { "completedApps", CountCompleted },
                 { "errorCount", ErrorCount },
+                { "deviceErrors", this.Count(x => x.IsError && x.Targeted == AppTargeted.Device) },
+                { "userErrors", this.Count(x => x.IsError && x.Targeted == AppTargeted.User) },
                 { "hasErrors", HasError },
                 { "isAllCompleted", IsAllCompleted() },
                 { "ignoredCount", IgnoreList.Count },
@@ -296,6 +298,15 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 { "failed", this.Count(x => x.InstallationState == AppInstallationState.Error || x.InstallationState == AppInstallationState.Postponed) },
                 { "pending", this.Count(x => x.InstallationState < AppInstallationState.Downloading) }
             };
+        }
+
+        /// <summary>
+        /// Gets all package states as a list of dictionaries for final status dump.
+        /// Reuses AppPackageState.ToEventData() which includes state, error info, DO telemetry.
+        /// </summary>
+        public List<Dictionary<string, object>> ToFinalStatusList()
+        {
+            return this.Select(pkg => pkg.ToEventData()).ToList();
         }
 
         /// <summary>

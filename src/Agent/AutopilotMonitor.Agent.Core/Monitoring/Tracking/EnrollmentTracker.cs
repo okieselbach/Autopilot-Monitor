@@ -28,6 +28,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         private ImeLogTracker _imeLogTracker;
         private Timer _summaryTimer;
         private bool _summaryTimerActive;
+        private Timer _debugStateTimer;
+        private bool _debugStateTimerActive;
         private string _lastEspPhase; // Track last ESP phase to prevent duplicate events
         private bool _hasAutoSwitchedToAppsPhase; // Track if we've already auto-switched to apps phase for current ESP phase
         private string _enrollmentType = "v1"; // "v1" = Autopilot Classic/ESP, "v2" = Windows Device Preparation
@@ -54,6 +56,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         // Device-Only ESP detection (Phase 3C)
         private Timer _deviceOnlyEspTimer;
         private const int DeviceOnlyEspTimerMinutes = 5;
+
+        // Safety-net timer for waiting_for_hello state
+        private Timer _waitingForHelloSafetyTimer;
+        private const int WaitingForHelloSafetyTimeoutSeconds = 420; // 7 min — longer than Hello chain (330s)
 
         // State persistence for crash recovery
         private readonly EnrollmentStatePersistence _statePersistence;
@@ -195,6 +201,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
 
             // Start periodic summary timer (30s, starts when app tracking begins)
             _summaryTimer = new Timer(SummaryTimerCallback, null, Timeout.Infinite, Timeout.Infinite);
+            _debugStateTimer = new Timer(DebugStateTimerCallback, null, Timeout.Infinite, Timeout.Infinite);
 
             _logger.Info("EnrollmentTracker: started");
         }
@@ -206,6 +213,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         {
             _logger.Info("EnrollmentTracker: stopping");
             _summaryTimer?.Change(Timeout.Infinite, Timeout.Infinite);
+            _debugStateTimer?.Change(Timeout.Infinite, Timeout.Infinite);
             _imeLogTracker?.Stop();
             _logger.Info("EnrollmentTracker: stopped");
         }
@@ -308,6 +316,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             {
                 _summaryTimerActive = true;
                 _summaryTimer?.Change(TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
+            }
+            if (!_debugStateTimerActive)
+            {
+                _debugStateTimerActive = true;
+                _debugStateTimer?.Change(TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(60));
             }
         }
 
@@ -505,9 +518,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         {
             _logger.Info("EnrollmentTracker: all apps completed");
 
-            // Stop summary timer
+            // Stop timers
             _summaryTimer?.Change(Timeout.Infinite, Timeout.Infinite);
             _summaryTimerActive = false;
+            _debugStateTimer?.Change(Timeout.Infinite, Timeout.Infinite);
+            _debugStateTimerActive = false;
 
             // Emit final summary
             EmitAppTrackingSummary();
@@ -564,9 +579,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             // User session completed successfully — cancel any pending ESP failure
             CancelPendingEspFailure();
 
-            // Stop summary timer if running
+            // Stop timers if running
             _summaryTimer?.Change(Timeout.Infinite, Timeout.Infinite);
             _summaryTimerActive = false;
+            _debugStateTimer?.Change(Timeout.Infinite, Timeout.Infinite);
+            _debugStateTimerActive = false;
 
             // Check if Windows Hello is configured but not yet completed
             if (_espAndHelloTracker != null)
@@ -593,9 +610,24 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
 
                     // Set flag so we know we're waiting
                     _isWaitingForHello = true;
+                    _stateData.IsWaitingForHello = true;
+                    _stateDirty = true;
+                    _statePersistence.Save(_stateData); // Immediate persist — summary timer was just stopped
 
-                    // Note: enrollment_complete will be triggered when Hello events arrive
-                    // or when the agent is stopped/times out
+                    // Defense-in-depth: Ensure Hello wait timer is running.
+                    // StartHelloWaitTimer() has internal guards (returns if timer already running,
+                    // if Hello already completed, or if wizard already started). Safe to call multiple times.
+                    _espAndHelloTracker?.StartHelloWaitTimer();
+
+                    // Safety net: if Hello never resolves (timer chain fails, agent crash without restart),
+                    // force enrollment_complete after 7 minutes instead of waiting for the 6h max lifetime timer.
+                    _waitingForHelloSafetyTimer?.Dispose();
+                    _waitingForHelloSafetyTimer = new Timer(
+                        OnWaitingForHelloSafetyTimeout,
+                        null,
+                        TimeSpan.FromSeconds(WaitingForHelloSafetyTimeoutSeconds),
+                        TimeSpan.FromMilliseconds(-1));
+
                     return;
                 }
             }
@@ -613,6 +645,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             _logger.Info("EnrollmentTracker: Received HelloCompleted event from EspAndHelloTracker");
             _stateData.HelloResolvedUtc = DateTime.UtcNow;
             RecordSignal("hello_resolved");
+
+            // Cancel safety timer — Hello resolved normally
+            _waitingForHelloSafetyTimer?.Change(Timeout.Infinite, Timeout.Infinite);
 
             if (_isWaitingForHello)
             {
@@ -725,13 +760,37 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         }
 
         /// <summary>
+        /// Safety-net callback: fires 7 minutes after waiting_for_hello was set.
+        /// If the normal Hello timeout chain (30s + 300s) failed for any reason,
+        /// this forces enrollment_complete instead of waiting for the 6h max lifetime timer.
+        /// </summary>
+        private void OnWaitingForHelloSafetyTimeout(object state)
+        {
+            if (!_isWaitingForHello || _enrollmentCompleteEmitted)
+                return;
+
+            _logger.Warning($"EnrollmentTracker: waiting_for_hello safety timeout ({WaitingForHelloSafetyTimeoutSeconds}s) expired — forcing completion");
+            _isWaitingForHello = false;
+
+            // Force-resolve Hello so TryEmitEnrollmentComplete's hello check passes
+            if (_espAndHelloTracker != null && !_espAndHelloTracker.IsHelloCompleted)
+            {
+                _espAndHelloTracker.ForceMarkHelloCompleted("safety_timeout");
+            }
+
+            TryEmitEnrollmentComplete("ime_hello_safety_timeout");
+        }
+
+        /// <summary>
         /// Emits an enrollment_failed event. The MonitoringService handles shutdown identically to enrollment_complete.
         /// </summary>
         private void EmitEnrollmentFailed(string failureType, string failureSource)
         {
-            // Stop summary timer
+            // Stop timers
             _summaryTimer?.Change(Timeout.Infinite, Timeout.Infinite);
             _summaryTimerActive = false;
+            _debugStateTimer?.Change(Timeout.Infinite, Timeout.Infinite);
+            _debugStateTimerActive = false;
 
             _emitEvent(new EnrollmentEvent
             {
@@ -750,6 +809,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     { "agentUptimeSeconds", (DateTime.UtcNow - _agentStartTimeUtc).TotalSeconds }
                 }
             });
+
+            // Write final status dump before cleanup
+            WriteFinalStatus("failed", failureType);
 
             // Clean up persisted tracker state
             _imeLogTracker?.DeleteState();
@@ -876,6 +938,18 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 _logger.Info("EnrollmentTracker: restarting Hello wait timer after state recovery");
                 _espAndHelloTracker.StartHelloWaitTimer();
             }
+
+            // Restart safety timer if we were waiting for Hello
+            if (_isWaitingForHello && !_enrollmentCompleteEmitted)
+            {
+                _logger.Info("EnrollmentTracker: restarting waiting_for_hello safety timer after state recovery");
+                _waitingForHelloSafetyTimer?.Dispose();
+                _waitingForHelloSafetyTimer = new Timer(
+                    OnWaitingForHelloSafetyTimeout,
+                    null,
+                    TimeSpan.FromSeconds(WaitingForHelloSafetyTimeoutSeconds),
+                    TimeSpan.FromMilliseconds(-1));
+            }
         }
 
         private void RecordSignal(string signal)
@@ -929,9 +1003,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             _enrollmentCompleteEmitted = true;
             _stateData.EnrollmentCompleteEmitted = true;
 
-            // Stop summary timer
+            // Stop timers
             _summaryTimer?.Change(Timeout.Infinite, Timeout.Infinite);
             _summaryTimerActive = false;
+            _debugStateTimer?.Change(Timeout.Infinite, Timeout.Infinite);
+            _debugStateTimerActive = false;
 
             var helloOutcome = _espAndHelloTracker?.HelloOutcome ?? "unknown";
 
@@ -966,7 +1042,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 }
             });
 
-            // Write enrollment complete marker for cleanup retry detection
+            // Write final status dump and enrollment complete marker
+            WriteFinalStatus("completed", source);
             WriteEnrollmentCompleteMarker();
 
             // Clean up persisted tracker state so next enrollment starts fresh
@@ -1122,6 +1199,33 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         }
 
         /// <summary>
+        /// Periodic debug state snapshot (every 60s). Writes to agent log only (not as event) to aid
+        /// post-mortem debugging of stuck enrollments without consuming Azure Table Storage.
+        /// </summary>
+        private void DebugStateTimerCallback(object state)
+        {
+            try
+            {
+                var states = _imeLogTracker?.PackageStates;
+                if (states == null || states.CountAll == 0) return;
+
+                var active = states.Where(x => x.IsActive).Select(x => $"{x.Name ?? x.Id}({x.InstallationState})");
+                var errors = states.Where(x => x.IsError).Select(x => $"{x.Name ?? x.Id}");
+
+                _logger.Debug($"[StateSnapshot] Apps: {states.CountCompleted}/{states.CountAll} completed, " +
+                    $"{states.ErrorCount} errors (device:{states.Count(x => x.IsError && x.Targeted == AppTargeted.Device)}, " +
+                    $"user:{states.Count(x => x.IsError && x.Targeted == AppTargeted.User)}), " +
+                    $"active: [{string.Join(", ", active)}], " +
+                    $"failed: [{string.Join(", ", errors)}], " +
+                    $"phase: {_lastEspPhase ?? "none"}, espExit: {_espFinalExitSeen}, desktop: {_desktopArrived}");
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug($"[StateSnapshot] Error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
         /// Emits app_tracking_summary only if state-breakdown counters changed since last emission.
         /// Called both event-driven (from HandleAppStateChanged) and periodically (30s timer backstop).
         /// </summary>
@@ -1196,7 +1300,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
 
             _espFailureTimer?.Dispose();
             _deviceOnlyEspTimer?.Dispose();
+            _waitingForHelloSafetyTimer?.Dispose();
             _summaryTimer?.Dispose();
+            _debugStateTimer?.Dispose();
             _imeLogTracker?.Dispose();
         }
 
@@ -1219,6 +1325,65 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             catch (Exception ex)
             {
                 _logger.Warning($"Failed to write enrollment complete marker: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Writes a comprehensive final-status.json with all app states, signals, and error summary.
+        /// Automatically included in diagnostics uploads for post-mortem analysis.
+        /// </summary>
+        private void WriteFinalStatus(string outcome, string source)
+        {
+            try
+            {
+                var stateDirectory = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor\State");
+                Directory.CreateDirectory(stateDirectory);
+
+                var appStates = _imeLogTracker?.PackageStates;
+
+                var signalTimestamps = new Dictionary<string, string>();
+                if (_stateData.EspFirstSeenUtc.HasValue)
+                    signalTimestamps["espFirstSeen"] = _stateData.EspFirstSeenUtc.Value.ToString("o");
+                if (_stateData.EspFinalExitUtc.HasValue)
+                    signalTimestamps["espFinalExit"] = _stateData.EspFinalExitUtc.Value.ToString("o");
+                if (_stateData.DesktopArrivedUtc.HasValue)
+                    signalTimestamps["desktopArrived"] = _stateData.DesktopArrivedUtc.Value.ToString("o");
+                if (_stateData.HelloResolvedUtc.HasValue)
+                    signalTimestamps["helloResolved"] = _stateData.HelloResolvedUtc.Value.ToString("o");
+                if (_stateData.ImePatternSeenUtc.HasValue)
+                    signalTimestamps["imePatternSeen"] = _stateData.ImePatternSeenUtc.Value.ToString("o");
+
+                var status = new Dictionary<string, object>
+                {
+                    { "timestamp", DateTime.UtcNow.ToString("o") },
+                    { "outcome", outcome },
+                    { "completionSource", source },
+                    { "helloOutcome", _espAndHelloTracker?.HelloOutcome ?? "unknown" },
+                    { "enrollmentType", _enrollmentType ?? "unknown" },
+                    { "agentUptimeSeconds", (DateTime.UtcNow - _agentStartTimeUtc).TotalSeconds },
+                    { "signalsSeen", _stateData.SignalsSeen ?? new List<string>() },
+                    { "signalTimestamps", signalTimestamps },
+                    { "appSummary", new Dictionary<string, object>
+                        {
+                            { "totalApps", appStates?.CountAll ?? 0 },
+                            { "completedApps", appStates?.CountCompleted ?? 0 },
+                            { "errorCount", appStates?.ErrorCount ?? 0 },
+                            { "deviceErrors", appStates?.Count(x => x.IsError && x.Targeted == AppTargeted.Device) ?? 0 },
+                            { "userErrors", appStates?.Count(x => x.IsError && x.Targeted == AppTargeted.User) ?? 0 }
+                        }
+                    },
+                    { "packageStates", appStates?.ToFinalStatusList() ?? new List<Dictionary<string, object>>() }
+                };
+
+                var json = System.Text.Json.JsonSerializer.Serialize(status,
+                    new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+                var path = Path.Combine(stateDirectory, "final-status.json");
+                File.WriteAllText(path, json);
+                _logger.Info($"Final status written: {path}");
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"Failed to write final status: {ex.Message}");
             }
         }
     }

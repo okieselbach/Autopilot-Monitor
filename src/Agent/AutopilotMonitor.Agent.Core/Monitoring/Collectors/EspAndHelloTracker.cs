@@ -139,6 +139,22 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             get { lock (_stateLock) { return _isHelloCompleted; } }
         }
 
+        /// <summary>
+        /// Force-marks Hello as completed from an external caller (e.g. safety timeout in EnrollmentTracker).
+        /// Does NOT invoke the HelloCompleted event — the caller handles completion logic directly.
+        /// </summary>
+        public void ForceMarkHelloCompleted(string reason)
+        {
+            lock (_stateLock)
+            {
+                if (_isHelloCompleted) return;
+                _isHelloCompleted = true;
+                HelloOutcome = reason;
+                StopHelloCompletionTimerLocked();
+                _logger.Warning($"Hello force-completed by external caller: {reason}");
+            }
+        }
+
         public void Start()
         {
             _logger.Info("Starting ESP and Hello tracker");

@@ -507,6 +507,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                         HandleImeStarted();
                         break;
 
+                    case "imeshutdown":
+                        HandleImeShutdown();
+                        break;
+
                     case "imesessionchange":
                         _logger.Debug($"IME session change: {match.Groups["change"]?.Value}");
                         break;
@@ -742,15 +746,27 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         {
             _logger.Info("ImeLogTracker: IME Agent Started detected");
 
-            // Mark any currently active app as installed (it was running before restart)
+            // Log any currently active app — it will be re-evaluated by new log entries after IME restart.
+            // We intentionally do NOT mark it as Installed here because IME may retry the app.
             if (!string.IsNullOrEmpty(_packageStates.CurrentPackageId))
             {
                 var currentPkg = _packageStates.GetPackage(_packageStates.CurrentPackageId);
                 if (currentPkg?.IsActive == true)
-                    UpdateStateWithCallback(_packageStates.CurrentPackageId, AppInstallationState.Installed);
+                    _logger.Info($"ImeLogTracker: Active package {currentPkg.Name ?? currentPkg.Id} ({currentPkg.InstallationState}) will be re-evaluated after IME restart");
             }
 
             OnImeStarted?.Invoke();
+        }
+
+        private void HandleImeShutdown()
+        {
+            _logger.Info("ImeLogTracker: IME shutdown detected — marking all active packages as Postponed");
+
+            foreach (var pkg in _packageStates.Where(p => p.IsActive).ToList())
+            {
+                _logger.Info($"ImeLogTracker: Postponing active package {pkg.Name ?? pkg.Id} ({pkg.InstallationState})");
+                UpdateStateWithCallback(pkg.Id, AppInstallationState.Postponed);
+            }
         }
 
         private string _lastEspPhaseDetected;
