@@ -1251,7 +1251,7 @@ function DeviceDetailsCard({ events }: { events: EnrollmentEvent[] }) {
 
               {/* Active Network Interface */}
               {networkInterfaceInfo && networkInterfaceInfo.status !== "no_active_interface" && (
-                <div className="mt-1 pt-3">
+                <div className="mt-3 pt-3 border-t border-gray-200">
                   <div className="text-sm font-medium text-gray-700 mb-1">Active Interface</div>
                   <DetailRow label="Connection" value={networkInterfaceInfo.connectionType === "WiFi" ? "WiFi" : "Ethernet"} />
                   {networkInterfaceInfo.adapterDescription && <DetailRow label="Adapter" value={networkInterfaceInfo.adapterDescription} />}
