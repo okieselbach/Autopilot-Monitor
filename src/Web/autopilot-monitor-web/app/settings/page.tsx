@@ -112,12 +112,6 @@ export default function SettingsPage() {
   const [helloWaitTimeoutSeconds, setHelloWaitTimeoutSeconds] = useState(30);
   const [autopilotConsentInProgress, setAutopilotConsentInProgress] = useState(false);
 
-  // Preview mode (seeded via ?preview=1 in Navbar, persisted in localStorage)
-  const [previewMode, setPreviewMode] = useState(() => {
-    if (typeof window !== 'undefined') return localStorage.getItem('previewMode') === 'true';
-    return false;
-  });
-
   // Agent behavior state
   const [selfDestructOnComplete, setSelfDestructOnComplete] = useState(true);
   const [keepLogFile, setKeepLogFile] = useState(false);
@@ -145,17 +139,6 @@ export default function SettingsPage() {
   const [enableLocalAdminAnalyzer, setEnableLocalAdminAnalyzer] = useState(true);
   const [localAdminAllowedAccounts, setLocalAdminAllowedAccounts] = useState<string[]>([]);
   const [newAllowedAccount, setNewAllowedAccount] = useState("");
-
-  // Listen for previewMode changes from Navbar
-  useEffect(() => {
-    const handler = () => setPreviewMode(localStorage.getItem('previewMode') === 'true');
-    window.addEventListener('storage', handler);
-    window.addEventListener('localStorageChange', handler);
-    return () => {
-      window.removeEventListener('storage', handler);
-      window.removeEventListener('localStorageChange', handler);
-    };
-  }, []);
 
   // Derived: true when form differs from last-saved config
   const hasUnsavedChanges = useMemo(() => {
@@ -888,7 +871,6 @@ export default function SettingsPage() {
               autopilotConsentInProgress={autopilotConsentInProgress}
               saving={saving}
               onBeginConsent={beginDeviceValidationConsentFlow}
-              previewMode={previewMode}
             />
 
             {user?.isTenantAdmin && (
