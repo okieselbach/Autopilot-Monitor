@@ -135,9 +135,9 @@ export default function ScriptExecutions({ events, showScriptOutput }: ScriptExe
   );
 }
 
-function getIntuneScriptUrl(policyId: string, scriptType: string): string {
+function getIntuneScriptUrl(policyId: string, scriptType: string): string | null {
   if (scriptType === "remediation") {
-    return `https://intune.microsoft.com/#view/Microsoft_Intune_Enrollment/UXAnalyticsScriptMenu/~/overview/id/${policyId}/isFirstParty/undefined`;
+    return null; // Remediation URL requires scriptName which we don't have
   }
   return `https://intune.microsoft.com/#view/Microsoft_Intune_DeviceSettings/ConfigureWMPolicyMenuBlade/~/overview/policyId/${policyId}/policyType/0`;
 }
@@ -186,7 +186,11 @@ function ScriptItemRow({ item, showScriptOutput }: { item: ScriptItem; showScrip
             </svg>
           )}
           <span className="text-sm font-medium text-gray-900 truncate">{label}</span>
-          <a href={intuneUrl} target="_blank" rel="noopener noreferrer" className="text-xs font-mono text-blue-600 hover:text-blue-800 hover:underline" title="Open in Intune portal">{shortId}…</a>
+          {intuneUrl ? (
+            <a href={intuneUrl} target="_blank" rel="noopener noreferrer" className="text-xs font-mono text-blue-600 hover:text-blue-800 hover:underline" title="Open in Intune portal">{shortId}…</a>
+          ) : (
+            <span className="text-xs font-mono text-gray-500">{shortId}…</span>
+          )}
           <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
             item.scriptType === "remediation"
               ? "bg-amber-100 text-amber-700"
@@ -220,7 +224,11 @@ function ScriptItemRow({ item, showScriptOutput }: { item: ScriptItem; showScrip
         <div className="mt-3 space-y-2">
           {/* Metadata */}
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600">
-            <span><span className="font-medium text-gray-700">Policy ID:</span> <a href={intuneUrl} target="_blank" rel="noopener noreferrer" className="font-mono text-blue-600 hover:text-blue-800 hover:underline">{item.policyId}</a></span>
+            <span><span className="font-medium text-gray-700">Policy ID:</span> {intuneUrl ? (
+              <a href={intuneUrl} target="_blank" rel="noopener noreferrer" className="font-mono text-blue-600 hover:text-blue-800 hover:underline">{item.policyId}</a>
+            ) : (
+              <span className="font-mono">{item.policyId}</span>
+            )}</span>
             {item.runContext && <span><span className="font-medium text-gray-700">Context:</span> {item.runContext}</span>}
             {item.exitCode != null && <span><span className="font-medium text-gray-700">Exit Code:</span> <span className="font-mono">{item.exitCode}</span></span>}
             {item.result && <span><span className="font-medium text-gray-700">Result:</span> {item.result}</span>}
