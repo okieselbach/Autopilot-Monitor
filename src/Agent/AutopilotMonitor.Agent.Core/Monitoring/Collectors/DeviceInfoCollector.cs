@@ -62,6 +62,21 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         }
 
         /// <summary>
+        /// Re-collects enrollment-dependent device info that was likely empty/incomplete at startup.
+        /// Called when DeviceSetup phase is first detected (ESP started = MDM enrollment + AAD join complete).
+        /// Re-emits: aad_join_status, autopilot_profile, esp_config_detected, tpm_status.
+        /// </summary>
+        public void CollectAtEnrollmentStart()
+        {
+            _logger.Info("EnrollmentTracker: collecting device info (at enrollment start)");
+
+            CollectAadJoinStatus();
+            CollectAutopilotProfile();
+            CollectEspConfiguration();
+            CollectTpmStatus();
+        }
+
+        /// <summary>
         /// Re-collects device info that may change during enrollment (e.g. BitLocker enabled via policy).
         /// Called at enrollment complete / FinalizingSetup transition to capture final state.
         /// </summary>

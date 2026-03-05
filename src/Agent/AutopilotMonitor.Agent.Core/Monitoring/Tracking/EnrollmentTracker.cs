@@ -35,6 +35,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         private bool _hasAutoSwitchedToAppsPhase; // Track if we've already auto-switched to apps phase for current ESP phase
         private string _enrollmentType = "v1"; // "v1" = Autopilot Classic/ESP, "v2" = Windows Device Preparation
         private bool _isWaitingForHello = false; // Track if we're waiting for Hello to complete before sending enrollment_complete
+        private bool _enrollmentStartDeviceInfoCollected = false; // Re-collect enrollment-dependent info once at first ESP phase
         private bool _finalDeviceInfoCollected = false; // Ensure final device info is emitted only once
         private string _lastEmittedSummaryHash; // Track last emitted state-breakdown to avoid redundant summary events
 
@@ -321,6 +322,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 Message = $"ESP phase: {phase}",
                 Data = new Dictionary<string, object> { { "espPhase", phase } }
             });
+
+            // Re-collect enrollment-dependent device info (AAD join, profile, ESP config)
+            // that may have been empty at startup (bootstrap / pre-enrollment scenario).
+            CollectDeviceInfoAtEnrollmentStart();
 
             // Start summary timer when we detect ESP phase
             if (!_summaryTimerActive)
@@ -1287,6 +1292,31 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             }
         }
 
+        /// <summary>
+        /// Re-collects enrollment-dependent device info (AAD join, Autopilot profile, ESP config)
+        /// that were likely empty when the agent started before enrollment (bootstrap scenario).
+        /// Called once when the first ESP phase is detected.
+        /// </summary>
+        private void CollectDeviceInfoAtEnrollmentStart()
+        {
+            if (_enrollmentStartDeviceInfoCollected)
+                return;
+
+            _enrollmentStartDeviceInfoCollected = true;
+            _logger.Info("EnrollmentTracker: first ESP phase detected — re-collecting enrollment-dependent device info");
+            Task.Run(() =>
+            {
+                try
+                {
+                    _deviceInfoCollector.CollectAtEnrollmentStart();
+                }
+                catch (Exception ex)
+                {
+                    _logger.Warning($"EnrollmentTracker: failed to re-collect device info at enrollment start: {ex.Message}");
+                }
+            });
+        }
+
         private void CollectDeviceInfoAtFinalizingSetup(string triggerReason)
         {
             if (_finalDeviceInfoCollected)
@@ -1481,7 +1511,56 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
 
                 // Add current phase (the phase active at completion, e.g. AccountSetup)
                 var currentPhaseName = _lastEspPhase ?? "Unknown";
-                packageStatesByPhase[currentPhaseName] = appStates?.ToFinalStatusList() ?? new List<Dictionary<string, object>>();
+                var currentPhaseList = appStates?.ToFinalStatusList() ?? new List<Dictionary<string, object>>();
+                packageStatesByPhase[currentPhaseName] = currentPhaseList;
+
+                // Aggregate app summary across ALL phases (snapshots + current)
+                var currentPhaseTotal = appStates?.CountAll ?? 0;
+                var currentPhaseCompleted = appStates?.CountCompleted ?? 0;
+                var currentPhaseErrors = appStates?.ErrorCount ?? 0;
+                var currentPhaseDeviceErrors = appStates?.Count(x => x.IsError && x.Targeted == AppTargeted.Device) ?? 0;
+                var currentPhaseUserErrors = appStates?.Count(x => x.IsError && x.Targeted == AppTargeted.User) ?? 0;
+
+                var allPhaseTotals = new Dictionary<string, int>();
+                var totalAppsAllPhases = currentPhaseTotal;
+                var completedAppsAllPhases = currentPhaseCompleted;
+                var errorCountAllPhases = currentPhaseErrors;
+                var deviceErrorsAllPhases = currentPhaseDeviceErrors;
+                var userErrorsAllPhases = currentPhaseUserErrors;
+
+                allPhaseTotals[currentPhaseName] = currentPhaseTotal;
+
+                if (phaseSnapshots != null)
+                {
+                    foreach (var kvp in phaseSnapshots)
+                    {
+                        var phaseApps = kvp.Value;
+                        allPhaseTotals[kvp.Key] = phaseApps.Count;
+                        totalAppsAllPhases += phaseApps.Count;
+                        foreach (var app in phaseApps)
+                        {
+                            object stateVal;
+                            var isError = app.TryGetValue("state", out stateVal) &&
+                                          string.Equals(stateVal?.ToString(), "Error", StringComparison.OrdinalIgnoreCase);
+                            var isCompleted = app.TryGetValue("state", out stateVal) &&
+                                              (stateVal?.ToString() == "Installed" || stateVal?.ToString() == "Skipped" ||
+                                               stateVal?.ToString() == "Postponed" || stateVal?.ToString() == "Error");
+                            if (isCompleted) completedAppsAllPhases++;
+                            if (isError)
+                            {
+                                errorCountAllPhases++;
+                                object targetVal;
+                                if (app.TryGetValue("targeted", out targetVal))
+                                {
+                                    if (string.Equals(targetVal?.ToString(), "Device", StringComparison.OrdinalIgnoreCase))
+                                        deviceErrorsAllPhases++;
+                                    else if (string.Equals(targetVal?.ToString(), "User", StringComparison.OrdinalIgnoreCase))
+                                        userErrorsAllPhases++;
+                                }
+                            }
+                        }
+                    }
+                }
 
                 var status = new Dictionary<string, object>
                 {
@@ -1495,11 +1574,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     { "signalTimestamps", signalTimestamps },
                     { "appSummary", new Dictionary<string, object>
                         {
-                            { "totalApps", appStates?.CountAll ?? 0 },
-                            { "completedApps", appStates?.CountCompleted ?? 0 },
-                            { "errorCount", appStates?.ErrorCount ?? 0 },
-                            { "deviceErrors", appStates?.Count(x => x.IsError && x.Targeted == AppTargeted.Device) ?? 0 },
-                            { "userErrors", appStates?.Count(x => x.IsError && x.Targeted == AppTargeted.User) ?? 0 }
+                            { "totalApps", totalAppsAllPhases },
+                            { "completedApps", completedAppsAllPhases },
+                            { "errorCount", errorCountAllPhases },
+                            { "deviceErrors", deviceErrorsAllPhases },
+                            { "userErrors", userErrorsAllPhases },
+                            { "appsByPhase", allPhaseTotals }
                         }
                     },
                     { "packageStatesByPhase", packageStatesByPhase }
