@@ -162,6 +162,7 @@ namespace AutopilotMonitor.Functions.Functions
                 EnrollmentEvent? whiteGloveEvent = null;
                 EnrollmentEvent? whiteGloveResumedEvent = null;
                 EnrollmentEvent? espFailureEvent = null;
+                EnrollmentEvent? deviceLocationEvent = null;
                 string? failureReason = null;
                 DateTime? earliestEventTimestamp = null;
                 DateTime? latestEventTimestamp = null;
@@ -216,6 +217,10 @@ namespace AutopilotMonitor.Functions.Functions
                     {
                         espFailureEvent = evt;
                     }
+                    else if (evt.EventType == "device_location")
+                    {
+                        deviceLocationEvent = evt;
+                    }
 
                     // Track app install events for per-app metrics
                     AggregateAppInstallEvent(evt, request.TenantId, request.SessionId, appInstallUpdates);
@@ -225,6 +230,20 @@ namespace AutopilotMonitor.Functions.Functions
                 foreach (var summary in appInstallUpdates.Values)
                 {
                     await _storageService.StoreAppInstallSummaryAsync(summary.Summary);
+                }
+
+                // Extract geo-location data and merge into session row
+                if (deviceLocationEvent?.Data != null)
+                {
+                    var geoData = deviceLocationEvent.Data;
+                    await _storageService.UpdateSessionGeoAsync(
+                        request.TenantId,
+                        request.SessionId,
+                        geoData.ContainsKey("country") ? geoData["country"]?.ToString() : null,
+                        geoData.ContainsKey("region") ? geoData["region"]?.ToString() : null,
+                        geoData.ContainsKey("city") ? geoData["city"]?.ToString() : null,
+                        geoData.ContainsKey("loc") ? geoData["loc"]?.ToString() : null
+                    );
                 }
 
                 // Update session status based on events

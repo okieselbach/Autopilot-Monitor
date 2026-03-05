@@ -67,6 +67,10 @@ namespace AutopilotMonitor.Functions.Services
                 int? durationSeconds = null;
                 string? diagnosticsBlobName = null;
                 DateTime? resumedAt = null;
+                string geoCountry = string.Empty;
+                string geoRegion = string.Empty;
+                string geoCity = string.Empty;
+                string geoLoc = string.Empty;
 
                 try
                 {
@@ -92,6 +96,10 @@ namespace AutopilotMonitor.Functions.Services
                     durationSeconds = existingEntity.GetInt32("DurationSeconds");
                     diagnosticsBlobName = existingEntity.GetString("DiagnosticsBlobName");
                     resumedAt = existingEntity.GetDateTimeOffset("ResumedAt")?.UtcDateTime;
+                    geoCountry = existingEntity.GetString("GeoCountry") ?? string.Empty;
+                    geoRegion = existingEntity.GetString("GeoRegion") ?? string.Empty;
+                    geoCity = existingEntity.GetString("GeoCity") ?? string.Empty;
+                    geoLoc = existingEntity.GetString("GeoLoc") ?? string.Empty;
 
                     // WhiteGlove resumption: if the existing session was in Pending state,
                     // this re-registration means the user has received the device and booted it.
@@ -155,6 +163,15 @@ namespace AutopilotMonitor.Functions.Services
 
                 if (resumedAt.HasValue)
                     entity["ResumedAt"] = EnsureUtc(resumedAt.Value);
+
+                if (!string.IsNullOrEmpty(geoCountry))
+                    entity["GeoCountry"] = geoCountry;
+                if (!string.IsNullOrEmpty(geoRegion))
+                    entity["GeoRegion"] = geoRegion;
+                if (!string.IsNullOrEmpty(geoCity))
+                    entity["GeoCity"] = geoCity;
+                if (!string.IsNullOrEmpty(geoLoc))
+                    entity["GeoLoc"] = geoLoc;
 
                 await tableClient.UpsertEntityAsync(entity);
                 _logger.LogInformation($"Stored session {registration.SessionId}");
@@ -865,6 +882,55 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
+        /// Updates the session's geo-location fields via unconditional Merge-mode write.
+        /// Only writes non-null values; skips if all values are null/empty or geo is already populated.
+        /// Non-fatal: geo is supplementary data, failures are logged as warnings.
+        /// </summary>
+        public async Task UpdateSessionGeoAsync(string tenantId, string sessionId,
+            string? country, string? region, string? city, string? loc)
+        {
+            if (string.IsNullOrEmpty(country) && string.IsNullOrEmpty(region) &&
+                string.IsNullOrEmpty(city) && string.IsNullOrEmpty(loc))
+                return;
+
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
+
+                // Check if geo fields are already populated (avoid redundant writes)
+                try
+                {
+                    var existing = await tableClient.GetEntityAsync<TableEntity>(tenantId, sessionId);
+                    var existingCountry = existing.Value.GetString("GeoCountry");
+                    if (!string.IsNullOrEmpty(existingCountry))
+                    {
+                        _logger.LogDebug("Session {SessionId} already has geo data, skipping update", sessionId);
+                        return;
+                    }
+                }
+                catch (RequestFailedException ex) when (ex.Status == 404)
+                {
+                    return; // Session does not exist yet
+                }
+
+                var update = new TableEntity(tenantId, sessionId)
+                {
+                    ["GeoCountry"] = country ?? string.Empty,
+                    ["GeoRegion"] = region ?? string.Empty,
+                    ["GeoCity"] = city ?? string.Empty,
+                    ["GeoLoc"] = loc ?? string.Empty
+                };
+
+                await tableClient.UpdateEntityAsync(update, ETag.All, TableUpdateMode.Merge);
+                _logger.LogDebug("Updated geo for session {SessionId}: {City}, {Region}, {Country}", sessionId, city, region, country);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to update geo for session {SessionId}", sessionId);
+            }
+        }
+
+        /// <summary>
         /// Deletes a session from storage
         /// </summary>
         public async Task<bool> DeleteSessionAsync(string tenantId, string sessionId)
@@ -955,7 +1021,11 @@ namespace AutopilotMonitor.Functions.Services
                 OsEdition = entity.GetString("OsEdition") ?? string.Empty,
                 OsLanguage = entity.GetString("OsLanguage") ?? string.Empty,
                 IsUserDriven = entity.GetBoolean("IsUserDriven") ?? false,
-                AgentVersion = entity.GetString("AgentVersion") ?? string.Empty
+                AgentVersion = entity.GetString("AgentVersion") ?? string.Empty,
+                GeoCountry = entity.GetString("GeoCountry") ?? string.Empty,
+                GeoRegion = entity.GetString("GeoRegion") ?? string.Empty,
+                GeoCity = entity.GetString("GeoCity") ?? string.Empty,
+                GeoLoc = entity.GetString("GeoLoc") ?? string.Empty
             };
         }
 
