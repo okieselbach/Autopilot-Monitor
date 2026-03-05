@@ -440,6 +440,13 @@ namespace AutopilotMonitor.Agent
                     return;
                 }
 
+                // Emergency break: absolute session age check across restarts.
+                // Prevents zombie agents that stay on the device forever due to logic errors.
+                if (CheckSessionAgeEmergencyBreak(config, logger, consoleMode))
+                {
+                    return;
+                }
+
                 if (consoleMode)
                 {
                     Console.WriteLine($"Agent Version: {agentVersion}");
@@ -868,6 +875,82 @@ namespace AutopilotMonitor.Agent
             }
 
             return true;
+        }
+
+        /// <summary>
+        /// Emergency break: checks if the current session has been alive longer than the absolute maximum.
+        /// Prevents zombie agents that stay on the device forever due to logic errors preventing
+        /// normal enrollment completion. Respects WhiteGlove scenarios (skips check during resume).
+        /// Returns true if emergency break triggered and agent should exit.
+        /// </summary>
+        static bool CheckSessionAgeEmergencyBreak(AgentConfiguration config, AgentLogger logger, bool consoleMode)
+        {
+            try
+            {
+                var dataDir = Environment.ExpandEnvironmentVariables(Constants.AgentDataDirectory);
+                var persistence = new SessionPersistence(dataDir);
+
+                // Skip check if WhiteGlove-paused (device powered off between Part 1 and Part 2).
+                // The timer will be reset when MonitoringService.Start() processes the WhiteGlove resume.
+                if (persistence.IsWhiteGloveResume())
+                {
+                    logger.Info("Emergency break: WhiteGlove resume detected — skipping session age check");
+                    return false;
+                }
+
+                var sessionCreatedAt = persistence.LoadSessionCreatedAt();
+                if (sessionCreatedAt == null)
+                {
+                    // Older agent without session.created — initialize the file now.
+                    // The emergency break will only trigger on subsequent restarts.
+                    if (persistence.SessionExists())
+                    {
+                        persistence.SaveSessionCreatedAt(DateTime.UtcNow);
+                        logger.Info("Emergency break: Initialized session.created for existing session");
+                    }
+                    return false;
+                }
+
+                var sessionAgeHours = (DateTime.UtcNow - sessionCreatedAt.Value).TotalHours;
+                var maxAgeHours = config.AbsoluteMaxSessionHours;
+
+                if (sessionAgeHours <= maxAgeHours)
+                {
+                    logger.Info($"Emergency break: Session age {sessionAgeHours:F1}h within limit ({maxAgeHours}h)");
+                    return false;
+                }
+
+                // Session too old — emergency self-destruct
+                logger.Warning($"EMERGENCY BREAK: Session age {sessionAgeHours:F1}h exceeds maximum {maxAgeHours}h — forcing cleanup");
+
+                if (consoleMode)
+                    Console.WriteLine($"EMERGENCY: Session is {sessionAgeHours:F1}h old (max: {maxAgeHours}h). Forcing cleanup.");
+
+                // Write enrollment-complete marker so next start exits cleanly
+                var stateDir = Environment.ExpandEnvironmentVariables(Constants.StateDirectory);
+                Directory.CreateDirectory(stateDir);
+                var markerPath = Path.Combine(stateDir, "enrollment-complete.marker");
+                File.WriteAllText(markerPath, $"Emergency break at {DateTime.UtcNow:O} (session age: {sessionAgeHours:F1}h)");
+
+                if (config.SelfDestructOnComplete)
+                {
+                    using (var service = new MonitoringService(config, logger, GetAgentVersion()))
+                    {
+                        service.TriggerCleanup();
+                    }
+                }
+
+                // Clean up session files
+                persistence.DeleteSession();
+
+                logger.Info("Emergency break: Cleanup completed. Agent will exit.");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                logger.Error($"Emergency break check failed: {ex.Message}", ex);
+                return false; // Don't block startup on check failure
+            }
         }
 
         static string GetAgentVersion()

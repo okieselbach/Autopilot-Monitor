@@ -183,6 +183,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     Message = "WhiteGlove Part 2 — user enrollment started after pre-provisioning"
                 });
                 _sessionPersistence.ClearWhiteGloveComplete();
+                _sessionPersistence.ResetSessionCreatedAt();
             }
 
             // Collect and emit device geo-location asynchronously — HTTP call, not on critical path

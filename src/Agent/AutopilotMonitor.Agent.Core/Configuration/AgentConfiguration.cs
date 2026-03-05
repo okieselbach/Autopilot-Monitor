@@ -153,6 +153,16 @@ namespace AutopilotMonitor.Agent.Core.Configuration
         public int AgentMaxLifetimeMinutes { get; set; } = 360;
 
         /// <summary>
+        /// Absolute maximum session age in hours across all agent restarts.
+        /// Emergency break: if the session has been alive longer than this, the agent
+        /// forces cleanup and self-destructs regardless of enrollment state.
+        /// Prevents zombie agents caused by unrecoverable logic errors.
+        /// Respects WhiteGlove scenarios (timer resets on Part 2 resume).
+        /// Default: 48 hours.
+        /// </summary>
+        public int AbsoluteMaxSessionHours { get; set; } = 48;
+
+        /// <summary>
         /// Bootstrap token for pre-MDM auth during OOBE.
         /// Embedded by the OOBE bootstrapper script via --bootstrap-token CLI arg.
         /// When set, sent as X-Bootstrap-Token header instead of cert auth.

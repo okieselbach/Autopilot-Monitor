@@ -717,6 +717,20 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 
                 var eventTimestamp = (record.TimeCreated ?? DateTime.UtcNow).ToUniversalTime();
 
+                var eventData = new Dictionary<string, object>
+                {
+                    { "windowsEventId", eventId },
+                    { "providerName", record.ProviderName ?? "" },
+                    { "description", description },
+                    { "eventLogChannel", ShellCoreEventLogChannel },
+                    { "eventTime", eventTimestamp.ToString("o") }
+                };
+
+                if (eventType == "esp_failure" && _detectedEspFailureType != null)
+                {
+                    eventData["failureType"] = _detectedEspFailureType;
+                }
+
                 _onEventCollected(new EnrollmentEvent
                 {
                     SessionId = _sessionId,
@@ -727,14 +741,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     Source = "EspAndHelloTracker",
                     Phase = EnrollmentPhase.Unknown, // Let EnrollmentTracker decide phase
                     Message = message,
-                    Data = new Dictionary<string, object>
-                    {
-                        { "windowsEventId", eventId },
-                        { "providerName", record.ProviderName ?? "" },
-                        { "description", description },
-                        { "eventLogChannel", ShellCoreEventLogChannel },
-                        { "eventTime", eventTimestamp.ToString("o") }
-                    }
+                    Data = eventData
                 });
 
                 _logger.Info($"Shell-Core event detected: {eventType} (EventID {eventId})");
@@ -746,7 +753,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     {
                         FinalizingSetupPhaseTriggered?.Invoke(this, finalizingSetupReason);
                     }
-                    catch { }
+                    catch (Exception ex) { _logger.Error("FinalizingSetupPhaseTriggered handler failed", ex); }
                 }
 
                 // Fire WhiteGloveCompleted if this was a WhiteGlove success event.
@@ -758,7 +765,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     {
                         WhiteGloveCompleted?.Invoke(this, EventArgs.Empty);
                     }
-                    catch { }
+                    catch (Exception ex) { _logger.Error("WhiteGloveCompleted handler failed", ex); }
                 }
 
                 // Fire EspFailureDetected if this was an ESP failure event.
@@ -772,7 +779,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     {
                         EspFailureDetected?.Invoke(this, failureType);
                     }
-                    catch { }
+                    catch (Exception ex) { _logger.Error($"EspFailureDetected handler failed for '{failureType}'", ex); }
                 }
             }
             catch (Exception ex)
@@ -1046,7 +1053,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                                     {
                                         _espExitDetected = true;
                                         _logger.Info("Backfill: ESP exit event found in recent Shell-Core logs");
-                                        try { FinalizingSetupPhaseTriggered?.Invoke(this, "esp_exiting"); } catch { }
+                                        try { FinalizingSetupPhaseTriggered?.Invoke(this, "esp_exiting"); } catch (Exception ex) { _logger.Error("Backfill: FinalizingSetupPhaseTriggered handler failed", ex); }
                                     }
                                 }
                             }
@@ -1061,7 +1068,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                             {
                                 var failureType = ExtractEspFailureType(description);
                                 _logger.Info($"Backfill: ESP failure event found in recent Shell-Core logs: {failureType}");
-                                try { EspFailureDetected?.Invoke(this, failureType); } catch { }
+                                try { EspFailureDetected?.Invoke(this, failureType); } catch (Exception ex) { _logger.Error($"Backfill: EspFailureDetected handler failed for '{failureType}'", ex); }
                             }
                         }
                     }

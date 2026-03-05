@@ -11,6 +11,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         private readonly string _sessionFilePath;
         private readonly string _sequenceFilePath;
         private readonly string _whiteGloveMarkerPath;
+        private readonly string _sessionCreatedPath;
         private readonly object _lockObject = new object();
 
         public SessionPersistence(string dataDirectory)
@@ -28,6 +29,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             _sessionFilePath = Path.Combine(dataDirectory, "session.id");
             _sequenceFilePath = Path.Combine(dataDirectory, "session.seq");
             _whiteGloveMarkerPath = Path.Combine(dataDirectory, "whiteglove.complete");
+            _sessionCreatedPath = Path.Combine(dataDirectory, "session.created");
         }
 
         /// <summary>
@@ -55,6 +57,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     // Create new session ID if file doesn't exist or is invalid
                     var newSessionId = Guid.NewGuid().ToString();
                     File.WriteAllText(_sessionFilePath, newSessionId);
+                    SaveSessionCreatedAt(DateTime.UtcNow);
                     return newSessionId;
                 }
                 catch (Exception ex)
@@ -82,6 +85,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                         File.Delete(_sequenceFilePath);
                     if (File.Exists(_whiteGloveMarkerPath))
                         File.Delete(_whiteGloveMarkerPath);
+                    if (File.Exists(_sessionCreatedPath))
+                        File.Delete(_sessionCreatedPath);
                 }
                 catch (Exception)
                 {
@@ -174,6 +179,48 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             {
                 return File.Exists(_whiteGloveMarkerPath);
             }
+        }
+
+        /// <summary>
+        /// Persists the session creation timestamp (UTC). Called once when a new session is created.
+        /// </summary>
+        public void SaveSessionCreatedAt(DateTime utcTimestamp)
+        {
+            lock (_lockObject)
+            {
+                try { File.WriteAllText(_sessionCreatedPath, utcTimestamp.ToString("O")); }
+                catch { }
+            }
+        }
+
+        /// <summary>
+        /// Loads the persisted session creation timestamp. Returns null if file is missing or invalid.
+        /// </summary>
+        public DateTime? LoadSessionCreatedAt()
+        {
+            lock (_lockObject)
+            {
+                try
+                {
+                    if (File.Exists(_sessionCreatedPath))
+                    {
+                        var content = File.ReadAllText(_sessionCreatedPath).Trim();
+                        if (DateTime.TryParse(content, null, System.Globalization.DateTimeStyles.RoundtripKind, out var dt))
+                            return dt.ToUniversalTime();
+                    }
+                }
+                catch { }
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Resets the session creation timestamp to now (UTC).
+        /// Used on WhiteGlove Part 2 resume to give the user enrollment phase a fresh timer.
+        /// </summary>
+        public void ResetSessionCreatedAt()
+        {
+            SaveSessionCreatedAt(DateTime.UtcNow);
         }
 
         /// <summary>

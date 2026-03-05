@@ -303,6 +303,24 @@ namespace AutopilotMonitor.Functions.Functions
                     );
                     _logger.LogWarning("{SessionPrefix} Status: Failed - {FailureReason} (transitioned={Transitioned})", sessionPrefix, failureReason, statusTransitioned);
                 }
+                else if (espFailureEvent != null)
+                {
+                    // Fallback: esp_failure arrived without enrollment_failed —
+                    // agent-side handler likely threw an exception (catch {} swallowed it).
+                    failureReason = espFailureEvent.Message ?? "ESP failure (backend fallback)";
+                    statusTransitioned = await _storageService.UpdateSessionStatusAsync(
+                        request.TenantId,
+                        request.SessionId,
+                        SessionStatus.Failed,
+                        espFailureEvent.Phase,
+                        failureReason,
+                        completedAt: espFailureEvent.Timestamp,
+                        earliestEventTimestamp: earliestEventTimestamp,
+                        latestEventTimestamp: latestEventTimestamp
+                    );
+                    _logger.LogWarning("{SessionPrefix} Status: Failed via esp_failure fallback - {FailureReason} (transitioned={Transitioned})",
+                        sessionPrefix, failureReason, statusTransitioned);
+                }
                 else if (gatherCompletionEvent != null)
                 {
                     // Gather rules collection completed — mark session as Succeeded.
