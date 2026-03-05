@@ -7,6 +7,7 @@ import { TenantProvider } from "../contexts/TenantContext";
 import { NotificationProvider } from "../contexts/NotificationContext";
 import { ThemeProvider } from "../contexts/ThemeContext";
 import Navbar from "../components/Navbar";
+import ScrollToTopButton from "../components/ScrollToTopButton";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -116,6 +117,7 @@ export default function RootLayout({
                 <SignalRProvider>
                   <Navbar />
                   {children}
+                  <ScrollToTopButton />
                 </SignalRProvider>
               </TenantProvider>
             </NotificationProvider>

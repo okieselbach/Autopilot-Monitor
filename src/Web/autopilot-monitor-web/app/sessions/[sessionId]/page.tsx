@@ -21,6 +21,7 @@ import EventTimeline from "./components/EventTimeline";
 import AnalysisResultsSection from "./components/AnalysisResultsSection";
 import MarkFailedModal from "./components/MarkFailedModal";
 import ReportSessionModal from "./components/ReportSessionModal";
+import SectionNav, { SectionEntry } from "./components/SectionNav";
 import { generateUiExport, generateCsvExport, generateSessionCsvExport, generateRuleResultsCsvExport, SessionExportEvent } from "@/lib/sessionExportUtils";
 
 export interface EnrollmentEvent {
@@ -867,24 +868,40 @@ export default function SessionDetailPage() {
         </div>
       </header>
 
+      <SectionNav sections={(() => {
+        const s: SectionEntry[] = [];
+        if (session) s.push({ id: "section-session-info", label: "Session Info" });
+        if (!isGatherRulesSession) s.push({ id: "section-device-details", label: "Device Details" });
+        if (!isGatherRulesSession && session) s.push({ id: "section-enrollment-progress", label: "Enrollment Progress" });
+        if (!isGatherRulesSession) s.push({ id: "section-analysis", label: "Analysis" });
+        if (!isGatherRulesSession) s.push({ id: "section-performance", label: "Performance" });
+        if (!isGatherRulesSession) s.push({ id: "section-scripts", label: "Script Executions" });
+        if (!isGatherRulesSession) s.push({ id: "section-downloads", label: "Downloads" });
+        if (!isGatherRulesSession) s.push({ id: "section-install-progress", label: "Install Progress" });
+        s.push({ id: "section-event-timeline", label: "Event Timeline" });
+        return s;
+      })()} />
+
       <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
         <div className="px-4 py-6 sm:px-0">
           {/* Session Info Card */}
           {session && (
+            <div id="section-session-info">
             <SessionInfoCard
               session={session}
               enrollmentDuration={isWhiteGloveSession && whiteGloveDurations.combinedDuration ? whiteGloveDurations.combinedDuration : enrollmentDurationFromEvents}
               displayStatus={displayStatus}
               isGatherRulesSession={isGatherRulesSession}
             />
+            </div>
           )}
 
           {/* Device Details Card (from enrollment tracker events) */}
-          {!isGatherRulesSession && <DeviceDetailsCard events={events} />}
+          {!isGatherRulesSession && <div id="section-device-details"><DeviceDetailsCard events={events} /></div>}
 
           {/* Phase Timeline */}
           {!isGatherRulesSession && session && (
-            <div className="bg-white shadow rounded-lg p-6 mb-6">
+            <div id="section-enrollment-progress" className="bg-white shadow rounded-lg p-6 mb-6">
               <h2 className="text-xl font-semibold text-gray-900 mb-6">Enrollment Progress</h2>
               <PhaseTimeline
                 currentPhase={session.currentPhase}
@@ -899,6 +916,7 @@ export default function SessionDetailPage() {
 
           {/* Analysis Results */}
           {!isGatherRulesSession && (
+            <div id="section-analysis">
             <AnalysisResultsSection
               analysisResults={analysisResults}
               loadingAnalysis={loadingAnalysis}
@@ -906,46 +924,56 @@ export default function SessionDetailPage() {
               setAnalysisExpanded={setAnalysisExpanded}
               onReanalyze={() => fetchAnalysisResults(true)}
             />
+            </div>
           )}
 
           {/* Performance Metrics (from performance_snapshot events) */}
           {!isGatherRulesSession && (
+            <div id="section-performance">
             <PerformanceChart
               events={events.filter(e => e.eventType === "performance_snapshot")}
             />
+            </div>
           )}
 
           {/* Script Executions (from script_completed, script_failed events) */}
           {!isGatherRulesSession && (
+            <div id="section-scripts">
             <ScriptExecutions
               events={events.filter(
                 e => e.eventType === "script_completed" || e.eventType === "script_failed"
               )}
               showScriptOutput={showScriptOutput}
             />
+            </div>
           )}
 
           {/* Download Progress (from download_progress, app_download_started, app_install_skipped events) */}
           {!isGatherRulesSession && (
+            <div id="section-downloads">
             <DownloadProgress
               events={events.filter(
                 e => e.eventType === "download_progress" || e.eventType === "app_download_started" || e.eventType === "app_install_skipped"
               )}
               summaryStats={appSummaryStats}
             />
+            </div>
           )}
 
           {/* Install Progress (from app_install_started, app_install_completed, app_install_failed, app_install_skipped events) */}
           {!isGatherRulesSession && (
+            <div id="section-install-progress">
             <InstallProgress
               events={events.filter(
                 e => e.eventType === "app_install_started" || e.eventType === "app_install_completed" || e.eventType === "app_install_failed" || e.eventType === "app_install_skipped"
               )}
               summaryStats={appSummaryStats}
             />
+            </div>
           )}
 
           {/* Event Timeline (with severity filters, expand/collapse, WhiteGlove split) */}
+          <div id="section-event-timeline">
           <EventTimeline
             filteredEvents={filteredEvents}
             events={events}
@@ -970,6 +998,7 @@ export default function SessionDetailPage() {
             userEnrollDuration={whiteGloveDurations.userEnrollDuration}
             showScriptOutput={showScriptOutput}
           />
+          </div>
         </div>
 
         {/* Mark as Failed Confirmation Modal */}
