@@ -873,7 +873,13 @@ namespace AutopilotMonitor.Functions.Functions
                         if (evt.Data.ContainsKey("doDownloadMode") && int.TryParse(evt.Data["doDownloadMode"]?.ToString(), out var doMode))
                             summary.DoDownloadMode = doMode;
                         if (evt.Data.ContainsKey("doDownloadDuration"))
-                            summary.DoDownloadDuration = evt.Data["doDownloadDuration"]?.ToString() ?? string.Empty;
+                        {
+                            var doDurStr = evt.Data["doDownloadDuration"]?.ToString() ?? string.Empty;
+                            summary.DoDownloadDuration = doDurStr;
+                            // Use DO's measured duration for throughput calculation (more accurate than timestamp diff)
+                            if (TimeSpan.TryParse(doDurStr, out var doDurTs) && doDurTs.TotalSeconds >= 1)
+                                summary.DownloadDurationSeconds = Math.Max(summary.DownloadDurationSeconds, (int)doDurTs.TotalSeconds);
+                        }
                         if (evt.Data.ContainsKey("doBytesFromLanPeers") && long.TryParse(evt.Data["doBytesFromLanPeers"]?.ToString(), out var doLan))
                             summary.DoBytesFromLanPeers = doLan;
                         if (evt.Data.ContainsKey("doBytesFromGroupPeers") && long.TryParse(evt.Data["doBytesFromGroupPeers"]?.ToString(), out var doGroup))

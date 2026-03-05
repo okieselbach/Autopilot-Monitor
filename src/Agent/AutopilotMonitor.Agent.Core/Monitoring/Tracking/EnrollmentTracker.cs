@@ -35,6 +35,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         private bool _hasAutoSwitchedToAppsPhase; // Track if we've already auto-switched to apps phase for current ESP phase
         private string _enrollmentType = "v1"; // "v1" = Autopilot Classic/ESP, "v2" = Windows Device Preparation
         private bool _isWaitingForHello = false; // Track if we're waiting for Hello to complete before sending enrollment_complete
+        private readonly bool _isBootstrapMode; // Agent started via bootstrap token (pre-MDM)
         private bool _enrollmentStartDeviceInfoCollected = false; // Re-collect enrollment-dependent info once at first ESP phase
         private bool _finalDeviceInfoCollected = false; // Ensure final device info is emitted only once
         private string _lastEmittedSummaryHash; // Track last emitted state-breakdown to avoid redundant summary events
@@ -145,8 +146,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             bool simulationMode = false,
             double speedFactor = 50,
             string imeMatchLogPath = null,
-            Collectors.EspAndHelloTracker espAndHelloTracker = null)
+            Collectors.EspAndHelloTracker espAndHelloTracker = null,
+            bool isBootstrapMode = false)
         {
+            _isBootstrapMode = isBootstrapMode;
             _sessionId = sessionId;
             _tenantId = tenantId;
             _emitEvent = emitEvent;
@@ -1295,6 +1298,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         /// <summary>
         /// Re-collects enrollment-dependent device info (AAD join, Autopilot profile, ESP config)
         /// that were likely empty when the agent started before enrollment (bootstrap scenario).
+        /// Only runs in bootstrap mode — in normal mode CollectAll() already has complete data.
         /// Called once when the first ESP phase is detected.
         /// </summary>
         private void CollectDeviceInfoAtEnrollmentStart()
@@ -1303,7 +1307,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 return;
 
             _enrollmentStartDeviceInfoCollected = true;
-            _logger.Info("EnrollmentTracker: first ESP phase detected — re-collecting enrollment-dependent device info");
+
+            if (!_isBootstrapMode)
+            {
+                _logger.Debug("EnrollmentTracker: skipping enrollment-start device info re-collection (not bootstrap mode)");
+                return;
+            }
+
+            _logger.Info("EnrollmentTracker: first ESP phase detected — re-collecting enrollment-dependent device info (bootstrap mode)");
             Task.Run(() =>
             {
                 try

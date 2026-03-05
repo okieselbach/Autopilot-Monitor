@@ -169,6 +169,20 @@ namespace AutopilotMonitor.Functions.Services
                             }
                         }
                     }
+
+                    // Preserve DownloadDurationSeconds and DownloadBytes from prior batch if current batch has no value
+                    if (summary.DownloadDurationSeconds == 0)
+                    {
+                        var existingDlDuration = existing.Value.GetInt32("DownloadDurationSeconds");
+                        if (existingDlDuration.HasValue && existingDlDuration.Value > 0)
+                            summary.DownloadDurationSeconds = existingDlDuration.Value;
+                    }
+                    if (summary.DownloadBytes == 0)
+                    {
+                        var existingDlBytes = existing.Value.GetInt64("DownloadBytes");
+                        if (existingDlBytes.HasValue && existingDlBytes.Value > 0)
+                            summary.DownloadBytes = existingDlBytes.Value;
+                    }
                 }
                 catch (Azure.RequestFailedException ex) when (ex.Status == 404)
                 {
