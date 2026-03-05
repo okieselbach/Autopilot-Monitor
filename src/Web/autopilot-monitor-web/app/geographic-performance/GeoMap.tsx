@@ -97,7 +97,7 @@ export default function GeoMap({ locations, globalAvgDuration, selectedLocation,
     <MapContainer
       center={[30, 0]}
       zoom={2}
-      style={{ height: "100%", width: "100%", borderRadius: "0.5rem" }}
+      style={{ height: "100%", width: "100%", borderRadius: "0.5rem", zIndex: 0 }}
       scrollWheelZoom={true}
     >
       <TileLayer
