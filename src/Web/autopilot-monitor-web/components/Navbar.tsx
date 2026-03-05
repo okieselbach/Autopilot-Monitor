@@ -446,9 +446,6 @@ export default function Navbar() {
                           <path strokeLinecap="round" strokeLinejoin="round" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                         </svg>
                         <span className="text-sm text-gray-700">IME Log Patterns</span>
-                        {previewMode && !galacticAdminMode && (
-                          <span className="ml-auto text-[10px] font-medium text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded">Preview</span>
-                        )}
                       </Link>
                     )}
 
