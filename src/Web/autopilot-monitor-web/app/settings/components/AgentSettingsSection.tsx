@@ -230,12 +230,12 @@ export default function AgentSettingsSection({
 
           {/* Show Script Output */}
           <div className="flex items-center justify-between p-4 rounded-lg border border-gray-200 hover:border-violet-200 transition-colors">
-            <div>
+            <div className="flex-1">
               <p className="font-medium text-gray-900">Show Script Output (stdout)</p>
               <p className="text-sm text-gray-500">Show standard output from PowerShell scripts in the timeline. Disable if scripts may output sensitive data. Error output (stderr) is always shown.</p>
             </div>
             <button onClick={() => setShowScriptOutput(!showScriptOutput)}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${showScriptOutput ? 'bg-violet-500' : 'bg-gray-300'}`}>
+              className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${showScriptOutput ? 'bg-violet-500' : 'bg-gray-300'}`}>
               <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${showScriptOutput ? 'translate-x-6' : 'translate-x-1'}`} />
             </button>
           </div>
