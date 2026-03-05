@@ -71,6 +71,23 @@ namespace AutopilotMonitor.Agent
                     logger.Info("Agent already running from target install directory; payload copy not required.");
                 }
 
+                // Persist bootstrap config if --bootstrap-token was provided.
+                // The Scheduled Task command line has no args, so the agent reads this file on restart.
+                var bootstrapTokenArg = GetArgValue(args, "--bootstrap-token");
+                var tenantIdArg = GetArgValue(args, "--tenant-id");
+                if (!string.IsNullOrEmpty(bootstrapTokenArg))
+                {
+                    var dataDir = Environment.ExpandEnvironmentVariables(Constants.AgentDataDirectory);
+                    var bootstrapConfigPath = Path.Combine(dataDir, "bootstrap-config.json");
+                    var bootstrapConfig = new BootstrapConfigFile
+                    {
+                        BootstrapToken = bootstrapTokenArg,
+                        TenantId = tenantIdArg
+                    };
+                    File.WriteAllText(bootstrapConfigPath, Newtonsoft.Json.JsonConvert.SerializeObject(bootstrapConfig));
+                    logger.Info("Bootstrap config persisted for Scheduled Task");
+                }
+
                 var taskName = Constants.ScheduledTaskName;
                 var taskCommand = $"\"{targetExePath}\"";
 
@@ -534,6 +551,7 @@ namespace AutopilotMonitor.Agent
             string imeLogPathOverride    = null;
             string imeMatchLogPath       = null;
             string replayLogDir      = null;
+            string bootstrapToken    = null;
             double replaySpeedFactor = 50;
 
             if (args != null)
@@ -568,6 +586,10 @@ namespace AutopilotMonitor.Agent
                 if (replaySpeedIndex >= 0 && replaySpeedIndex + 1 < args.Length)
                     if (double.TryParse(args[replaySpeedIndex + 1], out var speed))
                         replaySpeedFactor = speed;
+
+                var bootstrapTokenIndex = Array.IndexOf(args, "--bootstrap-token");
+                if (bootstrapTokenIndex >= 0 && bootstrapTokenIndex + 1 < args.Length)
+                    bootstrapToken = args[bootstrapTokenIndex + 1];
             }
 
             // Defaults
@@ -608,6 +630,33 @@ namespace AutopilotMonitor.Agent
 
             var sessionId = sessionPersist.LoadOrCreateSessionId();
 
+            // Bootstrap config: if no --bootstrap-token CLI arg, check for persisted config file.
+            // The OOBE bootstrap script calls --install --bootstrap-token {TOKEN} --tenant-id {TENANTID}.
+            // RunInstallMode persists these to bootstrap-config.json so the Scheduled Task picks them up
+            // on restart (the task command line has no args — just the exe path).
+            var bootstrapConfigPath = Path.Combine(dataDirectory, "bootstrap-config.json");
+            if (string.IsNullOrEmpty(bootstrapToken) && File.Exists(bootstrapConfigPath))
+            {
+                try
+                {
+                    var json = File.ReadAllText(bootstrapConfigPath);
+                    var bootstrapConfig = Newtonsoft.Json.JsonConvert.DeserializeObject<BootstrapConfigFile>(json);
+                    if (bootstrapConfig != null)
+                    {
+                        bootstrapToken = bootstrapConfig.BootstrapToken;
+                        if (string.IsNullOrEmpty(tenantIdOverride) && !string.IsNullOrEmpty(bootstrapConfig.TenantId))
+                        {
+                            tenantId = bootstrapConfig.TenantId;
+                        }
+                        // Also set noAuth so cert search is skipped
+                        noAuth = true;
+                    }
+                }
+                catch { /* ignore corrupt file */ }
+            }
+
+            var useBootstrapToken = !string.IsNullOrEmpty(bootstrapToken);
+
             return new AgentConfiguration
             {
                 ApiBaseUrl            = apiBaseUrl,
@@ -618,7 +667,7 @@ namespace AutopilotMonitor.Agent
                 UploadIntervalSeconds = uploadIntervalSeconds,
                 MaxBatchSize          = Constants.MaxBatchSize,
                 LogLevel              = AgentLogLevel.Info,
-                UseClientCertAuth     = !noAuth && useClientCertAuthConfig,
+                UseClientCertAuth     = !noAuth && !useBootstrapToken && useClientCertAuthConfig,
                 ClientCertThumbprint  = certThumbprint,
                 SelfDestructOnComplete = selfDestructOnComplete,
                 RebootOnComplete      = rebootOnComplete || rebootOnCompleteConfig,
@@ -627,7 +676,9 @@ namespace AutopilotMonitor.Agent
                 ImeMatchLogPath       = imeMatchLogPath,
                 ReplayLogDir          = replayLogDir,
                 ReplaySpeedFactor     = replaySpeedFactor,
-                KeepLogFile           = keepLogFile
+                KeepLogFile           = keepLogFile,
+                BootstrapToken        = bootstrapToken,
+                UseBootstrapTokenAuth = useBootstrapToken
             };
         }
 
@@ -845,5 +896,16 @@ namespace AutopilotMonitor.Agent
                 return "unknown";
             }
         }
+    }
+
+    /// <summary>
+    /// Persisted bootstrap configuration for OOBE-bootstrapped agents.
+    /// Saved to %ProgramData%\AutopilotMonitor\bootstrap-config.json by RunInstallMode
+    /// so the Scheduled Task can pick it up on restart.
+    /// </summary>
+    class BootstrapConfigFile
+    {
+        public string BootstrapToken { get; set; }
+        public string TenantId { get; set; }
     }
 }

@@ -17,6 +17,7 @@ import TeamsNotificationsSection from "./components/TeamsNotificationsSection";
 import DiagnosticsSection, { parseSasExpiry } from "./components/DiagnosticsSection";
 import DataManagementSection from "./components/DataManagementSection";
 import OffboardingSection from "./components/OffboardingSection";
+import BootstrapSessionsSection, { BootstrapSessionItem } from "./components/BootstrapSessionsSection";
 
 export interface DiagnosticsLogPath {
   path: string;
@@ -95,6 +96,10 @@ export default function SettingsPage() {
   const [offboardConfirmText, setOffboardConfirmText] = useState("");
   const [offboarding, setOffboarding] = useState(false);
   const [offboardError, setOffboardError] = useState<string | null>(null);
+
+  // Bootstrap sessions
+  const [bootstrapSessions, setBootstrapSessions] = useState<BootstrapSessionItem[]>([]);
+  const [bootstrapLoading, setBootstrapLoading] = useState(false);
 
   // Unsaved changes guard
   const [showUnsavedModal, setShowUnsavedModal] = useState(false);
@@ -323,6 +328,12 @@ export default function SettingsPage() {
   useEffect(() => {
     if (!tenantId) return;
     fetchAdmins();
+  }, [tenantId]);
+
+  // Fetch bootstrap sessions
+  useEffect(() => {
+    if (!tenantId) return;
+    fetchBootstrapSessions();
   }, [tenantId]);
 
   // Fetch global diagnostics paths (best-effort, may return 403 for non-galactic-admins)
@@ -764,6 +775,73 @@ export default function SettingsPage() {
   };
 
 
+  // Bootstrap sessions
+  const fetchBootstrapSessions = async () => {
+    if (!tenantId) return;
+    try {
+      setBootstrapLoading(true);
+      const token = await getAccessToken();
+      if (!token) return;
+      const response = await fetch(
+        `${API_BASE_URL}/api/bootstrap/sessions?tenantId=${tenantId}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (response.ok) {
+        const data = await response.json();
+        setBootstrapSessions(data.sessions || []);
+      }
+    } catch (err) {
+      console.error("Failed to fetch bootstrap sessions:", err);
+    } finally {
+      setBootstrapLoading(false);
+    }
+  };
+
+  const createBootstrapSession = async (validityHours: number, label: string): Promise<string | null> => {
+    if (!tenantId) return null;
+    try {
+      const token = await getAccessToken();
+      if (!token) throw new Error("Failed to get access token");
+      const response = await fetch(`${API_BASE_URL}/api/bootstrap/sessions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ tenantId, validityHours, label }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error((data as Record<string, string>).error || "Failed to create session");
+      }
+      const data = await response.json();
+      await fetchBootstrapSessions();
+      return data.bootstrapUrl || null;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create bootstrap session");
+      return null;
+    }
+  };
+
+  const revokeBootstrapSession = async (code: string) => {
+    if (!tenantId) return;
+    try {
+      const token = await getAccessToken();
+      if (!token) throw new Error("Failed to get access token");
+      const response = await fetch(
+        `${API_BASE_URL}/api/bootstrap/sessions/${code}?tenantId=${tenantId}`,
+        { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error((data as Record<string, string>).error || "Failed to revoke session");
+      }
+      await fetchBootstrapSessions();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to revoke bootstrap session");
+    }
+  };
+
   const handleOffboard = async () => {
     if (!tenantId) return;
 
@@ -962,6 +1040,14 @@ export default function SettingsPage() {
               setNewDiagPath={setNewDiagPath}
               newDiagDesc={newDiagDesc}
               setNewDiagDesc={setNewDiagDesc}
+            />
+
+            <BootstrapSessionsSection
+              sessions={bootstrapSessions}
+              loading={bootstrapLoading}
+              onRefresh={fetchBootstrapSessions}
+              onRevoke={revokeBootstrapSession}
+              onCreate={createBootstrapSession}
             />
 
             <DataManagementSection

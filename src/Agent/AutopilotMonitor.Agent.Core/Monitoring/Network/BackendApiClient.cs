@@ -29,6 +29,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
         private readonly string _serialNumber;
         private readonly Logging.AgentLogger _logger;
         private readonly NetworkMetrics _networkMetrics = new NetworkMetrics();
+        private readonly string _bootstrapToken;
+        private readonly bool _useBootstrapTokenAuth;
 
         /// <summary>
         /// Exposes the network metrics counters for AgentSelfMetricsCollector to read.
@@ -39,6 +41,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
         {
             _baseUrl = baseUrl.TrimEnd('/');
             _logger = logger;
+            _bootstrapToken = configuration?.BootstrapToken;
+            _useBootstrapTokenAuth = configuration?.UseBootstrapTokenAuth ?? false;
 
             // Find MDM certificate for client authentication if enabled
             if (configuration?.UseClientCertAuth == true)
@@ -350,6 +354,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
         private void AddSecurityHeaders(HttpRequestMessage request)
         {
             _logger?.Verbose("Adding security headers to request...");
+
+            // Bootstrap token auth (pre-MDM, OOBE bootstrapped agents)
+            if (_useBootstrapTokenAuth && !string.IsNullOrEmpty(_bootstrapToken))
+            {
+                request.Headers.Add("X-Bootstrap-Token", _bootstrapToken);
+                _logger?.Verbose("  X-Bootstrap-Token: [set]");
+            }
+
             // Client certificate is sent at TLS layer via HttpClientHandler.ClientCertificates (mTLS)
 
             // Add hardware information for whitelist validation

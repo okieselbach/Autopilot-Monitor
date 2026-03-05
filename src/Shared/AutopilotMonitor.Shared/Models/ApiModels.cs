@@ -329,6 +329,77 @@ namespace AutopilotMonitor.Shared.Models
         public string OutlierDirection { get; set; }
     }
 
+    // -----------------------------------------------------------------------
+    // Bootstrap session API models (OOBE pre-enrollment)
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Request to create a new bootstrap session for OOBE agent deployment
+    /// </summary>
+    public class CreateBootstrapSessionRequest
+    {
+        public string TenantId { get; set; }
+
+        /// <summary>
+        /// How long the bootstrap URL should be valid (1–168 hours, default 8)
+        /// </summary>
+        public int ValidityHours { get; set; } = 8;
+
+        /// <summary>
+        /// Optional human-readable label (e.g. "Lab A", "Floor 3")
+        /// </summary>
+        public string Label { get; set; }
+    }
+
+    /// <summary>
+    /// Response after creating a bootstrap session
+    /// </summary>
+    public class CreateBootstrapSessionResponse
+    {
+        public bool Success { get; set; }
+        public string ShortCode { get; set; }
+        public string BootstrapUrl { get; set; }
+        public DateTime ExpiresAt { get; set; }
+        public string Message { get; set; }
+    }
+
+    /// <summary>
+    /// A single bootstrap session item for the list response
+    /// </summary>
+    public class BootstrapSessionListItem
+    {
+        public string ShortCode { get; set; }
+        public string Label { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public DateTime ExpiresAt { get; set; }
+        public string CreatedByUpn { get; set; }
+        public bool IsRevoked { get; set; }
+        public bool IsExpired { get; set; }
+        public int UsageCount { get; set; }
+    }
+
+    /// <summary>
+    /// Response containing a list of bootstrap sessions for a tenant
+    /// </summary>
+    public class ListBootstrapSessionsResponse
+    {
+        public bool Success { get; set; }
+        public List<BootstrapSessionListItem> Sessions { get; set; } = new List<BootstrapSessionListItem>();
+    }
+
+    /// <summary>
+    /// Response from validating a bootstrap code (anonymous, called by the /go/{code} route)
+    /// </summary>
+    public class ValidateBootstrapCodeResponse
+    {
+        public bool Success { get; set; }
+        public string TenantId { get; set; }
+        public string Token { get; set; }
+        public string AgentDownloadUrl { get; set; }
+        public DateTime ExpiresAt { get; set; }
+        public string Message { get; set; }
+    }
+
     /// <summary>
     /// Global average benchmarks for geographic comparison.
     /// </summary>

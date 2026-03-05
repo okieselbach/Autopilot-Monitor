@@ -78,6 +78,7 @@ namespace AutopilotMonitor.Shared
             public const string GetBlockedDevices        = "/api/devices/blocked";
             public const string ImeLogPatterns           = "/api/rules/ime-log-patterns";
             public const string ReseedFromGitHub         = "/api/rules/reseed-from-github";
+            public const string ValidateBootstrapCode    = "/api/bootstrap/validate/{code}";
         }
 
         // -----------------------------------------------------------------------
@@ -175,6 +176,9 @@ namespace AutopilotMonitor.Shared
             // Session reports (feedback from Tenant Admins)
             public const string SessionReports = "SessionReports";
 
+            // Bootstrap sessions (OOBE pre-enrollment agent deployment)
+            public const string BootstrapSessions = "BootstrapSessions";
+
             /// <summary>
             /// Returns all table names for initialization
             /// </summary>
@@ -199,7 +203,8 @@ namespace AutopilotMonitor.Shared
                 PreviewWhitelist,
                 PreviewConfig,
                 BlockedDevices,
-                SessionReports
+                SessionReports,
+                BootstrapSessions
             };
         }
     }

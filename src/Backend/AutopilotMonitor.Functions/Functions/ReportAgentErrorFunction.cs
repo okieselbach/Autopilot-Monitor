@@ -30,6 +30,7 @@ namespace AutopilotMonitor.Functions.Functions
         private readonly AutopilotDeviceValidator _autopilotDeviceValidator;
         private readonly CorporateIdentifierValidator _corporateIdentifierValidator;
         private readonly TelemetryClient _telemetryClient;
+        private readonly BootstrapSessionService _bootstrapSessionService;
 
         public ReportAgentErrorFunction(
             ILogger<ReportAgentErrorFunction> logger,
@@ -37,7 +38,8 @@ namespace AutopilotMonitor.Functions.Functions
             RateLimitService rateLimitService,
             AutopilotDeviceValidator autopilotDeviceValidator,
             CorporateIdentifierValidator corporateIdentifierValidator,
-            TelemetryClient telemetryClient)
+            TelemetryClient telemetryClient,
+            BootstrapSessionService bootstrapSessionService)
         {
             _logger = logger;
             _configService = configService;
@@ -45,6 +47,7 @@ namespace AutopilotMonitor.Functions.Functions
             _autopilotDeviceValidator = autopilotDeviceValidator;
             _corporateIdentifierValidator = corporateIdentifierValidator;
             _telemetryClient = telemetryClient;
+            _bootstrapSessionService = bootstrapSessionService;
         }
 
         [Function("ReportAgentError")]
@@ -73,7 +76,8 @@ namespace AutopilotMonitor.Functions.Functions
                     _rateLimitService,
                     _autopilotDeviceValidator,
                     _corporateIdentifierValidator,
-                    _logger
+                    _logger,
+                    bootstrapSessionService: _bootstrapSessionService
                 );
 
                 if (errorResponse != null)

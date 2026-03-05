@@ -153,6 +153,18 @@ namespace AutopilotMonitor.Agent.Core.Configuration
         public int AgentMaxLifetimeMinutes { get; set; } = 360;
 
         /// <summary>
+        /// Bootstrap token for pre-MDM auth during OOBE.
+        /// Embedded by the OOBE bootstrapper script via --bootstrap-token CLI arg.
+        /// When set, sent as X-Bootstrap-Token header instead of cert auth.
+        /// </summary>
+        public string BootstrapToken { get; set; }
+
+        /// <summary>
+        /// Whether to use bootstrap token auth (true until MDM cert becomes available).
+        /// </summary>
+        public bool UseBootstrapTokenAuth { get; set; }
+
+        /// <summary>
         /// Whether diagnostics upload is configured for this tenant.
         /// When true, the agent requests a short-lived upload URL from the backend just before uploading.
         /// The SAS URL itself is never stored in config — it is fetched on-demand and used in memory only.

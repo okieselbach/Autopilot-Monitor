@@ -110,6 +110,7 @@ builder.Services.AddHttpClient<GitHubRuleRepository>();
 builder.Services.AddSingleton<MaintenanceService>();
 builder.Services.AddSingleton<BlockedDeviceService>();
 builder.Services.AddSingleton<SessionReportService>();
+builder.Services.AddSingleton<BootstrapSessionService>();
 builder.Services.AddSingleton<AutopilotMonitor.Functions.Security.GraphTokenService>();
 builder.Services.AddSingleton<AutopilotMonitor.Functions.Security.AutopilotDeviceValidator>();
 builder.Services.AddSingleton<AutopilotMonitor.Functions.Security.CorporateIdentifierValidator>();
