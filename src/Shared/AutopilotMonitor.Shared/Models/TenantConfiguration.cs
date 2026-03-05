@@ -265,6 +265,16 @@ namespace AutopilotMonitor.Shared.Models
             }
         }
 
+        // ===== BOOTSTRAP TOKEN =====
+
+        /// <summary>
+        /// Whether OOBE Bootstrap Sessions are enabled for this tenant.
+        /// When false (default), the Bootstrap Sessions feature is hidden in the UI
+        /// and all bootstrap API endpoints reject requests for this tenant.
+        /// Only configurable by Galactic Admins.
+        /// </summary>
+        public bool BootstrapTokenEnabled { get; set; } = false;
+
         // ===== DIAGNOSTICS LOG PATHS =====
 
         /// <summary>

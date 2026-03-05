@@ -20,15 +20,18 @@ namespace AutopilotMonitor.Functions.Functions
         private readonly ILogger<ValidateBootstrapCodeFunction> _logger;
         private readonly BootstrapSessionService _bootstrapService;
         private readonly RateLimitService _rateLimitService;
+        private readonly TenantConfigurationService _configService;
 
         public ValidateBootstrapCodeFunction(
             ILogger<ValidateBootstrapCodeFunction> logger,
             BootstrapSessionService bootstrapService,
-            RateLimitService rateLimitService)
+            RateLimitService rateLimitService,
+            TenantConfigurationService configService)
         {
             _logger = logger;
             _bootstrapService = bootstrapService;
             _rateLimitService = rateLimitService;
+            _configService = configService;
         }
 
         [Function("ValidateBootstrapCode")]
@@ -70,6 +73,16 @@ namespace AutopilotMonitor.Functions.Functions
                     var notFound = req.CreateResponse(HttpStatusCode.NotFound);
                     await notFound.WriteAsJsonAsync(new { success = false, message = "Code not found, expired, or revoked" });
                     return notFound;
+                }
+
+                // Check if bootstrap token feature is enabled for the session's tenant
+                var tenantConfig = await _configService.GetConfigurationAsync(session.TenantId);
+                if (!tenantConfig.BootstrapTokenEnabled)
+                {
+                    _logger.LogWarning("Bootstrap code {Code} rejected — feature disabled for tenant {TenantId}", code, session.TenantId);
+                    var disabled = req.CreateResponse(HttpStatusCode.NotFound);
+                    await disabled.WriteAsJsonAsync(new { success = false, message = "Code not found, expired, or revoked" });
+                    return disabled;
                 }
 
                 var responseData = new ValidateBootstrapCodeResponse

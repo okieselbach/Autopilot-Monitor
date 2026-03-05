@@ -62,6 +62,8 @@ export interface TenantConfiguration {
   // Agent analyzer settings
   enableLocalAdminAnalyzer?: boolean;
   localAdminAllowedAccountsJson?: string;
+  // Bootstrap token
+  bootstrapTokenEnabled?: boolean;
 }
 
 export interface TenantAdmin {
@@ -330,11 +332,11 @@ export default function SettingsPage() {
     fetchAdmins();
   }, [tenantId]);
 
-  // Fetch bootstrap sessions
+  // Fetch bootstrap sessions (only when feature is enabled)
   useEffect(() => {
-    if (!tenantId) return;
+    if (!tenantId || !config?.bootstrapTokenEnabled) return;
     fetchBootstrapSessions();
-  }, [tenantId]);
+  }, [tenantId, config?.bootstrapTokenEnabled]);
 
   // Fetch global diagnostics paths (best-effort, may return 403 for non-galactic-admins)
   useEffect(() => {
@@ -1042,13 +1044,15 @@ export default function SettingsPage() {
               setNewDiagDesc={setNewDiagDesc}
             />
 
-            <BootstrapSessionsSection
-              sessions={bootstrapSessions}
-              loading={bootstrapLoading}
-              onRefresh={fetchBootstrapSessions}
-              onRevoke={revokeBootstrapSession}
-              onCreate={createBootstrapSession}
-            />
+            {config?.bootstrapTokenEnabled && (
+              <BootstrapSessionsSection
+                sessions={bootstrapSessions}
+                loading={bootstrapLoading}
+                onRefresh={fetchBootstrapSessions}
+                onRevoke={revokeBootstrapSession}
+                onCreate={createBootstrapSession}
+              />
+            )}
 
             <DataManagementSection
               dataRetentionDays={dataRetentionDays}

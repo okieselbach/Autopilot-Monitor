@@ -21,17 +21,20 @@ namespace AutopilotMonitor.Functions.Functions
         private readonly BootstrapSessionService _bootstrapService;
         private readonly GalacticAdminService _galacticAdminService;
         private readonly TenantAdminsService _tenantAdminsService;
+        private readonly TenantConfigurationService _configService;
 
         public ListBootstrapSessionsFunction(
             ILogger<ListBootstrapSessionsFunction> logger,
             BootstrapSessionService bootstrapService,
             GalacticAdminService galacticAdminService,
-            TenantAdminsService tenantAdminsService)
+            TenantAdminsService tenantAdminsService,
+            TenantConfigurationService configService)
         {
             _logger = logger;
             _bootstrapService = bootstrapService;
             _galacticAdminService = galacticAdminService;
             _tenantAdminsService = tenantAdminsService;
+            _configService = configService;
         }
 
         [Function("ListBootstrapSessions")]
@@ -72,6 +75,16 @@ namespace AutopilotMonitor.Functions.Functions
                     var forbidden = req.CreateResponse(HttpStatusCode.Forbidden);
                     await forbidden.WriteAsJsonAsync(new { error = "Tenant admin access required" });
                     return forbidden;
+                }
+
+                // Check if bootstrap token feature is enabled for this tenant
+                var tenantConfig = await _configService.GetConfigurationAsync(tenantId);
+                if (!tenantConfig.BootstrapTokenEnabled)
+                {
+                    // Return empty list instead of error — feature simply not visible
+                    var emptyResponse = req.CreateResponse(HttpStatusCode.OK);
+                    await emptyResponse.WriteAsJsonAsync(new ListBootstrapSessionsResponse { Success = true, Sessions = new System.Collections.Generic.List<BootstrapSessionListItem>() });
+                    return emptyResponse;
                 }
 
                 var sessions = await _bootstrapService.ListAsync(tenantId);

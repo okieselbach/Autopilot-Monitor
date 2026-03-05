@@ -227,7 +227,8 @@ namespace AutopilotMonitor.Functions.Services
                 { "TeamsNotifyOnSuccess", config.TeamsNotifyOnSuccess },
                 { "TeamsNotifyOnFailure", config.TeamsNotifyOnFailure },
                 { "EnableLocalAdminAnalyzer", config.EnableLocalAdminAnalyzer },
-                { "LocalAdminAllowedAccountsJson", config.LocalAdminAllowedAccountsJson }
+                { "LocalAdminAllowedAccountsJson", config.LocalAdminAllowedAccountsJson },
+                { "BootstrapTokenEnabled", config.BootstrapTokenEnabled }
             };
 
             return entity;
@@ -273,7 +274,8 @@ namespace AutopilotMonitor.Functions.Services
                 TeamsNotifyOnSuccess = entity.GetBoolean("TeamsNotifyOnSuccess") ?? true,
                 TeamsNotifyOnFailure = entity.GetBoolean("TeamsNotifyOnFailure") ?? true,
                 EnableLocalAdminAnalyzer = entity.GetBoolean("EnableLocalAdminAnalyzer"),
-                LocalAdminAllowedAccountsJson = entity.GetString("LocalAdminAllowedAccountsJson")
+                LocalAdminAllowedAccountsJson = entity.GetString("LocalAdminAllowedAccountsJson"),
+                BootstrapTokenEnabled = entity.GetBoolean("BootstrapTokenEnabled") ?? false
             };
         }
     }
