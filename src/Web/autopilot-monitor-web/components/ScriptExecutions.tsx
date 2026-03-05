@@ -137,7 +137,7 @@ export default function ScriptExecutions({ events, showScriptOutput }: ScriptExe
 
 function getIntuneScriptUrl(policyId: string, scriptType: string): string {
   if (scriptType === "remediation") {
-    return `https://intune.microsoft.com/#view/Microsoft_Intune_Enrollment/UXAnalyticsScriptMenu/~/overview/id/${policyId}`;
+    return `https://intune.microsoft.com/#view/Microsoft_Intune_Enrollment/UXAnalyticsScriptMenu/~/overview/id/${policyId}/isFirstParty/undefined`;
   }
   return `https://intune.microsoft.com/#view/Microsoft_Intune_DeviceSettings/ConfigureWMPolicyMenuBlade/~/overview/policyId/${policyId}/policyType/0`;
 }
