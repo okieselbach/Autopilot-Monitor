@@ -63,9 +63,9 @@ export default function AutopilotValidationSection({
                 }
               }}
               disabled={saving || autopilotConsentInProgress}
-              className={`relative inline-flex h-8 w-14 shrink-0 items-center rounded-full transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${validateAutopilotDevice ? 'bg-green-600' : 'bg-gray-300'}`}
+              className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${validateAutopilotDevice ? 'bg-emerald-500' : 'bg-gray-300'}`}
             >
-              <span className={`inline-block h-6 w-6 transform rounded-full bg-white transition-transform ${validateAutopilotDevice ? 'translate-x-7' : 'translate-x-1'}`} />
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${validateAutopilotDevice ? 'translate-x-6' : 'translate-x-1'}`} />
             </button>
           </label>
         </div>
@@ -95,9 +95,9 @@ export default function AutopilotValidationSection({
                 }
               }}
               disabled={saving || autopilotConsentInProgress}
-              className={`relative inline-flex h-8 w-14 shrink-0 items-center rounded-full transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${validateCorporateIdentifier ? 'bg-green-600' : 'bg-gray-300'}`}
+              className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${validateCorporateIdentifier ? 'bg-emerald-500' : 'bg-gray-300'}`}
             >
-              <span className={`inline-block h-6 w-6 transform rounded-full bg-white transition-transform ${validateCorporateIdentifier ? 'translate-x-7' : 'translate-x-1'}`} />
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${validateCorporateIdentifier ? 'translate-x-6' : 'translate-x-1'}`} />
             </button>
           </label>
         </div>
