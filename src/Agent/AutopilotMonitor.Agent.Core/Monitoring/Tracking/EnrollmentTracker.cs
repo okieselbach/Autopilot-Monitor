@@ -1400,6 +1400,21 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 if (_stateData.ImePatternSeenUtc.HasValue)
                     signalTimestamps["imePatternSeen"] = _stateData.ImePatternSeenUtc.Value.ToString("o");
 
+                // Build per-phase package states: snapshots from completed phases + current phase
+                var phaseSnapshots = _imeLogTracker?.PhasePackageSnapshots;
+                var packageStatesByPhase = new Dictionary<string, object>();
+
+                // Add snapshots from completed phases (e.g. DeviceSetup apps captured before phase transition)
+                if (phaseSnapshots != null)
+                {
+                    foreach (var kvp in phaseSnapshots)
+                        packageStatesByPhase[kvp.Key] = kvp.Value;
+                }
+
+                // Add current phase (the phase active at completion, e.g. AccountSetup)
+                var currentPhaseName = _lastEspPhase ?? "Unknown";
+                packageStatesByPhase[currentPhaseName] = appStates?.ToFinalStatusList() ?? new List<Dictionary<string, object>>();
+
                 var status = new Dictionary<string, object>
                 {
                     { "timestamp", DateTime.UtcNow.ToString("o") },
@@ -1419,7 +1434,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                             { "userErrors", appStates?.Count(x => x.IsError && x.Targeted == AppTargeted.User) ?? 0 }
                         }
                     },
-                    { "packageStates", appStates?.ToFinalStatusList() ?? new List<Dictionary<string, object>>() }
+                    { "packageStatesByPhase", packageStatesByPhase }
                 };
 
                 var json = System.Text.Json.JsonSerializer.Serialize(status,

@@ -57,6 +57,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         };
         private int _currentPhaseOrder = 0;
 
+        // Snapshots of package states from completed ESP phases (e.g. DeviceSetup apps before AccountSetup starts)
+        private readonly Dictionary<string, List<Dictionary<string, object>>> _phasePackageSnapshots =
+            new Dictionary<string, List<Dictionary<string, object>>>(StringComparer.OrdinalIgnoreCase);
+
         // Simulation mode
         public bool SimulationMode { get; set; }
         public double SpeedFactor { get; set; } = 50;
@@ -99,6 +103,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         /// Access to the tracked package states
         /// </summary>
         public AppPackageStateList PackageStates => _packageStates;
+
+        /// <summary>
+        /// Snapshots of package states from completed ESP phases (keyed by phase name, e.g. "DeviceSetup").
+        /// Captured before package states are cleared on phase transition.
+        /// </summary>
+        public Dictionary<string, List<Dictionary<string, object>>> PhasePackageSnapshots => _phasePackageSnapshots;
 
         public ImeLogTracker(string logFolder, List<ImeLogPattern> patterns, AgentLogger logger, int pollingIntervalMs = 100, string matchLogPath = null, string stateDirectory = null)
         {
@@ -815,6 +825,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     _logger.Info($"ImeLogTracker: ESP phase changed from {_lastEspPhaseDetected} to {espPhaseString} - " +
                                  $"silenced {ignoredFromStates} packages + {ignoredFromSeen} additional seen IDs " +
                                  $"(total ignore list: {_packageStates.IgnoreList.Count})");
+
+                    // Snapshot package states from the completed phase before clearing
+                    if (_packageStates.CountAll > 0)
+                    {
+                        _phasePackageSnapshots[_lastEspPhaseDetected] = _packageStates.ToFinalStatusList();
+                        _logger.Info($"ImeLogTracker: Snapshotted {_packageStates.CountAll} package states from {_lastEspPhaseDetected} phase");
+                    }
 
                     _packageStates.Clear();
                     _packageStates.SetCurrent(""); // Reset current package to avoid stale device-phase reference
