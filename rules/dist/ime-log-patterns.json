@@ -2,6 +2,75 @@
   "$schema": "../schema/ime-log-pattern.schema.json",
   "rules": [
     {
+      "patternId": "HS-COMPLIANCE",
+      "category": "always",
+      "pattern": "\\[HS\\] the pre-remdiation detection script compliance result for (?<id>[a-z0-9]{8}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{12}) is (?<compliance>True|False)",
+      "action": "scriptCompleted",
+      "parameters": {
+        "scriptType": "remediation",
+        "part": "detection"
+      },
+      "description": "Captures the detection compliance result for a remediation script. True = compliant (no remediation needed), False = non-compliant (remediation will run).",
+      "enabled": true
+    },
+    {
+      "patternId": "HS-EXITCODE",
+      "category": "always",
+      "pattern": "\\[HS\\] exit code of the script is (?<exitCode>-?\\d+)",
+      "action": "scriptExitCode",
+      "parameters": {
+        "scriptType": "remediation"
+      },
+      "description": "Captures the exit code of a remediation script.",
+      "enabled": true
+    },
+    {
+      "patternId": "HS-RUN-CONTEXT",
+      "category": "always",
+      "pattern": "\\[HS\\] The policy needs be run as (?<context>System|User)",
+      "action": "scriptContext",
+      "parameters": {
+        "scriptType": "remediation"
+      },
+      "description": "Captures whether a remediation script runs as System or User context.",
+      "enabled": true
+    },
+    {
+      "patternId": "HS-SCRIPT-START",
+      "category": "always",
+      "pattern": "\\[HS\\] ProcessScript PolicyId: (?<id>[a-z0-9]{8}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{12}) PolicyType: (?<policyType>\\d+)",
+      "action": "scriptStarted",
+      "parameters": {
+        "scriptType": "remediation"
+      },
+      "description": "Detects when a Proactive Remediation (Health Script) starts processing. Captures PolicyId and PolicyType (6 = remediation).",
+      "enabled": true
+    },
+    {
+      "patternId": "HS-STDERR",
+      "category": "always",
+      "pattern": "\\[HS\\] err output = (?<output>.*)",
+      "action": "scriptOutput",
+      "parameters": {
+        "scriptType": "remediation",
+        "outputType": "stderr"
+      },
+      "description": "Captures standard error output (stderr) from a remediation script execution.",
+      "enabled": true
+    },
+    {
+      "patternId": "HS-STDOUT",
+      "category": "always",
+      "pattern": "\\[HS\\] std output = (?<output>.*)",
+      "action": "scriptOutput",
+      "parameters": {
+        "scriptType": "remediation",
+        "outputType": "stdout"
+      },
+      "description": "Captures standard output (stdout) from a remediation script execution.",
+      "enabled": true
+    },
+    {
       "patternId": "IME-AGENT-VERSION",
       "category": "always",
       "pattern": "Agent version is: (?<agentVersion>[\\d.]+)",
@@ -477,6 +546,90 @@
       "pattern": "\\[WinGetMessageProcessor\\] Processing Progress for app = {GUID}.*?- Operation Phase = Installing",
       "action": "updateStateInstalling",
       "description": "Detects WinGet app installation progress with Operation Phase = Installing (format variant 2).",
+      "enabled": true
+    },
+    {
+      "patternId": "PS-AGENT-ERROR",
+      "category": "always",
+      "pattern": "error from script =(?<output>.*)",
+      "action": "scriptOutput",
+      "parameters": {
+        "scriptType": "platform",
+        "outputType": "stderr"
+      },
+      "description": "Captures error output from AgentExecutor.log when a platform script produces stderr content.",
+      "enabled": true
+    },
+    {
+      "patternId": "PS-AGENT-EXITCODE",
+      "category": "always",
+      "pattern": "Powershell exit code is (?<exitCode>-?\\d+)",
+      "action": "scriptExitCode",
+      "parameters": {
+        "scriptType": "platform"
+      },
+      "description": "Captures the PowerShell exit code from AgentExecutor.log.",
+      "enabled": true
+    },
+    {
+      "patternId": "PS-AGENT-OUTPUT",
+      "category": "always",
+      "pattern": "write output done\\. output = (?<output>.*), error = (?<error>.*)",
+      "action": "scriptOutput",
+      "parameters": {
+        "scriptType": "platform"
+      },
+      "description": "Captures both stdout and stderr from AgentExecutor.log when a platform script completes. The output group contains stdout, the error group contains stderr.",
+      "enabled": true
+    },
+    {
+      "patternId": "PS-AGENT-SCRIPT-START",
+      "category": "always",
+      "pattern": "Adding argument powershell with value C:\\\\.*\\\\Policies\\\\Scripts\\\\[a-z0-9\\-]+_(?<id>[a-z0-9]{8}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{12})\\.ps1",
+      "action": "scriptStarted",
+      "parameters": {
+        "scriptType": "platform",
+        "source": "agentexecutor"
+      },
+      "description": "Detects platform script identification in AgentExecutor.log. Captures PolicyId from the script file path for stdout/stderr correlation.",
+      "enabled": true
+    },
+    {
+      "patternId": "PS-SCRIPT-CONTEXT",
+      "category": "always",
+      "pattern": "Launch powershell executor in (?<context>machine|user) session",
+      "action": "scriptContext",
+      "description": "Captures whether a PowerShell script runs in machine (System) or user session context.",
+      "enabled": true
+    },
+    {
+      "patternId": "PS-SCRIPT-EXITCODE",
+      "category": "always",
+      "pattern": "Powershell execution is done, exitCode = (?<exitCode>-?\\d+)",
+      "action": "scriptExitCode",
+      "description": "Captures the PowerShell exit code when script execution completes in the IME log.",
+      "enabled": true
+    },
+    {
+      "patternId": "PS-SCRIPT-GENERATED",
+      "category": "always",
+      "pattern": "Script file C:\\\\.*\\\\Policies\\\\Scripts\\\\[a-z0-9\\-]+_(?<id>[a-z0-9]{8}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{12})\\.ps1 is generated",
+      "action": "scriptStarted",
+      "parameters": {
+        "scriptType": "platform"
+      },
+      "description": "Detects when a platform PowerShell script file is generated by IME. Captures the PolicyId from the script file path.",
+      "enabled": true
+    },
+    {
+      "patternId": "PS-SCRIPT-RESULT",
+      "category": "always",
+      "pattern": "\\[PowerShell\\] User Id = [a-z0-9\\-]+, Policy id = (?<id>[a-z0-9]{8}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{12}), policy result = (?<result>\\w+)",
+      "action": "scriptCompleted",
+      "parameters": {
+        "scriptType": "platform"
+      },
+      "description": "Captures the final result (Success/Failed) of a platform PowerShell script execution with its PolicyId.",
       "enabled": true
     }
   ]

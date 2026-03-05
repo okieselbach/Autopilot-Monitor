@@ -223,6 +223,14 @@ namespace AutopilotMonitor.Shared.Models
         /// </summary>
         public int? MaxBatchSize { get; set; }
 
+        /// <summary>
+        /// Whether to show PowerShell script stdout in the web UI.
+        /// When false, only stderr (error output) is visible for troubleshooting.
+        /// stdout may contain sensitive data (credentials, tokens).
+        /// Default true (show stdout). Data is always collected regardless of this setting.
+        /// </summary>
+        public bool? ShowScriptOutput { get; set; } = true;
+
         // ===== AGENT ANALYZER SETTINGS =====
 
         /// <summary>
@@ -386,7 +394,8 @@ namespace AutopilotMonitor.Shared.Models
                 EnablePerformanceCollector = true,
                 PerformanceCollectorIntervalSeconds = 30,
                 SelfDestructOnComplete = true,
-                KeepLogFile = false
+                KeepLogFile = false,
+                ShowScriptOutput = true
             };
         }
     }

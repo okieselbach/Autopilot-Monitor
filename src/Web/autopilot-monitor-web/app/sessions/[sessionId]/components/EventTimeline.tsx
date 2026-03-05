@@ -26,6 +26,7 @@ interface EventTimelineProps {
   isGalacticAdmin?: boolean;
   preProvDuration?: string | null;
   userEnrollDuration?: string | null;
+  showScriptOutput?: boolean;
 }
 
 export default function EventTimeline({
@@ -50,6 +51,7 @@ export default function EventTimeline({
   isGalacticAdmin,
   preProvDuration,
   userEnrollDuration,
+  showScriptOutput,
 }: EventTimelineProps) {
   return (
     <div className="space-y-6">
@@ -124,6 +126,7 @@ export default function EventTimeline({
                     isExpanded={expandedPhases.has(`pre-${phaseName}`)}
                     onToggle={() => togglePhase(`pre-${phaseName}`)}
                     isGalacticAdmin={isGalacticAdmin}
+                    showScriptOutput={showScriptOutput}
                   />
                 ))}
               </div>
@@ -161,6 +164,7 @@ export default function EventTimeline({
                       isExpanded={expandedPhases.has(`user-${phaseName}`)}
                       onToggle={() => togglePhase(`user-${phaseName}`)}
                       isGalacticAdmin={isGalacticAdmin}
+                      showScriptOutput={showScriptOutput}
                     />
                   ))}
                 </div>
@@ -199,6 +203,7 @@ export default function EventTimeline({
                       isExpanded={expandedPhases.has(phaseName)}
                       onToggle={() => togglePhase(phaseName)}
                       isGalacticAdmin={isGalacticAdmin}
+                      showScriptOutput={showScriptOutput}
                     />
                   ))}
                 </div>
@@ -216,13 +221,15 @@ function PhaseSection({
   events,
   isExpanded,
   onToggle,
-  isGalacticAdmin
+  isGalacticAdmin,
+  showScriptOutput
 }: {
   phaseName: string;
   events: EnrollmentEvent[];
   isExpanded: boolean;
   onToggle: () => void;
   isGalacticAdmin?: boolean;
+  showScriptOutput?: boolean;
 }) {
   return (
     <div className="border-l-4 border-blue-500 pl-4">
@@ -243,6 +250,7 @@ function PhaseSection({
               key={event.eventId || `${event.sessionId}-${event.sequence}`}
               event={event}
               isGalacticAdmin={isGalacticAdmin}
+              showScriptOutput={showScriptOutput}
             />
           ))}
         </div>
@@ -251,12 +259,24 @@ function PhaseSection({
   );
 }
 
-function EventRow({ event, isGalacticAdmin }: { event: EnrollmentEvent; isGalacticAdmin?: boolean }) {
+function EventRow({ event, isGalacticAdmin, showScriptOutput }: { event: EnrollmentEvent; isGalacticAdmin?: boolean; showScriptOutput?: boolean }) {
   const [showDetails, setShowDetails] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
   const [copied, setCopied] = useState(false);
   const [copiedDetail, setCopiedDetail] = useState(false);
-  const detailData = useMemo(() => normalizeEventDataForDisplay(event.data), [event.data]);
+  const rawDetailData = useMemo(() => normalizeEventDataForDisplay(event.data), [event.data]);
+
+  // Filter stdout from script events when showScriptOutput is false
+  const isScriptEvent = event.eventType === "script_completed" || event.eventType === "script_failed";
+  const detailData = useMemo(() => {
+    if (!rawDetailData || !isScriptEvent || showScriptOutput !== false) return rawDetailData;
+    const filtered = { ...rawDetailData };
+    if ("stdout" in filtered) {
+      delete filtered.stdout;
+      filtered._stdoutHidden = "stdout hidden by admin setting";
+    }
+    return filtered;
+  }, [rawDetailData, isScriptEvent, showScriptOutput]);
 
   // Detect truncated data: backend sets _rawDataJson when DataJson could not be parsed
   const rawDataJson = detailData?._rawDataJson as string | undefined;

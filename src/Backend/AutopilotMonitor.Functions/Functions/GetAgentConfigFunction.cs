@@ -112,7 +112,7 @@ namespace AutopilotMonitor.Functions.Functions
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(new AgentConfigResponse
                 {
-                    ConfigVersion = 13, // session lifecycle: agent max lifetime, esp_failure → enrollment_failed, desktop arrival, multi-signal completion
+                    ConfigVersion = 14, // script execution tracking: platform + remediation scripts from IME logs
                     UploadIntervalSeconds = 30,
                     SelfDestructOnComplete = tenantConfig.SelfDestructOnComplete ?? true,
                     KeepLogFile = tenantConfig.KeepLogFile ?? false,

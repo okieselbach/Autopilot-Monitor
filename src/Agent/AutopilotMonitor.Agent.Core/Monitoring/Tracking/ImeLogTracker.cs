@@ -86,8 +86,20 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             "_IntuneManagementExtension.log",
             "IntuneManagementExtension-????????-??????.log",
             "AppWorkload.log",
-            "AppWorkload-????????-??????.log"
+            "AppWorkload-????????-??????.log",
+            // PowerShell script tracking
+            "AgentExecutor.log",
+            "AgentExecutor-????????-??????.log",
+            "HealthScripts.log",
+            "HealthScripts-????????-??????.log"
         };
+
+        // Script execution state tracking (accumulates multi-line data before emitting events)
+        private ScriptExecutionState _currentRemediationScript;
+        private readonly Dictionary<string, ScriptExecutionState> _pendingPlatformScripts =
+            new Dictionary<string, ScriptExecutionState>(StringComparer.OrdinalIgnoreCase);
+        private string _lastPlatformScriptPolicyId;
+        private const int MaxScriptOutputLength = 2048;
 
         // Callbacks to EnrollmentTracker
         public Action<string> OnEspPhaseChanged { get; set; }
@@ -98,6 +110,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         public Action OnAllAppsCompleted { get; set; }
         public Action OnUserSessionCompleted { get; set; }
         public Action<AppPackageState> OnDoTelemetryReceived { get; set; }
+        public Action<ScriptExecutionState> OnScriptCompleted { get; set; }
 
         /// <summary>
         /// Access to the tracked package states
@@ -643,6 +656,27 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                             HandleDoTelemetry(doTelJson);
                         break;
 
+                    // PowerShell script tracking actions
+                    case "scriptstarted":
+                        HandleScriptStarted(match, pattern.Parameters);
+                        break;
+
+                    case "scriptcontext":
+                        HandleScriptContext(match, pattern.Parameters);
+                        break;
+
+                    case "scriptexitcode":
+                        HandleScriptExitCode(match, pattern.Parameters);
+                        break;
+
+                    case "scriptoutput":
+                        HandleScriptOutput(match, pattern.Parameters);
+                        break;
+
+                    case "scriptcompleted":
+                        HandleScriptCompleted(match, pattern.Parameters);
+                        break;
+
                     default:
                         _logger.Debug($"ImeLogTracker: unhandled action '{pattern.Action}' for pattern {pattern.PatternId}");
                         break;
@@ -751,6 +785,196 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
 
             return null;
         }
+
+        // -----------------------------------------------------------------------
+        // PowerShell script tracking handlers
+        // -----------------------------------------------------------------------
+
+        private ScriptExecutionState GetCurrentScript(Dictionary<string, string> parameters)
+        {
+            var scriptType = parameters != null && parameters.TryGetValue("scriptType", out var st) ? st : null;
+            return string.Equals(scriptType, "remediation", StringComparison.OrdinalIgnoreCase)
+                ? _currentRemediationScript
+                : GetCurrentPlatformScript();
+        }
+
+        private ScriptExecutionState GetCurrentPlatformScript()
+        {
+            if (!string.IsNullOrEmpty(_lastPlatformScriptPolicyId) &&
+                _pendingPlatformScripts.TryGetValue(_lastPlatformScriptPolicyId, out var state))
+                return state;
+            return null;
+        }
+
+        private void HandleScriptStarted(Match match, Dictionary<string, string> parameters)
+        {
+            var id = match.Groups["id"]?.Value;
+            var scriptType = parameters != null && parameters.TryGetValue("scriptType", out var st) ? st : "platform";
+            var source = parameters != null && parameters.TryGetValue("source", out var src) ? src : null;
+
+            if (string.IsNullOrEmpty(id))
+            {
+                _logger.Debug("ImeLogTracker: scriptStarted with no policyId captured, skipping");
+                return;
+            }
+
+            if (string.Equals(scriptType, "remediation", StringComparison.OrdinalIgnoreCase))
+            {
+                // Flush any pending remediation script (shouldn't happen normally, but defensive)
+                if (_currentRemediationScript != null)
+                {
+                    _logger.Debug($"ImeLogTracker: flushing pending remediation script {_currentRemediationScript.PolicyId}");
+                    EmitScriptEvent(_currentRemediationScript);
+                }
+
+                _currentRemediationScript = new ScriptExecutionState
+                {
+                    PolicyId = id,
+                    ScriptType = "remediation",
+                    ScriptPart = "detection" // detection runs first; updated if remediation runs
+                };
+                _logger.Debug($"ImeLogTracker: remediation script started: {id}");
+            }
+            else
+            {
+                // Platform script: AgentExecutor.log entries create/enrich, IME log entries also create
+                if (!_pendingPlatformScripts.ContainsKey(id))
+                {
+                    _pendingPlatformScripts[id] = new ScriptExecutionState
+                    {
+                        PolicyId = id,
+                        ScriptType = "platform"
+                    };
+                }
+                _lastPlatformScriptPolicyId = id;
+                _logger.Debug($"ImeLogTracker: platform script started: {id} (source: {source ?? "ime"})");
+            }
+        }
+
+        private void HandleScriptContext(Match match, Dictionary<string, string> parameters)
+        {
+            var context = match.Groups["context"]?.Value;
+            if (string.IsNullOrEmpty(context)) return;
+
+            var runContext = string.Equals(context, "machine", StringComparison.OrdinalIgnoreCase) ? "System" : "User";
+            var script = GetCurrentScript(parameters);
+            if (script != null)
+            {
+                script.RunContext = runContext;
+                _logger.Debug($"ImeLogTracker: script context set to {runContext} for {script.PolicyId}");
+            }
+        }
+
+        private void HandleScriptExitCode(Match match, Dictionary<string, string> parameters)
+        {
+            var exitCodeStr = match.Groups["exitCode"]?.Value;
+            if (string.IsNullOrEmpty(exitCodeStr) || !int.TryParse(exitCodeStr, out var exitCode)) return;
+
+            var script = GetCurrentScript(parameters);
+            if (script != null)
+            {
+                script.ExitCode = exitCode;
+                _logger.Debug($"ImeLogTracker: script exit code {exitCode} for {script.PolicyId}");
+            }
+        }
+
+        private void HandleScriptOutput(Match match, Dictionary<string, string> parameters)
+        {
+            var outputType = parameters != null && parameters.TryGetValue("outputType", out var ot) ? ot : null;
+            var script = GetCurrentScript(parameters);
+            if (script == null) return;
+
+            // PS-AGENT-OUTPUT captures both stdout and stderr in one pattern
+            var output = match.Groups["output"]?.Value;
+            var error = match.Groups["error"]?.Value;
+
+            if (!string.IsNullOrEmpty(output) && !string.IsNullOrEmpty(error))
+            {
+                // Combined pattern (write output done. output = ..., error = ...)
+                script.Stdout = TruncateOutput(output.Trim());
+                script.Stderr = TruncateOutput(error.Trim());
+            }
+            else if (string.Equals(outputType, "stderr", StringComparison.OrdinalIgnoreCase))
+            {
+                script.Stderr = TruncateOutput(output?.Trim());
+            }
+            else
+            {
+                script.Stdout = TruncateOutput(output?.Trim());
+            }
+
+            _logger.Debug($"ImeLogTracker: script output captured for {script.PolicyId} (type: {outputType ?? "combined"})");
+        }
+
+        private void HandleScriptCompleted(Match match, Dictionary<string, string> parameters)
+        {
+            var scriptType = parameters != null && parameters.TryGetValue("scriptType", out var st) ? st : "platform";
+            var part = parameters != null && parameters.TryGetValue("part", out var p) ? p : null;
+
+            if (string.Equals(scriptType, "remediation", StringComparison.OrdinalIgnoreCase))
+            {
+                if (_currentRemediationScript == null) return;
+
+                var compliance = match.Groups["compliance"]?.Value;
+                var id = match.Groups["id"]?.Value;
+
+                _currentRemediationScript.ComplianceResult = compliance;
+                if (!string.IsNullOrEmpty(part))
+                    _currentRemediationScript.ScriptPart = part;
+                if (!string.IsNullOrEmpty(id))
+                    _currentRemediationScript.PolicyId = id; // confirm policyId from compliance line
+
+                _logger.Info($"ImeLogTracker: remediation detection completed: {_currentRemediationScript.PolicyId}, " +
+                    $"compliance={compliance}, exit={_currentRemediationScript.ExitCode}");
+
+                EmitScriptEvent(_currentRemediationScript);
+                _currentRemediationScript = null;
+            }
+            else
+            {
+                // Platform script: final result from IntuneManagementExtension.log
+                var id = match.Groups["id"]?.Value;
+                var result = match.Groups["result"]?.Value;
+
+                if (string.IsNullOrEmpty(id)) return;
+
+                // Merge with pending AgentExecutor data if available
+                if (!_pendingPlatformScripts.TryGetValue(id, out var script))
+                {
+                    script = new ScriptExecutionState
+                    {
+                        PolicyId = id,
+                        ScriptType = "platform"
+                    };
+                }
+
+                script.Result = result;
+
+                _logger.Info($"ImeLogTracker: platform script completed: {id}, result={result}, exit={script.ExitCode}");
+
+                EmitScriptEvent(script);
+                _pendingPlatformScripts.Remove(id);
+                if (string.Equals(_lastPlatformScriptPolicyId, id, StringComparison.OrdinalIgnoreCase))
+                    _lastPlatformScriptPolicyId = null;
+            }
+        }
+
+        private void EmitScriptEvent(ScriptExecutionState script)
+        {
+            if (script == null || string.IsNullOrEmpty(script.PolicyId)) return;
+            OnScriptCompleted?.Invoke(script);
+        }
+
+        private static string TruncateOutput(string output)
+        {
+            if (string.IsNullOrEmpty(output) || output.Length <= MaxScriptOutputLength)
+                return output;
+            return output.Substring(0, MaxScriptOutputLength) + "...[truncated]";
+        }
+
+        // -----------------------------------------------------------------------
+        // IME lifecycle handlers
+        // -----------------------------------------------------------------------
 
         private void HandleImeStarted()
         {

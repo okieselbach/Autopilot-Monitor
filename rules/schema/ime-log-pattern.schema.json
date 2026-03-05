@@ -62,7 +62,12 @@
             "imeSessionChange",
             "imeImpersonation",
             "enrollmentCompleted",
-            "updateDoTelemetry"
+            "updateDoTelemetry",
+            "scriptStarted",
+            "scriptContext",
+            "scriptExitCode",
+            "scriptOutput",
+            "scriptCompleted"
           ]
         },
         "parameters": {

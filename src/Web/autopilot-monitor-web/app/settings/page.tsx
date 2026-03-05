@@ -56,6 +56,8 @@ export interface TenantConfiguration {
   diagnosticsBlobSasUrl?: string;
   diagnosticsUploadMode?: string;
   diagnosticsLogPathsJson?: string;
+  // Script output visibility
+  showScriptOutput?: boolean;
   // Agent analyzer settings
   enableLocalAdminAnalyzer?: boolean;
   localAdminAllowedAccountsJson?: string;
@@ -120,6 +122,7 @@ export default function SettingsPage() {
   const [enableGeoLocation, setEnableGeoLocation] = useState(true);
   const [enableImeMatchLog, setEnableImeMatchLog] = useState(false);
   const [logLevel, setLogLevel] = useState("Info");
+  const [showScriptOutput, setShowScriptOutput] = useState(true);
 
   // Teams notifications state
   const [teamsWebhookUrl, setTeamsWebhookUrl] = useState("");
@@ -160,6 +163,7 @@ export default function SettingsPage() {
       enableGeoLocation !== (config.enableGeoLocation ?? true) ||
       enableImeMatchLog !== (config.enableImeMatchLog ?? false) ||
       logLevel !== (config.logLevel ?? "Info") ||
+      showScriptOutput !== (config.showScriptOutput ?? true) ||
       teamsWebhookUrl !== (config.teamsWebhookUrl ?? "") ||
       teamsNotifyOnSuccess !== (config.teamsNotifyOnSuccess ?? true) ||
       teamsNotifyOnFailure !== (config.teamsNotifyOnFailure ?? true) ||
@@ -179,7 +183,7 @@ export default function SettingsPage() {
     dataRetentionDays, sessionTimeoutHours, enablePerformanceCollector,
     performanceCollectorInterval, helloWaitTimeoutSeconds, selfDestructOnComplete, keepLogFile,
     rebootOnComplete, rebootDelaySeconds, enableGeoLocation, enableImeMatchLog,
-    logLevel, teamsWebhookUrl, teamsNotifyOnSuccess, teamsNotifyOnFailure,
+    logLevel, showScriptOutput, teamsWebhookUrl, teamsNotifyOnSuccess, teamsNotifyOnFailure,
     diagnosticsBlobSasUrl, diagnosticsUploadMode, tenantDiagPaths,
     enableLocalAdminAnalyzer, localAdminAllowedAccounts,
   ]);
@@ -229,6 +233,7 @@ export default function SettingsPage() {
         setEnableGeoLocation(data.enableGeoLocation ?? true);
         setEnableImeMatchLog(data.enableImeMatchLog ?? false);
         setLogLevel(data.logLevel ?? "Info");
+        setShowScriptOutput(data.showScriptOutput ?? true);
         setTeamsWebhookUrl(data.teamsWebhookUrl ?? "");
         setTeamsNotifyOnSuccess(data.teamsNotifyOnSuccess ?? true);
         setTeamsNotifyOnFailure(data.teamsNotifyOnFailure ?? true);
@@ -448,6 +453,7 @@ export default function SettingsPage() {
         enableGeoLocation,
         enableImeMatchLog,
         logLevel,
+        showScriptOutput,
         teamsWebhookUrl: teamsWebhookUrl || undefined,
         teamsNotifyOnSuccess,
         teamsNotifyOnFailure,
@@ -921,6 +927,8 @@ export default function SettingsPage() {
               setEnableImeMatchLog={setEnableImeMatchLog}
               logLevel={logLevel}
               setLogLevel={setLogLevel}
+              showScriptOutput={showScriptOutput}
+              setShowScriptOutput={setShowScriptOutput}
             />
 
             <AgentAnalyzersSection

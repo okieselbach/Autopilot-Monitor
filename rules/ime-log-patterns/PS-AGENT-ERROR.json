@@ -1,0 +1,10 @@
+{
+  "$schema": "../schema/ime-log-pattern.schema.json",
+  "patternId": "PS-AGENT-ERROR",
+  "category": "always",
+  "pattern": "error from script =(?<output>.*)",
+  "action": "scriptOutput",
+  "parameters": { "scriptType": "platform", "outputType": "stderr" },
+  "description": "Captures error output from AgentExecutor.log when a platform script produces stderr content.",
+  "enabled": true
+}

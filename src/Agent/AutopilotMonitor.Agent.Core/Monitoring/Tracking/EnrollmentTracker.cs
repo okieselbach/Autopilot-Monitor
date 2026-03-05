@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AutopilotMonitor.Agent.Core.Logging;
+using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Win32;
 
@@ -172,6 +173,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             _imeLogTracker.OnAllAppsCompleted = HandleAllAppsCompleted;
             _imeLogTracker.OnUserSessionCompleted = HandleUserSessionCompleted;
             _imeLogTracker.OnDoTelemetryReceived = HandleDoTelemetryReceived;
+            _imeLogTracker.OnScriptCompleted = HandleScriptCompleted;
 
             // Subscribe to EspAndHelloTracker completion event if available
             if (_espAndHelloTracker != null)
@@ -577,6 +579,72 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 Message = $"{app.Name ?? app.Id}: DO telemetry received",
                 Data = app.ToEventData()
             });
+        }
+
+        private void HandleScriptCompleted(ScriptExecutionState script)
+        {
+            if (script == null || string.IsNullOrEmpty(script.PolicyId)) return;
+
+            var isSuccess = string.Equals(script.Result, "Success", StringComparison.OrdinalIgnoreCase)
+                            || (script.ExitCode.HasValue && script.ExitCode.Value == 0 && string.IsNullOrEmpty(script.Result));
+
+            var eventType = isSuccess
+                ? Constants.EventTypes.ScriptCompleted
+                : Constants.EventTypes.ScriptFailed;
+
+            var severity = isSuccess ? EventSeverity.Info : EventSeverity.Warning;
+
+            // Build human-readable message
+            string shortId = script.PolicyId.Length >= 8 ? script.PolicyId.Substring(0, 8) : script.PolicyId;
+            string message;
+            if (string.Equals(script.ScriptType, "remediation", StringComparison.OrdinalIgnoreCase))
+            {
+                var complianceStr = string.Equals(script.ComplianceResult, "True", StringComparison.OrdinalIgnoreCase)
+                    ? "Compliant" : "Non-compliant";
+                message = $"Remediation {script.ScriptPart ?? "detection"} {shortId}: {complianceStr} (exit: {script.ExitCode ?? -1})";
+            }
+            else
+            {
+                message = $"Platform script {shortId}: {script.Result ?? "Unknown"} (exit: {script.ExitCode ?? -1})";
+            }
+
+            // Add stderr hint to message if present
+            if (!string.IsNullOrEmpty(script.Stderr) && script.Stderr.Trim().Length > 0)
+                message += " - stderr present";
+
+            var data = new Dictionary<string, object>
+            {
+                ["policyId"] = script.PolicyId,
+                ["scriptType"] = script.ScriptType ?? "platform",
+                ["exitCode"] = script.ExitCode ?? -1
+            };
+
+            if (!string.IsNullOrEmpty(script.RunContext))
+                data["runContext"] = script.RunContext;
+            if (!string.IsNullOrEmpty(script.Result))
+                data["result"] = script.Result;
+            if (!string.IsNullOrEmpty(script.Stdout) && script.Stdout.Trim().Length > 0)
+                data["stdout"] = script.Stdout;
+            if (!string.IsNullOrEmpty(script.Stderr) && script.Stderr.Trim().Length > 0)
+                data["stderr"] = script.Stderr;
+            if (!string.IsNullOrEmpty(script.ComplianceResult))
+                data["complianceResult"] = script.ComplianceResult;
+            if (!string.IsNullOrEmpty(script.ScriptPart))
+                data["scriptPart"] = script.ScriptPart;
+
+            _emitEvent(new EnrollmentEvent
+            {
+                SessionId = _sessionId,
+                TenantId = _tenantId,
+                EventType = eventType,
+                Severity = severity,
+                Source = Constants.EventSources.IME,
+                Phase = EnrollmentPhase.Unknown,
+                Message = message,
+                Data = data
+            });
+
+            _logger.Info($"EnrollmentTracker: {message}");
         }
 
         private void HandleUserSessionCompleted()

@@ -21,6 +21,8 @@ interface AgentSettingsSectionProps {
   setEnableImeMatchLog: (value: boolean) => void;
   logLevel: string;
   setLogLevel: (value: string) => void;
+  showScriptOutput: boolean;
+  setShowScriptOutput: (value: boolean) => void;
 }
 
 export default function AgentSettingsSection({
@@ -44,6 +46,8 @@ export default function AgentSettingsSection({
   setEnableImeMatchLog,
   logLevel,
   setLogLevel,
+  showScriptOutput,
+  setShowScriptOutput,
 }: AgentSettingsSectionProps) {
   return (
     <>
@@ -221,6 +225,18 @@ export default function AgentSettingsSection({
             <button onClick={() => setEnableImeMatchLog(!enableImeMatchLog)}
               className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${enableImeMatchLog ? 'bg-violet-500' : 'bg-gray-300'}`}>
               <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${enableImeMatchLog ? 'translate-x-6' : 'translate-x-1'}`} />
+            </button>
+          </div>
+
+          {/* Show Script Output */}
+          <div className="flex items-center justify-between p-4 rounded-lg border border-gray-200 hover:border-violet-200 transition-colors">
+            <div>
+              <p className="font-medium text-gray-900">Show Script Output (stdout)</p>
+              <p className="text-sm text-gray-500">Show standard output from PowerShell scripts in the timeline. Disable if scripts may output sensitive data. Error output (stderr) is always shown.</p>
+            </div>
+            <button onClick={() => setShowScriptOutput(!showScriptOutput)}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${showScriptOutput ? 'bg-violet-500' : 'bg-gray-300'}`}>
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${showScriptOutput ? 'translate-x-6' : 'translate-x-1'}`} />
             </button>
           </div>
 

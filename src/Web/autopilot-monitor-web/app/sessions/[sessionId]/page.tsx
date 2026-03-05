@@ -10,6 +10,7 @@ import { ProtectedRoute } from '../../../components/ProtectedRoute';
 import PerformanceChart from '../../../components/PerformanceChart';
 import DownloadProgress from '../../../components/DownloadProgress';
 import InstallProgress from '../../../components/InstallProgress';
+import ScriptExecutions from '../../../components/ScriptExecutions';
 import { API_BASE_URL } from "@/lib/config";
 
 import { V1_PHASE_NAMES, V2_PHASE_NAMES, V1_PHASE_ORDER, V2_PHASE_ORDER } from "./utils/phaseConstants";
@@ -92,6 +93,7 @@ export default function SessionDetailPage() {
   const [showMarkFailedConfirm, setShowMarkFailedConfirm] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
   const [reportSubmitting, setReportSubmitting] = useState(false);
+  const [showScriptOutput, setShowScriptOutput] = useState(true);
   const [analysisResults, setAnalysisResults] = useState<RuleResult[]>([]);
   const [loadingAnalysis, setLoadingAnalysis] = useState(false);
   const [analysisExpanded, setAnalysisExpanded] = useState(true);
@@ -194,6 +196,20 @@ export default function SessionDetailPage() {
     if (sessionTenantId && sessionId) {
       fetchEvents();
       fetchAnalysisResults();
+      // Fetch showScriptOutput setting (best-effort)
+      (async () => {
+        try {
+          const token = await getAccessToken();
+          if (!token) return;
+          const res = await fetch(`${API_BASE_URL}/api/config/${sessionTenantId}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (res.ok) {
+            const cfg = await res.json();
+            setShowScriptOutput(cfg.showScriptOutput ?? true);
+          }
+        } catch { /* non-fatal */ }
+      })();
     }
   }, [sessionTenantId, sessionId]);
 
@@ -899,6 +915,16 @@ export default function SessionDetailPage() {
             />
           )}
 
+          {/* Script Executions (from script_completed, script_failed events) */}
+          {!isGatherRulesSession && (
+            <ScriptExecutions
+              events={events.filter(
+                e => e.eventType === "script_completed" || e.eventType === "script_failed"
+              )}
+              showScriptOutput={showScriptOutput}
+            />
+          )}
+
           {/* Download Progress (from download_progress, app_download_started, app_install_skipped events) */}
           {!isGatherRulesSession && (
             <DownloadProgress
@@ -942,6 +968,7 @@ export default function SessionDetailPage() {
             isGalacticAdmin={user?.isGalacticAdmin}
             preProvDuration={whiteGloveDurations.preProvDuration}
             userEnrollDuration={whiteGloveDurations.userEnrollDuration}
+            showScriptOutput={showScriptOutput}
           />
         </div>
 

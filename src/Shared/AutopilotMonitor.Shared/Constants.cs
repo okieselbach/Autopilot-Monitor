@@ -109,6 +109,8 @@ namespace AutopilotMonitor.Shared
             public const string EnrollmentFailed    = "enrollment_failed";
             public const string DesktopArrived      = "desktop_arrived";
             public const string CompletionCheck     = "completion_check";
+            public const string ScriptCompleted     = "script_completed";
+            public const string ScriptFailed        = "script_failed";
         }
 
         // -----------------------------------------------------------------------
