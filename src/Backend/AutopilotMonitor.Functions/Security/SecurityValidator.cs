@@ -123,6 +123,18 @@ namespace AutopilotMonitor.Functions.Security
                     };
                 }
 
+                // Verify bootstrap token feature is enabled for this tenant
+                if (!config.BootstrapTokenEnabled)
+                {
+                    _logger.LogWarning("Rejected bootstrap token: feature disabled for tenant {TenantId}", tenantId);
+                    return new SecurityValidationResult
+                    {
+                        IsValid = false,
+                        StatusCode = HttpStatusCode.Forbidden,
+                        ErrorMessage = "Bootstrap token feature is not enabled for this tenant"
+                    };
+                }
+
                 // Verify the token's tenant matches the request tenant
                 if (!string.Equals(bootstrapSession.TenantId, tenantId, StringComparison.OrdinalIgnoreCase))
                 {

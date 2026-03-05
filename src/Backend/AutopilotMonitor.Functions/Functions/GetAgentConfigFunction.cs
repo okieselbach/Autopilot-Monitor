@@ -84,64 +84,7 @@ namespace AutopilotMonitor.Functions.Functions
                     return errorResponse;
                 }
 
-                _logger.LogInformation($"GetAgentConfig: Fetching config for tenant {tenantId}");
-
-                // Get tenant configuration
-                var tenantConfig = await _configService.GetConfigurationAsync(tenantId);
-
-                // Get global admin config for platform-wide policy settings
-                var adminConfig = await _adminConfigService.GetConfigurationAsync();
-
-                // Build collector configuration from tenant settings + global policy
-                var collectors = new CollectorConfiguration
-                {
-                    EnablePerformanceCollector = tenantConfig.EnablePerformanceCollector,
-                    PerformanceIntervalSeconds = tenantConfig.PerformanceCollectorIntervalSeconds,
-                    CollectorIdleTimeoutMinutes = adminConfig.CollectorIdleTimeoutMinutes,
-                    HelloWaitTimeoutSeconds = tenantConfig.HelloWaitTimeoutSeconds,
-                    AgentMaxLifetimeMinutes = tenantConfig.AgentMaxLifetimeMinutes ?? 360
-                };
-
-                // Get active gather rules for this tenant (user-defined ad-hoc only)
-                var gatherRules = await _gatherRuleService.GetActiveRulesForTenantAsync(tenantId);
-
-                // Get active IME log patterns for this tenant (from Table Storage)
-                var imeLogPatterns = await _imeLogPatternService.GetActivePatternsForTenantAsync(tenantId);
-
-                // Merge global + tenant-specific diagnostics log paths
-                var globalDiagPaths = adminConfig.GetDiagnosticsGlobalLogPaths();
-                var tenantDiagPaths = tenantConfig.GetDiagnosticsLogPaths();
-                var diagLogPaths = globalDiagPaths.Concat(tenantDiagPaths).ToList();
-
-                var response = req.CreateResponse(HttpStatusCode.OK);
-                await response.WriteAsJsonAsync(new AgentConfigResponse
-                {
-                    ConfigVersion = 14, // script execution tracking: platform + remediation scripts from IME logs
-                    UploadIntervalSeconds = 30,
-                    SelfDestructOnComplete = tenantConfig.SelfDestructOnComplete ?? true,
-                    KeepLogFile = tenantConfig.KeepLogFile ?? false,
-                    EnableGeoLocation = tenantConfig.EnableGeoLocation ?? true,
-                    EnableImeMatchLog = tenantConfig.EnableImeMatchLog ?? false,
-                    MaxAuthFailures = tenantConfig.MaxAuthFailures ?? 5,
-                    AuthFailureTimeoutMinutes = tenantConfig.AuthFailureTimeoutMinutes ?? 0,
-                    LogLevel = tenantConfig.LogLevel ?? "Info",
-                    RebootOnComplete = tenantConfig.RebootOnComplete ?? false,
-                    RebootDelaySeconds = tenantConfig.RebootDelaySeconds ?? 10,
-                    MaxBatchSize = tenantConfig.MaxBatchSize ?? 100,
-                    DiagnosticsUploadEnabled = !string.IsNullOrEmpty(tenantConfig.DiagnosticsBlobSasUrl),
-                    DiagnosticsUploadMode = tenantConfig.DiagnosticsUploadMode ?? "Off",
-                    DiagnosticsLogPaths = diagLogPaths,
-                    Collectors = collectors,
-                    Analyzers = new AnalyzerConfiguration
-                    {
-                        EnableLocalAdminAnalyzer = tenantConfig.EnableLocalAdminAnalyzer ?? true,
-                        LocalAdminAllowedAccounts = tenantConfig.GetLocalAdminAllowedAccounts()
-                    },
-                    GatherRules = gatherRules,
-                    ImeLogPatterns = imeLogPatterns
-                });
-
-                return response;
+                return await ProcessGetConfigAsync(req, tenantId);
             }
             catch (Exception ex)
             {
@@ -153,6 +96,72 @@ namespace AutopilotMonitor.Functions.Functions
                 });
                 return errorResp;
             }
+        }
+
+        /// <summary>
+        /// Core config logic: fetch tenant + admin config, gather rules, IME patterns.
+        /// Called by both the cert-auth Run() method and the bootstrap wrapper.
+        /// </summary>
+        internal async Task<HttpResponseData> ProcessGetConfigAsync(HttpRequestData req, string tenantId)
+        {
+            _logger.LogInformation($"GetAgentConfig: Fetching config for tenant {tenantId}");
+
+            // Get tenant configuration
+            var tenantConfig = await _configService.GetConfigurationAsync(tenantId);
+
+            // Get global admin config for platform-wide policy settings
+            var adminConfig = await _adminConfigService.GetConfigurationAsync();
+
+            // Build collector configuration from tenant settings + global policy
+            var collectors = new CollectorConfiguration
+            {
+                EnablePerformanceCollector = tenantConfig.EnablePerformanceCollector,
+                PerformanceIntervalSeconds = tenantConfig.PerformanceCollectorIntervalSeconds,
+                CollectorIdleTimeoutMinutes = adminConfig.CollectorIdleTimeoutMinutes,
+                HelloWaitTimeoutSeconds = tenantConfig.HelloWaitTimeoutSeconds,
+                AgentMaxLifetimeMinutes = tenantConfig.AgentMaxLifetimeMinutes ?? 360
+            };
+
+            // Get active gather rules for this tenant (user-defined ad-hoc only)
+            var gatherRules = await _gatherRuleService.GetActiveRulesForTenantAsync(tenantId);
+
+            // Get active IME log patterns for this tenant (from Table Storage)
+            var imeLogPatterns = await _imeLogPatternService.GetActivePatternsForTenantAsync(tenantId);
+
+            // Merge global + tenant-specific diagnostics log paths
+            var globalDiagPaths = adminConfig.GetDiagnosticsGlobalLogPaths();
+            var tenantDiagPaths = tenantConfig.GetDiagnosticsLogPaths();
+            var diagLogPaths = globalDiagPaths.Concat(tenantDiagPaths).ToList();
+
+            var response = req.CreateResponse(HttpStatusCode.OK);
+            await response.WriteAsJsonAsync(new AgentConfigResponse
+            {
+                ConfigVersion = 14, // script execution tracking: platform + remediation scripts from IME logs
+                UploadIntervalSeconds = 30,
+                SelfDestructOnComplete = tenantConfig.SelfDestructOnComplete ?? true,
+                KeepLogFile = tenantConfig.KeepLogFile ?? false,
+                EnableGeoLocation = tenantConfig.EnableGeoLocation ?? true,
+                EnableImeMatchLog = tenantConfig.EnableImeMatchLog ?? false,
+                MaxAuthFailures = tenantConfig.MaxAuthFailures ?? 5,
+                AuthFailureTimeoutMinutes = tenantConfig.AuthFailureTimeoutMinutes ?? 0,
+                LogLevel = tenantConfig.LogLevel ?? "Info",
+                RebootOnComplete = tenantConfig.RebootOnComplete ?? false,
+                RebootDelaySeconds = tenantConfig.RebootDelaySeconds ?? 10,
+                MaxBatchSize = tenantConfig.MaxBatchSize ?? 100,
+                DiagnosticsUploadEnabled = !string.IsNullOrEmpty(tenantConfig.DiagnosticsBlobSasUrl),
+                DiagnosticsUploadMode = tenantConfig.DiagnosticsUploadMode ?? "Off",
+                DiagnosticsLogPaths = diagLogPaths,
+                Collectors = collectors,
+                Analyzers = new AnalyzerConfiguration
+                {
+                    EnableLocalAdminAnalyzer = tenantConfig.EnableLocalAdminAnalyzer ?? true,
+                    LocalAdminAllowedAccounts = tenantConfig.GetLocalAdminAllowedAccounts()
+                },
+                GatherRules = gatherRules,
+                ImeLogPatterns = imeLogPatterns
+            });
+
+            return response;
         }
     }
 }

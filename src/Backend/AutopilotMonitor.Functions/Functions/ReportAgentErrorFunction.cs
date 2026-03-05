@@ -85,52 +85,7 @@ namespace AutopilotMonitor.Functions.Functions
                     return errorResponse;
                 }
 
-                // Parse the report body
-                AgentErrorReport? report = null;
-                try
-                {
-                    report = await JsonSerializer.DeserializeAsync<AgentErrorReport>(
-                        req.Body,
-                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-                }
-                catch
-                {
-                    // Body is malformed — still return 200 so the agent does not retry
-                    _logger.LogWarning("ReportAgentError: Could not parse request body from tenant {TenantId}", tenantId);
-                    return req.CreateResponse(HttpStatusCode.OK);
-                }
-
-                if (report == null)
-                {
-                    return req.CreateResponse(HttpStatusCode.OK);
-                }
-
-                // Emit a structured log entry (captured by App Insights as a trace)
-                _logger.LogCritical(
-                    "AgentEmergencyError [{ErrorType}] tenant={TenantId} session={SessionId} http={HttpStatusCode} seq={SequenceNumber} ver={AgentVersion}: {Message}",
-                    report.ErrorType,
-                    tenantId,
-                    report.SessionId,
-                    report.HttpStatusCode,
-                    report.SequenceNumber,
-                    report.AgentVersion,
-                    report.Message);
-
-                // Also emit as a custom event for easy KQL queries in App Insights:
-                //   customEvents | where name == "AgentEmergencyError" | order by timestamp desc
-                _telemetryClient.TrackEvent("AgentEmergencyError", new Dictionary<string, string>
-                {
-                    ["TenantId"]       = tenantId,
-                    ["SessionId"]      = report.SessionId ?? string.Empty,
-                    ["ErrorType"]      = report.ErrorType.ToString(),
-                    ["HttpStatusCode"] = report.HttpStatusCode?.ToString() ?? string.Empty,
-                    ["SequenceNumber"] = report.SequenceNumber?.ToString() ?? string.Empty,
-                    ["AgentVersion"]   = report.AgentVersion ?? string.Empty,
-                    ["Message"]        = report.Message ?? string.Empty,
-                    ["AgentTimestamp"] = report.Timestamp.ToString("O"),
-                });
-
-                return req.CreateResponse(HttpStatusCode.OK);
+                return await ProcessReportErrorAsync(req, tenantId);
             }
             catch (Exception ex)
             {
@@ -138,6 +93,60 @@ namespace AutopilotMonitor.Functions.Functions
                 _logger.LogError(ex, "ReportAgentError: Unexpected error handling emergency report");
                 return req.CreateResponse(HttpStatusCode.OK);
             }
+        }
+
+        /// <summary>
+        /// Core error reporting logic: parse body, log to App Insights.
+        /// Called by both the cert-auth Run() method and the bootstrap wrapper.
+        /// </summary>
+        internal async Task<HttpResponseData> ProcessReportErrorAsync(HttpRequestData req, string tenantId)
+        {
+            // Parse the report body
+            AgentErrorReport? report = null;
+            try
+            {
+                report = await JsonSerializer.DeserializeAsync<AgentErrorReport>(
+                    req.Body,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            }
+            catch
+            {
+                // Body is malformed — still return 200 so the agent does not retry
+                _logger.LogWarning("ReportAgentError: Could not parse request body from tenant {TenantId}", tenantId);
+                return req.CreateResponse(HttpStatusCode.OK);
+            }
+
+            if (report == null)
+            {
+                return req.CreateResponse(HttpStatusCode.OK);
+            }
+
+            // Emit a structured log entry (captured by App Insights as a trace)
+            _logger.LogCritical(
+                "AgentEmergencyError [{ErrorType}] tenant={TenantId} session={SessionId} http={HttpStatusCode} seq={SequenceNumber} ver={AgentVersion}: {Message}",
+                report.ErrorType,
+                tenantId,
+                report.SessionId,
+                report.HttpStatusCode,
+                report.SequenceNumber,
+                report.AgentVersion,
+                report.Message);
+
+            // Also emit as a custom event for easy KQL queries in App Insights:
+            //   customEvents | where name == "AgentEmergencyError" | order by timestamp desc
+            _telemetryClient.TrackEvent("AgentEmergencyError", new Dictionary<string, string>
+            {
+                ["TenantId"]       = tenantId,
+                ["SessionId"]      = report.SessionId ?? string.Empty,
+                ["ErrorType"]      = report.ErrorType.ToString(),
+                ["HttpStatusCode"] = report.HttpStatusCode?.ToString() ?? string.Empty,
+                ["SequenceNumber"] = report.SequenceNumber?.ToString() ?? string.Empty,
+                ["AgentVersion"]   = report.AgentVersion ?? string.Empty,
+                ["Message"]        = report.Message ?? string.Empty,
+                ["AgentTimestamp"] = report.Timestamp.ToString("O"),
+            });
+
+            return req.CreateResponse(HttpStatusCode.OK);
         }
     }
 }

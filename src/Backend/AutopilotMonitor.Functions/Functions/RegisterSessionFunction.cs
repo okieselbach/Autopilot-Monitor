@@ -82,64 +82,7 @@ namespace AutopilotMonitor.Functions.Functions
                     return new RegisterSessionOutput { HttpResponse = errorResponse2 };
                 }
 
-                _logger.LogInformation($"Registering session {registration.SessionId} for tenant {registration.TenantId} (Device: {validation.CertificateThumbprint})");
-
-                // Store session in Azure Table Storage
-                var stored = await _storageService.StoreSessionAsync(registration);
-
-                if (!stored)
-                {
-                    var errorResponse = await CreateErrorResponse(req, HttpStatusCode.InternalServerError, "Failed to store session");
-                    return new RegisterSessionOutput { HttpResponse = errorResponse };
-                }
-
-                // Increment platform stats (fire-and-forget, non-blocking)
-                _ = _storageService.IncrementPlatformStatAsync("TotalEnrollments")
-                    .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException, "Fire-and-forget IncrementPlatformStatAsync failed"), TaskContinuationOptions.OnlyOnFaulted);
-
-                // Retrieve the stored session to include full data in SignalR message
-                var session = await _storageService.GetSessionAsync(registration.TenantId, registration.SessionId);
-
-                var response = req.CreateResponse(HttpStatusCode.OK);
-                var responseData = new RegisterSessionResponse
-                {
-                    SessionId = registration.SessionId,
-                    Success = true,
-                    Message = "Session registered successfully",
-                    RegisteredAt = DateTime.UtcNow
-                };
-
-                await response.WriteAsJsonAsync(responseData);
-
-                // Send SignalR notification for new session registration
-                // This is sent to BOTH tenant-specific group AND galactic-admins group
-                // so Galactic Admins can see new sessions from all tenants without being
-                // flooded with every single event update
-                var messagePayload = new {
-                    sessionId = registration.SessionId,
-                    tenantId = registration.TenantId,
-                    session = session
-                };
-
-                // 1. Tenant-specific notification (normal users)
-                var tenantMessage = new SignalRMessageAction("newSession")
-                {
-                    GroupName = $"tenant-{registration.TenantId}",
-                    Arguments = new[] { messagePayload }
-                };
-
-                // 2. Galactic Admins notification (cross-tenant visibility)
-                var galacticAdminMessage = new SignalRMessageAction("newSession")
-                {
-                    GroupName = "galactic-admins",
-                    Arguments = new[] { messagePayload }
-                };
-
-                return new RegisterSessionOutput
-                {
-                    HttpResponse = response,
-                    SignalRMessages = new[] { tenantMessage, galacticAdminMessage }
-                };
+                return await ProcessRegisterAsync(req, registration, validation);
             }
             catch (Exception ex)
             {
@@ -147,6 +90,72 @@ namespace AutopilotMonitor.Functions.Functions
                 var errorResponse = await CreateErrorResponse(req, HttpStatusCode.InternalServerError, "Internal server error");
                 return new RegisterSessionOutput { HttpResponse = errorResponse };
             }
+        }
+
+        /// <summary>
+        /// Core registration logic: store session, emit SignalR notifications.
+        /// Called by both the cert-auth Run() method and the bootstrap wrapper.
+        /// </summary>
+        internal async Task<RegisterSessionOutput> ProcessRegisterAsync(HttpRequestData req, SessionRegistration registration, SecurityValidationResult validation)
+        {
+            _logger.LogInformation($"Registering session {registration.SessionId} for tenant {registration.TenantId} (Device: {validation.CertificateThumbprint})");
+
+            // Store session in Azure Table Storage
+            var stored = await _storageService.StoreSessionAsync(registration);
+
+            if (!stored)
+            {
+                var errorResponse = await CreateErrorResponse(req, HttpStatusCode.InternalServerError, "Failed to store session");
+                return new RegisterSessionOutput { HttpResponse = errorResponse };
+            }
+
+            // Increment platform stats (fire-and-forget, non-blocking)
+            _ = _storageService.IncrementPlatformStatAsync("TotalEnrollments")
+                .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException, "Fire-and-forget IncrementPlatformStatAsync failed"), TaskContinuationOptions.OnlyOnFaulted);
+
+            // Retrieve the stored session to include full data in SignalR message
+            var session = await _storageService.GetSessionAsync(registration.TenantId, registration.SessionId);
+
+            var response = req.CreateResponse(HttpStatusCode.OK);
+            var responseData = new RegisterSessionResponse
+            {
+                SessionId = registration.SessionId,
+                Success = true,
+                Message = "Session registered successfully",
+                RegisteredAt = DateTime.UtcNow
+            };
+
+            await response.WriteAsJsonAsync(responseData);
+
+            // Send SignalR notification for new session registration
+            // This is sent to BOTH tenant-specific group AND galactic-admins group
+            // so Galactic Admins can see new sessions from all tenants without being
+            // flooded with every single event update
+            var messagePayload = new {
+                sessionId = registration.SessionId,
+                tenantId = registration.TenantId,
+                session = session
+            };
+
+            // 1. Tenant-specific notification (normal users)
+            var tenantMessage = new SignalRMessageAction("newSession")
+            {
+                GroupName = $"tenant-{registration.TenantId}",
+                Arguments = new[] { messagePayload }
+            };
+
+            // 2. Galactic Admins notification (cross-tenant visibility)
+            var galacticAdminMessage = new SignalRMessageAction("newSession")
+            {
+                GroupName = "galactic-admins",
+                Arguments = new[] { messagePayload }
+            };
+
+            return new RegisterSessionOutput
+            {
+                HttpResponse = response,
+                SignalRMessages = new[] { tenantMessage, galacticAdminMessage }
+            };
         }
 
         private async Task<HttpResponseData> CreateErrorResponse(HttpRequestData req, HttpStatusCode statusCode, string message)

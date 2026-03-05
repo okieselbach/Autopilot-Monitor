@@ -101,7 +101,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
         public async Task<RegisterSessionResponse> RegisterSessionAsync(SessionRegistration registration)
         {
             var request = new RegisterSessionRequest { Registration = registration };
-            var url = $"{_baseUrl}{Constants.ApiEndpoints.RegisterSession}";
+            var endpoint = _useBootstrapTokenAuth
+                ? Constants.ApiEndpoints.BootstrapRegisterSession
+                : Constants.ApiEndpoints.RegisterSession;
+            var url = $"{_baseUrl}{endpoint}";
 
             var response = await PostAsync<RegisterSessionRequest, RegisterSessionResponse>(url, request);
             return response;
@@ -112,7 +115,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
         /// </summary>
         public async Task<IngestEventsResponse> IngestEventsAsync(IngestEventsRequest request)
         {
-            var url = $"{_baseUrl}{Constants.ApiEndpoints.IngestEvents}";
+            var ingestEndpoint = _useBootstrapTokenAuth
+                ? Constants.ApiEndpoints.BootstrapIngestEvents
+                : Constants.ApiEndpoints.IngestEvents;
+            var url = $"{_baseUrl}{ingestEndpoint}";
 
             // Use NDJSON (newline-delimited JSON) + gzip for efficient event upload
             // This reduces bandwidth significantly (70-80% compression typical for JSON)
@@ -166,7 +172,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
         /// </summary>
         public async Task<AgentConfigResponse> GetAgentConfigAsync(string tenantId)
         {
-            var url = $"{_baseUrl}{Constants.ApiEndpoints.GetAgentConfig}?tenantId={Uri.EscapeDataString(tenantId)}";
+            var configEndpoint = _useBootstrapTokenAuth
+                ? Constants.ApiEndpoints.BootstrapGetAgentConfig
+                : Constants.ApiEndpoints.GetAgentConfig;
+            var url = $"{_baseUrl}{configEndpoint}?tenantId={Uri.EscapeDataString(tenantId)}";
 
             var httpRequest = new HttpRequestMessage(HttpMethod.Get, url);
             AddSecurityHeaders(httpRequest);
@@ -226,7 +235,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
         {
             try
             {
-                var url = $"{_baseUrl}{Constants.ApiEndpoints.ReportAgentError}";
+                var errorEndpoint = _useBootstrapTokenAuth
+                    ? Constants.ApiEndpoints.BootstrapReportError
+                    : Constants.ApiEndpoints.ReportAgentError;
+                var url = $"{_baseUrl}{errorEndpoint}";
                 var json = JsonConvert.SerializeObject(report);
 
                 var httpRequest = new HttpRequestMessage(HttpMethod.Post, url)

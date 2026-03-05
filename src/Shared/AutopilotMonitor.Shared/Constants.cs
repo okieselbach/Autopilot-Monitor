@@ -79,6 +79,12 @@ namespace AutopilotMonitor.Shared
             public const string ImeLogPatterns           = "/api/rules/ime-log-patterns";
             public const string ReseedFromGitHub         = "/api/rules/reseed-from-github";
             public const string ValidateBootstrapCode    = "/api/bootstrap/validate/{code}";
+
+            // Bootstrap agent endpoints (cert-free, token-auth for pre-enrollment agents)
+            public const string BootstrapRegisterSession = "/api/bootstrap/register-session";
+            public const string BootstrapIngestEvents    = "/api/bootstrap/ingest";
+            public const string BootstrapGetAgentConfig  = "/api/bootstrap/config";
+            public const string BootstrapReportError     = "/api/bootstrap/error";
         }
 
         // -----------------------------------------------------------------------

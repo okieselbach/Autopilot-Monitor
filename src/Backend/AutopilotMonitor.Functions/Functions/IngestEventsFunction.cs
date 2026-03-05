@@ -92,6 +92,21 @@ namespace AutopilotMonitor.Functions.Functions
                     };
                 }
 
+                return await ProcessIngestAsync(req, tenantIdHeader, validation);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error ingesting events");
+                return await CreateErrorResponse(req, HttpStatusCode.InternalServerError, "Internal server error");
+            }
+        }
+
+        /// <summary>
+        /// Core ingest logic: device block check, NDJSON parsing, event storage, rule engine, SignalR.
+        /// Called by both the cert-auth Run() method and the bootstrap wrapper.
+        /// </summary>
+        internal async Task<IngestEventsOutput> ProcessIngestAsync(HttpRequestData req, string tenantId, SecurityValidationResult validation)
+        {
                 // --- Device block check (after security, before body decompression) ---
                 // Check if this device has been administratively blocked (e.g. rogue device sending excessive data).
                 // We read the serial number from the header (same header used by AutopilotDeviceValidator).
@@ -102,14 +117,14 @@ namespace AutopilotMonitor.Functions.Functions
 
                 if (!string.IsNullOrEmpty(serialNumberHeader))
                 {
-                    var (isBlocked, unblockAt, blockAction) = await _blockedDeviceService.IsBlockedAsync(tenantIdHeader, serialNumberHeader);
+                    var (isBlocked, unblockAt, blockAction) = await _blockedDeviceService.IsBlockedAsync(tenantId, serialNumberHeader);
                     if (isBlocked)
                     {
                         var isKill = string.Equals(blockAction, "Kill", StringComparison.OrdinalIgnoreCase);
 
                         _logger.LogWarning(
                             "{Action} ingest from device: TenantId={TenantId}, SerialNumber={SerialNumber}, UnblockAt={UnblockAt}",
-                            isKill ? "KILL signal for" : "Rejected", tenantIdHeader, serialNumberHeader, unblockAt);
+                            isKill ? "KILL signal for" : "Rejected", tenantId, serialNumberHeader, unblockAt);
 
                         var blockedHttpResponse = req.CreateResponse(System.Net.HttpStatusCode.OK);
                         await blockedHttpResponse.WriteAsJsonAsync(new IngestEventsResponse
@@ -132,7 +147,7 @@ namespace AutopilotMonitor.Functions.Functions
                 }
 
                 // --- Parse NDJSON+gzip request body (only after security is cleared) ---
-                var request = await ParseNdjsonGzipRequest(req.Body, tenantIdHeader);
+                var request = await ParseNdjsonGzipRequest(req.Body, tenantId);
 
                 if (request?.Events == null || request.Events.Count == 0)
                 {
@@ -145,9 +160,9 @@ namespace AutopilotMonitor.Functions.Functions
                 }
 
                 // Ensure body TenantId matches the validated header TenantId (prevent body spoofing)
-                if (!string.Equals(request.TenantId, tenantIdHeader, StringComparison.OrdinalIgnoreCase))
+                if (!string.Equals(request.TenantId, tenantId, StringComparison.OrdinalIgnoreCase))
                 {
-                    _logger.LogWarning("TenantId mismatch: header={HeaderTenantId}, body={BodyTenantId}", tenantIdHeader, request.TenantId);
+                    _logger.LogWarning("TenantId mismatch: header={HeaderTenantId}, body={BodyTenantId}", tenantId, request.TenantId);
                     return await CreateErrorResponse(req, HttpStatusCode.Forbidden, "TenantId mismatch between header and payload");
                 }
 
@@ -626,12 +641,6 @@ namespace AutopilotMonitor.Functions.Functions
                     HttpResponse = response,
                     SignalRMessages = new[] { summaryMessage, eventsMessage }
                 };
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error ingesting events");
-                return await CreateErrorResponse(req, HttpStatusCode.InternalServerError, "Internal server error");
-            }
         }
 
         /// <summary>

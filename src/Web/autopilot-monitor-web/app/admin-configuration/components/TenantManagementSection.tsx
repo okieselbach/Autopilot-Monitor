@@ -442,7 +442,7 @@ export function TenantManagementSection({
       {editingTenant && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="sticky top-0 bg-green-600 text-white p-6 rounded-t-lg">
+            <div className="sticky top-0 z-10 bg-green-600 text-white p-6 rounded-t-lg">
               <h2 className="text-2xl font-bold">Edit Tenant Configuration</h2>
               <p className="text-green-100 text-sm mt-1">{editingTenant.tenantId}</p>
             </div>

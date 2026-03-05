@@ -111,6 +111,12 @@ builder.Services.AddSingleton<MaintenanceService>();
 builder.Services.AddSingleton<BlockedDeviceService>();
 builder.Services.AddSingleton<SessionReportService>();
 builder.Services.AddSingleton<BootstrapSessionService>();
+
+// Register agent Function classes so bootstrap wrappers can inject them for code reuse
+builder.Services.AddSingleton<AutopilotMonitor.Functions.Functions.IngestEventsFunction>();
+builder.Services.AddSingleton<AutopilotMonitor.Functions.Functions.RegisterSessionFunction>();
+builder.Services.AddSingleton<AutopilotMonitor.Functions.Functions.GetAgentConfigFunction>();
+builder.Services.AddSingleton<AutopilotMonitor.Functions.Functions.ReportAgentErrorFunction>();
 builder.Services.AddSingleton<AutopilotMonitor.Functions.Security.GraphTokenService>();
 builder.Services.AddSingleton<AutopilotMonitor.Functions.Security.AutopilotDeviceValidator>();
 builder.Services.AddSingleton<AutopilotMonitor.Functions.Security.CorporateIdentifierValidator>();
