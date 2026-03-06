@@ -32,6 +32,7 @@ export default function Home() {
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [sortColumn, setSortColumn] = useState<keyof Session | null>(null);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+  const [columnFilters, setColumnFilters] = useState<Record<string, Set<string>>>({});
   const [currentPage, setCurrentPage] = useState(1);
   const sessionsPerPage = 7;
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -364,7 +365,7 @@ export default function Home() {
   // Reset to page 1 when search query, status filter, or sort changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, sortColumn, sortDirection]);
+  }, [searchQuery, statusFilter, sortColumn, sortDirection, columnFilters]);
 
   const deleteSession = (sessionId: string, sessionTenantId: string, deviceName?: string) => {
     setSessionToDelete({ sessionId, tenantId: sessionTenantId, deviceName });
@@ -468,9 +469,16 @@ export default function Home() {
     new Date(s.startedAt).toDateString() === new Date().toDateString()
   ).length;
 
-  // Filter sessions based on status filter and search query
+  // Filter sessions based on status filter, column filters, and search query
   const filteredSessions = sessions.filter(session => {
     if (statusFilter && session.status !== statusFilter) return false;
+
+    // Apply column filters
+    for (const [field, allowedValues] of Object.entries(columnFilters)) {
+      if (allowedValues.size === 0) continue;
+      const value = String(session[field as keyof Session] ?? "");
+      if (!allowedValues.has(value)) return false;
+    }
 
     if (!searchQuery.trim()) return true;
 
@@ -686,6 +694,8 @@ export default function Home() {
               blockedDevicesSet={blockedDevicesSet}
               isPreviewBlocked={isPreviewBlocked}
               user={user}
+              columnFilters={columnFilters}
+              onColumnFiltersChange={setColumnFilters}
               onDeleteSession={deleteSession}
               onBlockDevice={blockDevice}
             />

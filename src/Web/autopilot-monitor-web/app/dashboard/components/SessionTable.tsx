@@ -9,25 +9,26 @@ interface ColumnDef {
   key: string;
   label: string;
   defaultVisible: boolean;
-  // If set, the column is only shown when this mode is active (handled separately)
   adminOnly?: boolean;
   galacticOnly?: boolean;
   sortKey?: keyof Session;
+  // Session field used for column-level filtering; if set, column is filterable
+  filterKey?: keyof Session;
 }
 
 const ALL_COLUMNS: ColumnDef[] = [
   { key: "device", label: "Device", defaultVisible: true, sortKey: "deviceName" },
   { key: "tenantId", label: "Tenant ID", defaultVisible: false, galacticOnly: true },
-  { key: "model", label: "Model", defaultVisible: true, sortKey: "model" },
-  { key: "status", label: "Status", defaultVisible: true, sortKey: "status" },
+  { key: "model", label: "Model", defaultVisible: true, sortKey: "model", filterKey: "manufacturer" },
+  { key: "status", label: "Status", defaultVisible: true, sortKey: "status", filterKey: "status" },
   { key: "eventCount", label: "Events", defaultVisible: true, sortKey: "eventCount" },
   { key: "duration", label: "Duration", defaultVisible: true, sortKey: "durationSeconds" },
   { key: "started", label: "Started", defaultVisible: true, sortKey: "startedAt" },
-  { key: "country", label: "Country", defaultVisible: false, sortKey: "geoCountry" },
-  { key: "agentVersion", label: "Agent Version", defaultVisible: false, sortKey: "agentVersion" },
-  { key: "osBuild", label: "OS Build", defaultVisible: false, sortKey: "osBuild" },
-  { key: "osEdition", label: "OS Edition", defaultVisible: false, sortKey: "osEdition" },
-  { key: "osLanguage", label: "OS Language", defaultVisible: false, sortKey: "osLanguage" },
+  { key: "country", label: "Country", defaultVisible: false, sortKey: "geoCountry", filterKey: "geoCountry" },
+  { key: "agentVersion", label: "Agent Version", defaultVisible: false, sortKey: "agentVersion", filterKey: "agentVersion" },
+  { key: "osBuild", label: "OS Build", defaultVisible: false, sortKey: "osBuild", filterKey: "osBuild" },
+  { key: "osEdition", label: "OS Edition", defaultVisible: false, sortKey: "osEdition", filterKey: "osEdition" },
+  { key: "osLanguage", label: "OS Language", defaultVisible: false, sortKey: "osLanguage", filterKey: "osLanguage" },
   { key: "actions", label: "Actions", defaultVisible: true, adminOnly: true },
 ];
 
@@ -66,6 +67,8 @@ interface SessionTableProps {
   blockedDevicesSet: Set<string>;
   isPreviewBlocked: boolean;
   user: { isGalacticAdmin?: boolean } | null;
+  columnFilters: Record<string, Set<string>>;
+  onColumnFiltersChange: (filters: Record<string, Set<string>>) => void;
   onDeleteSession: (sessionId: string, tenantId: string, deviceName?: string) => void;
   onBlockDevice: (serialNumber: string, tenantId: string, deviceName?: string) => void;
 }
@@ -91,31 +94,52 @@ export function SessionTable({
   blockedDevicesSet,
   isPreviewBlocked,
   user,
+  columnFilters,
+  onColumnFiltersChange,
   onDeleteSession,
   onBlockDevice,
 }: SessionTableProps) {
   const router = useRouter();
   const [visibleColumns, setVisibleColumns] = useState<Set<string>>(getInitialVisibleColumns);
   const [showColumnSelector, setShowColumnSelector] = useState(false);
+  const [openFilterColumn, setOpenFilterColumn] = useState<string | null>(null);
   const columnSelectorRef = useRef<HTMLDivElement>(null);
+  const filterDropdownRef = useRef<HTMLDivElement>(null);
 
   // Persist visible columns to localStorage
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify([...visibleColumns]));
   }, [visibleColumns]);
 
-  // Close dropdown on outside click
+  // Close dropdowns on outside click
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (columnSelectorRef.current && !columnSelectorRef.current.contains(e.target as Node)) {
         setShowColumnSelector(false);
       }
+      if (filterDropdownRef.current && !filterDropdownRef.current.contains(e.target as Node)) {
+        setOpenFilterColumn(null);
+      }
     }
-    if (showColumnSelector) {
+    if (showColumnSelector || openFilterColumn) {
       document.addEventListener("mousedown", handleClickOutside);
       return () => document.removeEventListener("mousedown", handleClickOutside);
     }
-  }, [showColumnSelector]);
+  }, [showColumnSelector, openFilterColumn]);
+
+  // Compute unique values for a filterable field from all sessions (not filtered)
+  const getUniqueValues = (field: keyof Session): string[] => {
+    const values = new Set<string>();
+    for (const s of sessions) {
+      const v = s[field];
+      if (v != null && v !== "") values.add(String(v));
+    }
+    return [...values].sort();
+  };
+
+  const activeFilterCount = Object.values(columnFilters).reduce(
+    (sum, s) => sum + (s.size > 0 ? 1 : 0), 0
+  );
 
   const toggleColumn = (key: string) => {
     setVisibleColumns((prev) => {
@@ -281,6 +305,23 @@ export function SessionTable({
             Clear
           </button>
         )}
+        {activeFilterCount > 0 && (
+          <span className="inline-flex items-center gap-1.5 ml-2 px-2.5 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+            </svg>
+            {activeFilterCount} column filter{activeFilterCount > 1 ? "s" : ""} active
+            <button
+              onClick={() => onColumnFiltersChange({})}
+              className="ml-0.5 hover:text-blue-900 transition-colors"
+              title="Clear all column filters"
+            >
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </span>
+        )}
       </div>
 
       <div className="overflow-x-auto">
@@ -297,6 +338,15 @@ export function SessionTable({
                       direction={sortDirection}
                       onSort={onSort}
                       className={["eventCount", "duration", "started", "country", "agentVersion", "osBuild", "osEdition", "osLanguage"].includes(col.key) ? "px-3" : undefined}
+                      filterKey={col.filterKey}
+                      filterValues={col.filterKey ? getUniqueValues(col.filterKey) : undefined}
+                      activeFilter={col.filterKey ? columnFilters[col.filterKey] : undefined}
+                      isFilterOpen={openFilterColumn === col.key}
+                      onFilterToggle={() => setOpenFilterColumn(openFilterColumn === col.key ? null : col.key)}
+                      onFilterChange={(field, values) => {
+                        onColumnFiltersChange({ ...columnFilters, [field]: values });
+                      }}
+                      filterDropdownRef={openFilterColumn === col.key ? filterDropdownRef : undefined}
                     >
                       {col.label}
                     </SortableHeader>
@@ -505,12 +555,19 @@ function SessionCell({
         </td>
       );
 
-    case "agentVersion":
+    case "agentVersion": {
+      const fullVersion = session.agentVersion || "";
+      const shortVersion = fullVersion.split("+")[0];
       return (
         <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-500 font-mono">
-          {session.agentVersion || <span className="text-gray-300">—</span>}
+          {shortVersion ? (
+            <span title={fullVersion}>{shortVersion}</span>
+          ) : (
+            <span className="text-gray-300">—</span>
+          )}
         </td>
       );
+    }
 
     case "osBuild":
       return (
@@ -579,6 +636,13 @@ function SortableHeader({
   onSort,
   children,
   className,
+  filterKey,
+  filterValues,
+  activeFilter,
+  isFilterOpen,
+  onFilterToggle,
+  onFilterChange,
+  filterDropdownRef,
 }: {
   column: keyof Session;
   currentSort: keyof Session | null;
@@ -586,20 +650,114 @@ function SortableHeader({
   onSort: (column: keyof Session) => void;
   children: React.ReactNode;
   className?: string;
+  filterKey?: keyof Session;
+  filterValues?: string[];
+  activeFilter?: Set<string>;
+  isFilterOpen?: boolean;
+  onFilterToggle?: () => void;
+  onFilterChange?: (field: keyof Session, values: Set<string>) => void;
+  filterDropdownRef?: React.Ref<HTMLDivElement>;
 }) {
   const isActive = currentSort === column;
+  const hasActiveFilter = activeFilter && activeFilter.size > 0;
+  const [filterSearch, setFilterSearch] = useState("");
+
+  const filteredFilterValues = filterValues?.filter(v =>
+    v.toLowerCase().includes(filterSearch.toLowerCase())
+  );
 
   return (
     <th
-      onClick={() => onSort(column)}
-      className={`py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors select-none ${className ?? "px-6"}`}
+      className={`py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider select-none relative ${className ?? "px-6"}`}
     >
-      <div className="flex items-center gap-2">
-        {children}
-        <span className="text-gray-400">
-          {isActive ? (direction === "asc" ? "↑" : "↓") : "↕"}
-        </span>
+      <div className="flex items-center gap-1">
+        <button
+          onClick={() => onSort(column)}
+          className="flex items-center gap-1 hover:text-gray-700 transition-colors cursor-pointer"
+        >
+          {children}
+          <span className="text-gray-400">
+            {isActive ? (direction === "asc" ? "↑" : "↓") : "↕"}
+          </span>
+        </button>
+        {filterKey && onFilterToggle && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onFilterToggle();
+            }}
+            className={`p-0.5 rounded transition-colors ${hasActiveFilter ? "text-blue-600 hover:text-blue-800" : "text-gray-300 hover:text-gray-500"}`}
+            title={hasActiveFilter ? `Filtered (${activeFilter!.size} selected)` : "Filter this column"}
+          >
+            <svg className="w-3 h-3" fill={hasActiveFilter ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+            </svg>
+          </button>
+        )}
       </div>
+
+      {/* Filter Dropdown */}
+      {isFilterOpen && filterKey && filterValues && onFilterChange && (
+        <div
+          ref={filterDropdownRef}
+          className="absolute left-0 top-full mt-1 w-52 bg-white rounded-lg shadow-lg border border-gray-200 z-50 py-2"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Search within filter values */}
+          {filterValues.length > 8 && (
+            <div className="px-2 pb-2">
+              <input
+                type="text"
+                placeholder="Search..."
+                value={filterSearch}
+                onChange={(e) => setFilterSearch(e.target.value)}
+                className="w-full px-2 py-1 text-xs border border-gray-200 rounded text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                onClick={(e) => e.stopPropagation()}
+              />
+            </div>
+          )}
+          <div className="max-h-48 overflow-y-auto">
+            {(filteredFilterValues ?? filterValues).map((value) => {
+              const isChecked = activeFilter?.has(value) ?? false;
+              return (
+                <label
+                  key={value}
+                  className="flex items-center gap-2 px-3 py-1 hover:bg-gray-50 cursor-pointer text-xs text-gray-700 normal-case tracking-normal font-normal"
+                >
+                  <input
+                    type="checkbox"
+                    checked={isChecked}
+                    onChange={() => {
+                      const next = new Set(activeFilter ?? []);
+                      if (isChecked) {
+                        next.delete(value);
+                      } else {
+                        next.add(value);
+                      }
+                      onFilterChange(filterKey, next);
+                    }}
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 h-3 w-3"
+                  />
+                  <span className="truncate">{value}</span>
+                </label>
+              );
+            })}
+            {filteredFilterValues?.length === 0 && (
+              <div className="px-3 py-2 text-xs text-gray-400">No matches</div>
+            )}
+          </div>
+          {hasActiveFilter && (
+            <div className="border-t border-gray-100 mt-1 pt-1 px-3">
+              <button
+                onClick={() => onFilterChange(filterKey, new Set())}
+                className="text-xs text-blue-500 hover:text-blue-700 font-medium normal-case tracking-normal"
+              >
+                Clear filter
+              </button>
+            </div>
+          )}
+        </div>
+      )}
     </th>
   );
 }
