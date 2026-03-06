@@ -297,11 +297,13 @@ export function generateUiExport(
     //      (shown when no user-enrollment events
     //       exist and session status is "Pending")
     //
-    // SPLIT POINT CALCULATION (mirrors EventTimeline.tsx):
+    // SPLIT POINT CALCULATION (mirrors page.tsx):
     //   Normal:   first agent_started AFTER whiteglove_complete  → split = that event's sequence - 1
-    //   Fallback: if whiteglove_complete arrived after Part 2 boot, use the second-to-last
-    //             agent_started before whiteglove_complete        → split = that event's sequence - 1
+    //   Fallback: if whiteglove_complete arrived after Part 2 boot, the LAST agent_started
+    //             before whiteglove_complete is the Part 2 start  → split = that event's sequence - 1
     //   Single:   only pre-prov part present                     → split = whiteglove_complete.sequence
+    //
+    //   Events are assigned to parts purely by sequence number (no whiteglove_complete override).
 
     const wgCompleteEv = sorted.find(e => e.eventType === "whiteglove_complete");
     const wgSeq = wgCompleteEv?.sequence ?? sorted[sorted.length - 1]?.sequence ?? 0;
@@ -315,20 +317,20 @@ export function generateUiExport(
     } else {
       const beforeWg = agentStartedEvs.filter(e => e.sequence < wgSeq);
       if (beforeWg.length >= 2) {
-        splitSeq = beforeWg[beforeWg.length - 2].sequence - 1;
+        // Race condition: whiteglove_complete arrived after Part 2 boot.
+        // The LAST agent_started before wgEvent is the Part 2 start.
+        splitSeq = beforeWg[beforeWg.length - 1].sequence - 1;
       } else {
         splitSeq = wgSeq;
       }
     }
 
-    const preProvEvents = sorted.filter(e =>
-      e.sequence <= splitSeq || e.eventType === "whiteglove_complete"
-    );
+    // Events are assigned purely by sequence number — no special-casing for whiteglove_complete.
+    // Preserves chronological order in both parts.
+    const preProvEvents = sorted.filter(e => e.sequence <= splitSeq);
     // Sort Part 2 events by timestamp (primary) then sequence (secondary) to handle
     // potential duplicate sequences from agent sequence counter not persisted before reboot.
-    const userEnrollEvents = sorted.filter(e =>
-      e.sequence > splitSeq && e.eventType !== "whiteglove_complete"
-    ).sort((a, b) => {
+    const userEnrollEvents = sorted.filter(e => e.sequence > splitSeq).sort((a, b) => {
       const tCmp = (a.timestamp ?? "").localeCompare(b.timestamp ?? "");
       if (tCmp !== 0) return tCmp;
       return (a.sequence ?? 0) - (b.sequence ?? 0);

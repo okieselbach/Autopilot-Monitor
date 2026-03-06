@@ -36,6 +36,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         private string _enrollmentType = "v1"; // "v1" = Autopilot Classic/ESP, "v2" = Windows Device Preparation
         private bool _isWaitingForHello = false; // Track if we're waiting for Hello to complete before sending enrollment_complete
         private readonly bool _isBootstrapMode; // Agent started via bootstrap token (pre-MDM)
+        private bool _sendTraceEvents = true; // Send Trace-severity events to backend for decision auditing
         private bool _enrollmentStartDeviceInfoCollected = false; // Re-collect enrollment-dependent info once at first ESP phase
         private bool _finalDeviceInfoCollected = false; // Ensure final device info is emitted only once
         private string _lastEmittedSummaryHash; // Track last emitted state-breakdown to avoid redundant summary events
@@ -147,9 +148,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             double speedFactor = 50,
             string imeMatchLogPath = null,
             Collectors.EspAndHelloTracker espAndHelloTracker = null,
-            bool isBootstrapMode = false)
+            bool isBootstrapMode = false,
+            bool sendTraceEvents = true)
         {
             _isBootstrapMode = isBootstrapMode;
+            _sendTraceEvents = sendTraceEvents;
             _sessionId = sessionId;
             _tenantId = tenantId;
             _emitEvent = emitEvent;
@@ -186,6 +189,46 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 _espAndHelloTracker.FinalizingSetupPhaseTriggered += OnFinalizingSetupPhaseTriggered;
                 _espAndHelloTracker.WhiteGloveCompleted += OnWhiteGloveCompleted;
                 _espAndHelloTracker.EspFailureDetected += OnEspFailureDetected;
+            }
+        }
+
+        /// <summary>
+        /// Updates the SendTraceEvents setting from remote config at runtime.
+        /// </summary>
+        public void UpdateSendTraceEvents(bool value) => _sendTraceEvents = value;
+
+        /// <summary>
+        /// Emits a Trace-severity event that captures an agent decision for backend-side troubleshooting.
+        /// Always logged locally; only sent to the backend when SendTraceEvents is enabled.
+        /// </summary>
+        private void EmitTraceEvent(string decision, string reason, Dictionary<string, object> context = null)
+        {
+            var data = new Dictionary<string, object>
+            {
+                { "decision", decision },
+                { "reason", reason }
+            };
+            if (context != null)
+            {
+                foreach (var kvp in context)
+                    data[kvp.Key] = kvp.Value;
+            }
+
+            _logger.Info($"EnrollmentTracker [TRACE]: {decision} — {reason}");
+
+            if (_sendTraceEvents)
+            {
+                _emitEvent(new EnrollmentEvent
+                {
+                    SessionId = _sessionId,
+                    TenantId = _tenantId,
+                    EventType = "agent_trace",
+                    Severity = EventSeverity.Trace,
+                    Source = "EnrollmentTracker",
+                    Phase = EnrollmentPhase.Unknown,
+                    Message = $"{decision}: {reason}",
+                    Data = data
+                });
             }
         }
 

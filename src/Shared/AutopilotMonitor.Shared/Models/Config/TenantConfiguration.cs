@@ -337,6 +337,15 @@ namespace AutopilotMonitor.Shared.Models
         /// </summary>
         public string DiagnosticsUploadMode { get; set; } = "Off";
 
+        // ===== TRACE EVENTS =====
+
+        /// <summary>
+        /// Whether the agent should send Trace-severity events to the backend.
+        /// Trace events capture key agent decisions for backend-side troubleshooting.
+        /// Default: true (on in preview). Can be disabled per tenant to reduce traffic.
+        /// </summary>
+        public bool SendTraceEvents { get; set; } = true;
+
         // ===== TEAMS NOTIFICATIONS =====
 
         /// <summary>

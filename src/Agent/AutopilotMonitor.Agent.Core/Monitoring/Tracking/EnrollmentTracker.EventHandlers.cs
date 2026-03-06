@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using AutopilotMonitor.Agent.Core.Logging;
@@ -43,6 +44,22 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             {
                 _logger.Debug($"EnrollmentTracker: ESP phase unchanged ({phase}), skipping event");
                 return;
+            }
+
+            // AccountSetup verification: during WhiteGlove pre-provisioning the ESP briefly enters
+            // AccountSetup before WhiteGlove success, but no real user has signed in (only defaultuser0
+            // exists). Suppress the phase event to avoid a fake AccountSetup on the timeline.
+            // The ImeLogTracker has already updated its internal phase tracking (ignore lists, phase order)
+            // which is correct — we only suppress the event emission to the backend.
+            if (string.Equals(phase, "AccountSetup", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!HasRealUserProfile())
+                {
+                    EmitTraceEvent("AccountSetup_suppressed",
+                        "ESP reported AccountSetup but no real user profile found — likely WhiteGlove pre-provisioning",
+                        new Dictionary<string, object> { { "espPhase", phase }, { "previousPhase", _lastEspPhase ?? "null" } });
+                    return;
+                }
             }
 
             _logger.Info($"EnrollmentTracker: ESP phase changed from '{_lastEspPhase ?? "null"}' to '{phase}'");
@@ -478,6 +495,48 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             }
 
             TryEmitEnrollmentComplete("ime_pattern");
+        }
+
+        /// <summary>
+        /// Checks whether a real user profile exists in C:\Users\ (beyond system accounts).
+        /// Used to verify AccountSetup phase: during WhiteGlove pre-provisioning only defaultuser0
+        /// exists; in user-driven enrollment the signed-in user's profile is already created.
+        /// </summary>
+        private bool HasRealUserProfile()
+        {
+            try
+            {
+                var usersDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                // Navigate to the Users root (parent of the current profile)
+                usersDir = Path.GetDirectoryName(usersDir); // e.g. C:\Users
+                if (string.IsNullOrEmpty(usersDir) || !Directory.Exists(usersDir))
+                    usersDir = @"C:\Users";
+
+                var excludedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    "defaultuser0", "defaultuser1", "Default", "Default User",
+                    "Public", "All Users", "Administrator", "Guest"
+                };
+
+                foreach (var dir in Directory.GetDirectories(usersDir))
+                {
+                    var name = Path.GetFileName(dir);
+                    if (excludedNames.Contains(name))
+                        continue;
+                    if (name.StartsWith("DefaultUser", StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    _logger.Debug($"EnrollmentTracker: HasRealUserProfile found '{name}'");
+                    return true;
+                }
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"EnrollmentTracker: HasRealUserProfile check failed: {ex.Message}");
+                return false; // Fail safe: treat as no real user (suppress AccountSetup)
+            }
         }
     }
 }

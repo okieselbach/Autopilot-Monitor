@@ -211,6 +211,12 @@ namespace AutopilotMonitor.Agent.Core.Configuration
         public List<DiagnosticsLogPath> DiagnosticsLogPaths { get; set; } = new List<DiagnosticsLogPath>();
 
         /// <summary>
+        /// Whether the agent should send Trace-severity events to the backend.
+        /// Controlled per tenant via remote config. Default: true (on in preview).
+        /// </summary>
+        public bool SendTraceEvents { get; set; } = true;
+
+        /// <summary>
         /// Validates the configuration
         /// </summary>
         public bool IsValid()

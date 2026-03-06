@@ -125,6 +125,7 @@ namespace AutopilotMonitor.Shared.Models
     /// </summary>
     public enum EventSeverity
     {
+        Trace = -1,
         Debug = 0,
         Info = 1,
         Warning = 2,

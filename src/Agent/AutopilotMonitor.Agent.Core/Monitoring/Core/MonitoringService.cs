@@ -332,6 +332,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             _configuration.ShowEnrollmentSummary = config.ShowEnrollmentSummary;
             _configuration.EnrollmentSummaryTimeoutSeconds = config.EnrollmentSummaryTimeoutSeconds;
             _configuration.EnrollmentSummaryBrandingImageUrl = config.EnrollmentSummaryBrandingImageUrl;
+            _configuration.SendTraceEvents = config.SendTraceEvents;
+            _enrollmentTracker?.UpdateSendTraceEvents(config.SendTraceEvents);
 
             _logger.Info("Applied runtime settings from remote config");
             _logger.Info($"  uploadIntervalSeconds={_configuration.UploadIntervalSeconds}, selfDestructOnComplete={_configuration.SelfDestructOnComplete}, keepLogFile={_configuration.KeepLogFile}");

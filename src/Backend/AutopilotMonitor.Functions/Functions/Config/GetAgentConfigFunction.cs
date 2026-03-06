@@ -136,7 +136,7 @@ namespace AutopilotMonitor.Functions.Functions.Config
             var response = req.CreateResponse(HttpStatusCode.OK);
             await response.WriteAsJsonAsync(new AgentConfigResponse
             {
-                ConfigVersion = 15, // enrollment summary dialog
+                ConfigVersion = 16, // trace events for agent decision auditing
                 UploadIntervalSeconds = 30,
                 SelfDestructOnComplete = tenantConfig.SelfDestructOnComplete ?? true,
                 KeepLogFile = tenantConfig.KeepLogFile ?? false,
@@ -160,6 +160,7 @@ namespace AutopilotMonitor.Functions.Functions.Config
                     EnableLocalAdminAnalyzer = tenantConfig.EnableLocalAdminAnalyzer ?? true,
                     LocalAdminAllowedAccounts = tenantConfig.GetLocalAdminAllowedAccounts()
                 },
+                SendTraceEvents = tenantConfig.SendTraceEvents,
                 GatherRules = gatherRules,
                 ImeLogPatterns = imeLogPatterns
             });

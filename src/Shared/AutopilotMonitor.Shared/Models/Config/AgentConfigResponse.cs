@@ -137,6 +137,14 @@ namespace AutopilotMonitor.Shared.Models
         /// Controls which analyzers run and their per-analyzer parameters.
         /// </summary>
         public AnalyzerConfiguration Analyzers { get; set; } = new AnalyzerConfiguration();
+
+        /// <summary>
+        /// Whether the agent should send Trace-severity events to the backend.
+        /// Trace events capture key agent decisions (e.g. "AccountSetup suppressed — no real user profile")
+        /// for backend troubleshooting without relying on the agent log file.
+        /// Default: true (on in preview).
+        /// </summary>
+        public bool SendTraceEvents { get; set; } = true;
     }
 
     /// <summary>

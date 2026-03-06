@@ -97,7 +97,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                         _configuration.ImeLogPathOverride,
                         imeMatchLogPath: imeMatchLogPath,
                         espAndHelloTracker: _espAndHelloTracker,
-                        isBootstrapMode: _configuration.UseBootstrapTokenAuth
+                        isBootstrapMode: _configuration.UseBootstrapTokenAuth,
+                        sendTraceEvents: _configuration.SendTraceEvents
                     );
                     _enrollmentTracker.Start();
                 }

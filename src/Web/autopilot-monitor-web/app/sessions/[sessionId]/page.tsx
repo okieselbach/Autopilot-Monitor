@@ -539,9 +539,10 @@ export default function SessionDetailPage() {
     });
   };
 
-  // Filter events by severity for the timeline
+  // Filter events by severity for the timeline.
+  // Trace events are always excluded — they are for backend-side auditing only.
   const filteredEvents = useMemo(() =>
-    events.filter(e => severityFilters.has(e.severity)),
+    events.filter(e => e.severity !== "Trace" && severityFilters.has(e.severity)),
     [events, severityFilters]
   );
 
@@ -623,20 +624,17 @@ export default function SessionDetailPage() {
   }, [events, isWhiteGloveSession]);
 
   // For WhiteGlove sessions: split filtered events into pre-provisioning and user-enrollment parts.
-  // whiteglove_complete is always assigned to pre-prov, even if its sequence is higher than the
-  // split (race condition: Windows writes the event after the reboot).
+  // Events are assigned purely by sequence number — no special-casing for whiteglove_complete.
+  // In the race-condition case (Windows writes the WhiteGlove success event after the reboot),
+  // whiteglove_complete naturally lands in the user-enrollment part, preserving chronological order.
   const preProvEvents = useMemo(() => {
     if (!isWhiteGloveSession || whiteGloveSplitSequence < 0) return [] as EnrollmentEvent[];
-    return filteredEvents.filter(e =>
-      e.sequence <= whiteGloveSplitSequence || e.eventType === "whiteglove_complete"
-    );
+    return filteredEvents.filter(e => e.sequence <= whiteGloveSplitSequence);
   }, [filteredEvents, isWhiteGloveSession, whiteGloveSplitSequence]);
 
   const userEnrollEvents = useMemo(() => {
     if (!isWhiteGloveSession || whiteGloveSplitSequence < 0) return [] as EnrollmentEvent[];
-    return filteredEvents.filter(e =>
-      e.sequence > whiteGloveSplitSequence && e.eventType !== "whiteglove_complete"
-    );
+    return filteredEvents.filter(e => e.sequence > whiteGloveSplitSequence);
   }, [filteredEvents, isWhiteGloveSession, whiteGloveSplitSequence]);
 
   // Compute per-block durations for WhiteGlove sessions (using unfiltered events for accuracy).
@@ -646,12 +644,8 @@ export default function SessionDetailPage() {
       return { preProvDuration: null as string | null, userEnrollDuration: null as string | null, combinedDuration: null as string | null };
     }
 
-    const preProvEvts = events.filter(e =>
-      e.sequence <= whiteGloveSplitSequence || e.eventType === "whiteglove_complete"
-    );
-    const userEnrollEvts = events.filter(e =>
-      e.sequence > whiteGloveSplitSequence && e.eventType !== "whiteglove_complete"
-    );
+    const preProvEvts = events.filter(e => e.sequence <= whiteGloveSplitSequence);
+    const userEnrollEvts = events.filter(e => e.sequence > whiteGloveSplitSequence);
 
     const calcMs = (evts: EnrollmentEvent[]): number => {
       if (evts.length === 0) return 0;
