@@ -182,13 +182,23 @@ export default function PhaseTimeline({ currentPhase, completedPhases, events = 
     return phaseId === 3 || phaseId === 5;
   };
 
+  // WhiteGlove signal detection: check if pre-provisioning completed and/or user enrollment resumed
+  const hasWhiteGloveComplete = isPreProvisioned && events.some(e => e.eventType === 'whiteglove_complete');
+  const hasWhiteGloveResumed = isPreProvisioned && events.some(e => e.eventType === 'whiteglove_resumed');
+
   // Derive the highest real phase (0-7) seen in events, excluding phase 99 (Failed)
   const maxEventPhase = (() => {
     const realPhases = events
       .filter(e => e.phase >= 0 && e.phase <= 7)
       .map(e => e.phase);
-    if (realPhases.length === 0) return -1;
-    return Math.max(...realPhases);
+    let maxPhase = realPhases.length > 0 ? Math.max(...realPhases) : -1;
+
+    // WhiteGlove: whiteglove_complete means phases 0-3 are done;
+    // whiteglove_resumed means user enrollment (phase 4+) has started
+    if (hasWhiteGloveResumed) maxPhase = Math.max(maxPhase, 4); // AccountSetup
+    else if (hasWhiteGloveComplete) maxPhase = Math.max(maxPhase, 3); // AppsDevice done
+
+    return maxPhase;
   })();
 
   // Determine the actual failure phase from events when session has failed
