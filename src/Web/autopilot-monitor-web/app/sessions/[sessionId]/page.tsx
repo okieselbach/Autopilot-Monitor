@@ -100,6 +100,8 @@ export default function SessionDetailPage() {
   const [analysisResults, setAnalysisResults] = useState<RuleResult[]>([]);
   const [loadingAnalysis, setLoadingAnalysis] = useState(false);
   const [analysisExpanded, setAnalysisExpanded] = useState(true);
+  const [phaseTimelineExpanded, setPhaseTimelineExpanded] = useState(true);
+  const [perfExpanded, setPerfExpanded] = useState(true);
   const [timelineExpanded, setTimelineExpanded] = useState(true);
   const [adminMode, setAdminMode] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -897,16 +899,26 @@ export default function SessionDetailPage() {
           {/* Phase Timeline */}
           {!isGatherRulesSession && session && (
             <div id="section-enrollment-progress" className="bg-white shadow rounded-lg p-6 mb-6">
-              <h2 className="text-xl font-semibold text-gray-900 mb-6">Enrollment Progress</h2>
-              <PhaseTimeline
-                currentPhase={session.currentPhase}
-                completedPhases={session.status === 'Succeeded' ? [7] : []}
-                events={events}
-                sessionStatus={session.status}
-                enrollmentType={session.enrollmentType}
-                isPreProvisioned={isWhiteGloveSession}
-                onPhaseClick={scrollToPhase}
-              />
+              <button
+                onClick={() => setPhaseTimelineExpanded(!phaseTimelineExpanded)}
+                className="flex items-center justify-between w-full text-left"
+              >
+                <h2 className="text-xl font-semibold text-gray-900">Enrollment Progress</h2>
+                <svg className={`w-5 h-5 text-gray-400 transition-transform duration-200 ${phaseTimelineExpanded ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+              {phaseTimelineExpanded && (
+                <PhaseTimeline
+                  currentPhase={session.currentPhase}
+                  completedPhases={session.status === 'Succeeded' ? [7] : []}
+                  events={events}
+                  sessionStatus={session.status}
+                  enrollmentType={session.enrollmentType}
+                  isPreProvisioned={isWhiteGloveSession}
+                  onPhaseClick={scrollToPhase}
+                />
+              )}
             </div>
           )}
 
@@ -928,6 +940,8 @@ export default function SessionDetailPage() {
             <div id="section-performance">
             <PerformanceChart
               events={events.filter(e => e.eventType === "performance_snapshot")}
+              expanded={perfExpanded}
+              setExpanded={setPerfExpanded}
             />
             </div>
           )}
