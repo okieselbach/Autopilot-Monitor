@@ -175,6 +175,22 @@ namespace AutopilotMonitor.Agent.Core.Configuration
         public bool UseBootstrapTokenAuth { get; set; }
 
         /// <summary>
+        /// Whether to show a visual enrollment summary dialog to the end user.
+        /// </summary>
+        public bool ShowEnrollmentSummary { get; set; } = false;
+
+        /// <summary>
+        /// Auto-close timeout in seconds for the enrollment summary dialog.
+        /// 0 = no auto-close. Default: 60
+        /// </summary>
+        public int EnrollmentSummaryTimeoutSeconds { get; set; } = 60;
+
+        /// <summary>
+        /// Optional URL to a branding image for the enrollment summary dialog banner.
+        /// </summary>
+        public string EnrollmentSummaryBrandingImageUrl { get; set; }
+
+        /// <summary>
         /// Whether diagnostics upload is configured for this tenant.
         /// When true, the agent requests a short-lived upload URL from the backend just before uploading.
         /// The SAS URL itself is never stored in config — it is fetched on-demand and used in memory only.

@@ -737,6 +737,30 @@ export default function SessionDetailPage() {
     setExpandedPhases(new Set());
   };
 
+  const scrollToPhase = (phaseName: string) => {
+    const id = `phase-${phaseName.replace(/[^a-zA-Z0-9]/g, '-')}`;
+    // Try both WhiteGlove prefixed and plain ids
+    const el = document.getElementById(id);
+    if (el) {
+      // Expand the phase section if collapsed
+      setExpandedPhases(prev => {
+        const newExpanded = new Set(prev);
+        // For WhiteGlove sessions, the expandedPhases key may be prefixed
+        if (isWhiteGloveSession) {
+          newExpanded.add(`pre-${phaseName}`);
+          newExpanded.add(`user-${phaseName}`);
+        } else {
+          newExpanded.add(phaseName);
+        }
+        return newExpanded;
+      });
+      // Scroll after a tick so the section is expanded
+      setTimeout(() => {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 50);
+    }
+  };
+
   const togglePhase = (phaseName: string) => {
     setExpandedPhases(prev => {
       const newExpanded = new Set(prev);
@@ -881,6 +905,7 @@ export default function SessionDetailPage() {
                 sessionStatus={session.status}
                 enrollmentType={session.enrollmentType}
                 isPreProvisioned={isWhiteGloveSession}
+                onPhaseClick={scrollToPhase}
               />
             </div>
           )}

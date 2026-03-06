@@ -136,8 +136,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     return; // Don't continue with normal event processing
                 }
 
-                // No self-destruct/reboot — still upload diagnostics if configured
-                Task.Run(() => UploadDiagnosticsWithTimelineEvents(enrollmentSucceeded));
+                // No self-destruct/reboot — still upload diagnostics and optionally show summary
+                Task.Run(async () =>
+                {
+                    await UploadDiagnosticsWithTimelineEvents(enrollmentSucceeded);
+                    if (_configuration.ShowEnrollmentSummary)
+                        LaunchEnrollmentSummaryDialog();
+                });
             }
 
             // Immediate upload for:
@@ -439,6 +444,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 // Step 2.5: Upload diagnostics package (must complete before self-destruct/reboot)
                 await UploadDiagnosticsWithTimelineEvents(enrollmentSucceeded);
 
+                // Step 2.75: Launch enrollment summary dialog (fire-and-forget, runs independently)
+                if (_configuration.ShowEnrollmentSummary)
+                    LaunchEnrollmentSummaryDialog();
+
                 // Step 3: Self-destruct (removes Scheduled Task + files) or reboot-only
                 if (_configuration.SelfDestructOnComplete)
                 {
@@ -541,6 +550,91 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             {
                 _logger.Error("Error during WhiteGlove shutdown sequence", ex);
                 Environment.Exit(0); // Still exit — don't leave a zombie process
+            }
+        }
+
+        /// <summary>
+        /// Copies the summary dialog EXE + dependencies + final-status.json to a temp folder
+        /// and launches it in the user's desktop session via CreateProcessAsUser.
+        /// Fire-and-forget: the agent does NOT wait for the dialog to exit.
+        /// The dialog self-deletes its temp folder when closed.
+        /// </summary>
+        private void LaunchEnrollmentSummaryDialog()
+        {
+            try
+            {
+                var agentDir = Path.GetDirectoryName(
+                    System.Reflection.Assembly.GetExecutingAssembly().Location) ?? string.Empty;
+                var dialogExe = Path.Combine(agentDir, "AutopilotMonitor.SummaryDialog.exe");
+
+                if (!File.Exists(dialogExe))
+                {
+                    _logger.Warning($"Summary dialog EXE not found at {dialogExe} — skipping");
+                    return;
+                }
+
+                var statusFile = Path.Combine(
+                    Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor\State"),
+                    "final-status.json");
+
+                if (!File.Exists(statusFile))
+                {
+                    _logger.Warning($"final-status.json not found at {statusFile} — skipping summary dialog");
+                    return;
+                }
+
+                // Create temp folder for the dialog (survives agent self-destruct)
+                var tempDir = Path.Combine(Path.GetTempPath(),
+                    "AutopilotMonitor-Summary-" + Guid.NewGuid().ToString("N").Substring(0, 8));
+                Directory.CreateDirectory(tempDir);
+
+                // Copy dialog EXE + Newtonsoft.Json.dll + final-status.json to temp
+                var tempDialogExe = Path.Combine(tempDir, "AutopilotMonitor.SummaryDialog.exe");
+                File.Copy(dialogExe, tempDialogExe);
+
+                var jsonDll = Path.Combine(agentDir, "Newtonsoft.Json.dll");
+                if (File.Exists(jsonDll))
+                    File.Copy(jsonDll, Path.Combine(tempDir, "Newtonsoft.Json.dll"));
+
+                var tempStatusFile = Path.Combine(tempDir, "final-status.json");
+                File.Copy(statusFile, tempStatusFile);
+
+                // Build command line arguments
+                var args = $"--status-file \"{tempStatusFile}\" --timeout {_configuration.EnrollmentSummaryTimeoutSeconds}";
+                if (!string.IsNullOrEmpty(_configuration.EnrollmentSummaryBrandingImageUrl))
+                    args += $" --branding-url \"{_configuration.EnrollmentSummaryBrandingImageUrl}\"";
+
+                _logger.Info($"Launching enrollment summary dialog: {tempDialogExe} {args}");
+
+                // Emit timeline event
+                EmitEvent(new EnrollmentEvent
+                {
+                    SessionId = _configuration.SessionId,
+                    TenantId = _configuration.TenantId,
+                    Timestamp = DateTime.UtcNow,
+                    EventType = "enrollment_summary_shown",
+                    Severity = EventSeverity.Info,
+                    Source = "MonitoringService",
+                    Phase = EnrollmentPhase.Complete,
+                    Message = "Launching enrollment summary dialog to user"
+                });
+
+                // Best-effort upload of the timeline event
+                try { UploadEventsAsync().Wait(TimeSpan.FromSeconds(5)); } catch { }
+
+                // Launch in user session (fire-and-forget)
+                var launched = UserSessionProcessLauncher.LaunchInUserSession(tempDialogExe, args, _logger);
+                if (!launched)
+                {
+                    _logger.Warning("Could not launch summary dialog in user session (no interactive session found)");
+                    // Clean up temp folder since dialog won't run
+                    try { Directory.Delete(tempDir, true); } catch { }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"Failed to launch enrollment summary dialog: {ex.Message}");
+                // Non-fatal — continue with self-destruct/reboot
             }
         }
 

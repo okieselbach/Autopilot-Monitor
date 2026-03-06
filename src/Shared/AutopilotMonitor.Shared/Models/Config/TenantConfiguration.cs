@@ -224,6 +224,25 @@ namespace AutopilotMonitor.Shared.Models
         public int? MaxBatchSize { get; set; }
 
         /// <summary>
+        /// Whether to show a visual enrollment summary dialog to the end user
+        /// after enrollment completes (success or failure).
+        /// null = use agent default (false).
+        /// </summary>
+        public bool? ShowEnrollmentSummary { get; set; }
+
+        /// <summary>
+        /// Auto-close timeout in seconds for the enrollment summary dialog.
+        /// null = use agent default (60). 0 = no auto-close.
+        /// </summary>
+        public int? EnrollmentSummaryTimeoutSeconds { get; set; }
+
+        /// <summary>
+        /// Optional URL to a branding image displayed as a banner at the top of the enrollment summary dialog.
+        /// Expected size: 540 x 80 px. Larger images will be center-cropped.
+        /// </summary>
+        public string EnrollmentSummaryBrandingImageUrl { get; set; }
+
+        /// <summary>
         /// Whether to show PowerShell script stdout in the web UI.
         /// When false, only stderr (error output) is visible for troubleshooting.
         /// stdout may contain sensitive data (credentials, tokens).

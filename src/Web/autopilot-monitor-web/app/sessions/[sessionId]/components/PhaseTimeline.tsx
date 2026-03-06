@@ -298,18 +298,18 @@ export default function PhaseTimeline({ currentPhase, completedPhases, events = 
             />
           </div>
         )}
-        {/* Circle */}
-        <div className={`relative z-10 w-12 h-12 rounded-full flex items-center justify-center border-2 transition-all font-semibold ${getPhaseColor(status)}`}>
-          {status === 'completed' ? '✓' : status === 'failed' ? '✕' : phase.id + 1}
-        </div>
-        {/* Labels */}
-        <div className="mt-3 text-center">
-          <div
-            className={`text-xs font-medium text-gray-700 whitespace-nowrap${onPhaseClick ? ' cursor-pointer' : ''}`}
-            onClick={onPhaseClick ? () => onPhaseClick(phase.name) : undefined}
-          >
-            {phase.shortName}
+        {/* Circle + Labels — clickable to scroll to phase in timeline */}
+        <div
+          className={onPhaseClick ? 'cursor-pointer' : ''}
+          onClick={onPhaseClick ? () => onPhaseClick(phase.name) : undefined}
+        >
+          <div className={`relative z-10 w-12 h-12 rounded-full flex items-center justify-center border-2 transition-all font-semibold mx-auto ${getPhaseColor(status)}`}>
+            {status === 'completed' ? '✓' : status === 'failed' ? '✕' : phase.id + 1}
           </div>
+          <div className="mt-3 text-center">
+            <div className="text-xs font-medium text-gray-700 whitespace-nowrap">
+              {phase.shortName}
+            </div>
           {(status === 'completed' || status === 'failed') && getPhaseDuration(phase.id) && (
             <div className={`mt-0.5 text-[10px] ${
               status === 'failed' ? 'text-red-400' :
@@ -328,6 +328,7 @@ export default function PhaseTimeline({ currentPhase, completedPhases, events = 
               </div>
             </div>
           )}
+          </div>
         </div>
       </div>
     );

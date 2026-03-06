@@ -58,6 +58,10 @@ export interface TenantConfiguration {
   diagnosticsBlobSasUrl?: string;
   diagnosticsUploadMode?: string;
   diagnosticsLogPathsJson?: string;
+  // Enrollment summary dialog
+  showEnrollmentSummary?: boolean;
+  enrollmentSummaryTimeoutSeconds?: number;
+  enrollmentSummaryBrandingImageUrl?: string;
   // Script output visibility
   showScriptOutput?: boolean;
   // Agent analyzer settings
@@ -131,6 +135,9 @@ export default function SettingsPage() {
   const [enableImeMatchLog, setEnableImeMatchLog] = useState(false);
   const [logLevel, setLogLevel] = useState("Info");
   const [showScriptOutput, setShowScriptOutput] = useState(true);
+  const [showEnrollmentSummary, setShowEnrollmentSummary] = useState(false);
+  const [enrollmentSummaryTimeoutSeconds, setEnrollmentSummaryTimeoutSeconds] = useState(60);
+  const [enrollmentSummaryBrandingImageUrl, setEnrollmentSummaryBrandingImageUrl] = useState("");
 
   // Teams notifications state
   const [teamsWebhookUrl, setTeamsWebhookUrl] = useState("");
@@ -172,6 +179,9 @@ export default function SettingsPage() {
       enableImeMatchLog !== (config.enableImeMatchLog ?? false) ||
       logLevel !== (config.logLevel ?? "Info") ||
       showScriptOutput !== (config.showScriptOutput ?? true) ||
+      showEnrollmentSummary !== (config.showEnrollmentSummary ?? false) ||
+      enrollmentSummaryTimeoutSeconds !== (config.enrollmentSummaryTimeoutSeconds ?? 60) ||
+      enrollmentSummaryBrandingImageUrl !== (config.enrollmentSummaryBrandingImageUrl ?? "") ||
       teamsWebhookUrl !== (config.teamsWebhookUrl ?? "") ||
       teamsNotifyOnSuccess !== (config.teamsNotifyOnSuccess ?? true) ||
       teamsNotifyOnFailure !== (config.teamsNotifyOnFailure ?? true) ||
@@ -191,7 +201,8 @@ export default function SettingsPage() {
     dataRetentionDays, sessionTimeoutHours, enablePerformanceCollector,
     performanceCollectorInterval, helloWaitTimeoutSeconds, selfDestructOnComplete, keepLogFile,
     rebootOnComplete, rebootDelaySeconds, enableGeoLocation, enableImeMatchLog,
-    logLevel, showScriptOutput, teamsWebhookUrl, teamsNotifyOnSuccess, teamsNotifyOnFailure,
+    logLevel, showScriptOutput, showEnrollmentSummary, enrollmentSummaryTimeoutSeconds,
+    enrollmentSummaryBrandingImageUrl, teamsWebhookUrl, teamsNotifyOnSuccess, teamsNotifyOnFailure,
     diagnosticsBlobSasUrl, diagnosticsUploadMode, tenantDiagPaths,
     enableLocalAdminAnalyzer, localAdminAllowedAccounts,
   ]);
@@ -233,6 +244,9 @@ export default function SettingsPage() {
         setEnableImeMatchLog(data.enableImeMatchLog ?? false);
         setLogLevel(data.logLevel ?? "Info");
         setShowScriptOutput(data.showScriptOutput ?? true);
+        setShowEnrollmentSummary(data.showEnrollmentSummary ?? false);
+        setEnrollmentSummaryTimeoutSeconds(data.enrollmentSummaryTimeoutSeconds ?? 60);
+        setEnrollmentSummaryBrandingImageUrl(data.enrollmentSummaryBrandingImageUrl ?? "");
         setTeamsWebhookUrl(data.teamsWebhookUrl ?? "");
         setTeamsNotifyOnSuccess(data.teamsNotifyOnSuccess ?? true);
         setTeamsNotifyOnFailure(data.teamsNotifyOnFailure ?? true);
@@ -454,6 +468,9 @@ export default function SettingsPage() {
         enableImeMatchLog,
         logLevel,
         showScriptOutput,
+        showEnrollmentSummary,
+        enrollmentSummaryTimeoutSeconds,
+        enrollmentSummaryBrandingImageUrl: enrollmentSummaryBrandingImageUrl || undefined,
         teamsWebhookUrl: teamsWebhookUrl || undefined,
         teamsNotifyOnSuccess,
         teamsNotifyOnFailure,
@@ -978,6 +995,12 @@ export default function SettingsPage() {
               setLogLevel={setLogLevel}
               showScriptOutput={showScriptOutput}
               setShowScriptOutput={setShowScriptOutput}
+              showEnrollmentSummary={showEnrollmentSummary}
+              setShowEnrollmentSummary={setShowEnrollmentSummary}
+              enrollmentSummaryTimeoutSeconds={enrollmentSummaryTimeoutSeconds}
+              setEnrollmentSummaryTimeoutSeconds={setEnrollmentSummaryTimeoutSeconds}
+              enrollmentSummaryBrandingImageUrl={enrollmentSummaryBrandingImageUrl}
+              setEnrollmentSummaryBrandingImageUrl={setEnrollmentSummaryBrandingImageUrl}
             />
 
             <AgentAnalyzersSection

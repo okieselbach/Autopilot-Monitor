@@ -53,52 +53,92 @@ export default function EventTimeline({
   userEnrollDuration,
   showScriptOutput,
 }: EventTimelineProps) {
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const matchesSearch = useMemo(() => {
+    if (!searchQuery.trim()) return null;
+    const q = searchQuery.toLowerCase();
+    return (event: EnrollmentEvent) =>
+      event.eventType?.toLowerCase().includes(q) ||
+      event.message?.toLowerCase().includes(q) ||
+      event.source?.toLowerCase().includes(q);
+  }, [searchQuery]);
+
+  const filterPhaseEvents = (phaseEvents: EnrollmentEvent[]) =>
+    matchesSearch ? phaseEvents.filter(matchesSearch) : phaseEvents;
+
   return (
     <div className="space-y-6">
-      {/* Severity filters + Expand/Collapse — shared controls above the timeline(s) */}
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs font-medium text-gray-500">Filter:</span>
-        {(["Debug", "Info", "Warning", "Error", "Critical"] as const).map((sev) => {
-          const active = severityFilters.has(sev);
-          const colors: Record<string, { on: string; off: string }> = {
-            Debug:    { on: "bg-gray-200 text-gray-800",  off: "bg-gray-50 text-gray-400" },
-            Info:     { on: "bg-blue-100 text-blue-800",  off: "bg-gray-50 text-gray-400" },
-            Warning:  { on: "bg-yellow-100 text-yellow-800", off: "bg-gray-50 text-gray-400" },
-            Error:    { on: "bg-red-100 text-red-800",    off: "bg-gray-50 text-gray-400" },
-            Critical: { on: "bg-red-200 text-red-900",    off: "bg-gray-50 text-gray-400" },
-          };
-          return (
+      {/* Search + Severity filters + Expand/Collapse — shared controls above the timeline(s) */}
+      <div className="space-y-2">
+        {/* Search bar — full width on mobile, fixed width on larger screens */}
+        <div className="relative w-full sm:w-48">
+          <svg className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search events..."
+            className="w-full pl-7 pr-7 py-1 text-xs border border-gray-300 rounded-full focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+          />
+          {searchQuery && (
             <button
-              key={sev}
-              onClick={() => toggleSeverityFilter(sev)}
-              className={`px-2.5 py-1 text-xs font-medium rounded-full transition-colors ${active ? colors[sev].on : colors[sev].off} hover:opacity-80`}
+              onClick={() => setSearchQuery("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
             >
-              {sev}
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
             </button>
-          );
-        })}
-        <span className="text-xs text-gray-400">({filteredEvents.length}/{events.length})</span>
-        <div className="flex gap-1.5 ml-auto">
-          <button
-            onClick={expandAll}
-            title="Expand All"
-            className="flex items-center gap-1 px-2 py-1 text-xs bg-blue-50 text-blue-700 hover:bg-blue-100 rounded transition-colors"
-          >
-            <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-            <span className="hidden sm:inline">Expand All</span>
-          </button>
-          <button
-            onClick={collapseAll}
-            title="Collapse All"
-            className="flex items-center gap-1 px-2 py-1 text-xs bg-gray-50 text-gray-700 hover:bg-gray-100 rounded transition-colors"
-          >
-            <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
-            </svg>
-            <span className="hidden sm:inline">Collapse All</span>
-          </button>
+          )}
+        </div>
+        {/* Severity filters + Expand/Collapse */}
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-gray-500">Filter:</span>
+          {(["Debug", "Info", "Warning", "Error", "Critical"] as const).map((sev) => {
+            const active = severityFilters.has(sev);
+            const colors: Record<string, { on: string; off: string }> = {
+              Debug:    { on: "bg-gray-200 text-gray-800",  off: "bg-gray-50 text-gray-400" },
+              Info:     { on: "bg-blue-100 text-blue-800",  off: "bg-gray-50 text-gray-400" },
+              Warning:  { on: "bg-yellow-100 text-yellow-800", off: "bg-gray-50 text-gray-400" },
+              Error:    { on: "bg-red-100 text-red-800",    off: "bg-gray-50 text-gray-400" },
+              Critical: { on: "bg-red-200 text-red-900",    off: "bg-gray-50 text-gray-400" },
+            };
+            return (
+              <button
+                key={sev}
+                onClick={() => toggleSeverityFilter(sev)}
+                className={`px-2.5 py-1 text-xs font-medium rounded-full transition-colors ${active ? colors[sev].on : colors[sev].off} hover:opacity-80`}
+              >
+                {sev}
+              </button>
+            );
+          })}
+          <span className="text-xs text-gray-400">({filteredEvents.length}/{events.length})</span>
+          <div className="flex gap-1.5 ml-auto">
+            <button
+              onClick={expandAll}
+              title="Expand All"
+              className="flex items-center gap-1 px-2 py-1 text-xs bg-blue-50 text-blue-700 hover:bg-blue-100 rounded transition-colors"
+            >
+              <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+              <span className="hidden sm:inline">Expand All</span>
+            </button>
+            <button
+              onClick={collapseAll}
+              title="Collapse All"
+              className="flex items-center gap-1 px-2 py-1 text-xs bg-gray-50 text-gray-700 hover:bg-gray-100 rounded transition-colors"
+            >
+              <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+              </svg>
+              <span className="hidden sm:inline">Collapse All</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -122,7 +162,7 @@ export default function EventTimeline({
                   <PhaseSection
                     key={`pre-${phaseName}`}
                     phaseName={phaseName}
-                    events={preProvGrouped.eventsByPhase[phaseName]}
+                    events={filterPhaseEvents(preProvGrouped.eventsByPhase[phaseName])}
                     isExpanded={expandedPhases.has(`pre-${phaseName}`)}
                     onToggle={() => togglePhase(`pre-${phaseName}`)}
                     isGalacticAdmin={isGalacticAdmin}
@@ -160,7 +200,7 @@ export default function EventTimeline({
                     <PhaseSection
                       key={`user-${phaseName}`}
                       phaseName={phaseName}
-                      events={userEnrollGrouped.eventsByPhase[phaseName]}
+                      events={filterPhaseEvents(userEnrollGrouped.eventsByPhase[phaseName])}
                       isExpanded={expandedPhases.has(`user-${phaseName}`)}
                       onToggle={() => togglePhase(`user-${phaseName}`)}
                       isGalacticAdmin={isGalacticAdmin}
@@ -199,7 +239,7 @@ export default function EventTimeline({
                     <PhaseSection
                       key={phaseName}
                       phaseName={phaseName}
-                      events={eventsByPhase[phaseName]}
+                      events={filterPhaseEvents(eventsByPhase[phaseName])}
                       isExpanded={expandedPhases.has(phaseName)}
                       onToggle={() => togglePhase(phaseName)}
                       isGalacticAdmin={isGalacticAdmin}

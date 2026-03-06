@@ -136,7 +136,7 @@ namespace AutopilotMonitor.Functions.Functions.Config
             var response = req.CreateResponse(HttpStatusCode.OK);
             await response.WriteAsJsonAsync(new AgentConfigResponse
             {
-                ConfigVersion = 14, // script execution tracking: platform + remediation scripts from IME logs
+                ConfigVersion = 15, // enrollment summary dialog
                 UploadIntervalSeconds = 30,
                 SelfDestructOnComplete = tenantConfig.SelfDestructOnComplete ?? true,
                 KeepLogFile = tenantConfig.KeepLogFile ?? false,
@@ -147,6 +147,9 @@ namespace AutopilotMonitor.Functions.Functions.Config
                 LogLevel = tenantConfig.LogLevel ?? "Info",
                 RebootOnComplete = tenantConfig.RebootOnComplete ?? false,
                 RebootDelaySeconds = tenantConfig.RebootDelaySeconds ?? 10,
+                ShowEnrollmentSummary = tenantConfig.ShowEnrollmentSummary ?? false,
+                EnrollmentSummaryTimeoutSeconds = tenantConfig.EnrollmentSummaryTimeoutSeconds ?? 60,
+                EnrollmentSummaryBrandingImageUrl = tenantConfig.EnrollmentSummaryBrandingImageUrl,
                 MaxBatchSize = tenantConfig.MaxBatchSize ?? 100,
                 DiagnosticsUploadEnabled = !string.IsNullOrEmpty(tenantConfig.DiagnosticsBlobSasUrl),
                 DiagnosticsUploadMode = tenantConfig.DiagnosticsUploadMode ?? "Off",

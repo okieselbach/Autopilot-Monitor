@@ -329,11 +329,16 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 _logger.SetLogLevel(remoteLogLevel);
             }
 
+            _configuration.ShowEnrollmentSummary = config.ShowEnrollmentSummary;
+            _configuration.EnrollmentSummaryTimeoutSeconds = config.EnrollmentSummaryTimeoutSeconds;
+            _configuration.EnrollmentSummaryBrandingImageUrl = config.EnrollmentSummaryBrandingImageUrl;
+
             _logger.Info("Applied runtime settings from remote config");
             _logger.Info($"  uploadIntervalSeconds={_configuration.UploadIntervalSeconds}, selfDestructOnComplete={_configuration.SelfDestructOnComplete}, keepLogFile={_configuration.KeepLogFile}");
             _logger.Info($"  enableGeoLocation={_configuration.EnableGeoLocation}, imeMatchLogPath={_configuration.ImeMatchLogPath ?? "(disabled)"}");
             _logger.Info($"  maxAuthFailures={_configuration.MaxAuthFailures}, authFailureTimeoutMinutes={_configuration.AuthFailureTimeoutMinutes}");
             _logger.Info($"  logLevel={_configuration.LogLevel}, rebootOnComplete={_configuration.RebootOnComplete}, maxBatchSize={_configuration.MaxBatchSize}");
+            _logger.Info($"  showEnrollmentSummary={_configuration.ShowEnrollmentSummary}, summaryTimeoutSeconds={_configuration.EnrollmentSummaryTimeoutSeconds}");
         }
 
         /// <summary>

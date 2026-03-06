@@ -23,6 +23,12 @@ interface AgentSettingsSectionProps {
   setLogLevel: (value: string) => void;
   showScriptOutput: boolean;
   setShowScriptOutput: (value: boolean) => void;
+  showEnrollmentSummary: boolean;
+  setShowEnrollmentSummary: (value: boolean) => void;
+  enrollmentSummaryTimeoutSeconds: number;
+  setEnrollmentSummaryTimeoutSeconds: (value: number) => void;
+  enrollmentSummaryBrandingImageUrl: string;
+  setEnrollmentSummaryBrandingImageUrl: (value: string) => void;
 }
 
 export default function AgentSettingsSection({
@@ -48,6 +54,12 @@ export default function AgentSettingsSection({
   setLogLevel,
   showScriptOutput,
   setShowScriptOutput,
+  showEnrollmentSummary,
+  setShowEnrollmentSummary,
+  enrollmentSummaryTimeoutSeconds,
+  setEnrollmentSummaryTimeoutSeconds,
+  enrollmentSummaryBrandingImageUrl,
+  setEnrollmentSummaryBrandingImageUrl,
 }: AgentSettingsSectionProps) {
   return (
     <>
@@ -256,6 +268,56 @@ export default function AgentSettingsSection({
               <option value="Verbose">Verbose</option>
             </select>
           </div>
+
+          {/* Enrollment Summary Dialog */}
+          <div className="flex items-center justify-between p-4 rounded-lg border border-gray-200 hover:border-violet-200 transition-colors">
+            <div className="flex-1">
+              <p className="font-medium text-gray-900">Show Enrollment Summary</p>
+              <p className="text-sm text-gray-500">Display a visual enrollment summary dialog to the end user after enrollment completes (success or failure). Requires the SummaryDialog companion to be deployed alongside the agent.</p>
+            </div>
+            <button onClick={() => setShowEnrollmentSummary(!showEnrollmentSummary)}
+              className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${showEnrollmentSummary ? 'bg-violet-500' : 'bg-gray-300'}`}>
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${showEnrollmentSummary ? 'translate-x-6' : 'translate-x-1'}`} />
+            </button>
+          </div>
+
+          {showEnrollmentSummary && (
+            <>
+              {/* Auto-close timeout */}
+              <div className="flex items-center justify-between p-4 rounded-lg border border-gray-200 hover:border-violet-200 transition-colors ml-4">
+                <div>
+                  <p className="font-medium text-gray-900">Auto-Close Timeout</p>
+                  <p className="text-sm text-gray-500">Seconds until the summary dialog closes automatically. 0 = no auto-close.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={0}
+                    max={3600}
+                    value={enrollmentSummaryTimeoutSeconds}
+                    onChange={(e) => setEnrollmentSummaryTimeoutSeconds(Math.max(0, parseInt(e.target.value) || 0))}
+                    className="w-20 px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-gray-900 text-right focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
+                  />
+                  <span className="text-sm text-gray-500 whitespace-nowrap">seconds</span>
+                </div>
+              </div>
+
+              {/* Branding Image URL */}
+              <div className="p-4 rounded-lg border border-gray-200 hover:border-violet-200 transition-colors ml-4">
+                <div className="mb-2">
+                  <p className="font-medium text-gray-900">Branding Image URL</p>
+                  <p className="text-sm text-gray-500">Optional banner image at the top of the summary dialog. Recommended size: 540 x 80 px. Larger images will be center-cropped.</p>
+                </div>
+                <input
+                  type="url"
+                  value={enrollmentSummaryBrandingImageUrl}
+                  onChange={(e) => setEnrollmentSummaryBrandingImageUrl(e.target.value)}
+                  placeholder="https://example.com/branding-banner.png"
+                  className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-gray-900 focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
+                />
+              </div>
+            </>
+          )}
 
         </div>
       </div>

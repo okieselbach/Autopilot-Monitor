@@ -87,6 +87,26 @@ namespace AutopilotMonitor.Shared.Models
         public int RebootDelaySeconds { get; set; } = 10;
 
         /// <summary>
+        /// Whether to show a visual enrollment summary dialog to the end user
+        /// after enrollment completes (success or failure).
+        /// Default: false (opt-in)
+        /// </summary>
+        public bool ShowEnrollmentSummary { get; set; } = false;
+
+        /// <summary>
+        /// Auto-close timeout in seconds for the enrollment summary dialog.
+        /// 0 = no auto-close. Default: 60
+        /// </summary>
+        public int EnrollmentSummaryTimeoutSeconds { get; set; } = 60;
+
+        /// <summary>
+        /// Optional URL to a branding image displayed as a banner at the top of the enrollment summary dialog.
+        /// Expected size: 540 x 80 px. Larger images will be center-cropped.
+        /// null = no banner.
+        /// </summary>
+        public string EnrollmentSummaryBrandingImageUrl { get; set; }
+
+        /// <summary>
         /// Maximum number of events per upload batch.
         /// Default: 100
         /// </summary>
