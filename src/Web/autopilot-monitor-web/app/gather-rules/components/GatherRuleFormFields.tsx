@@ -1,0 +1,344 @@
+"use client";
+
+import {
+  NewRuleForm,
+  CATEGORIES,
+  COLLECTOR_TYPES,
+  COLLECTOR_TYPE_LABELS,
+  TRIGGERS,
+  SEVERITIES,
+  TARGET_PLACEHOLDERS,
+  TARGET_HINTS,
+  formatTrigger,
+} from "../types";
+
+interface GatherRuleFormFieldsProps {
+  form: NewRuleForm;
+  setForm: (f: NewRuleForm) => void;
+  showRuleId: boolean;
+}
+
+export function GatherRuleFormFields({ form, setForm, showRuleId }: GatherRuleFormFieldsProps) {
+  return (
+    <div className="space-y-5">
+      {/* Row 1: Rule ID (create only), Title */}
+      <div className={`grid grid-cols-1 ${showRuleId ? "sm:grid-cols-2" : ""} gap-4`}>
+        {showRuleId && (
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Rule ID <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={form.ruleId}
+              onChange={(e) => setForm({ ...form, ruleId: e.target.value })}
+              placeholder="e.g., custom-network-check"
+              autoComplete="off"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+            />
+          </div>
+        )}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Title <span className="text-red-500">*</span>
+          </label>
+          <input
+            type="text"
+            value={form.title}
+            onChange={(e) => setForm({ ...form, title: e.target.value })}
+            placeholder="e.g., Custom Network Check"
+            autoComplete="off"
+            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+          />
+        </div>
+      </div>
+
+      {/* Description */}
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+        <textarea
+          value={form.description}
+          onChange={(e) => setForm({ ...form, description: e.target.value })}
+          placeholder="Describe what this rule collects and why..."
+          rows={2}
+          className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors resize-none"
+        />
+      </div>
+
+      {/* Row 2: Category, Collector Type */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+          <select
+            value={form.category}
+            onChange={(e) => setForm({ ...form, category: e.target.value })}
+            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+          >
+            {CATEGORIES.map((cat) => (
+              <option key={cat} value={cat}>
+                {cat.charAt(0).toUpperCase() + cat.slice(1)}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Collector Type</label>
+          <select
+            value={form.collectorType}
+            onChange={(e) => setForm({ ...form, collectorType: e.target.value })}
+            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+          >
+            {COLLECTOR_TYPES.map((ct) => (
+              <option key={ct} value={ct}>
+                {COLLECTOR_TYPE_LABELS[ct] || (ct.charAt(0).toUpperCase() + ct.slice(1))}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* Target */}
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          Target <span className="text-red-500">*</span>
+        </label>
+        <input
+          type="text"
+          value={form.target}
+          onChange={(e) => setForm({ ...form, target: e.target.value })}
+          placeholder={TARGET_PLACEHOLDERS[form.collectorType] || "Target for data collection"}
+          autoComplete="off"
+          className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+        />
+        <p className="text-xs text-gray-400 mt-1">{TARGET_HINTS[form.collectorType] || "Registry path, WMI class, event log name, file path, or command depending on collector type"}</p>
+      </div>
+
+      {/* Registry: optional Value Name */}
+      {form.collectorType === "registry" && (
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Value Name</label>
+          <input
+            type="text"
+            value={form.valueName}
+            onChange={(e) => setForm({ ...form, valueName: e.target.value })}
+            placeholder="e.g., IsRecoveryAllowed (leave empty to read all values)"
+            autoComplete="off"
+            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+          />
+          <p className="text-xs text-gray-400 mt-1">Specific registry value to read. Leave empty to read all values in the key.</p>
+        </div>
+      )}
+
+      {/* EventLog: optional filters */}
+      {form.collectorType === "eventlog" && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Event ID</label>
+              <input
+                type="text"
+                value={form.eventId}
+                onChange={(e) => setForm({ ...form, eventId: e.target.value })}
+                placeholder="e.g., 62407 (leave empty for all events)"
+                autoComplete="off"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+              />
+              <p className="text-xs text-gray-400 mt-1">Filter by specific Event ID. Leave empty to collect all events.</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Max Entries</label>
+              <input
+                type="number"
+                min={1}
+                max={50}
+                value={form.maxEntries}
+                onChange={(e) => setForm({ ...form, maxEntries: e.target.value })}
+                placeholder="10"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+              />
+              <p className="text-xs text-gray-400 mt-1">Maximum number of events to return (1-50, default: 10).</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Source / Provider</label>
+              <input
+                type="text"
+                value={form.source}
+                onChange={(e) => setForm({ ...form, source: e.target.value })}
+                placeholder="e.g., Microsoft-Windows-Kernel-General"
+                autoComplete="off"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+              />
+              <p className="text-xs text-gray-400 mt-1">Filter by event provider/source name. Leave empty for all sources.</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Message Filter</label>
+              <input
+                type="text"
+                value={form.messageFilter}
+                onChange={(e) => setForm({ ...form, messageFilter: e.target.value })}
+                placeholder="e.g., *ESPProgress* (leave empty for no filter)"
+                autoComplete="off"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+              />
+              <p className="text-xs text-gray-400 mt-1">Filter by message text. Use * as wildcard prefix/suffix.</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* File: optional parameters */}
+      {form.collectorType === "file" && (
+        <div>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={form.readContent}
+              onChange={(e) => setForm({ ...form, readContent: e.target.checked })}
+              className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+            />
+            <span className="text-sm font-medium text-gray-700">Read file content</span>
+          </label>
+          <p className="text-xs text-gray-400 mt-1 ml-6">Read the last 4000 characters of the file (only files &lt;50 KB). Useful for log files and setup logs.</p>
+        </div>
+      )}
+
+      {/* LogParser: required pattern + optional settings */}
+      {form.collectorType === "logparser" && (
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Pattern <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={form.logPattern}
+              onChange={(e) => setForm({ ...form, logPattern: e.target.value })}
+              placeholder={`e.g., (?<action>Install|Uninstall).*(?<appName>[A-Za-z0-9_-]+)`}
+              autoComplete="off"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+            />
+            <p className="text-xs text-gray-400 mt-1">Regex with named capture groups. Each match emits a separate event. Named groups become event data fields.</p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Max Lines</label>
+              <input
+                type="number"
+                min={1}
+                max={10000}
+                value={form.maxLines}
+                onChange={(e) => setForm({ ...form, maxLines: e.target.value })}
+                placeholder="1000"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+              />
+              <p className="text-xs text-gray-400 mt-1">Max lines to parse per execution (default: 1000).</p>
+            </div>
+            <div className="flex flex-col justify-center">
+              <label className="flex items-center gap-2 cursor-pointer mt-4">
+                <input
+                  type="checkbox"
+                  checked={form.trackPosition}
+                  onChange={(e) => setForm({ ...form, trackPosition: e.target.checked })}
+                  className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                />
+                <span className="text-sm font-medium text-gray-700">Track position</span>
+              </label>
+              <p className="text-xs text-gray-400 mt-1 ml-6">Resume from last read position across executions (recommended).</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Trigger */}
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">Trigger</label>
+        <select
+          value={form.trigger}
+          onChange={(e) => setForm({ ...form, trigger: e.target.value })}
+          className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+        >
+          {TRIGGERS.map((t) => (
+            <option key={t} value={t}>{formatTrigger(t)}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Conditional Trigger Fields */}
+      {form.trigger === "interval" && (
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Interval (seconds)</label>
+          <input
+            type="number"
+            min={5}
+            max={3600}
+            value={form.intervalSeconds}
+            onChange={(e) => setForm({ ...form, intervalSeconds: parseInt(e.target.value) || 60 })}
+            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+          />
+          <p className="text-xs text-gray-400 mt-1">How often to run this rule (5 - 3600 seconds)</p>
+        </div>
+      )}
+
+      {form.trigger === "phase_change" && (
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Trigger Phase</label>
+          <input
+            type="text"
+            value={form.triggerPhase}
+            onChange={(e) => setForm({ ...form, triggerPhase: e.target.value })}
+            placeholder="e.g., DeviceESP, AccountESP, DevicePreparation"
+            autoComplete="off"
+            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+          />
+        </div>
+      )}
+
+      {form.trigger === "on_event" && (
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Trigger Event Type</label>
+          <input
+            type="text"
+            value={form.triggerEventType}
+            onChange={(e) => setForm({ ...form, triggerEventType: e.target.value })}
+            placeholder="e.g., enrollment_complete, enrollment_failed, app_install_failed"
+            autoComplete="off"
+            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+          />
+        </div>
+      )}
+
+      {/* Row 3: Output Event Type, Output Severity */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Output Event Type <span className="text-red-500">*</span>
+          </label>
+          <input
+            type="text"
+            value={form.outputEventType}
+            onChange={(e) => setForm({ ...form, outputEventType: e.target.value })}
+            placeholder="e.g., CustomNetworkStatus"
+            autoComplete="off"
+            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Output Severity</label>
+          <select
+            value={form.outputSeverity}
+            onChange={(e) => setForm({ ...form, outputSeverity: e.target.value })}
+            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+          >
+            {SEVERITIES.map((s) => (
+              <option key={s} value={s}>
+                {s.charAt(0).toUpperCase() + s.slice(1)}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+    </div>
+  );
+}

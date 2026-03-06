@@ -8,7 +8,7 @@ using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
 
-namespace AutopilotMonitor.Functions.Functions
+namespace AutopilotMonitor.Functions.Functions.Bootstrap
 {
     /// <summary>
     /// GET /api/bootstrap/validate/{code} — Validate a bootstrap code and return the token.

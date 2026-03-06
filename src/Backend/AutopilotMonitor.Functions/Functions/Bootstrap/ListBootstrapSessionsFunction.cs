@@ -9,7 +9,7 @@ using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
 
-namespace AutopilotMonitor.Functions.Functions
+namespace AutopilotMonitor.Functions.Functions.Bootstrap
 {
     /// <summary>
     /// GET /api/bootstrap/sessions?tenantId={tenantId} — List bootstrap sessions for a tenant.

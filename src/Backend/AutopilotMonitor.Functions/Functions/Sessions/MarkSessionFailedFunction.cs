@@ -7,7 +7,7 @@ using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Azure.Functions.Worker.Extensions.SignalRService;
 using Microsoft.Extensions.Logging;
 
-namespace AutopilotMonitor.Functions.Functions
+namespace AutopilotMonitor.Functions.Functions.Sessions
 {
     public class MarkSessionFailedFunction
     {

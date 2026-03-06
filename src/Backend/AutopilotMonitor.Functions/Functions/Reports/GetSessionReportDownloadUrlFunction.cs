@@ -8,7 +8,7 @@ using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
-namespace AutopilotMonitor.Functions.Functions
+namespace AutopilotMonitor.Functions.Functions.Reports
 {
     /// <summary>
     /// Returns a short-lived SAS download URL for a session report blob stored in central blob storage.

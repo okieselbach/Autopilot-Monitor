@@ -3,7 +3,7 @@ using AutopilotMonitor.Functions.Services;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Logging;
 
-namespace AutopilotMonitor.Functions.Functions
+namespace AutopilotMonitor.Functions.Functions.Admin
 {
     /// <summary>
     /// Timer-triggered Azure Function that runs daily maintenance.

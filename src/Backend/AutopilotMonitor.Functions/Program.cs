@@ -1,5 +1,8 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using AutopilotMonitor.Functions.Functions.Config;
+using AutopilotMonitor.Functions.Functions.Ingest;
+using AutopilotMonitor.Functions.Functions.Sessions;
 using AutopilotMonitor.Functions.Middleware;
 using AutopilotMonitor.Functions.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -113,10 +116,10 @@ builder.Services.AddSingleton<SessionReportService>();
 builder.Services.AddSingleton<BootstrapSessionService>();
 
 // Register agent Function classes so bootstrap wrappers can inject them for code reuse
-builder.Services.AddSingleton<AutopilotMonitor.Functions.Functions.IngestEventsFunction>();
-builder.Services.AddSingleton<AutopilotMonitor.Functions.Functions.RegisterSessionFunction>();
-builder.Services.AddSingleton<AutopilotMonitor.Functions.Functions.GetAgentConfigFunction>();
-builder.Services.AddSingleton<AutopilotMonitor.Functions.Functions.ReportAgentErrorFunction>();
+builder.Services.AddSingleton<IngestEventsFunction>();
+builder.Services.AddSingleton<RegisterSessionFunction>();
+builder.Services.AddSingleton<GetAgentConfigFunction>();
+builder.Services.AddSingleton<ReportAgentErrorFunction>();
 builder.Services.AddSingleton<AutopilotMonitor.Functions.Security.GraphTokenService>();
 builder.Services.AddSingleton<AutopilotMonitor.Functions.Security.AutopilotDeviceValidator>();
 builder.Services.AddSingleton<AutopilotMonitor.Functions.Security.CorporateIdentifierValidator>();

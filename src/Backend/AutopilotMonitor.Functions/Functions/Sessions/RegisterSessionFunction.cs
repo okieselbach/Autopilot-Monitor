@@ -8,7 +8,7 @@ using Microsoft.Azure.Functions.Worker.Extensions.SignalRService;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 
-namespace AutopilotMonitor.Functions.Functions
+namespace AutopilotMonitor.Functions.Functions.Sessions
 {
     public class RegisterSessionFunction
     {

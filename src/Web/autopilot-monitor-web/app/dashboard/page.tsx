@@ -10,23 +10,11 @@ import { useAuth } from "../../contexts/AuthContext";
 import { useNotifications } from "../../contexts/NotificationContext";
 import { API_BASE_URL } from "@/lib/config";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
-
-interface Session {
-  sessionId: string;
-  tenantId: string;
-  serialNumber: string;
-  deviceName: string;
-  manufacturer: string;
-  model: string;
-  startedAt: string;
-  status: string;
-  currentPhase: number;
-  eventCount: number;
-  durationSeconds: number;
-  failureReason?: string;
-  isPreProvisioned?: boolean;
-  isHybridJoin?: boolean;
-}
+import { Session } from "./types";
+import { StatsCard } from "./components/StatsCards";
+import { WelcomeMessage } from "./components/WelcomeMessage";
+import { SessionTable } from "./components/SessionTable";
+import { DeleteConfirmModal, BlockConfirmModal } from "./components/ConfirmationModals";
 
 interface TenantConfigurationSummary {
   validateAutopilotDevice: boolean;
@@ -258,32 +246,21 @@ export default function Home() {
 
   // Setup SignalR listener - re-register when connection changes
   useEffect(() => {
-    // Listen for real-time updates via SignalR
-    // - "newSession" events: Sent when a session is first registered (new session notification)
-    // - "newevents" events: Sent when events are ingested (status updates for existing sessions)
-    // Both are important for keeping the session list up-to-date
-
     const handleNewSession = (data: { sessionId: string; tenantId: string; session: Session }) => {
       console.log('New session registered', data);
 
       if (data.session) {
-        // Add new session to the list (at the beginning - most recent first)
         setSessions(prevSessions => {
-          // Check if session already exists (shouldn't happen, but be defensive)
           const sessionIndex = prevSessions.findIndex(s => s.sessionId === data.session.sessionId);
           if (sessionIndex >= 0) {
-            // Update existing session (just in case)
             const updated = [...prevSessions];
             updated[sessionIndex] = data.session;
             return updated;
           } else {
-            // Add new session at the beginning (most recent first)
             return [data.session, ...prevSessions];
           }
         });
       } else {
-        // data.session is null — read-after-write race in Table Storage between StoreSession
-        // and GetSession. Fall back to a full list refresh so the session still appears.
         console.warn('newSession event received without session data, falling back to fetch');
         fetchSessions();
       }
@@ -292,8 +269,6 @@ export default function Home() {
     const handleNewEvents = (data: { sessionId: string; tenantId: string; eventCount: number; sessionUpdate?: Partial<Session>; session?: Session }) => {
       console.log('New events notification received on home page', data);
 
-      // Merge delta update into existing session (sessionUpdate contains only changed fields)
-      // Falls back to full session replacement if sessionUpdate is not present
       const update = data.sessionUpdate || data.session;
       if (update) {
         setSessions(prevSessions => {
@@ -316,7 +291,7 @@ export default function Home() {
       off('newevents', handleNewEvents);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isConnected]); // Re-register when SignalR connection is established
+  }, [isConnected]);
 
   // Save admin mode to localStorage when it changes
   useEffect(() => {
@@ -354,7 +329,6 @@ export default function Home() {
       }
     };
 
-    // Also listen for custom storage events (for same-window changes)
     const handleCustomStorageChange = () => {
       const newAdminMode = localStorage.getItem('adminMode') === 'true';
       const newGalacticMode = localStorage.getItem('galacticAdminMode') === 'true';
@@ -378,7 +352,6 @@ export default function Home() {
 
   // Refetch sessions when galactic admin mode changes
   useEffect(() => {
-    // Skip on initial mount - only refetch when user actually toggles the setting
     if (!hasGalacticModeInitialized.current) {
       hasGalacticModeInitialized.current = true;
       return;
@@ -407,7 +380,6 @@ export default function Home() {
       });
 
       if (response.ok) {
-        // Remove session from local state
         setSessions(prevSessions => prevSessions.filter(s => s.sessionId !== sessionToDelete.sessionId));
         console.log(`Session ${sessionToDelete.sessionId} deleted successfully`);
         setShowDeleteConfirm(false);
@@ -498,14 +470,12 @@ export default function Home() {
 
   // Filter sessions based on status filter and search query
   const filteredSessions = sessions.filter(session => {
-    // Apply status filter first
     if (statusFilter && session.status !== statusFilter) return false;
 
     if (!searchQuery.trim()) return true;
 
     const query = searchQuery.toLowerCase().trim();
 
-    // Check for duration comparison (e.g., ">30" or "<10")
     const durationMatch = query.match(/^([><]=?)\s*(\d+)$/);
     if (durationMatch) {
       const operator = durationMatch[1];
@@ -518,7 +488,6 @@ export default function Home() {
       if (operator === "<=") return durationMinutes <= value;
     }
 
-    // Search in multiple fields
     const searchableText = [
       session.deviceName,
       session.serialNumber,
@@ -541,7 +510,6 @@ export default function Home() {
     let aValue: any = a[sortColumn];
     let bValue: any = b[sortColumn];
 
-    // Handle special cases
     if (sortColumn === "startedAt") {
       aValue = new Date(aValue).getTime();
       bValue = new Date(bValue).getTime();
@@ -552,11 +520,10 @@ export default function Home() {
     return 0;
   });
 
-  // Paginated sessions - show only current page
+  // Paginated sessions
   const totalPages = Math.ceil(sortedSessions.length / sessionsPerPage);
   const startIndex = (currentPage - 1) * sessionsPerPage;
-  const endIndex = startIndex + sessionsPerPage;
-  const paginatedSessions = sortedSessions.slice(startIndex, endIndex);
+  const paginatedSessions = sortedSessions.slice(startIndex, startIndex + sessionsPerPage);
 
   const handleSort = (column: keyof Session) => {
     if (sortColumn === column) {
@@ -687,973 +654,57 @@ export default function Home() {
           </div>
 
           {/* Welcome message - only show when no sessions */}
-          {sessions.length === 0 && (
-            <div className="bg-white shadow rounded-lg overflow-hidden">
-              {/* Top accent bar */}
-              <div className="h-1 bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500" />
-              <div className="p-6 sm:p-8">
-                {/* Header */}
-                <div className="flex items-start gap-4 mb-6">
-                  <div className="shrink-0 w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center">
-                    <svg className="w-5 h-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                  </div>
-                  <div>
-                    <h2 className="text-xl font-semibold text-gray-900 leading-tight">Welcome to Autopilot Monitor</h2>
-                    <p className="mt-1 text-sm text-gray-500">Your tenant is connected — deploy the agent to start monitoring enrollments.</p>
-                  </div>
-                </div>
-
-                {/* Steps */}
-                <ol className="space-y-3 mb-7">
-                  <li className="flex items-start gap-3">
-                    <span className="shrink-0 mt-0.5 w-5 h-5 rounded-full bg-blue-600 text-white text-[10px] font-bold flex items-center justify-center">1</span>
-                    <p className="text-sm text-gray-700">
-                      Follow the{" "}
-                      <a href="/docs#setup" className="text-blue-600 hover:underline font-medium">setup guide</a>
-                      {" "}to configure your tenant and grant the required permissions.
-                    </p>
-                  </li>
-                  <li className="flex items-start gap-3">
-                    <span className="shrink-0 mt-0.5 w-5 h-5 rounded-full bg-blue-600 text-white text-[10px] font-bold flex items-center justify-center">2</span>
-                    <p className="text-sm text-gray-700">
-                      Deploy the{" "}
-                      <a href="/docs#agent-setup" className="text-blue-600 hover:underline font-medium">Intune bootstrapper</a>
-                      {" "}to your Autopilot device groups — the agent installs automatically on first boot.
-                    </p>
-                  </li>
-                  <li className="flex items-start gap-3">
-                    <span className="shrink-0 mt-0.5 w-5 h-5 rounded-full bg-blue-600 text-white text-[10px] font-bold flex items-center justify-center">3</span>
-                    <p className="text-sm text-gray-700">Enrollment sessions will appear here in real time as devices go through the enrollment process.</p>
-                  </li>
-                </ol>
-
-                {/* Quick links */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <a
-                    href="/docs"
-                    className="group flex items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 hover:border-blue-300 hover:bg-blue-50 transition-colors"
-                  >
-                    <span className="shrink-0 w-8 h-8 rounded-lg bg-white border border-gray-200 group-hover:border-blue-200 flex items-center justify-center shadow-sm">
-                      <svg className="w-4 h-4 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                      </svg>
-                    </span>
-                    <div>
-                      <p className="text-sm font-medium text-gray-900">Documentation</p>
-                      <p className="text-xs text-gray-500">Setup and configuration guides</p>
-                    </div>
-                    <svg className="w-4 h-4 text-gray-300 group-hover:text-blue-400 ml-auto shrink-0 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                    </svg>
-                  </a>
-                  <a
-                    href="https://github.com/okieselbach/Autopilot-Monitor"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="group flex items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 hover:border-gray-400 hover:bg-gray-100 transition-colors"
-                  >
-                    <span className="shrink-0 w-8 h-8 rounded-lg bg-white border border-gray-200 group-hover:border-gray-300 flex items-center justify-center shadow-sm">
-                      <svg className="w-4 h-4 text-gray-700" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" />
-                      </svg>
-                    </span>
-                    <div>
-                      <p className="text-sm font-medium text-gray-900">GitHub Repository</p>
-                      <p className="text-xs text-gray-500">Source code and issue tracking</p>
-                    </div>
-                    <svg className="w-4 h-4 text-gray-300 group-hover:text-gray-500 ml-auto shrink-0 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                    </svg>
-                  </a>
-                </div>
-              </div>
-            </div>
-          )}
+          {sessions.length === 0 && <WelcomeMessage />}
 
           {/* Sessions List */}
           {sessions.length > 0 && (
-            <div className="mt-8 bg-white shadow rounded-lg p-6">
-              <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
-                <h2 className="text-xl font-semibold text-gray-900">
-                  Sessions ({sessions.length})
-                  {filteredSessions.length !== sessions.length && (
-                    <span className="text-sm text-gray-500 ml-2">
-                      ({filteredSessions.length} filtered)
-                    </span>
-                  )}
-                </h2>
-                {isPreviewBlocked ? (
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-200 shrink-0">
-                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    Preview approval pending
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-800 border border-green-200 shrink-0">
-                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                    </svg>
-                    Preview approved
-                  </span>
-                )}
-              </div>
-
-              {/* Search Input */}
-              <div className="mb-4 relative">
-                <input
-                  type="text"
-                  placeholder="Search by device, serial, model, status, session ID, or duration (e.g., >30 for >30min)"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full px-4 py-2 pr-10 border border-gray-300 rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                />
-                {searchQuery && (
-                  <button
-                    onClick={() => setSearchQuery("")}
-                    className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600 transition-colors"
-                    title="Clear search"
-                  >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                )}
-              </div>
-
-              {/* Status Filter Badges */}
-              <div className="mb-4 flex items-center gap-2 flex-wrap">
-                {(["Succeeded", "InProgress", "Pending", "Failed"] as const).map((status) => {
-                  const config: Record<string, { bg: string; bgActive: string; text: string; label: string }> = {
-                    Succeeded: { bg: "bg-green-50 text-green-700 border-green-200 hover:bg-green-100", bgActive: "bg-green-600 text-white border-green-600", text: "text-green-600", label: "Succeeded" },
-                    InProgress: { bg: "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100", bgActive: "bg-blue-600 text-white border-blue-600", text: "text-blue-600", label: "In Progress" },
-                    Pending: { bg: "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100", bgActive: "bg-amber-500 text-white border-amber-500", text: "text-amber-600", label: "Pending" },
-                    Failed: { bg: "bg-red-50 text-red-700 border-red-200 hover:bg-red-100", bgActive: "bg-red-600 text-white border-red-600", text: "text-red-600", label: "Failed" },
-                  };
-                  const c = config[status];
-                  const count = sessions.filter(s => s.status === status).length;
-                  const isActive = statusFilter === status;
-                  return (
-                    <button
-                      key={status}
-                      onClick={() => setStatusFilter(isActive ? null : status)}
-                      className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border transition-colors cursor-pointer ${isActive ? c.bgActive : c.bg}`}
-                    >
-                      {c.label}
-                      <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none ${isActive ? "bg-white/25" : "bg-black/5"}`}>
-                        {count}
-                      </span>
-                    </button>
-                  );
-                })}
-                {statusFilter && (
-                  <button
-                    onClick={() => setStatusFilter(null)}
-                    className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors cursor-pointer"
-                    title="Clear filter"
-                  >
-                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                    Clear
-                  </button>
-                )}
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <SortableHeader column="deviceName" currentSort={sortColumn} direction={sortDirection} onSort={handleSort}>
-                        Device
-                      </SortableHeader>
-                      {galacticAdminMode && (
-                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Tenant ID
-                        </th>
-                      )}
-                      <SortableHeader column="model" currentSort={sortColumn} direction={sortDirection} onSort={handleSort}>
-                        Model
-                      </SortableHeader>
-                      <SortableHeader column="status" currentSort={sortColumn} direction={sortDirection} onSort={handleSort}>
-                        Status
-                      </SortableHeader>
-                      <SortableHeader column="eventCount" currentSort={sortColumn} direction={sortDirection} onSort={handleSort} className="px-3">
-                        Events
-                      </SortableHeader>
-                      <SortableHeader column="durationSeconds" currentSort={sortColumn} direction={sortDirection} onSort={handleSort} className="px-3">
-                        Duration
-                      </SortableHeader>
-                      <SortableHeader column="startedAt" currentSort={sortColumn} direction={sortDirection} onSort={handleSort} className="px-3">
-                        Started
-                      </SortableHeader>
-                      {adminMode && (
-                        <th scope="col" className="pl-3 pr-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Actions
-                        </th>
-                      )}
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {paginatedSessions.length === 0 ? (
-                      <tr>
-                        <td colSpan={(galacticAdminMode ? 1 : 0) + (adminMode ? 7 : 6)} className="px-6 py-8 text-center text-gray-500">
-                          No sessions found matching your search.
-                        </td>
-                      </tr>
-                    ) : (
-                      paginatedSessions.map((session) => (
-                      <tr
-                        key={session.sessionId}
-                        onClick={() => router.push(`/sessions/${session.sessionId}`)}
-                        className="hover:bg-gray-50 cursor-pointer transition-colors"
-                      >
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm font-medium text-gray-900">
-                            {session.deviceName || session.serialNumber}
-                          </div>
-                          <div className="text-sm text-gray-500">
-                            {session.serialNumber}
-                          </div>
-                        </td>
-                        {galacticAdminMode && (
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                navigator.clipboard.writeText(session.tenantId);
-                              }}
-                              className="group flex items-center gap-1 text-xs font-mono text-gray-600 hover:text-blue-600 transition-colors"
-                              title={session.tenantId}
-                            >
-                              <span>{session.tenantId.split('-').slice(0, 2).join('-')}...</span>
-                              <svg className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                              </svg>
-                            </button>
-                          </td>
-                        )}
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm font-medium text-gray-900">
-                            {session.manufacturer || "Unknown manufacturer"}
-                          </div>
-                          <div className="text-sm text-gray-500">
-                            {session.model || "Unknown model"}
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="flex items-center gap-1.5">
-                            <StatusBadge status={session.status} failureReason={session.failureReason} />
-                            {session.isHybridJoin && (
-                              <span
-                                className="px-2 inline-flex items-center gap-1 text-xs leading-5 font-semibold rounded-full bg-purple-100 text-purple-800"
-                                title="Hybrid Azure AD Join"
-                              >
-                                Hybrid
-                              </span>
-                            )}
-                            {blockedDevicesSet.has(`${session.tenantId}:${session.serialNumber}`) && (
-                              <span
-                                className="px-2 inline-flex items-center gap-1 text-xs leading-5 font-semibold rounded-full bg-orange-100 text-orange-800"
-                                title="Device is currently blocked"
-                              >
-                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
-                                </svg>
-                                Blocked
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {session.eventCount}
-                        </td>
-                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {Math.round(session.durationSeconds / 60)} min
-                        </td>
-                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {new Date(session.startedAt).toLocaleString()}
-                        </td>
-                        {adminMode && (
-                          <td className="pl-3 pr-4 py-4 whitespace-nowrap text-right text-sm font-medium">
-                            <div className="flex items-center justify-end gap-2">
-                              {galacticAdminMode && user?.isGalacticAdmin && (
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    blockDevice(session.serialNumber, session.tenantId, session.deviceName || session.serialNumber);
-                                  }}
-                                  className="text-orange-500 hover:text-orange-700 transition-colors"
-                                  title="Device blocken"
-                                >
-                                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
-                                  </svg>
-                                </button>
-                              )}
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  deleteSession(session.sessionId, session.tenantId, session.deviceName || session.serialNumber);
-                                }}
-                                className="text-red-600 hover:text-red-900 transition-colors"
-                                title="Session löschen"
-                              >
-                                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                </svg>
-                              </button>
-                            </div>
-                          </td>
-                        )}
-                      </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Pagination Controls */}
-              {totalPages > 1 && (
-                <div className="mt-4 flex items-center justify-between">
-                  <div className="text-sm text-gray-700">
-                    Page {currentPage} of {totalPages} ({sortedSessions.length} total sessions)
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={handlePreviousPage}
-                      disabled={currentPage === 1}
-                      className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      ← Previous
-                    </button>
-                    <button
-                      onClick={handleNextPage}
-                      disabled={currentPage === totalPages}
-                      className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      Next →
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
+            <SessionTable
+              sessions={sessions}
+              filteredSessions={filteredSessions}
+              sortedSessions={sortedSessions}
+              paginatedSessions={paginatedSessions}
+              searchQuery={searchQuery}
+              onSearchQueryChange={setSearchQuery}
+              statusFilter={statusFilter}
+              onStatusFilterChange={setStatusFilter}
+              sortColumn={sortColumn}
+              sortDirection={sortDirection}
+              onSort={handleSort}
+              currentPage={currentPage}
+              totalPages={totalPages}
+              onPreviousPage={handlePreviousPage}
+              onNextPage={handleNextPage}
+              adminMode={adminMode}
+              galacticAdminMode={galacticAdminMode}
+              blockedDevicesSet={blockedDevicesSet}
+              isPreviewBlocked={isPreviewBlocked}
+              user={user}
+              onDeleteSession={deleteSession}
+              onBlockDevice={blockDevice}
+            />
           )}
         </div>
       </main>
 
       {/* Delete Confirmation Modal */}
       {showDeleteConfirm && sessionToDelete && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={cancelDelete}>
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
-            <div className="p-6">
-              <div className="flex items-center mb-4">
-                <div className="flex-shrink-0 w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
-                  <svg className="w-6 h-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                  </svg>
-                </div>
-                <h3 className="ml-4 text-lg font-semibold text-gray-900">Delete Session</h3>
-              </div>
-
-              <div className="mb-6">
-                <p className="text-sm text-gray-700 mb-2">
-                  This action is <span className="font-semibold text-red-600">irreversible</span>!
-                </p>
-                <p className="text-sm text-gray-700 mb-2">
-                  The session <span className="font-mono text-xs">{sessionToDelete.sessionId}</span> for device <span className="font-semibold">{sessionToDelete.deviceName || 'Unknown'}</span> and all associated events will be permanently deleted.
-                </p>
-                <p className="text-sm text-gray-600">
-                  Do you want to continue?
-                </p>
-              </div>
-
-              <div className="flex justify-end gap-3">
-                <button
-                  onClick={cancelDelete}
-                  className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={confirmDelete}
-                  className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors"
-                >
-                  Delete
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <DeleteConfirmModal
+          sessionToDelete={sessionToDelete}
+          onConfirm={confirmDelete}
+          onCancel={cancelDelete}
+        />
       )}
 
       {/* Block Device Confirmation Modal */}
       {showBlockConfirm && sessionToBlock && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={cancelBlock}>
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
-            <div className="p-6">
-              <div className="flex items-center mb-4">
-                <div className="flex-shrink-0 w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center">
-                  <svg className="w-6 h-6 text-orange-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
-                  </svg>
-                </div>
-                <h3 className="ml-4 text-lg font-semibold text-gray-900">Block Device</h3>
-              </div>
-
-              <div className="mb-6">
-                <p className="text-sm text-gray-700 mb-2">
-                  Device <span className="font-semibold">{sessionToBlock.deviceName || sessionToBlock.serialNumber}</span> (Serial: <span className="font-mono text-xs">{sessionToBlock.serialNumber}</span>) will be blocked for <span className="font-semibold">24 hours</span>.
-                </p>
-                <p className="text-sm text-gray-600">
-                  The agent will stop uploading data while blocked. Do you want to continue?
-                </p>
-              </div>
-
-              <div className="flex justify-end gap-3">
-                <button
-                  onClick={cancelBlock}
-                  className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={confirmBlock}
-                  disabled={blockingDevice}
-                  className="px-4 py-2 bg-orange-600 text-white rounded-md hover:bg-orange-700 transition-colors disabled:opacity-50"
-                >
-                  {blockingDevice ? 'Blocking...' : 'Block'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <BlockConfirmModal
+          sessionToBlock={sessionToBlock}
+          blockingDevice={blockingDevice}
+          onConfirm={confirmBlock}
+          onCancel={cancelBlock}
+        />
       )}
     </div>
     </ProtectedRoute>
-  );
-}
-
-function StatsCard({
-  title,
-  value,
-  description,
-  color,
-}: {
-  title: string;
-  value: string;
-  description: string;
-  color: "blue" | "green" | "purple" | "red";
-}) {
-  const colorClasses = {
-    blue: "bg-blue-500",
-    green: "bg-green-500",
-    purple: "bg-purple-500",
-    red: "bg-red-500",
-  };
-
-  return (
-    <div className="bg-white overflow-hidden shadow rounded-lg">
-      <div className="p-5">
-        <div className="flex items-center">
-          <div className="flex-shrink-0">
-            <div className={`${colorClasses[color]} rounded-md p-3`}>
-              <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-              </svg>
-            </div>
-          </div>
-          <div className="ml-5 w-0 flex-1">
-            <dl>
-              <dt className="text-sm font-medium text-gray-500 truncate">{title}</dt>
-              <dd className="flex items-baseline">
-                <div className="text-2xl font-semibold text-gray-900">{value}</div>
-              </dd>
-            </dl>
-          </div>
-        </div>
-        <div className="mt-2">
-          <div className="text-sm text-gray-500">{description}</div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function QuickLink({
-  title,
-  description,
-  href,
-}: {
-  title: string;
-  description: string;
-  href: string;
-}) {
-  return (
-    <a
-      href={href}
-      className="block p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
-    >
-      <h4 className="text-sm font-medium text-gray-900">{title}</h4>
-      <p className="mt-1 text-sm text-gray-500">{description}</p>
-    </a>
-  );
-}
-
-function SortableHeader({
-  column,
-  currentSort,
-  direction,
-  onSort,
-  children,
-  className,
-}: {
-  column: keyof Session;
-  currentSort: keyof Session | null;
-  direction: "asc" | "desc";
-  onSort: (column: keyof Session) => void;
-  children: React.ReactNode;
-  className?: string;
-}) {
-  const isActive = currentSort === column;
-
-  return (
-    <th
-      onClick={() => onSort(column)}
-      className={`py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors select-none ${className ?? "px-6"}`}
-    >
-      <div className="flex items-center gap-2">
-        {children}
-        <span className="text-gray-400">
-          {isActive ? (direction === "asc" ? "↑" : "↓") : "↕"}
-        </span>
-      </div>
-    </th>
-  );
-}
-
-function StatusBadge({ status, failureReason }: { status: string; failureReason?: string }) {
-  const statusConfig = {
-    InProgress: { color: "bg-blue-100 text-blue-800", text: "In Progress" },
-    Pending: { color: "bg-amber-100 text-amber-800", text: "Pending" },
-    Succeeded: { color: "bg-green-100 text-green-800", text: "Succeeded" },
-    Failed: { color: "bg-red-100 text-red-800", text: "Failed" },
-    Unknown: { color: "bg-gray-100 text-gray-800", text: "Unknown" },
-  };
-
-  const config = statusConfig[status as keyof typeof statusConfig] || statusConfig.Unknown;
-
-  // Check if this is a timeout failure
-  const isTimeout = status === "Failed" && failureReason && failureReason.toLowerCase().includes("timed out");
-
-  return (
-    <span
-      className={`px-2 inline-flex items-center gap-1 text-xs leading-5 font-semibold rounded-full ${config.color}`}
-      title={failureReason || undefined}
-    >
-      {config.text}
-      {isTimeout && (
-        <span title={failureReason} className="inline-flex items-center">
-          ⏱️
-        </span>
-      )}
-    </span>
-  );
-}
-
-function SettingsMenu({
-  apiStatus,
-  onCheckHealth,
-  adminMode,
-  onAdminModeChange,
-  galacticAdminMode,
-  onGalacticAdminModeChange,
-  user,
-}: {
-  apiStatus: "unchecked" | "checking" | "healthy" | "error";
-  onCheckHealth: () => void;
-  adminMode: boolean;
-  onAdminModeChange: (enabled: boolean) => void;
-  galacticAdminMode: boolean;
-  onGalacticAdminModeChange: (enabled: boolean) => void;
-  user: { displayName: string; email: string; isGalacticAdmin?: boolean } | null;
-}) {
-  const [isOpen, setIsOpen] = useState(false);
-  const [showAuditLog, setShowAuditLog] = useState(false);
-  const [auditLogs, setAuditLogs] = useState<any[]>([]);
-  const [loadingLogs, setLoadingLogs] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const { tenantId } = useTenant();
-  const { getAccessToken } = useAuth(); // Add this line to get getAccessToken
-
-  const fetchAuditLogs = async () => {
-    setLoadingLogs(true);
-    try {
-      const response = await authenticatedFetch(`${API_BASE_URL}/api/audit/logs?tenantId=${tenantId}`, getAccessToken);
-
-      if (response.ok) {
-        const data = await response.json();
-        setAuditLogs(data.logs || []);
-      }
-    } catch (error) {
-      if (error instanceof TokenExpiredError) {
-        console.error('Session expired:', error.message);
-      } else {
-        console.error("Failed to fetch audit logs:", error);
-      }
-    } finally {
-      setLoadingLogs(false);
-    }
-  };
-
-  const statusColors = {
-    unchecked: "text-gray-500",
-    checking: "text-yellow-600",
-    healthy: "text-green-600",
-    error: "text-red-600",
-  };
-
-  const statusIcons = {
-    unchecked: "🔘",
-    checking: "🔄",
-    healthy: "✅",
-    error: "❌",
-  };
-
-  const statusText = {
-    unchecked: "Not checked",
-    checking: "Checking...",
-    healthy: "Connected",
-    error: "Not connected",
-  };
-
-  // Close dropdown when clicking outside
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
-    }
-
-    if (isOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
-      return () => {
-        document.removeEventListener("mousedown", handleClickOutside);
-      };
-    }
-  }, [isOpen]);
-
-  return (
-    <div className="relative" ref={menuRef}>
-      {/* Settings Button */}
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="p-2 rounded-full hover:bg-gray-100 transition-colors"
-        aria-label="Settings"
-        title="Settings"
-      >
-        <svg className="h-5 w-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-        </svg>
-      </button>
-
-      {/* Dropdown Menu */}
-      {isOpen && (
-        <div className="absolute right-0 mt-2 w-72 bg-white rounded-lg shadow-lg border border-gray-200 z-50">
-          <div className="p-4">
-            <h3 className="text-sm font-semibold text-gray-900 mb-3">Settings</h3>
-
-            {/* Admin Mode Toggle */}
-            <div className="mb-3">
-              <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-gray-700">Admin Mode</span>
-                  {adminMode && <span className="text-xs text-red-600 font-semibold">AKTIV</span>}
-                </div>
-                <button
-                  onClick={() => onAdminModeChange(!adminMode)}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                    adminMode ? 'bg-red-600' : 'bg-gray-300'
-                  }`}
-                >
-                  <span
-                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                      adminMode ? 'translate-x-6' : 'translate-x-1'
-                    }`}
-                  />
-                </button>
-              </div>
-              {adminMode && (
-                <p className="mt-2 text-xs text-red-600 px-3 whitespace-nowrap">
-                  ⚠️ Allows deleting sessions
-                </p>
-              )}
-            </div>
-
-            {/* Galactic Admin Toggle - Only visible to actual galactic admins */}
-            {user?.isGalacticAdmin && (
-              <div className="mb-3">
-                <div className="flex items-center justify-between p-3 rounded-lg bg-purple-50">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-gray-700">Galactic Admin</span>
-                    {galacticAdminMode && <span className="text-xs text-purple-700 font-semibold">ACTIVE</span>}
-                  </div>
-                  <button
-                    onClick={() => onGalacticAdminModeChange(!galacticAdminMode)}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                      galacticAdminMode ? 'bg-purple-600' : 'bg-gray-300'
-                    }`}
-                  >
-                    <span
-                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                        galacticAdminMode ? 'translate-x-6' : 'translate-x-1'
-                      }`}
-                    />
-                  </button>
-                </div>
-                {galacticAdminMode && (
-                  <p className="mt-2 text-xs text-purple-700 px-3">
-                    Shows ALL sessions across ALL tenants
-                  </p>
-                )}
-              </div>
-            )}
-
-            {/* API Status Section - Clickable */}
-            <div className="border-t border-gray-200 pt-3">
-              <button
-                onClick={onCheckHealth}
-                disabled={apiStatus === "checking"}
-                className="w-full p-3 text-left rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                title={apiStatus === "unchecked" ? "Click to check API status" : undefined}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium text-gray-700">API Status</span>
-                  <span className={`text-sm font-medium ${statusColors[apiStatus]}`}>
-                    {statusIcons[apiStatus]} {statusText[apiStatus]}
-                  </span>
-                </div>
-              </button>
-            </div>
-
-            {/* Configuration Section */}
-            <div className="border-t border-gray-200 pt-3 mt-3">
-              <a
-                href="/settings"
-                className="block w-full p-3 text-left rounded-lg hover:bg-gray-50 transition-colors"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium text-gray-700">Configuration</span>
-                  <svg className="h-5 w-5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                  </svg>
-                </div>
-              </a>
-            </div>
-
-            {/* Usage Metrics Section - Always visible for tenant */}
-            <div className="border-t border-gray-200 pt-3">
-              <a
-                href="/usage-metrics"
-                className="block w-full p-3 text-left rounded-lg hover:bg-gray-50 transition-colors"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium text-gray-700">Usage Metrics</span>
-                  <svg className="h-5 w-5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                  </svg>
-                </div>
-              </a>
-            </div>
-
-            {/* Platform Usage Metrics Section - Galactic Admin Only */}
-            {galacticAdminMode && (
-              <div className="border-t border-gray-200 pt-3">
-                <a
-                  href="/platform-usage-metrics"
-                  className="block w-full p-3 text-left rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium text-gray-700">Platform Usage Metrics</span>
-                    <svg className="h-5 w-5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                  </div>
-                </a>
-              </div>
-            )}
-
-            {/* Audit Log Section */}
-            <div className="border-t border-gray-200 pt-3">
-              <button
-                onClick={() => {
-                  setShowAuditLog(true);
-                  fetchAuditLogs();
-                }}
-                className="w-full p-3 text-left rounded-lg hover:bg-gray-50 transition-colors"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium text-gray-700">Audit Log</span>
-                  <svg className="h-5 w-5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                </div>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Audit Log Modal */}
-      {showAuditLog && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]" onClick={() => setShowAuditLog(false)}>
-          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[80vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
-            <div className="p-6 border-b border-gray-200">
-              <div className="flex items-center justify-between">
-                <h2 className="text-xl font-semibold text-gray-900">Audit Log</h2>
-                <button
-                  onClick={() => setShowAuditLog(false)}
-                  className="text-gray-400 hover:text-gray-600"
-                >
-                  <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-            <div className="p-6 overflow-y-auto max-h-[60vh]">
-              {loadingLogs ? (
-                <div className="text-center py-8 text-gray-500">Lade Audit Logs...</div>
-              ) : auditLogs.length === 0 ? (
-                <div className="text-center py-8 text-gray-500">Keine Audit Logs vorhanden</div>
-              ) : (
-                <div className="space-y-4">
-                  {auditLogs.map((log) => (
-                    <div key={log.id} className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50">
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-3">
-                            <span className={`px-2 py-1 text-xs font-semibold rounded ${
-                              log.action === 'DELETE' ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'
-                            }`}>
-                              {log.action}
-                            </span>
-                            <span className="text-sm font-medium text-gray-900">{log.entityType}</span>
-                            <span className="text-sm text-gray-500 font-mono">{log.entityId}</span>
-                          </div>
-                          <div className="mt-2 text-sm text-gray-600">
-                            von <span className="font-medium">{log.performedBy}</span>
-                          </div>
-                          {log.details && log.details !== '{}' && (
-                            <div className="mt-2 text-xs text-gray-500 bg-gray-50 p-2 rounded">
-                              {log.details}
-                            </div>
-                          )}
-                        </div>
-                        <div className="text-xs text-gray-500 text-right">
-                          {new Date(log.timestamp).toLocaleString('de-DE')}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function UserMenu({
-  username,
-  email,
-  onLogout,
-}: {
-  username: string;
-  email: string;
-  onLogout: () => void;
-}) {
-  const [isOpen, setIsOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  // Get initials from username
-  const getInitials = (name: string) => {
-    return name
-      .split(" ")
-      .map(n => n[0])
-      .join("")
-      .toUpperCase()
-      .slice(0, 2);
-  };
-
-  // Close dropdown when clicking outside
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
-    }
-
-    if (isOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
-      return () => {
-        document.removeEventListener("mousedown", handleClickOutside);
-      };
-    }
-  }, [isOpen]);
-
-  return (
-    <div className="relative" ref={menuRef}>
-      {/* User Avatar Button */}
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 p-1 rounded-full hover:bg-gray-100 transition-colors"
-        aria-label="User menu"
-      >
-        <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white text-sm font-medium">
-          {getInitials(username)}
-        </div>
-      </button>
-
-      {/* Dropdown Menu */}
-      {isOpen && (
-        <div className="absolute right-0 mt-2 w-80 bg-white rounded-lg shadow-lg border border-gray-200 z-50">
-          <div className="p-4">
-            {/* User Info */}
-            <div className="flex items-center gap-3 pb-3 border-b border-gray-200">
-              <div className="w-12 h-12 rounded-full bg-blue-600 flex items-center justify-center text-white text-lg font-medium">
-                {getInitials(username)}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-semibold text-gray-900 truncate">
-                  {username}
-                </div>
-                <div className="text-xs text-gray-500 truncate">
-                  {email}
-                </div>
-                <button className="text-xs text-blue-600 hover:text-blue-800 mt-1">
-                  View account
-                </button>
-              </div>
-            </div>
-
-            {/* Sign out */}
-            <div className="pt-3">
-              <button
-                onClick={onLogout}
-                className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg transition-colors"
-              >
-                Sign out
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
   );
 }

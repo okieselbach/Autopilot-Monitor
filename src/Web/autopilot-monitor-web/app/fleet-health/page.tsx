@@ -9,6 +9,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { useNotifications } from "../../contexts/NotificationContext";
 import { API_BASE_URL } from "@/lib/config";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
+import FleetStatCard from "./components/FleetStatCard";
 
 interface Session {
   sessionId: string;
@@ -426,7 +427,7 @@ export default function FleetHealthPage() {
         <main className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
           {/* Top Stats */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
-            <StatCard
+            <FleetStatCard
               title="Success Rate"
               value={`${stats.successRate.toFixed(1)}%`}
               subtitle={`${stats.succeeded} of ${stats.total} enrollments`}
@@ -438,19 +439,19 @@ export default function FleetHealthPage() {
                   : "red"
               }
             />
-            <StatCard
+            <FleetStatCard
               title="Avg. Enrollment Time"
               value={`${stats.avgDuration} min`}
               subtitle="Completed enrollments"
               color="blue"
             />
-            <StatCard
+            <FleetStatCard
               title="Failed"
               value={stats.failed.toString()}
               subtitle="Needs attention"
               color="red"
             />
-            <StatCard
+            <FleetStatCard
               title="Active Now"
               value={stats.inProgress.toString()}
               subtitle="Currently enrolling"
@@ -851,42 +852,3 @@ export default function FleetHealthPage() {
   );
 }
 
-function StatCard({
-  title,
-  value,
-  subtitle,
-  color,
-}: {
-  title: string;
-  value: string;
-  subtitle: string;
-  color: "green" | "blue" | "red" | "yellow";
-}) {
-  const colorClasses = {
-    green: "border-green-500 bg-green-50",
-    blue: "border-blue-500 bg-blue-50",
-    red: "border-red-500 bg-red-50",
-    yellow: "border-yellow-500 bg-yellow-50",
-  };
-
-  const valueColors = {
-    green: "text-green-700",
-    blue: "text-blue-700",
-    red: "text-red-700",
-    yellow: "text-yellow-700",
-  };
-
-  return (
-    <div
-      className={`bg-white overflow-hidden shadow rounded-lg border-l-4 ${colorClasses[color]}`}
-    >
-      <div className="p-5">
-        <div className="text-sm font-medium text-gray-500">{title}</div>
-        <div className={`text-3xl font-bold mt-1 ${valueColors[color]}`}>
-          {value}
-        </div>
-        <div className="text-xs text-gray-400 mt-1">{subtitle}</div>
-      </div>
-    </div>
-  );
-}

@@ -1,0 +1,119 @@
+"use client";
+
+import { useState, useCallback } from "react";
+import { useAuth } from "@/contexts/AuthContext";
+import { useNotifications } from "@/contexts/NotificationContext";
+import {
+  authenticatedFetch,
+  TokenExpiredError,
+} from "@/lib/authenticatedFetch";
+
+export interface UseAuthenticatedFetchOptions {
+  /** Called on non-TokenExpiredError failures. If not set, only the error state is updated. */
+  onError?: (error: Error) => void;
+  /** Called on TokenExpiredError. Default: addNotification via NotificationContext. */
+  onTokenExpired?: (error: TokenExpiredError) => void;
+}
+
+export interface ExecuteOptions<T> {
+  /** Transform the raw JSON before storing in data state. */
+  transform?: (json: unknown) => T;
+  /** If true, skip setting loading state (useful for background refreshes). */
+  silent?: boolean;
+}
+
+export interface UseAuthenticatedFetchReturn<T> {
+  data: T | null;
+  loading: boolean;
+  error: string | null;
+  /** Execute a fetch request. Returns the parsed data or null on failure. */
+  execute: (
+    url: string,
+    init?: RequestInit,
+    options?: ExecuteOptions<T>,
+  ) => Promise<T | null>;
+  clearError: () => void;
+  setData: React.Dispatch<React.SetStateAction<T | null>>;
+}
+
+export function useAuthenticatedFetch<T = unknown>(
+  options?: UseAuthenticatedFetchOptions,
+): UseAuthenticatedFetchReturn<T> {
+  const { getAccessToken } = useAuth();
+  const { addNotification } = useNotifications();
+
+  const [data, setData] = useState<T | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const clearError = useCallback(() => setError(null), []);
+
+  const execute = useCallback(
+    async (
+      url: string,
+      init?: RequestInit,
+      executeOptions?: ExecuteOptions<T>,
+    ): Promise<T | null> => {
+      try {
+        if (!executeOptions?.silent) {
+          setLoading(true);
+        }
+        setError(null);
+
+        const response = await authenticatedFetch(url, getAccessToken, init);
+
+        if (!response.ok) {
+          // Try to extract error message from response body (API returns { message: "..." })
+          let message = `Failed: ${response.statusText}`;
+          try {
+            const errorData = await response.json();
+            if (errorData.message) message = errorData.message;
+          } catch {
+            /* response body wasn't JSON */
+          }
+          throw new Error(message);
+        }
+
+        if (response.status === 204) {
+          return null;
+        }
+
+        const json = await response.json();
+        const result = executeOptions?.transform
+          ? executeOptions.transform(json)
+          : (json as T);
+        setData(result);
+        return result;
+      } catch (err) {
+        if (err instanceof TokenExpiredError) {
+          if (options?.onTokenExpired) {
+            options.onTokenExpired(err);
+          } else {
+            addNotification(
+              "error",
+              "Session Expired",
+              err.message,
+              "session-expired",
+            );
+          }
+        } else if (options?.onError) {
+          options.onError(
+            err instanceof Error ? err : new Error(String(err)),
+          );
+        }
+
+        const message =
+          err instanceof Error ? err.message : "An unknown error occurred";
+        setError(message);
+        return null;
+      } finally {
+        if (!executeOptions?.silent) {
+          setLoading(false);
+        }
+      }
+    },
+    [getAccessToken, addNotification, options?.onError, options?.onTokenExpired],
+  );
+
+  return { data, loading, error, execute, clearError, setData };
+}

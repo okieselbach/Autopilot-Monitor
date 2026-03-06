@@ -1,12 +1,13 @@
 using System;
 using System.Net;
+using AutopilotMonitor.Functions.Functions.Ingest;
 using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Functions.Services;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
 
-namespace AutopilotMonitor.Functions.Functions
+namespace AutopilotMonitor.Functions.Functions.Bootstrap
 {
     /// <summary>
     /// POST /api/bootstrap/error — cert-free error reporting for pre-enrollment agents.

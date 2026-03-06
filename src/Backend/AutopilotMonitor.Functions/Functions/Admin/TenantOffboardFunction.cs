@@ -11,7 +11,7 @@ using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
-namespace AutopilotMonitor.Functions.Functions;
+namespace AutopilotMonitor.Functions.Functions.Admin;
 
 /// <summary>
 /// Tenant Offboarding endpoint

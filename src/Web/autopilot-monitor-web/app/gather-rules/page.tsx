@@ -7,145 +7,32 @@ import { ProtectedRoute } from "../../components/ProtectedRoute";
 import { useTenant } from "../../contexts/TenantContext";
 import { useAuth } from "../../contexts/AuthContext";
 import { API_BASE_URL } from "@/lib/config";
-import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 import { downloadAsJson, stripInternalFields, bumpVersion } from "@/lib/rulePageHelpers";
 import { StatCard } from "@/components/rules/StatCard";
 import { RuleFilterBar } from "@/components/rules/RuleFilterBar";
 import { EmptyState } from "@/components/rules/EmptyState";
 import { FormJsonToggle, JsonModeToggleButtons } from "@/components/rules/FormJsonToggle";
-
-interface GatherRule {
-  ruleId: string;
-  title: string;
-  description: string;
-  category: string;
-  version: string;
-  author: string;
-  enabled: boolean;
-  isBuiltIn: boolean;
-  isCommunity: boolean;
-  collectorType: string;
-  target: string;
-  parameters: Record<string, string>;
-  trigger: string;
-  intervalSeconds: number | null;
-  triggerPhase: string | null;
-  triggerEventType: string | null;
-  outputEventType: string;
-  outputSeverity: string;
-  tags: string[];
-  createdAt: string;
-  updatedAt: string;
-}
-
-interface NewRuleForm {
-  ruleId: string;
-  title: string;
-  description: string;
-  category: string;
-  collectorType: string;
-  target: string;
-  valueName: string;          // registry
-  eventId: string;            // eventlog
-  messageFilter: string;      // eventlog
-  maxEntries: string;         // eventlog
-  source: string;             // eventlog
-  readContent: boolean;       // file
-  logPattern: string;         // logparser
-  trackPosition: boolean;     // logparser
-  maxLines: string;           // logparser
-  trigger: string;
-  intervalSeconds: number;
-  triggerPhase: string;
-  triggerEventType: string;
-  outputEventType: string;
-  outputSeverity: string;
-}
-
-const CATEGORIES = ["network", "identity", "apps", "device", "esp", "enrollment"] as const;
-const COLLECTOR_TYPES = ["registry", "eventlog", "wmi", "file", "command_allowlisted", "logparser"] as const;
-const TRIGGERS = ["startup", "phase_change", "interval", "on_event"] as const;
-const SEVERITIES = ["info", "warning", "error", "critical"] as const;
-
-const CATEGORY_COLORS: Record<string, { bg: string; text: string }> = {
-  network: { bg: "bg-blue-100", text: "text-blue-700" },
-  identity: { bg: "bg-purple-100", text: "text-purple-700" },
-  apps: { bg: "bg-orange-100", text: "text-orange-700" },
-  device: { bg: "bg-gray-100", text: "text-gray-700" },
-  esp: { bg: "bg-teal-100", text: "text-teal-700" },
-  enrollment: { bg: "bg-indigo-100", text: "text-indigo-700" },
-};
-
-const COLLECTOR_TYPE_LABELS: Record<string, string> = {
-  registry: "Registry",
-  eventlog: "Event Log",
-  wmi: "WMI Query",
-  file: "File",
-  command_allowlisted: "Command (Allowlisted)",
-  command: "Command (Allowlisted)", // legacy alias
-  logparser: "Log Parser",
-};
-
-const TARGET_PLACEHOLDERS: Record<string, string> = {
-  registry: "e.g., HKLM\\SOFTWARE\\Microsoft\\Enrollments",
-  eventlog: "e.g., Microsoft-Windows-Shell-Core/Operational",
-  wmi: "e.g., SELECT * FROM Win32_BIOS",
-  file: "e.g., C:\\Windows\\Panther\\UnattendGC\\setupact.log",
-  command_allowlisted: "e.g., Get-Tpm or dsregcmd /status",
-  logparser: "e.g., %ProgramData%\\Microsoft\\IntuneManagementExtension\\Logs\\AppWorkload.log",
-};
-
-const TARGET_HINTS: Record<string, string> = {
-  registry: "Full registry path including hive (HKLM, HKCU). The agent reads values from this key.",
-  eventlog: "Event log name — supports operational/analytic logs like Microsoft-Windows-Shell-Core/Operational.",
-  wmi: "Full WQL query (SELECT * FROM ...). Must use an allowed WMI class.",
-  file: "File path. Environment variables like %ProgramData% are supported. Must be within allowed directories.",
-  command_allowlisted: "Exact command string from the agent's allowlist. Custom commands are not permitted.",
-  logparser: "Path to a CMTrace-format log file. Environment variables are expanded. Requires a regex pattern in parameters.",
-};
-
-const EMPTY_FORM: NewRuleForm = {
-  ruleId: "",
-  title: "",
-  description: "",
-  category: "device",
-  collectorType: "registry",
-  target: "",
-  valueName: "",
-  eventId: "",
-  messageFilter: "",
-  maxEntries: "",
-  source: "",
-  readContent: false,
-  logPattern: "",
-  trackPosition: true,
-  maxLines: "",
-  trigger: "startup",
-  intervalSeconds: 60,
-  triggerPhase: "",
-  triggerEventType: "",
-  outputEventType: "",
-  outputSeverity: "info",
-};
-
-
-function formatTrigger(trigger: string) {
-  switch (trigger) {
-    case "phase_change": return "Phase Change";
-    case "on_event": return "On Event";
-    default: return trigger.charAt(0).toUpperCase() + trigger.slice(1);
-  }
-}
+import { useAuthenticatedFetch, useNotificationMessages } from "@/hooks";
+import { GatherRule, NewRuleForm, EMPTY_FORM, CATEGORY_COLORS } from "./types";
+import { GatherRuleFormFields } from "./components/GatherRuleFormFields";
+import { GatherRuleCard } from "./components/GatherRuleCard";
 
 export default function GatherRulesPage() {
   const router = useRouter();
   const { tenantId } = useTenant();
-  const { getAccessToken, user } = useAuth();
+  const { user } = useAuth();
 
-  const [rules, setRules] = useState<GatherRule[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const { successMessage, error, showSuccess, showError } = useNotificationMessages();
+
+  const { data: rules, loading, execute: fetchRulesExec, setData: setRules } = useAuthenticatedFetch<GatherRule[]>({
+    onError: (err) => showError(err.message),
+    onTokenExpired: (err) => showError(err.message),
+  });
+
+  const { execute: mutate } = useAuthenticatedFetch({
+    onError: (err) => showError(err.message),
+    onTokenExpired: (err) => showError(err.message),
+  });
 
   // Filter state
   const [searchQuery, setSearchQuery] = useState("");
@@ -173,210 +60,131 @@ export default function GatherRulesPage() {
   const [togglingRule, setTogglingRule] = useState<string | null>(null);
   const [deletingRule, setDeletingRule] = useState<string | null>(null);
 
-  const showSuccess = useCallback((message: string) => {
-    setSuccessMessage(message);
-    setTimeout(() => setSuccessMessage(null), 3000);
-  }, []);
-
-  const showError = useCallback((message: string) => {
-    setError(message);
-    setTimeout(() => setError(null), 3000);
-  }, []);
-
-  // Fetch rules
   const fetchRules = useCallback(async () => {
-    if (!tenantId) return;
-
-    try {
-      setLoading(true);
-      setError(null);
-
-      const response = await authenticatedFetch(`${API_BASE_URL}/api/rules/gather`, getAccessToken);
-
-      if (!response.ok) {
-        throw new Error(`Failed to load gather rules: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      if (data.success && Array.isArray(data.rules)) {
-        setRules(data.rules);
-      } else {
-        throw new Error("Unexpected response format");
-      }
-    } catch (err) {
-      console.error("Error fetching gather rules:", err);
-      setError(err instanceof Error ? err.message : "Failed to load gather rules");
-    } finally {
-      setLoading(false);
-    }
-  }, [tenantId, getAccessToken]);
+    await fetchRulesExec(
+      `${API_BASE_URL}/api/gather-rules?tenantId=${tenantId}`,
+      undefined,
+      { transform: (d) => (d as { rules?: GatherRule[] }).rules || [] }
+    );
+  }, [tenantId, fetchRulesExec]);
 
   useEffect(() => {
-    fetchRules();
-  }, [fetchRules]);
-
-  // Toggle rule enabled/disabled
-  const handleToggleRule = async (rule: GatherRule) => {
-    try {
-      setTogglingRule(rule.ruleId);
-      setError(null);
-
-      const response = await authenticatedFetch(`${API_BASE_URL}/api/rules/gather/${encodeURIComponent(rule.ruleId)}`, getAccessToken, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ ...rule, enabled: !rule.enabled }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `Failed to update rule: ${response.statusText}`);
-      }
-
-      setRules((prev) =>
-        prev.map((r) => (r.ruleId === rule.ruleId ? { ...r, enabled: !r.enabled } : r))
-      );
-      showSuccess(`Rule "${rule.title}" ${rule.enabled ? "disabled" : "enabled"} successfully!`);
-    } catch (err) {
-      console.error("Error toggling rule:", err);
-      showError(err instanceof Error ? err.message : "Failed to update rule");
-    } finally {
-      setTogglingRule(null);
+    if (tenantId) {
+      fetchRules();
     }
+  }, [tenantId, fetchRules]);
+
+  const handleToggleRule = async (rule: GatherRule) => {
+    setTogglingRule(rule.ruleId);
+    const result = await mutate(
+      `${API_BASE_URL}/api/gather-rules/${rule.ruleId}?tenantId=${tenantId}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: !rule.enabled }),
+      }
+    );
+    if (result !== null) {
+      setRules(prev =>
+        (prev || []).map(r =>
+          r.ruleId === rule.ruleId ? { ...r, enabled: !r.enabled } : r
+        )
+      );
+      showSuccess(`Rule "${rule.title}" ${!rule.enabled ? "enabled" : "disabled"}`);
+    }
+    setTogglingRule(null);
   };
 
-  // Delete rule (custom rules only)
   const handleDeleteRule = async (rule: GatherRule) => {
-    if (!confirm(`Are you sure you want to delete the rule "${rule.title}"? This action cannot be undone.`)) {
-      return;
-    }
+    if (!confirm(`Delete rule "${rule.title}"? This cannot be undone.`)) return;
 
-    try {
-      setDeletingRule(rule.ruleId);
-      setError(null);
-
-      const url = `${API_BASE_URL}/api/rules/gather/${encodeURIComponent(rule.ruleId)}`;
-      const response = await authenticatedFetch(url, getAccessToken, {
-        method: "DELETE",
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || errorData.error || `Failed to delete rule: ${response.statusText}`);
-      }
-
-      setRules((prev) => prev.filter((r) => r.ruleId !== rule.ruleId));
+    setDeletingRule(rule.ruleId);
+    const result = await mutate(
+      `${API_BASE_URL}/api/gather-rules/${rule.ruleId}?tenantId=${tenantId}`,
+      { method: "DELETE" }
+    );
+    if (result !== null) {
+      setRules(prev => (prev || []).filter(r => r.ruleId !== rule.ruleId));
       if (expandedRuleId === rule.ruleId) setExpandedRuleId(null);
-      showSuccess(`Rule "${rule.title}" deleted.`);
-    } catch (err) {
-      console.error("Error deleting rule:", err);
-      showError(err instanceof Error ? err.message : "Failed to delete rule");
-    } finally {
-      setDeletingRule(null);
+      showSuccess(`Rule "${rule.title}" deleted`);
     }
+    setDeletingRule(null);
   };
 
   const buildParameters = (form: NewRuleForm): Record<string, string> => {
     const params: Record<string, string> = {};
-    if (form.collectorType === "registry" && form.valueName.trim()) {
-      params.valueName = form.valueName.trim();
+    if (form.collectorType === "registry" && form.valueName) {
+      params.valueName = form.valueName;
     }
     if (form.collectorType === "eventlog") {
-      if (form.eventId.trim()) params.eventId = form.eventId.trim();
-      if (form.messageFilter.trim()) params.messageFilter = form.messageFilter.trim();
-      if (form.maxEntries.trim()) params.maxEntries = form.maxEntries.trim();
-      if (form.source.trim()) params.source = form.source.trim();
+      if (form.eventId) params.eventId = form.eventId;
+      if (form.messageFilter) params.messageFilter = form.messageFilter;
+      if (form.maxEntries) params.maxEntries = form.maxEntries;
+      if (form.source) params.source = form.source;
     }
     if (form.collectorType === "file") {
-      if (form.readContent) params.readContent = "true";
+      params.readContent = form.readContent ? "true" : "false";
     }
     if (form.collectorType === "logparser") {
-      if (form.logPattern.trim()) params.pattern = form.logPattern.trim();
+      if (form.logPattern) params.pattern = form.logPattern;
       params.trackPosition = form.trackPosition ? "true" : "false";
-      if (form.maxLines.trim()) params.maxLines = form.maxLines.trim();
+      if (form.maxLines) params.maxLines = form.maxLines;
     }
     return params;
   };
 
-  // Create custom rule
   const handleCreateRule = async (overrideForm?: NewRuleForm) => {
-    const formData = overrideForm || newRule;
-    if (!formData.ruleId.trim() || !formData.title.trim() || !formData.target.trim() || !formData.outputEventType.trim()) {
-      showError("Rule ID, Title, Target, and Output Event Type are required.");
+    const form = overrideForm || newRule;
+    if (!form.ruleId || !form.title || !form.target || !form.outputEventType) {
+      showError("Rule ID, Title, Target, and Output Event Type are required");
       return;
     }
 
-    try {
-      setCreating(true);
-      setError(null);
+    setCreating(true);
+    const payload = {
+      ruleId: form.ruleId,
+      title: form.title,
+      description: form.description,
+      category: form.category,
+      collectorType: form.collectorType,
+      target: form.target,
+      parameters: buildParameters(form),
+      trigger: form.trigger,
+      intervalSeconds: form.trigger === "interval" ? form.intervalSeconds : null,
+      triggerPhase: form.trigger === "phase_change" ? form.triggerPhase : null,
+      triggerEventType: form.trigger === "on_event" ? form.triggerEventType : null,
+      outputEventType: form.outputEventType,
+      outputSeverity: form.outputSeverity,
+    };
 
-      const payload: Record<string, unknown> = {
-        ruleId: formData.ruleId.trim(),
-        title: formData.title.trim(),
-        description: formData.description.trim(),
-        category: formData.category,
-        collectorType: formData.collectorType,
-        target: formData.target.trim(),
-        trigger: formData.trigger,
-        outputEventType: formData.outputEventType.trim(),
-        outputSeverity: formData.outputSeverity,
-        parameters: buildParameters(formData),
-      };
-
-      if (formData.trigger === "interval") {
-        payload.intervalSeconds = formData.intervalSeconds;
-      }
-      if (formData.trigger === "phase_change") {
-        payload.triggerPhase = formData.triggerPhase.trim();
-      }
-      if (formData.trigger === "on_event") {
-        payload.triggerEventType = formData.triggerEventType.trim();
-      }
-
-      const response = await authenticatedFetch(`${API_BASE_URL}/api/rules/gather`, getAccessToken, {
+    const result = await mutate(
+      `${API_BASE_URL}/api/gather-rules?tenantId=${tenantId}`,
+      {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `Failed to create rule: ${response.statusText}`);
       }
-
-      showSuccess(`Rule "${formData.title}" created successfully!`);
-      setNewRule({ ...EMPTY_FORM });
+    );
+    if (result !== null) {
+      showSuccess(`Rule "${form.title}" created`);
       setShowCreateForm(false);
+      setNewRule({ ...EMPTY_FORM });
       setJsonModeCreate(false);
       setJsonError(null);
-      await fetchRules();
-    } catch (err) {
-      console.error("Error creating rule:", err);
-      showError(err instanceof Error ? err.message : "Failed to create rule");
-    } finally {
-      setCreating(false);
+      fetchRules();
     }
+    setCreating(false);
   };
 
-  // Start editing a rule (Galactic Admin for built-in, or custom rules)
   const startEditing = (rule: GatherRule) => {
     setEditingRuleId(rule.ruleId);
     setEditForm({
       ruleId: rule.ruleId,
       title: rule.title,
-      description: rule.description || "",
+      description: rule.description,
       category: rule.category,
       collectorType: rule.collectorType,
       target: rule.target,
-      trigger: rule.trigger,
-      intervalSeconds: rule.intervalSeconds || 60,
-      triggerPhase: rule.triggerPhase || "",
-      triggerEventType: rule.triggerEventType || "",
-      outputEventType: rule.outputEventType,
-      outputSeverity: rule.outputSeverity,
       valueName: rule.parameters?.valueName || "",
       eventId: rule.parameters?.eventId || "",
       messageFilter: rule.parameters?.messageFilter || "",
@@ -386,445 +194,89 @@ export default function GatherRulesPage() {
       logPattern: rule.parameters?.pattern || "",
       trackPosition: rule.parameters?.trackPosition !== "false",
       maxLines: rule.parameters?.maxLines || "",
+      trigger: rule.trigger,
+      intervalSeconds: rule.intervalSeconds || 60,
+      triggerPhase: rule.triggerPhase || "",
+      triggerEventType: rule.triggerEventType || "",
+      outputEventType: rule.outputEventType,
+      outputSeverity: rule.outputSeverity,
     });
   };
 
-  // Save edited rule
   const handleSaveEdit = async (rule: GatherRule, overrideForm?: NewRuleForm) => {
-    const formData = overrideForm || editForm;
-    if (!formData.title.trim() || !formData.target.trim() || !formData.outputEventType.trim()) {
-      showError("Title, Target, and Output Event Type are required.");
+    const form = overrideForm || editForm;
+    if (!form.title || !form.target || !form.outputEventType) {
+      showError("Title, Target, and Output Event Type are required");
       return;
     }
 
-    try {
-      setSaving(true);
-      setError(null);
+    setSaving(true);
+    const payload = {
+      title: form.title,
+      description: form.description,
+      category: form.category,
+      collectorType: form.collectorType,
+      target: form.target,
+      parameters: buildParameters(form),
+      trigger: form.trigger,
+      intervalSeconds: form.trigger === "interval" ? form.intervalSeconds : null,
+      triggerPhase: form.trigger === "phase_change" ? form.triggerPhase : null,
+      triggerEventType: form.trigger === "on_event" ? form.triggerEventType : null,
+      outputEventType: form.outputEventType,
+      outputSeverity: form.outputSeverity,
+      version: bumpVersion(rule.version),
+    };
 
-      const payload: Record<string, unknown> = {
-        ...rule,
-        title: formData.title.trim(),
-        description: formData.description.trim(),
-        category: formData.category,
-        collectorType: formData.collectorType,
-        target: formData.target.trim(),
-        trigger: formData.trigger,
-        outputEventType: formData.outputEventType.trim(),
-        outputSeverity: formData.outputSeverity,
-        parameters: buildParameters(formData),
-        author: user?.displayName || user?.upn || rule.author,
-        version: bumpVersion(rule.version),
-      };
-
-      if (formData.trigger === "interval") {
-        payload.intervalSeconds = formData.intervalSeconds;
-      }
-      if (formData.trigger === "phase_change") {
-        payload.triggerPhase = formData.triggerPhase.trim();
-      }
-      if (formData.trigger === "on_event") {
-        payload.triggerEventType = formData.triggerEventType.trim();
-      }
-
-      const url = `${API_BASE_URL}/api/rules/gather/${encodeURIComponent(rule.ruleId)}`;
-
-      const response = await authenticatedFetch(url, getAccessToken, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
+    const result = await mutate(
+      `${API_BASE_URL}/api/gather-rules/${rule.ruleId}?tenantId=${tenantId}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || errorData.message || `Failed to update rule: ${response.statusText}`);
       }
-
+    );
+    if (result !== null) {
+      showSuccess(`Rule "${form.title}" saved`);
       setEditingRuleId(null);
       setJsonModeEdit(false);
       setJsonError(null);
-      showSuccess(`Rule "${formData.title}" updated successfully!`);
-      await fetchRules();
-    } catch (err) {
-      console.error("Error saving rule:", err);
-      showError(err instanceof Error ? err.message : "Failed to save rule");
-    } finally {
-      setSaving(false);
+      fetchRules();
     }
+    setSaving(false);
   };
 
-  // Filtered rules
-  const filteredRules = rules.filter((rule) => {
-    const matchesSearch =
-      searchQuery === "" ||
-      rule.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      rule.ruleId.toLowerCase().includes(searchQuery.toLowerCase());
-
-    const matchesCategory = categoryFilter === "all" || rule.category === categoryFilter;
-
-    const matchesType =
-      typeFilter === "all" ||
-      (typeFilter === "builtin" && rule.isBuiltIn && !rule.isCommunity) ||
-      (typeFilter === "community" && rule.isCommunity) ||
-      (typeFilter === "custom" && !rule.isBuiltIn && !rule.isCommunity);
-
-    return matchesSearch && matchesCategory && matchesType;
+  // Computed values
+  const rulesList = rules || [];
+  const filteredRules = rulesList.filter((rule) => {
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      if (
+        !rule.title.toLowerCase().includes(q) &&
+        !rule.ruleId.toLowerCase().includes(q)
+      ) {
+        return false;
+      }
+    }
+    if (categoryFilter !== "all" && rule.category !== categoryFilter) return false;
+    if (typeFilter === "builtin" && !rule.isBuiltIn) return false;
+    if (typeFilter === "community" && !rule.isCommunity) return false;
+    if (typeFilter === "custom" && (rule.isBuiltIn || rule.isCommunity)) return false;
+    return true;
   });
 
-  // Summary stats
-  const totalRules = rules.length;
-  const activeRules = rules.filter((r) => r.enabled).length;
-  const builtInCount = rules.filter((r) => r.isBuiltIn && !r.isCommunity).length;
-  const communityCount = rules.filter((r) => r.isCommunity).length;
-  const customCount = rules.filter((r) => !r.isBuiltIn && !r.isCommunity).length;
+  const totalRules = rulesList.length;
+  const activeRules = rulesList.filter((r) => r.enabled).length;
+  const builtInCount = rulesList.filter((r) => r.isBuiltIn).length;
+  const communityCount = rulesList.filter((r) => r.isCommunity).length;
+  const customCount = rulesList.filter((r) => !r.isBuiltIn && !r.isCommunity).length;
 
   const handleExportSingle = (rule: GatherRule) => {
-    const cleaned = stripInternalFields(rule);
-    downloadAsJson({ "$schema": "../schema/gather-rule.schema.json", ...cleaned }, `${rule.ruleId}.json`);
+    downloadAsJson(stripInternalFields(rule), `gather-rule-${rule.ruleId}.json`);
   };
 
   const handleExportAll = () => {
-    const cleaned = filteredRules.map(stripInternalFields);
-    downloadAsJson(cleaned, "gather-rules-export.json");
+    downloadAsJson(filteredRules.map(stripInternalFields), "gather-rules-export.json");
   };
-
-  const getCategoryBadge = (category: string) => {
-    const colors = CATEGORY_COLORS[category] || { bg: "bg-gray-100", text: "text-gray-700" };
-    return (
-      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${colors.bg} ${colors.text}`}>
-        {category}
-      </span>
-    );
-  };
-
-  // Shared form fields component (used by both create and edit forms)
-  const renderFormFields = (
-    form: NewRuleForm,
-    setForm: (f: NewRuleForm) => void,
-    showRuleId: boolean
-  ) => (
-    <div className="space-y-5">
-      {/* Row 1: Rule ID (create only), Title */}
-      <div className={`grid grid-cols-1 ${showRuleId ? "sm:grid-cols-2" : ""} gap-4`}>
-        {showRuleId && (
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Rule ID <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              value={form.ruleId}
-              onChange={(e) => setForm({ ...form, ruleId: e.target.value })}
-              placeholder="e.g., custom-network-check"
-              autoComplete="off"
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
-            />
-          </div>
-        )}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Title <span className="text-red-500">*</span>
-          </label>
-          <input
-            type="text"
-            value={form.title}
-            onChange={(e) => setForm({ ...form, title: e.target.value })}
-            placeholder="e.g., Custom Network Check"
-            autoComplete="off"
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
-          />
-        </div>
-      </div>
-
-      {/* Description */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-        <textarea
-          value={form.description}
-          onChange={(e) => setForm({ ...form, description: e.target.value })}
-          placeholder="Describe what this rule collects and why..."
-          rows={2}
-          className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors resize-none"
-        />
-      </div>
-
-      {/* Row 2: Category, Collector Type */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
-          <select
-            value={form.category}
-            onChange={(e) => setForm({ ...form, category: e.target.value })}
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
-          >
-            {CATEGORIES.map((cat) => (
-              <option key={cat} value={cat}>
-                {cat.charAt(0).toUpperCase() + cat.slice(1)}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Collector Type</label>
-          <select
-            value={form.collectorType}
-            onChange={(e) => setForm({ ...form, collectorType: e.target.value })}
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
-          >
-            {COLLECTOR_TYPES.map((ct) => (
-              <option key={ct} value={ct}>
-                {COLLECTOR_TYPE_LABELS[ct] || (ct.charAt(0).toUpperCase() + ct.slice(1))}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      {/* Target */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          Target <span className="text-red-500">*</span>
-        </label>
-        <input
-          type="text"
-          value={form.target}
-          onChange={(e) => setForm({ ...form, target: e.target.value })}
-          placeholder={TARGET_PLACEHOLDERS[form.collectorType] || "Target for data collection"}
-          autoComplete="off"
-          className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
-        />
-        <p className="text-xs text-gray-400 mt-1">{TARGET_HINTS[form.collectorType] || "Registry path, WMI class, event log name, file path, or command depending on collector type"}</p>
-      </div>
-
-      {/* Registry: optional Value Name */}
-      {form.collectorType === "registry" && (
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Value Name</label>
-          <input
-            type="text"
-            value={form.valueName}
-            onChange={(e) => setForm({ ...form, valueName: e.target.value })}
-            placeholder="e.g., IsRecoveryAllowed (leave empty to read all values)"
-            autoComplete="off"
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
-          />
-          <p className="text-xs text-gray-400 mt-1">Specific registry value to read. Leave empty to read all values in the key.</p>
-        </div>
-      )}
-
-      {/* EventLog: optional filters */}
-      {form.collectorType === "eventlog" && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Event ID</label>
-              <input
-                type="text"
-                value={form.eventId}
-                onChange={(e) => setForm({ ...form, eventId: e.target.value })}
-                placeholder="e.g., 62407 (leave empty for all events)"
-                autoComplete="off"
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
-              />
-              <p className="text-xs text-gray-400 mt-1">Filter by specific Event ID. Leave empty to collect all events.</p>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Max Entries</label>
-              <input
-                type="number"
-                min={1}
-                max={50}
-                value={form.maxEntries}
-                onChange={(e) => setForm({ ...form, maxEntries: e.target.value })}
-                placeholder="10"
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
-              />
-              <p className="text-xs text-gray-400 mt-1">Maximum number of events to return (1–50, default: 10).</p>
-            </div>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Source / Provider</label>
-              <input
-                type="text"
-                value={form.source}
-                onChange={(e) => setForm({ ...form, source: e.target.value })}
-                placeholder="e.g., Microsoft-Windows-Kernel-General"
-                autoComplete="off"
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
-              />
-              <p className="text-xs text-gray-400 mt-1">Filter by event provider/source name. Leave empty for all sources.</p>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Message Filter</label>
-              <input
-                type="text"
-                value={form.messageFilter}
-                onChange={(e) => setForm({ ...form, messageFilter: e.target.value })}
-                placeholder="e.g., *ESPProgress* (leave empty for no filter)"
-                autoComplete="off"
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
-              />
-              <p className="text-xs text-gray-400 mt-1">Filter by message text. Use * as wildcard prefix/suffix.</p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* File: optional parameters */}
-      {form.collectorType === "file" && (
-        <div>
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={form.readContent}
-              onChange={(e) => setForm({ ...form, readContent: e.target.checked })}
-              className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-            />
-            <span className="text-sm font-medium text-gray-700">Read file content</span>
-          </label>
-          <p className="text-xs text-gray-400 mt-1 ml-6">Read the last 4000 characters of the file (only files &lt;50 KB). Useful for log files and setup logs.</p>
-        </div>
-      )}
-
-      {/* LogParser: required pattern + optional settings */}
-      {form.collectorType === "logparser" && (
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Pattern <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              value={form.logPattern}
-              onChange={(e) => setForm({ ...form, logPattern: e.target.value })}
-              placeholder={`e.g., (?<action>Install|Uninstall).*(?<appName>[A-Za-z0-9_-]+)`}
-              autoComplete="off"
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
-            />
-            <p className="text-xs text-gray-400 mt-1">Regex with named capture groups. Each match emits a separate event. Named groups become event data fields.</p>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Max Lines</label>
-              <input
-                type="number"
-                min={1}
-                max={10000}
-                value={form.maxLines}
-                onChange={(e) => setForm({ ...form, maxLines: e.target.value })}
-                placeholder="1000"
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
-              />
-              <p className="text-xs text-gray-400 mt-1">Max lines to parse per execution (default: 1000).</p>
-            </div>
-            <div className="flex flex-col justify-center">
-              <label className="flex items-center gap-2 cursor-pointer mt-4">
-                <input
-                  type="checkbox"
-                  checked={form.trackPosition}
-                  onChange={(e) => setForm({ ...form, trackPosition: e.target.checked })}
-                  className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                />
-                <span className="text-sm font-medium text-gray-700">Track position</span>
-              </label>
-              <p className="text-xs text-gray-400 mt-1 ml-6">Resume from last read position across executions (recommended).</p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Trigger */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Trigger</label>
-        <select
-          value={form.trigger}
-          onChange={(e) => setForm({ ...form, trigger: e.target.value })}
-          className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
-        >
-          {TRIGGERS.map((t) => (
-            <option key={t} value={t}>{formatTrigger(t)}</option>
-          ))}
-        </select>
-      </div>
-
-      {/* Conditional Trigger Fields */}
-      {form.trigger === "interval" && (
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Interval (seconds)</label>
-          <input
-            type="number"
-            min={5}
-            max={3600}
-            value={form.intervalSeconds}
-            onChange={(e) => setForm({ ...form, intervalSeconds: parseInt(e.target.value) || 60 })}
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
-          />
-          <p className="text-xs text-gray-400 mt-1">How often to run this rule (5 - 3600 seconds)</p>
-        </div>
-      )}
-
-      {form.trigger === "phase_change" && (
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Trigger Phase</label>
-          <input
-            type="text"
-            value={form.triggerPhase}
-            onChange={(e) => setForm({ ...form, triggerPhase: e.target.value })}
-            placeholder="e.g., DeviceESP, AccountESP, DevicePreparation"
-            autoComplete="off"
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
-          />
-        </div>
-      )}
-
-      {form.trigger === "on_event" && (
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Trigger Event Type</label>
-          <input
-            type="text"
-            value={form.triggerEventType}
-            onChange={(e) => setForm({ ...form, triggerEventType: e.target.value })}
-            placeholder="e.g., enrollment_complete, enrollment_failed, app_install_failed"
-            autoComplete="off"
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
-          />
-        </div>
-      )}
-
-      {/* Row 3: Output Event Type, Output Severity */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Output Event Type <span className="text-red-500">*</span>
-          </label>
-          <input
-            type="text"
-            value={form.outputEventType}
-            onChange={(e) => setForm({ ...form, outputEventType: e.target.value })}
-            placeholder="e.g., CustomNetworkStatus"
-            autoComplete="off"
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
-          />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Output Severity</label>
-          <select
-            value={form.outputSeverity}
-            onChange={(e) => setForm({ ...form, outputSeverity: e.target.value })}
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
-          >
-            {SEVERITIES.map((s) => (
-              <option key={s} value={s}>
-                {s.charAt(0).toUpperCase() + s.slice(1)}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-    </div>
-  );
 
   return (
     <ProtectedRoute>
@@ -946,7 +398,6 @@ export default function GatherRulesPage() {
                           <p className="text-sm text-gray-500 mt-1">Define a new data collection rule for enrolled devices</p>
                         </div>
                       </div>
-                      {/* JSON Mode Toggle */}
                       <JsonModeToggleButtons
                         jsonMode={jsonModeCreate}
                         onToggleMode={(mode) => {
@@ -982,7 +433,7 @@ export default function GatherRulesPage() {
                       textareaRows={20}
                       description='Edit the rule as JSON. All fields are supported including <code class="bg-gray-100 px-1 rounded text-xs">parameters</code> for collector-specific options.'
                     >
-                      {renderFormFields(newRule, setNewRule, true)}
+                      <GatherRuleFormFields form={newRule} setForm={setNewRule} showRuleId={true} />
                     </FormJsonToggle>
 
                     {/* Action Buttons */}
@@ -1049,376 +500,52 @@ export default function GatherRulesPage() {
                     showClearButton={!!(searchQuery || categoryFilter !== "all" || typeFilter !== "all")}
                   />
                 ) : (
-                  filteredRules.map((rule) => {
-                    const isExpanded = expandedRuleId === rule.ruleId;
-                    const isEditing = editingRuleId === rule.ruleId;
-                    const catColor = CATEGORY_COLORS[rule.category] || { bg: "bg-gray-100", text: "text-gray-700" };
-                    const canEdit = !rule.isBuiltIn && !rule.isCommunity;
-
-                    return (
-                      <div
-                        key={rule.ruleId}
-                        className={`bg-white rounded-lg shadow border transition-all ${
-                          isExpanded ? "border-indigo-300 ring-1 ring-indigo-200" : "border-gray-200 hover:border-gray-300"
-                        } ${!rule.enabled ? "opacity-60" : ""}`}
-                      >
-                        {/* Collapsed Header */}
-                        <div
-                          className="p-4 cursor-pointer select-none"
-                          onClick={() => {
-                            if (isEditing) return;
-                            setExpandedRuleId(isExpanded ? null : rule.ruleId);
-                            if (isExpanded && editingRuleId === rule.ruleId) {
-                              setEditingRuleId(null);
-                            }
-                          }}
-                        >
-                          <div className="flex items-center space-x-4">
-                            {/* Enable/Disable Toggle */}
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleToggleRule(rule);
-                              }}
-                              disabled={togglingRule === rule.ruleId}
-                              className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${
-                                togglingRule === rule.ruleId
-                                  ? "opacity-50 cursor-not-allowed"
-                                  : "cursor-pointer"
-                              } ${rule.enabled ? "bg-emerald-500" : "bg-gray-300"}`}
-                              title={rule.enabled ? "Disable rule" : "Enable rule"}
-                            >
-                              <span
-                                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                                  rule.enabled ? "translate-x-6" : "translate-x-1"
-                                }`}
-                              />
-                            </button>
-
-                            {/* Rule ID */}
-                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono font-medium bg-gray-100 text-gray-600 border border-gray-200 flex-shrink-0 hidden sm:inline-flex">
-                              {rule.ruleId}
-                            </span>
-
-                            {/* Title */}
-                            <div className="flex-1 min-w-0">
-                              <h3 className="text-sm font-semibold text-gray-900 truncate">
-                                {rule.title}
-                              </h3>
-                            </div>
-
-                            {/* Category Badge */}
-                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${catColor.bg} ${catColor.text} flex-shrink-0`}>
-                              {rule.category.charAt(0).toUpperCase() + rule.category.slice(1)}
-                            </span>
-
-                            {/* Collector Type */}
-                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-50 text-gray-600 flex-shrink-0 hidden md:inline-flex">
-                              {COLLECTOR_TYPE_LABELS[rule.collectorType] || rule.collectorType}
-                            </span>
-
-                            {/* Type Badge */}
-                            <span
-                              className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium flex-shrink-0 ${
-                                rule.isBuiltIn
-                                  ? "bg-blue-50 text-blue-600 border border-blue-200"
-                                  : rule.isCommunity
-                                  ? "bg-amber-50 text-amber-600 border border-amber-200"
-                                  : "bg-purple-50 text-purple-600 border border-purple-200"
-                              }`}
-                            >
-                              {rule.isBuiltIn ? "Built-in" : rule.isCommunity ? "Community" : "Custom"}
-                            </span>
-
-                            {/* Expand/Collapse Arrow */}
-                            <svg
-                              className={`w-5 h-5 text-gray-400 transition-transform flex-shrink-0 ${
-                                isExpanded ? "rotate-180" : ""
-                              }`}
-                              fill="none"
-                              stroke="currentColor"
-                              viewBox="0 0 24 24"
-                            >
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                            </svg>
-                          </div>
-                        </div>
-
-                        {/* Expanded Details */}
-                        {isExpanded && !isEditing && (
-                          <div className="border-t border-gray-200 p-6 space-y-6">
-                            {/* Meta Info Row */}
-                            <div className="flex flex-wrap items-center gap-4 text-sm text-gray-500">
-                              <span>
-                                <span className="font-medium text-gray-700">Version:</span> {rule.version}
-                              </span>
-                              <span>
-                                <span className="font-medium text-gray-700">Author:</span> {rule.author}
-                              </span>
-                              <span>
-                                <span className="font-medium text-gray-700">Created:</span>{" "}
-                                {new Date(rule.createdAt).toLocaleDateString()}
-                              </span>
-                              <span>
-                                <span className="font-medium text-gray-700">Updated:</span>{" "}
-                                {new Date(rule.updatedAt).toLocaleDateString()}
-                              </span>
-                              <span className="text-xs font-mono text-gray-400 sm:hidden">
-                                {rule.ruleId}
-                              </span>
-                            </div>
-
-                            {/* Tags */}
-                            {rule.tags && rule.tags.length > 0 && (
-                              <div className="flex flex-wrap gap-2">
-                                {rule.tags.map((tag, idx) => (
-                                  <span
-                                    key={idx}
-                                    className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-600"
-                                  >
-                                    #{tag}
-                                  </span>
-                                ))}
-                              </div>
-                            )}
-
-                            {/* Description */}
-                            {rule.description && (
-                              <div>
-                                <h4 className="text-sm font-semibold text-gray-700 mb-1">Description</h4>
-                                <p className="text-sm text-gray-600 leading-relaxed">{rule.description}</p>
-                              </div>
-                            )}
-
-                            {/* Collection Details */}
-                            <div>
-                              <h4 className="text-sm font-semibold text-gray-700 mb-2">Collection Details</h4>
-                              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 space-y-3">
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                                  <div>
-                                    <span className="text-gray-500 font-medium">Collector Type:</span>{" "}
-                                    <span className="text-gray-900 font-semibold">{COLLECTOR_TYPE_LABELS[rule.collectorType] || rule.collectorType}</span>
-                                  </div>
-                                  <div>
-                                    <span className="text-gray-500 font-medium">Category:</span>{" "}
-                                    {getCategoryBadge(rule.category)}
-                                  </div>
-                                </div>
-                                <div className="text-sm">
-                                  <span className="text-gray-500 font-medium">Target:</span>
-                                  <code className="ml-2 px-2 py-1 bg-gray-200 rounded text-xs font-mono text-gray-800 break-all">
-                                    {rule.target}
-                                  </code>
-                                </div>
-                                {rule.parameters && Object.keys(rule.parameters).length > 0 && (
-                                  <div className="text-sm">
-                                    <span className="text-gray-500 font-medium">Parameters:</span>
-                                    <div className="mt-1 space-y-1">
-                                      {Object.entries(rule.parameters).map(([key, value]) => (
-                                        <div key={key} className="flex items-start gap-2">
-                                          <code className="px-1.5 py-0.5 bg-indigo-100 rounded text-xs font-mono text-indigo-700">{key}</code>
-                                          <span className="text-gray-400">=</span>
-                                          <code className="px-1.5 py-0.5 bg-gray-200 rounded text-xs font-mono text-gray-700 break-all">{value}</code>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-
-                            {/* Trigger Details */}
-                            <div>
-                              <h4 className="text-sm font-semibold text-gray-700 mb-2">Trigger</h4>
-                              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-sm">
-                                <div className="flex items-center gap-2">
-                                  <svg className="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                                  </svg>
-                                  <span className="font-semibold text-gray-900">{formatTrigger(rule.trigger)}</span>
-                                  {rule.trigger === "interval" && rule.intervalSeconds && (
-                                    <span className="text-gray-500">every {rule.intervalSeconds} seconds</span>
-                                  )}
-                                  {rule.trigger === "phase_change" && rule.triggerPhase && (
-                                    <span className="text-gray-500">
-                                      on phase: <code className="px-1 bg-gray-200 rounded text-xs">{rule.triggerPhase}</code>
-                                    </span>
-                                  )}
-                                  {rule.trigger === "on_event" && rule.triggerEventType && (
-                                    <span className="text-gray-500">
-                                      on event: <code className="px-1 bg-gray-200 rounded text-xs">{rule.triggerEventType}</code>
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Output */}
-                            <div>
-                              <h4 className="text-sm font-semibold text-gray-700 mb-2">Output</h4>
-                              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-sm">
-                                <div className="flex flex-wrap items-center gap-4">
-                                  <div>
-                                    <span className="text-gray-500 font-medium">Event Type:</span>{" "}
-                                    <code className="px-1.5 py-0.5 bg-gray-200 rounded text-xs font-mono text-gray-800">{rule.outputEventType}</code>
-                                  </div>
-                                  <div>
-                                    <span className="text-gray-500 font-medium">Severity:</span>{" "}
-                                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                                      rule.outputSeverity.toLowerCase() === "error" || rule.outputSeverity.toLowerCase() === "critical"
-                                        ? "bg-red-100 text-red-700"
-                                        : rule.outputSeverity.toLowerCase() === "warning"
-                                        ? "bg-yellow-100 text-yellow-700"
-                                        : "bg-blue-100 text-blue-700"
-                                    }`}>
-                                      {rule.outputSeverity.charAt(0).toUpperCase() + rule.outputSeverity.slice(1)}
-                                    </span>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Actions */}
-                            <div className="flex items-center justify-end space-x-3 pt-4 border-t border-gray-200">
-                              <button
-                                onClick={() => handleExportSingle(rule)}
-                                className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors flex items-center space-x-2"
-                                title="Export rule as JSON"
-                              >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                                </svg>
-                                <span>Export</span>
-                              </button>
-                              {canEdit && (
-                                <button
-                                  onClick={() => startEditing(rule)}
-                                  className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center space-x-2"
-                                  title="Edit rule"
-                                >
-                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                  </svg>
-                                  <span>Edit</span>
-                                </button>
-                              )}
-                              {!rule.isBuiltIn && !rule.isCommunity && (
-                                <button
-                                  onClick={() => handleDeleteRule(rule)}
-                                  disabled={deletingRule === rule.ruleId}
-                                  className="px-4 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-2"
-                                  title="Delete rule"
-                                >
-                                  {deletingRule === rule.ruleId ? (
-                                    <>
-                                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                                      <span>Deleting...</span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                      </svg>
-                                      <span>Delete</span>
-                                    </>
-                                  )}
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Edit Form (replaces detail view when editing) */}
-                        {isExpanded && isEditing && (
-                          <div className="border-t border-gray-200 p-6">
-                            <div className="flex items-center justify-between mb-4">
-                              <div className="flex items-center space-x-2">
-                                <svg className="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                </svg>
-                                <h4 className="text-sm font-semibold text-gray-900">
-                                  Editing: {rule.ruleId}
-                                </h4>
-                              </div>
-                              {/* JSON Mode Toggle */}
-                              <JsonModeToggleButtons
-                                jsonMode={jsonModeEdit}
-                                onToggleMode={(mode) => {
-                                  if (mode) { setJsonText(JSON.stringify(editForm, null, 2)); }
-                                  setJsonModeEdit(mode);
-                                  setJsonError(null);
-                                }}
-                              />
-                            </div>
-
-                            <FormJsonToggle
-                              jsonMode={jsonModeEdit}
-                              onToggleMode={(mode) => {
-                                if (mode) { setJsonText(JSON.stringify(editForm, null, 2)); }
-                                setJsonModeEdit(mode);
-                                setJsonError(null);
-                              }}
-                              jsonText={jsonText}
-                              onJsonTextChange={(text) => { setJsonText(text); setJsonError(null); }}
-                              jsonError={jsonError}
-                              onApplyJson={() => {
-                                try {
-                                  const parsed = JSON.parse(jsonText) as NewRuleForm;
-                                  if (!parsed.title) throw new Error("JSON must include title");
-                                  setEditForm({ ...editForm, ...parsed });
-                                  setJsonModeEdit(false);
-                                  setJsonError(null);
-                                } catch (e) {
-                                  setJsonError(e instanceof Error ? e.message : "Invalid JSON");
-                                }
-                              }}
-                              textareaRows={20}
-                              description='Edit the rule as JSON. All fields are supported including <code class="bg-gray-100 px-1 rounded text-xs">parameters</code> for collector-specific options.'
-                            >
-                              {renderFormFields(editForm, setEditForm, false)}
-                            </FormJsonToggle>
-
-                            {/* Action Buttons */}
-                            <div className="flex items-center justify-end space-x-3 pt-4 mt-5 border-t border-gray-200">
-                              <button
-                                onClick={() => { setEditingRuleId(null); setJsonModeEdit(false); setJsonError(null); }}
-                                disabled={saving}
-                                className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-medium"
-                              >
-                                Cancel
-                              </button>
-                              <button
-                                onClick={() => {
-                                  if (jsonModeEdit) {
-                                    try {
-                                      const parsed = JSON.parse(jsonText) as NewRuleForm;
-                                      setJsonError(null);
-                                      handleSaveEdit(rule, { ...editForm, ...parsed });
-                                    } catch (e) {
-                                      setJsonError(e instanceof Error ? e.message : "Invalid JSON");
-                                    }
-                                  } else {
-                                    handleSaveEdit(rule);
-                                  }
-                                }}
-                                disabled={saving}
-                                className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-2 text-sm font-medium"
-                              >
-                                {saving ? (
-                                  <>
-                                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                                    <span>Saving...</span>
-                                  </>
-                                ) : (
-                                  <span>Save Changes</span>
-                                )}
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })
+                  filteredRules.map((rule) => (
+                    <GatherRuleCard
+                      key={rule.ruleId}
+                      rule={rule}
+                      isExpanded={expandedRuleId === rule.ruleId}
+                      isEditing={editingRuleId === rule.ruleId}
+                      editForm={editForm}
+                      setEditForm={setEditForm}
+                      saving={saving}
+                      togglingRule={togglingRule}
+                      deletingRule={deletingRule}
+                      jsonModeEdit={jsonModeEdit}
+                      jsonText={jsonText}
+                      jsonError={jsonError}
+                      onToggle={() => handleToggleRule(rule)}
+                      onExpand={() => {
+                        if (editingRuleId === rule.ruleId) return;
+                        setExpandedRuleId(expandedRuleId === rule.ruleId ? null : rule.ruleId);
+                        if (expandedRuleId === rule.ruleId && editingRuleId === rule.ruleId) {
+                          setEditingRuleId(null);
+                        }
+                      }}
+                      onStartEditing={() => startEditing(rule)}
+                      onCancelEditing={() => { setEditingRuleId(null); setJsonModeEdit(false); setJsonError(null); }}
+                      onSaveEdit={handleSaveEdit}
+                      onDelete={() => handleDeleteRule(rule)}
+                      onExport={() => handleExportSingle(rule)}
+                      onToggleJsonMode={(mode) => {
+                        if (mode) { setJsonText(JSON.stringify(editForm, null, 2)); }
+                        setJsonModeEdit(mode);
+                        setJsonError(null);
+                      }}
+                      onJsonTextChange={(text) => { setJsonText(text); setJsonError(null); }}
+                      onApplyJson={() => {
+                        try {
+                          const parsed = JSON.parse(jsonText) as NewRuleForm;
+                          if (!parsed.title) throw new Error("JSON must include title");
+                          setEditForm({ ...editForm, ...parsed });
+                          setJsonModeEdit(false);
+                          setJsonError(null);
+                        } catch (e) {
+                          setJsonError(e instanceof Error ? e.message : "Invalid JSON");
+                        }
+                      }}
+                    />
+                  ))
                 )}
               </div>
             </div>

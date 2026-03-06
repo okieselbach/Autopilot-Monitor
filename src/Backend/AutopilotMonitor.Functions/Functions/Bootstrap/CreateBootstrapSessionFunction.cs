@@ -10,7 +10,7 @@ using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 
-namespace AutopilotMonitor.Functions.Functions
+namespace AutopilotMonitor.Functions.Functions.Bootstrap
 {
     /// <summary>
     /// POST /api/bootstrap/sessions — Create a new bootstrap session for OOBE agent deployment.

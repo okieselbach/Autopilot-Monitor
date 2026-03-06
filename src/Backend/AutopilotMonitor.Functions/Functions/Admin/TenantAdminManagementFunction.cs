@@ -7,7 +7,7 @@ using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
 
-namespace AutopilotMonitor.Functions.Functions;
+namespace AutopilotMonitor.Functions.Functions.Admin;
 
 /// <summary>
 /// Tenant Admin Management endpoints

@@ -1,5 +1,6 @@
 using System;
 using System.Net;
+using AutopilotMonitor.Functions.Functions.Sessions;
 using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Functions.Services;
 using AutopilotMonitor.Shared.Models;
@@ -9,7 +10,7 @@ using Microsoft.Azure.Functions.Worker.Extensions.SignalRService;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 
-namespace AutopilotMonitor.Functions.Functions
+namespace AutopilotMonitor.Functions.Functions.Bootstrap
 {
     /// <summary>
     /// POST /api/bootstrap/register-session — cert-free session registration for pre-enrollment agents.

@@ -1,0 +1,158 @@
+export interface RelatedDoc {
+  title: string;
+  url: string;
+}
+
+export interface RemediationStep {
+  title: string;
+  steps: string[];
+}
+
+export interface ConfidenceFactor {
+  signal: string;
+  condition: string;
+  weight: number;
+}
+
+export interface RuleCondition {
+  signal: string;
+  source: string;
+  eventType: string;
+  dataField: string;
+  operator: string;
+  value: string;
+  required: boolean;
+  // event_correlation fields
+  correlateEventType?: string;
+  joinField?: string;
+  timeWindowSeconds?: number | null;
+  eventAFilterField?: string;
+  eventAFilterOperator?: string;
+  eventAFilterValue?: string;
+}
+
+export interface AnalyzeRule {
+  ruleId: string;
+  title: string;
+  description: string;
+  severity: string;
+  category: string;
+  trigger: string;
+  version: string;
+  author: string;
+  enabled: boolean;
+  isBuiltIn: boolean;
+  isCommunity: boolean;
+  conditions: RuleCondition[];
+  baseConfidence: number;
+  confidenceFactors: ConfidenceFactor[];
+  confidenceThreshold: number;
+  explanation: string;
+  remediation: RemediationStep[];
+  relatedDocs: RelatedDoc[];
+  tags: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RuleForm {
+  ruleId: string;
+  title: string;
+  description: string;
+  severity: string;
+  category: string;
+  trigger: string;
+  explanation: string;
+  baseConfidence: number;
+  confidenceThreshold: number;
+  conditions: RuleCondition[];
+  confidenceFactors: ConfidenceFactor[];
+  remediation: RemediationStep[];
+  relatedDocs: RelatedDoc[];
+}
+
+export const CATEGORIES = ["network", "identity", "apps", "device", "esp", "enrollment"] as const;
+export const SEVERITIES = ["info", "warning", "high", "critical"] as const;
+export const TRIGGERS = ["single", "correlation"] as const;
+export const OPERATORS = ["equals", "contains", "regex", "gt", "lt", "gte", "lte", "exists", "count_gte"] as const;
+export const SOURCES = ["event_type", "event_data", "phase_duration", "event_count", "event_correlation"] as const;
+
+export const SEVERITY_COLORS: Record<string, { bg: string; text: string; border: string; dot: string }> = {
+  critical: { bg: "bg-red-100", text: "text-red-800", border: "border-red-300", dot: "bg-red-500" },
+  high: { bg: "bg-orange-100", text: "text-orange-800", border: "border-orange-300", dot: "bg-orange-500" },
+  warning: { bg: "bg-yellow-100", text: "text-yellow-800", border: "border-yellow-300", dot: "bg-yellow-500" },
+  info: { bg: "bg-blue-100", text: "text-blue-800", border: "border-blue-300", dot: "bg-blue-500" },
+};
+
+export const CATEGORY_COLORS: Record<string, { bg: string; text: string }> = {
+  network: { bg: "bg-blue-100", text: "text-blue-700" },
+  identity: { bg: "bg-purple-100", text: "text-purple-700" },
+  apps: { bg: "bg-orange-100", text: "text-orange-700" },
+  device: { bg: "bg-gray-100", text: "text-gray-700" },
+  esp: { bg: "bg-teal-100", text: "text-teal-700" },
+  enrollment: { bg: "bg-indigo-100", text: "text-indigo-700" },
+};
+
+export function getSeverityColor(severity: string) {
+  return SEVERITY_COLORS[severity.toLowerCase()] || SEVERITY_COLORS.info;
+}
+
+export function getCategoryColor(category: string) {
+  return CATEGORY_COLORS[category.toLowerCase()] || { bg: "bg-gray-100", text: "text-gray-700" };
+}
+
+export const EMPTY_CONDITION: RuleCondition = {
+  signal: "",
+  source: "event_type",
+  eventType: "",
+  dataField: "",
+  operator: "contains",
+  value: "",
+  required: true,
+  correlateEventType: "",
+  joinField: "",
+  timeWindowSeconds: null,
+  eventAFilterField: "",
+  eventAFilterOperator: "equals",
+  eventAFilterValue: "",
+};
+
+export const EMPTY_FACTOR: ConfidenceFactor = {
+  signal: "",
+  condition: "",
+  weight: 10,
+};
+
+export const EMPTY_FORM: RuleForm = {
+  ruleId: "",
+  title: "",
+  description: "",
+  severity: "warning",
+  category: "device",
+  trigger: "single",
+  explanation: "",
+  baseConfidence: 50,
+  confidenceThreshold: 40,
+  conditions: [{ ...EMPTY_CONDITION }],
+  confidenceFactors: [],
+  remediation: [],
+  relatedDocs: [],
+};
+
+export function ruleToForm(rule: AnalyzeRule): RuleForm {
+  return {
+    ruleId: rule.ruleId,
+    title: rule.title,
+    description: rule.description || "",
+    severity: rule.severity,
+    category: rule.category,
+    trigger: rule.trigger || "single",
+    explanation: rule.explanation || "",
+    baseConfidence: rule.baseConfidence,
+    confidenceThreshold: rule.confidenceThreshold,
+    conditions: rule.conditions.length > 0 ? rule.conditions.map(c => ({ ...c })) : [{ ...EMPTY_CONDITION }],
+    confidenceFactors: rule.confidenceFactors.map(f => ({ ...f })),
+    remediation: rule.remediation.map(r => ({ title: r.title, steps: [...r.steps] })),
+    relatedDocs: rule.relatedDocs.map(d => ({ ...d })),
+  };
+}
