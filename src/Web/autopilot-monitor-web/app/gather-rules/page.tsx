@@ -62,7 +62,7 @@ export default function GatherRulesPage() {
 
   const fetchRules = useCallback(async () => {
     await fetchRulesExec(
-      `${API_BASE_URL}/api/gather-rules?tenantId=${tenantId}`,
+      `${API_BASE_URL}/api/rules/gather?tenantId=${tenantId}`,
       undefined,
       { transform: (d) => (d as { rules?: GatherRule[] }).rules || [] }
     );
@@ -77,9 +77,9 @@ export default function GatherRulesPage() {
   const handleToggleRule = async (rule: GatherRule) => {
     setTogglingRule(rule.ruleId);
     const result = await mutate(
-      `${API_BASE_URL}/api/gather-rules/${rule.ruleId}?tenantId=${tenantId}`,
+      `${API_BASE_URL}/api/rules/gather/${rule.ruleId}?tenantId=${tenantId}`,
       {
-        method: "PATCH",
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled: !rule.enabled }),
       }
@@ -100,7 +100,7 @@ export default function GatherRulesPage() {
 
     setDeletingRule(rule.ruleId);
     const result = await mutate(
-      `${API_BASE_URL}/api/gather-rules/${rule.ruleId}?tenantId=${tenantId}`,
+      `${API_BASE_URL}/api/rules/gather/${rule.ruleId}?tenantId=${tenantId}`,
       { method: "DELETE" }
     );
     if (result !== null) {
@@ -158,7 +158,7 @@ export default function GatherRulesPage() {
     };
 
     const result = await mutate(
-      `${API_BASE_URL}/api/gather-rules?tenantId=${tenantId}`,
+      `${API_BASE_URL}/api/rules/gather?tenantId=${tenantId}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -228,9 +228,9 @@ export default function GatherRulesPage() {
     };
 
     const result = await mutate(
-      `${API_BASE_URL}/api/gather-rules/${rule.ruleId}?tenantId=${tenantId}`,
+      `${API_BASE_URL}/api/rules/gather/${rule.ruleId}?tenantId=${tenantId}`,
       {
-        method: "PATCH",
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       }

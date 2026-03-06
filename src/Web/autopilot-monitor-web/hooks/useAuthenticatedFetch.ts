@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNotifications } from "@/contexts/NotificationContext";
 import {
@@ -46,6 +46,10 @@ export function useAuthenticatedFetch<T = unknown>(
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Stabilize callback refs so `execute` identity doesn't change on every render
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
+
   const clearError = useCallback(() => setError(null), []);
 
   const execute = useCallback(
@@ -85,9 +89,10 @@ export function useAuthenticatedFetch<T = unknown>(
         setData(result);
         return result;
       } catch (err) {
+        const opts = optionsRef.current;
         if (err instanceof TokenExpiredError) {
-          if (options?.onTokenExpired) {
-            options.onTokenExpired(err);
+          if (opts?.onTokenExpired) {
+            opts.onTokenExpired(err);
           } else {
             addNotification(
               "error",
@@ -96,8 +101,8 @@ export function useAuthenticatedFetch<T = unknown>(
               "session-expired",
             );
           }
-        } else if (options?.onError) {
-          options.onError(
+        } else if (opts?.onError) {
+          opts.onError(
             err instanceof Error ? err : new Error(String(err)),
           );
         }
@@ -112,7 +117,7 @@ export function useAuthenticatedFetch<T = unknown>(
         }
       }
     },
-    [getAccessToken, addNotification, options?.onError, options?.onTokenExpired],
+    [getAccessToken, addNotification],
   );
 
   return { data, loading, error, execute, clearError, setData };
