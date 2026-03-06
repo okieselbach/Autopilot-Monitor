@@ -37,6 +37,7 @@ namespace AutopilotMonitor.SummaryDialog
 
             ApplyScrollBarStyle();
             ApplyContentClip();
+            ApplyTaskbarIcon();
 
             LoadStatusData();
             RenderOutcome();
@@ -413,7 +414,7 @@ namespace AutopilotMonitor.SummaryDialog
         {
             // Clip the entire content Border to a rounded rectangle.
             // This prevents child backgrounds from bleeding past the rounded corners.
-            const double radius = 12;
+            const double radius = 11; // matches inner CornerRadius (outer 12 minus 1px border)
 
             void UpdateClip()
             {
@@ -427,6 +428,47 @@ namespace AutopilotMonitor.SummaryDialog
 
             ContentBorder.SizeChanged += (s, args) => UpdateClip();
             UpdateClip(); // Set immediately — layout is already complete at Window_Loaded time
+        }
+
+        /// <summary>
+        /// Generates a green checkmark icon and sets it as the window/taskbar icon.
+        /// </summary>
+        private void ApplyTaskbarIcon()
+        {
+            const int size = 32;
+            var dv = new DrawingVisual();
+            using (var dc = dv.RenderOpen())
+            {
+                var successGreen = Color.FromRgb(0x05, 0x96, 0x69);
+                var bgBrush = new SolidColorBrush(Color.FromRgb(0xEC, 0xFD, 0xF5));
+                var strokePen = new Pen(new SolidColorBrush(successGreen), 2.0);
+                var checkPen = new Pen(new SolidColorBrush(successGreen), 3.0)
+                {
+                    StartLineCap = PenLineCap.Round,
+                    EndLineCap = PenLineCap.Round,
+                    LineJoin = PenLineJoin.Round
+                };
+
+                // Circle background + outline
+                var center = new Point(size / 2.0, size / 2.0);
+                dc.DrawEllipse(bgBrush, strokePen, center, 14, 14);
+
+                // Checkmark path (scaled from 56px icon to 32px)
+                var checkPath = new StreamGeometry();
+                using (var ctx = checkPath.Open())
+                {
+                    ctx.BeginFigure(new Point(9, 16), false, false);
+                    ctx.LineTo(new Point(14, 21), true, true);
+                    ctx.LineTo(new Point(23, 11), true, true);
+                }
+                checkPath.Freeze();
+                dc.DrawGeometry(null, checkPen, checkPath);
+            }
+
+            var rtb = new RenderTargetBitmap(size, size, 96, 96, PixelFormats.Pbgra32);
+            rtb.Render(dv);
+            rtb.Freeze();
+            Icon = rtb;
         }
 
         private static bool DetectDarkTheme()

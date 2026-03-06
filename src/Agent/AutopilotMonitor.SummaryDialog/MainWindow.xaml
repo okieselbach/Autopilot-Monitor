@@ -36,17 +36,18 @@
     </Window.Resources>
 
     <Grid>
-        <!-- Shadow layer (separate so clipping the content border doesn't cut the shadow) -->
-        <Border CornerRadius="12" Background="{DynamicResource WindowBackground}">
+        <!-- Shadow + border stroke layer (not clipped, so the border line stays crisp at corners) -->
+        <Border CornerRadius="12" Background="{DynamicResource WindowBackground}"
+                BorderBrush="{DynamicResource BorderColor}" BorderThickness="1">
             <Border.Effect>
                 <DropShadowEffect BlurRadius="24" ShadowDepth="4" Opacity="0.15" Color="#000000"/>
             </Border.Effect>
         </Border>
 
-        <!-- Content layer (clipped to rounded corners in code-behind) -->
-        <Border x:Name="ContentBorder" CornerRadius="12"
+        <!-- Content layer (clipped to rounded corners, no border stroke — sits inside the stroke) -->
+        <Border x:Name="ContentBorder" CornerRadius="11"
                 Background="{DynamicResource WindowBackground}"
-                BorderBrush="{DynamicResource BorderColor}" BorderThickness="1">
+                Margin="1">
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>  <!-- Branding banner -->
