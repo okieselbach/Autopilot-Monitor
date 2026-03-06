@@ -113,6 +113,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
 
         private void HandlePatternMatch(CompiledPattern pattern, Match match, string message)
         {
+            LastMatchedPatternId = pattern.PatternId;
             try
             {
                 var id = match.Groups["id"]?.Value;

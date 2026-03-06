@@ -13,6 +13,22 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
     /// </summary>
     public partial class EnrollmentTracker
     {
+        /// <summary>
+        /// Wraps _emitEvent and automatically injects the current ImeLogTracker patternId into event Data.
+        /// Use this for all events emitted from ImeLogTracker callback handlers.
+        /// </summary>
+        private void EmitImeTrackerEvent(EnrollmentEvent evt)
+        {
+            var patternId = _imeLogTracker?.LastMatchedPatternId;
+            if (!string.IsNullOrEmpty(patternId))
+            {
+                if (evt.Data == null)
+                    evt.Data = new Dictionary<string, object>();
+                evt.Data["patternId"] = patternId;
+            }
+            _emitEvent(evt);
+        }
+
         private void HandleEspPhaseChanged(string phase)
         {
             // WDP (v2) has no ESP - skip ESP phase handling entirely
@@ -58,7 +74,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             if (string.Equals(phase, "AccountSetup", StringComparison.OrdinalIgnoreCase))
                 enrollmentPhase = EnrollmentPhase.AccountSetup;
 
-            _emitEvent(new EnrollmentEvent
+            EmitImeTrackerEvent(new EnrollmentEvent
             {
                 SessionId = _sessionId,
                 TenantId = _tenantId,
@@ -89,7 +105,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
 
         private void HandleImeAgentVersion(string version)
         {
-            _emitEvent(new EnrollmentEvent
+            EmitImeTrackerEvent(new EnrollmentEvent
             {
                 SessionId = _sessionId,
                 TenantId = _tenantId,
@@ -123,7 +139,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                         // Switch from DeviceSetup to AppsDevice
                         _logger.Info($"EnrollmentTracker: First app activity detected during DeviceSetup, switching to AppsDevice phase");
                         _hasAutoSwitchedToAppsPhase = true;
-                        _emitEvent(new EnrollmentEvent
+                        EmitImeTrackerEvent(new EnrollmentEvent
                         {
                             SessionId = _sessionId,
                             TenantId = _tenantId,
@@ -140,7 +156,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                         // Switch from AccountSetup to AppsUser
                         _logger.Info($"EnrollmentTracker: First app activity detected during AccountSetup, switching to AppsUser phase");
                         _hasAutoSwitchedToAppsPhase = true;
-                        _emitEvent(new EnrollmentEvent
+                        EmitImeTrackerEvent(new EnrollmentEvent
                         {
                             SessionId = _sessionId,
                             TenantId = _tenantId,
@@ -174,7 +190,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                         // Skip if no real download data (bytesTotal too small or zero)
                         if (app.BytesTotal > 1024) // At least 1 KB to be a real download
                         {
-                            _emitEvent(new EnrollmentEvent
+                            EmitImeTrackerEvent(new EnrollmentEvent
                             {
                                 SessionId = _sessionId,
                                 TenantId = _tenantId,
@@ -202,7 +218,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 case AppInstallationState.Installed:
                     eventType = "app_install_completed";
                     // Emit download_progress event for download manager (shows as completed)
-                    _emitEvent(new EnrollmentEvent
+                    EmitImeTrackerEvent(new EnrollmentEvent
                     {
                         SessionId = _sessionId,
                         TenantId = _tenantId,
@@ -226,7 +242,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     eventType = "app_install_failed";
                     severity = EventSeverity.Error;
                     // Emit download_progress event for download manager (shows as failed)
-                    _emitEvent(new EnrollmentEvent
+                    EmitImeTrackerEvent(new EnrollmentEvent
                     {
                         SessionId = _sessionId,
                         TenantId = _tenantId,
@@ -256,7 +272,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             if (newState == AppInstallationState.Error && !string.IsNullOrEmpty(app.ErrorDetail))
                 message = $"{app.Name ?? app.Id}: {app.ErrorDetail}";
 
-            _emitEvent(new EnrollmentEvent
+            EmitImeTrackerEvent(new EnrollmentEvent
             {
                 SessionId = _sessionId,
                 TenantId = _tenantId,
@@ -307,7 +323,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             var phase = EnrollmentPhase.Unknown;
 
             // Dedicated do_telemetry event for backend aggregation
-            _emitEvent(new EnrollmentEvent
+            EmitImeTrackerEvent(new EnrollmentEvent
             {
                 SessionId = _sessionId,
                 TenantId = _tenantId,
@@ -320,7 +336,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             });
 
             // Also emit download_progress so the UI picks up DO stats
-            _emitEvent(new EnrollmentEvent
+            EmitImeTrackerEvent(new EnrollmentEvent
             {
                 SessionId = _sessionId,
                 TenantId = _tenantId,
@@ -384,7 +400,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             if (!string.IsNullOrEmpty(script.ScriptPart))
                 data["scriptPart"] = script.ScriptPart;
 
-            _emitEvent(new EnrollmentEvent
+            EmitImeTrackerEvent(new EnrollmentEvent
             {
                 SessionId = _sessionId,
                 TenantId = _tenantId,
@@ -426,7 +442,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     _logger.Info("EnrollmentTracker: Windows Hello policy is configured but provisioning has not completed yet.");
                     _logger.Info("EnrollmentTracker: Waiting for Hello provisioning to finish before marking enrollment as complete.");
 
-                    _emitEvent(new EnrollmentEvent
+                    EmitImeTrackerEvent(new EnrollmentEvent
                     {
                         SessionId = _sessionId,
                         TenantId = _tenantId,
