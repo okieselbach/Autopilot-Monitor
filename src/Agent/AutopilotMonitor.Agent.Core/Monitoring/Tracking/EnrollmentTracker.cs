@@ -179,6 +179,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             _imeLogTracker.OnPoliciesDiscovered = HandlePoliciesDiscovered;
             _imeLogTracker.OnAllAppsCompleted = HandleAllAppsCompleted;
             _imeLogTracker.OnUserSessionCompleted = HandleUserSessionCompleted;
+            _imeLogTracker.OnImeSessionChange = HandleImeSessionChange;
             _imeLogTracker.OnDoTelemetryReceived = HandleDoTelemetryReceived;
             _imeLogTracker.OnScriptCompleted = HandleScriptCompleted;
 

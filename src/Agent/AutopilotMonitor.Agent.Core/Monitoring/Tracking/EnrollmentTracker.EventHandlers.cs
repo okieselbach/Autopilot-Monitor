@@ -432,11 +432,39 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             _logger.Info($"EnrollmentTracker: {message}");
         }
 
+        private void HandleImeSessionChange(string changeType)
+        {
+            _emitEvent(new EnrollmentEvent
+            {
+                SessionId = _sessionId,
+                TenantId = _tenantId,
+                EventType = "ime_session_change",
+                Severity = EventSeverity.Debug,
+                Source = "ImeLogTracker",
+                Phase = EnrollmentPhase.Unknown,
+                Message = $"IME session change: {changeType}",
+                Data = new Dictionary<string, object> { { "changeType", changeType ?? "" } }
+            });
+        }
+
         private void HandleUserSessionCompleted()
         {
             _logger.Info("EnrollmentTracker: User session completed (detected from IME log)");
             _stateData.ImePatternSeenUtc = DateTime.UtcNow;
             RecordSignal("ime_pattern");
+
+            // Emit timeline event so admins can see exactly when IME finished its user part
+            EmitImeTrackerEvent(new EnrollmentEvent
+            {
+                SessionId = _sessionId,
+                TenantId = _tenantId,
+                EventType = "ime_user_session_completed",
+                Severity = EventSeverity.Info,
+                Source = "ImeLogTracker",
+                Phase = EnrollmentPhase.Unknown,
+                Message = "IME user session completed",
+                Data = new Dictionary<string, object> { { "detectedAt", DateTime.UtcNow.ToString("o") } }
+            });
 
             // User session completed successfully — cancel any pending ESP failure
             CancelPendingEspFailure();

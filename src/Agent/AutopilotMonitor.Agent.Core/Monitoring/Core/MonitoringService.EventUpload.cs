@@ -129,20 +129,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     }
                 });
 
-                // Trigger self-destruct or reboot if configured
-                if (_configuration.SelfDestructOnComplete || _configuration.RebootOnComplete)
-                {
-                    Task.Run(() => HandleEnrollmentComplete(enrollmentSucceeded));
-                    return; // Don't continue with normal event processing
-                }
-
-                // No self-destruct/reboot — still upload diagnostics and optionally show summary
-                Task.Run(async () =>
-                {
-                    await UploadDiagnosticsWithTimelineEvents(enrollmentSucceeded);
-                    if (_configuration.ShowEnrollmentSummary)
-                        LaunchEnrollmentSummaryDialog();
-                });
+                // Always run the full completion sequence (analyzers, diagnostics, summary, exit).
+                // HandleEnrollmentComplete conditionally self-destructs or reboots based on config.
+                Task.Run(() => HandleEnrollmentComplete(enrollmentSucceeded));
+                return; // Don't continue with normal event processing
             }
 
             // Immediate upload for:
@@ -160,6 +150,41 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 _logger.Info($"Triggering immediate upload for {evt.EventType} (bypassing debounce)");
                 Task.Run(() => UploadEventsAsync());
             }
+        }
+
+        /// <summary>
+        /// Emits a Trace-severity event from any component for agent decision auditing.
+        /// Always logged locally; only sent to the backend when SendTraceEvents is enabled.
+        /// </summary>
+        private void EmitTraceEvent(string source, string decision, string reason, Dictionary<string, object> context = null)
+        {
+            _logger.Info($"[TRACE] {source}: {decision} — {reason}");
+
+            if (!_configuration.SendTraceEvents)
+                return;
+
+            var data = new Dictionary<string, object>
+            {
+                { "decision", decision },
+                { "reason", reason }
+            };
+            if (context != null)
+            {
+                foreach (var kvp in context)
+                    data[kvp.Key] = kvp.Value;
+            }
+
+            EmitEvent(new EnrollmentEvent
+            {
+                SessionId = _configuration.SessionId,
+                TenantId = _configuration.TenantId,
+                EventType = "agent_trace",
+                Severity = EventSeverity.Trace,
+                Source = source,
+                Phase = EnrollmentPhase.Unknown,
+                Message = $"{decision}: {reason}",
+                Data = data
+            });
         }
 
         /// <summary>
@@ -424,7 +449,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         {
             try
             {
-                _logger.Info("===== ENROLLMENT COMPLETE - Starting Self-Destruct Sequence =====");
+                _logger.Info("===== ENROLLMENT COMPLETE - Starting shutdown sequence =====");
 
                 // Step 1: Stop all event collectors
                 _logger.Info("Stopping event collectors...");
@@ -487,7 +512,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     Process.Start(psi);
                 }
 
-                _logger.Info("Self-destruct sequence initiated. Agent will now exit.");
+                _logger.Info("Shutdown sequence complete. Agent will now exit.");
 
                 // Exit the application
                 Environment.Exit(0);
@@ -583,9 +608,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     return;
                 }
 
-                // Create temp folder for the dialog (survives agent self-destruct)
-                var tempDir = Path.Combine(Path.GetTempPath(),
-                    "AutopilotMonitor-Summary-" + Guid.NewGuid().ToString("N").Substring(0, 8));
+                // Create temp folder for the dialog (survives agent self-destruct).
+                // Use ProgramData instead of Path.GetTempPath() because the agent runs as SYSTEM
+                // and SYSTEM's temp (C:\WINDOWS\SystemTemp) is not accessible to the user session.
+                var tempDir = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                    "AutopilotMonitor",
+                    "Summary-" + Guid.NewGuid().ToString("N").Substring(0, 8));
                 Directory.CreateDirectory(tempDir);
 
                 // Copy dialog EXE + Newtonsoft.Json.dll + final-status.json to temp

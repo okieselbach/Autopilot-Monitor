@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Management;
 using System.Threading;
@@ -17,6 +18,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         private readonly AgentLogger _logger;
         private Timer _pollingTimer;
         private bool _desktopArrived;
+        private bool _excludedUserTraced; // Emit trace event only once for excluded-user skips
         private const int PollingIntervalSeconds = 30;
 
         /// <summary>
@@ -37,6 +39,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         /// Fired exactly once when a real user desktop is detected (explorer.exe under a real user).
         /// </summary>
         public event EventHandler DesktopArrived;
+
+        /// <summary>
+        /// Optional callback for trace events (decision, reason, context).
+        /// Wired by MonitoringService to emit agent_trace events to the backend.
+        /// </summary>
+        public Action<string, string, Dictionary<string, object>> OnTraceEvent { get; set; }
 
         public DesktopArrivalDetector(AgentLogger logger)
         {
@@ -83,12 +91,35 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                         if (IsExcludedUser(owner))
                         {
                             _logger.Debug($"DesktopArrivalDetector: explorer.exe PID {proc.Id} owned by excluded user '{owner}' — skipping");
+
+                            // Trace this decision once so it's visible in the backend
+                            if (!_excludedUserTraced)
+                            {
+                                _excludedUserTraced = true;
+                                try
+                                {
+                                    OnTraceEvent?.Invoke(
+                                        "desktop_excluded_user",
+                                        $"explorer.exe found but owned by excluded user '{owner}' — not a real user desktop",
+                                        new Dictionary<string, object> { { "pid", proc.Id }, { "session", proc.SessionId }, { "owner", owner } });
+                                }
+                                catch { }
+                            }
                             continue;
                         }
 
                         // Real user desktop detected
                         _desktopArrived = true;
                         _logger.Info($"DesktopArrivalDetector: real user desktop detected (explorer.exe PID {proc.Id}, session {proc.SessionId}, user '{owner}')");
+
+                        try
+                        {
+                            OnTraceEvent?.Invoke(
+                                "desktop_real_user_detected",
+                                $"Real user desktop detected (explorer.exe PID {proc.Id}, user '{owner}')",
+                                new Dictionary<string, object> { { "pid", proc.Id }, { "session", proc.SessionId }, { "owner", owner } });
+                        }
+                        catch { }
 
                         // Stop polling
                         _pollingTimer?.Dispose();

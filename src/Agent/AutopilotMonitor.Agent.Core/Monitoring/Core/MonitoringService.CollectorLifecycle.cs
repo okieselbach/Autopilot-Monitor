@@ -106,6 +106,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 // Desktop arrival detector — detects real user desktop for no-ESP completion
                 _desktopArrivalDetector = new DesktopArrivalDetector(_logger);
                 _desktopArrivalDetector.DesktopArrived += OnDesktopArrived;
+                _desktopArrivalDetector.OnTraceEvent = (decision, reason, context) =>
+                    EmitTraceEvent("DesktopArrivalDetector", decision, reason, context);
                 _desktopArrivalDetector.Start();
 
                 // Agent max lifetime safety net — prevents zombie agents

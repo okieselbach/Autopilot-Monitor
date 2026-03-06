@@ -66,9 +66,18 @@ namespace AutopilotMonitor.SummaryDialog
                 var exePath = System.Reflection.Assembly.GetExecutingAssembly().Location;
                 var exeDir = Path.GetDirectoryName(exePath);
 
-                // Only self-cleanup if running from a temp folder
+                // Only self-cleanup if running from a known staging folder
+                // (agent copies the dialog to ProgramData\AutopilotMonitor\Summary-* or legacy TEMP)
+                if (exeDir == null)
+                    return;
+
+                var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+                var agentStagingRoot = Path.Combine(programData, "AutopilotMonitor");
                 var tempRoot = Path.GetTempPath().TrimEnd('\\');
-                if (exeDir == null || !exeDir.StartsWith(tempRoot, StringComparison.OrdinalIgnoreCase))
+
+                var isStagedCopy = exeDir.StartsWith(agentStagingRoot, StringComparison.OrdinalIgnoreCase)
+                                || exeDir.StartsWith(tempRoot, StringComparison.OrdinalIgnoreCase);
+                if (!isStagedCopy)
                     return;
 
                 var pid = Process.GetCurrentProcess().Id;

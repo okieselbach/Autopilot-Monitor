@@ -138,7 +138,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                         break;
 
                     case "imesessionchange":
-                        _logger.Debug($"IME session change: {match.Groups["change"]?.Value}");
+                        var sessionChange = match.Groups["change"]?.Value;
+                        _logger.Debug($"IME session change: {sessionChange}");
+                        OnImeSessionChange?.Invoke(sessionChange);
                         break;
 
                     case "espphasedetected":

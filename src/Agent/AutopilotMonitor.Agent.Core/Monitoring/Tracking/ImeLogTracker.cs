@@ -112,6 +112,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         public Action<string> OnPoliciesDiscovered { get; set; }
         public Action OnAllAppsCompleted { get; set; }
         public Action OnUserSessionCompleted { get; set; }
+        public Action<string> OnImeSessionChange { get; set; }
         public Action<AppPackageState> OnDoTelemetryReceived { get; set; }
         public Action<ScriptExecutionState> OnScriptCompleted { get; set; }
 
