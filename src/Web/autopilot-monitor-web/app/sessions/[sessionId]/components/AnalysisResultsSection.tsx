@@ -76,7 +76,9 @@ export default function AnalysisResultsSection({
               </>
             )}
           </button>
-          <span className="text-gray-400">{analysisExpanded ? '▼' : '▶'}</span>
+          <svg className={`w-5 h-5 text-gray-400 transition-transform duration-200 ${analysisExpanded ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
         </div>
       </div>
 
@@ -150,7 +152,9 @@ function AnalysisResultCard({ result }: { result: RuleResult }) {
             </div>
           </div>
         </div>
-        <span className="text-gray-400 ml-2">{expanded ? '▼' : '▶'}</span>
+        <svg className={`w-5 h-5 text-gray-400 ml-2 transition-transform duration-200 flex-shrink-0 ${expanded ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+        </svg>
       </div>
 
       {expanded && (

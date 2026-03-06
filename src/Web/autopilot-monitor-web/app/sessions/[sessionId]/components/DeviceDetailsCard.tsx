@@ -168,7 +168,9 @@ export default function DeviceDetailsCard({ events }: { events: EnrollmentEvent[
           </svg>
           <h2 className="text-xl font-semibold text-gray-900">Device Details</h2>
         </div>
-        <span className="text-gray-400">{expanded ? '▼' : '▶'}</span>
+        <svg className={`w-5 h-5 text-gray-400 transition-transform duration-200 ${expanded ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+        </svg>
       </button>
 
       {expanded && (
@@ -229,7 +231,9 @@ export default function DeviceDetailsCard({ events }: { events: EnrollmentEvent[
                             onClick={() => setShowIpv6(prev => ({ ...prev, [i]: !isIpv6Shown }))}
                             className="text-xs text-blue-600 hover:text-blue-800 flex items-center space-x-1"
                           >
-                            <span>{isIpv6Shown ? '▼' : '▶'}</span>
+                            <svg className={`w-3 h-3 transition-transform duration-200 ${isIpv6Shown ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
+                            </svg>
                             <span>IPv6 ({ipv6.length})</span>
                           </button>
                           {isIpv6Shown && (

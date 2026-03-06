@@ -227,7 +227,9 @@ export default function EventTimeline({
             className="flex items-center justify-between w-full text-left mb-4"
           >
             <h2 className="text-xl font-semibold text-gray-900">Event Timeline</h2>
-            <span className="text-gray-400">{timelineExpanded ? '▼' : '▶'}</span>
+            <svg className={`w-5 h-5 text-gray-400 transition-transform duration-200 ${timelineExpanded ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
           </button>
           {timelineExpanded && (
             <>
@@ -280,7 +282,9 @@ function PhaseSection({
         <h3 className="text-lg font-semibold text-gray-900 group-hover:text-blue-600">
           {phaseName} ({events.length} events)
         </h3>
-        <span className="text-gray-400">{isExpanded ? '▼' : '▶'}</span>
+        <svg className={`w-5 h-5 text-gray-400 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+        </svg>
       </button>
 
       {isExpanded && (

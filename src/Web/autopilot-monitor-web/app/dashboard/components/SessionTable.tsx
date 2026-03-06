@@ -198,7 +198,7 @@ export function SessionTable({
               Columns
             </button>
             {showColumnSelector && (
-              <div className="absolute right-0 top-full mt-1 w-56 bg-white rounded-lg shadow-lg border border-gray-200 z-50 py-2">
+              <div className="absolute left-0 sm:left-auto sm:right-0 top-full mt-1 w-56 bg-white rounded-lg shadow-lg border border-gray-200 z-50 py-2">
                 <div className="px-3 py-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center justify-between">
                   <span>Toggle Columns</span>
                   <button
