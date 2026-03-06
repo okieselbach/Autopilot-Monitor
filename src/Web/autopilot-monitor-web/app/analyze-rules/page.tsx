@@ -7,6 +7,7 @@ import { ProtectedRoute } from "../../components/ProtectedRoute";
 import { useTenant } from "../../contexts/TenantContext";
 import { useAuth } from "../../contexts/AuthContext";
 import { API_BASE_URL } from "@/lib/config";
+import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 import { downloadAsJson, stripInternalFields, bumpVersion } from "@/lib/rulePageHelpers";
 import { StatCard } from "@/components/rules/StatCard";
 import { RuleFilterBar } from "@/components/rules/RuleFilterBar";
@@ -226,16 +227,7 @@ export default function AnalyzeRulesPage() {
       setLoading(true);
       setError(null);
 
-      const token = await getAccessToken();
-      if (!token) {
-        throw new Error("Failed to get access token");
-      }
-
-      const response = await fetch(`${API_BASE_URL}/api/rules/analyze`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/rules/analyze`, getAccessToken);
 
       if (!response.ok) {
         throw new Error(`Failed to load analyze rules: ${response.statusText}`);
@@ -265,16 +257,10 @@ export default function AnalyzeRulesPage() {
       setTogglingRuleId(rule.ruleId);
       setError(null);
 
-      const token = await getAccessToken();
-      if (!token) {
-        throw new Error("Failed to get access token");
-      }
-
-      const response = await fetch(`${API_BASE_URL}/api/rules/analyze/${encodeURIComponent(rule.ruleId)}`, {
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/rules/analyze/${encodeURIComponent(rule.ruleId)}`, getAccessToken, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ ...rule, enabled: !rule.enabled }),
       });
@@ -305,17 +291,9 @@ export default function AnalyzeRulesPage() {
       setDeletingRuleId(rule.ruleId);
       setError(null);
 
-      const token = await getAccessToken();
-      if (!token) {
-        throw new Error("Failed to get access token");
-      }
-
       const url = `${API_BASE_URL}/api/rules/analyze/${encodeURIComponent(rule.ruleId)}`;
-      const response = await fetch(url, {
+      const response = await authenticatedFetch(url, getAccessToken, {
         method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
       });
 
       if (!response.ok) {
@@ -345,11 +323,6 @@ export default function AnalyzeRulesPage() {
       setCreating(true);
       setError(null);
 
-      const token = await getAccessToken();
-      if (!token) {
-        throw new Error("Failed to get access token");
-      }
-
       const payload = {
         ruleId: form.ruleId.trim(),
         title: form.title.trim(),
@@ -366,11 +339,10 @@ export default function AnalyzeRulesPage() {
         relatedDocs: form.relatedDocs.filter(d => d.title.trim() && d.url.trim()),
       };
 
-      const response = await fetch(`${API_BASE_URL}/api/rules/analyze`, {
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/rules/analyze`, getAccessToken, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify(payload),
       });
@@ -410,11 +382,6 @@ export default function AnalyzeRulesPage() {
       setSaving(true);
       setError(null);
 
-      const token = await getAccessToken();
-      if (!token) {
-        throw new Error("Failed to get access token");
-      }
-
       const payload = {
         ...rule,
         title: form.title.trim(),
@@ -434,11 +401,10 @@ export default function AnalyzeRulesPage() {
       };
       const url = `${API_BASE_URL}/api/rules/analyze/${encodeURIComponent(rule.ruleId)}`;
 
-      const response = await fetch(url, {
+      const response = await authenticatedFetch(url, getAccessToken, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify(payload),
       });

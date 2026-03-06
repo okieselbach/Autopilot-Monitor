@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useMemo } from "react";
 import { API_BASE_URL } from "@/lib/config";
+import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 import { useTenant } from "../../contexts/TenantContext";
 import { useAuth } from "../../contexts/AuthContext";
 import { useNotifications } from "../../contexts/NotificationContext";
@@ -173,11 +174,9 @@ export default function ProgressPortalPage() {
     lastFetchedSessionId.current = session.sessionId;
     const fetchEvents = async () => {
       try {
-        const token = await getAccessToken();
-        if (!token) return;
-        const response = await fetch(
+        const response = await authenticatedFetch(
           `${API_BASE_URL}/api/sessions/${session.sessionId}/events?tenantId=${tenantId}`,
-          { headers: { Authorization: `Bearer ${token}` } }
+          getAccessToken
         );
         if (response.ok) {
           const data = await response.json();
@@ -195,8 +194,12 @@ export default function ProgressPortalPage() {
           addNotification('error', 'Backend Error', `Failed to load enrollment events: ${response.statusText}`, 'progress-events-error');
         }
       } catch (error) {
-        console.error("Failed to fetch events:", error);
-        addNotification('error', 'Backend Not Reachable', 'Unable to load enrollment events. Please check your connection.', 'progress-events-error');
+        if (error instanceof TokenExpiredError) {
+          addNotification('error', 'Session Expired', error.message, 'session-expired-error');
+        } else {
+          console.error("Failed to fetch events:", error);
+          addNotification('error', 'Backend Not Reachable', 'Unable to load enrollment events. Please check your connection.', 'progress-events-error');
+        }
       }
     };
     fetchEvents();
@@ -213,16 +216,9 @@ export default function ProgressPortalPage() {
     lastFetchedSessionId.current = null;
 
     try {
-      const token = await getAccessToken();
-      if (!token) {
-        addNotification('error', 'Authentication Error', 'Failed to get access token. Please try logging in again.', 'progress-auth-error');
-        setSearching(false);
-        return;
-      }
-
-      const response = await fetch(
+      const response = await authenticatedFetch(
         `${API_BASE_URL}/api/sessions?tenantId=${tenantId}`,
-        { headers: { Authorization: `Bearer ${token}` } }
+        getAccessToken
       );
 
       if (response.ok) {
@@ -256,8 +252,12 @@ export default function ProgressPortalPage() {
         setNotFound(true);
       }
     } catch (error) {
-      console.error("Search failed:", error);
-      addNotification('error', 'Backend Not Reachable', 'Unable to search for device. Please check your connection.', 'progress-search-error');
+      if (error instanceof TokenExpiredError) {
+        addNotification('error', 'Session Expired', error.message, 'session-expired-error');
+      } else {
+        console.error("Search failed:", error);
+        addNotification('error', 'Backend Not Reachable', 'Unable to search for device. Please check your connection.', 'progress-search-error');
+      }
       setNotFound(true);
     } finally {
       setSearching(false);

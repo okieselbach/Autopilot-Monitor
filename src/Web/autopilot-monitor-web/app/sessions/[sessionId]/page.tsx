@@ -12,6 +12,7 @@ import DownloadProgress from '../../../components/DownloadProgress';
 import InstallProgress from '../../../components/InstallProgress';
 import ScriptExecutions from '../../../components/ScriptExecutions';
 import { API_BASE_URL } from "@/lib/config";
+import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 
 import { V1_PHASE_NAMES, V2_PHASE_NAMES, V1_PHASE_ORDER, V2_PHASE_ORDER } from "./utils/phaseConstants";
 import { groupEventsByPhase } from "./utils/eventHelpers";
@@ -200,11 +201,10 @@ export default function SessionDetailPage() {
       // Fetch showScriptOutput setting (best-effort)
       (async () => {
         try {
-          const token = await getAccessToken();
-          if (!token) return;
-          const res = await fetch(`${API_BASE_URL}/api/config/${sessionTenantId}`, {
-            headers: { Authorization: `Bearer ${token}` },
-          });
+          const res = await authenticatedFetch(
+            `${API_BASE_URL}/api/config/${sessionTenantId}`,
+            getAccessToken
+          );
           if (res.ok) {
             const cfg = await res.json();
             setShowScriptOutput(cfg.showScriptOutput ?? true);
@@ -314,16 +314,6 @@ export default function SessionDetailPage() {
 
   const fetchSessionDetails = async () => {
     try {
-      // Get access token and include Authorization header
-      const token = await getAccessToken();
-
-      if (!token) {
-        addNotification('error', 'Authentication Error', 'Failed to get access token. Please try logging in again.', 'session-detail-auth-error');
-        // Allow retry — token may not be ready yet (MSAL still initializing)
-        hasInitialFetch.current = false;
-        return;
-      }
-
       const knownTenantId = resolveEffectiveTenantId();
       const endpoint = knownTenantId
         ? `${API_BASE_URL}/api/sessions/${sessionId}?tenantId=${knownTenantId}`
@@ -331,11 +321,7 @@ export default function SessionDetailPage() {
           ? `${API_BASE_URL}/api/galactic/sessions`
           : `${API_BASE_URL}/api/sessions/${sessionId}`;
 
-      const response = await fetch(endpoint, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
+      const response = await authenticatedFetch(endpoint, getAccessToken);
       if (response.ok) {
         const data = await response.json();
         const foundSession = data.session ?? data.sessions?.find((s: Session) => s.sessionId === sessionId);
@@ -348,6 +334,10 @@ export default function SessionDetailPage() {
         addNotification('error', 'Backend Error', `Failed to load session details: ${response.statusText}`, 'session-detail-fetch-error');
       }
     } catch (error) {
+      if (error instanceof TokenExpiredError) {
+        addNotification('error', 'Session Expired', error.message, 'session-expired-error');
+        return;
+      }
       console.error("Failed to fetch session details:", error);
       addNotification('error', 'Backend Not Reachable', 'Unable to load session details. Please check your connection.', 'session-detail-fetch-error');
       // Allow retry on network errors
@@ -370,19 +360,10 @@ export default function SessionDetailPage() {
     fetchEventsQueued.current = false;
 
     try {
-      // Get access token and include Authorization header
-      const token = await getAccessToken();
-
-      if (!token) {
-        addNotification('error', 'Authentication Error', 'Failed to get access token. Please try logging in again.', 'session-events-auth-error');
-        setLoading(false);
-        return;
-      }
-      const response = await fetch(`${API_BASE_URL}/api/sessions/${sessionId}/events?tenantId=${effectiveTenantId}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
+      const response = await authenticatedFetch(
+        `${API_BASE_URL}/api/sessions/${sessionId}/events?tenantId=${effectiveTenantId}`,
+        getAccessToken
+      );
       if (response.ok) {
         const data = await response.json();
         // Replace entire event list with fresh data from Table Storage (canonical truth).
@@ -403,8 +384,12 @@ export default function SessionDetailPage() {
         addNotification('error', 'Backend Error', `Failed to load session events: ${response.statusText}`, 'session-events-fetch-error');
       }
     } catch (error) {
-      console.error("Failed to fetch events:", error);
-      addNotification('error', 'Backend Not Reachable', 'Unable to load session events. Please check your connection.', 'session-events-fetch-error');
+      if (error instanceof TokenExpiredError) {
+        addNotification('error', 'Session Expired', error.message, 'session-expired-error');
+      } else {
+        console.error("Failed to fetch events:", error);
+        addNotification('error', 'Backend Not Reachable', 'Unable to load session events. Please check your connection.', 'session-events-fetch-error');
+      }
     } finally {
       setLoading(false);
       fetchEventsInFlight.current = false;
@@ -422,13 +407,11 @@ export default function SessionDetailPage() {
     if (!effectiveTenantId || !GUID_REGEX.test(effectiveTenantId)) return;
     try {
       setLoadingAnalysis(true);
-      const token = await getAccessToken();
-      if (!token) return;
 
       const reanalyzeParam = reanalyze ? '&reanalyze=true' : '';
-      const response = await fetch(
+      const response = await authenticatedFetch(
         `${API_BASE_URL}/api/sessions/${sessionId}/analysis?tenantId=${effectiveTenantId}${reanalyzeParam}`,
-        { headers: { 'Authorization': `Bearer ${token}` } }
+        getAccessToken
       );
       if (response.ok) {
         const data = await response.json();
@@ -452,19 +435,11 @@ export default function SessionDetailPage() {
     const effectiveTenantId = sessionTenantId || tenantId;
 
     try {
-      // Get access token and include Authorization header
-      const token = await getAccessToken();
-
-      if (!token) {
-        console.error('Failed to get access token for mark failed');
-        return;
-      }
-      const response = await fetch(`${API_BASE_URL}/api/sessions/${sessionId}/mark-failed?tenantId=${effectiveTenantId}`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
+      const response = await authenticatedFetch(
+        `${API_BASE_URL}/api/sessions/${sessionId}/mark-failed?tenantId=${effectiveTenantId}`,
+        getAccessToken,
+        { method: 'POST' }
+      );
 
       if (response.ok) {
         setShowMarkFailedConfirm(false);
@@ -495,11 +470,6 @@ export default function SessionDetailPage() {
     const effectiveTenantId = sessionTenantId || tenantId;
     try {
       setReportSubmitting(true);
-      const token = await getAccessToken();
-      if (!token) {
-        addNotification('error', 'Authentication Error', 'Failed to get access token.', 'report-auth-error');
-        throw new Error('Failed to get access token.');
-      }
 
       // Generate TXT and CSV exports from the events currently loaded
       const exportEvents: SessionExportEvent[] = events.map(e => ({
@@ -511,14 +481,12 @@ export default function SessionDetailPage() {
       const sessionCsv = session ? generateSessionCsvExport(session) : '';
       const ruleResultsCsv = generateRuleResultsCsvExport(analysisResults);
 
-      const response = await fetch(
+      const response = await authenticatedFetch(
         `${API_BASE_URL}/api/sessions/${sessionId}/report?tenantId=${effectiveTenantId}`,
+        getAccessToken,
         {
           method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             tenantId: effectiveTenantId,
             sessionId,
@@ -812,17 +780,19 @@ export default function SessionDetailPage() {
               <button
                 onClick={async () => {
                   try {
-                    const token = await getAccessToken();
-                    if (!token) return;
-                    const res = await fetch(
+                    const res = await authenticatedFetch(
                       `${API_BASE_URL}/api/diagnostics/download-url?tenantId=${session.tenantId}&blobName=${encodeURIComponent(session.diagnosticsBlobName!)}`,
-                      { headers: { Authorization: `Bearer ${token}` } }
+                      getAccessToken
                     );
                     if (!res.ok) throw new Error('Failed to get download URL');
                     const data = await res.json();
                     window.open(data.downloadUrl, '_blank');
                   } catch (err) {
-                    console.error('Diagnostics download failed:', err);
+                    if (err instanceof TokenExpiredError) {
+                      addNotification('error', 'Session Expired', err.message, 'session-expired-error');
+                    } else {
+                      console.error('Diagnostics download failed:', err);
+                    }
                   }
                 }}
                 className="px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-md hover:bg-gray-50 transition-colors flex items-center gap-2 text-sm"

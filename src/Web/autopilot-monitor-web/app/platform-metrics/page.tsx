@@ -6,6 +6,7 @@ import { API_BASE_URL } from '@/lib/config';
 import { ProtectedRoute } from '../../components/ProtectedRoute';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNotifications } from '../../contexts/NotificationContext';
+import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -110,15 +111,7 @@ export default function PlatformMetricsPage() {
     setError(null);
 
     try {
-      const token = await getAccessToken();
-      if (!token) {
-        addNotification('error', 'Auth Error', 'No access token', 'pm-auth');
-        return;
-      }
-
-      const res = await fetch(`${API_BASE_URL}/api/galactic/metrics/platform`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authenticatedFetch(`${API_BASE_URL}/api/galactic/metrics/platform`, getAccessToken);
 
       if (!res.ok) {
         if (res.status === 403) {
@@ -157,8 +150,12 @@ export default function PlatformMetricsPage() {
 
       setSessionMetrics(mapped);
     } catch (err) {
-      console.error('Platform metrics fetch error:', err);
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      if (err instanceof TokenExpiredError) {
+        addNotification('error', 'Session Expired', err.message, 'session-expired-error');
+      } else {
+        console.error('Platform metrics fetch error:', err);
+        setError(err instanceof Error ? err.message : 'Unknown error');
+      }
     } finally {
       setLoading(false);
     }

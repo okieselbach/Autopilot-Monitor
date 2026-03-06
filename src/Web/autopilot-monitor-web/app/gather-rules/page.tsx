@@ -7,6 +7,7 @@ import { ProtectedRoute } from "../../components/ProtectedRoute";
 import { useTenant } from "../../contexts/TenantContext";
 import { useAuth } from "../../contexts/AuthContext";
 import { API_BASE_URL } from "@/lib/config";
+import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 import { downloadAsJson, stripInternalFields, bumpVersion } from "@/lib/rulePageHelpers";
 import { StatCard } from "@/components/rules/StatCard";
 import { RuleFilterBar } from "@/components/rules/RuleFilterBar";
@@ -190,16 +191,7 @@ export default function GatherRulesPage() {
       setLoading(true);
       setError(null);
 
-      const token = await getAccessToken();
-      if (!token) {
-        throw new Error("Failed to get access token");
-      }
-
-      const response = await fetch(`${API_BASE_URL}/api/rules/gather`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/rules/gather`, getAccessToken);
 
       if (!response.ok) {
         throw new Error(`Failed to load gather rules: ${response.statusText}`);
@@ -229,16 +221,10 @@ export default function GatherRulesPage() {
       setTogglingRule(rule.ruleId);
       setError(null);
 
-      const token = await getAccessToken();
-      if (!token) {
-        throw new Error("Failed to get access token");
-      }
-
-      const response = await fetch(`${API_BASE_URL}/api/rules/gather/${encodeURIComponent(rule.ruleId)}`, {
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/rules/gather/${encodeURIComponent(rule.ruleId)}`, getAccessToken, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ ...rule, enabled: !rule.enabled }),
       });
@@ -270,17 +256,9 @@ export default function GatherRulesPage() {
       setDeletingRule(rule.ruleId);
       setError(null);
 
-      const token = await getAccessToken();
-      if (!token) {
-        throw new Error("Failed to get access token");
-      }
-
       const url = `${API_BASE_URL}/api/rules/gather/${encodeURIComponent(rule.ruleId)}`;
-      const response = await fetch(url, {
+      const response = await authenticatedFetch(url, getAccessToken, {
         method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
       });
 
       if (!response.ok) {
@@ -333,11 +311,6 @@ export default function GatherRulesPage() {
       setCreating(true);
       setError(null);
 
-      const token = await getAccessToken();
-      if (!token) {
-        throw new Error("Failed to get access token");
-      }
-
       const payload: Record<string, unknown> = {
         ruleId: formData.ruleId.trim(),
         title: formData.title.trim(),
@@ -361,11 +334,10 @@ export default function GatherRulesPage() {
         payload.triggerEventType = formData.triggerEventType.trim();
       }
 
-      const response = await fetch(`${API_BASE_URL}/api/rules/gather`, {
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/rules/gather`, getAccessToken, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify(payload),
       });
@@ -429,11 +401,6 @@ export default function GatherRulesPage() {
       setSaving(true);
       setError(null);
 
-      const token = await getAccessToken();
-      if (!token) {
-        throw new Error("Failed to get access token");
-      }
-
       const payload: Record<string, unknown> = {
         ...rule,
         title: formData.title.trim(),
@@ -461,11 +428,10 @@ export default function GatherRulesPage() {
 
       const url = `${API_BASE_URL}/api/rules/gather/${encodeURIComponent(rule.ruleId)}`;
 
-      const response = await fetch(url, {
+      const response = await authenticatedFetch(url, getAccessToken, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify(payload),
       });

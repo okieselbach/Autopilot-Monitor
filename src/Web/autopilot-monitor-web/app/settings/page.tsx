@@ -7,6 +7,7 @@ import { useTenant } from "../../contexts/TenantContext";
 import { useAuth } from "../../contexts/AuthContext";
 import { useNotifications } from "../../contexts/NotificationContext";
 import { API_BASE_URL } from "@/lib/config";
+import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 import UnsavedChangesModal from "../../components/UnsavedChangesModal";
 import AutopilotValidationSection from "./components/AutopilotValidationSection";
 import AdminManagementSection from "./components/AdminManagementSection";
@@ -205,16 +206,7 @@ export default function SettingsPage() {
         setError(null);
 
         
-        const token = await getAccessToken();
-        if (!token) {
-          throw new Error('Failed to get access token');
-        }
-
-        const response = await fetch(`${API_BASE_URL}/api/config/${tenantId}`, {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        });
+        const response = await authenticatedFetch(`${API_BASE_URL}/api/config/${tenantId}`, getAccessToken);
 
         if (!response.ok) {
           throw new Error(`Failed to load configuration: ${response.statusText}`);
@@ -285,8 +277,12 @@ export default function SettingsPage() {
           }
         }
       } catch (err) {
-        console.error("Error fetching configuration:", err);
-        setError(err instanceof Error ? err.message : "Failed to load configuration");
+        if (err instanceof TokenExpiredError) {
+          addNotification('error', 'Session Expired', err.message, 'session-expired-error');
+        } else {
+          console.error("Error fetching configuration:", err);
+          setError(err instanceof Error ? err.message : "Failed to load configuration");
+        }
       } finally {
         setLoading(false);
       }
@@ -302,16 +298,7 @@ export default function SettingsPage() {
     try {
       setLoadingAdmins(true);
 
-      const token = await getAccessToken();
-      if (!token) {
-        throw new Error('Failed to get access token');
-      }
-
-      const response = await fetch(`${API_BASE_URL}/api/tenants/${tenantId}/admins`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/tenants/${tenantId}/admins`, getAccessToken);
 
       if (!response.ok) {
         throw new Error(`Failed to load admins: ${response.statusText}`);
@@ -320,8 +307,12 @@ export default function SettingsPage() {
       const data: TenantAdmin[] = await response.json();
       setAdmins(data);
     } catch (err) {
-      console.error("Error fetching admins:", err);
-      setError(err instanceof Error ? err.message : "Failed to load admins");
+      if (err instanceof TokenExpiredError) {
+        addNotification('error', 'Session Expired', err.message, 'session-expired-error');
+      } else {
+        console.error("Error fetching admins:", err);
+        setError(err instanceof Error ? err.message : "Failed to load admins");
+      }
     } finally {
       setLoadingAdmins(false);
     }
@@ -342,11 +333,7 @@ export default function SettingsPage() {
   useEffect(() => {
     const fetchGlobalDiagPaths = async () => {
       try {
-        const token = await getAccessToken();
-        if (!token) return;
-        const res = await fetch(`${API_BASE_URL}/api/global/config`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const res = await authenticatedFetch(`${API_BASE_URL}/api/global/config`, getAccessToken);
         if (!res.ok) return;
         const data = await res.json();
         if (data.diagnosticsGlobalLogPathsJson) {
@@ -477,16 +464,10 @@ export default function SettingsPage() {
         localAdminAllowedAccountsJson: localAdminAllowedAccounts.length > 0 ? JSON.stringify(localAdminAllowedAccounts) : undefined,
       };
 
-      const token = await getAccessToken();
-      if (!token) {
-        throw new Error('Failed to get access token');
-      }
-
-      const response = await fetch(`${API_BASE_URL}/api/config/${tenantId}`, {
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/config/${tenantId}`, getAccessToken, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
-          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify(updatedConfig),
       });
@@ -515,19 +496,10 @@ export default function SettingsPage() {
       setError(null);
       setSuccessMessage(null);
 
-      const token = await getAccessToken();
-      if (!token) {
-        throw new Error("Failed to get access token");
-      }
-
       const redirectUri = `${window.location.origin}/settings`;
-      const response = await fetch(
+      const response = await authenticatedFetch(
         `${API_BASE_URL}/api/config/${tenantId}/autopilot-device-validation/consent-url?redirectUri=${encodeURIComponent(redirectUri)}`,
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        }
+        getAccessToken,
       );
 
       if (!response.ok) {
@@ -544,7 +516,11 @@ export default function SettingsPage() {
       sessionStorage.setItem("consentTrigger", trigger);
       window.location.href = data.consentUrl;
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to start admin consent flow");
+      if (err instanceof TokenExpiredError) {
+        addNotification('error', 'Session Expired', err.message, 'session-expired-error');
+      } else {
+        setError(err instanceof Error ? err.message : "Failed to start admin consent flow");
+      }
       setAutopilotConsentInProgress(false);
     }
   };
@@ -584,18 +560,10 @@ export default function SettingsPage() {
 
       try {
         setAutopilotConsentInProgress(true);
-        const token = await getAccessToken();
-        if (!token) {
-          throw new Error("Failed to get access token");
-        }
 
-        const statusResponse = await fetch(
+        const statusResponse = await authenticatedFetch(
           `${API_BASE_URL}/api/config/${tenantId}/autopilot-device-validation/consent-status`,
-          {
-            headers: {
-              'Authorization': `Bearer ${token}`
-            }
-          }
+          getAccessToken,
         );
 
         if (!statusResponse.ok) {
@@ -617,7 +585,11 @@ export default function SettingsPage() {
         }
         router.replace("/settings");
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to verify consent");
+        if (err instanceof TokenExpiredError) {
+          addNotification('error', 'Session Expired', err.message, 'session-expired-error');
+        } else {
+          setError(err instanceof Error ? err.message : "Failed to verify consent");
+        }
       } finally {
         setAutopilotConsentInProgress(false);
       }
@@ -632,8 +604,12 @@ export default function SettingsPage() {
     try {
       await saveConfiguration();
     } catch (err) {
-      console.error("Error saving configuration:", err);
-      setError(err instanceof Error ? err.message : "Failed to save configuration");
+      if (err instanceof TokenExpiredError) {
+        addNotification('error', 'Session Expired', err.message, 'session-expired-error');
+      } else {
+        console.error("Error saving configuration:", err);
+        setError(err instanceof Error ? err.message : "Failed to save configuration");
+      }
     }
   };
 
@@ -646,16 +622,10 @@ export default function SettingsPage() {
       setError(null);
       setSuccessMessage(null);
 
-      const token = await getAccessToken();
-      if (!token) {
-        throw new Error('Failed to get access token');
-      }
-
-      const response = await fetch(`${API_BASE_URL}/api/tenants/${tenantId}/admins`, {
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/tenants/${tenantId}/admins`, getAccessToken, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({ upn: newAdminEmail.trim() }),
       });
@@ -674,8 +644,12 @@ export default function SettingsPage() {
       // Auto-hide success message after 3 seconds
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch (err) {
-      console.error("Error adding admin:", err);
-      setError(err instanceof Error ? err.message : "Failed to add admin");
+      if (err instanceof TokenExpiredError) {
+        addNotification('error', 'Session Expired', err.message, 'session-expired-error');
+      } else {
+        console.error("Error adding admin:", err);
+        setError(err instanceof Error ? err.message : "Failed to add admin");
+      }
     } finally {
       setAddingAdmin(false);
     }
@@ -694,16 +668,8 @@ export default function SettingsPage() {
       setError(null);
       setSuccessMessage(null);
 
-      const token = await getAccessToken();
-      if (!token) {
-        throw new Error('Failed to get access token');
-      }
-
-      const response = await fetch(`${API_BASE_URL}/api/tenants/${tenantId}/admins/${encodeURIComponent(adminUpn)}`, {
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/tenants/${tenantId}/admins/${encodeURIComponent(adminUpn)}`, getAccessToken, {
         method: "DELETE",
-        headers: {
-          'Authorization': `Bearer ${token}`
-        },
       });
 
       if (!response.ok) {
@@ -719,8 +685,12 @@ export default function SettingsPage() {
       // Auto-hide success message after 3 seconds
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch (err) {
-      console.error("Error removing admin:", err);
-      setError(err instanceof Error ? err.message : "Failed to remove admin");
+      if (err instanceof TokenExpiredError) {
+        addNotification('error', 'Session Expired', err.message, 'session-expired-error');
+      } else {
+        console.error("Error removing admin:", err);
+        setError(err instanceof Error ? err.message : "Failed to remove admin");
+      }
     } finally {
       setRemovingAdmin(null);
     }
@@ -736,19 +706,12 @@ export default function SettingsPage() {
       setError(null);
       setSuccessMessage(null);
 
-      const token = await getAccessToken();
-      if (!token) {
-        throw new Error('Failed to get access token');
-      }
-
-      const response = await fetch(
+      const response = await authenticatedFetch(
         `${API_BASE_URL}/api/tenants/${tenantId}/admins/${encodeURIComponent(adminUpn)}/${action}`,
+        getAccessToken,
         {
           method: "PATCH",
-          headers: {
-            'Authorization': `Bearer ${token}`
-          },
-        }
+        },
       );
 
       if (!response.ok) {
@@ -769,8 +732,12 @@ export default function SettingsPage() {
       // Auto-hide success message after 3 seconds
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch (err) {
-      console.error(`Error ${action}ing admin:`, err);
-      setError(err instanceof Error ? err.message : `Failed to ${action} admin`);
+      if (err instanceof TokenExpiredError) {
+        addNotification('error', 'Session Expired', err.message, 'session-expired-error');
+      } else {
+        console.error(`Error ${action}ing admin:`, err);
+        setError(err instanceof Error ? err.message : `Failed to ${action} admin`);
+      }
     } finally {
       setTogglingAdmin(null);
     }
@@ -782,11 +749,9 @@ export default function SettingsPage() {
     if (!tenantId) return;
     try {
       setBootstrapLoading(true);
-      const token = await getAccessToken();
-      if (!token) return;
-      const response = await fetch(
+      const response = await authenticatedFetch(
         `${API_BASE_URL}/api/bootstrap/sessions?tenantId=${tenantId}`,
-        { headers: { Authorization: `Bearer ${token}` } }
+        getAccessToken,
       );
       if (response.ok) {
         const data = await response.json();
@@ -802,13 +767,10 @@ export default function SettingsPage() {
   const createBootstrapSession = async (validityHours: number, label: string): Promise<string | null> => {
     if (!tenantId) return null;
     try {
-      const token = await getAccessToken();
-      if (!token) throw new Error("Failed to get access token");
-      const response = await fetch(`${API_BASE_URL}/api/bootstrap/sessions`, {
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/bootstrap/sessions`, getAccessToken, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ tenantId, validityHours, label }),
       });
@@ -820,7 +782,11 @@ export default function SettingsPage() {
       await fetchBootstrapSessions();
       return data.bootstrapUrl || null;
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create bootstrap session");
+      if (err instanceof TokenExpiredError) {
+        addNotification('error', 'Session Expired', err.message, 'session-expired-error');
+      } else {
+        setError(err instanceof Error ? err.message : "Failed to create bootstrap session");
+      }
       return null;
     }
   };
@@ -828,11 +794,10 @@ export default function SettingsPage() {
   const revokeBootstrapSession = async (code: string) => {
     if (!tenantId) return;
     try {
-      const token = await getAccessToken();
-      if (!token) throw new Error("Failed to get access token");
-      const response = await fetch(
+      const response = await authenticatedFetch(
         `${API_BASE_URL}/api/bootstrap/sessions/${code}?tenantId=${tenantId}`,
-        { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }
+        getAccessToken,
+        { method: "DELETE" },
       );
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
@@ -840,7 +805,11 @@ export default function SettingsPage() {
       }
       await fetchBootstrapSessions();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to revoke bootstrap session");
+      if (err instanceof TokenExpiredError) {
+        addNotification('error', 'Session Expired', err.message, 'session-expired-error');
+      } else {
+        setError(err instanceof Error ? err.message : "Failed to revoke bootstrap session");
+      }
     }
   };
 
@@ -851,12 +820,8 @@ export default function SettingsPage() {
       setOffboarding(true);
       setOffboardError(null);
 
-      const token = await getAccessToken();
-      if (!token) throw new Error('Failed to get access token');
-
-      const response = await fetch(`${API_BASE_URL}/api/tenants/${tenantId}/offboard`, {
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/tenants/${tenantId}/offboard`, getAccessToken, {
         method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` },
       });
 
       if (!response.ok) {
@@ -867,7 +832,11 @@ export default function SettingsPage() {
       // Offboard successful – sign out the user as their admin access is gone
       logout();
     } catch (err) {
-      setOffboardError(err instanceof Error ? err.message : 'Offboard failed');
+      if (err instanceof TokenExpiredError) {
+        addNotification('error', 'Session Expired', err.message, 'session-expired-error');
+      } else {
+        setOffboardError(err instanceof Error ? err.message : 'Offboard failed');
+      }
       setOffboarding(false);
     }
   };

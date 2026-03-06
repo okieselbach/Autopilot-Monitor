@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { API_BASE_URL } from '@/lib/config';
 import { ProtectedRoute } from '../../components/ProtectedRoute';
 import { useAuth } from '../../contexts/AuthContext';
+import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 
 interface SessionMetrics {
   total: number;
@@ -98,17 +99,7 @@ export default function PlatformUsageMetricsPage() {
       setError(null);
 
       // Platform-wide metrics - cross-tenant (Galactic Admin only)
-      
-      const token = await getAccessToken();
-      if (!token) {
-        throw new Error('Failed to get access token');
-      }
-
-      const response = await fetch(`${API_BASE_URL}/api/galactic/metrics/usage`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/galactic/metrics/usage`, getAccessToken);
 
       if (!response.ok) {
         throw new Error(`Failed to fetch platform usage metrics: ${response.statusText}`);
@@ -117,7 +108,11 @@ export default function PlatformUsageMetricsPage() {
       const data = await response.json();
       setMetrics(data);
     } catch (err) {
-      console.error('Error fetching platform usage metrics:', err);
+      if (err instanceof TokenExpiredError) {
+        console.error('Session expired:', err.message);
+      } else {
+        console.error('Error fetching platform usage metrics:', err);
+      }
       setError(err instanceof Error ? err.message : 'Failed to fetch platform usage metrics');
     } finally {
       setLoading(false);

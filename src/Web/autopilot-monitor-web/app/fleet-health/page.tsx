@@ -8,6 +8,7 @@ import { useTenant } from "../../contexts/TenantContext";
 import { useAuth } from "../../contexts/AuthContext";
 import { useNotifications } from "../../contexts/NotificationContext";
 import { API_BASE_URL } from "@/lib/config";
+import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 
 interface Session {
   sessionId: string;
@@ -141,14 +142,7 @@ export default function FleetHealthPage() {
       const endpoint = galacticAdminMode
         ? `${API_BASE_URL}/api/galactic/sessions`
         : `${API_BASE_URL}/api/sessions?tenantId=${tenantId}`;
-      const token = await getAccessToken();
-      if (!token) {
-        addNotification('error', 'Authentication Error', 'Failed to get access token. Please try logging in again.', 'fleet-health-auth-error');
-        return;
-      }
-      const response = await fetch(endpoint, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const response = await authenticatedFetch(endpoint, getAccessToken);
       if (response.ok) {
         const data = await response.json();
         setSessions(data.sessions || []);
@@ -156,8 +150,12 @@ export default function FleetHealthPage() {
         addNotification('error', 'Backend Error', `Failed to load sessions: ${response.statusText}`, 'fleet-health-sessions-error');
       }
     } catch (error) {
-      console.error("Failed to fetch sessions:", error);
-      addNotification('error', 'Backend Not Reachable', 'Unable to load fleet health data. Please check your connection.', 'fleet-health-sessions-error');
+      if (error instanceof TokenExpiredError) {
+        addNotification('error', 'Session Expired', error.message, 'session-expired-error');
+      } else {
+        console.error("Failed to fetch sessions:", error);
+        addNotification('error', 'Backend Not Reachable', 'Unable to load fleet health data. Please check your connection.', 'fleet-health-sessions-error');
+      }
     } finally {
       setLoading(false);
     }
@@ -165,16 +163,11 @@ export default function FleetHealthPage() {
 
   const fetchAppMetrics = async (range: "7d" | "30d" | "90d" = timeRange) => {
     try {
-      const token = await getAccessToken();
-      if (!token) return;
       const days = range === "7d" ? 7 : range === "30d" ? 30 : 90;
       const endpoint = galacticAdminMode
         ? `${API_BASE_URL}/api/galactic/metrics/app?days=${days}`
         : `${API_BASE_URL}/api/metrics/app?tenantId=${tenantId}&days=${days}`;
-      const response = await fetch(
-        endpoint,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+      const response = await authenticatedFetch(endpoint, getAccessToken);
       if (response.ok) {
         const data = await response.json();
         setAppMetrics(data);
@@ -182,8 +175,12 @@ export default function FleetHealthPage() {
         addNotification('error', 'Backend Error', `Failed to load app metrics: ${response.statusText}`, 'fleet-health-metrics-error');
       }
     } catch (error) {
-      console.error("Failed to fetch app metrics:", error);
-      addNotification('error', 'Backend Not Reachable', 'Unable to load app metrics. Please check your connection.', 'fleet-health-metrics-error');
+      if (error instanceof TokenExpiredError) {
+        addNotification('error', 'Session Expired', error.message, 'session-expired-error');
+      } else {
+        console.error("Failed to fetch app metrics:", error);
+        addNotification('error', 'Backend Not Reachable', 'Unable to load app metrics. Please check your connection.', 'fleet-health-metrics-error');
+      }
     }
   };
 

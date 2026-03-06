@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { API_BASE_URL } from "@/lib/config";
+import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 
 interface MaintenanceSectionProps {
   getAccessToken: () => Promise<string | null>;
@@ -27,31 +28,26 @@ export function MaintenanceSection({
       setError(null);
       setSuccessMessage(null);
 
-      const token = await getAccessToken();
-      if (!token) {
-        throw new Error('Failed to get access token');
-      }
-
       const queryParams = maintenanceDate ? `?date=${maintenanceDate}` : '';
-      const response = await fetch(`${API_BASE_URL}/api/maintenance/trigger${queryParams}`, {
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/maintenance/trigger${queryParams}`, getAccessToken, {
         method: "POST",
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
       });
 
       if (!response.ok) {
         throw new Error(`Failed to trigger maintenance: ${response.statusText}`);
       }
 
-      const result = await response.json();
       const dateInfo = maintenanceDate ? ` for ${maintenanceDate}` : '';
       setSuccessMessage(`Maintenance job completed successfully${dateInfo}!`);
 
       // Auto-hide success message after 5 seconds
       setTimeout(() => setSuccessMessage(null), 5000);
     } catch (err) {
-      console.error("Error triggering maintenance:", err);
+      if (err instanceof TokenExpiredError) {
+        console.error("Session expired while triggering maintenance");
+      } else {
+        console.error("Error triggering maintenance:", err);
+      }
       setError(err instanceof Error ? err.message : "Failed to trigger maintenance job");
     } finally {
       setTriggeringMaintenance(false);
@@ -64,16 +60,8 @@ export function MaintenanceSection({
       setError(null);
       setSuccessMessage(null);
 
-      const token = await getAccessToken();
-      if (!token) {
-        throw new Error('Failed to get access token');
-      }
-
-      const response = await fetch(`${API_BASE_URL}/api/rules/reseed-from-github?type=analyze`, {
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/rules/reseed-from-github?type=analyze`, getAccessToken, {
         method: "POST",
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
       });
 
       if (!response.ok) {
@@ -85,7 +73,11 @@ export function MaintenanceSection({
       setSuccessMessage(`Analyze rules reseeded from GitHub: ${result.analyze?.deleted ?? 0} deleted, ${result.analyze?.written ?? 0} written`);
       setTimeout(() => setSuccessMessage(null), 5000);
     } catch (err) {
-      console.error("Error reseeding analyze rules:", err);
+      if (err instanceof TokenExpiredError) {
+        console.error("Session expired while reseeding analyze rules");
+      } else {
+        console.error("Error reseeding analyze rules:", err);
+      }
       setError(err instanceof Error ? err.message : "Failed to reseed analyze rules");
     } finally {
       setReseedingRules(false);
@@ -98,16 +90,8 @@ export function MaintenanceSection({
       setError(null);
       setSuccessMessage(null);
 
-      const token = await getAccessToken();
-      if (!token) {
-        throw new Error('Failed to get access token');
-      }
-
-      const response = await fetch(`${API_BASE_URL}/api/rules/reseed-from-github?type=gather`, {
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/rules/reseed-from-github?type=gather`, getAccessToken, {
         method: "POST",
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
       });
 
       if (!response.ok) {
@@ -119,7 +103,11 @@ export function MaintenanceSection({
       setSuccessMessage(`Gather rules reseeded from GitHub: ${result.gather?.deleted ?? 0} deleted, ${result.gather?.written ?? 0} written`);
       setTimeout(() => setSuccessMessage(null), 5000);
     } catch (err) {
-      console.error("Error reseeding gather rules:", err);
+      if (err instanceof TokenExpiredError) {
+        console.error("Session expired while reseeding gather rules");
+      } else {
+        console.error("Error reseeding gather rules:", err);
+      }
       setError(err instanceof Error ? err.message : "Failed to reseed gather rules");
     } finally {
       setReseedingGatherRules(false);
@@ -132,16 +120,8 @@ export function MaintenanceSection({
       setError(null);
       setSuccessMessage(null);
 
-      const token = await getAccessToken();
-      if (!token) {
-        throw new Error('Failed to get access token');
-      }
-
-      const response = await fetch(`${API_BASE_URL}/api/rules/reseed-from-github?type=ime`, {
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/rules/reseed-from-github?type=ime`, getAccessToken, {
         method: "POST",
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
       });
 
       if (!response.ok) {
@@ -153,7 +133,11 @@ export function MaintenanceSection({
       setSuccessMessage(`IME log patterns reseeded from GitHub: ${result.ime?.deleted ?? 0} deleted, ${result.ime?.written ?? 0} written`);
       setTimeout(() => setSuccessMessage(null), 5000);
     } catch (err) {
-      console.error("Error reseeding IME log patterns:", err);
+      if (err instanceof TokenExpiredError) {
+        console.error("Session expired while reseeding IME log patterns");
+      } else {
+        console.error("Error reseeding IME log patterns:", err);
+      }
       setError(err instanceof Error ? err.message : "Failed to reseed IME log patterns");
     } finally {
       setReseedingImePatterns(false);
@@ -166,16 +150,8 @@ export function MaintenanceSection({
       setError(null);
       setSuccessMessage(null);
 
-      const token = await getAccessToken();
-      if (!token) {
-        throw new Error('Failed to get access token');
-      }
-
-      const response = await fetch(`${API_BASE_URL}/api/rules/reseed-from-github?type=all`, {
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/rules/reseed-from-github?type=all`, getAccessToken, {
         method: "POST",
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
       });
 
       if (!response.ok) {
@@ -191,7 +167,11 @@ export function MaintenanceSection({
       );
       setTimeout(() => setSuccessMessage(null), 8000);
     } catch (err) {
-      console.error("Error reseeding from GitHub:", err);
+      if (err instanceof TokenExpiredError) {
+        console.error("Session expired while reseeding from GitHub");
+      } else {
+        console.error("Error reseeding from GitHub:", err);
+      }
       setError(err instanceof Error ? err.message : "Failed to reseed from GitHub");
     } finally {
       setFetchingFromGitHub(false);

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { ProtectedRoute } from "../../components/ProtectedRoute";
 import { useAuth } from "../../contexts/AuthContext";
 import { API_BASE_URL } from "@/lib/config";
+import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 import { TenantManagementSection, TenantConfiguration } from "./components/TenantManagementSection";
 import { MaintenanceSection } from "./components/MaintenanceSection";
 import { DiagnosticsLogPathsSection, DiagnosticsLogPath } from "./components/DiagnosticsLogPathsSection";
@@ -75,16 +76,7 @@ export default function AdminConfigurationPage() {
         setError(null);
 
 
-        const token = await getAccessToken();
-        if (!token) {
-          throw new Error('Failed to get access token');
-        }
-
-        const response = await fetch(`${API_BASE_URL}/api/global/config`, {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        });
+        const response = await authenticatedFetch(`${API_BASE_URL}/api/global/config`, getAccessToken);
 
         if (!response.ok) {
           throw new Error(`Failed to load admin configuration: ${response.statusText}`);
@@ -103,7 +95,11 @@ export default function AdminConfigurationPage() {
           setGlobalDiagPaths([]);
         }
       } catch (err) {
-        console.error("Error fetching admin configuration:", err);
+        if (err instanceof TokenExpiredError) {
+          console.error("Session expired while fetching admin configuration");
+        } else {
+          console.error("Error fetching admin configuration:", err);
+        }
         setError(err instanceof Error ? err.message : "Failed to load admin configuration");
       } finally {
         setLoadingConfig(false);
@@ -119,18 +115,9 @@ export default function AdminConfigurationPage() {
     try {
       setLoadingTenants(true);
 
-      const token = await getAccessToken();
-      if (!token) {
-        throw new Error('Failed to get access token');
-      }
-
       const [tenantsRes, previewRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/config/all`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        }),
-        fetch(`${API_BASE_URL}/api/preview/whitelist`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        })
+        authenticatedFetch(`${API_BASE_URL}/api/config/all`, getAccessToken),
+        authenticatedFetch(`${API_BASE_URL}/api/preview/whitelist`, getAccessToken)
       ]);
 
       if (!tenantsRes.ok) {
@@ -148,7 +135,11 @@ export default function AdminConfigurationPage() {
         setPreviewApproved(approvedIds);
       }
     } catch (err) {
-      console.error("Error fetching tenants:", err);
+      if (err instanceof TokenExpiredError) {
+        console.error("Session expired while fetching tenants");
+      } else {
+        console.error("Error fetching tenants:", err);
+      }
       setError(err instanceof Error ? err.message : "Failed to load tenants");
     } finally {
       setLoadingTenants(false);
@@ -166,17 +157,14 @@ export default function AdminConfigurationPage() {
       setError(null);
       setSuccessMessage(null);
 
-      const token = await getAccessToken();
-      if (!token) throw new Error("Failed to get access token");
-
       const updatedConfig: AdminConfiguration = {
         ...adminConfig,
         diagnosticsGlobalLogPathsJson: JSON.stringify(paths),
       };
 
-      const response = await fetch(`${API_BASE_URL}/api/global/config`, {
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/global/config`, getAccessToken, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updatedConfig),
       });
 
@@ -188,6 +176,9 @@ export default function AdminConfigurationPage() {
       setSuccessMessage("Global diagnostics log paths saved successfully!");
       setTimeout(() => setSuccessMessage(null), 4000);
     } catch (err) {
+      if (err instanceof TokenExpiredError) {
+        console.error("Session expired while saving diagnostics paths");
+      }
       setError(err instanceof Error ? err.message : "Failed to save diagnostics paths");
     } finally {
       setSavingDiagPaths(false);
@@ -211,17 +202,9 @@ export default function AdminConfigurationPage() {
         maintenanceBlockDurationHours: maintenanceBlockDurationHours,
       };
 
-      const token = await getAccessToken();
-      if (!token) {
-        throw new Error('Failed to get access token');
-      }
-
-      const response = await fetch(`${API_BASE_URL}/api/global/config`, {
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/global/config`, getAccessToken, {
         method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          'Authorization': `Bearer ${token}`
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updatedConfig),
       });
 
@@ -236,7 +219,11 @@ export default function AdminConfigurationPage() {
       // Auto-hide success message after 3 seconds
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch (err) {
-      console.error("Error saving admin configuration:", err);
+      if (err instanceof TokenExpiredError) {
+        console.error("Session expired while saving admin configuration");
+      } else {
+        console.error("Error saving admin configuration:", err);
+      }
       setError(err instanceof Error ? err.message : "Failed to save admin configuration");
     } finally {
       setSavingConfig(false);

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { API_BASE_URL } from "@/lib/config";
+import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 
 interface SessionReport {
   reportId: string;
@@ -77,12 +78,10 @@ export function SessionReportsSection({
   const handleDownload = async (blobName: string) => {
     try {
       setDownloadingBlob(blobName);
-      const token = await getAccessToken();
-      if (!token) throw new Error("Failed to get access token");
 
-      const res = await fetch(
+      const res = await authenticatedFetch(
         `${API_BASE_URL}/api/galactic/session-reports/download-url?blobName=${encodeURIComponent(blobName)}`,
-        { headers: { Authorization: `Bearer ${token}` } }
+        getAccessToken
       );
       if (!res.ok) throw new Error(`Failed to get download URL: ${res.statusText}`);
       const data = await res.json();
@@ -93,6 +92,9 @@ export function SessionReportsSection({
       a.download = blobName;
       a.click();
     } catch (err) {
+      if (err instanceof TokenExpiredError) {
+        console.error("Session expired while downloading report");
+      }
       setError(err instanceof Error ? err.message : "Failed to download report");
     } finally {
       setDownloadingBlob(null);
@@ -104,17 +106,13 @@ export function SessionReportsSection({
     try {
       setSavingNote(true);
       setNoteSaveResult(null);
-      const token = await getAccessToken();
-      if (!token) throw new Error("Failed to get access token");
 
-      const res = await fetch(
+      const res = await authenticatedFetch(
         `${API_BASE_URL}/api/galactic/session-reports/${selectedReport.reportId}/note`,
+        getAccessToken,
         {
           method: "PATCH",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ adminNote: adminNoteValue }),
         }
       );
@@ -126,6 +124,9 @@ export function SessionReportsSection({
       setReports(prev => prev.map(r => r.reportId === selectedReport.reportId ? updated : r));
       setNoteSaveResult("saved");
     } catch (err) {
+      if (err instanceof TokenExpiredError) {
+        console.error("Session expired while saving admin note");
+      }
       setNoteSaveResult(err instanceof Error ? err.message : "Failed to save note");
     } finally {
       setSavingNote(false);
@@ -135,12 +136,8 @@ export function SessionReportsSection({
   const fetchReports = async () => {
     try {
       setLoading(true);
-      const token = await getAccessToken();
-      if (!token) throw new Error("Failed to get access token");
 
-      const res = await fetch(`${API_BASE_URL}/api/galactic/session-reports`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const res = await authenticatedFetch(`${API_BASE_URL}/api/galactic/session-reports`, getAccessToken);
 
       if (res.status === 404) {
         // Table/container doesn't exist yet — no reports submitted so far
@@ -151,6 +148,9 @@ export function SessionReportsSection({
       const data = await res.json();
       setReports(data.reports ?? []);
     } catch (err) {
+      if (err instanceof TokenExpiredError) {
+        console.error("Session expired while loading reports");
+      }
       setError(err instanceof Error ? err.message : "Failed to load reports");
     } finally {
       setLoading(false);

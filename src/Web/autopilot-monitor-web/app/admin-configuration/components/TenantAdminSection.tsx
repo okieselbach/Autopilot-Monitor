@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { API_BASE_URL } from "@/lib/config";
+import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 
 interface TenantAdmin {
   tenantId: string;
@@ -40,16 +41,7 @@ export function TenantAdminSection({
       setLoadingAdmins(true);
       setCurrentAdminPage(0); // Reset to first page when loading new tenant
 
-      const token = await getAccessToken();
-      if (!token) {
-        throw new Error('Failed to get access token');
-      }
-
-      const response = await fetch(`${API_BASE_URL}/api/tenants/${tid}/admins`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/tenants/${tid}/admins`, getAccessToken);
 
       if (!response.ok) {
         throw new Error(`Failed to load admins: ${response.statusText}`);
@@ -58,7 +50,11 @@ export function TenantAdminSection({
       const data: TenantAdmin[] = await response.json();
       setTenantAdmins(data);
     } catch (err) {
-      console.error("Error fetching tenant admins:", err);
+      if (err instanceof TokenExpiredError) {
+        console.error("Session expired while fetching tenant admins");
+      } else {
+        console.error("Error fetching tenant admins:", err);
+      }
       setError(err instanceof Error ? err.message : "Failed to load tenant admins");
     } finally {
       setLoadingAdmins(false);
@@ -77,17 +73,9 @@ export function TenantAdminSection({
       setAddingAdmin(true);
       setError(null);
 
-      const token = await getAccessToken();
-      if (!token) {
-        throw new Error('Failed to get access token');
-      }
-
-      const response = await fetch(`${API_BASE_URL}/api/tenants/${tenantId}/admins`, {
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/tenants/${tenantId}/admins`, getAccessToken, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          'Authorization': `Bearer ${token}`
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ upn: newAdminEmail.trim() }),
       });
 
@@ -105,7 +93,11 @@ export function TenantAdminSection({
       // Auto-hide success message after 3 seconds
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch (err) {
-      console.error("Error adding tenant admin:", err);
+      if (err instanceof TokenExpiredError) {
+        console.error("Session expired while adding tenant admin");
+      } else {
+        console.error("Error adding tenant admin:", err);
+      }
       setError(err instanceof Error ? err.message : "Failed to add admin");
     } finally {
       setAddingAdmin(false);
@@ -121,16 +113,8 @@ export function TenantAdminSection({
       setRemovingAdmin(adminUpn);
       setError(null);
 
-      const token = await getAccessToken();
-      if (!token) {
-        throw new Error('Failed to get access token');
-      }
-
-      const response = await fetch(`${API_BASE_URL}/api/tenants/${tenantId}/admins/${encodeURIComponent(adminUpn)}`, {
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/tenants/${tenantId}/admins/${encodeURIComponent(adminUpn)}`, getAccessToken, {
         method: "DELETE",
-        headers: {
-          'Authorization': `Bearer ${token}`
-        },
       });
 
       if (!response.ok) {
@@ -146,7 +130,11 @@ export function TenantAdminSection({
       // Auto-hide success message after 3 seconds
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch (err) {
-      console.error("Error removing tenant admin:", err);
+      if (err instanceof TokenExpiredError) {
+        console.error("Session expired while removing tenant admin");
+      } else {
+        console.error("Error removing tenant admin:", err);
+      }
       setError(err instanceof Error ? err.message : "Failed to remove admin");
     } finally {
       setRemovingAdmin(null);
@@ -158,17 +146,9 @@ export function TenantAdminSection({
       setTogglingAdmin(adminUpn);
       setError(null);
 
-      const token = await getAccessToken();
-      if (!token) {
-        throw new Error('Failed to get access token');
-      }
-
       const action = isEnabled ? 'disable' : 'enable';
-      const response = await fetch(`${API_BASE_URL}/api/tenants/${tenantId}/admins/${encodeURIComponent(adminUpn)}/${action}`, {
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/tenants/${tenantId}/admins/${encodeURIComponent(adminUpn)}/${action}`, getAccessToken, {
         method: "PATCH",
-        headers: {
-          'Authorization': `Bearer ${token}`
-        },
       });
 
       if (!response.ok) {
@@ -189,7 +169,11 @@ export function TenantAdminSection({
       // Auto-hide success message after 3 seconds
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch (err) {
-      console.error("Error toggling tenant admin:", err);
+      if (err instanceof TokenExpiredError) {
+        console.error("Session expired while toggling tenant admin");
+      } else {
+        console.error("Error toggling tenant admin:", err);
+      }
       setError(err instanceof Error ? err.message : "Failed to toggle admin");
     } finally {
       setTogglingAdmin(null);

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { API_BASE_URL } from "@/lib/config";
+import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 import { TenantAdminSection } from "./TenantAdminSection";
 
 export interface TenantConfiguration {
@@ -91,17 +92,9 @@ export function TenantManagementSection({
       setError(null);
       setSuccessMessage(null);
 
-      const token = await getAccessToken();
-      if (!token) {
-        throw new Error('Failed to get access token');
-      }
-
-      const response = await fetch(`${API_BASE_URL}/api/config/${tenant.tenantId}`, {
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/config/${tenant.tenantId}`, getAccessToken, {
         method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          'Authorization': `Bearer ${token}`
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(tenant),
       });
 
@@ -119,7 +112,11 @@ export function TenantManagementSection({
       // Auto-hide success message after 3 seconds
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch (err) {
-      console.error("Error saving tenant configuration:", err);
+      if (err instanceof TokenExpiredError) {
+        console.error("Session expired while saving tenant configuration");
+      } else {
+        console.error("Error saving tenant configuration:", err);
+      }
       setError(err instanceof Error ? err.message : "Failed to save tenant configuration");
     } finally {
       setSavingTenant(false);
@@ -132,18 +129,10 @@ export function TenantManagementSection({
       setError(null);
       setSuccessMessage(null);
 
-      const token = await getAccessToken();
-      if (!token) {
-        throw new Error('Failed to get access token');
-      }
-
       const newValue = !tenant.allowInsecureAgentRequests;
-      const response = await fetch(`${API_BASE_URL}/api/config/${tenant.tenantId}/security-bypass`, {
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/config/${tenant.tenantId}/security-bypass`, getAccessToken, {
         method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          'Authorization': `Bearer ${token}`
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ allowInsecureAgentRequests: newValue }),
       });
 
@@ -169,6 +158,9 @@ export function TenantManagementSection({
       );
       setTimeout(() => setSuccessMessage(null), 4000);
     } catch (err) {
+      if (err instanceof TokenExpiredError) {
+        console.error("Session expired while toggling security bypass");
+      }
       setError(err instanceof Error ? err.message : "Failed to update security bypass");
     } finally {
       setTogglingSecurityBypassTenant(null);
@@ -181,16 +173,10 @@ export function TenantManagementSection({
       setError(null);
       setSuccessMessage(null);
 
-      const token = await getAccessToken();
-      if (!token) {
-        throw new Error('Failed to get access token');
-      }
-
       const isCurrentlyApproved = previewApproved.has(tenantId);
 
-      const response = await fetch(`${API_BASE_URL}/api/preview/whitelist/${tenantId}`, {
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/preview/whitelist/${tenantId}`, getAccessToken, {
         method: isCurrentlyApproved ? "DELETE" : "POST",
-        headers: { 'Authorization': `Bearer ${token}` }
       });
 
       if (!response.ok) {
@@ -215,6 +201,9 @@ export function TenantManagementSection({
       );
       setTimeout(() => setSuccessMessage(null), 4000);
     } catch (err) {
+      if (err instanceof TokenExpiredError) {
+        console.error("Session expired while updating preview access");
+      }
       setError(err instanceof Error ? err.message : "Failed to update preview access");
     } finally {
       setTogglingPreviewTenant(null);

@@ -34,7 +34,7 @@ interface AuthContextType {
   previewMessage: string;
   login: () => Promise<void>;
   logout: () => Promise<void>;
-  getAccessToken: () => Promise<string | null>;
+  getAccessToken: (forceRefresh?: boolean) => Promise<string | null>;
   refreshUserInfo: () => Promise<void>;
 }
 
@@ -224,7 +224,7 @@ function AuthProviderInternal({ children }: { children: React.ReactNode }) {
    * Gets access token for API calls
    * Automatically handles token refresh
    */
-  const getAccessToken = useCallback(async (): Promise<string | null> => {
+  const getAccessToken = useCallback(async (forceRefresh?: boolean): Promise<string | null> => {
     if (accounts.length === 0) {
       return null;
     }
@@ -233,6 +233,7 @@ function AuthProviderInternal({ children }: { children: React.ReactNode }) {
       const response = await instance.acquireTokenSilent({
         scopes: apiRequest.scopes,
         account: accounts[0],
+        forceRefresh: forceRefresh ?? false,
       });
 
       return response.accessToken;

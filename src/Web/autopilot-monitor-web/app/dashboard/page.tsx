@@ -9,6 +9,7 @@ import { useTenant } from "../../contexts/TenantContext";
 import { useAuth } from "../../contexts/AuthContext";
 import { useNotifications } from "../../contexts/NotificationContext";
 import { API_BASE_URL } from "@/lib/config";
+import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 
 interface Session {
   sessionId: string;
@@ -87,19 +88,7 @@ export default function Home() {
         ? `${API_BASE_URL}/api/galactic/sessions`
         : `${API_BASE_URL}/api/sessions?tenantId=${tenantId}`;
 
-      // Get access token and include Authorization header
-      const token = await getAccessToken();
-
-      if (!token) {
-        addNotification('error', 'Authentication Error', 'Failed to get access token. Please try logging in again.', 'auth-error');
-        return;
-      }
-
-      const response = await fetch(endpoint, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
+      const response = await authenticatedFetch(endpoint, getAccessToken);
 
       if (response.ok) {
         const data = await response.json();
@@ -110,8 +99,12 @@ export default function Home() {
         addNotification('error', 'Backend Error', `Failed to fetch sessions: ${response.statusText}`, 'backend-error');
       }
     } catch (error) {
-      console.error("Failed to fetch sessions:", error);
-      addNotification('error', 'Backend Not Reachable', 'Unable to connect to the backend API. Please ensure the backend server is running.', 'backend-unreachable');
+      if (error instanceof TokenExpiredError) {
+        addNotification('error', 'Session Expired', error.message, 'session-expired-error');
+      } else {
+        console.error("Failed to fetch sessions:", error);
+        addNotification('error', 'Backend Not Reachable', 'Unable to connect to the backend API. Please ensure the backend server is running.', 'backend-unreachable');
+      }
     } finally {
       setLoading(false);
     }
@@ -124,9 +117,6 @@ export default function Home() {
     }
 
     try {
-      const token = await getAccessToken();
-      if (!token) return;
-
       const tenantIds = galacticAdminMode
         ? [...new Set(currentSessions.map(s => s.tenantId))]
         : tenantId ? [tenantId] : [];
@@ -138,9 +128,8 @@ export default function Home() {
 
       const results = await Promise.allSettled(
         tenantIds.map(tid =>
-          fetch(`${API_BASE_URL}/api/devices/blocked?tenantId=${encodeURIComponent(tid)}`, {
-            headers: { Authorization: `Bearer ${token}` },
-          }).then(res => res.ok ? res.json() : { blocked: [] })
+          authenticatedFetch(`${API_BASE_URL}/api/devices/blocked?tenantId=${encodeURIComponent(tid)}`, getAccessToken)
+            .then(res => res.ok ? res.json() : { blocked: [] })
         )
       );
 
@@ -155,7 +144,11 @@ export default function Home() {
 
       setBlockedDevicesSet(newSet);
     } catch (error) {
-      console.error("Failed to fetch blocked devices:", error);
+      if (error instanceof TokenExpiredError) {
+        addNotification('error', 'Session Expired', error.message, 'session-expired-error');
+      } else {
+        console.error("Failed to fetch blocked devices:", error);
+      }
     }
   };
 
@@ -172,14 +165,7 @@ export default function Home() {
       if (user && !user.isTenantAdmin && !user.isGalacticAdmin) return;
 
       try {
-        const token = await getAccessToken();
-        if (!token) return;
-
-        const response = await fetch(`${API_BASE_URL}/api/config/${tenantId}`, {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        });
+        const response = await authenticatedFetch(`${API_BASE_URL}/api/config/${tenantId}`, getAccessToken);
 
         if (!response.ok) {
           setSerialValidationEnabled(null);
@@ -188,7 +174,10 @@ export default function Home() {
 
         const data: TenantConfigurationSummary = await response.json();
         setSerialValidationEnabled(!!data.validateAutopilotDevice);
-      } catch {
+      } catch (error) {
+        if (error instanceof TokenExpiredError) {
+          addNotification('error', 'Session Expired', error.message, 'session-expired-error');
+        }
         setSerialValidationEnabled(null);
       }
     };
@@ -413,19 +402,8 @@ export default function Home() {
     if (!sessionToDelete) return;
 
     try {
-      // Get access token and include Authorization header
-      const token = await getAccessToken();
-
-      if (!token) {
-        alert('Authentication error: Failed to get access token. Please try logging in again.');
-        return;
-      }
-
-      const response = await fetch(`${API_BASE_URL}/api/sessions/${sessionToDelete.sessionId}?tenantId=${sessionToDelete.tenantId}`, {
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/sessions/${sessionToDelete.sessionId}?tenantId=${sessionToDelete.tenantId}`, getAccessToken, {
         method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
       });
 
       if (response.ok) {
@@ -439,8 +417,12 @@ export default function Home() {
         alert(`Fehler beim Löschen: ${data.message || 'Unbekannter Fehler'}`);
       }
     } catch (error) {
-      console.error('Failed to delete session:', error);
-      alert('Fehler beim Löschen der Session');
+      if (error instanceof TokenExpiredError) {
+        addNotification('error', 'Session Expired', error.message, 'session-expired-error');
+      } else {
+        console.error('Failed to delete session:', error);
+        alert('Fehler beim Löschen der Session');
+      }
     }
   };
 
@@ -459,19 +441,10 @@ export default function Home() {
 
     try {
       setBlockingDevice(true);
-      const token = await getAccessToken();
 
-      if (!token) {
-        alert('Authentication error: Failed to get access token. Please try logging in again.');
-        return;
-      }
-
-      const response = await fetch(`${API_BASE_URL}/api/devices/block`, {
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/devices/block`, getAccessToken, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           tenantId: sessionToBlock.tenantId,
           serialNumber: sessionToBlock.serialNumber,
@@ -495,8 +468,12 @@ export default function Home() {
         alert(`Fehler beim Blocken: ${data.message || 'Unbekannter Fehler'}`);
       }
     } catch (error) {
-      console.error('Failed to block device:', error);
-      alert('Fehler beim Blocken des Geräts');
+      if (error instanceof TokenExpiredError) {
+        addNotification('error', 'Session Expired', error.message, 'session-expired-error');
+      } else {
+        console.error('Failed to block device:', error);
+        alert('Fehler beim Blocken des Geräts');
+      }
     } finally {
       setBlockingDevice(false);
     }
@@ -1314,26 +1291,18 @@ function SettingsMenu({
   const fetchAuditLogs = async () => {
     setLoadingLogs(true);
     try {
-      // Get access token and include Authorization header
-      const token = await getAccessToken();
-
-      if (!token) {
-        console.error('Failed to get access token for audit logs');
-        return;
-      }
-
-      const response = await fetch(`${API_BASE_URL}/api/audit/logs?tenantId=${tenantId}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/audit/logs?tenantId=${tenantId}`, getAccessToken);
 
       if (response.ok) {
         const data = await response.json();
         setAuditLogs(data.logs || []);
       }
     } catch (error) {
-      console.error("Failed to fetch audit logs:", error);
+      if (error instanceof TokenExpiredError) {
+        console.error('Session expired:', error.message);
+      } else {
+        console.error("Failed to fetch audit logs:", error);
+      }
     } finally {
       setLoadingLogs(false);
     }

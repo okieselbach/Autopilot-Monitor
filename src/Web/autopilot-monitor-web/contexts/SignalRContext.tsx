@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import * as signalR from '@microsoft/signalr';
 import { API_BASE_URL } from '@/lib/config';
+import { authenticatedFetch } from '@/lib/authenticatedFetch';
 import { useAuth } from './AuthContext';
 
 interface SignalRContextType {
@@ -81,15 +82,15 @@ export function SignalRProvider({ children }: { children: React.ReactNode }) {
 
       for (const groupName of previousGroups) {
         try {
-          const token = await getAccessToken();
-          const response = await fetch(`${API_BASE_URL}/api/realtime/groups/join`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify({ connectionId, groupName })
-          });
+          const response = await authenticatedFetch(
+            `${API_BASE_URL}/api/realtime/groups/join`,
+            getAccessToken,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ connectionId, groupName })
+            }
+          );
 
           if (response.ok) {
             joinedGroupsRef.current.add(groupName);
@@ -178,15 +179,15 @@ export function SignalRProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      const token = await getAccessToken();
-      const response = await fetch(`${API_BASE_URL}/api/realtime/groups/join`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ connectionId, groupName })
-      });
+      const response = await authenticatedFetch(
+        `${API_BASE_URL}/api/realtime/groups/join`,
+        getAccessToken,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ connectionId, groupName })
+        }
+      );
 
       if (!response.ok) {
         // Remove from Set if API call failed (so we can retry)
@@ -218,15 +219,15 @@ export function SignalRProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      const token = await getAccessToken();
-      const response = await fetch(`${API_BASE_URL}/api/realtime/groups/leave`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ connectionId, groupName })
-      });
+      const response = await authenticatedFetch(
+        `${API_BASE_URL}/api/realtime/groups/leave`,
+        getAccessToken,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ connectionId, groupName })
+        }
+      );
 
       if (!response.ok) {
         // Re-add to Set if API call failed (so we can retry)

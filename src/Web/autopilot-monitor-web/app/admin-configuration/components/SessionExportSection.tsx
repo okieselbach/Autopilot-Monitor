@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { API_BASE_URL } from "@/lib/config";
+import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 import { TenantConfiguration } from "./TenantManagementSection";
 import { TenantSearchSelect } from "./TenantSearchSelect";
 import { SessionExportEvent, generateCsvExport, generateUiExport } from "@/lib/sessionExportUtils";
@@ -44,17 +45,18 @@ export function SessionExportSection({
       setExportLoading(true);
       setExportError(null);
       setExportedEvents(null);
-      const token = await getAccessToken();
-      if (!token) throw new Error("Failed to get access token");
-      const res = await fetch(
+      const res = await authenticatedFetch(
         `${API_BASE_URL}/api/sessions/${sid}/events?tenantId=${encodeURIComponent(tid)}`,
-        { headers: { Authorization: `Bearer ${token}` } }
+        getAccessToken
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
       const data = await res.json();
       if (!data.success) throw new Error(data.message || "Backend returned error");
       setExportedEvents(data.events ?? []);
     } catch (err) {
+      if (err instanceof TokenExpiredError) {
+        console.error("Session expired while fetching export events");
+      }
       setExportError(err instanceof Error ? err.message : "Failed to fetch events");
     } finally {
       setExportLoading(false);

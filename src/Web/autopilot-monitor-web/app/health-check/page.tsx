@@ -4,6 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useNotifications } from '@/contexts/NotificationContext';
 import { useState, useEffect } from 'react';
 import { API_BASE_URL } from '@/lib/config';
+import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 
 interface HealthCheck {
   name: string;
@@ -30,17 +31,7 @@ export default function HealthCheckPage() {
   const performHealthCheck = async () => {
     setLoading(true);
     try {
-      const token = await getAccessToken();
-      if (!token) {
-        addNotification('error', 'Authentication Error', 'No access token available', 'health-check-auth-error');
-        return;
-      }
-
-      const response = await fetch(`${API_BASE_URL}/api/health/detailed`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/health/detailed`, getAccessToken);
 
       if (!response.ok) {
         if (response.status === 403) {
@@ -60,8 +51,12 @@ export default function HealthCheckPage() {
         addNotification('warning', 'Health Check Complete', 'Some systems are unhealthy');
       }
     } catch (error) {
-      console.error('Health check error:', error);
-      addNotification('error', 'Health Check Error', error instanceof Error ? error.message : 'Unknown error', 'health-check-error');
+      if (error instanceof TokenExpiredError) {
+        addNotification('error', 'Session Expired', error.message, 'session-expired-error');
+      } else {
+        console.error('Health check error:', error);
+        addNotification('error', 'Health Check Error', error instanceof Error ? error.message : 'Unknown error', 'health-check-error');
+      }
     } finally {
       setLoading(false);
     }

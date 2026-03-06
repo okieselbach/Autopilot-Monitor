@@ -7,6 +7,7 @@ import { ProtectedRoute } from "../../components/ProtectedRoute";
 import { useTenant } from "../../contexts/TenantContext";
 import { useAuth } from "../../contexts/AuthContext";
 import { API_BASE_URL } from "@/lib/config";
+import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 import { downloadAsJson, stripInternalFields } from "@/lib/rulePageHelpers";
 import { StatCard } from "@/components/rules/StatCard";
 import { RuleFilterBar } from "@/components/rules/RuleFilterBar";
@@ -148,12 +149,7 @@ export default function ImeLogPatternsPage() {
     if (!tenantId) return;
     try {
       setLoading(true);
-      const token = await getAccessToken();
-      if (!token) throw new Error("Failed to get access token");
-
-      const response = await fetch(`${API_BASE_URL}/api/rules/ime-log-patterns`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/rules/ime-log-patterns`, getAccessToken);
 
       if (!response.ok) {
         throw new Error(`Failed to fetch patterns: ${response.statusText}`);
@@ -166,8 +162,12 @@ export default function ImeLogPatternsPage() {
         throw new Error(data.message || "Failed to fetch patterns");
       }
     } catch (err) {
-      console.error("Error fetching patterns:", err);
-      showError(err instanceof Error ? err.message : "Failed to fetch patterns");
+      if (err instanceof TokenExpiredError) {
+        showError(err.message);
+      } else {
+        console.error("Error fetching patterns:", err);
+        showError(err instanceof Error ? err.message : "Failed to fetch patterns");
+      }
     } finally {
       setLoading(false);
     }
@@ -185,16 +185,13 @@ export default function ImeLogPatternsPage() {
       setTogglingPattern(pattern.patternId);
       setError(null);
 
-      const token = await getAccessToken();
-      if (!token) throw new Error("Failed to get access token");
-
-      const response = await fetch(
+      const response = await authenticatedFetch(
         `${API_BASE_URL}/api/rules/ime-log-patterns/${encodeURIComponent(pattern.patternId)}?global=true`,
+        getAccessToken,
         {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({ ...pattern, enabled: !pattern.enabled }),
         }
@@ -245,9 +242,6 @@ export default function ImeLogPatternsPage() {
       setSaving(true);
       setError(null);
 
-      const token = await getAccessToken();
-      if (!token) throw new Error("Failed to get access token");
-
       const payload: Partial<ImeLogPattern> = {
         patternId,
         category: editForm.category,
@@ -258,13 +252,13 @@ export default function ImeLogPatternsPage() {
         enabled: editForm.enabled,
       };
 
-      const response = await fetch(
+      const response = await authenticatedFetch(
         `${API_BASE_URL}/api/rules/ime-log-patterns/${encodeURIComponent(patternId)}?global=true`,
+        getAccessToken,
         {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify(payload),
         }

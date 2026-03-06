@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { API_BASE_URL } from "@/lib/config";
+import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 import { TenantConfiguration } from "./TenantManagementSection";
 import { TenantSearchSelect } from "./TenantSearchSelect";
 
@@ -60,15 +61,14 @@ export function DeviceBlockSection({
     if (!tenantId) return;
     try {
       setLoadingBlockedDevices(true);
-      const token = await getAccessToken();
-      if (!token) throw new Error("Failed to get access token");
-      const response = await fetch(`${API_BASE_URL}/api/devices/blocked?tenantId=${encodeURIComponent(tenantId)}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/devices/blocked?tenantId=${encodeURIComponent(tenantId)}`, getAccessToken);
       if (!response.ok) throw new Error(`Failed to load blocked devices: ${response.statusText}`);
       const data = await response.json();
       setBlockedDevices(data.blocked ?? []);
     } catch (err) {
+      if (err instanceof TokenExpiredError) {
+        console.error("Session expired while loading blocked devices");
+      }
       setError(err instanceof Error ? err.message : "Failed to load blocked devices");
     } finally {
       setLoadingBlockedDevices(false);
@@ -78,16 +78,15 @@ export function DeviceBlockSection({
   const fetchAllBlockedDevices = async () => {
     try {
       setLoadingAllBlocked(true);
-      const token = await getAccessToken();
-      if (!token) throw new Error("Failed to get access token");
-      const response = await fetch(`${API_BASE_URL}/api/galactic/devices/blocked`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/galactic/devices/blocked`, getAccessToken);
       if (!response.ok) throw new Error(`Failed to load blocked devices: ${response.statusText}`);
       const data = await response.json();
       setBlockedDevices(data.blocked ?? []);
       setBlockListTenantId("");
     } catch (err) {
+      if (err instanceof TokenExpiredError) {
+        console.error("Session expired while loading all blocked devices");
+      }
       setError(err instanceof Error ? err.message : "Failed to load all blocked devices");
     } finally {
       setLoadingAllBlocked(false);
@@ -104,11 +103,9 @@ export function DeviceBlockSection({
     try {
       setBlockingDevice(true);
       setError(null);
-      const token = await getAccessToken();
-      if (!token) throw new Error("Failed to get access token");
-      const response = await fetch(`${API_BASE_URL}/api/devices/block`, {
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/devices/block`, getAccessToken, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           tenantId: blockTenantId,
           serialNumber: blockSerialNumber.trim(),
@@ -130,6 +127,9 @@ export function DeviceBlockSection({
       setBlockAction("Block");
       if (blockListTenantId === blockTenantId) await fetchBlockedDevices(blockTenantId);
     } catch (err) {
+      if (err instanceof TokenExpiredError) {
+        console.error("Session expired while blocking device");
+      }
       setError(err instanceof Error ? err.message : "Failed to block device");
     } finally {
       setBlockingDevice(false);
@@ -140,11 +140,10 @@ export function DeviceBlockSection({
     try {
       setUnblockingDevice(serialNumber);
       setError(null);
-      const token = await getAccessToken();
-      if (!token) throw new Error("Failed to get access token");
-      const response = await fetch(
+      const response = await authenticatedFetch(
         `${API_BASE_URL}/api/devices/block/${encodeURIComponent(serialNumber)}?tenantId=${encodeURIComponent(tenantId)}`,
-        { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }
+        getAccessToken,
+        { method: "DELETE" }
       );
       const result = await response.json();
       if (!response.ok) throw new Error(result.message || response.statusText);
@@ -152,6 +151,9 @@ export function DeviceBlockSection({
       setTimeout(() => setSuccessMessage(null), 3000);
       setBlockedDevices((prev) => prev.filter((d) => d.serialNumber !== serialNumber || d.tenantId !== tenantId));
     } catch (err) {
+      if (err instanceof TokenExpiredError) {
+        console.error("Session expired while unblocking device");
+      }
       setError(err instanceof Error ? err.message : "Failed to unblock device");
     } finally {
       setUnblockingDevice(null);
@@ -166,12 +168,10 @@ export function DeviceBlockSection({
     try {
       setKillingDevice(device.serialNumber);
       setError(null);
-      const token = await getAccessToken();
-      if (!token) throw new Error("Failed to get access token");
       const remainingHours = Math.max(1, Math.ceil((new Date(device.unblockAt).getTime() - Date.now()) / 3600000));
-      const response = await fetch(`${API_BASE_URL}/api/devices/block`, {
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/devices/block`, getAccessToken, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           tenantId: device.tenantId,
           serialNumber: device.serialNumber,
@@ -186,6 +186,9 @@ export function DeviceBlockSection({
       setTimeout(() => setSuccessMessage(null), 4000);
       await fetchBlockedDevices(device.tenantId);
     } catch (err) {
+      if (err instanceof TokenExpiredError) {
+        console.error("Session expired while sending kill signal");
+      }
       setError(err instanceof Error ? err.message : "Failed to send kill signal");
     } finally {
       setKillingDevice(null);

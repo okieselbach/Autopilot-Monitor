@@ -7,6 +7,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useNotifications } from '../../contexts/NotificationContext';
 import { ProtectedRoute } from '../../components/ProtectedRoute';
 import { API_BASE_URL } from '@/lib/config';
+import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 
 interface AuditLogEntry {
   id: string;
@@ -52,20 +53,10 @@ export default function AuditPage() {
         setLoading(true);
       }
 
-      const token = await getAccessToken();
-      if (!token) {
-        addNotification('error', 'Authentication Error', 'Failed to get access token. Please try logging in again.', 'audit-auth-error');
-        return;
-      }
-
       const endpoint = galacticAdminMode
         ? `${API_BASE_URL}/api/galactic/audit/logs`
         : `${API_BASE_URL}/api/audit/logs`;
-      const response = await fetch(endpoint, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
+      const response = await authenticatedFetch(endpoint, getAccessToken);
 
       if (!response.ok) {
         addNotification('error', 'Backend Error', `Failed to load audit logs: ${response.statusText}`, 'audit-fetch-error');
@@ -79,8 +70,12 @@ export default function AuditPage() {
         addNotification('error', 'Backend Error', data.message || 'Failed to load audit logs', 'audit-fetch-error');
       }
     } catch (err) {
-      console.error('Error fetching audit logs:', err);
-      addNotification('error', 'Backend Not Reachable', 'Unable to load audit logs. Please check your connection.', 'audit-fetch-error');
+      if (err instanceof TokenExpiredError) {
+        addNotification('error', 'Session Expired', err.message, 'session-expired-error');
+      } else {
+        console.error('Error fetching audit logs:', err);
+        addNotification('error', 'Backend Not Reachable', 'Unable to load audit logs. Please check your connection.', 'audit-fetch-error');
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);

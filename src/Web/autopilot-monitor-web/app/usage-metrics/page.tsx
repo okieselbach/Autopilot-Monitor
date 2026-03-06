@@ -7,6 +7,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useNotifications } from '../../contexts/NotificationContext';
 import { ProtectedRoute } from '../../components/ProtectedRoute';
 import { API_BASE_URL } from '@/lib/config';
+import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 
 interface SessionMetrics {
   total: number;
@@ -87,17 +88,7 @@ export default function UsageMetricsPage() {
         setLoading(true);
       }
 
-      const token = await getAccessToken();
-      if (!token) {
-        addNotification('error', 'Authentication Error', 'Failed to get access token. Please try logging in again.', 'usage-metrics-auth-error');
-        return;
-      }
-
-      const response = await fetch(`${API_BASE_URL}/api/metrics/usage?tenantId=${tenantId}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/metrics/usage?tenantId=${tenantId}`, getAccessToken);
 
       if (!response.ok) {
         addNotification('error', 'Backend Error', `Failed to load usage metrics: ${response.statusText}`, 'usage-metrics-fetch-error');
@@ -107,8 +98,12 @@ export default function UsageMetricsPage() {
       const data = await response.json();
       setMetrics(data);
     } catch (err) {
-      console.error('Error fetching usage metrics:', err);
-      addNotification('error', 'Backend Not Reachable', 'Unable to load usage metrics. Please check your connection.', 'usage-metrics-fetch-error');
+      if (err instanceof TokenExpiredError) {
+        addNotification('error', 'Session Expired', err.message, 'session-expired-error');
+      } else {
+        console.error('Error fetching usage metrics:', err);
+        addNotification('error', 'Backend Not Reachable', 'Unable to load usage metrics. Please check your connection.', 'usage-metrics-fetch-error');
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
