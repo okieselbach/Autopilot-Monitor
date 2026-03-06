@@ -232,7 +232,7 @@ function PhaseSection({
   showScriptOutput?: boolean;
 }) {
   return (
-    <div className="border-l-4 border-blue-500 pl-4">
+    <div id={`phase-${phaseName.replace(/[^a-zA-Z0-9]/g, '-')}`} className="border-l-4 border-blue-500 pl-4">
       <button
         onClick={onToggle}
         className="flex items-center justify-between w-full text-left mb-3 group"

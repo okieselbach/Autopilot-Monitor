@@ -13,4 +13,11 @@ export interface Session {
   failureReason?: string;
   isPreProvisioned?: boolean;
   isHybridJoin?: boolean;
+  agentVersion?: string;
+  geoCountry?: string;
+  geoRegion?: string;
+  geoCity?: string;
+  osBuild?: string;
+  osEdition?: string;
+  osLanguage?: string;
 }

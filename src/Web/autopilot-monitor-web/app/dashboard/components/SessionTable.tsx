@@ -1,7 +1,49 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { useState, useEffect, useRef } from "react";
 import { Session } from "../types";
+
+// Column definition for the session table
+interface ColumnDef {
+  key: string;
+  label: string;
+  defaultVisible: boolean;
+  // If set, the column is only shown when this mode is active (handled separately)
+  adminOnly?: boolean;
+  galacticOnly?: boolean;
+  sortKey?: keyof Session;
+}
+
+const ALL_COLUMNS: ColumnDef[] = [
+  { key: "device", label: "Device", defaultVisible: true, sortKey: "deviceName" },
+  { key: "tenantId", label: "Tenant ID", defaultVisible: false, galacticOnly: true },
+  { key: "model", label: "Model", defaultVisible: true, sortKey: "model" },
+  { key: "status", label: "Status", defaultVisible: true, sortKey: "status" },
+  { key: "eventCount", label: "Events", defaultVisible: true, sortKey: "eventCount" },
+  { key: "duration", label: "Duration", defaultVisible: true, sortKey: "durationSeconds" },
+  { key: "started", label: "Started", defaultVisible: true, sortKey: "startedAt" },
+  { key: "country", label: "Country", defaultVisible: false, sortKey: "geoCountry" },
+  { key: "agentVersion", label: "Agent Version", defaultVisible: false, sortKey: "agentVersion" },
+  { key: "osBuild", label: "OS Build", defaultVisible: false, sortKey: "osBuild" },
+  { key: "osEdition", label: "OS Edition", defaultVisible: false, sortKey: "osEdition" },
+  { key: "osLanguage", label: "OS Language", defaultVisible: false, sortKey: "osLanguage" },
+  { key: "actions", label: "Actions", defaultVisible: true, adminOnly: true },
+];
+
+const STORAGE_KEY = "sessionTable_visibleColumns";
+
+function getInitialVisibleColumns(): Set<string> {
+  if (typeof window !== "undefined") {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        return new Set(JSON.parse(stored));
+      }
+    } catch { /* ignore */ }
+  }
+  return new Set(ALL_COLUMNS.filter((c) => c.defaultVisible).map((c) => c.key));
+}
 
 interface SessionTableProps {
   sessions: Session[];
@@ -53,6 +95,59 @@ export function SessionTable({
   onBlockDevice,
 }: SessionTableProps) {
   const router = useRouter();
+  const [visibleColumns, setVisibleColumns] = useState<Set<string>>(getInitialVisibleColumns);
+  const [showColumnSelector, setShowColumnSelector] = useState(false);
+  const columnSelectorRef = useRef<HTMLDivElement>(null);
+
+  // Persist visible columns to localStorage
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify([...visibleColumns]));
+  }, [visibleColumns]);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (columnSelectorRef.current && !columnSelectorRef.current.contains(e.target as Node)) {
+        setShowColumnSelector(false);
+      }
+    }
+    if (showColumnSelector) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [showColumnSelector]);
+
+  const toggleColumn = (key: string) => {
+    setVisibleColumns((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
+  const resetColumns = () => {
+    setVisibleColumns(new Set(ALL_COLUMNS.filter((c) => c.defaultVisible).map((c) => c.key)));
+  };
+
+  // Filter columns based on mode and visibility
+  const activeColumns = ALL_COLUMNS.filter((col) => {
+    if (col.adminOnly && !adminMode) return false;
+    if (col.galacticOnly && !galacticAdminMode) return false;
+    return visibleColumns.has(col.key);
+  });
+
+  // Columns available for the selector (exclude mode-gated ones that aren't applicable)
+  const selectableColumns = ALL_COLUMNS.filter((col) => {
+    if (col.adminOnly && !adminMode) return false;
+    if (col.galacticOnly && !galacticAdminMode) return false;
+    return true;
+  });
+
+  const colSpan = activeColumns.length;
 
   return (
     <div className="mt-8 bg-white shadow rounded-lg p-6">
@@ -65,28 +160,73 @@ export function SessionTable({
             </span>
           )}
         </h2>
-        {isPreviewBlocked ? (
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-200 shrink-0">
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            Preview approval pending
-          </span>
-        ) : (
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-800 border border-green-200 shrink-0">
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-            </svg>
-            Preview approved
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          {/* Column Selector */}
+          <div className="relative" ref={columnSelectorRef}>
+            <button
+              onClick={() => setShowColumnSelector(!showColumnSelector)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 border border-gray-200 transition-colors"
+              title="Configure visible columns"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
+              </svg>
+              Columns
+            </button>
+            {showColumnSelector && (
+              <div className="absolute right-0 top-full mt-1 w-56 bg-white rounded-lg shadow-lg border border-gray-200 z-50 py-2">
+                <div className="px-3 py-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center justify-between">
+                  <span>Toggle Columns</span>
+                  <button
+                    onClick={resetColumns}
+                    className="text-blue-500 hover:text-blue-700 normal-case font-medium tracking-normal"
+                  >
+                    Reset
+                  </button>
+                </div>
+                <div className="border-t border-gray-100 mt-1 pt-1">
+                  {selectableColumns.map((col) => (
+                    <label
+                      key={col.key}
+                      className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 cursor-pointer text-sm text-gray-700"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={visibleColumns.has(col.key)}
+                        onChange={() => toggleColumn(col.key)}
+                        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 h-3.5 w-3.5"
+                      />
+                      {col.label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {isPreviewBlocked ? (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-200 shrink-0">
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              Preview approval pending
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-800 border border-green-200 shrink-0">
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+              </svg>
+              Preview approved
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Search Input */}
       <div className="mb-4 relative">
         <input
           type="text"
-          placeholder="Search by device, serial, model, status, session ID, or duration (e.g., >30 for >30min)"
+          placeholder="Search by device, serial, model, status, session ID, country, or duration (e.g., >30 for >30min)"
           value={searchQuery}
           onChange={(e) => onSearchQueryChange(e.target.value)}
           className="w-full px-4 py-2 pr-10 border border-gray-300 rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
@@ -147,40 +287,41 @@ export function SessionTable({
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
-              <SortableHeader column="deviceName" currentSort={sortColumn} direction={sortDirection} onSort={onSort}>
-                Device
-              </SortableHeader>
-              {galacticAdminMode && (
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Tenant ID
-                </th>
-              )}
-              <SortableHeader column="model" currentSort={sortColumn} direction={sortDirection} onSort={onSort}>
-                Model
-              </SortableHeader>
-              <SortableHeader column="status" currentSort={sortColumn} direction={sortDirection} onSort={onSort}>
-                Status
-              </SortableHeader>
-              <SortableHeader column="eventCount" currentSort={sortColumn} direction={sortDirection} onSort={onSort} className="px-3">
-                Events
-              </SortableHeader>
-              <SortableHeader column="durationSeconds" currentSort={sortColumn} direction={sortDirection} onSort={onSort} className="px-3">
-                Duration
-              </SortableHeader>
-              <SortableHeader column="startedAt" currentSort={sortColumn} direction={sortDirection} onSort={onSort} className="px-3">
-                Started
-              </SortableHeader>
-              {adminMode && (
-                <th scope="col" className="pl-3 pr-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Actions
-                </th>
-              )}
+              {activeColumns.map((col) => {
+                if (col.sortKey) {
+                  return (
+                    <SortableHeader
+                      key={col.key}
+                      column={col.sortKey}
+                      currentSort={sortColumn}
+                      direction={sortDirection}
+                      onSort={onSort}
+                      className={["eventCount", "duration", "started", "country", "agentVersion", "osBuild", "osEdition", "osLanguage"].includes(col.key) ? "px-3" : undefined}
+                    >
+                      {col.label}
+                    </SortableHeader>
+                  );
+                }
+                // Non-sortable headers (tenantId, actions)
+                if (col.key === "actions") {
+                  return (
+                    <th key={col.key} scope="col" className="pl-3 pr-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Actions
+                    </th>
+                  );
+                }
+                return (
+                  <th key={col.key} scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    {col.label}
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
             {paginatedSessions.length === 0 ? (
               <tr>
-                <td colSpan={(galacticAdminMode ? 1 : 0) + (adminMode ? 7 : 6)} className="px-6 py-8 text-center text-gray-500">
+                <td colSpan={colSpan} className="px-6 py-8 text-center text-gray-500">
                   No sessions found matching your search.
                 </td>
               </tr>
@@ -191,104 +332,19 @@ export function SessionTable({
                 onClick={() => router.push(`/sessions/${session.sessionId}`)}
                 className="hover:bg-gray-50 cursor-pointer transition-colors"
               >
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <div className="text-sm font-medium text-gray-900">
-                    {session.deviceName || session.serialNumber}
-                  </div>
-                  <div className="text-sm text-gray-500">
-                    {session.serialNumber}
-                  </div>
-                </td>
-                {galacticAdminMode && (
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        navigator.clipboard.writeText(session.tenantId);
-                      }}
-                      className="group flex items-center gap-1 text-xs font-mono text-gray-600 hover:text-blue-600 transition-colors"
-                      title={session.tenantId}
-                    >
-                      <span>{session.tenantId.split('-').slice(0, 2).join('-')}...</span>
-                      <svg className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                      </svg>
-                    </button>
-                  </td>
-                )}
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <div className="text-sm font-medium text-gray-900">
-                    {session.manufacturer || "Unknown manufacturer"}
-                  </div>
-                  <div className="text-sm text-gray-500">
-                    {session.model || "Unknown model"}
-                  </div>
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <div className="flex items-center gap-1.5">
-                    <StatusBadge status={session.status} failureReason={session.failureReason} />
-                    {session.isHybridJoin && (
-                      <span
-                        className="px-2 inline-flex items-center gap-1 text-xs leading-5 font-semibold rounded-full bg-purple-100 text-purple-800"
-                        title="Hybrid Azure AD Join"
-                      >
-                        Hybrid
-                      </span>
-                    )}
-                    {blockedDevicesSet.has(`${session.tenantId}:${session.serialNumber}`) && (
-                      <span
-                        className="px-2 inline-flex items-center gap-1 text-xs leading-5 font-semibold rounded-full bg-orange-100 text-orange-800"
-                        title="Device is currently blocked"
-                      >
-                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
-                        </svg>
-                        Blocked
-                      </span>
-                    )}
-                  </div>
-                </td>
-                <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-500">
-                  {session.eventCount}
-                </td>
-                <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-500">
-                  {Math.round(session.durationSeconds / 60)} min
-                </td>
-                <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-500">
-                  {new Date(session.startedAt).toLocaleString()}
-                </td>
-                {adminMode && (
-                  <td className="pl-3 pr-4 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    <div className="flex items-center justify-end gap-2">
-                      {galacticAdminMode && user?.isGalacticAdmin && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onBlockDevice(session.serialNumber, session.tenantId, session.deviceName || session.serialNumber);
-                          }}
-                          className="text-orange-500 hover:text-orange-700 transition-colors"
-                          title="Device blocken"
-                        >
-                          <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
-                          </svg>
-                        </button>
-                      )}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onDeleteSession(session.sessionId, session.tenantId, session.deviceName || session.serialNumber);
-                        }}
-                        className="text-red-600 hover:text-red-900 transition-colors"
-                        title="Session löschen"
-                      >
-                        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                      </button>
-                    </div>
-                  </td>
-                )}
+                {activeColumns.map((col) => (
+                  <SessionCell
+                    key={col.key}
+                    columnKey={col.key}
+                    session={session}
+                    adminMode={adminMode}
+                    galacticAdminMode={galacticAdminMode}
+                    blockedDevicesSet={blockedDevicesSet}
+                    user={user}
+                    onDeleteSession={onDeleteSession}
+                    onBlockDevice={onBlockDevice}
+                  />
+                ))}
               </tr>
               ))
             )}
@@ -322,6 +378,198 @@ export function SessionTable({
       )}
     </div>
   );
+}
+
+function SessionCell({
+  columnKey,
+  session,
+  adminMode,
+  galacticAdminMode,
+  blockedDevicesSet,
+  user,
+  onDeleteSession,
+  onBlockDevice,
+}: {
+  columnKey: string;
+  session: Session;
+  adminMode: boolean;
+  galacticAdminMode: boolean;
+  blockedDevicesSet: Set<string>;
+  user: { isGalacticAdmin?: boolean } | null;
+  onDeleteSession: (sessionId: string, tenantId: string, deviceName?: string) => void;
+  onBlockDevice: (serialNumber: string, tenantId: string, deviceName?: string) => void;
+}) {
+  switch (columnKey) {
+    case "device":
+      return (
+        <td className="px-6 py-4 whitespace-nowrap">
+          <div className="text-sm font-medium text-gray-900">
+            {session.deviceName || session.serialNumber}
+          </div>
+          <div className="text-sm text-gray-500">
+            {session.serialNumber}
+          </div>
+        </td>
+      );
+
+    case "tenantId":
+      return (
+        <td className="px-6 py-4 whitespace-nowrap">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              navigator.clipboard.writeText(session.tenantId);
+            }}
+            className="group flex items-center gap-1 text-xs font-mono text-gray-600 hover:text-blue-600 transition-colors"
+            title={session.tenantId}
+          >
+            <span>{session.tenantId.split('-').slice(0, 2).join('-')}...</span>
+            <svg className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+            </svg>
+          </button>
+        </td>
+      );
+
+    case "model":
+      return (
+        <td className="px-6 py-4 whitespace-nowrap">
+          <div className="text-sm font-medium text-gray-900">
+            {session.manufacturer || "Unknown manufacturer"}
+          </div>
+          <div className="text-sm text-gray-500">
+            {session.model || "Unknown model"}
+          </div>
+        </td>
+      );
+
+    case "status":
+      return (
+        <td className="px-6 py-4 whitespace-nowrap">
+          <div className="flex items-center gap-1.5">
+            <StatusBadge status={session.status} failureReason={session.failureReason} />
+            {session.isHybridJoin && (
+              <span
+                className="px-2 inline-flex items-center gap-1 text-xs leading-5 font-semibold rounded-full bg-purple-100 text-purple-800"
+                title="Hybrid Azure AD Join"
+              >
+                Hybrid
+              </span>
+            )}
+            {blockedDevicesSet.has(`${session.tenantId}:${session.serialNumber}`) && (
+              <span
+                className="px-2 inline-flex items-center gap-1 text-xs leading-5 font-semibold rounded-full bg-orange-100 text-orange-800"
+                title="Device is currently blocked"
+              >
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                </svg>
+                Blocked
+              </span>
+            )}
+          </div>
+        </td>
+      );
+
+    case "eventCount":
+      return (
+        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-500">
+          {session.eventCount}
+        </td>
+      );
+
+    case "duration":
+      return (
+        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-500">
+          {Math.round(session.durationSeconds / 60)} min
+        </td>
+      );
+
+    case "started":
+      return (
+        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-500">
+          {new Date(session.startedAt).toLocaleString()}
+        </td>
+      );
+
+    case "country":
+      return (
+        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-500">
+          {session.geoCountry ? (
+            <span title={[session.geoCity, session.geoRegion, session.geoCountry].filter(Boolean).join(", ")}>
+              {session.geoCountry}
+            </span>
+          ) : (
+            <span className="text-gray-300">—</span>
+          )}
+        </td>
+      );
+
+    case "agentVersion":
+      return (
+        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-500 font-mono">
+          {session.agentVersion || <span className="text-gray-300">—</span>}
+        </td>
+      );
+
+    case "osBuild":
+      return (
+        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-500 font-mono">
+          {session.osBuild || <span className="text-gray-300">—</span>}
+        </td>
+      );
+
+    case "osEdition":
+      return (
+        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-500">
+          {session.osEdition || <span className="text-gray-300">—</span>}
+        </td>
+      );
+
+    case "osLanguage":
+      return (
+        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-500">
+          {session.osLanguage || <span className="text-gray-300">—</span>}
+        </td>
+      );
+
+    case "actions":
+      return (
+        <td className="pl-3 pr-4 py-4 whitespace-nowrap text-right text-sm font-medium">
+          <div className="flex items-center justify-end gap-2">
+            {galacticAdminMode && user?.isGalacticAdmin && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onBlockDevice(session.serialNumber, session.tenantId, session.deviceName || session.serialNumber);
+                }}
+                className="text-orange-500 hover:text-orange-700 transition-colors"
+                title="Device blocken"
+              >
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                </svg>
+              </button>
+            )}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onDeleteSession(session.sessionId, session.tenantId, session.deviceName || session.serialNumber);
+              }}
+              className="text-red-600 hover:text-red-900 transition-colors"
+              title="Session löschen"
+            >
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+            </button>
+          </div>
+        </td>
+      );
+
+    default:
+      return <td className="px-3 py-4" />;
+  }
 }
 
 function SortableHeader({

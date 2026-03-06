@@ -497,7 +497,14 @@ export default function Home() {
       session.sessionId,
       new Date(session.startedAt).toLocaleString(),
       `${Math.round(session.durationSeconds / 60)} min`,
-      blockedDevicesSet.has(`${session.tenantId}:${session.serialNumber}`) ? "blocked" : ""
+      blockedDevicesSet.has(`${session.tenantId}:${session.serialNumber}`) ? "blocked" : "",
+      session.geoCountry,
+      session.geoRegion,
+      session.geoCity,
+      session.agentVersion,
+      session.osBuild,
+      session.osEdition,
+      session.osLanguage,
     ].join(" ").toLowerCase();
 
     return searchableText.includes(query);

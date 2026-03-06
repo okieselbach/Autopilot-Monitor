@@ -11,9 +11,10 @@ interface PhaseTimelineProps {
   sessionStatus?: string;
   enrollmentType?: string;
   isPreProvisioned?: boolean;
+  onPhaseClick?: (phaseName: string) => void;
 }
 
-export default function PhaseTimeline({ currentPhase, completedPhases, events = [], sessionStatus, enrollmentType, isPreProvisioned }: PhaseTimelineProps) {
+export default function PhaseTimeline({ currentPhase, completedPhases, events = [], sessionStatus, enrollmentType, isPreProvisioned, onPhaseClick }: PhaseTimelineProps) {
   const phases = enrollmentType === "v2" ? V2_PHASES : V1_PHASES;
 
   // Derive current activity for the active phase from events
@@ -303,7 +304,10 @@ export default function PhaseTimeline({ currentPhase, completedPhases, events = 
         </div>
         {/* Labels */}
         <div className="mt-3 text-center">
-          <div className="text-xs font-medium text-gray-700 whitespace-nowrap">
+          <div
+            className={`text-xs font-medium text-gray-700 whitespace-nowrap${onPhaseClick ? ' cursor-pointer' : ''}`}
+            onClick={onPhaseClick ? () => onPhaseClick(phase.name) : undefined}
+          >
             {phase.shortName}
           </div>
           {(status === 'completed' || status === 'failed') && getPhaseDuration(phase.id) && (
