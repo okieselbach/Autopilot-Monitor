@@ -130,10 +130,12 @@ export function TenantManagementSection({
       setSuccessMessage(null);
 
       const newValue = !tenant.allowInsecureAgentRequests;
-      const response = await authenticatedFetch(`${API_BASE_URL}/api/config/${tenant.tenantId}/security-bypass`, getAccessToken, {
-        method: "PATCH",
+      const updatedTenant = { ...tenant, allowInsecureAgentRequests: newValue };
+
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/config/${tenant.tenantId}`, getAccessToken, {
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ allowInsecureAgentRequests: newValue }),
+        body: JSON.stringify(updatedTenant),
       });
 
       if (!response.ok) {
@@ -141,10 +143,10 @@ export function TenantManagementSection({
         throw new Error(errorData.error || `Failed to update security bypass: ${response.statusText}`);
       }
 
+      const result = await response.json();
+
       setTenants(prev => prev.map(t =>
-        t.tenantId === tenant.tenantId
-          ? { ...t, allowInsecureAgentRequests: newValue }
-          : t
+        t.tenantId === tenant.tenantId ? result.config : t
       ));
 
       setEditingTenant(prev => prev && prev.tenantId === tenant.tenantId

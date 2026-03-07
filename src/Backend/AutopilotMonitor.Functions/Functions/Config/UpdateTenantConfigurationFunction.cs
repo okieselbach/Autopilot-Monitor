@@ -110,6 +110,32 @@ namespace AutopilotMonitor.Functions.Functions.Config
                 // Set the actual user identifier for audit logging
                 config.UpdatedBy = userIdentifier;
 
+                // Protect GA-only fields from non-Galactic-Admin callers
+                var existingConfig = await _configService.GetConfigurationAsync(tenantId);
+                if (!isGalacticAdmin)
+                {
+                    if (config.AllowInsecureAgentRequests != existingConfig.AllowInsecureAgentRequests ||
+                        config.BootstrapTokenEnabled != existingConfig.BootstrapTokenEnabled ||
+                        config.CustomRateLimitRequestsPerMinute != existingConfig.CustomRateLimitRequestsPerMinute ||
+                        config.RateLimitRequestsPerMinute != existingConfig.RateLimitRequestsPerMinute ||
+                        config.Disabled != existingConfig.Disabled ||
+                        config.MaxNdjsonPayloadSizeMB != existingConfig.MaxNdjsonPayloadSizeMB)
+                    {
+                        _logger.LogWarning(
+                            "Tenant Admin {User} attempted to modify GA-only fields for tenant {TenantId}",
+                            userIdentifier, tenantId);
+                    }
+
+                    config.AllowInsecureAgentRequests = existingConfig.AllowInsecureAgentRequests;
+                    config.BootstrapTokenEnabled = existingConfig.BootstrapTokenEnabled;
+                    config.CustomRateLimitRequestsPerMinute = existingConfig.CustomRateLimitRequestsPerMinute;
+                    config.RateLimitRequestsPerMinute = existingConfig.RateLimitRequestsPerMinute;
+                    config.Disabled = existingConfig.Disabled;
+                    config.DisabledReason = existingConfig.DisabledReason;
+                    config.DisabledUntil = existingConfig.DisabledUntil;
+                    config.MaxNdjsonPayloadSizeMB = existingConfig.MaxNdjsonPayloadSizeMB;
+                }
+
                 // Save configuration
                 await _configService.SaveConfigurationAsync(config);
 

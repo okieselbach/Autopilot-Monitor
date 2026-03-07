@@ -235,7 +235,7 @@ Monitoring/
 |----------|------------|
 | **Sessions** | `GET /sessions`, `GET /sessions/{id}`, `GET /sessions/{id}/events`, `POST /sessions/{id}/analysis`, `DELETE /sessions/{id}`, `POST /sessions/{id}/mark-failed` |
 | **Rules** | CRUD for `/rules/gather`, `/rules/analyze`, `/rules/ime-log-patterns`, `POST /rules/reseed-from-github` |
-| **Config** | `GET/POST /global/config`, `GET/POST /config/{tenantId}`, `POST /config/{tenantId}/security-bypass` |
+| **Config** | `GET/POST /global/config`, `GET/PUT /config/{tenantId}` |
 | **Auth** | `GET /auth/me`, `GET /auth/is-galactic-admin`, CRUD `/auth/galactic-admins` |
 | **Tenants** | CRUD `/tenants/{id}/admins`, `POST /tenants/{id}/offboard` |
 | **Devices** | `POST /devices/block`, `DELETE /devices/block/{serial}`, `GET /devices/blocked` |
