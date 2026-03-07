@@ -20,6 +20,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
         private readonly AnalyzeRuleService _analyzeRuleService;
         private readonly TeamsNotificationService _teamsNotificationService;
         private readonly BlockedDeviceService _blockedDeviceService;
+        private readonly BlockedVersionService _blockedVersionService;
         private readonly BootstrapSessionService _bootstrapSessionService;
 
         public IngestEventsFunction(
@@ -32,6 +33,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             AnalyzeRuleService analyzeRuleService,
             TeamsNotificationService teamsNotificationService,
             BlockedDeviceService blockedDeviceService,
+            BlockedVersionService blockedVersionService,
             BootstrapSessionService bootstrapSessionService)
         {
             _logger = logger;
@@ -43,6 +45,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             _analyzeRuleService = analyzeRuleService;
             _teamsNotificationService = teamsNotificationService;
             _blockedDeviceService = blockedDeviceService;
+            _blockedVersionService = blockedVersionService;
             _bootstrapSessionService = bootstrapSessionService;
         }
 

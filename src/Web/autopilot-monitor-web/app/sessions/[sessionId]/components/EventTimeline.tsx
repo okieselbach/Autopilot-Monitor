@@ -54,6 +54,12 @@ export default function EventTimeline({
   showScriptOutput,
 }: EventTimelineProps) {
   const [searchQuery, setSearchQuery] = useState("");
+  const [rawMode, setRawMode] = useState(false);
+
+  const sortedBySequence = useMemo(
+    () => [...events].filter(e => severityFilters.has(e.severity)).sort((a, b) => a.sequence - b.sequence),
+    [events, severityFilters]
+  );
 
   const matchesSearch = useMemo(() => {
     if (!searchQuery.trim()) return null;
@@ -117,7 +123,15 @@ export default function EventTimeline({
             );
           })}
           <span className="text-xs text-gray-400">({filteredEvents.length}/{events.length})</span>
-          <div className="flex gap-1.5 ml-auto">
+          <div className="flex gap-1.5 ml-auto items-center">
+            {isGalacticAdmin && (
+              <button
+                onClick={() => setRawMode(!rawMode)}
+                className={`text-xs hover:underline mr-1 ${rawMode ? 'text-purple-700 font-semibold' : 'text-gray-400 hover:text-gray-600'}`}
+              >
+                {rawMode ? '← Timeline' : 'Raw'}
+              </button>
+            )}
             <button
               onClick={expandAll}
               title="Expand All"
@@ -142,8 +156,17 @@ export default function EventTimeline({
         </div>
       </div>
 
-      {/* Timeline — split for WhiteGlove sessions, single card otherwise */}
-      {isWhiteGloveSession ? (
+      {/* Raw mode — compact flat list by sequence (galactic only) */}
+      {rawMode && isGalacticAdmin ? (
+        <div className="bg-white shadow rounded-lg p-4">
+          <h2 className="text-sm font-semibold text-gray-700 mb-3">Raw Events ({sortedBySequence.length})</h2>
+          <div className="divide-y divide-gray-100">
+            {sortedBySequence.map((ev) => (
+              <RawEventRow key={ev.eventId || `${ev.sessionId}-${ev.sequence}`} event={ev} />
+            ))}
+          </div>
+        </div>
+      ) : isWhiteGloveSession ? (
         <>
           {/* Pre-Provisioning Part */}
           <div className="bg-white shadow rounded-lg p-6">
@@ -502,6 +525,42 @@ function EventRow({ event, isGalacticAdmin, showScriptOutput }: { event: Enrollm
               </svg>
             )}
           </button>
+          <pre>{JSON.stringify(detailData, null, 2)}</pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RawEventRow({ event }: { event: EnrollmentEvent }) {
+  const [expanded, setExpanded] = useState(false);
+  const detailData = useMemo(() => normalizeEventDataForDisplay(event.data), [event.data]);
+  const hasDetails = detailData && Object.keys(detailData).length > 0;
+
+  const sevColor: Record<string, string> = {
+    Debug: "text-gray-400",
+    Info: "text-blue-600",
+    Warning: "text-yellow-600",
+    Error: "text-red-600",
+    Critical: "text-red-800 font-semibold",
+  };
+
+  return (
+    <div className="py-1.5 text-xs font-mono">
+      <div className="flex items-start gap-2">
+        <span className="text-gray-400 w-8 text-right flex-shrink-0">{event.sequence}</span>
+        <span className="text-gray-500 flex-shrink-0">{new Date(event.timestamp).toLocaleTimeString()}</span>
+        <span className={`flex-shrink-0 w-12 ${sevColor[event.severity] || "text-gray-500"}`}>{event.severity.substring(0, 4)}</span>
+        <span className="text-gray-900 font-medium flex-shrink-0">{event.eventType}</span>
+        <span className="text-gray-500 truncate flex-1 min-w-0">{event.message}</span>
+        {hasDetails && (
+          <button onClick={() => setExpanded(!expanded)} className="text-gray-400 hover:text-blue-600 flex-shrink-0 ml-1">
+            {expanded ? '−' : '+'}
+          </button>
+        )}
+      </div>
+      {expanded && hasDetails && (
+        <div className="ml-10 mt-1 p-2 bg-gray-900 rounded text-[11px] text-gray-100 overflow-x-auto max-h-60 overflow-y-auto">
           <pre>{JSON.stringify(detailData, null, 2)}</pre>
         </div>
       )}

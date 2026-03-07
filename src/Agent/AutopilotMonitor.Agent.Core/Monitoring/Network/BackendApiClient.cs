@@ -31,18 +31,20 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
         private readonly NetworkMetrics _networkMetrics = new NetworkMetrics();
         private readonly string _bootstrapToken;
         private readonly bool _useBootstrapTokenAuth;
+        private readonly string _agentVersion;
 
         /// <summary>
         /// Exposes the network metrics counters for AgentSelfMetricsCollector to read.
         /// </summary>
         public NetworkMetrics NetworkMetrics => _networkMetrics;
 
-        public BackendApiClient(string baseUrl, AgentConfiguration configuration = null, Logging.AgentLogger logger = null)
+        public BackendApiClient(string baseUrl, AgentConfiguration configuration = null, Logging.AgentLogger logger = null, string agentVersion = null)
         {
             _baseUrl = baseUrl.TrimEnd('/');
             _logger = logger;
             _bootstrapToken = configuration?.BootstrapToken;
             _useBootstrapTokenAuth = configuration?.UseBootstrapTokenAuth ?? false;
+            _agentVersion = agentVersion;
 
             // Find MDM certificate for client authentication if enabled
             if (configuration?.UseClientCertAuth == true)
@@ -394,6 +396,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
             {
                 request.Headers.Add("X-Device-SerialNumber", _serialNumber);
                 _logger?.Verbose($"  X-Device-SerialNumber: {_serialNumber}");
+            }
+
+            // Add agent version for version-based block/kill management
+            if (!string.IsNullOrEmpty(_agentVersion))
+            {
+                request.Headers.Add("X-Agent-Version", _agentVersion);
+                _logger?.Verbose($"  X-Agent-Version: {_agentVersion}");
             }
         }
 

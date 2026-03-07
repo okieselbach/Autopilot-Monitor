@@ -51,7 +51,7 @@ namespace AutopilotMonitor.Agent
                     Console.WriteLine();
                 }
 
-                using (var apiClient = new BackendApiClient(config.ApiBaseUrl, config, logger))
+                using (var apiClient = new BackendApiClient(config.ApiBaseUrl, config, logger, agentVersion))
                 using (var remoteConfigService = new RemoteConfigService(apiClient, config.TenantId, logger))
                 {
                     // Step 1: Fetch remote config (gather rules + settings)

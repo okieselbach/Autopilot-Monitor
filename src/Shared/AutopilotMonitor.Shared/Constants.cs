@@ -76,6 +76,8 @@ namespace AutopilotMonitor.Shared
             public const string ReportAgentError         = "/api/agent/error";
             public const string BlockDevice              = "/api/devices/block";
             public const string GetBlockedDevices        = "/api/devices/blocked";
+            public const string BlockVersion             = "/api/versions/block";
+            public const string GetBlockedVersions       = "/api/versions/blocked";
             public const string ImeLogPatterns           = "/api/rules/ime-log-patterns";
             public const string ReseedFromGitHub         = "/api/rules/reseed-from-github";
             public const string ValidateBootstrapCode    = "/api/bootstrap/validate/{code}";
@@ -179,6 +181,9 @@ namespace AutopilotMonitor.Shared
             // Device blocking
             public const string BlockedDevices = "BlockedDevices";
 
+            // Version-based blocking
+            public const string BlockedVersions = "BlockedVersions";
+
             // Session reports (feedback from Tenant Admins)
             public const string SessionReports = "SessionReports";
 
@@ -209,6 +214,7 @@ namespace AutopilotMonitor.Shared
                 PreviewWhitelist,
                 PreviewConfig,
                 BlockedDevices,
+                BlockedVersions,
                 SessionReports,
                 BootstrapSessions
             };

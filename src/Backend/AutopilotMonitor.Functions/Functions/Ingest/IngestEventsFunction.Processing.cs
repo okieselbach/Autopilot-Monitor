@@ -61,6 +61,41 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                     }
                 }
 
+                // --- Version block check (global, applies to all tenants) ---
+                var agentVersionHeader = req.Headers.Contains("X-Agent-Version")
+                    ? req.Headers.GetValues("X-Agent-Version").FirstOrDefault()
+                    : null;
+
+                if (!string.IsNullOrEmpty(agentVersionHeader))
+                {
+                    var (isVersionBlocked, versionAction, matchedPattern) = await _blockedVersionService.IsVersionBlockedAsync(agentVersionHeader);
+                    if (isVersionBlocked)
+                    {
+                        var isVersionKill = string.Equals(versionAction, "Kill", StringComparison.OrdinalIgnoreCase);
+
+                        _logger.LogWarning(
+                            "Version {Action} for agent: TenantId={TenantId}, AgentVersion={AgentVersion}, MatchedPattern={Pattern}",
+                            isVersionKill ? "KILL" : "BLOCK", tenantId, agentVersionHeader, matchedPattern);
+
+                        var versionBlockedResponse = req.CreateResponse(System.Net.HttpStatusCode.OK);
+                        await versionBlockedResponse.WriteAsJsonAsync(new IngestEventsResponse
+                        {
+                            Success = false,
+                            DeviceBlocked = true,
+                            DeviceKillSignal = isVersionKill,
+                            Message = isVersionKill
+                                ? $"Agent version {agentVersionHeader} has been issued a remote kill signal (pattern: {matchedPattern})."
+                                : $"Agent version {agentVersionHeader} is blocked by administrator (pattern: {matchedPattern}).",
+                            ProcessedAt = DateTime.UtcNow
+                        });
+                        return new IngestEventsOutput
+                        {
+                            HttpResponse = versionBlockedResponse,
+                            SignalRMessages = Array.Empty<SignalRMessageAction>()
+                        };
+                    }
+                }
+
                 // --- Parse NDJSON+gzip request body (only after security is cleared) ---
                 var request = await ParseNdjsonGzipRequest(req.Body, tenantId);
 

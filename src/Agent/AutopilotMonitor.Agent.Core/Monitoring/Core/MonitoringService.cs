@@ -93,7 +93,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             }
 
             _spool = new EventSpool(_configuration.SpoolDirectory);
-            _apiClient = new BackendApiClient(_configuration.ApiBaseUrl, _configuration, _logger);
+            _apiClient = new BackendApiClient(_configuration.ApiBaseUrl, _configuration, _logger, _agentVersion);
             _emergencyReporter = new EmergencyReporter(_apiClient, _configuration.SessionId, _configuration.TenantId, agentVersion, _logger);
             _cleanupService = new CleanupService(_configuration, _logger);
             _diagnosticsService = new DiagnosticsPackageService(_configuration, _logger, _apiClient);

@@ -112,6 +112,7 @@ builder.Services.AddSingleton<ImeLogPatternService>();
 builder.Services.AddHttpClient<GitHubRuleRepository>();
 builder.Services.AddSingleton<MaintenanceService>();
 builder.Services.AddSingleton<BlockedDeviceService>();
+builder.Services.AddSingleton<BlockedVersionService>();
 builder.Services.AddSingleton<SessionReportService>();
 builder.Services.AddSingleton<BootstrapSessionService>();
 

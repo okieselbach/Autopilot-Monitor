@@ -10,6 +10,7 @@ import { TenantManagementSection, TenantConfiguration } from "./components/Tenan
 import { MaintenanceSection } from "./components/MaintenanceSection";
 import { DiagnosticsLogPathsSection, DiagnosticsLogPath } from "./components/DiagnosticsLogPathsSection";
 import { DeviceBlockSection } from "./components/DeviceBlockSection";
+import { VersionBlockSection } from "./components/VersionBlockSection";
 import { SessionExportSection } from "./components/SessionExportSection";
 import { AdminConfigSettingsSection } from "./components/AdminConfigSettingsSection";
 import { SessionReportsSection } from "./components/SessionReportsSection";
@@ -363,6 +364,13 @@ export default function AdminConfigurationPage() {
               savingConfig={savingConfig}
               adminConfigExists={!!adminConfig}
               onSaveAdminConfig={handleSaveAdminConfig}
+              getAccessToken={getAccessToken}
+              setError={setError}
+              setSuccessMessage={setSuccessMessage}
+            />
+
+            {/* Version Block Management */}
+            <VersionBlockSection
               getAccessToken={getAccessToken}
               setError={setError}
               setSuccessMessage={setSuccessMessage}
