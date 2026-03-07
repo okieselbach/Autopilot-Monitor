@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Threading;
 using System.Threading.Tasks;
 using AutopilotMonitor.Agent.Core.Configuration;
@@ -608,14 +610,19 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     return;
                 }
 
-                // Create temp folder for the dialog (survives agent self-destruct).
-                // Use ProgramData instead of Path.GetTempPath() because the agent runs as SYSTEM
-                // and SYSTEM's temp (C:\WINDOWS\SystemTemp) is not accessible to the user session.
+                // Create temp folder for the dialog OUTSIDE the AutopilotMonitor folder.
+                // The agent's self-destruct deletes ProgramData\AutopilotMonitor entirely,
+                // so the dialog files must live elsewhere to survive.
                 var tempDir = Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-                    "AutopilotMonitor",
-                    "Summary-" + Guid.NewGuid().ToString("N").Substring(0, 8));
+                    "AutopilotMonitor-Summary");
+
+                // Clean up any leftover folder from a previous run, then create fresh
+                try { if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true); } catch { }
                 Directory.CreateDirectory(tempDir);
+
+                // Grant the interactive user delete permissions so the dialog can self-cleanup
+                GrantUserDeletePermission(tempDir);
 
                 // Copy dialog EXE + Newtonsoft.Json.dll + final-status.json to temp
                 var tempDialogExe = Path.Combine(tempDir, "AutopilotMonitor.SummaryDialog.exe");
@@ -624,6 +631,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 var jsonDll = Path.Combine(agentDir, "Newtonsoft.Json.dll");
                 if (File.Exists(jsonDll))
                     File.Copy(jsonDll, Path.Combine(tempDir, "Newtonsoft.Json.dll"));
+
+                var exeConfig = dialogExe + ".config";
+                if (File.Exists(exeConfig))
+                    File.Copy(exeConfig, tempDialogExe + ".config");
 
                 var tempStatusFile = Path.Combine(tempDir, "final-status.json");
                 File.Copy(statusFile, tempStatusFile);
@@ -664,6 +675,31 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             {
                 _logger.Warning($"Failed to launch enrollment summary dialog: {ex.Message}");
                 // Non-fatal — continue with self-destruct/reboot
+            }
+        }
+
+        /// <summary>
+        /// Grants the built-in Users group full control on a directory so the user-session
+        /// SummaryDialog process can delete it during self-cleanup.
+        /// </summary>
+        private void GrantUserDeletePermission(string directoryPath)
+        {
+            try
+            {
+                var dirInfo = new DirectoryInfo(directoryPath);
+                var security = dirInfo.GetAccessControl();
+                var usersIdentity = new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null);
+                security.AddAccessRule(new FileSystemAccessRule(
+                    usersIdentity,
+                    FileSystemRights.FullControl,
+                    InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                    PropagationFlags.None,
+                    AccessControlType.Allow));
+                dirInfo.SetAccessControl(security);
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug($"Could not set ACL on summary folder: {ex.Message}");
             }
         }
 

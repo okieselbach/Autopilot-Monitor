@@ -12,14 +12,42 @@ namespace AutopilotMonitor.SummaryDialog
         internal static string BrandingImageUrl { get; private set; }
         internal static bool? ForceTheme { get; private set; } // true=dark, false=light, null=auto
 
+        private static string _logFile;
+
+        public App()
+        {
+            // Set up crash logging as early as possible to diagnose launch failures
+            // (e.g. when launched via CreateProcessAsUser from SYSTEM service)
+            try
+            {
+                var exeDir = Path.GetDirectoryName(
+                    System.Reflection.Assembly.GetExecutingAssembly().Location) ?? ".";
+                _logFile = Path.Combine(exeDir, "SummaryDialog.log");
+                Log("App constructor — process started");
+            }
+            catch { }
+
+            AppDomain.CurrentDomain.UnhandledException += (s, e) =>
+            {
+                Log($"UNHANDLED EXCEPTION: {e.ExceptionObject}");
+            };
+
+            DispatcherUnhandledException += (s, e) =>
+            {
+                Log($"DISPATCHER EXCEPTION: {e.Exception}");
+            };
+        }
+
         protected override void OnStartup(StartupEventArgs e)
         {
+            Log($"OnStartup — args: {string.Join(" ", e.Args)}");
             base.OnStartup(e);
             ParseArguments(e.Args);
         }
 
         protected override void OnExit(ExitEventArgs e)
         {
+            Log("OnExit — shutting down");
             base.OnExit(e);
             SelfCleanup();
         }
@@ -67,15 +95,16 @@ namespace AutopilotMonitor.SummaryDialog
                 var exeDir = Path.GetDirectoryName(exePath);
 
                 // Only self-cleanup if running from a known staging folder
-                // (agent copies the dialog to ProgramData\AutopilotMonitor\Summary-* or legacy TEMP)
                 if (exeDir == null)
                     return;
 
                 var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
-                var agentStagingRoot = Path.Combine(programData, "AutopilotMonitor");
+                var summaryStaging = Path.Combine(programData, "AutopilotMonitor-Summary");
+                var legacyStaging = Path.Combine(programData, "AutopilotMonitor");
                 var tempRoot = Path.GetTempPath().TrimEnd('\\');
 
-                var isStagedCopy = exeDir.StartsWith(agentStagingRoot, StringComparison.OrdinalIgnoreCase)
+                var isStagedCopy = exeDir.StartsWith(summaryStaging, StringComparison.OrdinalIgnoreCase)
+                                || exeDir.StartsWith(legacyStaging, StringComparison.OrdinalIgnoreCase)
                                 || exeDir.StartsWith(tempRoot, StringComparison.OrdinalIgnoreCase);
                 if (!isStagedCopy)
                     return;
@@ -98,6 +127,17 @@ namespace AutopilotMonitor.SummaryDialog
             {
                 // Best-effort cleanup, ignore errors
             }
+        }
+
+        internal static void Log(string message)
+        {
+            try
+            {
+                if (_logFile != null)
+                    File.AppendAllText(_logFile,
+                        $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] {message}{Environment.NewLine}");
+            }
+            catch { }
         }
     }
 }
