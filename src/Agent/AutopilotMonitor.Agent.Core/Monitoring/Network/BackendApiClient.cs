@@ -95,6 +95,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
             {
                 Timeout = TimeSpan.FromSeconds(30)
             };
+
+            // Set User-Agent for firewall allowlisting and server-side logging
+            var ua = string.IsNullOrEmpty(_agentVersion)
+                ? "AutopilotMonitor.Agent"
+                : $"AutopilotMonitor.Agent/{_agentVersion}";
+            _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(ua);
         }
 
         /// <summary>
