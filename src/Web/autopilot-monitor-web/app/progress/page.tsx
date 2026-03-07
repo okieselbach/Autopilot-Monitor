@@ -175,7 +175,7 @@ export default function ProgressPortalPage() {
     const fetchEvents = async () => {
       try {
         const response = await authenticatedFetch(
-          `${API_BASE_URL}/api/sessions/${session.sessionId}/events?tenantId=${tenantId}`,
+          `${API_BASE_URL}/api/progress/sessions/${session.sessionId}/events?tenantId=${tenantId}`,
           getAccessToken
         );
         if (response.ok) {
@@ -217,7 +217,7 @@ export default function ProgressPortalPage() {
 
     try {
       const response = await authenticatedFetch(
-        `${API_BASE_URL}/api/sessions?tenantId=${tenantId}`,
+        `${API_BASE_URL}/api/progress/sessions?tenantId=${tenantId}`,
         getAccessToken
       );
 
