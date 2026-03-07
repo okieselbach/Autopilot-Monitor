@@ -104,9 +104,10 @@ export default function EventTimeline({
         {/* Severity filters + Expand/Collapse */}
         <div className="flex flex-wrap items-center gap-2 flex-1 min-w-0">
           <span className="text-xs font-medium text-gray-500">Filter:</span>
-          {(["Debug", "Info", "Warning", "Error", "Critical"] as const).map((sev) => {
+          {(rawMode ? ["Trace", "Debug", "Info", "Warning", "Error", "Critical"] as const : ["Debug", "Info", "Warning", "Error", "Critical"] as const).map((sev) => {
             const active = severityFilters.has(sev);
             const colors: Record<string, { on: string; off: string }> = {
+              Trace:    { on: "bg-purple-100 text-purple-800", off: "bg-gray-50 text-gray-400" },
               Debug:    { on: "bg-gray-200 text-gray-800",  off: "bg-gray-50 text-gray-400" },
               Info:     { on: "bg-blue-100 text-blue-800",  off: "bg-gray-50 text-gray-400" },
               Warning:  { on: "bg-yellow-100 text-yellow-800", off: "bg-gray-50 text-gray-400" },
@@ -125,14 +126,12 @@ export default function EventTimeline({
           })}
           <span className="text-xs text-gray-400">({filteredEvents.length}/{events.length})</span>
           <div className="flex gap-1.5 ml-auto items-center">
-            {isGalacticAdmin && (
-              <button
-                onClick={() => setRawMode(!rawMode)}
-                className={`text-xs hover:underline mr-1 ${rawMode ? 'text-purple-700 font-semibold' : 'text-gray-400 hover:text-gray-600'}`}
-              >
-                {rawMode ? '← Timeline' : 'Raw'}
-              </button>
-            )}
+            <button
+              onClick={() => setRawMode(!rawMode)}
+              className={`text-xs hover:underline mr-1 ${rawMode ? 'text-purple-700 font-semibold' : 'text-gray-400 hover:text-gray-600'}`}
+            >
+              {rawMode ? '← Timeline' : 'Raw'}
+            </button>
             <button
               onClick={expandAll}
               title="Expand All"
@@ -158,7 +157,7 @@ export default function EventTimeline({
       </div>
 
       {/* Raw mode — compact flat list by sequence (galactic only) */}
-      {rawMode && isGalacticAdmin ? (
+      {rawMode ? (
         <div className="bg-white shadow rounded-lg p-4">
           <h2 className="text-sm font-semibold text-gray-700 mb-3">Raw Events ({sortedBySequence.length})</h2>
           <div className="divide-y divide-gray-100">
@@ -539,6 +538,7 @@ function RawEventRow({ event }: { event: EnrollmentEvent }) {
   const hasDetails = detailData && Object.keys(detailData).length > 0;
 
   const sevColor: Record<string, string> = {
+    Trace: "text-purple-500",
     Debug: "text-gray-400",
     Info: "text-blue-600",
     Warning: "text-yellow-600",

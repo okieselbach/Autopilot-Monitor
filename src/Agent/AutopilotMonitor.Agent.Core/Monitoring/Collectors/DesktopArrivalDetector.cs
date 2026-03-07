@@ -116,8 +116,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                         {
                             OnTraceEvent?.Invoke(
                                 "desktop_real_user_detected",
-                                $"Real user desktop detected (explorer.exe PID {proc.Id}, user '{owner}')",
-                                new Dictionary<string, object> { { "pid", proc.Id }, { "session", proc.SessionId }, { "owner", owner } });
+                                $"Real user desktop detected (explorer.exe PID {proc.Id}, user '[redacted]')",
+                                new Dictionary<string, object> { { "pid", proc.Id }, { "session", proc.SessionId }, { "owner", "[redacted]" } });
                         }
                         catch { }
 
