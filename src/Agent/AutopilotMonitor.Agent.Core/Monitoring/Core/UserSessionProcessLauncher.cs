@@ -79,12 +79,15 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     var si = new NativeMethods.STARTUPINFO();
                     si.cb = Marshal.SizeOf(si);
                     si.lpDesktop = @"WinSta0\Default";
+                    si.dwFlags = NativeMethods.STARTF_USESHOWWINDOW;
+                    si.wShowWindow = NativeMethods.SW_SHOW;
 
-                    var creationFlags = NativeMethods.CREATE_NEW_CONSOLE;
+                    uint creationFlags = 0;
                     if (environment != IntPtr.Zero)
                         creationFlags |= NativeMethods.CREATE_UNICODE_ENVIRONMENT;
 
                     var commandLine = $"\"{exePath}\" {arguments}";
+                    var workingDirectory = System.IO.Path.GetDirectoryName(exePath);
 
                     var procSa = new NativeMethods.SECURITY_ATTRIBUTES();
                     procSa.nLength = Marshal.SizeOf(procSa);
@@ -100,7 +103,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                         false,          // bInheritHandles
                         creationFlags,
                         environment,
-                        null,           // lpCurrentDirectory (inherit)
+                        workingDirectory,
                         ref si,
                         out var pi))
                     {
@@ -237,8 +240,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             public const uint TOKEN_DUPLICATE = 0x0002;
             public const uint TOKEN_QUERY = 0x0008;
             public const uint MAXIMUM_ALLOWED = 0x02000000;
-            public const uint CREATE_NEW_CONSOLE = 0x00000010;
             public const uint CREATE_UNICODE_ENVIRONMENT = 0x00000400;
+            public const int STARTF_USESHOWWINDOW = 0x00000001;
+            public const short SW_SHOW = 5;
 
             public enum SECURITY_IMPERSONATION_LEVEL
             {
