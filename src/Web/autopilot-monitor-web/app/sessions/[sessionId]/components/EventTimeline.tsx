@@ -56,11 +56,6 @@ export default function EventTimeline({
   const [searchQuery, setSearchQuery] = useState("");
   const [rawMode, setRawMode] = useState(false);
 
-  const sortedBySequence = useMemo(
-    () => [...events].filter(e => severityFilters.has(e.severity)).sort((a, b) => a.sequence - b.sequence),
-    [events, severityFilters]
-  );
-
   const matchesSearch = useMemo(() => {
     if (!searchQuery.trim()) return null;
     const q = searchQuery.toLowerCase();
@@ -69,6 +64,12 @@ export default function EventTimeline({
       event.message?.toLowerCase().includes(q) ||
       event.source?.toLowerCase().includes(q);
   }, [searchQuery]);
+
+  const sortedBySequence = useMemo(() => {
+    let filtered = events.filter(e => severityFilters.has(e.severity));
+    if (matchesSearch) filtered = filtered.filter(matchesSearch);
+    return filtered.sort((a, b) => a.sequence - b.sequence);
+  }, [events, severityFilters, matchesSearch]);
 
   const filterPhaseEvents = (phaseEvents: EnrollmentEvent[]) =>
     matchesSearch ? phaseEvents.filter(matchesSearch) : phaseEvents;
