@@ -5,6 +5,7 @@ interface DataManagementSectionProps {
   setDataRetentionDays: (value: number) => void;
   sessionTimeoutHours: number;
   setSessionTimeoutHours: (value: number) => void;
+  isGalacticAdmin?: boolean;
 }
 
 export default function DataManagementSection({
@@ -12,6 +13,7 @@ export default function DataManagementSection({
   setDataRetentionDays,
   sessionTimeoutHours,
   setSessionTimeoutHours,
+  isGalacticAdmin,
 }: DataManagementSectionProps) {
   return (
     <div className="bg-white rounded-lg shadow">
@@ -29,13 +31,28 @@ export default function DataManagementSection({
             </p>
             <input
               type="number"
-              min="7"
+              min={isGalacticAdmin ? "0" : "7"}
               max="180"
               value={dataRetentionDays}
-              onChange={(e) => setDataRetentionDays(parseInt(e.target.value) || 90)}
+              onChange={(e) => {
+                const val = parseInt(e.target.value);
+                if (isNaN(val)) {
+                  setDataRetentionDays(90);
+                } else if (isGalacticAdmin && val === 0) {
+                  setDataRetentionDays(0);
+                } else {
+                  setDataRetentionDays(val || 90);
+                }
+              }}
               className="mt-1 block w-full px-4 py-2 border border-gray-300 rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
             />
-            <p className="text-xs text-gray-400 mt-1">Minimum: 7 days, Maximum: 180 days</p>
+            {dataRetentionDays === 0 ? (
+              <p className="text-xs text-amber-600 mt-1 font-medium">⚠ Infinite retention — data will never be automatically deleted</p>
+            ) : (
+              <p className="text-xs text-gray-400 mt-1">
+                {isGalacticAdmin ? "Minimum: 0 (infinite) or 7 days" : "Minimum: 7 days"}, Maximum: 180 days
+              </p>
+            )}
           </label>
         </div>
 

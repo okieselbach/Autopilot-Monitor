@@ -160,7 +160,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         /// </summary>
         private void EmitTraceEvent(string source, string decision, string reason, Dictionary<string, object> context = null)
         {
-            _logger.Info($"[TRACE] {source}: {decision} — {reason}");
+            _logger.Trace($"{source}: {decision} — {reason}");
 
             if (!_configuration.SendTraceEvents)
                 return;

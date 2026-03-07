@@ -178,6 +178,14 @@ namespace AutopilotMonitor.Functions.Services
                     {
                         var config = await _tenantConfigService.GetConfigurationAsync(tenantId);
                         var retentionDays = config?.DataRetentionDays ?? 90;
+
+                        // 0 = infinite retention, skip cleanup for this tenant
+                        if (retentionDays <= 0)
+                        {
+                            _logger.LogInformation($"Tenant {tenantId}: Data retention set to infinite (0), skipping cleanup");
+                            continue;
+                        }
+
                         var cutoffDate = DateTime.UtcNow.AddDays(-retentionDays);
 
                         var oldSessions = await _storageService.GetSessionsOlderThanAsync(tenantId, cutoffDate);

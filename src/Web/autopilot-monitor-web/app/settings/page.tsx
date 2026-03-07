@@ -1051,6 +1051,7 @@ export default function SettingsPage() {
               setDataRetentionDays={setDataRetentionDays}
               sessionTimeoutHours={sessionTimeoutHours}
               setSessionTimeoutHours={setSessionTimeoutHours}
+              isGalacticAdmin={user?.isGalacticAdmin}
             />
 
             {user?.isTenantAdmin && (

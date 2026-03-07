@@ -215,7 +215,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     data[kvp.Key] = kvp.Value;
             }
 
-            _logger.Info($"EnrollmentTracker [TRACE]: {decision} — {reason}");
+            _logger.Trace($"EnrollmentTracker: {decision} — {reason}");
 
             if (_sendTraceEvents)
             {

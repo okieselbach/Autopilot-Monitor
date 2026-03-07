@@ -13,7 +13,8 @@ namespace AutopilotMonitor.Agent.Core.Logging
     {
         Info = 0,
         Debug = 1,
-        Verbose = 2
+        Verbose = 2,
+        Trace = 3
     }
 
     /// <summary>
@@ -47,6 +48,12 @@ namespace AutopilotMonitor.Agent.Core.Logging
         }
 
         public AgentLogLevel LogLevel => _logLevel;
+
+        public void Trace(string message)
+        {
+            if (_logLevel >= AgentLogLevel.Trace)
+                Log("TRACE", message);
+        }
 
         public void Verbose(string message)
         {
