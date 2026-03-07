@@ -77,6 +77,8 @@ export interface TenantAdmin {
   isEnabled: boolean;
   addedDate: string;
   addedBy: string;
+  role: string | null;
+  canManageBootstrapTokens: boolean;
 }
 
 export default function SettingsPage() {
@@ -92,6 +94,7 @@ export default function SettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [newAdminEmail, setNewAdminEmail] = useState("");
+  const [newMemberRole, setNewMemberRole] = useState<string>("Admin");
   const [addingAdmin, setAddingAdmin] = useState(false);
   const [removingAdmin, setRemovingAdmin] = useState<string | null>(null);
   const [togglingAdmin, setTogglingAdmin] = useState<string | null>(null);
@@ -644,16 +647,17 @@ export default function SettingsPage() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ upn: newAdminEmail.trim() }),
+        body: JSON.stringify({ upn: newAdminEmail.trim(), role: newMemberRole }),
       });
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.error || `Failed to add admin: ${response.statusText}`);
+        throw new Error(errorData.error || `Failed to add member: ${response.statusText}`);
       }
 
-      setSuccessMessage(`Admin ${newAdminEmail} added successfully!`);
+      setSuccessMessage(`${newMemberRole} ${newAdminEmail} added successfully!`);
       setNewAdminEmail("");
+      setNewMemberRole("Admin");
 
       // Refresh admin list
       await fetchAdmins();
@@ -760,6 +764,43 @@ export default function SettingsPage() {
     }
   };
 
+  const handleUpdatePermissions = async (adminUpn: string, role: string, canManageBootstrapTokens: boolean) => {
+    if (!tenantId) return;
+
+    try {
+      setTogglingAdmin(adminUpn);
+      setError(null);
+      setSuccessMessage(null);
+
+      const response = await authenticatedFetch(
+        `${API_BASE_URL}/api/tenants/${tenantId}/admins/${encodeURIComponent(adminUpn)}/permissions`,
+        getAccessToken,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ role, canManageBootstrapTokens }),
+        },
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `Failed to update permissions: ${response.statusText}`);
+      }
+
+      setSuccessMessage(`Permissions for ${adminUpn} updated successfully!`);
+      await fetchAdmins();
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err) {
+      if (err instanceof TokenExpiredError) {
+        addNotification('error', 'Session Expired', err.message, 'session-expired-error');
+      } else {
+        console.error("Error updating permissions:", err);
+        setError(err instanceof Error ? err.message : "Failed to update permissions");
+      }
+    } finally {
+      setTogglingAdmin(null);
+    }
+  };
 
   // Bootstrap sessions
   const fetchBootstrapSessions = async () => {
@@ -858,10 +899,19 @@ export default function SettingsPage() {
     }
   };
 
-  // Redirect regular users (non-TenantAdmin) to progress portal
+  // Access gate: Admin → full settings, Operator with bootstrap → bootstrap only, others → redirect
   if (user && !user.isTenantAdmin && !user.isGalacticAdmin) {
-    router.replace('/progress');
-    return null;
+    if (user.role === 'Operator' && user.canManageBootstrapTokens) {
+      // Operator with bootstrap permission — allowed, will see only bootstrap section
+    } else if (user.role === 'Operator') {
+      // Operator without bootstrap permission — no settings access
+      router.replace('/dashboard');
+      return null;
+    } else {
+      // Regular user — redirect to progress portal
+      router.replace('/progress');
+      return null;
+    }
   }
 
   return (
@@ -883,7 +933,7 @@ export default function SettingsPage() {
                   <p className="text-sm text-gray-600 mt-1">Tenant: {tenantId}</p>
                 </div>
               </div>
-              {!loading && (
+              {!loading && user?.isTenantAdmin && (
                 <div className="flex items-center space-x-3">
                   <button
                     onClick={handleSave}
@@ -935,15 +985,18 @@ export default function SettingsPage() {
             )}
 
 
-            <AutopilotValidationSection
-              validateAutopilotDevice={validateAutopilotDevice}
-              setValidateAutopilotDevice={setValidateAutopilotDevice}
-              validateCorporateIdentifier={validateCorporateIdentifier}
-              setValidateCorporateIdentifier={setValidateCorporateIdentifier}
-              autopilotConsentInProgress={autopilotConsentInProgress}
-              saving={saving}
-              onBeginConsent={beginDeviceValidationConsentFlow}
-            />
+            {/* Admin-only sections — hidden for Operators */}
+            {user?.isTenantAdmin && (
+              <AutopilotValidationSection
+                validateAutopilotDevice={validateAutopilotDevice}
+                setValidateAutopilotDevice={setValidateAutopilotDevice}
+                validateCorporateIdentifier={validateCorporateIdentifier}
+                setValidateCorporateIdentifier={setValidateCorporateIdentifier}
+                autopilotConsentInProgress={autopilotConsentInProgress}
+                saving={saving}
+                onBeginConsent={beginDeviceValidationConsentFlow}
+              />
+            )}
 
             {user?.isTenantAdmin && (
               <AdminManagementSection
@@ -951,6 +1004,8 @@ export default function SettingsPage() {
                 loadingAdmins={loadingAdmins}
                 newAdminEmail={newAdminEmail}
                 setNewAdminEmail={setNewAdminEmail}
+                newMemberRole={newMemberRole}
+                setNewMemberRole={setNewMemberRole}
                 addingAdmin={addingAdmin}
                 removingAdmin={removingAdmin}
                 togglingAdmin={togglingAdmin}
@@ -962,16 +1017,20 @@ export default function SettingsPage() {
                 onAddAdmin={handleAddAdmin}
                 onRemoveAdmin={handleRemoveAdmin}
                 onToggleAdmin={handleToggleTenantAdmin}
+                onUpdatePermissions={handleUpdatePermissions}
               />
             )}
 
-            <HardwareWhitelistSection
-              manufacturerWhitelist={manufacturerWhitelist}
-              setManufacturerWhitelist={setManufacturerWhitelist}
-              modelWhitelist={modelWhitelist}
-              setModelWhitelist={setModelWhitelist}
-            />
+            {user?.isTenantAdmin && (
+              <HardwareWhitelistSection
+                manufacturerWhitelist={manufacturerWhitelist}
+                setManufacturerWhitelist={setManufacturerWhitelist}
+                modelWhitelist={modelWhitelist}
+                setModelWhitelist={setModelWhitelist}
+              />
+            )}
 
+            {user?.isTenantAdmin && (
             <AgentSettingsSection
               enablePerformanceCollector={enablePerformanceCollector}
               setEnablePerformanceCollector={setEnablePerformanceCollector}
@@ -1002,7 +1061,9 @@ export default function SettingsPage() {
               enrollmentSummaryBrandingImageUrl={enrollmentSummaryBrandingImageUrl}
               setEnrollmentSummaryBrandingImageUrl={setEnrollmentSummaryBrandingImageUrl}
             />
+            )}
 
+            {user?.isTenantAdmin && (
             <AgentAnalyzersSection
               enableLocalAdminAnalyzer={enableLocalAdminAnalyzer}
               setEnableLocalAdminAnalyzer={setEnableLocalAdminAnalyzer}
@@ -1011,7 +1072,9 @@ export default function SettingsPage() {
               newAllowedAccount={newAllowedAccount}
               setNewAllowedAccount={setNewAllowedAccount}
             />
+            )}
 
+            {user?.isTenantAdmin && (
             <TeamsNotificationsSection
               teamsWebhookUrl={teamsWebhookUrl}
               setTeamsWebhookUrl={setTeamsWebhookUrl}
@@ -1020,7 +1083,9 @@ export default function SettingsPage() {
               teamsNotifyOnFailure={teamsNotifyOnFailure}
               setTeamsNotifyOnFailure={setTeamsNotifyOnFailure}
             />
+            )}
 
+            {user?.isTenantAdmin && (
             <DiagnosticsSection
               diagnosticsBlobSasUrl={diagnosticsBlobSasUrl}
               setDiagnosticsBlobSasUrl={setDiagnosticsBlobSasUrl}
@@ -1035,8 +1100,10 @@ export default function SettingsPage() {
               newDiagDesc={newDiagDesc}
               setNewDiagDesc={setNewDiagDesc}
             />
+            )}
 
-            {config?.bootstrapTokenEnabled && (
+            {/* Bootstrap section: visible to Admins always, Operators with bootstrap permission */}
+            {config?.bootstrapTokenEnabled && (user?.isTenantAdmin || user?.canManageBootstrapTokens) && (
               <BootstrapSessionsSection
                 sessions={bootstrapSessions}
                 loading={bootstrapLoading}
@@ -1046,6 +1113,7 @@ export default function SettingsPage() {
               />
             )}
 
+            {user?.isTenantAdmin && (
             <DataManagementSection
               dataRetentionDays={dataRetentionDays}
               setDataRetentionDays={setDataRetentionDays}
@@ -1053,6 +1121,7 @@ export default function SettingsPage() {
               setSessionTimeoutHours={setSessionTimeoutHours}
               isGalacticAdmin={user?.isGalacticAdmin}
             />
+            )}
 
             {user?.isTenantAdmin && (
               <OffboardingSection
@@ -1067,8 +1136,8 @@ export default function SettingsPage() {
               />
             )}
 
-            {/* Configuration Info */}
-            {config && (
+            {/* Configuration Info — Admin only */}
+            {config && user?.isTenantAdmin && (
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                 <div className="flex items-start space-x-3">
                   <svg className="w-5 h-5 text-blue-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

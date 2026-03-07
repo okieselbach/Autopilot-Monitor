@@ -66,13 +66,13 @@ namespace AutopilotMonitor.Functions.Functions.Bootstrap
                     }
                 }
 
-                // Admin check
+                // Admin or Operator with bootstrap permission check
                 var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userIdentifier);
-                var isTenantAdmin = await _tenantAdminsService.IsTenantAdminAsync(tenantId, userIdentifier);
-                if (!isGalacticAdmin && !isTenantAdmin)
+                var canManageBootstrap = await _tenantAdminsService.CanManageBootstrapAsync(tenantId, userIdentifier);
+                if (!isGalacticAdmin && !canManageBootstrap)
                 {
                     var forbidden = req.CreateResponse(HttpStatusCode.Forbidden);
-                    await forbidden.WriteAsJsonAsync(new { error = "Tenant admin access required" });
+                    await forbidden.WriteAsJsonAsync(new { error = "Bootstrap token management access required" });
                     return forbidden;
                 }
 

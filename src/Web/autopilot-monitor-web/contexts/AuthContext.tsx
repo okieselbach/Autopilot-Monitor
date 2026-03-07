@@ -24,6 +24,8 @@ interface UserInfo {
   objectId: string;
   isGalacticAdmin: boolean;
   isTenantAdmin: boolean;
+  role: 'Admin' | 'Operator' | 'Viewer' | null;
+  canManageBootstrapTokens: boolean;
 }
 
 interface AuthContextType {
@@ -111,6 +113,8 @@ function AuthProviderInternal({ children }: { children: React.ReactNode }) {
               objectId: account.homeAccountId || '',
               isGalacticAdmin: false,
               isTenantAdmin: false,
+              role: null,
+              canManageBootstrapTokens: false,
             };
           }
         }
@@ -126,6 +130,8 @@ function AuthProviderInternal({ children }: { children: React.ReactNode }) {
         objectId: data.objectId || account.homeAccountId || '',
         isGalacticAdmin: data.isGalacticAdmin || false,
         isTenantAdmin: data.isTenantAdmin || false,
+        role: data.role || null,
+        canManageBootstrapTokens: data.canManageBootstrapTokens || false,
       };
     } catch (error) {
       console.error('[Auth] Failed to fetch user info:', error);
@@ -138,6 +144,8 @@ function AuthProviderInternal({ children }: { children: React.ReactNode }) {
         objectId: account.homeAccountId || '',
         isGalacticAdmin: false,
         isTenantAdmin: false,
+        role: null,
+        canManageBootstrapTokens: false,
       };
     }
   }, [instance]);

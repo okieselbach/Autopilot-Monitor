@@ -139,6 +139,21 @@ namespace AutopilotMonitor.Shared
         }
 
         // -----------------------------------------------------------------------
+        // Tenant Roles
+        // -----------------------------------------------------------------------
+
+        /// <summary>
+        /// Roles for tenant members stored in the TenantAdmins table.
+        /// Null/missing Role on existing entities is treated as Admin for backward compatibility.
+        /// </summary>
+        public static class TenantRoles
+        {
+            public const string Admin = "Admin";
+            public const string Operator = "Operator";
+            public const string Viewer = "Viewer";
+        }
+
+        // -----------------------------------------------------------------------
         // Azure Table Storage table names
         // All table names are defined here centrally and initialized at application startup
         // -----------------------------------------------------------------------

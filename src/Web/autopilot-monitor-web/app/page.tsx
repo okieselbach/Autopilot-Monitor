@@ -164,12 +164,12 @@ export default function LandingPage() {
   const router = useRouter();
   const [platformStats, setPlatformStats] = useState(DEFAULT_PLATFORM_STATS);
 
-  // Redirect after login: preview-blocked → /preview, admins → /dashboard, users → /progress
+  // Redirect after login: preview-blocked → /preview, admins/operators → /dashboard, users → /progress
   useEffect(() => {
     if (isAuthenticated && !isLoading && user) {
       if (isPreviewBlocked) {
         router.push("/preview");
-      } else if (user.isTenantAdmin || user.isGalacticAdmin) {
+      } else if (user.isTenantAdmin || user.isGalacticAdmin || user.role === 'Operator') {
         router.push("/dashboard");
       } else {
         router.push("/progress");

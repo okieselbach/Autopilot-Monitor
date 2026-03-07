@@ -115,10 +115,11 @@ public class TenantAdminManagementFunction
             return badRequestResponse;
         }
 
-        // Add the admin
-        var newAdmin = await _tenantAdminsService.AddTenantAdminAsync(tenantId, body.Upn, upn!);
+        // Determine role (default to Admin for backward compat)
+        var role = !string.IsNullOrWhiteSpace(body.Role) ? body.Role : AutopilotMonitor.Shared.Constants.TenantRoles.Admin;
+        var newAdmin = await _tenantAdminsService.AddTenantMemberAsync(tenantId, body.Upn, upn!, role, body.CanManageBootstrapTokens);
 
-        _logger.LogInformation($"Tenant Admin added: {body.Upn} to tenant {tenantId} by {upn}");
+        _logger.LogInformation($"Tenant member added: {body.Upn} with role {role} to tenant {tenantId} by {upn}");
 
         var response = req.CreateResponse(HttpStatusCode.Created);
         await response.WriteAsJsonAsync(new { admin = newAdmin });
@@ -164,11 +165,12 @@ public class TenantAdminManagementFunction
         // Check if trying to remove self
         if (adminUpn.Equals(upn, StringComparison.OrdinalIgnoreCase))
         {
-            // Check if this is the last admin (only for non-Galactic-Admins)
+            // Check if this is the last Admin-role member (only for non-Galactic-Admins)
             if (!isGalacticAdmin)
             {
-                var admins = await _tenantAdminsService.GetTenantAdminsAsync(tenantId);
-                if (admins.Count == 1)
+                var members = await _tenantAdminsService.GetTenantAdminsAsync(tenantId);
+                var adminCount = members.Count(m => m.IsEnabled && (m.Role == null || m.Role == AutopilotMonitor.Shared.Constants.TenantRoles.Admin));
+                if (adminCount <= 1)
                 {
                     var badRequestResponse = req.CreateResponse(HttpStatusCode.BadRequest);
                     await badRequestResponse.WriteAsJsonAsync(new { error = "Cannot remove yourself as the last admin. Please add another admin first." });
@@ -276,9 +278,90 @@ public class TenantAdminManagementFunction
         await response.WriteAsJsonAsync(new { message = "Tenant Admin enabled successfully" });
         return response;
     }
+    /// <summary>
+    /// PATCH /api/tenants/{tenantId}/admins/{adminUpn}/permissions
+    /// Updates role and permissions for a tenant member
+    /// Accessible by: Galactic Admins OR Tenant Admins of the same tenant
+    /// </summary>
+    [Function("UpdateMemberPermissions")]
+    [Authorize]
+    public async Task<HttpResponseData> UpdateMemberPermissions(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "patch", Route = "tenants/{tenantId}/admins/{adminUpn}/permissions")] HttpRequestData req,
+        string tenantId,
+        string adminUpn,
+        FunctionContext context)
+    {
+        var principal = context.GetUser();
+        if (principal == null)
+        {
+            return req.CreateResponse(HttpStatusCode.Unauthorized);
+        }
+
+        var userTenantId = principal.GetTenantId();
+        var upn = principal.GetUserPrincipalName();
+
+        // Check authorization: either Galactic Admin OR Tenant Admin of the same tenant
+        var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(upn);
+        var isTenantAdmin = tenantId.Equals(userTenantId, StringComparison.OrdinalIgnoreCase) &&
+                           await _tenantAdminsService.IsTenantAdminAsync(tenantId, upn);
+
+        if (!isGalacticAdmin && !isTenantAdmin)
+        {
+            _logger.LogWarning("User {Upn} attempted to update member permissions for tenant {TenantId} without authorization", upn, tenantId);
+            var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
+            await forbiddenResponse.WriteAsJsonAsync(new { error = "Access denied. You must be a Galactic Admin or a Tenant Admin for this tenant." });
+            return forbiddenResponse;
+        }
+
+        var body = await req.ReadFromJsonAsync<UpdateMemberPermissionsRequest>();
+        if (body == null || string.IsNullOrWhiteSpace(body.Role))
+        {
+            var badRequestResponse = req.CreateResponse(HttpStatusCode.BadRequest);
+            await badRequestResponse.WriteAsJsonAsync(new { error = "Role is required" });
+            return badRequestResponse;
+        }
+
+        // Prevent demoting yourself if you're the last Admin
+        if (adminUpn.Equals(upn, StringComparison.OrdinalIgnoreCase) && body.Role != AutopilotMonitor.Shared.Constants.TenantRoles.Admin)
+        {
+            if (!isGalacticAdmin)
+            {
+                var members = await _tenantAdminsService.GetTenantAdminsAsync(tenantId);
+                var adminCount = members.Count(m => m.IsEnabled && (m.Role == null || m.Role == AutopilotMonitor.Shared.Constants.TenantRoles.Admin));
+                if (adminCount <= 1)
+                {
+                    var badRequestResponse = req.CreateResponse(HttpStatusCode.BadRequest);
+                    await badRequestResponse.WriteAsJsonAsync(new { error = "Cannot demote yourself as the last admin. Please add another admin first." });
+                    return badRequestResponse;
+                }
+            }
+        }
+
+        var updated = await _tenantAdminsService.UpdateMemberPermissionsAsync(tenantId, adminUpn, body.Role, body.CanManageBootstrapTokens);
+        if (!updated)
+        {
+            var notFoundResponse = req.CreateResponse(HttpStatusCode.NotFound);
+            await notFoundResponse.WriteAsJsonAsync(new { error = "Member not found" });
+            return notFoundResponse;
+        }
+
+        _logger.LogInformation("Member permissions updated: {AdminUpn} -> role={Role} in tenant {TenantId} by {Upn}", adminUpn, body.Role, tenantId, upn);
+
+        var response = req.CreateResponse(HttpStatusCode.OK);
+        await response.WriteAsJsonAsync(new { message = "Member permissions updated successfully" });
+        return response;
+    }
 }
 
 public class AddTenantAdminRequest
 {
     public string Upn { get; set; } = string.Empty;
+    public string? Role { get; set; }
+    public bool CanManageBootstrapTokens { get; set; }
+}
+
+public class UpdateMemberPermissionsRequest
+{
+    public string Role { get; set; } = string.Empty;
+    public bool CanManageBootstrapTokens { get; set; }
 }

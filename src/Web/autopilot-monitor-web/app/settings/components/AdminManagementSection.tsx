@@ -7,6 +7,8 @@ interface AdminManagementSectionProps {
   loadingAdmins: boolean;
   newAdminEmail: string;
   setNewAdminEmail: (value: string) => void;
+  newMemberRole: string;
+  setNewMemberRole: (value: string) => void;
   addingAdmin: boolean;
   removingAdmin: string | null;
   togglingAdmin: string | null;
@@ -18,6 +20,37 @@ interface AdminManagementSectionProps {
   onAddAdmin: () => void;
   onRemoveAdmin: (upn: string) => void;
   onToggleAdmin: (upn: string, isEnabled: boolean) => void;
+  onUpdatePermissions: (upn: string, role: string, canManageBootstrapTokens: boolean) => void;
+}
+
+function getRoleBadge(role: string | null) {
+  const effectiveRole = role ?? "Admin";
+  switch (effectiveRole) {
+    case "Admin":
+      return (
+        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+          Admin
+        </span>
+      );
+    case "Operator":
+      return (
+        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+          Operator
+        </span>
+      );
+    case "Viewer":
+      return (
+        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">
+          Viewer
+        </span>
+      );
+    default:
+      return (
+        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">
+          {effectiveRole}
+        </span>
+      );
+  }
 }
 
 export default function AdminManagementSection({
@@ -25,6 +58,8 @@ export default function AdminManagementSection({
   loadingAdmins,
   newAdminEmail,
   setNewAdminEmail,
+  newMemberRole,
+  setNewMemberRole,
   addingAdmin,
   removingAdmin,
   togglingAdmin,
@@ -36,6 +71,7 @@ export default function AdminManagementSection({
   onAddAdmin,
   onRemoveAdmin,
   onToggleAdmin,
+  onUpdatePermissions,
 }: AdminManagementSectionProps) {
   return (
     <div className="bg-white rounded-lg shadow">
@@ -45,8 +81,8 @@ export default function AdminManagementSection({
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
           </svg>
           <div>
-            <h2 className="text-xl font-semibold text-gray-900">Admin Users Management</h2>
-            <p className="text-sm text-gray-500 mt-1">Manage who has admin access to this tenant</p>
+            <h2 className="text-xl font-semibold text-gray-900">Team Management</h2>
+            <p className="text-sm text-gray-500 mt-1">Manage team members and their roles for this tenant</p>
           </div>
         </div>
       </div>
@@ -57,10 +93,12 @@ export default function AdminManagementSection({
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             <div className="text-sm text-blue-800">
-              <p className="font-medium">About Admin Users</p>
+              <p className="font-medium">About Roles</p>
               <p className="mt-1">
-                Admin users have full access to tenant configuration, all sessions, diagnostics, and settings.
-                Non-admin users only have access to the simplified device tracking page.
+                <strong>Admin</strong> — Full access to all tenant configuration, sessions, diagnostics, and settings.
+              </p>
+              <p className="mt-1">
+                <strong>Operator</strong> — Access to dashboard, sessions, and monitoring. Can optionally manage bootstrap tokens if permitted.
               </p>
               <p className="mt-2">
                 <strong>Your email:</strong> {user?.upn}
@@ -69,10 +107,10 @@ export default function AdminManagementSection({
           </div>
         </div>
 
-        {/* Current Admins List */}
+        {/* Current Members List */}
         <div>
           <label className="block mb-2">
-            <span className="text-gray-700 font-medium">Current Admin Users</span>
+            <span className="text-gray-700 font-medium">Current Team Members</span>
             {loadingAdmins && (
               <span className="ml-2 text-sm text-gray-500">(Loading...)</span>
             )}
@@ -114,10 +152,10 @@ export default function AdminManagementSection({
           </div>
 
           {admins.length === 0 && !loadingAdmins ? (
-            <div className="text-sm text-gray-500 italic">No admins found</div>
+            <div className="text-sm text-gray-500 italic">No members found</div>
           ) : (
             <>
-              {/* Filtered and Paginated Admin List */}
+              {/* Filtered and Paginated Member List */}
               {(() => {
                 const filteredAdmins = admins.filter(admin =>
                   admin.upn.toLowerCase().includes(adminSearchQuery.toLowerCase())
@@ -126,7 +164,7 @@ export default function AdminManagementSection({
                 if (filteredAdmins.length === 0) {
                   return (
                     <div className="text-sm text-gray-500 italic p-4 text-center bg-gray-50 rounded-lg">
-                      No admins match your search
+                      No members match your search
                     </div>
                   );
                 }
@@ -140,60 +178,94 @@ export default function AdminManagementSection({
                 return (
                   <>
                     <div className="space-y-2">
-                      {paginatedAdmins.map((admin) => (
-                        <div
-                          key={admin.upn}
-                          className={`flex items-center justify-between p-3 border rounded-lg ${
-                            admin.isEnabled
-                              ? "bg-gray-50 border-gray-200"
-                              : "bg-gray-100 border-gray-300"
-                          }`}
-                        >
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center space-x-2">
-                              <div className="font-medium text-gray-900 truncate">{admin.upn}</div>
-                              {!admin.isEnabled && (
-                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-200 text-gray-700">
-                                  Disabled
-                                </span>
-                              )}
+                      {paginatedAdmins.map((admin) => {
+                        const effectiveRole = admin.role ?? "Admin";
+                        const isCurrentUser = admin.upn.toLowerCase() === user?.upn?.toLowerCase();
+
+                        return (
+                          <div
+                            key={admin.upn}
+                            className={`p-3 border rounded-lg ${
+                              admin.isEnabled
+                                ? "bg-gray-50 border-gray-200"
+                                : "bg-gray-100 border-gray-300"
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center space-x-2">
+                                  <div className="font-medium text-gray-900 truncate">{admin.upn}</div>
+                                  {getRoleBadge(admin.role)}
+                                  {!admin.isEnabled && (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-200 text-gray-700">
+                                      Disabled
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-xs text-gray-500 mt-1">
+                                  Added {new Date(admin.addedDate).toLocaleDateString()} by {admin.addedBy}
+                                </div>
+                              </div>
+                              <div className="flex items-center space-x-2 ml-4">
+                                {isCurrentUser ? (
+                                  <span className="text-sm text-blue-600 font-medium">(You)</span>
+                                ) : (
+                                  <>
+                                    {/* Role change dropdown */}
+                                    <select
+                                      value={effectiveRole}
+                                      onChange={(e) => onUpdatePermissions(admin.upn, e.target.value, admin.canManageBootstrapTokens)}
+                                      disabled={togglingAdmin === admin.upn}
+                                      className="px-2 py-1 text-sm border border-gray-300 rounded bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-purple-500 disabled:opacity-50"
+                                    >
+                                      <option value="Admin">Admin</option>
+                                      <option value="Operator">Operator</option>
+                                    </select>
+                                    <button
+                                      onClick={() => onToggleAdmin(admin.upn, admin.isEnabled)}
+                                      disabled={togglingAdmin === admin.upn}
+                                      className={`px-3 py-1 text-sm text-white rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                                        admin.isEnabled
+                                          ? "bg-yellow-600 hover:bg-yellow-700"
+                                          : "bg-green-600 hover:bg-green-700"
+                                      }`}
+                                    >
+                                      {togglingAdmin === admin.upn
+                                        ? "..."
+                                        : admin.isEnabled
+                                        ? "Disable"
+                                        : "Enable"}
+                                    </button>
+                                    <button
+                                      onClick={() => onRemoveAdmin(admin.upn)}
+                                      disabled={removingAdmin === admin.upn}
+                                      className="px-3 py-1 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                    >
+                                      {removingAdmin === admin.upn ? "Removing..." : "Remove"}
+                                    </button>
+                                  </>
+                                )}
+                              </div>
                             </div>
-                            <div className="text-xs text-gray-500 mt-1">
-                              Added {new Date(admin.addedDate).toLocaleDateString()} by {admin.addedBy}
-                            </div>
-                          </div>
-                          <div className="flex items-center space-x-2 ml-4">
-                            {admin.upn.toLowerCase() === user?.upn?.toLowerCase() ? (
-                              <span className="text-sm text-blue-600 font-medium">(You)</span>
-                            ) : (
-                              <>
-                                <button
-                                  onClick={() => onToggleAdmin(admin.upn, admin.isEnabled)}
-                                  disabled={togglingAdmin === admin.upn}
-                                  className={`px-3 py-1 text-sm text-white rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                                    admin.isEnabled
-                                      ? "bg-yellow-600 hover:bg-yellow-700"
-                                      : "bg-green-600 hover:bg-green-700"
-                                  }`}
-                                >
-                                  {togglingAdmin === admin.upn
-                                    ? "..."
-                                    : admin.isEnabled
-                                    ? "Disable"
-                                    : "Enable"}
-                                </button>
-                                <button
-                                  onClick={() => onRemoveAdmin(admin.upn)}
-                                  disabled={removingAdmin === admin.upn}
-                                  className="px-3 py-1 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                                >
-                                  {removingAdmin === admin.upn ? "Removing..." : "Remove"}
-                                </button>
-                              </>
+
+                            {/* Bootstrap token permission toggle for Operators */}
+                            {effectiveRole === "Operator" && !isCurrentUser && (
+                              <div className="mt-2 pt-2 border-t border-gray-200">
+                                <label className="flex items-center space-x-2 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={admin.canManageBootstrapTokens}
+                                    onChange={(e) => onUpdatePermissions(admin.upn, "Operator", e.target.checked)}
+                                    disabled={togglingAdmin === admin.upn}
+                                    className="h-4 w-4 text-purple-600 rounded border-gray-300 focus:ring-purple-500 disabled:opacity-50"
+                                  />
+                                  <span className="text-sm text-gray-700">Can manage bootstrap tokens</span>
+                                </label>
+                              </div>
                             )}
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
 
                     {/* Pagination Controls */}
@@ -207,7 +279,7 @@ export default function AdminManagementSection({
                           Previous
                         </button>
                         <span className="text-sm text-gray-600">
-                          Page {currentAdminPage + 1} of {totalAdminPages} ({filteredAdmins.length} admin{filteredAdmins.length !== 1 ? 's' : ''})
+                          Page {currentAdminPage + 1} of {totalAdminPages} ({filteredAdmins.length} member{filteredAdmins.length !== 1 ? 's' : ''})
                         </span>
                         <button
                           onClick={() => setCurrentAdminPage(prev => Math.min(totalAdminPages - 1, prev + 1))}
@@ -225,13 +297,12 @@ export default function AdminManagementSection({
           )}
         </div>
 
-        {/* Add New Admin */}
+        {/* Add New Member */}
         <div>
           <label className="block mb-2">
-            <span className="text-gray-700 font-medium">Add New Admin</span>
+            <span className="text-gray-700 font-medium">Add New Team Member</span>
             <p className="text-sm text-gray-500 mb-2">
-              Enter the user email (UPN) to grant admin access.
-              Example: <code className="bg-gray-100 px-1 rounded">newadmin@company.com</code>
+              Enter the user email (UPN) and select a role to grant access.
             </p>
             <div className="flex space-x-2">
               <input
@@ -240,7 +311,7 @@ export default function AdminManagementSection({
                 id="add-new-admin-email-input"
                 value={newAdminEmail}
                 onChange={(e) => setNewAdminEmail(e.target.value)}
-                placeholder="newadmin@tenant.com"
+                placeholder="user@tenant.com"
                 autoComplete="off"
                 className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-colors"
                 onKeyDown={(e) => {
@@ -250,6 +321,14 @@ export default function AdminManagementSection({
                   }
                 }}
               />
+              <select
+                value={newMemberRole}
+                onChange={(e) => setNewMemberRole(e.target.value)}
+                className="px-3 py-2 border border-gray-300 rounded-lg text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-colors"
+              >
+                <option value="Admin">Admin</option>
+                <option value="Operator">Operator</option>
+              </select>
               <button
                 onClick={onAddAdmin}
                 disabled={addingAdmin || !newAdminEmail.trim()}
@@ -279,7 +358,7 @@ export default function AdminManagementSection({
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
             </svg>
             <p className="text-sm text-yellow-800">
-              <strong>Important:</strong> Make sure to include your own email in the list to maintain admin access!
+              <strong>Important:</strong> Make sure to keep at least one Admin in the list to maintain full access!
               The first user to log in was automatically made an admin.
             </p>
           </div>

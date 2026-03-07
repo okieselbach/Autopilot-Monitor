@@ -157,6 +157,11 @@ public class AuthFunction
             }
         }
 
+        // Get role info for the user (Admin, Operator, Viewer, or null if not a member)
+        var memberRole = await _tenantAdminsService.GetMemberRoleAsync(tenantId, upn);
+        string? role = memberRole?.Role;
+        bool canManageBootstrapTokens = memberRole?.CanManageBootstrapTokens ?? false;
+
         // Record user login activity for metrics tracking
         _ = _storageService.RecordUserLoginAsync(tenantId, upn, displayName, objectId)
             .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException, "Fire-and-forget RecordUserLoginAsync failed"), TaskContinuationOptions.OnlyOnFaulted);
@@ -168,7 +173,9 @@ public class AuthFunction
             displayName,
             objectId,
             isGalacticAdmin,
-            isTenantAdmin
+            isTenantAdmin,
+            role,
+            canManageBootstrapTokens
         };
 
         var response = req.CreateResponse(HttpStatusCode.OK);
