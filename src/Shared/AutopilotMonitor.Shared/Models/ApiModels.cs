@@ -186,7 +186,9 @@ namespace AutopilotMonitor.Shared.Models
         public bool IsHybridJoin { get; set; }
 
         // Device detail fields — stored in the Sessions table but omitted from earlier versions
+        public string OsName { get; set; }
         public string OsBuild { get; set; }
+        public string OsDisplayVersion { get; set; }
         public string OsEdition { get; set; }
         public string OsLanguage { get; set; }
         public bool IsUserDriven { get; set; }

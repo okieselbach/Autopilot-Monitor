@@ -38,9 +38,19 @@ namespace AutopilotMonitor.Shared.Models
         public string DeviceName { get; set; }
 
         /// <summary>
-        /// OS build number
+        /// OS product name, e.g. "Microsoft Windows 11 Pro"
+        /// </summary>
+        public string OsName { get; set; }
+
+        /// <summary>
+        /// Real OS build number, e.g. "26220.7934" (CurrentBuild.UBR from registry)
         /// </summary>
         public string OsBuild { get; set; }
+
+        /// <summary>
+        /// OS display version, e.g. "25H2", "24H2"
+        /// </summary>
+        public string OsDisplayVersion { get; set; }
 
         /// <summary>
         /// OS edition (e.g., "Pro", "Enterprise")

@@ -26,7 +26,9 @@ const ALL_COLUMNS: ColumnDef[] = [
   { key: "started", label: "Started", defaultVisible: true, sortKey: "startedAt" },
   { key: "country", label: "Country", defaultVisible: false, sortKey: "geoCountry", filterKey: "geoCountry" },
   { key: "agentVersion", label: "Agent Version", defaultVisible: false, sortKey: "agentVersion", filterKey: "agentVersion" },
+  { key: "osName", label: "OS Name", defaultVisible: false, sortKey: "osName", filterKey: "osName" },
   { key: "osBuild", label: "OS Build", defaultVisible: false, sortKey: "osBuild", filterKey: "osBuild" },
+  { key: "osDisplayVersion", label: "OS Version", defaultVisible: false, sortKey: "osDisplayVersion", filterKey: "osDisplayVersion" },
   { key: "osEdition", label: "OS Edition", defaultVisible: false, sortKey: "osEdition", filterKey: "osEdition" },
   { key: "osLanguage", label: "OS Language", defaultVisible: false, sortKey: "osLanguage", filterKey: "osLanguage" },
   { key: "actions", label: "Actions", defaultVisible: true, adminOnly: true },
@@ -337,7 +339,7 @@ export function SessionTable({
                       currentSort={sortColumn}
                       direction={sortDirection}
                       onSort={onSort}
-                      className={["eventCount", "duration", "started", "country", "agentVersion", "osBuild", "osEdition", "osLanguage"].includes(col.key) ? "px-3" : undefined}
+                      className={["eventCount", "duration", "started", "country", "agentVersion", "osName", "osBuild", "osDisplayVersion", "osEdition", "osLanguage"].includes(col.key) ? "px-3" : undefined}
                       filterKey={col.filterKey}
                       filterValues={col.filterKey ? getUniqueValues(col.filterKey) : undefined}
                       activeFilter={col.filterKey ? columnFilters[col.filterKey] : undefined}
@@ -569,10 +571,24 @@ function SessionCell({
       );
     }
 
+    case "osName":
+      return (
+        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-500">
+          {session.osName || <span className="text-gray-300">—</span>}
+        </td>
+      );
+
     case "osBuild":
       return (
         <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-500 font-mono">
           {session.osBuild || <span className="text-gray-300">—</span>}
+        </td>
+      );
+
+    case "osDisplayVersion":
+      return (
+        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-500">
+          {session.osDisplayVersion || <span className="text-gray-300">—</span>}
         </td>
       );
 

@@ -17,7 +17,9 @@ export interface Session {
   geoCountry?: string;
   geoRegion?: string;
   geoCity?: string;
+  osName?: string;
   osBuild?: string;
+  osDisplayVersion?: string;
   osEdition?: string;
   osLanguage?: string;
 }

@@ -7,6 +7,7 @@ using System.Net.NetworkInformation;
 using System.Text.Json;
 using System.Threading.Tasks;
 using AutopilotMonitor.Agent.Core.Logging;
+using AutopilotMonitor.Agent.Core.Monitoring.Core;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Win32;
 
@@ -138,27 +139,27 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             // Emit os_info event
             try
             {
+                // Read individual registry values; reuse DeviceInfoProvider helpers where possible
+                var edition = (Registry.GetValue(RegKeyWindowsCurrentVersion, "EditionID", string.Empty) ?? string.Empty).ToString();
+                var compositionEdition = (Registry.GetValue(RegKeyWindowsCurrentVersion, "CompositionEditionID", string.Empty) ?? string.Empty).ToString();
+                var currentBuild = (Registry.GetValue(RegKeyWindowsCurrentVersion, "CurrentBuild", string.Empty) ?? string.Empty).ToString();
+                var buildBranch = (Registry.GetValue(RegKeyWindowsCurrentVersion, "BuildBranch", string.Empty) ?? string.Empty).ToString();
+                var displayVersion = DeviceInfoProvider.GetOsDisplayVersion();
+                var buildRevision = (Registry.GetValue(RegKeyWindowsCurrentVersion, "UBR", string.Empty) ?? string.Empty).ToString();
+
                 var data = new Dictionary<string, object>
                 {
                     { "version", Environment.OSVersion.Version.ToString() },
                     { "osVersion", osName },
-                    { "edition", (Registry.GetValue(RegKeyWindowsCurrentVersion, "EditionID", string.Empty) ?? string.Empty).ToString() },
-                    { "compositionEdition", (Registry.GetValue(RegKeyWindowsCurrentVersion, "CompositionEditionID", string.Empty) ?? string.Empty).ToString() },
-                    { "currentBuild", (Registry.GetValue(RegKeyWindowsCurrentVersion, "CurrentBuild", string.Empty) ?? string.Empty).ToString() },
-                    { "buildBranch", (Registry.GetValue(RegKeyWindowsCurrentVersion, "BuildBranch", string.Empty) ?? string.Empty).ToString() },
-                    { "displayVersion", (Registry.GetValue(RegKeyWindowsCurrentVersion, "DisplayVersion", string.Empty) ?? string.Empty).ToString() },
-                    { "buildRevision", (Registry.GetValue(RegKeyWindowsCurrentVersion, "UBR", string.Empty) ?? string.Empty).ToString() }
+                    { "edition", edition },
+                    { "compositionEdition", compositionEdition },
+                    { "currentBuild", currentBuild },
+                    { "buildBranch", buildBranch },
+                    { "displayVersion", displayVersion },
+                    { "buildRevision", buildRevision }
                 };
 
-                object osVersionValue;
-                object displayVersionValue;
-                object currentBuildValue;
-                object buildRevisionValue;
-
-                var osVersion = data.TryGetValue("osVersion", out osVersionValue) ? osVersionValue?.ToString() ?? string.Empty : string.Empty;
-                var displayVersion = data.TryGetValue("displayVersion", out displayVersionValue) ? displayVersionValue?.ToString() ?? string.Empty : string.Empty;
-                var currentBuild = data.TryGetValue("currentBuild", out currentBuildValue) ? currentBuildValue?.ToString() ?? string.Empty : string.Empty;
-                var buildRevision = data.TryGetValue("buildRevision", out buildRevisionValue) ? buildRevisionValue?.ToString() ?? string.Empty : string.Empty;
+                var osVersion = osName;
 
                 var message = string.IsNullOrWhiteSpace(osVersion) ? "OS information collected" : osVersion;
                 if (!string.IsNullOrWhiteSpace(displayVersion))

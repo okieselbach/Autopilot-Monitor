@@ -510,7 +510,9 @@ export default function Home() {
       session.geoRegion,
       session.geoCity,
       session.agentVersion,
+      session.osName,
       session.osBuild,
+      session.osDisplayVersion,
       session.osEdition,
       session.osLanguage,
     ].join(" ").toLowerCase();

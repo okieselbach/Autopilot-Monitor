@@ -83,7 +83,9 @@ export interface SessionCsvData {
   deviceName: string;
   manufacturer: string;
   model: string;
+  osName?: string;
   osBuild?: string;
+  osDisplayVersion?: string;
   osEdition?: string;
   osLanguage?: string;
   isUserDriven?: boolean;
@@ -105,7 +107,7 @@ export function generateSessionCsvExport(session: SessionCsvData): string {
   const esc = (v: string | undefined | null) => `"${String(v ?? "").replace(/"/g, '""')}"`;
   // Columns match the Sessions Azure Table Storage schema exactly
   // PartitionKey = TenantId, RowKey = SessionId
-  const header = "PartitionKey,RowKey,SerialNumber,DeviceName,Manufacturer,Model,OsBuild,OsEdition,OsLanguage,IsUserDriven,IsPreProvisioned,StartedAt,CompletedAt,AgentVersion,EnrollmentType,CurrentPhase,Status,EventCount,FailureReason,LastEventAt,DurationSeconds,DiagnosticsBlobName";
+  const header = "PartitionKey,RowKey,SerialNumber,DeviceName,Manufacturer,Model,OsName,OsBuild,OsDisplayVersion,OsEdition,OsLanguage,IsUserDriven,IsPreProvisioned,StartedAt,CompletedAt,AgentVersion,EnrollmentType,CurrentPhase,Status,EventCount,FailureReason,LastEventAt,DurationSeconds,DiagnosticsBlobName";
   const row = [
     esc(session.tenantId),
     esc(session.sessionId),
@@ -113,7 +115,9 @@ export function generateSessionCsvExport(session: SessionCsvData): string {
     esc(session.deviceName),
     esc(session.manufacturer),
     esc(session.model),
+    esc(session.osName),
     esc(session.osBuild),
+    esc(session.osDisplayVersion),
     esc(session.osEdition),
     esc(session.osLanguage),
     String(session.isUserDriven ?? ""),
