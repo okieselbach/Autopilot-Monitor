@@ -15,6 +15,9 @@ export default function DataManagementSection({
   setSessionTimeoutHours,
   isGalacticAdmin,
 }: DataManagementSectionProps) {
+  const isOverridden = dataRetentionDays === 0 || dataRetentionDays < 7 || dataRetentionDays > 180;
+  const isRetentionDisabled = isOverridden && !isGalacticAdmin;
+
   return (
     <div className="bg-white rounded-lg shadow">
       <div className="p-6 border-b border-gray-200">
@@ -31,27 +34,30 @@ export default function DataManagementSection({
             </p>
             <input
               type="number"
-              min={isGalacticAdmin ? "0" : "7"}
+              min="7"
               max="180"
               value={dataRetentionDays}
-              onChange={(e) => {
-                const val = parseInt(e.target.value);
-                if (isNaN(val)) {
-                  setDataRetentionDays(90);
-                } else if (isGalacticAdmin && val === 0) {
-                  setDataRetentionDays(0);
-                } else {
-                  setDataRetentionDays(val || 90);
-                }
-              }}
-              className="mt-1 block w-full px-4 py-2 border border-gray-300 rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+              disabled={isRetentionDisabled}
+              onChange={(e) => setDataRetentionDays(parseInt(e.target.value) || 90)}
+              className={`mt-1 block w-full px-4 py-2 border rounded-lg placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${
+                isRetentionDisabled
+                  ? "bg-gray-100 text-gray-500 border-gray-200 cursor-not-allowed"
+                  : "border-gray-300 text-gray-900"
+              }`}
             />
-            {dataRetentionDays === 0 ? (
-              <p className="text-xs text-amber-600 mt-1 font-medium">⚠ Infinite retention — data will never be automatically deleted</p>
+            {isRetentionDisabled ? (
+              <div className="mt-2 flex items-start space-x-2 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+                <span className="text-amber-500 mt-0.5 flex-shrink-0">⚠</span>
+                <p className="text-xs text-amber-800">
+                  <span className="font-semibold">Overridden by administrator</span> —{" "}
+                  {dataRetentionDays === 0
+                    ? "Infinite retention is active. Data will never be automatically deleted."
+                    : `Retention is set to ${dataRetentionDays} days (outside the standard 7–180 day range).`}
+                  {" "}Contact your Galactic admin to change this value.
+                </p>
+              </div>
             ) : (
-              <p className="text-xs text-gray-400 mt-1">
-                {isGalacticAdmin ? "Minimum: 0 (infinite) or 7 days" : "Minimum: 7 days"}, Maximum: 180 days
-              </p>
+              <p className="text-xs text-gray-400 mt-1">Minimum: 7 days, Maximum: 180 days</p>
             )}
           </label>
         </div>
