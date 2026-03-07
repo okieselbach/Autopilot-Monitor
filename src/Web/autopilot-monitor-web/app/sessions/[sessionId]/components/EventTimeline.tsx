@@ -551,7 +551,7 @@ function RawEventRow({ event }: { event: EnrollmentEvent }) {
       <div className="flex items-start gap-2">
         <span className="text-gray-400 w-8 text-right flex-shrink-0">{event.sequence}</span>
         <span className="text-gray-500 flex-shrink-0">{new Date(event.timestamp).toLocaleTimeString()}</span>
-        <span className={`flex-shrink-0 w-12 ${sevColor[event.severity] || "text-gray-500"}`}>{event.severity.substring(0, 4)}</span>
+        <span className={`flex-shrink-0 w-14 ${sevColor[event.severity] || "text-gray-500"}`}>{event.severity}</span>
         <span className="text-gray-900 font-medium flex-shrink-0">{event.eventType}</span>
         <span className="text-gray-500 truncate flex-1 min-w-0">{event.message}</span>
         {hasDetails && (
