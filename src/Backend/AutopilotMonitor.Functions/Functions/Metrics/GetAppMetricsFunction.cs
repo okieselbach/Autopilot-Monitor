@@ -24,14 +24,7 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
         {
             try
             {
-                // Validate authentication
-                if (!TenantHelper.IsAuthenticated(req))
-                {
-                    var unauthorizedResponse = req.CreateResponse(HttpStatusCode.Unauthorized);
-                    await unauthorizedResponse.WriteAsJsonAsync(new { success = false, message = "Authentication required." });
-                    return unauthorizedResponse;
-                }
-
+                // Authentication + MemberRead authorization enforced by PolicyEnforcementMiddleware
                 var tenantId = TenantHelper.GetTenantId(req);
                 _logger.LogInformation($"Fetching app metrics for tenant {tenantId}");
 

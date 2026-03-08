@@ -41,19 +41,7 @@ public class ProgressPortalFunction
 
         try
         {
-            if (!TenantHelper.IsAuthenticated(req))
-            {
-                var unauthorizedResponse = req.CreateResponse(HttpStatusCode.Unauthorized);
-                await unauthorizedResponse.WriteAsJsonAsync(new
-                {
-                    success = false,
-                    message = "Authentication required. Please provide a valid JWT token.",
-                    count = 0,
-                    sessions = Array.Empty<object>()
-                });
-                return unauthorizedResponse;
-            }
-
+            // Authentication + AuthenticatedUser authorization enforced by PolicyEnforcementMiddleware
             var tenantId = TenantHelper.GetTenantId(req);
 
             _logger.LogInformation("ProgressGetSessions: Fetching sessions for tenant {TenantId}", tenantId);
@@ -106,20 +94,7 @@ public class ProgressPortalFunction
 
         try
         {
-            if (!TenantHelper.IsAuthenticated(req))
-            {
-                var unauthorizedResponse = req.CreateResponse(HttpStatusCode.Unauthorized);
-                await unauthorizedResponse.WriteAsJsonAsync(new
-                {
-                    success = false,
-                    message = "Authentication required. Please provide a valid JWT token.",
-                    sessionId = sessionId,
-                    count = 0,
-                    events = Array.Empty<object>()
-                });
-                return unauthorizedResponse;
-            }
-
+            // Authentication + AuthenticatedUser authorization enforced by PolicyEnforcementMiddleware
             var userTenantId = TenantHelper.GetTenantId(req);
             var userIdentifier = TenantHelper.GetUserIdentifier(req);
 

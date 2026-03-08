@@ -19,7 +19,6 @@ namespace AutopilotMonitor.Functions.Functions.Admin
         private readonly AnalyzeRuleService _analyzeRuleService;
         private readonly ImeLogPatternService _imeLogPatternService;
         private readonly TableStorageService _storageService;
-        private readonly GalacticAdminService _galacticAdminService;
 
         public ReseedFromGitHubFunction(
             ILogger<ReseedFromGitHubFunction> logger,
@@ -27,8 +26,7 @@ namespace AutopilotMonitor.Functions.Functions.Admin
             GatherRuleService gatherRuleService,
             AnalyzeRuleService analyzeRuleService,
             ImeLogPatternService imeLogPatternService,
-            TableStorageService storageService,
-            GalacticAdminService galacticAdminService)
+            TableStorageService storageService)
         {
             _logger = logger;
             _gitHubRepo = gitHubRepo;
@@ -36,7 +34,6 @@ namespace AutopilotMonitor.Functions.Functions.Admin
             _analyzeRuleService = analyzeRuleService;
             _imeLogPatternService = imeLogPatternService;
             _storageService = storageService;
-            _galacticAdminService = galacticAdminService;
         }
 
         [Function("ReseedFromGitHub")]
@@ -45,20 +42,8 @@ namespace AutopilotMonitor.Functions.Functions.Admin
         {
             try
             {
-                if (!TenantHelper.IsAuthenticated(req))
-                {
-                    var unauthorized = req.CreateResponse(HttpStatusCode.Unauthorized);
-                    await unauthorized.WriteAsJsonAsync(new { success = false, message = "Authentication required" });
-                    return unauthorized;
-                }
-
+                // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
                 var upn = TenantHelper.GetUserIdentifier(req);
-                if (!await _galacticAdminService.IsGalacticAdminAsync(upn))
-                {
-                    var forbidden = req.CreateResponse(HttpStatusCode.Forbidden);
-                    await forbidden.WriteAsJsonAsync(new { success = false, message = "Galactic Admin privileges required" });
-                    return forbidden;
-                }
 
                 // Parse ?type= parameter (default: all)
                 var typeParam = "all";

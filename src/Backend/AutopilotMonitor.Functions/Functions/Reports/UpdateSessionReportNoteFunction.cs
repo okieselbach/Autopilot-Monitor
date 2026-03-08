@@ -16,16 +16,13 @@ namespace AutopilotMonitor.Functions.Functions.Reports
     {
         private readonly ILogger<UpdateSessionReportNoteFunction> _logger;
         private readonly SessionReportService _sessionReportService;
-        private readonly GalacticAdminService _galacticAdminService;
 
         public UpdateSessionReportNoteFunction(
             ILogger<UpdateSessionReportNoteFunction> logger,
-            SessionReportService sessionReportService,
-            GalacticAdminService galacticAdminService)
+            SessionReportService sessionReportService)
         {
             _logger = logger;
             _sessionReportService = sessionReportService;
-            _galacticAdminService = galacticAdminService;
         }
 
         [Function("UpdateSessionReportNote")]
@@ -35,21 +32,8 @@ namespace AutopilotMonitor.Functions.Functions.Reports
         {
             try
             {
-                if (!TenantHelper.IsAuthenticated(req))
-                {
-                    var unauthorizedResponse = req.CreateResponse(HttpStatusCode.Unauthorized);
-                    await unauthorizedResponse.WriteAsJsonAsync(new { success = false, message = "Authentication required." });
-                    return unauthorizedResponse;
-                }
-
+                // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
                 var userIdentifier = TenantHelper.GetUserIdentifier(req);
-                var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userIdentifier);
-                if (!isGalacticAdmin)
-                {
-                    var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-                    await forbiddenResponse.WriteAsJsonAsync(new { success = false, message = "Access denied. Galactic Admin role required." });
-                    return forbiddenResponse;
-                }
 
                 if (string.IsNullOrEmpty(reportId))
                 {

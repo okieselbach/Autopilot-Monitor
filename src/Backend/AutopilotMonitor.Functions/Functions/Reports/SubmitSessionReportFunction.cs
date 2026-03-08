@@ -13,7 +13,6 @@ namespace AutopilotMonitor.Functions.Functions.Reports
         private readonly ILogger<SubmitSessionReportFunction> _logger;
         private readonly SessionReportService _sessionReportService;
         private readonly TableStorageService _storageService;
-        private readonly TenantAdminsService _tenantAdminsService;
         private readonly GalacticAdminService _galacticAdminService;
         private readonly TelegramNotificationService _telegramNotificationService;
 
@@ -21,14 +20,12 @@ namespace AutopilotMonitor.Functions.Functions.Reports
             ILogger<SubmitSessionReportFunction> logger,
             SessionReportService sessionReportService,
             TableStorageService storageService,
-            TenantAdminsService tenantAdminsService,
             GalacticAdminService galacticAdminService,
             TelegramNotificationService telegramNotificationService)
         {
             _logger = logger;
             _sessionReportService = sessionReportService;
             _storageService = storageService;
-            _tenantAdminsService = tenantAdminsService;
             _galacticAdminService = galacticAdminService;
             _telegramNotificationService = telegramNotificationService;
         }
@@ -42,36 +39,12 @@ namespace AutopilotMonitor.Functions.Functions.Reports
 
             try
             {
-                // Validate authentication
-                if (!TenantHelper.IsAuthenticated(req))
-                {
-                    _logger.LogWarning("Unauthenticated session report attempt for session {SessionId}", sessionId);
-                    var unauthorizedResponse = req.CreateResponse(HttpStatusCode.Unauthorized);
-                    await unauthorizedResponse.WriteAsJsonAsync(new
-                    {
-                        success = false,
-                        message = "Authentication required. Please provide a valid JWT token."
-                    });
-                    return unauthorizedResponse;
-                }
-
+                // Authentication + TenantAdminOrGA authorization enforced by PolicyEnforcementMiddleware
                 string tenantId = TenantHelper.GetTenantId(req);
                 string userIdentifier = TenantHelper.GetUserIdentifier(req);
 
-                // Require Tenant Admin or Galactic Admin
+                // Still needed: GA check for audit log skip logic
                 var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userIdentifier);
-                var isTenantAdmin = await _tenantAdminsService.IsTenantAdminAsync(tenantId, userIdentifier);
-                if (!isGalacticAdmin && !isTenantAdmin)
-                {
-                    _logger.LogWarning("Non-admin user {UserIdentifier} attempted to submit session report for {SessionId}", userIdentifier, sessionId);
-                    var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-                    await forbiddenResponse.WriteAsJsonAsync(new
-                    {
-                        success = false,
-                        message = "Access denied. Tenant Admin or Galactic Admin role required."
-                    });
-                    return forbiddenResponse;
-                }
 
                 // Parse request body
                 var request = await req.ReadFromJsonAsync<SubmitSessionReportRequest>();

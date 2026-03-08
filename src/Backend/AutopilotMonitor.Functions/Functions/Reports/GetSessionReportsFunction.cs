@@ -1,5 +1,4 @@
 using System.Net;
-using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Services;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -11,16 +10,13 @@ namespace AutopilotMonitor.Functions.Functions.Reports
     {
         private readonly ILogger<GetSessionReportsFunction> _logger;
         private readonly SessionReportService _sessionReportService;
-        private readonly GalacticAdminService _galacticAdminService;
 
         public GetSessionReportsFunction(
             ILogger<GetSessionReportsFunction> logger,
-            SessionReportService sessionReportService,
-            GalacticAdminService galacticAdminService)
+            SessionReportService sessionReportService)
         {
             _logger = logger;
             _sessionReportService = sessionReportService;
-            _galacticAdminService = galacticAdminService;
         }
 
         [Function("GetSessionReports")]
@@ -31,32 +27,7 @@ namespace AutopilotMonitor.Functions.Functions.Reports
 
             try
             {
-                // Validate authentication
-                if (!TenantHelper.IsAuthenticated(req))
-                {
-                    var unauthorizedResponse = req.CreateResponse(HttpStatusCode.Unauthorized);
-                    await unauthorizedResponse.WriteAsJsonAsync(new
-                    {
-                        success = false,
-                        message = "Authentication required."
-                    });
-                    return unauthorizedResponse;
-                }
-
-                string userIdentifier = TenantHelper.GetUserIdentifier(req);
-
-                // Require Galactic Admin only (this is admin-config data)
-                var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userIdentifier);
-                if (!isGalacticAdmin)
-                {
-                    var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-                    await forbiddenResponse.WriteAsJsonAsync(new
-                    {
-                        success = false,
-                        message = "Access denied. Galactic Admin role required."
-                    });
-                    return forbiddenResponse;
-                }
+                // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
 
                 var reports = await _sessionReportService.GetAllReportsAsync();
 

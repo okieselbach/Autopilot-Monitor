@@ -1,5 +1,4 @@
 using System.Net;
-using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Services;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -14,16 +13,13 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
     {
         private readonly ILogger<PlatformUsageMetricsFunction> _logger;
         private readonly UsageMetricsService _usageMetricsService;
-        private readonly GalacticAdminService _galacticAdminService;
 
         public PlatformUsageMetricsFunction(
             ILogger<PlatformUsageMetricsFunction> logger,
-            UsageMetricsService usageMetricsService,
-            GalacticAdminService galacticAdminService)
+            UsageMetricsService usageMetricsService)
         {
             _logger = logger;
             _usageMetricsService = usageMetricsService;
-            _galacticAdminService = galacticAdminService;
         }
 
         /// <summary>
@@ -39,36 +35,7 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
 
             try
             {
-                // Validate authentication
-                if (!TenantHelper.IsAuthenticated(req))
-                {
-                    _logger.LogWarning("Unauthenticated platform usage metrics attempt");
-                    var unauthorizedResponse = req.CreateResponse(HttpStatusCode.Unauthorized);
-                    await unauthorizedResponse.WriteAsJsonAsync(new
-                    {
-                        success = false,
-                        message = "Authentication required. Please provide a valid JWT token."
-                    });
-                    return unauthorizedResponse;
-                }
-
-                // Check if user is Galactic Admin via GalacticAdminService (Azure Table Storage)
-                var userEmail = TenantHelper.GetUserIdentifier(req);
-                var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userEmail);
-
-                if (!isGalacticAdmin)
-                {
-                    _logger.LogWarning($"Non-Galactic Admin user {userEmail} attempted to access platform usage metrics");
-                    var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-                    await forbiddenResponse.WriteAsJsonAsync(new
-                    {
-                        success = false,
-                        message = "Access denied. Galactic Admin role required."
-                    });
-                    return forbiddenResponse;
-                }
-
-                _logger.LogInformation($"Platform usage metrics accessed by Galactic Admin: {userEmail}");
+                // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
 
                 var metrics = await _usageMetricsService.ComputeUsageMetricsAsync();
 

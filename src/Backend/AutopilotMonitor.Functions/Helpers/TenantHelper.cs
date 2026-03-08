@@ -10,27 +10,6 @@ namespace AutopilotMonitor.Functions.Helpers;
 public static class TenantHelper
 {
     /// <summary>
-    /// Checks if the request has an authenticated user
-    /// Azure Functions Isolated Worker compatible
-    /// </summary>
-    /// <param name="req">The HTTP request</param>
-    /// <returns>True if user is authenticated, false otherwise</returns>
-    public static bool IsAuthenticated(HttpRequestData req)
-    {
-        // Azure Functions Isolated Worker: Try FunctionContext.Items first
-        // This is set by AuthenticationMiddleware and is more reliable than httpContext.User
-        if (req.FunctionContext.Items.TryGetValue("ClaimsPrincipal", out var principalObj)
-            && principalObj is ClaimsPrincipal principal)
-        {
-            return principal.Identity?.IsAuthenticated == true;
-        }
-
-        // Fallback to HTTP context (may not work reliably in isolated worker)
-        var httpContext = req.FunctionContext.GetHttpContext();
-        return httpContext?.User?.Identity?.IsAuthenticated == true;
-    }
-
-    /// <summary>
     /// Extracts the tenant ID from the authenticated user's JWT token claims.
     /// Uses the Azure AD tenant ID claim which identifies which customer/organization owns the data.
     /// Supports both v1.0 and v2.0 tokens.

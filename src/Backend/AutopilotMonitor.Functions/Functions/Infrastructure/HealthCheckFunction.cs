@@ -1,6 +1,4 @@
 using System.Net;
-using AutopilotMonitor.Functions.Extensions;
-using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Services;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -12,16 +10,13 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure
     {
         private readonly ILogger<HealthCheckFunction> _logger;
         private readonly HealthCheckService _healthCheckService;
-        private readonly GalacticAdminService _galacticAdminService;
 
         public HealthCheckFunction(
             ILogger<HealthCheckFunction> logger,
-            HealthCheckService healthCheckService,
-            GalacticAdminService galacticAdminService)
+            HealthCheckService healthCheckService)
         {
             _logger = logger;
             _healthCheckService = healthCheckService;
-            _galacticAdminService = galacticAdminService;
         }
 
         /// <summary>
@@ -57,36 +52,7 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure
         {
             _logger.LogInformation("Detailed health check requested");
 
-            // Validate authentication
-            if (!TenantHelper.IsAuthenticated(req))
-            {
-                _logger.LogWarning("Unauthenticated detailed health check attempt");
-                var unauthorizedResponse = req.CreateResponse(HttpStatusCode.Unauthorized);
-                await unauthorizedResponse.WriteAsJsonAsync(new
-                {
-                    success = false,
-                    message = "Authentication required. Please provide a valid JWT token."
-                });
-                return unauthorizedResponse;
-            }
-
-            // Check if user is Galactic Admin via GalacticAdminService (Azure Table Storage)
-            var userEmail = TenantHelper.GetUserIdentifier(req);
-            var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userEmail);
-
-            if (!isGalacticAdmin)
-            {
-                _logger.LogWarning($"Non-Galactic Admin user {userEmail} attempted to access detailed health check");
-                var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-                await forbiddenResponse.WriteAsJsonAsync(new
-                {
-                    success = false,
-                    message = "Access denied. Galactic Admin role required."
-                });
-                return forbiddenResponse;
-            }
-
-            _logger.LogInformation($"Detailed health check accessed by Galactic Admin: {userEmail}");
+            // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
 
             // Perform comprehensive health checks
             var healthCheckResult = await _healthCheckService.PerformAllChecksAsync();

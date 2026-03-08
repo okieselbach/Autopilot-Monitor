@@ -97,13 +97,7 @@ public class AutopilotDeviceValidationConsentFunction
 
     private async Task<HttpResponseData?> EnsureAuthorizedTenantAdminAsync(HttpRequestData req, string tenantId)
     {
-        if (!TenantHelper.IsAuthenticated(req))
-        {
-            var unauthorized = req.CreateResponse(HttpStatusCode.Unauthorized);
-            await unauthorized.WriteAsJsonAsync(new { error = "Authentication required." });
-            return unauthorized;
-        }
-
+        // Authentication enforced by PolicyEnforcementMiddleware
         var authenticatedTenantId = TenantHelper.GetTenantId(req);
         var userIdentifier = TenantHelper.GetUserIdentifier(req);
 

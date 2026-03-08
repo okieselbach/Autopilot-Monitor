@@ -27,13 +27,7 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
         {
             try
             {
-                if (!TenantHelper.IsAuthenticated(req))
-                {
-                    var unauthorizedResponse = req.CreateResponse(HttpStatusCode.Unauthorized);
-                    await unauthorizedResponse.WriteAsJsonAsync(new { success = false, message = "Authentication required." });
-                    return unauthorizedResponse;
-                }
-
+                // Authentication + MemberRead authorization enforced by PolicyEnforcementMiddleware
                 var tenantId = TenantHelper.GetTenantId(req);
                 _logger.LogInformation("Fetching geographic metrics for tenant {TenantId}", tenantId);
 

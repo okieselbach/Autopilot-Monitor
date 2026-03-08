@@ -41,11 +41,8 @@ public class TenantAdminManagementFunction
         string tenantId,
         FunctionContext context)
     {
-        var principal = context.GetUser();
-        if (principal == null)
-        {
-            return req.CreateResponse(HttpStatusCode.Unauthorized);
-        }
+        // Authentication enforced by PolicyEnforcementMiddleware
+        var principal = context.GetUser()!;
 
         var userTenantId = principal.GetTenantId();
         var upn = principal.GetUserPrincipalName();
@@ -84,11 +81,8 @@ public class TenantAdminManagementFunction
         string tenantId,
         FunctionContext context)
     {
-        var principal = context.GetUser();
-        if (principal == null)
-        {
-            return req.CreateResponse(HttpStatusCode.Unauthorized);
-        }
+        // Authentication enforced by PolicyEnforcementMiddleware
+        var principal = context.GetUser()!;
 
         var userTenantId = principal.GetTenantId();
         var upn = principal.GetUserPrincipalName();
@@ -140,11 +134,8 @@ public class TenantAdminManagementFunction
         string adminUpn,
         FunctionContext context)
     {
-        var principal = context.GetUser();
-        if (principal == null)
-        {
-            return req.CreateResponse(HttpStatusCode.Unauthorized);
-        }
+        // Authentication enforced by PolicyEnforcementMiddleware
+        var principal = context.GetUser()!;
 
         var userTenantId = principal.GetTenantId();
         var upn = principal.GetUserPrincipalName();
@@ -202,11 +193,8 @@ public class TenantAdminManagementFunction
         string adminUpn,
         FunctionContext context)
     {
-        var principal = context.GetUser();
-        if (principal == null)
-        {
-            return req.CreateResponse(HttpStatusCode.Unauthorized);
-        }
+        // Authentication enforced by PolicyEnforcementMiddleware
+        var principal = context.GetUser()!;
 
         var userTenantId = principal.GetTenantId();
         var upn = principal.GetUserPrincipalName();
@@ -247,11 +235,8 @@ public class TenantAdminManagementFunction
         string adminUpn,
         FunctionContext context)
     {
-        var principal = context.GetUser();
-        if (principal == null)
-        {
-            return req.CreateResponse(HttpStatusCode.Unauthorized);
-        }
+        // Authentication enforced by PolicyEnforcementMiddleware
+        var principal = context.GetUser()!;
 
         var userTenantId = principal.GetTenantId();
         var upn = principal.GetUserPrincipalName();
@@ -291,11 +276,8 @@ public class TenantAdminManagementFunction
         string adminUpn,
         FunctionContext context)
     {
-        var principal = context.GetUser();
-        if (principal == null)
-        {
-            return req.CreateResponse(HttpStatusCode.Unauthorized);
-        }
+        // Authentication enforced by PolicyEnforcementMiddleware
+        var principal = context.GetUser()!;
 
         var userTenantId = principal.GetTenantId();
         var upn = principal.GetUserPrincipalName();

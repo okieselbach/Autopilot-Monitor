@@ -12,22 +12,22 @@ using Microsoft.Extensions.Logging;
 namespace AutopilotMonitor.Functions.Middleware;
 
 /// <summary>
-/// Logging-only middleware that evaluates the EndpointAccessPolicyCatalog against each request
-/// and compares its decision with the actual pipeline outcome. Never blocks requests.
+/// Policy enforcement middleware that evaluates the EndpointAccessPolicyCatalog against each request
+/// and blocks requests that don't meet the required policy. Fail-closed: unregistered routes are denied.
 ///
-/// Designed for Phase 2 of the auth refactor: deploy to production, observe mismatches,
-/// then switch to enforcement in Phase 3.
+/// Phase 3 of the auth refactor: replaces both PolicyAuditMiddleware (logging-only) and
+/// MemberAuthorizationMiddleware (coarse member check) with catalog-driven enforcement.
 ///
-/// Middleware order: AuthenticationMiddleware → PolicyAuditMiddleware → MemberAuthorizationMiddleware
+/// Middleware order: AuthenticationMiddleware → PolicyEnforcementMiddleware → Function
 /// </summary>
-public class PolicyAuditMiddleware : IFunctionsWorkerMiddleware
+public class PolicyEnforcementMiddleware : IFunctionsWorkerMiddleware
 {
-    private readonly ILogger<PolicyAuditMiddleware> _logger;
+    private readonly ILogger<PolicyEnforcementMiddleware> _logger;
     private readonly GalacticAdminService _galacticAdminService;
     private readonly TenantAdminsService _tenantAdminsService;
 
-    public PolicyAuditMiddleware(
-        ILogger<PolicyAuditMiddleware> logger,
+    public PolicyEnforcementMiddleware(
+        ILogger<PolicyEnforcementMiddleware> logger,
         GalacticAdminService galacticAdminService,
         TenantAdminsService tenantAdminsService)
     {
@@ -41,6 +41,7 @@ public class PolicyAuditMiddleware : IFunctionsWorkerMiddleware
         var httpContext = context.GetHttpContext();
         if (httpContext == null)
         {
+            // Non-HTTP trigger (e.g. timer, queue) — no auth needed
             await next(context);
             return;
         }
@@ -53,53 +54,57 @@ public class PolicyAuditMiddleware : IFunctionsWorkerMiddleware
 
         if (catalogEntry == null)
         {
-            _logger.LogWarning("[PolicyAudit] UNREGISTERED route: {Method} {Path} — not in catalog (fail-closed)",
+            // Fail-closed: unregistered route → 403
+            _logger.LogError("[PolicyEnforcement] BLOCKED unregistered route: {Method} {Path} — not in catalog (fail-closed)",
                 httpMethod, requestPath);
+            httpContext.Response.StatusCode = (int)HttpStatusCode.Forbidden;
+            httpContext.Response.ContentType = "application/json";
+            await httpContext.Response.WriteAsJsonAsync(new
+            {
+                error = "Forbidden",
+                message = "Access denied."
+            });
+            return;
+        }
+
+        // Evaluate the catalog policy for the current user
+        var decision = await EvaluateCatalogPolicyAsync(context, catalogEntry);
+
+        if (decision.IsAllowed)
+        {
+            _logger.LogDebug("[PolicyEnforcement] ALLOW {Method} {Path} policy={Policy} user={User} role={Role}",
+                httpMethod, requestPath, catalogEntry.Policy, decision.UserIdentifier, decision.UserRole);
             await next(context);
             return;
         }
 
-        // Evaluate what the catalog WOULD decide for the current user
-        var catalogDecision = await EvaluateCatalogPolicyAsync(context, catalogEntry);
+        // Denied — determine 401 vs 403
+        var statusCode = decision.Reason is "NoJWT" or "MissingClaims"
+            ? HttpStatusCode.Unauthorized
+            : HttpStatusCode.Forbidden;
 
-        // Let the rest of the pipeline run (MemberAuth + function)
-        await next(context);
+        _logger.LogWarning("[PolicyEnforcement] DENIED {Method} {Path} policy={Policy} status={Status} user={User} role={Role} reason={Reason}",
+            httpMethod, requestPath, catalogEntry.Policy, (int)statusCode,
+            decision.UserIdentifier, decision.UserRole, decision.Reason);
 
-        // Compare catalog decision against actual outcome
-        var actualStatusCode = httpContext.Response.StatusCode;
-        var isAuthFailure = actualStatusCode == (int)HttpStatusCode.Unauthorized
-                         || actualStatusCode == (int)HttpStatusCode.Forbidden;
-        var actuallyAllowed = !isAuthFailure;
+        httpContext.Response.StatusCode = (int)statusCode;
+        httpContext.Response.ContentType = "application/json";
 
-        if (catalogDecision.IsAllowed == actuallyAllowed)
+        if (statusCode == HttpStatusCode.Unauthorized)
         {
-            // Decisions match — no mismatch
-            _logger.LogDebug("[PolicyAudit] OK {Method} {Path} policy={Policy} catalogDecision={Decision} actualStatus={Status}",
-                httpMethod, requestPath, catalogEntry.Policy, catalogDecision.IsAllowed ? "Allow" : "Deny", actualStatusCode);
-            return;
+            await httpContext.Response.WriteAsJsonAsync(new
+            {
+                error = "AuthenticationRequired",
+                message = "Authentication required. Please provide a valid JWT token."
+            });
         }
-
-        // Mismatch detected
-        if (catalogDecision.IsAllowed && !actuallyAllowed)
+        else
         {
-            // Catalog says Allow but pipeline denied → pipeline is MORE restrictive than catalog
-            // Expected for Viewer role (MemberAuth blocks, catalog would allow MemberRead)
-            _logger.LogWarning(
-                "[PolicyAudit] MISMATCH(TooRestrictive) {Method} {Path} " +
-                "policy={Policy} catalogDecision=Allow actualStatus={Status} " +
-                "user={User} role={Role} reason={Reason}",
-                httpMethod, requestPath, catalogEntry.Policy, actualStatusCode,
-                catalogDecision.UserIdentifier, catalogDecision.UserRole, catalogDecision.Reason);
-        }
-        else if (!catalogDecision.IsAllowed && actuallyAllowed)
-        {
-            // Catalog says Deny but pipeline allowed → SECURITY CONCERN: pipeline is too permissive
-            _logger.LogError(
-                "[PolicyAudit] MISMATCH(TooPermissive) {Method} {Path} " +
-                "policy={Policy} catalogDecision=Deny actualStatus={Status} " +
-                "user={User} role={Role} reason={Reason}",
-                httpMethod, requestPath, catalogEntry.Policy, actualStatusCode,
-                catalogDecision.UserIdentifier, catalogDecision.UserRole, catalogDecision.Reason);
+            await httpContext.Response.WriteAsJsonAsync(new
+            {
+                error = "InsufficientPermissions",
+                message = "Access denied. You do not have permission to access this resource."
+            });
         }
     }
 
@@ -162,7 +167,7 @@ public class PolicyAuditMiddleware : IFunctionsWorkerMiddleware
         if (role == null)
             return CatalogDecisionResult.Deny(userIdentifier, "NonMember", "NotInTenant");
 
-        // MemberRead allows Admin, Operator, AND Viewer (future Phase 3 behavior)
+        // MemberRead allows Admin, Operator, AND Viewer
         return CatalogDecisionResult.Allow(userIdentifier, role.Role ?? "Admin", "TenantMember");
     }
 

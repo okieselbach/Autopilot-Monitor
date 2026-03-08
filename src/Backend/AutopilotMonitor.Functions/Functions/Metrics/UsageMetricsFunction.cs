@@ -36,19 +36,7 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
 
             try
             {
-                // Validate authentication
-                if (!TenantHelper.IsAuthenticated(req))
-                {
-                    _logger.LogWarning("Unauthenticated UsageMetrics attempt");
-                    var unauthorizedResponse = req.CreateResponse(HttpStatusCode.Unauthorized);
-                    await unauthorizedResponse.WriteAsJsonAsync(new
-                    {
-                        success = false,
-                        message = "Authentication required. Please provide a valid JWT token."
-                    });
-                    return unauthorizedResponse;
-                }
-
+                // Authentication + MemberRead authorization enforced by PolicyEnforcementMiddleware
                 string tenantId = TenantHelper.GetTenantId(req);
                 string userIdentifier = TenantHelper.GetUserIdentifier(req);
 

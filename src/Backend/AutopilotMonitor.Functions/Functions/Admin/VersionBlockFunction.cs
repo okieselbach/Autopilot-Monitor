@@ -15,16 +15,13 @@ namespace AutopilotMonitor.Functions.Functions.Admin
     {
         private readonly ILogger<VersionBlockFunction> _logger;
         private readonly BlockedVersionService _blockedVersionService;
-        private readonly GalacticAdminService _galacticAdminService;
 
         public VersionBlockFunction(
             ILogger<VersionBlockFunction> logger,
-            BlockedVersionService blockedVersionService,
-            GalacticAdminService galacticAdminService)
+            BlockedVersionService blockedVersionService)
         {
             _logger = logger;
             _blockedVersionService = blockedVersionService;
-            _galacticAdminService = galacticAdminService;
         }
 
         /// <summary>GET /api/versions/blocked — list all active version block rules</summary>
@@ -34,12 +31,7 @@ namespace AutopilotMonitor.Functions.Functions.Admin
         {
             try
             {
-                if (!TenantHelper.IsAuthenticated(req))
-                    return await UnauthorizedAsync(req);
-
-                var userIdentifier = TenantHelper.GetUserIdentifier(req);
-                if (!await _galacticAdminService.IsGalacticAdminAsync(userIdentifier))
-                    return await ForbiddenAsync(req);
+                // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
 
                 var rules = await _blockedVersionService.GetBlockedVersionsAsync();
 
@@ -63,12 +55,8 @@ namespace AutopilotMonitor.Functions.Functions.Admin
         {
             try
             {
-                if (!TenantHelper.IsAuthenticated(req))
-                    return await UnauthorizedAsync(req);
-
+                // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
                 var userIdentifier = TenantHelper.GetUserIdentifier(req);
-                if (!await _galacticAdminService.IsGalacticAdminAsync(userIdentifier))
-                    return await ForbiddenAsync(req);
 
                 string body;
                 using (var reader = new System.IO.StreamReader(req.Body))
@@ -130,12 +118,8 @@ namespace AutopilotMonitor.Functions.Functions.Admin
         {
             try
             {
-                if (!TenantHelper.IsAuthenticated(req))
-                    return await UnauthorizedAsync(req);
-
+                // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
                 var userIdentifier = TenantHelper.GetUserIdentifier(req);
-                if (!await _galacticAdminService.IsGalacticAdminAsync(userIdentifier))
-                    return await ForbiddenAsync(req);
 
                 var versionPattern = Uri.UnescapeDataString(encodedPattern ?? string.Empty);
                 if (string.IsNullOrEmpty(versionPattern))
@@ -163,20 +147,6 @@ namespace AutopilotMonitor.Functions.Functions.Admin
         // -----------------------------------------------------------------------
         // Helpers
         // -----------------------------------------------------------------------
-
-        private static async Task<HttpResponseData> UnauthorizedAsync(HttpRequestData req)
-        {
-            var r = req.CreateResponse(HttpStatusCode.Unauthorized);
-            await r.WriteAsJsonAsync(new { success = false, message = "Authentication required." });
-            return r;
-        }
-
-        private static async Task<HttpResponseData> ForbiddenAsync(HttpRequestData req)
-        {
-            var r = req.CreateResponse(HttpStatusCode.Forbidden);
-            await r.WriteAsJsonAsync(new { success = false, message = "Access denied. Only Galactic Admins can manage version blocks." });
-            return r;
-        }
 
         private static async Task<HttpResponseData> BadRequestAsync(HttpRequestData req, string message)
         {

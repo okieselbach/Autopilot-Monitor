@@ -11,16 +11,13 @@ namespace AutopilotMonitor.Functions.Functions.Admin
     {
         private readonly ILogger<GetGalacticAuditLogsFunction> _logger;
         private readonly TableStorageService _storageService;
-        private readonly GalacticAdminService _galacticAdminService;
 
         public GetGalacticAuditLogsFunction(
             ILogger<GetGalacticAuditLogsFunction> logger,
-            TableStorageService storageService,
-            GalacticAdminService galacticAdminService)
+            TableStorageService storageService)
         {
             _logger = logger;
             _storageService = storageService;
-            _galacticAdminService = galacticAdminService;
         }
 
         [Function("GetGalacticAuditLogs")]
@@ -31,34 +28,8 @@ namespace AutopilotMonitor.Functions.Functions.Admin
 
             try
             {
-                // Validate authentication
-                if (!TenantHelper.IsAuthenticated(req))
-                {
-                    _logger.LogWarning("Unauthenticated GetGalacticAuditLogs attempt");
-                    var unauthorizedResponse = req.CreateResponse(HttpStatusCode.Unauthorized);
-                    await unauthorizedResponse.WriteAsJsonAsync(new
-                    {
-                        success = false,
-                        message = "Authentication required. Please provide a valid JWT token."
-                    });
-                    return unauthorizedResponse;
-                }
-
-                // Check if user is Galactic Admin
+                // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
                 var userEmail = TenantHelper.GetUserIdentifier(req);
-                var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userEmail);
-
-                if (!isGalacticAdmin)
-                {
-                    _logger.LogWarning($"Non-Galactic Admin user {userEmail} attempted to access GetGalacticAuditLogs");
-                    var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-                    await forbiddenResponse.WriteAsJsonAsync(new
-                    {
-                        success = false,
-                        message = "Access denied. Galactic Admin role required."
-                    });
-                    return forbiddenResponse;
-                }
 
                 _logger.LogInformation($"Fetching all audit logs across all tenants (User: {userEmail})");
 

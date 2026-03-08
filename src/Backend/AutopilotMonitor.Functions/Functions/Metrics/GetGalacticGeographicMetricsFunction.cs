@@ -11,16 +11,13 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
     {
         private readonly ILogger<GetGalacticGeographicMetricsFunction> _logger;
         private readonly TableStorageService _storageService;
-        private readonly GalacticAdminService _galacticAdminService;
 
         public GetGalacticGeographicMetricsFunction(
             ILogger<GetGalacticGeographicMetricsFunction> logger,
-            TableStorageService storageService,
-            GalacticAdminService galacticAdminService)
+            TableStorageService storageService)
         {
             _logger = logger;
             _storageService = storageService;
-            _galacticAdminService = galacticAdminService;
         }
 
         [Function("GetGalacticGeographicMetrics")]
@@ -29,22 +26,8 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
         {
             try
             {
-                if (!TenantHelper.IsAuthenticated(req))
-                {
-                    var unauthorizedResponse = req.CreateResponse(HttpStatusCode.Unauthorized);
-                    await unauthorizedResponse.WriteAsJsonAsync(new { success = false, message = "Authentication required." });
-                    return unauthorizedResponse;
-                }
-
+                // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
                 var userEmail = TenantHelper.GetUserIdentifier(req);
-                var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userEmail);
-
-                if (!isGalacticAdmin)
-                {
-                    var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-                    await forbiddenResponse.WriteAsJsonAsync(new { success = false, message = "Access denied. Galactic Admin role required." });
-                    return forbiddenResponse;
-                }
 
                 _logger.LogInformation("Fetching galactic geographic metrics (User: {UserEmail})", userEmail);
 

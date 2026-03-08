@@ -16,32 +16,21 @@ namespace AutopilotMonitor.Functions.Functions.Rules
     {
         private readonly ILogger<GatherRulesFunction> _logger;
         private readonly GatherRuleService _ruleService;
-        private readonly TenantAdminsService _tenantAdminsService;
-        private readonly GalacticAdminService _galacticAdminService;
 
         public GatherRulesFunction(
             ILogger<GatherRulesFunction> logger,
-            GatherRuleService ruleService,
-            TenantAdminsService tenantAdminsService,
-            GalacticAdminService galacticAdminService)
+            GatherRuleService ruleService)
         {
             _logger = logger;
             _ruleService = ruleService;
-            _tenantAdminsService = tenantAdminsService;
-            _galacticAdminService = galacticAdminService;
         }
 
         [Function("GetGatherRules")]
         public async Task<HttpResponseData> GetRules(
             [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "rules/gather")] HttpRequestData req)
         {
-            var tenantId = TenantHelper.IsAuthenticated(req) ? TenantHelper.GetTenantId(req) : null;
-            if (string.IsNullOrEmpty(tenantId))
-            {
-                var unauthorized = req.CreateResponse(HttpStatusCode.Unauthorized);
-                await unauthorized.WriteAsJsonAsync(new { success = false, message = "Authentication required" });
-                return unauthorized;
-            }
+            // Authentication + MemberRead authorization enforced by PolicyEnforcementMiddleware
+            var tenantId = TenantHelper.GetTenantId(req);
 
             var rules = await _ruleService.GetAllRulesForTenantAsync(tenantId);
 
@@ -54,24 +43,8 @@ namespace AutopilotMonitor.Functions.Functions.Rules
         public async Task<HttpResponseData> CreateRule(
             [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "rules/gather")] HttpRequestData req)
         {
-            var tenantId = TenantHelper.IsAuthenticated(req) ? TenantHelper.GetTenantId(req) : null;
-            if (string.IsNullOrEmpty(tenantId))
-            {
-                var unauthorized = req.CreateResponse(HttpStatusCode.Unauthorized);
-                await unauthorized.WriteAsJsonAsync(new { success = false, message = "Authentication required" });
-                return unauthorized;
-            }
-
-            // Require Tenant Admin or Galactic Admin for rule modifications
-            var userIdentifier = TenantHelper.GetUserIdentifier(req);
-            var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userIdentifier);
-            var isTenantAdmin = await _tenantAdminsService.IsTenantAdminAsync(tenantId, userIdentifier);
-            if (!isGalacticAdmin && !isTenantAdmin)
-            {
-                var forbidden = req.CreateResponse(HttpStatusCode.Forbidden);
-                await forbidden.WriteAsJsonAsync(new { success = false, message = "Access denied. Tenant Admin or Galactic Admin role required." });
-                return forbidden;
-            }
+            // Authentication + TenantAdminOrGA authorization enforced by PolicyEnforcementMiddleware
+            var tenantId = TenantHelper.GetTenantId(req);
 
             if (req.Headers.TryGetValues("Content-Length", out var clValues)
                 && long.TryParse(clValues.FirstOrDefault(), out var contentLength)
@@ -103,24 +76,8 @@ namespace AutopilotMonitor.Functions.Functions.Rules
             [HttpTrigger(AuthorizationLevel.Anonymous, "put", Route = "rules/gather/{ruleId}")] HttpRequestData req,
             string ruleId)
         {
-            var tenantId = TenantHelper.IsAuthenticated(req) ? TenantHelper.GetTenantId(req) : null;
-            if (string.IsNullOrEmpty(tenantId))
-            {
-                var unauthorized = req.CreateResponse(HttpStatusCode.Unauthorized);
-                await unauthorized.WriteAsJsonAsync(new { success = false, message = "Authentication required" });
-                return unauthorized;
-            }
-
-            // Require Tenant Admin or Galactic Admin for rule modifications
-            var userIdentifier = TenantHelper.GetUserIdentifier(req);
-            var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userIdentifier);
-            var isTenantAdmin = await _tenantAdminsService.IsTenantAdminAsync(tenantId, userIdentifier);
-            if (!isGalacticAdmin && !isTenantAdmin)
-            {
-                var forbidden = req.CreateResponse(HttpStatusCode.Forbidden);
-                await forbidden.WriteAsJsonAsync(new { success = false, message = "Access denied. Tenant Admin or Galactic Admin role required." });
-                return forbidden;
-            }
+            // Authentication + TenantAdminOrGA authorization enforced by PolicyEnforcementMiddleware
+            var tenantId = TenantHelper.GetTenantId(req);
 
             if (req.Headers.TryGetValues("Content-Length", out var clValues2)
                 && long.TryParse(clValues2.FirstOrDefault(), out var contentLength2)
@@ -153,24 +110,8 @@ namespace AutopilotMonitor.Functions.Functions.Rules
             [HttpTrigger(AuthorizationLevel.Anonymous, "delete", Route = "rules/gather/{ruleId}")] HttpRequestData req,
             string ruleId)
         {
-            var tenantId = TenantHelper.IsAuthenticated(req) ? TenantHelper.GetTenantId(req) : null;
-            if (string.IsNullOrEmpty(tenantId))
-            {
-                var unauthorized = req.CreateResponse(HttpStatusCode.Unauthorized);
-                await unauthorized.WriteAsJsonAsync(new { success = false, message = "Authentication required" });
-                return unauthorized;
-            }
-
-            // Require Tenant Admin or Galactic Admin for rule modifications
-            var userIdentifier = TenantHelper.GetUserIdentifier(req);
-            var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userIdentifier);
-            var isTenantAdmin = await _tenantAdminsService.IsTenantAdminAsync(tenantId, userIdentifier);
-            if (!isGalacticAdmin && !isTenantAdmin)
-            {
-                var forbidden = req.CreateResponse(HttpStatusCode.Forbidden);
-                await forbidden.WriteAsJsonAsync(new { success = false, message = "Access denied. Tenant Admin or Galactic Admin role required." });
-                return forbidden;
-            }
+            // Authentication + TenantAdminOrGA authorization enforced by PolicyEnforcementMiddleware
+            var tenantId = TenantHelper.GetTenantId(req);
 
             // Load the rule to determine its type (built-in/community vs. custom)
             var rules = await _ruleService.GetAllRulesForTenantAsync(tenantId);

@@ -13,19 +13,13 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
     {
         private readonly ILogger<MarkSessionFailedFunction> _logger;
         private readonly TableStorageService _storageService;
-        private readonly TenantAdminsService _tenantAdminsService;
-        private readonly GalacticAdminService _galacticAdminService;
 
         public MarkSessionFailedFunction(
             ILogger<MarkSessionFailedFunction> logger,
-            TableStorageService storageService,
-            TenantAdminsService tenantAdminsService,
-            GalacticAdminService galacticAdminService)
+            TableStorageService storageService)
         {
             _logger = logger;
             _storageService = storageService;
-            _tenantAdminsService = tenantAdminsService;
-            _galacticAdminService = galacticAdminService;
         }
 
         [Function("MarkSessionFailed")]
@@ -37,36 +31,9 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
 
             try
             {
-                // Validate authentication
-                if (!TenantHelper.IsAuthenticated(req))
-                {
-                    _logger.LogWarning($"Unauthenticated MarkSessionFailed attempt for session {sessionId}");
-                    var unauthorizedResponse = req.CreateResponse(HttpStatusCode.Unauthorized);
-                    await unauthorizedResponse.WriteAsJsonAsync(new
-                    {
-                        success = false,
-                        message = "Authentication required. Please provide a valid JWT token."
-                    });
-                    return new MarkSessionFailedOutput { HttpResponse = unauthorizedResponse };
-                }
-
+                // Authentication + TenantAdminOrGA authorization enforced by PolicyEnforcementMiddleware
                 string tenantId = TenantHelper.GetTenantId(req);
                 string userIdentifier = TenantHelper.GetUserIdentifier(req);
-
-                // Require Tenant Admin or Galactic Admin for status modifications
-                var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userIdentifier);
-                var isTenantAdmin = await _tenantAdminsService.IsTenantAdminAsync(tenantId, userIdentifier);
-                if (!isGalacticAdmin && !isTenantAdmin)
-                {
-                    _logger.LogWarning($"Non-admin user {userIdentifier} attempted to mark session {sessionId} as failed");
-                    var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-                    await forbiddenResponse.WriteAsJsonAsync(new
-                    {
-                        success = false,
-                        message = "Access denied. Tenant Admin or Galactic Admin role required."
-                    });
-                    return new MarkSessionFailedOutput { HttpResponse = forbiddenResponse };
-                }
 
                 _logger.LogInformation($"Marking session {sessionId} as failed for tenant {tenantId} by user {userIdentifier}");
 

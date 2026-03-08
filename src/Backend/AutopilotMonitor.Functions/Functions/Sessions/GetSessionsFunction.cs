@@ -26,21 +26,7 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
 
             try
             {
-                // Validate authentication
-                if (!TenantHelper.IsAuthenticated(req))
-                {
-                    _logger.LogWarning("Unauthenticated GetSessions attempt");
-                    var unauthorizedResponse = req.CreateResponse(HttpStatusCode.Unauthorized);
-                    await unauthorizedResponse.WriteAsJsonAsync(new
-                    {
-                        success = false,
-                        message = "Authentication required. Please provide a valid JWT token.",
-                        count = 0,
-                        sessions = Array.Empty<object>()
-                    });
-                    return unauthorizedResponse;
-                }
-
+                // Authentication + MemberRead authorization enforced by PolicyEnforcementMiddleware
                 var tenantId = TenantHelper.GetTenantId(req);
 
                 _logger.LogInformation($"Fetching sessions for tenant {tenantId}");
