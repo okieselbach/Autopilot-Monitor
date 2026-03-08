@@ -26,28 +26,41 @@ namespace AutopilotMonitor.SummaryDialog
 
         public MainWindow()
         {
+            App.Log("MainWindow constructor — InitializeComponent");
             InitializeComponent();
+            App.Log("MainWindow constructor — done");
         }
 
         private async void Window_Loaded(object sender, RoutedEventArgs e)
         {
-            _isDarkTheme = App.ForceTheme ?? DetectDarkTheme();
-            if (_isDarkTheme)
-                ApplyDarkTheme();
-
-            ApplyScrollBarStyle();
-            ApplyContentClip();
-            ApplyTaskbarIcon();
-
-            LoadStatusData();
-            RenderOutcome();
-            RenderAppList();
-            StartCountdown();
-
-            // Load branding image (async, best-effort)
-            if (!string.IsNullOrEmpty(App.BrandingImageUrl))
+            App.Log("Window_Loaded — start");
+            try
             {
-                await LoadBrandingImageAsync();
+                _isDarkTheme = App.ForceTheme ?? DetectDarkTheme();
+                App.Log($"Theme: isDark={_isDarkTheme} (forced={App.ForceTheme})");
+                if (_isDarkTheme)
+                    ApplyDarkTheme();
+
+                ApplyScrollBarStyle();
+                ApplyContentClip();
+                ApplyTaskbarIcon();
+
+                LoadStatusData();
+                RenderOutcome();
+                RenderAppList();
+                StartCountdown();
+
+                // Load branding image (async, best-effort)
+                if (!string.IsNullOrEmpty(App.BrandingImageUrl))
+                {
+                    await LoadBrandingImageAsync();
+                }
+
+                App.Log("Window_Loaded — complete, window should be visible");
+            }
+            catch (Exception ex)
+            {
+                App.LogError($"Window_Loaded FAILED: {ex}");
             }
         }
 
@@ -59,10 +72,16 @@ namespace AutopilotMonitor.SummaryDialog
                 {
                     var json = File.ReadAllText(App.StatusFilePath);
                     _status = JsonConvert.DeserializeObject<FinalStatus>(json);
+                    App.Log($"LoadStatusData: outcome={_status?.Outcome} apps={_status?.AppSummary?.TotalApps}");
+                }
+                else
+                {
+                    App.Log($"LoadStatusData: status file missing or empty (path={App.StatusFilePath})");
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                App.LogError($"LoadStatusData FAILED: {ex.Message}");
                 _status = null;
             }
         }
@@ -277,9 +296,9 @@ namespace AutopilotMonitor.SummaryDialog
                     BrandingBanner.Visibility = Visibility.Visible;
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // Best-effort: skip banner on any error
+                App.Log($"LoadBrandingImage: skipped ({ex.Message})");
                 BrandingBanner.Visibility = Visibility.Collapsed;
             }
         }
@@ -479,11 +498,14 @@ namespace AutopilotMonitor.SummaryDialog
                     @"SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize"))
                 {
                     var value = key?.GetValue("AppsUseLightTheme");
-                    return value is int i && i == 0;
+                    var isDark = value is int i && i == 0;
+                    App.Log($"DetectDarkTheme: AppsUseLightTheme={value} → isDark={isDark}");
+                    return isDark;
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                App.Log($"DetectDarkTheme: registry read failed ({ex.Message}), defaulting to light");
                 return false;
             }
         }

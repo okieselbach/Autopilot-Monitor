@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Text;
 using System.Windows;
 
 namespace AutopilotMonitor.SummaryDialog
@@ -13,6 +14,8 @@ namespace AutopilotMonitor.SummaryDialog
         internal static bool? ForceTheme { get; private set; } // true=dark, false=light, null=auto
 
         private static string _logFile;
+        private static string _tempLogFile; // error log in %TEMP% (survives self-cleanup)
+        private static bool _hadErrors;
 
         public App()
         {
@@ -23,19 +26,59 @@ namespace AutopilotMonitor.SummaryDialog
                 var exeDir = Path.GetDirectoryName(
                     System.Reflection.Assembly.GetExecutingAssembly().Location) ?? ".";
                 _logFile = Path.Combine(exeDir, "SummaryDialog.log");
+
+                // Error log in user's temp folder — survives self-cleanup for troubleshooting
+                try { _tempLogFile = Path.Combine(Path.GetTempPath(), "SummaryDialog-error.log"); }
+                catch { /* temp path unavailable */ }
+
                 Log("App constructor — process started");
+                LogDiagnostics();
             }
-            catch { }
+            catch (Exception ex)
+            {
+                LogError($"App constructor failed: {ex}");
+            }
 
             AppDomain.CurrentDomain.UnhandledException += (s, e) =>
             {
-                Log($"UNHANDLED EXCEPTION: {e.ExceptionObject}");
+                LogError($"UNHANDLED EXCEPTION: {e.ExceptionObject}");
             };
 
             DispatcherUnhandledException += (s, e) =>
             {
-                Log($"DISPATCHER EXCEPTION: {e.Exception}");
+                LogError($"DISPATCHER EXCEPTION: {e.Exception}");
+                e.Handled = true; // prevent uncontrolled crash, ensure OnExit runs
+                try { Shutdown(1); } catch { }
             };
+        }
+
+        private void LogDiagnostics()
+        {
+            try
+            {
+                var proc = Process.GetCurrentProcess();
+                Log($"PID={proc.Id} SessionId={proc.SessionId}");
+
+                // Session 0 = SYSTEM session — window will NOT be visible to the user
+                if (proc.SessionId == 0)
+                    LogError("CRITICAL: Process is in Session 0 (SYSTEM) — window will NOT be visible!");
+
+                Log($"User: {Environment.UserDomainName}\\{Environment.UserName}");
+                Log($"CommandLine: {Environment.CommandLine}");
+                Log($"ExeDir: {Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location)}");
+                Log($"Temp: {Path.GetTempPath()}");
+                Log($"Is64Bit: {Environment.Is64BitProcess} OS: {Environment.OSVersion}");
+
+                // Check if critical dependency exists
+                var exeDir = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
+                var jsonDll = Path.Combine(exeDir ?? ".", "Newtonsoft.Json.dll");
+                if (!File.Exists(jsonDll))
+                    LogError($"Newtonsoft.Json.dll NOT FOUND at {jsonDll}");
+            }
+            catch (Exception ex)
+            {
+                LogError($"LogDiagnostics failed: {ex.Message}");
+            }
         }
 
         protected override void OnStartup(StartupEventArgs e)
@@ -49,6 +92,7 @@ namespace AutopilotMonitor.SummaryDialog
         {
             Log("OnExit — shutting down");
             base.OnExit(e);
+            CleanupTempErrorLog();
             SelfCleanup();
         }
 
@@ -84,8 +128,9 @@ namespace AutopilotMonitor.SummaryDialog
         }
 
         /// <summary>
-        /// Self-cleanup: delete the temp folder this EXE was launched from.
-        /// Uses a cmd.exe script that waits for our process to exit, then deletes the folder.
+        /// Self-cleanup: delete the staging folder this EXE was launched from.
+        /// Uses PowerShell Wait-Process to cleanly wait for our process to exit,
+        /// then deletes the folder. No polling loops or race conditions.
         /// </summary>
         private void SelfCleanup()
         {
@@ -110,23 +155,44 @@ namespace AutopilotMonitor.SummaryDialog
                     return;
 
                 var pid = Process.GetCurrentProcess().Id;
-                // Wait for our process to exit, then delete the temp folder
-                var script = $@"/c tasklist /fi ""PID eq {pid}"" 2>nul | find ""{pid}"" >nul && (ping 127.0.0.1 -n 3 >nul) & rd /s /q ""{exeDir}""";
+
+                // PowerShell Wait-Process: waits for our process to actually exit (no polling),
+                // then deletes the staging folder. 60s timeout as safety net.
+                var psScript = $"Wait-Process -Id {pid} -Timeout 60 -ErrorAction SilentlyContinue; " +
+                               $"Start-Sleep -Seconds 1; " +
+                               $"Remove-Item -LiteralPath '{exeDir}' -Recurse -Force -ErrorAction SilentlyContinue";
+                var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(psScript));
+
+                Log($"SelfCleanup: spawning PowerShell to delete '{exeDir}' after PID {pid} exits");
 
                 var psi = new ProcessStartInfo
                 {
-                    FileName = "cmd.exe",
-                    Arguments = script,
+                    FileName = "powershell.exe",
+                    Arguments = $"-NoProfile -NonInteractive -EncodedCommand {encoded}",
                     WindowStyle = ProcessWindowStyle.Hidden,
                     CreateNoWindow = true,
                     UseShellExecute = false
                 };
                 Process.Start(psi);
             }
-            catch
+            catch (Exception ex)
             {
+                Log($"SelfCleanup failed: {ex.Message}");
                 // Best-effort cleanup, ignore errors
             }
+        }
+
+        /// <summary>
+        /// Delete the temp error log if no errors occurred (no traces on success).
+        /// </summary>
+        private void CleanupTempErrorLog()
+        {
+            try
+            {
+                if (!_hadErrors && _tempLogFile != null && File.Exists(_tempLogFile))
+                    File.Delete(_tempLogFile);
+            }
+            catch { }
         }
 
         internal static void Log(string message)
@@ -135,6 +201,23 @@ namespace AutopilotMonitor.SummaryDialog
             {
                 if (_logFile != null)
                     File.AppendAllText(_logFile,
+                        $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] {message}{Environment.NewLine}");
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// Log an error to both the main log and the temp error log.
+        /// The temp error log survives self-cleanup for post-mortem troubleshooting.
+        /// </summary>
+        internal static void LogError(string message)
+        {
+            _hadErrors = true;
+            Log(message);
+            try
+            {
+                if (_tempLogFile != null)
+                    File.AppendAllText(_tempLogFile,
                         $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] {message}{Environment.NewLine}");
             }
             catch { }
