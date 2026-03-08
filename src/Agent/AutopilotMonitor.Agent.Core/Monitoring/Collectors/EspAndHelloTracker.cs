@@ -35,6 +35,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         private System.Threading.Timer _policyCheckTimer;
         private System.Threading.Timer _helloWaitTimer;
         private System.Threading.Timer _helloCompletionTimer;
+        private System.Threading.Timer _provisioningStatusTimer;
 
         private bool _isPolicyConfigured = false;
         private bool _isHelloPolicyEnabled = false; // true when Hello policy is explicitly detected as enabled
@@ -178,6 +179,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 
             // Safety net: backfill recent terminal events in case watcher started late or event delivery lagged.
             BackfillRecentTerminalHelloEvents();
+
+            // Poll ESP provisioning category status from registry
+            // (catches failures that Shell-Core event 62407 patterns miss, e.g. Certificate failures)
+            StartProvisioningStatusPolling();
         }
 
         public void Stop()
@@ -241,6 +246,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     _logger.Error("Error stopping ESP and Hello tracker watcher", ex);
                 }
             }
+
+            // Stop provisioning status polling timer
+            StopProvisioningStatusPolling("tracker_stopped");
 
             // Stop Shell-Core/Operational watcher
             if (_shellCoreWatcher != null)
