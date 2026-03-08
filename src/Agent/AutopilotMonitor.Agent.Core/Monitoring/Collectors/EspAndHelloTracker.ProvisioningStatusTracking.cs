@@ -145,22 +145,37 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                 {
                     var root = doc.RootElement;
 
-                    // Extract core fields
+                    // Extract core fields — defensive against unexpected JSON value types
                     bool? categorySucceeded = null;
                     string categoryStatusMessage = null;
 
                     if (root.TryGetProperty("categorySucceeded", out var succeededProp))
-                        categorySucceeded = succeededProp.GetBoolean();
+                    {
+                        if (succeededProp.ValueKind == JsonValueKind.True)
+                            categorySucceeded = true;
+                        else if (succeededProp.ValueKind == JsonValueKind.False)
+                            categorySucceeded = false;
+                        else if (succeededProp.ValueKind == JsonValueKind.String
+                            && bool.TryParse(succeededProp.GetString(), out var parsed))
+                            categorySucceeded = parsed;
+                    }
 
-                    if (root.TryGetProperty("categoryStatusMessage", out var messageProp))
+                    if (root.TryGetProperty("categoryStatusMessage", out var messageProp)
+                        && messageProp.ValueKind == JsonValueKind.String)
+                    {
                         categoryStatusMessage = messageProp.GetString();
+                    }
 
-                    // Collect subcategory details
+                    // Collect subcategory details — values can be strings or objects, use ToString() as fallback
                     var subcategories = new Dictionary<string, string>();
                     foreach (var prop in root.EnumerateObject())
                     {
                         if (prop.Name.Contains("Subcategory", StringComparison.OrdinalIgnoreCase))
-                            subcategories[prop.Name] = prop.Value.GetString() ?? "";
+                        {
+                            subcategories[prop.Name] = prop.Value.ValueKind == JsonValueKind.String
+                                ? prop.Value.GetString() ?? ""
+                                : prop.Value.ToString();
+                        }
                     }
 
                     // Determine severity based on outcome
