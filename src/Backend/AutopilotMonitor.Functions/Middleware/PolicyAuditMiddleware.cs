@@ -115,11 +115,9 @@ public class PolicyAuditMiddleware : IFunctionsWorkerMiddleware
             principal = cp;
         }
 
-        var userIdentifier = principal?.FindFirst("upn")?.Value
-                          ?? principal?.FindFirst("preferred_username")?.Value
-                          ?? "anonymous";
         var tenantId = principal?.GetTenantId();
         var upn = principal?.GetUserPrincipalName();
+        var userIdentifier = upn ?? "anonymous";
 
         switch (entry.Policy)
         {
