@@ -111,10 +111,26 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                         return false;
                     }
 
-                    // Close the process and thread handles — we don't need them (fire-and-forget)
-                    NativeMethods.CloseHandle(pi.hProcess);
+                    // Close the thread handle — we don't need it
                     NativeMethods.CloseHandle(pi.hThread);
 
+                    logger.Info($"UserSessionProcessLauncher: Created process PID {pi.dwProcessId} in user session — verifying startup...");
+
+                    // Verify the process actually started (CLR initialized, no immediate crash).
+                    // If the process dies within 3 seconds, the exit code tells us exactly why
+                    // (e.g. 0xC0000135 = DLL not found, 0xC000007B = invalid image format,
+                    //  0xE0434352 = .NET unhandled exception, 0x80131522 = fusion/assembly load error).
+                    var waitResult = NativeMethods.WaitForSingleObject(pi.hProcess, 3000);
+                    if (waitResult != NativeMethods.WAIT_TIMEOUT)
+                    {
+                        NativeMethods.GetExitCodeProcess(pi.hProcess, out var exitCode);
+                        NativeMethods.CloseHandle(pi.hProcess);
+                        logger.Warning($"UserSessionProcessLauncher: Process PID {pi.dwProcessId} exited within 3s — " +
+                                       $"exit code 0x{exitCode:X8} (startup crash or missing dependency)");
+                        return false;
+                    }
+
+                    NativeMethods.CloseHandle(pi.hProcess);
                     logger.Info($"UserSessionProcessLauncher: Successfully launched process PID {pi.dwProcessId} in user session");
                     return true;
                 }
@@ -325,6 +341,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 
             [DllImport("kernel32.dll", SetLastError = true)]
             public static extern bool CloseHandle(IntPtr hObject);
+
+            [DllImport("kernel32.dll")]
+            public static extern uint WaitForSingleObject(IntPtr hHandle, uint dwMilliseconds);
+
+            [DllImport("kernel32.dll", SetLastError = true)]
+            public static extern bool GetExitCodeProcess(IntPtr hProcess, out uint lpExitCode);
+
+            public const uint WAIT_TIMEOUT = 258;
         }
     }
 }
