@@ -16,18 +16,15 @@ namespace AutopilotMonitor.Functions.Functions.Config
     {
         private readonly ILogger<UpdateTenantConfigurationFunction> _logger;
         private readonly TenantConfigurationService _configService;
-        private readonly TenantAdminsService _tenantAdminsService;
         private readonly GalacticAdminService _galacticAdminService;
 
         public UpdateTenantConfigurationFunction(
             ILogger<UpdateTenantConfigurationFunction> logger,
             TenantConfigurationService configService,
-            TenantAdminsService tenantAdminsService,
             GalacticAdminService galacticAdminService)
         {
             _logger = logger;
             _configService = configService;
-            _tenantAdminsService = tenantAdminsService;
             _galacticAdminService = galacticAdminService;
         }
 
@@ -38,27 +35,18 @@ namespace AutopilotMonitor.Functions.Functions.Config
         {
             try
             {
-                // Validate authentication
-                if (!TenantHelper.IsAuthenticated(req))
-                {
-                    _logger.LogWarning($"Unauthenticated UpdateTenantConfiguration attempt for tenant {tenantId}");
-                    var unauthorizedResponse = req.CreateResponse(HttpStatusCode.Unauthorized);
-                    await unauthorizedResponse.WriteAsJsonAsync(new
-                    {
-                        success = false,
-                        message = "Authentication required. Please provide a valid JWT token."
-                    });
-                    return unauthorizedResponse;
-                }
-
-                // Get tenant ID from JWT token and validate access
+                // Authentication + TenantAdminOrGA authorization enforced by PolicyEnforcementMiddleware
                 string authenticatedTenantId = TenantHelper.GetTenantId(req);
                 string userIdentifier = TenantHelper.GetUserIdentifier(req);
 
-                // Validate tenant access: User can only update their own tenant's configuration
-                if (authenticatedTenantId != tenantId)
+                // GA check needed for: cross-tenant bypass + protected field filtering
+                var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userIdentifier);
+
+                // Validate tenant access: cross-tenant only for Galactic Admins
+                if (!isGalacticAdmin && !string.Equals(authenticatedTenantId, tenantId, StringComparison.OrdinalIgnoreCase))
                 {
-                    _logger.LogWarning($"User {userIdentifier} from tenant {authenticatedTenantId} attempted to update configuration for tenant {tenantId}");
+                    _logger.LogWarning("User {User} from tenant {AuthTenant} attempted to update configuration for tenant {TargetTenant}",
+                        userIdentifier, authenticatedTenantId, tenantId);
                     var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
                     await forbiddenResponse.WriteAsJsonAsync(new
                     {
@@ -68,22 +56,7 @@ namespace AutopilotMonitor.Functions.Functions.Config
                     return forbiddenResponse;
                 }
 
-                // Require Tenant Admin or Galactic Admin for configuration changes
-                var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userIdentifier);
-                var isTenantAdmin = await _tenantAdminsService.IsTenantAdminAsync(tenantId, userIdentifier);
-                if (!isGalacticAdmin && !isTenantAdmin)
-                {
-                    _logger.LogWarning($"Non-admin user {userIdentifier} attempted to update configuration for tenant {tenantId}");
-                    var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-                    await forbiddenResponse.WriteAsJsonAsync(new
-                    {
-                        success = false,
-                        message = "Access denied. Tenant Admin or Galactic Admin role required."
-                    });
-                    return forbiddenResponse;
-                }
-
-                _logger.LogInformation($"UpdateTenantConfiguration: {tenantId} by user {userIdentifier}");
+                _logger.LogInformation("UpdateTenantConfiguration: {TenantId} by user {User}", tenantId, userIdentifier);
 
                 // Parse request body
                 if (req.Headers.TryGetValues("Content-Length", out var clValues)

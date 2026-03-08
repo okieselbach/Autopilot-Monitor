@@ -37,13 +37,7 @@ namespace AutopilotMonitor.Functions.Functions.Rules
             [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "sessions/{sessionId}/analysis")] HttpRequestData req,
             string sessionId)
         {
-            if (!TenantHelper.IsAuthenticated(req))
-            {
-                var unauthorized = req.CreateResponse(HttpStatusCode.Unauthorized);
-                await unauthorized.WriteAsJsonAsync(new { success = false, message = "Authentication required" });
-                return unauthorized;
-            }
-
+            // Authentication + MemberRead authorization enforced by PolicyEnforcementMiddleware
             var userTenantId = TenantHelper.GetTenantId(req);
             var userIdentifier = TenantHelper.GetUserIdentifier(req);
 

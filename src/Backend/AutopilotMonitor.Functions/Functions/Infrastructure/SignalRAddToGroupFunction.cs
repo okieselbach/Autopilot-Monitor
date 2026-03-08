@@ -28,14 +28,7 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure
         {
             try
             {
-                // Validate authentication
-                if (!TenantHelper.IsAuthenticated(req))
-                {
-                    _logger.LogWarning("Unauthenticated AddToGroup attempt");
-                    var unauthorizedResponse = req.CreateResponse(HttpStatusCode.Unauthorized);
-                    await unauthorizedResponse.WriteAsJsonAsync(new { success = false, message = "Authentication required" });
-                    return new AddToGroupOutput { HttpResponse = unauthorizedResponse };
-                }
+                // Authentication + AuthenticatedUser authorization enforced by PolicyEnforcementMiddleware
 
                 // Parse request
                 if (req.Headers.TryGetValues("Content-Length", out var clValues)

@@ -16,16 +16,13 @@ namespace AutopilotMonitor.Functions.Functions.Config
     {
         private readonly ILogger<UpdateAdminConfigurationFunction> _logger;
         private readonly AdminConfigurationService _adminConfigService;
-        private readonly GalacticAdminService _galacticAdminService;
 
         public UpdateAdminConfigurationFunction(
             ILogger<UpdateAdminConfigurationFunction> logger,
-            AdminConfigurationService adminConfigService,
-            GalacticAdminService galacticAdminService)
+            AdminConfigurationService adminConfigService)
         {
             _logger = logger;
             _adminConfigService = adminConfigService;
-            _galacticAdminService = galacticAdminService;
         }
 
         [Function("UpdateAdminConfiguration")]
@@ -34,35 +31,8 @@ namespace AutopilotMonitor.Functions.Functions.Config
         {
             try
             {
-                // Validate authentication
-                if (!TenantHelper.IsAuthenticated(req))
-                {
-                    _logger.LogWarning("Unauthenticated UpdateAdminConfiguration attempt");
-                    var unauthorizedResponse = req.CreateResponse(HttpStatusCode.Unauthorized);
-                    await unauthorizedResponse.WriteAsJsonAsync(new
-                    {
-                        success = false,
-                        message = "Authentication required. Please provide a valid JWT token."
-                    });
-                    return unauthorizedResponse;
-                }
-
-                // Get tenant ID and user identifier from JWT token
-                string tenantId = TenantHelper.GetTenantId(req);
+                // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
                 string userIdentifier = TenantHelper.GetUserIdentifier(req);
-
-                // Validate Galactic Admin role
-                if (!await _galacticAdminService.IsGalacticAdminAsync(userIdentifier))
-                {
-                    _logger.LogWarning($"Non-Galactic Admin user {userIdentifier} from tenant {tenantId} attempted to update admin configuration");
-                    var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-                    await forbiddenResponse.WriteAsJsonAsync(new
-                    {
-                        success = false,
-                        message = "Access denied. Only Galactic Admins can modify global configuration."
-                    });
-                    return forbiddenResponse;
-                }
 
                 _logger.LogInformation($"UpdateAdminConfiguration by Galactic Admin user {userIdentifier}");
 

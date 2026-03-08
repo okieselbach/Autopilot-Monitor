@@ -17,26 +17,19 @@ namespace AutopilotMonitor.Functions.Functions.Rules
     {
         private readonly ILogger<ImeLogPatternsFunction> _logger;
         private readonly ImeLogPatternService _patternService;
-        private readonly GalacticAdminService _galacticAdminService;
 
-        public ImeLogPatternsFunction(ILogger<ImeLogPatternsFunction> logger, ImeLogPatternService patternService, GalacticAdminService galacticAdminService)
+        public ImeLogPatternsFunction(ILogger<ImeLogPatternsFunction> logger, ImeLogPatternService patternService)
         {
             _logger = logger;
             _patternService = patternService;
-            _galacticAdminService = galacticAdminService;
         }
 
         [Function("GetImeLogPatterns")]
         public async Task<HttpResponseData> GetPatterns(
             [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "rules/ime-log-patterns")] HttpRequestData req)
         {
-            var tenantId = TenantHelper.IsAuthenticated(req) ? TenantHelper.GetTenantId(req) : null;
-            if (string.IsNullOrEmpty(tenantId))
-            {
-                var unauthorized = req.CreateResponse(HttpStatusCode.Unauthorized);
-                await unauthorized.WriteAsJsonAsync(new { success = false, message = "Authentication required" });
-                return unauthorized;
-            }
+            // Authentication + MemberRead authorization enforced by PolicyEnforcementMiddleware
+            var tenantId = TenantHelper.GetTenantId(req);
 
             var patterns = await _patternService.GetAllPatternsForTenantAsync(tenantId);
 
@@ -50,29 +43,14 @@ namespace AutopilotMonitor.Functions.Functions.Rules
             [HttpTrigger(AuthorizationLevel.Anonymous, "put", Route = "rules/ime-log-patterns/{patternId}")] HttpRequestData req,
             string patternId)
         {
-            var tenantId = TenantHelper.IsAuthenticated(req) ? TenantHelper.GetTenantId(req) : null;
-            if (string.IsNullOrEmpty(tenantId))
-            {
-                var unauthorized = req.CreateResponse(HttpStatusCode.Unauthorized);
-                await unauthorized.WriteAsJsonAsync(new { success = false, message = "Authentication required" });
-                return unauthorized;
-            }
+            // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
 
-            // Phase 1: Only global edits by Galactic Admins
+            // Phase 1: Only global edits
             var globalEdit = req.Url.Query.Contains("global=true", StringComparison.OrdinalIgnoreCase);
             if (!globalEdit)
             {
                 var forbidden = req.CreateResponse(HttpStatusCode.Forbidden);
-                await forbidden.WriteAsJsonAsync(new { success = false, message = "IME log pattern edits require ?global=true and Galactic Admin privileges" });
-                return forbidden;
-            }
-
-            var upn = TenantHelper.GetUserIdentifier(req);
-            var isGalactic = await _galacticAdminService.IsGalacticAdminAsync(upn);
-            if (!isGalactic)
-            {
-                var forbidden = req.CreateResponse(HttpStatusCode.Forbidden);
-                await forbidden.WriteAsJsonAsync(new { success = false, message = "Galactic Admin privileges required" });
+                await forbidden.WriteAsJsonAsync(new { success = false, message = "IME log pattern edits require ?global=true" });
                 return forbidden;
             }
 
@@ -108,20 +86,8 @@ namespace AutopilotMonitor.Functions.Functions.Rules
         {
             try
             {
-                if (!TenantHelper.IsAuthenticated(req))
-                {
-                    var unauthorized = req.CreateResponse(HttpStatusCode.Unauthorized);
-                    await unauthorized.WriteAsJsonAsync(new { success = false, message = "Authentication required" });
-                    return unauthorized;
-                }
-
+                // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
                 var upn = TenantHelper.GetUserIdentifier(req);
-                if (!await _galacticAdminService.IsGalacticAdminAsync(upn))
-                {
-                    var forbidden = req.CreateResponse(HttpStatusCode.Forbidden);
-                    await forbidden.WriteAsJsonAsync(new { success = false, message = "Galactic Admin privileges required" });
-                    return forbidden;
-                }
 
                 _logger.LogInformation($"Reseed IME log patterns triggered by Galactic Admin {upn}");
 

@@ -1,7 +1,6 @@
 using System;
 using System.Net;
 using System.Threading.Tasks;
-using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Services;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -13,16 +12,13 @@ namespace AutopilotMonitor.Functions.Functions.Admin
     {
         private readonly ILogger<GetAllBlockedDevicesFunction> _logger;
         private readonly BlockedDeviceService _blockedDeviceService;
-        private readonly GalacticAdminService _galacticAdminService;
 
         public GetAllBlockedDevicesFunction(
             ILogger<GetAllBlockedDevicesFunction> logger,
-            BlockedDeviceService blockedDeviceService,
-            GalacticAdminService galacticAdminService)
+            BlockedDeviceService blockedDeviceService)
         {
             _logger = logger;
             _blockedDeviceService = blockedDeviceService;
-            _galacticAdminService = galacticAdminService;
         }
 
         /// <summary>GET /api/galactic/devices/blocked — list all active blocks across all tenants</summary>
@@ -34,21 +30,7 @@ namespace AutopilotMonitor.Functions.Functions.Admin
 
             try
             {
-                if (!TenantHelper.IsAuthenticated(req))
-                {
-                    var unauthorizedResponse = req.CreateResponse(HttpStatusCode.Unauthorized);
-                    await unauthorizedResponse.WriteAsJsonAsync(new { success = false, message = "Authentication required." });
-                    return unauthorizedResponse;
-                }
-
-                var userEmail = TenantHelper.GetUserIdentifier(req);
-                if (!await _galacticAdminService.IsGalacticAdminAsync(userEmail))
-                {
-                    _logger.LogWarning("Non-Galactic Admin user {User} attempted to access GetAllBlockedDevices", userEmail);
-                    var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-                    await forbiddenResponse.WriteAsJsonAsync(new { success = false, message = "Access denied. Galactic Admin role required." });
-                    return forbiddenResponse;
-                }
+                // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
 
                 var blocked = await _blockedDeviceService.GetAllBlockedDevicesAsync();
 

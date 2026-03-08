@@ -19,9 +19,9 @@ var builder = FunctionsApplication.CreateBuilder(args);
 builder.ConfigureFunctionsWebApplication();
 
 // Register middleware pipeline (Azure Functions .NET 8 isolated worker pattern)
-// Order matters: authentication first, then member authorization
+// Order matters: authentication (401) → policy enforcement (403)
 builder.UseMiddleware<AuthenticationMiddleware>();
-builder.UseMiddleware<MemberAuthorizationMiddleware>();
+builder.UseMiddleware<PolicyEnforcementMiddleware>();
 
 // Configure JSON serialization to use camelCase
 builder.Services.Configure<JsonSerializerOptions>(options =>

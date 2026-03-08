@@ -217,21 +217,7 @@ public class AuthFunction
         [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "auth/galactic-admins")] HttpRequestData req,
         FunctionContext context)
     {
-        var principal = context.GetUser();
-        if (principal == null)
-        {
-            return req.CreateResponse(HttpStatusCode.Unauthorized);
-        }
-
-        var upn = principal.GetUserPrincipalName();
-        var isAdmin = await _galacticAdminService.IsGalacticAdminAsync(upn);
-
-        if (!isAdmin)
-        {
-            var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-            await forbiddenResponse.WriteAsJsonAsync(new { error = "Only Galactic Admins can access this endpoint" });
-            return forbiddenResponse;
-        }
+        // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
 
         var admins = await _galacticAdminService.GetAllGalacticAdminsAsync();
 
@@ -250,21 +236,9 @@ public class AuthFunction
         [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "auth/galactic-admins")] HttpRequestData req,
         FunctionContext context)
     {
+        // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
         var principal = context.GetUser();
-        if (principal == null)
-        {
-            return req.CreateResponse(HttpStatusCode.Unauthorized);
-        }
-
-        var currentUpn = principal.GetUserPrincipalName();
-        var isAdmin = await _galacticAdminService.IsGalacticAdminAsync(currentUpn);
-
-        if (!isAdmin)
-        {
-            var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-            await forbiddenResponse.WriteAsJsonAsync(new { error = "Only Galactic Admins can add other admins" });
-            return forbiddenResponse;
-        }
+        var currentUpn = principal?.GetUserPrincipalName();
 
         // Parse request body
         var body = await req.ReadFromJsonAsync<AddGalacticAdminRequest>();
@@ -295,21 +269,9 @@ public class AuthFunction
         string upn,
         FunctionContext context)
     {
+        // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
         var principal = context.GetUser();
-        if (principal == null)
-        {
-            return req.CreateResponse(HttpStatusCode.Unauthorized);
-        }
-
-        var currentUpn = principal.GetUserPrincipalName();
-        var isAdmin = await _galacticAdminService.IsGalacticAdminAsync(currentUpn);
-
-        if (!isAdmin)
-        {
-            var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-            await forbiddenResponse.WriteAsJsonAsync(new { error = "Only Galactic Admins can remove other admins" });
-            return forbiddenResponse;
-        }
+        var currentUpn = principal?.GetUserPrincipalName();
 
         // Prevent self-removal
         if (upn.Equals(currentUpn, StringComparison.OrdinalIgnoreCase))

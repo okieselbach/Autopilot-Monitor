@@ -15,16 +15,13 @@ namespace AutopilotMonitor.Functions.Functions.Admin
     {
         private readonly ILogger<DeviceBlockFunction> _logger;
         private readonly BlockedDeviceService _blockedDeviceService;
-        private readonly GalacticAdminService _galacticAdminService;
 
         public DeviceBlockFunction(
             ILogger<DeviceBlockFunction> logger,
-            BlockedDeviceService blockedDeviceService,
-            GalacticAdminService galacticAdminService)
+            BlockedDeviceService blockedDeviceService)
         {
             _logger = logger;
             _blockedDeviceService = blockedDeviceService;
-            _galacticAdminService = galacticAdminService;
         }
 
         /// <summary>GET /api/devices/blocked?tenantId={tenantId} — list all active blocks for a tenant</summary>
@@ -34,12 +31,7 @@ namespace AutopilotMonitor.Functions.Functions.Admin
         {
             try
             {
-                if (!TenantHelper.IsAuthenticated(req))
-                    return await UnauthorizedAsync(req);
-
-                var userIdentifier = TenantHelper.GetUserIdentifier(req);
-                if (!await _galacticAdminService.IsGalacticAdminAsync(userIdentifier))
-                    return await ForbiddenAsync(req);
+                // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
 
                 var tenantId = req.Query["tenantId"];
                 if (string.IsNullOrEmpty(tenantId))
@@ -67,12 +59,8 @@ namespace AutopilotMonitor.Functions.Functions.Admin
         {
             try
             {
-                if (!TenantHelper.IsAuthenticated(req))
-                    return await UnauthorizedAsync(req);
-
+                // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
                 var userIdentifier = TenantHelper.GetUserIdentifier(req);
-                if (!await _galacticAdminService.IsGalacticAdminAsync(userIdentifier))
-                    return await ForbiddenAsync(req);
 
                 string body;
                 using (var reader = new System.IO.StreamReader(req.Body))
@@ -137,12 +125,8 @@ namespace AutopilotMonitor.Functions.Functions.Admin
         {
             try
             {
-                if (!TenantHelper.IsAuthenticated(req))
-                    return await UnauthorizedAsync(req);
-
+                // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
                 var userIdentifier = TenantHelper.GetUserIdentifier(req);
-                if (!await _galacticAdminService.IsGalacticAdminAsync(userIdentifier))
-                    return await ForbiddenAsync(req);
 
                 var tenantId = req.Query["tenantId"];
                 if (string.IsNullOrEmpty(tenantId))
@@ -174,20 +158,6 @@ namespace AutopilotMonitor.Functions.Functions.Admin
         // -----------------------------------------------------------------------
         // Helpers
         // -----------------------------------------------------------------------
-
-        private static async Task<HttpResponseData> UnauthorizedAsync(HttpRequestData req)
-        {
-            var r = req.CreateResponse(HttpStatusCode.Unauthorized);
-            await r.WriteAsJsonAsync(new { success = false, message = "Authentication required." });
-            return r;
-        }
-
-        private static async Task<HttpResponseData> ForbiddenAsync(HttpRequestData req)
-        {
-            var r = req.CreateResponse(HttpStatusCode.Forbidden);
-            await r.WriteAsJsonAsync(new { success = false, message = "Access denied. Only Galactic Admins can manage device blocks." });
-            return r;
-        }
 
         private static async Task<HttpResponseData> BadRequestAsync(HttpRequestData req, string message)
         {

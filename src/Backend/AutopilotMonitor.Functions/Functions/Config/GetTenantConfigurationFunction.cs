@@ -13,13 +13,16 @@ namespace AutopilotMonitor.Functions.Functions.Config
     {
         private readonly ILogger<GetTenantConfigurationFunction> _logger;
         private readonly TenantConfigurationService _configService;
+        private readonly GalacticAdminService _galacticAdminService;
 
         public GetTenantConfigurationFunction(
             ILogger<GetTenantConfigurationFunction> logger,
-            TenantConfigurationService configService)
+            TenantConfigurationService configService,
+            GalacticAdminService galacticAdminService)
         {
             _logger = logger;
             _configService = configService;
+            _galacticAdminService = galacticAdminService;
         }
 
         [Function("GetTenantConfiguration")]
@@ -29,34 +32,26 @@ namespace AutopilotMonitor.Functions.Functions.Config
         {
             try
             {
-                // Validate authentication
-                if (!TenantHelper.IsAuthenticated(req))
-                {
-                    _logger.LogWarning($"Unauthenticated GetTenantConfiguration attempt for tenant {tenantId}");
-                    var unauthorizedResponse = req.CreateResponse(HttpStatusCode.Unauthorized);
-                    await unauthorizedResponse.WriteAsJsonAsync(new
-                    {
-                        success = false,
-                        message = "Authentication required. Please provide a valid JWT token."
-                    });
-                    return unauthorizedResponse;
-                }
-
-                // Get tenant ID from JWT token and validate access
+                // Authentication + MemberRead authorization enforced by PolicyEnforcementMiddleware
                 string authenticatedTenantId = TenantHelper.GetTenantId(req);
                 string userIdentifier = TenantHelper.GetUserIdentifier(req);
 
-                // Validate tenant access: User can only access their own tenant's configuration
-                if (authenticatedTenantId != tenantId)
+                // Validate tenant access: cross-tenant only for Galactic Admins
+                if (!string.Equals(authenticatedTenantId, tenantId, StringComparison.OrdinalIgnoreCase))
                 {
-                    _logger.LogWarning($"User {userIdentifier} from tenant {authenticatedTenantId} attempted to access configuration for tenant {tenantId}");
-                    var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-                    await forbiddenResponse.WriteAsJsonAsync(new
+                    var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userIdentifier);
+                    if (!isGalacticAdmin)
                     {
-                        success = false,
-                        message = "Access denied. You can only access your own tenant's configuration."
-                    });
-                    return forbiddenResponse;
+                        _logger.LogWarning("User {User} from tenant {AuthTenant} attempted to access configuration for tenant {TargetTenant}",
+                            userIdentifier, authenticatedTenantId, tenantId);
+                        var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
+                        await forbiddenResponse.WriteAsJsonAsync(new
+                        {
+                            success = false,
+                            message = "Access denied. You can only access your own tenant's configuration."
+                        });
+                        return forbiddenResponse;
+                    }
                 }
 
                 _logger.LogInformation($"GetTenantConfiguration: {tenantId} by user {userIdentifier}");

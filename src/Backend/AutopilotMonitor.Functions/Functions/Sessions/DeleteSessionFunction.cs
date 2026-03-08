@@ -11,19 +11,13 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
     {
         private readonly ILogger<DeleteSessionFunction> _logger;
         private readonly TableStorageService _storageService;
-        private readonly TenantAdminsService _tenantAdminsService;
-        private readonly GalacticAdminService _galacticAdminService;
 
         public DeleteSessionFunction(
             ILogger<DeleteSessionFunction> logger,
-            TableStorageService storageService,
-            TenantAdminsService tenantAdminsService,
-            GalacticAdminService galacticAdminService)
+            TableStorageService storageService)
         {
             _logger = logger;
             _storageService = storageService;
-            _tenantAdminsService = tenantAdminsService;
-            _galacticAdminService = galacticAdminService;
         }
 
         [Function("DeleteSession")]
@@ -35,36 +29,9 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
 
             try
             {
-                // Validate authentication
-                if (!TenantHelper.IsAuthenticated(req))
-                {
-                    _logger.LogWarning($"Unauthenticated DeleteSession attempt for session {sessionId}");
-                    var unauthorizedResponse = req.CreateResponse(HttpStatusCode.Unauthorized);
-                    await unauthorizedResponse.WriteAsJsonAsync(new
-                    {
-                        success = false,
-                        message = "Authentication required. Please provide a valid JWT token."
-                    });
-                    return unauthorizedResponse;
-                }
-
+                // Authentication + TenantAdminOrGA authorization enforced by PolicyEnforcementMiddleware
                 var tenantId = TenantHelper.GetTenantId(req);
                 var userIdentifier = TenantHelper.GetUserIdentifier(req);
-
-                // Require Tenant Admin or Galactic Admin for destructive operations
-                var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userIdentifier);
-                var isTenantAdmin = await _tenantAdminsService.IsTenantAdminAsync(tenantId, userIdentifier);
-                if (!isGalacticAdmin && !isTenantAdmin)
-                {
-                    _logger.LogWarning($"Non-admin user {userIdentifier} attempted to delete session {sessionId}");
-                    var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-                    await forbiddenResponse.WriteAsJsonAsync(new
-                    {
-                        success = false,
-                        message = "Access denied. Tenant Admin or Galactic Admin role required."
-                    });
-                    return forbiddenResponse;
-                }
 
                 _logger.LogInformation($"Deleting session {sessionId} for tenant {tenantId} by user {userIdentifier}");
 

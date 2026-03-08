@@ -18,20 +18,17 @@ namespace AutopilotMonitor.Functions.Functions.Bootstrap
         private readonly ILogger<RevokeBootstrapSessionFunction> _logger;
         private readonly BootstrapSessionService _bootstrapService;
         private readonly GalacticAdminService _galacticAdminService;
-        private readonly TenantAdminsService _tenantAdminsService;
         private readonly TenantConfigurationService _configService;
 
         public RevokeBootstrapSessionFunction(
             ILogger<RevokeBootstrapSessionFunction> logger,
             BootstrapSessionService bootstrapService,
             GalacticAdminService galacticAdminService,
-            TenantAdminsService tenantAdminsService,
             TenantConfigurationService configService)
         {
             _logger = logger;
             _bootstrapService = bootstrapService;
             _galacticAdminService = galacticAdminService;
-            _tenantAdminsService = tenantAdminsService;
             _configService = configService;
         }
 
@@ -42,19 +39,13 @@ namespace AutopilotMonitor.Functions.Functions.Bootstrap
         {
             try
             {
-                if (!TenantHelper.IsAuthenticated(req))
-                {
-                    var unauth = req.CreateResponse(HttpStatusCode.Unauthorized);
-                    await unauth.WriteAsJsonAsync(new { error = "Authentication required" });
-                    return unauth;
-                }
-
+                // Authentication + BootstrapManagerOrGA authorization enforced by PolicyEnforcementMiddleware
                 var authenticatedTenantId = TenantHelper.GetTenantId(req);
                 var userIdentifier = TenantHelper.GetUserIdentifier(req);
 
                 var tenantId = req.Query["tenantId"] ?? authenticatedTenantId;
 
-                // Tenant boundary check
+                // Cross-tenant boundary check — only Galactic Admins may operate on other tenants
                 if (!string.Equals(authenticatedTenantId, tenantId, StringComparison.OrdinalIgnoreCase))
                 {
                     var isGalactic = await _galacticAdminService.IsGalacticAdminAsync(userIdentifier);
@@ -64,16 +55,6 @@ namespace AutopilotMonitor.Functions.Functions.Bootstrap
                         await forbidden.WriteAsJsonAsync(new { error = "Access denied: tenant mismatch" });
                         return forbidden;
                     }
-                }
-
-                // Admin or Operator with bootstrap permission check
-                var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userIdentifier);
-                var canManageBootstrap = await _tenantAdminsService.CanManageBootstrapAsync(tenantId, userIdentifier);
-                if (!isGalacticAdmin && !canManageBootstrap)
-                {
-                    var forbidden = req.CreateResponse(HttpStatusCode.Forbidden);
-                    await forbidden.WriteAsJsonAsync(new { error = "Bootstrap token management access required" });
-                    return forbidden;
                 }
 
                 // Check if bootstrap token feature is enabled for this tenant

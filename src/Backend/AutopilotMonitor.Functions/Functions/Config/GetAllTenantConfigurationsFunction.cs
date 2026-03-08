@@ -13,16 +13,13 @@ namespace AutopilotMonitor.Functions.Functions.Config
     {
         private readonly ILogger<GetAllTenantConfigurationsFunction> _logger;
         private readonly TenantConfigurationService _configService;
-        private readonly GalacticAdminService _galacticAdminService;
 
         public GetAllTenantConfigurationsFunction(
             ILogger<GetAllTenantConfigurationsFunction> logger,
-            TenantConfigurationService configService,
-            GalacticAdminService galacticAdminService)
+            TenantConfigurationService configService)
         {
             _logger = logger;
             _configService = configService;
-            _galacticAdminService = galacticAdminService;
         }
 
         [Function("GetAllTenantConfigurations")]
@@ -31,36 +28,8 @@ namespace AutopilotMonitor.Functions.Functions.Config
         {
             try
             {
-                // Validate authentication
-                if (!TenantHelper.IsAuthenticated(req))
-                {
-                    _logger.LogWarning("Unauthenticated GetAllTenantConfigurations attempt");
-                    var unauthorizedResponse = req.CreateResponse(HttpStatusCode.Unauthorized);
-                    await unauthorizedResponse.WriteAsJsonAsync(new
-                    {
-                        success = false,
-                        message = "Authentication required. Please provide a valid JWT token."
-                    });
-                    return unauthorizedResponse;
-                }
-
-                // Get user identifier
+                // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
                 string userIdentifier = TenantHelper.GetUserIdentifier(req);
-
-                // Check if user is Galactic Admin
-                bool isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userIdentifier);
-
-                if (!isGalacticAdmin)
-                {
-                    _logger.LogWarning($"User {userIdentifier} attempted to access all tenant configurations without Galactic Admin privileges");
-                    var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-                    await forbiddenResponse.WriteAsJsonAsync(new
-                    {
-                        success = false,
-                        message = "Access denied. This endpoint requires Galactic Admin privileges."
-                    });
-                    return forbiddenResponse;
-                }
 
                 _logger.LogInformation($"GetAllTenantConfigurations by Galactic Admin {userIdentifier}");
 

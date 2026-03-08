@@ -1,7 +1,6 @@
 using System.Net;
 using System.Web;
 using Azure.Storage.Blobs;
-using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Services;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -17,17 +16,14 @@ namespace AutopilotMonitor.Functions.Functions.Reports
     public class GetSessionReportDownloadUrlFunction
     {
         private readonly ILogger<GetSessionReportDownloadUrlFunction> _logger;
-        private readonly GalacticAdminService _galacticAdminService;
         private readonly string _blobConnectionString;
         private const string ContainerName = "session-reports";
 
         public GetSessionReportDownloadUrlFunction(
             ILogger<GetSessionReportDownloadUrlFunction> logger,
-            GalacticAdminService galacticAdminService,
             IConfiguration configuration)
         {
             _logger = logger;
-            _galacticAdminService = galacticAdminService;
             _blobConnectionString = configuration["AzureBlobStorageConnectionString"]
                 ?? throw new InvalidOperationException("AzureBlobStorageConnectionString is not configured");
         }
@@ -38,21 +34,7 @@ namespace AutopilotMonitor.Functions.Functions.Reports
         {
             try
             {
-                if (!TenantHelper.IsAuthenticated(req))
-                {
-                    var unauthorizedResponse = req.CreateResponse(HttpStatusCode.Unauthorized);
-                    await unauthorizedResponse.WriteAsJsonAsync(new { success = false, message = "Authentication required." });
-                    return unauthorizedResponse;
-                }
-
-                var userIdentifier = TenantHelper.GetUserIdentifier(req);
-                var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userIdentifier);
-                if (!isGalacticAdmin)
-                {
-                    var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-                    await forbiddenResponse.WriteAsJsonAsync(new { success = false, message = "Access denied. Galactic Admin role required." });
-                    return forbiddenResponse;
-                }
+                // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
 
                 var query = HttpUtility.ParseQueryString(req.Url.Query);
                 var blobName = query["blobName"];

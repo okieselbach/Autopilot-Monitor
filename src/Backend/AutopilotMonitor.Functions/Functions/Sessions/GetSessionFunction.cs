@@ -44,18 +44,7 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
 
             try
             {
-                if (!TenantHelper.IsAuthenticated(req))
-                {
-                    _logger.LogWarning($"{sessionPrefix} Unauthenticated GetSession attempt");
-                    var unauthorizedResponse = req.CreateResponse(HttpStatusCode.Unauthorized);
-                    await unauthorizedResponse.WriteAsJsonAsync(new
-                    {
-                        success = false,
-                        message = "Authentication required. Please provide a valid JWT token."
-                    });
-                    return unauthorizedResponse;
-                }
-
+                // Authentication + MemberRead authorization enforced by PolicyEnforcementMiddleware
                 var userTenantId = TenantHelper.GetTenantId(req);
                 var userIdentifier = TenantHelper.GetUserIdentifier(req);
                 var query = HttpUtility.ParseQueryString(req.Url.Query);

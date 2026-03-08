@@ -34,9 +34,9 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
     private readonly object _initLock = new object();
 
     /// <summary>
-    /// Routes that do not require JWT authentication.
-    /// Device-to-cloud routes (sessions/register, events/ingest, agent/config) use their own
-    /// certificate/hardware validation via SecurityValidator.
+    /// Routes that do not require JWT authentication (exact match).
+    /// Device-to-cloud routes use their own certificate/hardware validation via SecurityValidator.
+    /// Bootstrap device routes use bootstrap token validation via SecurityValidator.
     /// </summary>
     private static readonly string[] _anonymousRoutes =
     {
@@ -45,7 +45,21 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
         "/api/agent/register-session",
         "/api/agent/ingest",
         "/api/agent/config",
-        "/api/agent/upload-url"
+        "/api/agent/upload-url",
+        "/api/agent/error",
+        "/api/bootstrap/register-session",
+        "/api/bootstrap/ingest",
+        "/api/bootstrap/config",
+        "/api/bootstrap/error",
+    };
+
+    /// <summary>
+    /// Route prefixes that do not require JWT authentication (prefix match).
+    /// Used for routes with path parameters where exact match is impossible.
+    /// </summary>
+    private static readonly string[] _anonymousPrefixes =
+    {
+        "/api/bootstrap/validate/",  // /api/bootstrap/validate/{code}
     };
 
     public AuthenticationMiddleware(
@@ -242,6 +256,11 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
         foreach (var route in _anonymousRoutes)
         {
             if (path.Equals(route, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        foreach (var prefix in _anonymousPrefixes)
+        {
+            if (path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
                 return true;
         }
         return false;
