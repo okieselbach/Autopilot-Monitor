@@ -27,9 +27,11 @@ namespace AutopilotMonitor.SummaryDialog
                     System.Reflection.Assembly.GetExecutingAssembly().Location) ?? ".";
                 _logFile = Path.Combine(exeDir, "SummaryDialog.log");
 
-                // Error log in user's temp folder — survives self-cleanup for troubleshooting
-                try { _tempLogFile = Path.Combine(Path.GetTempPath(), "SummaryDialog-error.log"); }
-                catch { /* temp path unavailable */ }
+                // Error log in ProgramData — fixed, known path that survives self-cleanup.
+                // Always accessible regardless of user profile state or session assignment.
+                var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+                try { _tempLogFile = Path.Combine(programData, "SummaryDialog-error.log"); }
+                catch { /* path unavailable */ }
 
                 Log("App constructor — process started");
                 LogDiagnostics();
