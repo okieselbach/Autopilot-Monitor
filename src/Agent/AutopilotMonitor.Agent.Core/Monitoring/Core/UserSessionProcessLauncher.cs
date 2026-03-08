@@ -8,7 +8,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 {
     /// <summary>
     /// Launches a process in the logged-in user's desktop session from a SYSTEM context.
-    /// Uses CreateProcessAsUser with a token duplicated from explorer.exe.
+    /// Uses WTSQueryUserToken to obtain the proper interactive session token, then
+    /// CreateProcessAsUser to launch the process in the user's desktop.
     /// </summary>
     internal static class UserSessionProcessLauncher
     {
@@ -29,12 +30,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         public static bool LaunchInUserSession(string exePath, string arguments, AgentLogger logger)
         {
             IntPtr userToken = IntPtr.Zero;
-            IntPtr duplicatedToken = IntPtr.Zero;
             IntPtr environment = IntPtr.Zero;
 
             try
             {
-                // Find explorer.exe in a non-zero session owned by a real user
+                // Find explorer.exe in a non-zero session owned by a real user.
+                // We need the session ID for WTSQueryUserToken and the user validation
+                // to ensure a real interactive user is logged in.
                 var explorerProcess = FindExplorerProcess(logger);
                 if (explorerProcess == null)
                 {
@@ -42,98 +44,90 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     return false;
                 }
 
+                uint sessionId;
                 using (explorerProcess)
                 {
-                    logger.Info($"UserSessionProcessLauncher: Found explorer.exe PID {explorerProcess.Id} in session {explorerProcess.SessionId}");
-
-                    // Open the token of explorer.exe
-                    if (!NativeMethods.OpenProcessToken(explorerProcess.Handle,
-                        NativeMethods.TOKEN_DUPLICATE | NativeMethods.TOKEN_QUERY, out userToken))
-                    {
-                        logger.Warning($"UserSessionProcessLauncher: OpenProcessToken failed (error {Marshal.GetLastWin32Error()})");
-                        return false;
-                    }
-
-                    // Duplicate the token as a primary token for CreateProcessAsUser
-                    var sa = new NativeMethods.SECURITY_ATTRIBUTES();
-                    sa.nLength = Marshal.SizeOf(sa);
-
-                    if (!NativeMethods.DuplicateTokenEx(userToken,
-                        NativeMethods.MAXIMUM_ALLOWED, ref sa,
-                        NativeMethods.SECURITY_IMPERSONATION_LEVEL.SecurityIdentification,
-                        NativeMethods.TOKEN_TYPE.TokenPrimary, out duplicatedToken))
-                    {
-                        logger.Warning($"UserSessionProcessLauncher: DuplicateTokenEx failed (error {Marshal.GetLastWin32Error()})");
-                        return false;
-                    }
-
-                    // Create an environment block for the user
-                    if (!NativeMethods.CreateEnvironmentBlock(out environment, duplicatedToken, false))
-                    {
-                        logger.Warning($"UserSessionProcessLauncher: CreateEnvironmentBlock failed (error {Marshal.GetLastWin32Error()})");
-                        // Non-fatal: we can proceed without it, but env vars may be wrong
-                        environment = IntPtr.Zero;
-                    }
-
-                    // Set up startup info to target the user's desktop
-                    var si = new NativeMethods.STARTUPINFO();
-                    si.cb = Marshal.SizeOf(si);
-                    si.lpDesktop = @"WinSta0\Default";
-                    si.dwFlags = NativeMethods.STARTF_USESHOWWINDOW;
-                    si.wShowWindow = NativeMethods.SW_SHOW;
-
-                    uint creationFlags = 0;
-                    if (environment != IntPtr.Zero)
-                        creationFlags |= NativeMethods.CREATE_UNICODE_ENVIRONMENT;
-
-                    var commandLine = $"\"{exePath}\" {arguments}";
-                    var workingDirectory = System.IO.Path.GetDirectoryName(exePath);
-
-                    var procSa = new NativeMethods.SECURITY_ATTRIBUTES();
-                    procSa.nLength = Marshal.SizeOf(procSa);
-                    var threadSa = new NativeMethods.SECURITY_ATTRIBUTES();
-                    threadSa.nLength = Marshal.SizeOf(threadSa);
-
-                    if (!NativeMethods.CreateProcessAsUser(
-                        duplicatedToken,
-                        null,           // lpApplicationName (null, use command line)
-                        commandLine,    // lpCommandLine
-                        ref procSa,
-                        ref threadSa,
-                        false,          // bInheritHandles
-                        creationFlags,
-                        environment,
-                        workingDirectory,
-                        ref si,
-                        out var pi))
-                    {
-                        logger.Warning($"UserSessionProcessLauncher: CreateProcessAsUser failed (error {Marshal.GetLastWin32Error()})");
-                        return false;
-                    }
-
-                    // Close the thread handle — we don't need it
-                    NativeMethods.CloseHandle(pi.hThread);
-
-                    logger.Info($"UserSessionProcessLauncher: Created process PID {pi.dwProcessId} in user session — verifying startup...");
-
-                    // Verify the process actually started (CLR initialized, no immediate crash).
-                    // If the process dies within 3 seconds, the exit code tells us exactly why
-                    // (e.g. 0xC0000135 = DLL not found, 0xC000007B = invalid image format,
-                    //  0xE0434352 = .NET unhandled exception, 0x80131522 = fusion/assembly load error).
-                    var waitResult = NativeMethods.WaitForSingleObject(pi.hProcess, 3000);
-                    if (waitResult != NativeMethods.WAIT_TIMEOUT)
-                    {
-                        NativeMethods.GetExitCodeProcess(pi.hProcess, out var exitCode);
-                        NativeMethods.CloseHandle(pi.hProcess);
-                        logger.Warning($"UserSessionProcessLauncher: Process PID {pi.dwProcessId} exited within 3s — " +
-                                       $"exit code 0x{exitCode:X8} (startup crash or missing dependency)");
-                        return false;
-                    }
-
-                    NativeMethods.CloseHandle(pi.hProcess);
-                    logger.Info($"UserSessionProcessLauncher: Successfully launched process PID {pi.dwProcessId} in user session");
-                    return true;
+                    sessionId = (uint)explorerProcess.SessionId;
+                    logger.Info($"UserSessionProcessLauncher: Found explorer.exe PID {explorerProcess.Id} in session {sessionId}");
                 }
+
+                // Get the proper interactive session token via WTS.
+                // Unlike OpenProcessToken + DuplicateTokenEx, WTSQueryUserToken returns the
+                // real session token with full desktop/GPU access — required for WPF apps
+                // that use AllowsTransparency/layered windows (DLL init fails without it).
+                if (!NativeMethods.WTSQueryUserToken(sessionId, out userToken))
+                {
+                    var error = Marshal.GetLastWin32Error();
+                    logger.Warning($"UserSessionProcessLauncher: WTSQueryUserToken failed for session {sessionId} (error {error})");
+                    return false;
+                }
+
+                // Create an environment block for the user
+                if (!NativeMethods.CreateEnvironmentBlock(out environment, userToken, false))
+                {
+                    logger.Warning($"UserSessionProcessLauncher: CreateEnvironmentBlock failed (error {Marshal.GetLastWin32Error()})");
+                    // Non-fatal: we can proceed without it, but env vars may be wrong
+                    environment = IntPtr.Zero;
+                }
+
+                // Set up startup info to target the user's desktop
+                var si = new NativeMethods.STARTUPINFO();
+                si.cb = Marshal.SizeOf(si);
+                si.lpDesktop = @"WinSta0\Default";
+                si.dwFlags = NativeMethods.STARTF_USESHOWWINDOW;
+                si.wShowWindow = NativeMethods.SW_SHOW;
+
+                uint creationFlags = 0;
+                if (environment != IntPtr.Zero)
+                    creationFlags |= NativeMethods.CREATE_UNICODE_ENVIRONMENT;
+
+                var commandLine = $"\"{exePath}\" {arguments}";
+                var workingDirectory = System.IO.Path.GetDirectoryName(exePath);
+
+                var procSa = new NativeMethods.SECURITY_ATTRIBUTES();
+                procSa.nLength = Marshal.SizeOf(procSa);
+                var threadSa = new NativeMethods.SECURITY_ATTRIBUTES();
+                threadSa.nLength = Marshal.SizeOf(threadSa);
+
+                if (!NativeMethods.CreateProcessAsUser(
+                    userToken,
+                    null,           // lpApplicationName (null, use command line)
+                    commandLine,    // lpCommandLine
+                    ref procSa,
+                    ref threadSa,
+                    false,          // bInheritHandles
+                    creationFlags,
+                    environment,
+                    workingDirectory,
+                    ref si,
+                    out var pi))
+                {
+                    logger.Warning($"UserSessionProcessLauncher: CreateProcessAsUser failed (error {Marshal.GetLastWin32Error()})");
+                    return false;
+                }
+
+                // Close the thread handle — we don't need it
+                NativeMethods.CloseHandle(pi.hThread);
+
+                logger.Info($"UserSessionProcessLauncher: Created process PID {pi.dwProcessId} in user session — verifying startup...");
+
+                // Verify the process actually started (CLR initialized, no immediate crash).
+                // If the process dies within 3 seconds, the exit code tells us exactly why
+                // (e.g. 0xC0000135 = DLL not found, 0xC000007B = invalid image format,
+                //  0xE0434352 = .NET unhandled exception, 0x8007045A = DLL init failed).
+                var waitResult = NativeMethods.WaitForSingleObject(pi.hProcess, 3000);
+                if (waitResult != NativeMethods.WAIT_TIMEOUT)
+                {
+                    NativeMethods.GetExitCodeProcess(pi.hProcess, out var exitCode);
+                    NativeMethods.CloseHandle(pi.hProcess);
+                    logger.Warning($"UserSessionProcessLauncher: Process PID {pi.dwProcessId} exited within 3s — " +
+                                   $"exit code 0x{exitCode:X8} (startup crash or missing dependency)");
+                    return false;
+                }
+
+                NativeMethods.CloseHandle(pi.hProcess);
+                logger.Info($"UserSessionProcessLauncher: Successfully launched process PID {pi.dwProcessId} in user session");
+                return true;
             }
             catch (Exception ex)
             {
@@ -144,8 +138,6 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             {
                 if (environment != IntPtr.Zero)
                     NativeMethods.DestroyEnvironmentBlock(environment);
-                if (duplicatedToken != IntPtr.Zero)
-                    NativeMethods.CloseHandle(duplicatedToken);
                 if (userToken != IntPtr.Zero)
                     NativeMethods.CloseHandle(userToken);
             }
@@ -253,26 +245,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         /// </summary>
         private static class NativeMethods
         {
-            public const uint TOKEN_DUPLICATE = 0x0002;
-            public const uint TOKEN_QUERY = 0x0008;
-            public const uint MAXIMUM_ALLOWED = 0x02000000;
             public const uint CREATE_UNICODE_ENVIRONMENT = 0x00000400;
             public const int STARTF_USESHOWWINDOW = 0x00000001;
             public const short SW_SHOW = 5;
-
-            public enum SECURITY_IMPERSONATION_LEVEL
-            {
-                SecurityAnonymous,
-                SecurityIdentification,
-                SecurityImpersonation,
-                SecurityDelegation
-            }
-
-            public enum TOKEN_TYPE
-            {
-                TokenPrimary = 1,
-                TokenImpersonation
-            }
+            public const uint WAIT_TIMEOUT = 258;
 
             [StructLayout(LayoutKind.Sequential)]
             public struct SECURITY_ATTRIBUTES
@@ -314,15 +290,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 public int dwThreadId;
             }
 
-            [DllImport("advapi32.dll", SetLastError = true)]
-            public static extern bool OpenProcessToken(IntPtr processHandle, uint desiredAccess, out IntPtr tokenHandle);
-
-            [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-            public static extern bool DuplicateTokenEx(
-                IntPtr hExistingToken, uint dwDesiredAccess,
-                ref SECURITY_ATTRIBUTES lpTokenAttributes,
-                SECURITY_IMPERSONATION_LEVEL impersonationLevel,
-                TOKEN_TYPE tokenType, out IntPtr phNewToken);
+            [DllImport("Wtsapi32.dll", SetLastError = true)]
+            public static extern bool WTSQueryUserToken(uint SessionId, out IntPtr phToken);
 
             [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
             public static extern bool CreateProcessAsUser(
@@ -347,8 +316,6 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 
             [DllImport("kernel32.dll", SetLastError = true)]
             public static extern bool GetExitCodeProcess(IntPtr hProcess, out uint lpExitCode);
-
-            public const uint WAIT_TIMEOUT = 258;
         }
     }
 }
