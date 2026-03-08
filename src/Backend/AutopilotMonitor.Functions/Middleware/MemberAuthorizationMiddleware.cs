@@ -28,7 +28,7 @@ public class MemberAuthorizationMiddleware : IFunctionsWorkerMiddleware
         "/api/health",           // Anonymous health check
         "/api/stats/",           // Anonymous platform stats
         "/api/agent/",           // Device cert auth, no JWT
-        "/api/bootstrap/device", // Bootstrap device routes use cert auth
+        "/api/bootstrap/",       // Bootstrap routes — device routes have no JWT, management routes have inline auth
         "/api/auth/",            // Must work for any authenticated user (role info)
         "/api/progress/",        // Progress Portal — open to any tenant user
         "/api/realtime/",        // SignalR — tenant isolation via group validation
