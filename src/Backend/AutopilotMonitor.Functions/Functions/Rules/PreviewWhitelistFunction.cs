@@ -10,7 +10,7 @@ namespace AutopilotMonitor.Functions.Functions.Rules;
 
 /// <summary>
 /// CRUD endpoints for managing the Private Preview tenant whitelist.
-/// All endpoints are Galactic Admin only.
+/// All endpoints are Galactic Admin only (except notification-email which is AuthenticatedUser).
 /// Temporary — remove after GA.
 /// </summary>
 public class PreviewWhitelistFunction
@@ -19,17 +19,20 @@ public class PreviewWhitelistFunction
     private readonly PreviewWhitelistService _previewWhitelistService;
     private readonly TenantConfigurationService _tenantConfigurationService;
     private readonly TenantAdminsService _tenantAdminsService;
+    private readonly ResendEmailService _resendEmailService;
 
     public PreviewWhitelistFunction(
         ILogger<PreviewWhitelistFunction> logger,
         PreviewWhitelistService previewWhitelistService,
         TenantConfigurationService tenantConfigurationService,
-        TenantAdminsService tenantAdminsService)
+        TenantAdminsService tenantAdminsService,
+        ResendEmailService resendEmailService)
     {
         _logger = logger;
         _previewWhitelistService = previewWhitelistService;
         _tenantConfigurationService = tenantConfigurationService;
         _tenantAdminsService = tenantAdminsService;
+        _resendEmailService = resendEmailService;
     }
 
     /// <summary>
@@ -110,6 +113,16 @@ public class PreviewWhitelistFunction
                     "No valid tenant requester UPN found in TenantConfiguration for tenant {TenantId} (UpdatedBy: '{UpdatedBy}') — skipping auto-promote",
                     tenantId, requesterUpn ?? "<null>");
             }
+
+            // Fire-and-forget: send welcome email if notification email is configured
+            if (!string.IsNullOrWhiteSpace(tenantConfig.PreviewNotificationEmail))
+            {
+                _ = _resendEmailService.SendPreviewApprovedEmailAsync(
+                        tenantConfig.PreviewNotificationEmail, tenantConfig.DomainName)
+                    .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException,
+                        "Fire-and-forget welcome email failed for tenant {TenantId}", tenantId),
+                        TaskContinuationOptions.OnlyOnFaulted);
+            }
         }
         catch (Exception ex)
         {
@@ -147,4 +160,89 @@ public class PreviewWhitelistFunction
         await response.WriteAsJsonAsync(new { message = "Tenant removed from preview", tenantId });
         return response;
     }
+
+    /// <summary>
+    /// PUT /api/preview/notification-email
+    /// Saves the caller's notification email for Private Preview approval.
+    /// AuthenticatedUser policy — preview-blocked users can call this.
+    /// </summary>
+    [Function("SavePreviewNotificationEmail")]
+    [Authorize]
+    public async Task<HttpResponseData> SaveNotificationEmail(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "put", Route = "preview/notification-email")] HttpRequestData req,
+        FunctionContext context)
+    {
+        var principal = context.GetUser();
+        var tenantId = principal?.GetTenantId();
+
+        if (string.IsNullOrWhiteSpace(tenantId))
+        {
+            var bad = req.CreateResponse(HttpStatusCode.BadRequest);
+            await bad.WriteAsJsonAsync(new { error = "Could not determine tenant" });
+            return bad;
+        }
+
+        var body = await req.ReadFromJsonAsync<SaveNotificationEmailRequest>();
+        var email = body?.Email?.Trim();
+
+        if (!string.IsNullOrEmpty(email) && !email.Contains('@'))
+        {
+            var bad = req.CreateResponse(HttpStatusCode.BadRequest);
+            await bad.WriteAsJsonAsync(new { error = "Invalid email address" });
+            return bad;
+        }
+
+        var tenantConfig = await _tenantConfigurationService.GetConfigurationAsync(tenantId);
+        tenantConfig.PreviewNotificationEmail = email;
+        await _tenantConfigurationService.SaveConfigurationAsync(tenantConfig);
+
+        _logger.LogInformation(
+            "Preview notification email updated for tenant {TenantId}: {Email}",
+            tenantId, string.IsNullOrEmpty(email) ? "(cleared)" : email);
+
+        var response = req.CreateResponse(HttpStatusCode.OK);
+        await response.WriteAsJsonAsync(new { message = "Notification email saved", email });
+        return response;
+    }
+
+    /// <summary>
+    /// POST /api/preview/send-welcome-email/{tenantId}
+    /// Sends (or resends) the Private Preview welcome email. Galactic Admin only.
+    /// </summary>
+    [Function("SendPreviewWelcomeEmail")]
+    [Authorize]
+    public async Task<HttpResponseData> SendWelcomeEmail(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "preview/send-welcome-email/{tenantId}")] HttpRequestData req,
+        string tenantId,
+        FunctionContext context)
+    {
+        // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
+
+        var tenantConfig = await _tenantConfigurationService.GetConfigurationAsync(tenantId);
+        var email = tenantConfig.PreviewNotificationEmail;
+
+        if (string.IsNullOrWhiteSpace(email))
+        {
+            var bad = req.CreateResponse(HttpStatusCode.BadRequest);
+            await bad.WriteAsJsonAsync(new { error = "No notification email configured for this tenant" });
+            return bad;
+        }
+
+        await _resendEmailService.SendPreviewApprovedEmailAsync(email, tenantConfig.DomainName);
+
+        var principal = context.GetUser();
+        var upn = principal?.GetUserPrincipalName();
+        _logger.LogInformation(
+            "Welcome email sent to {Email} for tenant {TenantId} by {Upn}",
+            email, tenantId, upn);
+
+        var response = req.CreateResponse(HttpStatusCode.OK);
+        await response.WriteAsJsonAsync(new { message = "Welcome email sent", email });
+        return response;
+    }
+}
+
+public class SaveNotificationEmailRequest
+{
+    public string Email { get; set; } = string.Empty;
 }

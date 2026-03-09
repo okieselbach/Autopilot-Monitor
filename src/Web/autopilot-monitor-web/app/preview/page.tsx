@@ -2,11 +2,16 @@
 
 import { useAuth } from "../../contexts/AuthContext";
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { API_BASE_URL } from "@/lib/config";
 
 export default function PreviewPage() {
-  const { isAuthenticated, isLoading, user, isPreviewBlocked, previewMessage, logout } = useAuth();
+  const { isAuthenticated, isLoading, user, isPreviewBlocked, previewMessage, logout, getAccessToken } = useAuth();
   const router = useRouter();
+
+  const [notificationEmail, setNotificationEmail] = useState("");
+  const [emailStatus, setEmailStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [emailError, setEmailError] = useState("");
 
   // If not preview-blocked (e.g. approved tenant navigates here), redirect away
   useEffect(() => {
@@ -21,6 +26,45 @@ export default function PreviewPage() {
       router.push("/");
     }
   }, [isAuthenticated, isLoading, user, isPreviewBlocked, router]);
+
+  const handleSaveEmail = async () => {
+    const email = notificationEmail.trim();
+    if (!email || !email.includes("@")) {
+      setEmailError("Please enter a valid email address.");
+      setEmailStatus("error");
+      return;
+    }
+
+    try {
+      setEmailStatus("saving");
+      setEmailError("");
+
+      const token = await getAccessToken();
+      if (!token) {
+        throw new Error("Not authenticated");
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/preview/notification-email`, {
+        method: "PUT",
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to save email");
+      }
+
+      setEmailStatus("saved");
+      setTimeout(() => setEmailStatus("idle"), 5000);
+    } catch (err) {
+      setEmailError(err instanceof Error ? err.message : "Failed to save email");
+      setEmailStatus("error");
+    }
+  };
 
   if (isLoading) {
     return (
@@ -72,6 +116,39 @@ export default function PreviewPage() {
             <p className="text-xs text-blue-500 mt-1">
               Tenant: {user?.tenantId}
             </p>
+          </div>
+
+          {/* Notification Email */}
+          <div className="text-left bg-indigo-50 border border-indigo-200 rounded-lg p-4 mb-6">
+            <p className="text-sm font-semibold text-indigo-900 mb-1">Get notified when approved</p>
+            <p className="text-sm text-indigo-700 mb-3">
+              Enter your email and we'll notify you as soon as your Private Preview access is granted.
+            </p>
+            <div className="flex gap-2">
+              <input
+                type="email"
+                value={notificationEmail}
+                onChange={(e) => { setNotificationEmail(e.target.value); setEmailStatus("idle"); setEmailError(""); }}
+                placeholder="your@email.com"
+                className="flex-1 px-3 py-2 border border-indigo-300 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+                onKeyDown={(e) => { if (e.key === "Enter") handleSaveEmail(); }}
+              />
+              <button
+                onClick={handleSaveEmail}
+                disabled={emailStatus === "saving" || !notificationEmail.trim()}
+                className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+              >
+                {emailStatus === "saving" ? "Saving..." : "Notify me"}
+              </button>
+            </div>
+            {emailStatus === "saved" && (
+              <p className="text-xs text-green-600 mt-2 font-medium">
+                Email saved! We'll send you a notification when your access is approved.
+              </p>
+            )}
+            {emailStatus === "error" && emailError && (
+              <p className="text-xs text-red-600 mt-2 font-medium">{emailError}</p>
+            )}
           </div>
 
           <div className="text-left bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6">

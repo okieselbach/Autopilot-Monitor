@@ -96,6 +96,7 @@ public static class EndpointAccessPolicyCatalog
         new("POST",   "realtime/groups/leave",     EndpointPolicy.AuthenticatedUser),
         new("GET",    "progress/sessions",         EndpointPolicy.AuthenticatedUser),
         new("GET",    "progress/sessions/{sessionId}/events", EndpointPolicy.AuthenticatedUser),
+        new("PUT",    "preview/notification-email", EndpointPolicy.AuthenticatedUser),
 
         // ── MemberRead (Admin + Operator, later + Viewer) ───────────────
         new("GET",    "sessions",                  EndpointPolicy.MemberRead),
@@ -151,6 +152,7 @@ public static class EndpointAccessPolicyCatalog
         new("GET",    "preview/whitelist",          EndpointPolicy.GalacticAdminOnly),
         new("POST",   "preview/whitelist/{tenantId}", EndpointPolicy.GalacticAdminOnly),
         new("DELETE", "preview/whitelist/{tenantId}", EndpointPolicy.GalacticAdminOnly),
+        new("POST",   "preview/send-welcome-email/{tenantId}", EndpointPolicy.GalacticAdminOnly),
         new("GET",    "galactic/sessions",          EndpointPolicy.GalacticAdminOnly),
         new("GET",    "galactic/audit/logs",        EndpointPolicy.GalacticAdminOnly),
         new("GET",    "galactic/metrics/platform",  EndpointPolicy.GalacticAdminOnly),

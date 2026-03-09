@@ -33,6 +33,14 @@ namespace AutopilotMonitor.Shared.Models
         /// </summary>
         public string UpdatedBy { get; set; }
 
+        // ===== PRIVATE PREVIEW =====
+
+        /// <summary>
+        /// Email address for Private Preview approval notification.
+        /// Entered by the user on the waitlist page or by a Galactic Admin.
+        /// </summary>
+        public string PreviewNotificationEmail { get; set; }
+
         // ===== TENANT STATUS =====
 
         /// <summary>

@@ -128,6 +128,7 @@ builder.Services.AddSingleton<AutopilotMonitor.Functions.Security.AutopilotDevic
 builder.Services.AddSingleton<AutopilotMonitor.Functions.Security.CorporateIdentifierValidator>();
 builder.Services.AddHttpClient<TeamsNotificationService>();
 builder.Services.AddHttpClient<TelegramNotificationService>();
+builder.Services.AddSingleton<ResendEmailService>();
 
 var app = builder.Build();
 

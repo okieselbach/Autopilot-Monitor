@@ -103,10 +103,16 @@ export default function UsageMetricsPage() {
         const response = await authenticatedFetch(`${API_BASE_URL}/api/config/all`, getAccessToken);
         if (response.ok) {
           const data = await response.json();
-          setTenants(data.map((t: { tenantId: string; domainName: string }) => ({
+          const mapped: TenantInfo[] = data.map((t: { tenantId: string; domainName: string }) => ({
             tenantId: t.tenantId,
             domainName: t.domainName || '',
-          })));
+          }));
+          mapped.sort((a, b) => {
+            const nameA = a.domainName || a.tenantId;
+            const nameB = b.domainName || b.tenantId;
+            return nameA.localeCompare(nameB);
+          });
+          setTenants(mapped);
         }
       } catch (err) {
         console.error('Error fetching tenant list:', err);

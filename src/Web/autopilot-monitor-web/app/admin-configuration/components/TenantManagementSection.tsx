@@ -13,6 +13,7 @@ export interface TenantConfiguration {
   disabled: boolean;
   disabledReason?: string;
   disabledUntil?: string;
+  previewNotificationEmail?: string;
   rateLimitRequestsPerMinute: number;
   manufacturerWhitelist: string;
   modelWhitelist: string;
@@ -58,6 +59,7 @@ export function TenantManagementSection({
 
   // Preview Whitelist state
   const [togglingPreviewTenant, setTogglingPreviewTenant] = useState<string | null>(null);
+  const [sendingWelcomeEmail, setSendingWelcomeEmail] = useState(false);
 
   // Filter and sort tenants
   const filteredTenants = tenants.filter(t => {
@@ -165,6 +167,36 @@ export function TenantManagementSection({
       setError(err instanceof Error ? err.message : "Failed to update security bypass");
     } finally {
       setTogglingSecurityBypassTenant(null);
+    }
+  };
+
+  const handleSendWelcomeEmail = async (tenantId: string) => {
+    try {
+      setSendingWelcomeEmail(true);
+      setError(null);
+      setSuccessMessage(null);
+
+      const response = await authenticatedFetch(
+        `${API_BASE_URL}/api/preview/send-welcome-email/${tenantId}`,
+        getAccessToken,
+        { method: "POST" }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Failed to send welcome email: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      setSuccessMessage(`Welcome email sent to ${result.email}`);
+      setTimeout(() => setSuccessMessage(null), 4000);
+    } catch (err) {
+      if (err instanceof TokenExpiredError) {
+        console.error("Session expired while sending welcome email");
+      }
+      setError(err instanceof Error ? err.message : "Failed to send welcome email");
+    } finally {
+      setSendingWelcomeEmail(false);
     }
   };
 
@@ -486,6 +518,43 @@ export function TenantManagementSection({
                 setError={setError}
                 setSuccessMessage={setSuccessMessage}
               />
+
+              {/* Preview Notification Email */}
+              <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
+                <h3 className="font-semibold text-indigo-900 mb-3">Preview Notification Email</h3>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="email"
+                    value={editingTenant.previewNotificationEmail || ''}
+                    onChange={(e) => setEditingTenant({ ...editingTenant, previewNotificationEmail: e.target.value })}
+                    placeholder="user@example.com"
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+                  />
+                  <button
+                    onClick={() => handleSendWelcomeEmail(editingTenant.tenantId)}
+                    disabled={sendingWelcomeEmail || !editingTenant.previewNotificationEmail?.trim()}
+                    className="px-3 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap flex items-center gap-1.5"
+                    title="Send or resend the Private Preview welcome email"
+                  >
+                    {sendingWelcomeEmail ? (
+                      <>
+                        <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-white"></div>
+                        <span>Sending...</span>
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                        </svg>
+                        <span>Send Welcome Email</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+                <p className="text-xs text-indigo-600 mt-2">
+                  Save changes first if you edited the email. The welcome email is also sent automatically on approval if set.
+                </p>
+              </div>
 
               {/* Rate Limit */}
               <div>
