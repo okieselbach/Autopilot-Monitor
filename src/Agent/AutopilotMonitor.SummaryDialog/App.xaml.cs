@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Text;
 using System.Windows;
 
 namespace AutopilotMonitor.SummaryDialog
@@ -11,7 +12,7 @@ namespace AutopilotMonitor.SummaryDialog
         internal static int TimeoutSeconds { get; private set; } = 60;
         internal static string BrandingImageUrl { get; private set; }
         internal static bool? ForceTheme { get; private set; } // true=dark, false=light, null=auto
-        internal static bool NoCleanup { get; private set; }
+        internal static bool Cleanup { get; private set; }
 
         private static string _logFile;
         private static string _tempLogFile; // error log in %TEMP% (survives self-cleanup)
@@ -95,10 +96,10 @@ namespace AutopilotMonitor.SummaryDialog
             Log("OnExit — shutting down");
             base.OnExit(e);
             CleanupTempErrorLog();
-            if (!NoCleanup)
+            if (Cleanup)
                 SelfCleanup();
             else
-                Log("SelfCleanup skipped (--no-cleanup)");
+                Log("SelfCleanup skipped (no --cleanup flag)");
         }
 
         private void ParseArguments(string[] args)
@@ -123,8 +124,8 @@ namespace AutopilotMonitor.SummaryDialog
                     case "--light-theme":
                         ForceTheme = false;
                         break;
-                    case "--no-cleanup":
-                        NoCleanup = true;
+                    case "--cleanup":
+                        Cleanup = true;
                         break;
                 }
             }
@@ -137,8 +138,8 @@ namespace AutopilotMonitor.SummaryDialog
 
         /// <summary>
         /// Self-cleanup: delete the staging folder this EXE was launched from.
-        /// Spawns cmd.exe with a short delay (ping loopback), then rd /s /q.
-        /// Simple and reliable — no PowerShell dependency or execution policy issues.
+        /// Spawns PowerShell with Wait-Process (waits for our process to exit),
+        /// then a short delay for file handle cleanup, then Remove-Item.
         /// </summary>
         private void SelfCleanup()
         {
@@ -165,17 +166,26 @@ namespace AutopilotMonitor.SummaryDialog
                     return;
                 }
 
-                // cmd.exe /c: ping loopback ~5s (waits for our process to exit + file handles to close),
-                // then rd /s /q to recursively delete the staging folder.
-                var cmdExe = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe");
-                var cmdArgs = $"/c ping -n 6 127.0.0.1 > nul 2>&1 & rd /s /q \"{exeDir}\"";
+                var pid = Process.GetCurrentProcess().Id;
 
-                Log($"SelfCleanup: spawning cmd.exe to delete '{exeDir}'");
+                // PowerShell Wait-Process: waits for our actual process exit (no polling),
+                // then short delay for file handle cleanup, then Remove-Item.
+                var psScript = $"Wait-Process -Id {pid} -Timeout 30 -ErrorAction SilentlyContinue; " +
+                               $"Start-Sleep -Seconds 2; " +
+                               $"Remove-Item -LiteralPath '{exeDir}' -Recurse -Force -ErrorAction SilentlyContinue";
+                var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(psScript));
+
+                // Full path to powershell.exe — don't rely on PATH resolution
+                var psExe = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.System),
+                    @"WindowsPowerShell\v1.0\powershell.exe");
+
+                Log($"SelfCleanup: spawning PowerShell to delete '{exeDir}' after PID {pid} exits");
 
                 Process.Start(new ProcessStartInfo
                 {
-                    FileName = cmdExe,
-                    Arguments = cmdArgs,
+                    FileName = psExe,
+                    Arguments = $"-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand {encoded}",
                     CreateNoWindow = true,
                     UseShellExecute = false
                 });

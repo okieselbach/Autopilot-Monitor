@@ -640,7 +640,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 File.Copy(statusFile, tempStatusFile);
 
                 // Build command line arguments
-                var args = $"--status-file \"{tempStatusFile}\" --timeout {_configuration.EnrollmentSummaryTimeoutSeconds}";
+                var args = $"--status-file \"{tempStatusFile}\" --timeout {_configuration.EnrollmentSummaryTimeoutSeconds} --cleanup";
                 if (!string.IsNullOrEmpty(_configuration.EnrollmentSummaryBrandingImageUrl))
                     args += $" --branding-url \"{_configuration.EnrollmentSummaryBrandingImageUrl}\"";
 

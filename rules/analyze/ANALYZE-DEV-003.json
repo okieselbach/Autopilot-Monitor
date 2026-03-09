@@ -1,0 +1,55 @@
+{
+  "$schema": "../schema/analyze-rule.schema.json",
+  "ruleId": "ANALYZE-DEV-003",
+  "title": "Unsupported Windows 11 Version",
+  "description": "Detects devices running Windows 11 version 22H2 or older, which is no longer supported by Microsoft.",
+  "severity": "warning",
+  "category": "device",
+  "enabled": true,
+  "baseConfidence": 90,
+  "conditions": [
+    {
+      "signal": "windows_11",
+      "source": "event_type",
+      "eventType": "os_info",
+      "dataField": "osVersion",
+      "operator": "contains",
+      "value": "Windows 11",
+      "required": true
+    },
+    {
+      "signal": "old_build",
+      "source": "event_data",
+      "eventType": "os_info",
+      "dataField": "currentBuild",
+      "operator": "lte",
+      "value": "22621",
+      "required": true
+    }
+  ],
+  "confidenceFactors": [],
+  "confidenceThreshold": 40,
+  "explanation": "This device is running Windows 11 version 22H2 (Build 22621) or older, which has reached end of support. Microsoft no longer provides security updates or bug fixes for this version. Devices running unsupported OS versions are exposed to known vulnerabilities and may fail compliance checks.",
+  "remediation": [
+    {
+      "title": "Update to a supported Windows 11 version",
+      "steps": [
+        "Verify the device meets hardware requirements for Windows 11 23H2 or 24H2",
+        "Update the Windows Autopilot deployment profile to use a supported OS image (23H2 or later)",
+        "If using a custom OS image, rebuild it with a supported Windows 11 version",
+        "For existing devices, deploy a Windows 11 feature update via Intune or Windows Update for Business"
+      ]
+    }
+  ],
+  "relatedDocs": [
+    {
+      "title": "Windows 11 release information",
+      "url": "https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information"
+    },
+    {
+      "title": "Windows 11 22H2 end of support",
+      "url": "https://learn.microsoft.com/en-us/lifecycle/products/windows-11-home-and-pro"
+    }
+  ],
+  "tags": ["device", "os-version", "end-of-support", "windows-11"]
+}
