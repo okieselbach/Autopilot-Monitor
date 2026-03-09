@@ -663,7 +663,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 try { UploadEventsAsync().Wait(TimeSpan.FromSeconds(5)); } catch { }
 
                 // Launch in user session (fire-and-forget)
-                var launched = UserSessionProcessLauncher.LaunchInUserSession(tempDialogExe, args, _logger);
+                var launched = UserSessionProcessLauncher.LaunchInUserSession(
+                    tempDialogExe, args, _logger,
+                    _configuration.EnrollmentSummaryLaunchRetrySeconds);
                 if (!launched)
                 {
                     _logger.Warning("Could not launch summary dialog in user session (no interactive session found)");

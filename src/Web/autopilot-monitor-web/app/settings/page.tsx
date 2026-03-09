@@ -62,6 +62,7 @@ export interface TenantConfiguration {
   showEnrollmentSummary?: boolean;
   enrollmentSummaryTimeoutSeconds?: number;
   enrollmentSummaryBrandingImageUrl?: string;
+  enrollmentSummaryLaunchRetrySeconds?: number;
   // Script output visibility
   showScriptOutput?: boolean;
   // Agent analyzer settings
@@ -141,6 +142,7 @@ export default function SettingsPage() {
   const [showEnrollmentSummary, setShowEnrollmentSummary] = useState(false);
   const [enrollmentSummaryTimeoutSeconds, setEnrollmentSummaryTimeoutSeconds] = useState(60);
   const [enrollmentSummaryBrandingImageUrl, setEnrollmentSummaryBrandingImageUrl] = useState("");
+  const [enrollmentSummaryLaunchRetrySeconds, setEnrollmentSummaryLaunchRetrySeconds] = useState(120);
 
   // Teams notifications state
   const [teamsWebhookUrl, setTeamsWebhookUrl] = useState("");
@@ -185,6 +187,7 @@ export default function SettingsPage() {
       showEnrollmentSummary !== (config.showEnrollmentSummary ?? false) ||
       enrollmentSummaryTimeoutSeconds !== (config.enrollmentSummaryTimeoutSeconds ?? 60) ||
       enrollmentSummaryBrandingImageUrl !== (config.enrollmentSummaryBrandingImageUrl ?? "") ||
+      enrollmentSummaryLaunchRetrySeconds !== (config.enrollmentSummaryLaunchRetrySeconds ?? 120) ||
       teamsWebhookUrl !== (config.teamsWebhookUrl ?? "") ||
       teamsNotifyOnSuccess !== (config.teamsNotifyOnSuccess ?? true) ||
       teamsNotifyOnFailure !== (config.teamsNotifyOnFailure ?? true) ||
@@ -205,7 +208,8 @@ export default function SettingsPage() {
     performanceCollectorInterval, helloWaitTimeoutSeconds, selfDestructOnComplete, keepLogFile,
     rebootOnComplete, rebootDelaySeconds, enableGeoLocation, enableImeMatchLog,
     logLevel, showScriptOutput, showEnrollmentSummary, enrollmentSummaryTimeoutSeconds,
-    enrollmentSummaryBrandingImageUrl, teamsWebhookUrl, teamsNotifyOnSuccess, teamsNotifyOnFailure,
+    enrollmentSummaryBrandingImageUrl, enrollmentSummaryLaunchRetrySeconds,
+    teamsWebhookUrl, teamsNotifyOnSuccess, teamsNotifyOnFailure,
     diagnosticsBlobSasUrl, diagnosticsUploadMode, tenantDiagPaths,
     enableLocalAdminAnalyzer, localAdminAllowedAccounts,
   ]);
@@ -250,6 +254,7 @@ export default function SettingsPage() {
         setShowEnrollmentSummary(data.showEnrollmentSummary ?? false);
         setEnrollmentSummaryTimeoutSeconds(data.enrollmentSummaryTimeoutSeconds ?? 60);
         setEnrollmentSummaryBrandingImageUrl(data.enrollmentSummaryBrandingImageUrl ?? "");
+        setEnrollmentSummaryLaunchRetrySeconds(data.enrollmentSummaryLaunchRetrySeconds ?? 120);
         setTeamsWebhookUrl(data.teamsWebhookUrl ?? "");
         setTeamsNotifyOnSuccess(data.teamsNotifyOnSuccess ?? true);
         setTeamsNotifyOnFailure(data.teamsNotifyOnFailure ?? true);
@@ -474,6 +479,7 @@ export default function SettingsPage() {
         showEnrollmentSummary,
         enrollmentSummaryTimeoutSeconds,
         enrollmentSummaryBrandingImageUrl: enrollmentSummaryBrandingImageUrl || undefined,
+        enrollmentSummaryLaunchRetrySeconds,
         teamsWebhookUrl: teamsWebhookUrl || undefined,
         teamsNotifyOnSuccess,
         teamsNotifyOnFailure,
@@ -1060,6 +1066,8 @@ export default function SettingsPage() {
               setEnrollmentSummaryTimeoutSeconds={setEnrollmentSummaryTimeoutSeconds}
               enrollmentSummaryBrandingImageUrl={enrollmentSummaryBrandingImageUrl}
               setEnrollmentSummaryBrandingImageUrl={setEnrollmentSummaryBrandingImageUrl}
+              enrollmentSummaryLaunchRetrySeconds={enrollmentSummaryLaunchRetrySeconds}
+              setEnrollmentSummaryLaunchRetrySeconds={setEnrollmentSummaryLaunchRetrySeconds}
             />
             )}
 

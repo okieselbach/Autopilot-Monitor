@@ -243,6 +243,13 @@ namespace AutopilotMonitor.Shared.Models
         public string EnrollmentSummaryBrandingImageUrl { get; set; }
 
         /// <summary>
+        /// Maximum time in seconds the agent retries launching the enrollment summary dialog
+        /// when the user's desktop is locked by a credential UI (e.g. Windows Hello).
+        /// null = use agent default (120). 0 = no retry (single attempt).
+        /// </summary>
+        public int? EnrollmentSummaryLaunchRetrySeconds { get; set; }
+
+        /// <summary>
         /// Whether to show PowerShell script stdout in the web UI.
         /// When false, only stderr (error output) is visible for troubleshooting.
         /// stdout may contain sensitive data (credentials, tokens).

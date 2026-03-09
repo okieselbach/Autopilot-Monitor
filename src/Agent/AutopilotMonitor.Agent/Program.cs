@@ -65,6 +65,14 @@ namespace AutopilotMonitor.Agent
                 Console.WriteLine();
             }
 
+            // Self-update: check for newer agent version in blob storage and apply if available.
+            // Priority: speed over update — 1s version check, 10s download timeout.
+            // Any failure → continue with current version (never block startup).
+            var agentDir = Environment.ExpandEnvironmentVariables(Constants.AgentDirectory);
+            SelfUpdater.CleanupPreviousUpdate(agentDir, msg => { if (consoleMode) Console.WriteLine(msg); });
+            SelfUpdater.CheckAndApplyUpdateAsync(GetAgentVersion(), agentDir, consoleMode).GetAwaiter().GetResult();
+            // If we reach here, no update was applied — continue normal startup
+
             try
             {
                 var config = LoadConfiguration(args);

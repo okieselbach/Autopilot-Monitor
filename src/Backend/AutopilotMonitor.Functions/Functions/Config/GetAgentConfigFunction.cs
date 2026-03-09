@@ -150,6 +150,7 @@ namespace AutopilotMonitor.Functions.Functions.Config
                 ShowEnrollmentSummary = tenantConfig.ShowEnrollmentSummary ?? false,
                 EnrollmentSummaryTimeoutSeconds = tenantConfig.EnrollmentSummaryTimeoutSeconds ?? 60,
                 EnrollmentSummaryBrandingImageUrl = tenantConfig.EnrollmentSummaryBrandingImageUrl,
+                EnrollmentSummaryLaunchRetrySeconds = tenantConfig.EnrollmentSummaryLaunchRetrySeconds ?? 120,
                 MaxBatchSize = tenantConfig.MaxBatchSize ?? 100,
                 DiagnosticsUploadEnabled = !string.IsNullOrEmpty(tenantConfig.DiagnosticsBlobSasUrl),
                 DiagnosticsUploadMode = tenantConfig.DiagnosticsUploadMode ?? "Off",

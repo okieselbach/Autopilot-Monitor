@@ -191,6 +191,13 @@ namespace AutopilotMonitor.Agent.Core.Configuration
         public string EnrollmentSummaryBrandingImageUrl { get; set; }
 
         /// <summary>
+        /// Maximum time in seconds the agent retries launching the enrollment summary dialog
+        /// when the user's desktop is locked by a credential UI (e.g. Windows Hello).
+        /// 0 = no retry (single attempt). Default: 120.
+        /// </summary>
+        public int EnrollmentSummaryLaunchRetrySeconds { get; set; } = 120;
+
+        /// <summary>
         /// Whether diagnostics upload is configured for this tenant.
         /// When true, the agent requests a short-lived upload URL from the backend just before uploading.
         /// The SAS URL itself is never stored in config — it is fetched on-demand and used in memory only.

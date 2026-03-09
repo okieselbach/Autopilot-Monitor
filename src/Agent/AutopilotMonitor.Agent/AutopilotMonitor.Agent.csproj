@@ -56,6 +56,15 @@
     <Message Text="Auto-incremented build version to: $(Version)" Importance="high" />
   </Target>
 
+  <!-- Generate version.json into build output for self-update and deployment upload -->
+  <Target Name="GenerateVersionJson" AfterTargets="Build">
+    <WriteLinesToFile
+      File="$(OutputPath)version.json"
+      Lines='{ "version": "$(Version)" }'
+      Overwrite="true" />
+    <Message Text="Generated version.json: $(Version)" Importance="high" />
+  </Target>
+
   <ItemGroup>
     <ProjectReference Include="..\AutopilotMonitor.Agent.Core\AutopilotMonitor.Agent.Core.csproj" />
     <ProjectReference Include="..\..\Shared\AutopilotMonitor.Shared\AutopilotMonitor.Shared.csproj" />

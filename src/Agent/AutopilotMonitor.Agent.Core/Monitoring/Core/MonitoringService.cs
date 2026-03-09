@@ -332,6 +332,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             _configuration.ShowEnrollmentSummary = config.ShowEnrollmentSummary;
             _configuration.EnrollmentSummaryTimeoutSeconds = config.EnrollmentSummaryTimeoutSeconds;
             _configuration.EnrollmentSummaryBrandingImageUrl = config.EnrollmentSummaryBrandingImageUrl;
+            _configuration.EnrollmentSummaryLaunchRetrySeconds = config.EnrollmentSummaryLaunchRetrySeconds;
             _configuration.SendTraceEvents = config.SendTraceEvents;
             _enrollmentTracker?.UpdateSendTraceEvents(config.SendTraceEvents);
 

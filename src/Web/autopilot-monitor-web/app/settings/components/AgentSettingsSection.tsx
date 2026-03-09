@@ -29,6 +29,8 @@ interface AgentSettingsSectionProps {
   setEnrollmentSummaryTimeoutSeconds: (value: number) => void;
   enrollmentSummaryBrandingImageUrl: string;
   setEnrollmentSummaryBrandingImageUrl: (value: string) => void;
+  enrollmentSummaryLaunchRetrySeconds: number;
+  setEnrollmentSummaryLaunchRetrySeconds: (value: number) => void;
 }
 
 export default function AgentSettingsSection({
@@ -60,6 +62,8 @@ export default function AgentSettingsSection({
   setEnrollmentSummaryTimeoutSeconds,
   enrollmentSummaryBrandingImageUrl,
   setEnrollmentSummaryBrandingImageUrl,
+  enrollmentSummaryLaunchRetrySeconds,
+  setEnrollmentSummaryLaunchRetrySeconds,
 }: AgentSettingsSectionProps) {
   return (
     <>
@@ -296,6 +300,25 @@ export default function AgentSettingsSection({
                     max={3600}
                     value={enrollmentSummaryTimeoutSeconds}
                     onChange={(e) => setEnrollmentSummaryTimeoutSeconds(Math.max(0, parseInt(e.target.value) || 0))}
+                    className="w-20 px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-gray-900 text-right focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
+                  />
+                  <span className="text-sm text-gray-500 whitespace-nowrap">seconds</span>
+                </div>
+              </div>
+
+              {/* Launch Retry Timeout */}
+              <div className="flex items-center justify-between p-4 rounded-lg border border-gray-200 hover:border-violet-200 transition-colors ml-4">
+                <div>
+                  <p className="font-medium text-gray-900">Launch Retry Timeout</p>
+                  <p className="text-sm text-gray-500">How long the agent retries launching the dialog when the desktop is locked by a credential UI (e.g. Windows Hello). 0 = no retry.</p>
+                </div>
+                <div className="flex items-center gap-2 ml-4">
+                  <input
+                    type="number"
+                    min={0}
+                    max={3600}
+                    value={enrollmentSummaryLaunchRetrySeconds}
+                    onChange={(e) => setEnrollmentSummaryLaunchRetrySeconds(Math.min(3600, Math.max(0, parseInt(e.target.value) || 0)))}
                     className="w-20 px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-gray-900 text-right focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
                   />
                   <span className="text-sm text-gray-500 whitespace-nowrap">seconds</span>

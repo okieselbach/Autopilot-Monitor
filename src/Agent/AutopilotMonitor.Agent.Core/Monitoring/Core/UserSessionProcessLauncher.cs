@@ -26,8 +26,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         /// Launches the specified executable in the logged-in user's desktop session.
         /// Returns true if the process was launched successfully, false otherwise.
         /// This is fire-and-forget — the caller does not wait for the process to exit.
+        /// If the process fails with 0x8007045A (desktop locked by credential UI),
+        /// retries for up to maxRetrySeconds.
         /// </summary>
-        public static bool LaunchInUserSession(string exePath, string arguments, AgentLogger logger)
+        public static bool LaunchInUserSession(string exePath, string arguments, AgentLogger logger, int maxRetrySeconds = 120)
         {
             IntPtr userToken = IntPtr.Zero;
             IntPtr environment = IntPtr.Zero;
@@ -89,45 +91,114 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 var threadSa = new NativeMethods.SECURITY_ATTRIBUTES();
                 threadSa.nLength = Marshal.SizeOf(threadSa);
 
-                if (!NativeMethods.CreateProcessAsUser(
-                    userToken,
-                    null,           // lpApplicationName (null, use command line)
-                    commandLine,    // lpCommandLine
-                    ref procSa,
-                    ref threadSa,
-                    false,          // bInheritHandles
-                    creationFlags,
-                    environment,
-                    workingDirectory,
-                    ref si,
-                    out var pi))
+                // During Autopilot enrollment the user's desktop may be locked by the
+                // CloudExperienceHost (CXH) process which hosts ESP + Windows Hello.
+                // GUI processes fail with 0x8007045A (DLL init) when the desktop isn't accessible.
+                //
+                // Strategy: retry loop with integrated CXH monitoring.
+                // - On 24H2+ and ≤22H2: CXH exits cleanly after Hello → we wake up immediately
+                //   (Process.WaitForExit instead of blind Thread.Sleep).
+                // - On 23H2: CXH stays running even after Hello/desktop → WaitForExit times out
+                //   after retryInterval, behaves like a normal retry sleep.
+                // This gives us instant wake-up when CXH cooperates, and a reliable fallback
+                // when it doesn't — all within a single unified loop.
+                const int retryIntervalSeconds = 10;
+                var retryStopwatch = System.Diagnostics.Stopwatch.StartNew();
+                int attempt = 0;
+
+                // One-time CXH lookup — track for the lifetime of the retry loop
+                Process cxhProcess = null;
+                if (maxRetrySeconds > 0)
                 {
-                    logger.Warning($"UserSessionProcessLauncher: CreateProcessAsUser failed (error {Marshal.GetLastWin32Error()})");
-                    return false;
+                    try
+                    {
+                        cxhProcess = FindProcessInSession("CloudExperienceHost", sessionId);
+                        if (cxhProcess != null)
+                            logger.Info($"UserSessionProcessLauncher: CloudExperienceHost PID {cxhProcess.Id} running " +
+                                       $"in session {sessionId} — will monitor for exit during retries");
+                    }
+                    catch { }
                 }
 
-                // Close the thread handle — we don't need it
-                NativeMethods.CloseHandle(pi.hThread);
-
-                logger.Info($"UserSessionProcessLauncher: Created process PID {pi.dwProcessId} in user session — verifying startup...");
-
-                // Verify the process actually started (CLR initialized, no immediate crash).
-                // If the process dies within 3 seconds, the exit code tells us exactly why
-                // (e.g. 0xC0000135 = DLL not found, 0xC000007B = invalid image format,
-                //  0xE0434352 = .NET unhandled exception, 0x8007045A = DLL init failed).
-                var waitResult = NativeMethods.WaitForSingleObject(pi.hProcess, 3000);
-                if (waitResult != NativeMethods.WAIT_TIMEOUT)
+                try
                 {
+                while (true)
+                {
+                    attempt++;
+
+                    if (!NativeMethods.CreateProcessAsUser(
+                        userToken,
+                        null,           // lpApplicationName (null, use command line)
+                        commandLine,    // lpCommandLine
+                        ref procSa,
+                        ref threadSa,
+                        false,          // bInheritHandles
+                        creationFlags,
+                        environment,
+                        workingDirectory,
+                        ref si,
+                        out var pi))
+                    {
+                        logger.Warning($"UserSessionProcessLauncher: CreateProcessAsUser failed (error {Marshal.GetLastWin32Error()})");
+                        return false;
+                    }
+
+                    NativeMethods.CloseHandle(pi.hThread);
+                    logger.Info($"UserSessionProcessLauncher: Attempt {attempt} — created PID {pi.dwProcessId}, verifying startup...");
+
+                    // Wait 3s to verify the process survives DLL init + CLR bootstrap.
+                    var waitResult = NativeMethods.WaitForSingleObject(pi.hProcess, 3000);
+                    if (waitResult == NativeMethods.WAIT_TIMEOUT)
+                    {
+                        // Process is still running after 3s — success
+                        NativeMethods.CloseHandle(pi.hProcess);
+                        logger.Info($"UserSessionProcessLauncher: Successfully launched PID {pi.dwProcessId} in user session" +
+                                   (attempt > 1 ? $" (after {attempt} attempts, {retryStopwatch.Elapsed.TotalSeconds:F0}s)" : ""));
+                        return true;
+                    }
+
+                    // Process exited within 3s — check why
                     NativeMethods.GetExitCodeProcess(pi.hProcess, out var exitCode);
                     NativeMethods.CloseHandle(pi.hProcess);
+
+                    // 0x8007045A = ERROR_DLL_INIT_FAILED — desktop locked by credential UI.
+                    // Retry until the desktop becomes accessible or we exceed the retry window.
+                    if (exitCode == 0x8007045A && retryStopwatch.Elapsed.TotalSeconds < maxRetrySeconds)
+                    {
+                        // If CXH is tracked and still running, wait for its exit instead of blind sleep.
+                        // On 24H2+/≤22H2: CXH exits → we wake up instantly.
+                        // On 23H2: CXH never exits → WaitForExit times out → same as regular retry interval.
+                        if (cxhProcess != null)
+                        {
+                            logger.Info($"UserSessionProcessLauncher: Attempt {attempt} — 0x8007045A, waiting for CXH exit (up to {retryIntervalSeconds}s)...");
+                            if (cxhProcess.WaitForExit(retryIntervalSeconds * 1000))
+                            {
+                                logger.Info("UserSessionProcessLauncher: CloudExperienceHost exited — desktop should be available");
+                                cxhProcess.Dispose();
+                                cxhProcess = null;
+                                System.Threading.Thread.Sleep(500); // brief delay for desktop init
+                            }
+                            // else: CXH still running (23H2 behavior) — retry anyway
+                        }
+                        else
+                        {
+                            logger.Info($"UserSessionProcessLauncher: Attempt {attempt} — 0x8007045A (desktop locked?) — retrying in {retryIntervalSeconds}s...");
+                            System.Threading.Thread.Sleep(retryIntervalSeconds * 1000);
+                        }
+                        continue;
+                    }
+
+                    // Non-retryable error, or retry timeout exceeded
                     logger.Warning($"UserSessionProcessLauncher: Process PID {pi.dwProcessId} exited within 3s — " +
-                                   $"exit code 0x{exitCode:X8} (startup crash or missing dependency)");
+                                   $"exit code 0x{exitCode:X8}" +
+                                   (attempt > 1 ? $" (gave up after {attempt} attempts, {retryStopwatch.Elapsed.TotalSeconds:F0}s)" : ""));
                     return false;
                 }
-
-                NativeMethods.CloseHandle(pi.hProcess);
-                logger.Info($"UserSessionProcessLauncher: Successfully launched process PID {pi.dwProcessId} in user session");
-                return true;
+                }
+                finally
+                {
+                    cxhProcess?.Dispose();
+                }
             }
             catch (Exception ex)
             {
@@ -141,6 +212,41 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 if (userToken != IntPtr.Zero)
                     NativeMethods.CloseHandle(userToken);
             }
+        }
+
+        /// <summary>
+        /// Finds a process by name running in a specific session.
+        /// Returns the first matching Process handle, or null if none found.
+        /// </summary>
+        private static Process FindProcessInSession(string processName, uint sessionId)
+        {
+            try
+            {
+                var processes = Process.GetProcessesByName(processName);
+                foreach (var proc in processes)
+                {
+                    try
+                    {
+                        if ((uint)proc.SessionId == sessionId)
+                        {
+                            // Dispose the rest
+                            foreach (var other in processes)
+                            {
+                                if (other.Id != proc.Id)
+                                    try { other.Dispose(); } catch { }
+                            }
+                            return proc;
+                        }
+                        proc.Dispose();
+                    }
+                    catch
+                    {
+                        proc.Dispose();
+                    }
+                }
+            }
+            catch { }
+            return null;
         }
 
         /// <summary>

@@ -45,6 +45,35 @@ namespace AutopilotMonitor.Shared
         public const string ApiBaseUrl = "https://autopilotmonitor-api.azurewebsites.net";
 
         // -----------------------------------------------------------------------
+        // Agent self-update
+        // -----------------------------------------------------------------------
+
+        /// <summary>
+        /// Base URL for agent binaries in Azure Blob Storage (public read)
+        /// </summary>
+        public const string AgentBlobBaseUrl = "https://autopilotmonitor.blob.core.windows.net/agent";
+
+        /// <summary>
+        /// Version manifest filename in blob storage (JSON: { "version": "1.0.350" })
+        /// </summary>
+        public const string AgentVersionFileName = "version.json";
+
+        /// <summary>
+        /// Agent ZIP filename in blob storage
+        /// </summary>
+        public const string AgentZipFileName = "AutopilotMonitor-Agent.zip";
+
+        /// <summary>
+        /// Staging directory for self-update extraction
+        /// </summary>
+        public const string AgentUpdateStagingDir = @"%ProgramData%\AutopilotMonitor\Agent-Update";
+
+        /// <summary>
+        /// Agent binary directory
+        /// </summary>
+        public const string AgentDirectory = @"%ProgramData%\AutopilotMonitor\Agent";
+
+        // -----------------------------------------------------------------------
         // Upload / batching defaults
         // -----------------------------------------------------------------------
 

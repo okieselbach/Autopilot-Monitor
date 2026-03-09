@@ -107,6 +107,13 @@ namespace AutopilotMonitor.Shared.Models
         public string EnrollmentSummaryBrandingImageUrl { get; set; }
 
         /// <summary>
+        /// Maximum time in seconds the agent retries launching the enrollment summary dialog
+        /// when the user's desktop is locked by a credential UI (e.g. Windows Hello).
+        /// 0 = no retry (single attempt). Default: 120 (2 minutes).
+        /// </summary>
+        public int EnrollmentSummaryLaunchRetrySeconds { get; set; } = 120;
+
+        /// <summary>
         /// Maximum number of events per upload batch.
         /// Default: 100
         /// </summary>
