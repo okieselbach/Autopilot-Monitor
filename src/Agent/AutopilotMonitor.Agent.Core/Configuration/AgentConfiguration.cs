@@ -224,6 +224,19 @@ namespace AutopilotMonitor.Agent.Core.Configuration
         public bool SendTraceEvents { get; set; } = true;
 
         /// <summary>
+        /// When true, the agent waits for an MDM certificate to appear before starting.
+        /// Used when deploying the agent before Intune enrollment completes.
+        /// The agent polls the certificate store every 5 seconds until a valid cert is found.
+        /// </summary>
+        public bool AwaitEnrollment { get; set; } = false;
+
+        /// <summary>
+        /// Maximum time in minutes to wait for the MDM certificate in await-enrollment mode.
+        /// 0 = wait indefinitely. Default: 480 (8 hours).
+        /// </summary>
+        public int AwaitEnrollmentTimeoutMinutes { get; set; } = 480;
+
+        /// <summary>
         /// Validates the configuration
         /// </summary>
         public bool IsValid()

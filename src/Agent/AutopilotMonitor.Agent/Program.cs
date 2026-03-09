@@ -5,6 +5,7 @@ using System.Linq;
 using AutopilotMonitor.Agent.Core.Configuration;
 using AutopilotMonitor.Agent.Core.Logging;
 using AutopilotMonitor.Agent.Core.Monitoring.Core;
+using AutopilotMonitor.Agent.Core.Security;
 using AutopilotMonitor.Shared;
 
 namespace AutopilotMonitor.Agent
@@ -13,6 +14,12 @@ namespace AutopilotMonitor.Agent
     {
         static void Main(string[] args)
         {
+            if (args.Contains("--help") || args.Contains("-h") || args.Contains("-?"))
+            {
+                PrintUsage();
+                return;
+            }
+
             // Install mode: ensure folders, deploy payload, create/update Scheduled Task, and start it.
             if (args.Contains("--install"))
             {
@@ -117,7 +124,51 @@ namespace AutopilotMonitor.Agent
                         if (!string.IsNullOrEmpty(config.ClientCertThumbprint))
                             Console.WriteLine($"Thumbprint:  {config.ClientCertThumbprint}");
                     }
+                    if (config.AwaitEnrollment)
+                        Console.WriteLine($"Await Enroll: ENABLED (timeout: {config.AwaitEnrollmentTimeoutMinutes}min)");
                     Console.WriteLine();
+                }
+
+                // Await-enrollment mode: wait for MDM certificate before proceeding.
+                // Used when the agent is deployed before Intune enrollment completes.
+                if (config.AwaitEnrollment)
+                {
+                    logger.Info("Await-enrollment mode active — waiting for MDM certificate before starting");
+                    if (consoleMode)
+                        Console.WriteLine("Await-enrollment: Waiting for MDM certificate...");
+
+                    var cert = EnrollmentAwaiter.WaitForMdmCertificateAsync(
+                        config.ClientCertThumbprint,
+                        config.AwaitEnrollmentTimeoutMinutes,
+                        logger).GetAwaiter().GetResult();
+
+                    if (cert == null)
+                    {
+                        logger.Warning("Await-enrollment: No MDM certificate found within timeout. Agent will exit.");
+                        if (consoleMode)
+                            Console.WriteLine("ERROR: No MDM certificate found within timeout. Agent will exit.");
+                        return;
+                    }
+
+                    if (consoleMode)
+                        Console.WriteLine($"MDM certificate found: {cert.Thumbprint}");
+
+                    // Re-read TenantId from registry — enrollment creates the registry key
+                    // alongside the certificate, so it should be available now.
+                    if (string.IsNullOrEmpty(config.TenantId))
+                    {
+                        config.TenantId = GetTenantIdFromRegistry();
+                        if (!string.IsNullOrEmpty(config.TenantId))
+                        {
+                            logger.Info($"Await-enrollment: TenantId discovered from registry: {config.TenantId}");
+                            if (consoleMode)
+                                Console.WriteLine($"Tenant ID:   {config.TenantId}");
+                        }
+                        else
+                        {
+                            logger.Warning("Await-enrollment: MDM certificate found but TenantId not yet in registry");
+                        }
+                    }
                 }
 
                 using (var service = new MonitoringService(config, logger, agentVersion))
@@ -161,6 +212,48 @@ namespace AutopilotMonitor.Agent
                     Console.WriteLine(ex.StackTrace);
                 }
             }
+        }
+
+        static void PrintUsage()
+        {
+            var version = GetAgentVersion();
+            Console.WriteLine($"Autopilot Monitor Agent v{version}");
+            Console.WriteLine();
+            Console.WriteLine("Usage: AutopilotMonitor.Agent.exe [options]");
+            Console.WriteLine();
+            Console.WriteLine("Modes:");
+            Console.WriteLine("  --install                         Deploy payload, create Scheduled Task, and start it");
+            Console.WriteLine("  --run-gather-rules                Execute startup gather rules once and exit");
+            Console.WriteLine("  (default)                         Run enrollment monitoring");
+            Console.WriteLine();
+            Console.WriteLine("General options:");
+            Console.WriteLine("  --help, -h, -?                    Show this help message");
+            Console.WriteLine("  --console                         Enable console output (auto-enabled when interactive)");
+            Console.WriteLine("  --new-session                     Force a new session ID (delete persisted session)");
+            Console.WriteLine("  --keep-logfile                    Preserve log directory after self-destruct cleanup");
+            Console.WriteLine("  --no-cleanup                      Disable self-destruct on enrollment completion");
+            Console.WriteLine("  --reboot-on-complete              Reboot the device after enrollment completes");
+            Console.WriteLine("  --disable-geolocation             Skip geo-location detection");
+            Console.WriteLine();
+            Console.WriteLine("Authentication:");
+            Console.WriteLine("  --no-auth                         Disable client cert auth (with --bootstrap-token only)");
+            Console.WriteLine("  --cert-thumbprint <THUMBPRINT>    Use a specific certificate instead of auto-detection");
+            Console.WriteLine("  --bootstrap-token <TOKEN>         Use bootstrap token auth (pre-MDM OOBE phase)");
+            Console.WriteLine();
+            Console.WriteLine("Await-enrollment mode:");
+            Console.WriteLine("  --await-enrollment                Wait for MDM certificate before starting monitoring");
+            Console.WriteLine("  --await-enrollment-timeout <MIN>  Timeout in minutes for await-enrollment (default: 480)");
+            Console.WriteLine();
+            Console.WriteLine("Overrides:");
+            Console.WriteLine("  --tenant-id <ID>                  Override tenant ID (instead of registry discovery)");
+            Console.WriteLine("  --api-url <URL>                   Override backend API base URL");
+            Console.WriteLine("  --backend-api <URL>               Alias for --api-url");
+            Console.WriteLine("  --ime-log-path <PATH>             Override IME logs directory");
+            Console.WriteLine("  --ime-match-log <PATH>            Write matched IME log lines to file (debug)");
+            Console.WriteLine();
+            Console.WriteLine("Replay (testing/simulation):");
+            Console.WriteLine("  --replay-log-dir <PATH>           Directory with real IME logs for replay");
+            Console.WriteLine("  --replay-speed-factor <FACTOR>    Time compression factor (default: 50)");
         }
 
         /// <summary>

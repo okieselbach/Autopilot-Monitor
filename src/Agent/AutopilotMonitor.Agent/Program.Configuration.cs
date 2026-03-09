@@ -53,6 +53,7 @@ namespace AutopilotMonitor.Agent
             var disableGeoLoc     = args?.Contains("--disable-geolocation") ?? false;
             var newSession        = args?.Contains("--new-session") ?? false;
             var keepLogFile       = args?.Contains("--keep-logfile") ?? false;
+            var awaitEnrollment   = args?.Contains("--await-enrollment") ?? false;
 
             string certThumbprint        = null;
             string tenantIdOverride      = null;
@@ -62,6 +63,7 @@ namespace AutopilotMonitor.Agent
             string replayLogDir      = null;
             string bootstrapToken    = null;
             double replaySpeedFactor = 50;
+            int    awaitEnrollmentTimeoutMinutes = 480;
 
             if (args != null)
             {
@@ -99,6 +101,11 @@ namespace AutopilotMonitor.Agent
                 var bootstrapTokenIndex = Array.IndexOf(args, "--bootstrap-token");
                 if (bootstrapTokenIndex >= 0 && bootstrapTokenIndex + 1 < args.Length)
                     bootstrapToken = args[bootstrapTokenIndex + 1];
+
+                var awaitTimeoutIndex = Array.IndexOf(args, "--await-enrollment-timeout");
+                if (awaitTimeoutIndex >= 0 && awaitTimeoutIndex + 1 < args.Length)
+                    if (int.TryParse(args[awaitTimeoutIndex + 1], out var awaitTimeout))
+                        awaitEnrollmentTimeoutMinutes = awaitTimeout;
             }
 
             // Defaults
@@ -187,7 +194,9 @@ namespace AutopilotMonitor.Agent
                 ReplaySpeedFactor     = replaySpeedFactor,
                 KeepLogFile           = keepLogFile,
                 BootstrapToken        = bootstrapToken,
-                UseBootstrapTokenAuth = useBootstrapToken
+                UseBootstrapTokenAuth = useBootstrapToken,
+                AwaitEnrollment       = awaitEnrollment,
+                AwaitEnrollmentTimeoutMinutes = awaitEnrollmentTimeoutMinutes
             };
         }
 
