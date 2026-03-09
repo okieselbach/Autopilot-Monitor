@@ -342,8 +342,9 @@ export default function SettingsPage() {
 
   useEffect(() => {
     if (!tenantId) return;
+    if (!user?.isTenantAdmin && !user?.isGalacticAdmin) return;
     fetchAdmins();
-  }, [tenantId]);
+  }, [tenantId, user?.isTenantAdmin, user?.isGalacticAdmin]);
 
   // Fetch bootstrap sessions (only when feature is enabled)
   useEffect(() => {
@@ -351,8 +352,9 @@ export default function SettingsPage() {
     fetchBootstrapSessions();
   }, [tenantId, config?.bootstrapTokenEnabled]);
 
-  // Fetch global diagnostics paths (best-effort, may return 403 for non-galactic-admins)
+  // Fetch global diagnostics paths (galactic-admin only)
   useEffect(() => {
+    if (!user?.isGalacticAdmin) return;
     const fetchGlobalDiagPaths = async () => {
       try {
         const res = await authenticatedFetch(`${API_BASE_URL}/api/global/config`, getAccessToken);
@@ -362,11 +364,11 @@ export default function SettingsPage() {
           setGlobalDiagPaths(JSON.parse(data.diagnosticsGlobalLogPathsJson));
         }
       } catch {
-        // Non-fatal: galactic-admin endpoint may be unreachable for regular admins
+        // Non-fatal
       }
     };
     fetchGlobalDiagPaths();
-  }, []);
+  }, [user?.isGalacticAdmin]);
 
   // Intercept <Link> clicks from Navbar and any other anchor navigations
   useEffect(() => {

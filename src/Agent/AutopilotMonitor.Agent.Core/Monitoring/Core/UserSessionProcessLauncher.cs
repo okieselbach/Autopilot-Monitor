@@ -8,9 +8,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 {
     /// <summary>
     /// Launches a process in the logged-in user's desktop session from a SYSTEM context.
-    /// Uses WTSQueryUserToken + CreateProcessWithTokenW (LOGON_WITH_PROFILE) to launch
-    /// the process with the user's full interactive context including loaded profile.
-    /// Falls back to CreateProcessAsUser if CreateProcessWithTokenW is unavailable.
+    /// Uses WTSQueryUserToken + DuplicateTokenEx + SetTokenInformation(TokenSessionId)
+    /// to create a session-stamped token, then CreateProcessAsUser to launch in the
+    /// correct interactive session (not Session 0).
     /// </summary>
     internal static class UserSessionProcessLauncher
     {
@@ -33,6 +33,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         public static bool LaunchInUserSession(string exePath, string arguments, AgentLogger logger, int maxRetrySeconds = 120)
         {
             IntPtr userToken = IntPtr.Zero;
+            IntPtr dupToken = IntPtr.Zero;
             IntPtr environment = IntPtr.Zero;
 
             try
@@ -60,16 +61,36 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     return false;
                 }
 
-                // Create an environment block for the user
-                if (!NativeMethods.CreateEnvironmentBlock(out environment, userToken, false))
+                // Duplicate token and stamp the target session ID.
+                // WTSQueryUserToken gives us the user's identity, but CreateProcessAsUser
+                // needs TokenSessionId explicitly set to avoid Session 0 placement
+                // (the calling service runs in Session 0; without stamping, the child
+                // process inherits Session 0 even though the token belongs to the user).
+                if (!NativeMethods.DuplicateTokenEx(userToken, NativeMethods.MAXIMUM_ALLOWED, IntPtr.Zero,
+                    NativeMethods.SECURITY_IMPERSONATION, NativeMethods.TOKEN_PRIMARY, out dupToken))
+                {
+                    logger.Warning($"UserSessionProcessLauncher: DuplicateTokenEx failed (error {Marshal.GetLastWin32Error()})");
+                    return false;
+                }
+
+                if (!NativeMethods.SetTokenInformation(dupToken, NativeMethods.TokenSessionId,
+                    ref sessionId, (uint)Marshal.SizeOf(typeof(uint))))
+                {
+                    logger.Warning($"UserSessionProcessLauncher: SetTokenInformation(SessionId={sessionId}) failed (error {Marshal.GetLastWin32Error()})");
+                    return false;
+                }
+
+                logger.Info($"UserSessionProcessLauncher: Token duplicated and stamped to session {sessionId}");
+
+                // Create an environment block for the user (using session-stamped token)
+                if (!NativeMethods.CreateEnvironmentBlock(out environment, dupToken, false))
                 {
                     logger.Warning($"UserSessionProcessLauncher: CreateEnvironmentBlock failed (error {Marshal.GetLastWin32Error()})");
                     environment = IntPtr.Zero;
                 }
 
                 // Set up startup info — empty lpDesktop lets Windows select the correct
-                // desktop for the token's session (avoids Session 0 vs user session mismatch
-                // when explicitly specifying "WinSta0\Default" from SYSTEM context).
+                // desktop for the session-stamped token.
                 var si = new NativeMethods.STARTUPINFO();
                 si.cb = Marshal.SizeOf(si);
                 si.lpDesktop = "";
@@ -109,51 +130,27 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 {
                     attempt++;
 
-                    // Try CreateProcessWithTokenW first (LOGON_WITH_PROFILE loads the user
-                    // profile — required for USER32.dll/GDI32.dll DllMain to succeed).
-                    // Falls back to CreateProcessAsUser if the Secondary Logon service is unavailable.
+                    // CreateProcessAsUser with session-stamped token.
+                    // The duplicated token has TokenSessionId set to the user's session,
+                    // ensuring the process lands on the interactive desktop (not Session 0).
                     bool created;
                     NativeMethods.PROCESS_INFORMATION pi;
 
-                    created = NativeMethods.CreateProcessWithTokenW(
-                        userToken,
-                        NativeMethods.LOGON_WITH_PROFILE,
-                        null,
-                        commandLine,
-                        creationFlags,
-                        environment,
-                        workingDirectory,
-                        ref si,
-                        out pi);
+                    var procSa = new NativeMethods.SECURITY_ATTRIBUTES();
+                    procSa.nLength = Marshal.SizeOf(procSa);
+                    var threadSa = new NativeMethods.SECURITY_ATTRIBUTES();
+                    threadSa.nLength = Marshal.SizeOf(threadSa);
+
+                    created = NativeMethods.CreateProcessAsUser(
+                        dupToken, null, commandLine,
+                        ref procSa, ref threadSa, false,
+                        creationFlags, environment, workingDirectory,
+                        ref si, out pi);
 
                     if (!created)
                     {
-                        var tokenError = Marshal.GetLastWin32Error();
-
-                        // 1314 = ERROR_PRIVILEGE_NOT_HELD, 1058 = ERROR_SERVICE_DISABLED (seclogon)
-                        // Fall back to CreateProcessAsUser
-                        if (tokenError == 1314 || tokenError == 1058)
-                        {
-                            if (attempt == 1)
-                                logger.Info($"UserSessionProcessLauncher: CreateProcessWithTokenW unavailable (error {tokenError}) — falling back to CreateProcessAsUser");
-
-                            var procSa = new NativeMethods.SECURITY_ATTRIBUTES();
-                            procSa.nLength = Marshal.SizeOf(procSa);
-                            var threadSa = new NativeMethods.SECURITY_ATTRIBUTES();
-                            threadSa.nLength = Marshal.SizeOf(threadSa);
-
-                            created = NativeMethods.CreateProcessAsUser(
-                                userToken, null, commandLine,
-                                ref procSa, ref threadSa, false,
-                                creationFlags, environment, workingDirectory,
-                                ref si, out pi);
-                        }
-
-                        if (!created)
-                        {
-                            logger.Warning($"UserSessionProcessLauncher: CreateProcess failed (error {Marshal.GetLastWin32Error()})");
-                            return false;
-                        }
+                        logger.Warning($"UserSessionProcessLauncher: CreateProcessAsUser failed (error {Marshal.GetLastWin32Error()})");
+                        return false;
                     }
 
                     NativeMethods.CloseHandle(pi.hThread);
@@ -221,6 +218,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             {
                 if (environment != IntPtr.Zero)
                     NativeMethods.DestroyEnvironmentBlock(environment);
+                if (dupToken != IntPtr.Zero)
+                    NativeMethods.CloseHandle(dupToken);
                 if (userToken != IntPtr.Zero)
                     NativeMethods.CloseHandle(userToken);
             }
@@ -365,7 +364,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             public const int STARTF_FORCEONFEEDBACK = 0x00000040;
             public const short SW_SHOW = 5;
             public const uint WAIT_TIMEOUT = 258;
-            public const uint LOGON_WITH_PROFILE = 1;
+            public const uint MAXIMUM_ALLOWED = 0x02000000;
+            public const int SECURITY_IMPERSONATION = 2;
+            public const int TOKEN_PRIMARY = 1;
+            public const int TokenSessionId = 12;
 
             [StructLayout(LayoutKind.Sequential)]
             public struct SECURITY_ATTRIBUTES
@@ -410,13 +412,15 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             [DllImport("Wtsapi32.dll", SetLastError = true)]
             public static extern bool WTSQueryUserToken(uint SessionId, out IntPtr phToken);
 
-            [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-            public static extern bool CreateProcessWithTokenW(
-                IntPtr hToken, uint dwLogonFlags,
-                string lpApplicationName, string lpCommandLine,
-                uint dwCreationFlags, IntPtr lpEnvironment,
-                string lpCurrentDirectory,
-                ref STARTUPINFO lpStartupInfo, out PROCESS_INFORMATION lpProcessInformation);
+            [DllImport("advapi32.dll", SetLastError = true)]
+            public static extern bool DuplicateTokenEx(
+                IntPtr hExistingToken, uint dwDesiredAccess, IntPtr lpTokenAttributes,
+                int ImpersonationLevel, int TokenType, out IntPtr phNewToken);
+
+            [DllImport("advapi32.dll", SetLastError = true)]
+            public static extern bool SetTokenInformation(
+                IntPtr TokenHandle, int TokenInformationClass,
+                ref uint TokenInformation, uint TokenInformationLength);
 
             [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
             public static extern bool CreateProcessAsUser(

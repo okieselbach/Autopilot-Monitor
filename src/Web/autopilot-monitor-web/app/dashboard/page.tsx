@@ -141,9 +141,9 @@ export default function Home() {
     }
   };
 
-  // Redirect regular users (non-admin) to progress portal – they must never see the session list
+  // Redirect regular users (non-admin, non-operator) to progress portal – they must never see the session list
   useEffect(() => {
-    if (user && !user.isTenantAdmin && !user.isGalacticAdmin) {
+    if (user && !user.isTenantAdmin && !user.isGalacticAdmin && user.role !== 'Operator') {
       router.replace("/progress");
     }
   }, [user, router]);
@@ -151,7 +151,7 @@ export default function Home() {
   useEffect(() => {
     const fetchTenantSecurityConfig = async () => {
       if (!tenantId) return;
-      if (user && !user.isTenantAdmin && !user.isGalacticAdmin) return;
+      if (user && !user.isTenantAdmin && !user.isGalacticAdmin && user.role !== 'Operator') return;
 
       try {
         const response = await authenticatedFetch(`${API_BASE_URL}/api/config/${tenantId}`, getAccessToken);
@@ -178,7 +178,7 @@ export default function Home() {
   // Wait for a real tenantId before fetching — TenantContext initializes to '' and
   // updates asynchronously once AuthContext finishes loading the user token.
   useEffect(() => {
-    if (user && !user.isTenantAdmin && !user.isGalacticAdmin) {
+    if (user && !user.isTenantAdmin && !user.isGalacticAdmin && user.role !== 'Operator') {
       return; // regular users are being redirected, don't fetch
     }
     if (!galacticAdminMode && !tenantId) return; // wait for real tenant ID
