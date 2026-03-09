@@ -44,6 +44,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Analyzers
             "DefaultAccount",
             "WDAGUtilityAccount",
             "defaultuser0",    // Temporary OOBE/Autopilot system account, present during enrollment
+            "defaultuser1",    // Sometimes seen in OOBE, but not always present
+            "defaultuser2",    // Sometimes seen in OOBE, but not always present
             "Public",          // Profile folder (not a user account)
             "Default",         // Default user profile template
             "Default User",    // Symlink to Default in some Windows versions

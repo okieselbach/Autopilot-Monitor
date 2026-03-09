@@ -20,7 +20,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         private static readonly string[] ExcludedUserNames =
         {
             "SYSTEM", "LOCAL SERVICE", "NETWORK SERVICE",
-            "DefaultUser0", "DefaultUser1", "defaultuser0", "defaultuser1"
+            "DefaultUser0", "DefaultUser1", "DefaultUser2", 
+            "defaultuser0", "defaultuser1", "defaultuser2"
         };
 
         /// <summary>
@@ -66,11 +67,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     environment = IntPtr.Zero;
                 }
 
-                // Set up startup info to target the user's desktop
+                // Set up startup info — empty lpDesktop lets Windows select the correct
+                // desktop for the token's session (avoids Session 0 vs user session mismatch
+                // when explicitly specifying "WinSta0\Default" from SYSTEM context).
                 var si = new NativeMethods.STARTUPINFO();
                 si.cb = Marshal.SizeOf(si);
-                si.lpDesktop = @"WinSta0\Default";
-                si.dwFlags = NativeMethods.STARTF_USESHOWWINDOW;
+                si.lpDesktop = "";
+                si.dwFlags = NativeMethods.STARTF_USESHOWWINDOW | NativeMethods.STARTF_FORCEONFEEDBACK;
                 si.wShowWindow = NativeMethods.SW_SHOW;
 
                 uint creationFlags = 0;
@@ -359,6 +362,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         {
             public const uint CREATE_UNICODE_ENVIRONMENT = 0x00000400;
             public const int STARTF_USESHOWWINDOW = 0x00000001;
+            public const int STARTF_FORCEONFEEDBACK = 0x00000040;
             public const short SW_SHOW = 5;
             public const uint WAIT_TIMEOUT = 258;
             public const uint LOGON_WITH_PROFILE = 1;
