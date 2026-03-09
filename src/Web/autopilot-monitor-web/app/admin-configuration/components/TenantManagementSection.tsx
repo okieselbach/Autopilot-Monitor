@@ -170,7 +170,7 @@ export function TenantManagementSection({
     }
   };
 
-  const handleSendWelcomeEmail = async (tenantId: string) => {
+  const handleSendWelcomeEmail = async (tenantId: string, email?: string) => {
     try {
       setSendingWelcomeEmail(true);
       setError(null);
@@ -179,7 +179,11 @@ export function TenantManagementSection({
       const response = await authenticatedFetch(
         `${API_BASE_URL}/api/preview/send-welcome-email/${tenantId}`,
         getAccessToken,
-        { method: "POST" }
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: email || "" }),
+        }
       );
 
       if (!response.ok) {
@@ -531,7 +535,7 @@ export function TenantManagementSection({
                     className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
                   />
                   <button
-                    onClick={() => handleSendWelcomeEmail(editingTenant.tenantId)}
+                    onClick={() => handleSendWelcomeEmail(editingTenant.tenantId, editingTenant.previewNotificationEmail)}
                     disabled={sendingWelcomeEmail || !editingTenant.previewNotificationEmail?.trim()}
                     className="px-3 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap flex items-center gap-1.5"
                     title="Send or resend the Private Preview welcome email"

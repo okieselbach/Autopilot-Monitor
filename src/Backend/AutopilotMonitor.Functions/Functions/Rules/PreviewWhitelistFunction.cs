@@ -208,6 +208,7 @@ public class PreviewWhitelistFunction
     /// <summary>
     /// POST /api/preview/send-welcome-email/{tenantId}
     /// Sends (or resends) the Private Preview welcome email. Galactic Admin only.
+    /// Accepts optional { email } in body — if provided, saves it to tenant config before sending.
     /// </summary>
     [Function("SendPreviewWelcomeEmail")]
     [Authorize]
@@ -219,6 +220,16 @@ public class PreviewWhitelistFunction
         // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
 
         var tenantConfig = await _tenantConfigurationService.GetConfigurationAsync(tenantId);
+
+        // If the caller provides an email in the body, save it first
+        var body = await req.ReadFromJsonAsync<SaveNotificationEmailRequest>();
+        var bodyEmail = body?.Email?.Trim();
+        if (!string.IsNullOrWhiteSpace(bodyEmail))
+        {
+            tenantConfig.PreviewNotificationEmail = bodyEmail;
+            await _tenantConfigurationService.SaveConfigurationAsync(tenantConfig);
+        }
+
         var email = tenantConfig.PreviewNotificationEmail;
 
         if (string.IsNullOrWhiteSpace(email))
