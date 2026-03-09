@@ -21,7 +21,6 @@ export interface TenantConfiguration {
   bootstrapTokenEnabled?: boolean;
   dataRetentionDays: number;
   sessionTimeoutHours: number;
-  maxNdjsonPayloadSizeMB: number;
 }
 
 export interface TenantManagementSectionProps {
@@ -603,17 +602,6 @@ export function TenantManagementSection({
                 />
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Max NDJSON Payload (MB)</label>
-                <input
-                  type="number"
-                  min="1"
-                  max="50"
-                  value={editingTenant.maxNdjsonPayloadSizeMB}
-                  onChange={(e) => setEditingTenant({ ...editingTenant, maxNdjsonPayloadSizeMB: parseInt(e.target.value) || 5 })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                />
-              </div>
             </div>
 
             {/* Modal Actions */}

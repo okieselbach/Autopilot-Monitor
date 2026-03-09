@@ -91,8 +91,7 @@ namespace AutopilotMonitor.Functions.Functions.Config
                         config.BootstrapTokenEnabled != existingConfig.BootstrapTokenEnabled ||
                         config.CustomRateLimitRequestsPerMinute != existingConfig.CustomRateLimitRequestsPerMinute ||
                         config.RateLimitRequestsPerMinute != existingConfig.RateLimitRequestsPerMinute ||
-                        config.Disabled != existingConfig.Disabled ||
-                        config.MaxNdjsonPayloadSizeMB != existingConfig.MaxNdjsonPayloadSizeMB)
+                        config.Disabled != existingConfig.Disabled)
                     {
                         _logger.LogWarning(
                             "Tenant Admin {User} attempted to modify GA-only fields for tenant {TenantId}",
@@ -106,8 +105,10 @@ namespace AutopilotMonitor.Functions.Functions.Config
                     config.Disabled = existingConfig.Disabled;
                     config.DisabledReason = existingConfig.DisabledReason;
                     config.DisabledUntil = existingConfig.DisabledUntil;
-                    config.MaxNdjsonPayloadSizeMB = existingConfig.MaxNdjsonPayloadSizeMB;
                 }
+
+                // MaxNdjsonPayloadSizeMB is table-only — always preserve existing value
+                config.MaxNdjsonPayloadSizeMB = existingConfig.MaxNdjsonPayloadSizeMB;
 
                 // Save configuration
                 await _configService.SaveConfigurationAsync(config);

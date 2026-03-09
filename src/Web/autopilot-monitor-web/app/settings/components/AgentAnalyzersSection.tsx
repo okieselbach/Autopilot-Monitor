@@ -15,6 +15,8 @@ const BUILTIN_ACCOUNTS = [
   "DefaultAccount",
   "WDAGUtilityAccount",
   "defaultuser0",
+  "defaultuser1",
+  "defaultuser2",
   "Public",
   "Default",
   "Default User",
