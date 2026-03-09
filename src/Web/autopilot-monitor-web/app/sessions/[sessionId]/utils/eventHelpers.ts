@@ -49,7 +49,16 @@ export function groupEventsByPhase(
     eventsByPhase[targetPhase].push(event);
   }
 
-  const orderedPhases = phaseOrder.filter(p => eventsByPhase[p]?.length > 0);
+  // Order phase sections chronologically by first event sequence (not hardcoded).
+  // This ensures the display always matches the actual event sequence — critical when
+  // SkipUserStatusPage=true reorders phases (FinalizingSetup before AppsUser).
+  const orderedPhases = Object.keys(eventsByPhase)
+    .filter(p => eventsByPhase[p]?.length > 0)
+    .sort((a, b) => {
+      const aFirst = eventsByPhase[a][0]?.sequence ?? 0;
+      const bFirst = eventsByPhase[b][0]?.sequence ?? 0;
+      return aFirst - bFirst;
+    });
   return { eventsByPhase, orderedPhases };
 }
 

@@ -10,6 +10,17 @@ export const V1_PHASES = [
   { id: 7, name: "Complete",            shortName: "Complete" },
 ];
 
+// V1 with SkipUserStatusPage=true: no Account Setup, Finalizing comes before Apps (User)
+export const V1_SKIP_USER_PHASES = [
+  { id: 0, name: "Start",               shortName: "Start" },
+  { id: 1, name: "Device Preparation",  shortName: "Device Preparation" },
+  { id: 2, name: "Device Setup",        shortName: "Device Setup" },
+  { id: 3, name: "Apps (Device)",       shortName: "Apps (Device)" },
+  { id: 6, name: "Finalizing Setup",    shortName: "Finalizing" },
+  { id: 5, name: "Apps (User)",         shortName: "Apps (User)" },
+  { id: 7, name: "Complete",            shortName: "Complete" },
+];
+
 export const V2_PHASES = [
   { id: 0, name: "Start",               shortName: "Start" },
   { id: 1, name: "Device Preparation",  shortName: "Device Preparation" },

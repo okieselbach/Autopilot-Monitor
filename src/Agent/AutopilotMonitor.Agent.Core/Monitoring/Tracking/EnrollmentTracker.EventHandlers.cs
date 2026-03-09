@@ -185,6 +185,23 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                             Data = new Dictionary<string, object> { { "espPhase", "AppsUser" }, { "autoDetected", true } }
                         });
                     }
+                    else if (string.Equals(_lastEspPhase, "FinalizingSetup", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // SkipUserStatusPage flow: apps starting after FinalizingSetup are background user apps
+                        _logger.Info($"EnrollmentTracker: First app activity detected during FinalizingSetup (SkipUserStatusPage), switching to AppsUser phase");
+                        _hasAutoSwitchedToAppsPhase = true;
+                        EmitImeTrackerEvent(new EnrollmentEvent
+                        {
+                            SessionId = _sessionId,
+                            TenantId = _tenantId,
+                            EventType = "esp_phase_changed",
+                            Severity = EventSeverity.Info,
+                            Source = "EnrollmentTracker",
+                            Phase = EnrollmentPhase.AppsUser,
+                            Message = "ESP phase: AppsUser (auto-detected from app activity)",
+                            Data = new Dictionary<string, object> { { "espPhase", "AppsUser" }, { "autoDetected", true } }
+                        });
+                    }
                 }
             }
 

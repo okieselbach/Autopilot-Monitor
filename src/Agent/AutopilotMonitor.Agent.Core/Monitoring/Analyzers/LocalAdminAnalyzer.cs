@@ -88,20 +88,40 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Analyzers
         public void AnalyzeAtShutdown()
         {
             _logger.Info($"{Name}: Running shutdown analysis");
-            RunAnalysis("shutdown", EnrollmentPhase.Complete);
+
+            // At shutdown a user has logged in — their profile folder and account are expected.
+            // Detect logged-in users via explorer.exe owner (same technique as DesktopArrivalDetector)
+            // and add them dynamically so they don't trigger false positives.
+            var loggedInUsers = GetLoggedInUserNames();
+            RunAnalysis("shutdown", EnrollmentPhase.Complete, loggedInUsers);
         }
 
         // -----------------------------------------------------------------------
         // Core analysis
         // -----------------------------------------------------------------------
 
-        private void RunAnalysis(string trigger, EnrollmentPhase phase)
+        private void RunAnalysis(string trigger, EnrollmentPhase phase, List<string> dynamicAllowedUsers = null)
         {
             try
             {
+                // Build effective allowed list: static + optional dynamic (logged-in users at shutdown)
+                var effectiveAllowed = _allowedAccounts;
+                if (dynamicAllowedUsers != null && dynamicAllowedUsers.Count > 0)
+                {
+                    effectiveAllowed = new List<string>(_allowedAccounts);
+                    foreach (var user in dynamicAllowedUsers)
+                    {
+                        if (!effectiveAllowed.Any(a => string.Equals(a, user, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            effectiveAllowed.Add(user);
+                            _logger.Info($"{Name}: Dynamically allowing logged-in user: {user}");
+                        }
+                    }
+                }
+
                 var bypassNroResult  = CheckBypassNroRegistry();
-                var accountsResult   = CheckLocalAdminAccounts();
-                var profilesResult   = CheckUserProfiles();
+                var accountsResult   = CheckLocalAdminAccounts(effectiveAllowed);
+                var profilesResult   = CheckUserProfiles(effectiveAllowed);
 
                 int confidenceScore = 0;
 
@@ -157,7 +177,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Analyzers
                     { "finding",                    findingLabel },
                     { "triggered_at",               trigger },
                     { "enrollment_phase_at_check",  phase.ToString() },
-                    { "allowed_accounts",           _allowedAccounts },
+                    { "allowed_accounts",           effectiveAllowed },
+                    { "dynamically_allowed_users",  dynamicAllowedUsers ?? new List<string>() },
                     { "checks", new Dictionary<string, object>
                         {
                             { "bypass_nro", new Dictionary<string, object>
@@ -234,7 +255,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Analyzers
             }
         }
 
-        private LocalAccountCheckResult CheckLocalAdminAccounts()
+        private LocalAccountCheckResult CheckLocalAdminAccounts(List<string> allowedAccounts)
         {
             var allChecked = new List<string>();
             var unexpected = new List<string>();
@@ -258,7 +279,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Analyzers
                         if (disabled)
                             continue;
 
-                        if (!_allowedAccounts.Any(a =>
+                        if (!allowedAccounts.Any(a =>
                             string.Equals(a, name, StringComparison.OrdinalIgnoreCase)))
                         {
                             unexpected.Add(name);
@@ -275,7 +296,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Analyzers
             return new LocalAccountCheckResult { AllChecked = allChecked, Unexpected = unexpected };
         }
 
-        private UserProfileCheckResult CheckUserProfiles()
+        private UserProfileCheckResult CheckUserProfiles(List<string> allowedAccounts)
         {
             var allFound   = new List<string>();
             var unexpected = new List<string>();
@@ -299,7 +320,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Analyzers
 
                     allFound.Add(folderName);
 
-                    if (!_allowedAccounts.Any(a =>
+                    if (!allowedAccounts.Any(a =>
                         string.Equals(a, folderName, StringComparison.OrdinalIgnoreCase)))
                     {
                         unexpected.Add(folderName);
@@ -313,6 +334,118 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Analyzers
             }
 
             return new UserProfileCheckResult { AllFound = allFound, Unexpected = unexpected };
+        }
+
+        /// <summary>
+        /// Detects currently logged-in user(s) by finding explorer.exe processes owned by
+        /// real (non-system) users. Returns the plain username part (without domain prefix).
+        /// Uses the same approach as DesktopArrivalDetector.
+        /// </summary>
+        private List<string> GetLoggedInUserNames()
+        {
+            var users = new List<string>();
+
+            try
+            {
+                var explorerProcesses = System.Diagnostics.Process.GetProcessesByName("explorer");
+                foreach (var proc in explorerProcesses)
+                {
+                    try
+                    {
+                        // Session 0 = SYSTEM session, skip
+                        if (proc.SessionId == 0)
+                            continue;
+
+                        string owner = GetExplorerOwner(proc.Id);
+                        if (string.IsNullOrEmpty(owner))
+                            continue;
+
+                        // Extract username part (after backslash if DOMAIN\User format)
+                        var userName = owner;
+                        var bsIdx = owner.LastIndexOf('\\');
+                        if (bsIdx >= 0 && bsIdx < owner.Length - 1)
+                            userName = owner.Substring(bsIdx + 1);
+
+                        // Skip system/service accounts
+                        if (IsSystemAccount(userName))
+                            continue;
+
+                        if (!users.Any(u => string.Equals(u, userName, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            users.Add(userName);
+                            _logger.Debug($"{Name}: Detected logged-in user: {userName}");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Debug($"{Name}: Error checking explorer.exe PID {proc.Id}: {ex.Message}");
+                    }
+                    finally
+                    {
+                        proc.Dispose();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"{Name}: Failed to detect logged-in users: {ex.Message}");
+            }
+
+            return users;
+        }
+
+        /// <summary>
+        /// Gets the owner of a process via WMI Win32_Process.GetOwner.
+        /// Returns "DOMAIN\User" or "User", or null on failure.
+        /// </summary>
+        private string GetExplorerOwner(int processId)
+        {
+            try
+            {
+                using (var searcher = new ManagementObjectSearcher(
+                    $"SELECT * FROM Win32_Process WHERE ProcessId = {processId}"))
+                {
+                    foreach (ManagementObject obj in searcher.Get())
+                    {
+                        var outParams = new object[2];
+                        var result = (uint)obj.InvokeMethod("GetOwner", outParams);
+                        if (result == 0)
+                        {
+                            var user   = outParams[0]?.ToString();
+                            var domain = outParams[1]?.ToString();
+                            return string.IsNullOrEmpty(domain) ? user : $"{domain}\\{user}";
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug($"{Name}: WMI GetOwner failed for PID {processId}: {ex.Message}");
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Returns true for system/service accounts that are not real enrolled users.
+        /// </summary>
+        private static bool IsSystemAccount(string userName)
+        {
+            if (string.IsNullOrEmpty(userName))
+                return true;
+
+            var systemNames = new[] { "SYSTEM", "LOCAL SERVICE", "NETWORK SERVICE" };
+            foreach (var sn in systemNames)
+            {
+                if (string.Equals(userName, sn, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+
+            // DefaultUser* pattern (OOBE system accounts)
+            if (userName.StartsWith("DefaultUser", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            return false;
         }
 
         // -----------------------------------------------------------------------

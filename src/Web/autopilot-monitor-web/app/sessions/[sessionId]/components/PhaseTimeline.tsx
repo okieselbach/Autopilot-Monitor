@@ -2,7 +2,7 @@
 
 import React from "react";
 import { EnrollmentEvent } from "../page";
-import { V1_PHASES, V2_PHASES } from "../utils/phaseConstants";
+import { V1_PHASES, V1_SKIP_USER_PHASES, V2_PHASES } from "../utils/phaseConstants";
 
 interface PhaseTimelineProps {
   currentPhase: number;
@@ -11,11 +11,14 @@ interface PhaseTimelineProps {
   sessionStatus?: string;
   enrollmentType?: string;
   isPreProvisioned?: boolean;
+  isSkipUserStatusPage?: boolean;
   onPhaseClick?: (phaseName: string) => void;
 }
 
-export default function PhaseTimeline({ currentPhase, completedPhases, events = [], sessionStatus, enrollmentType, isPreProvisioned, onPhaseClick }: PhaseTimelineProps) {
-  const phases = enrollmentType === "v2" ? V2_PHASES : V1_PHASES;
+export default function PhaseTimeline({ currentPhase, completedPhases, events = [], sessionStatus, enrollmentType, isPreProvisioned, isSkipUserStatusPage, onPhaseClick }: PhaseTimelineProps) {
+  const phases = enrollmentType === "v2"
+    ? V2_PHASES
+    : isSkipUserStatusPage ? V1_SKIP_USER_PHASES : V1_PHASES;
 
   // Derive current activity for the active phase from events
   const getCurrentActivity = (phaseId: number): string | null => {
@@ -141,35 +144,58 @@ export default function PhaseTimeline({ currentPhase, completedPhases, events = 
       return formatDuration(end - start);
     }
 
-    // V1 phase-transition-based durations:
-    // Device Setup (2): first phase 2 → first phase 4 (includes Apps Device sub-phase)
-    // Apps Device (3): first phase 3 → last phase 3 (sub-phase only)
-    // Account Setup (4): first phase 4 → first phase 6 (includes Apps User sub-phase)
-    // Apps User (5): first phase 5 → last phase 5 (sub-phase only)
-    // Finalizing (6): first phase 6 → first phase 7 (or last phase 6)
     const start = getFirstEventTime(phaseId);
     if (!start) return null;
 
     let end: number | null = null;
-    switch (phaseId) {
-      case 2: // Device Setup → ends when Account Setup starts
-        end = getFirstEventTime(4) ?? getLastEventTime(3) ?? getLastEventTime(2);
-        break;
-      case 3: // Apps (Device) — sub-phase, own event range
-        end = getLastEventTime(3);
-        break;
-      case 4: // Account Setup → ends when Finalizing starts
-        end = getFirstEventTime(6) ?? getLastEventTime(5) ?? getLastEventTime(4);
-        break;
-      case 5: // Apps (User) — sub-phase, own event range
-        end = getLastEventTime(5);
-        break;
-      case 6: // Finalizing → ends when Complete starts
-        end = getFirstEventTime(7) ?? getLastEventTime(6);
-        break;
-      default:
-        end = getLastEventTime(phaseId);
-        break;
+
+    if (isSkipUserStatusPage) {
+      // V1 SkipUser: Device Setup(2) → FinalizingSetup(6) → AppsUser(5) → Complete(7)
+      // No AccountSetup(4). AppsUser is a top-level phase (not sub-phase).
+      switch (phaseId) {
+        case 2: // Device Setup → ends when Finalizing Setup starts
+          end = getFirstEventTime(6) ?? getLastEventTime(3) ?? getLastEventTime(2);
+          break;
+        case 3: // Apps (Device) — sub-phase, own event range
+          end = getLastEventTime(3);
+          break;
+        case 6: // Finalizing Setup → ends when Apps (User) or Complete starts
+          end = getFirstEventTime(5) ?? getFirstEventTime(7) ?? getLastEventTime(6);
+          break;
+        case 5: // Apps (User) — top-level, ends when Complete starts
+          end = getFirstEventTime(7) ?? getLastEventTime(5);
+          break;
+        default:
+          end = getLastEventTime(phaseId);
+          break;
+      }
+    } else {
+      // V1 normal phase-transition-based durations:
+      // Device Setup (2): first phase 2 → first phase 4 (includes Apps Device sub-phase)
+      // Apps Device (3): first phase 3 → last phase 3 (sub-phase only)
+      // Account Setup (4): first phase 4 → first phase 6 (includes Apps User sub-phase)
+      // Apps User (5): first phase 5 → last phase 5 (sub-phase only)
+      // Finalizing (6): first phase 6 → first phase 7 (or last phase 6)
+      switch (phaseId) {
+        case 2: // Device Setup → ends when Account Setup starts
+          end = getFirstEventTime(4) ?? getLastEventTime(3) ?? getLastEventTime(2);
+          break;
+        case 3: // Apps (Device) — sub-phase, own event range
+          end = getLastEventTime(3);
+          break;
+        case 4: // Account Setup → ends when Finalizing starts
+          end = getFirstEventTime(6) ?? getLastEventTime(5) ?? getLastEventTime(4);
+          break;
+        case 5: // Apps (User) — sub-phase, own event range
+          end = getLastEventTime(5);
+          break;
+        case 6: // Finalizing → ends when Complete starts
+          end = getFirstEventTime(7) ?? getLastEventTime(6);
+          break;
+        default:
+          end = getLastEventTime(phaseId);
+          break;
+      }
     }
 
     if (!end || end <= start) return null;
@@ -177,8 +203,11 @@ export default function PhaseTimeline({ currentPhase, completedPhases, events = 
   };
 
   // Check if a phase is a sub-phase (Apps Device / Apps User in V1)
+  // When SkipUserStatusPage: only Apps Device (3) is a sub-phase — Apps User (5) is top-level
+  // since there is no Account Setup parent phase.
   const isSubPhase = (phaseId: number): boolean => {
     if (enrollmentType === "v2") return false;
+    if (isSkipUserStatusPage) return phaseId === 3;
     return phaseId === 3 || phaseId === 5;
   };
 
@@ -186,17 +215,33 @@ export default function PhaseTimeline({ currentPhase, completedPhases, events = 
   const hasWhiteGloveComplete = isPreProvisioned && events.some(e => e.eventType === 'whiteglove_complete');
   const hasWhiteGloveResumed = isPreProvisioned && events.some(e => e.eventType === 'whiteglove_resumed');
 
-  // Derive the highest real phase (0-7) seen in events, excluding phase 99 (Failed)
+  // Helper: get display-order index of a phase ID in the phases array.
+  // Handles non-sequential phase IDs (e.g. SkipUser: 0,1,2,3,6,5,7).
+  const phaseIndex = (id: number): number => {
+    const idx = phases.findIndex(p => p.id === id);
+    return idx >= 0 ? idx : -1;
+  };
+
+  // Derive the furthest-reached phase seen in events using display-order index
   const maxEventPhase = (() => {
     const realPhases = events
       .filter(e => e.phase >= 0 && e.phase <= 7)
       .map(e => e.phase);
-    let maxPhase = realPhases.length > 0 ? Math.max(...realPhases) : -1;
+
+    let maxPhase = -1;
+    let maxIdx = -1;
+    for (const p of realPhases) {
+      const idx = phaseIndex(p);
+      if (idx > maxIdx) {
+        maxIdx = idx;
+        maxPhase = p;
+      }
+    }
 
     // WhiteGlove: whiteglove_complete means phases 0-3 are done;
     // whiteglove_resumed means user enrollment (phase 4+) has started
-    if (hasWhiteGloveResumed) maxPhase = Math.max(maxPhase, 4); // AccountSetup
-    else if (hasWhiteGloveComplete) maxPhase = Math.max(maxPhase, 3); // AppsDevice done
+    if (hasWhiteGloveResumed && phaseIndex(4) > maxIdx) maxPhase = 4;
+    else if (hasWhiteGloveComplete && phaseIndex(3) > maxIdx) maxPhase = 3;
 
     return maxPhase;
   })();
@@ -208,15 +253,13 @@ export default function PhaseTimeline({ currentPhase, completedPhases, events = 
     return maxEventPhase >= 0 ? maxEventPhase : 0;
   })();
 
-  // Effective current phase: use the max of backend currentPhase and what events show.
-  // This prevents the tracker from lagging behind the timeline when events from a new
-  // phase arrive via SignalR before the backend updates session.currentPhase.
+  // Effective current phase: use the further-reached of backend currentPhase and events phase
+  // (compared by display-order index, not numeric value).
   const effectiveCurrentPhase = (() => {
     if (sessionStatus === 'Succeeded') return currentPhase;
     if (sessionStatus === 'Failed') return failurePhase !== null ? failurePhase : currentPhase;
-    // In-progress: take the higher of backend phase and events phase
     if (maxEventPhase < 0) return currentPhase;
-    return Math.max(currentPhase, maxEventPhase);
+    return phaseIndex(maxEventPhase) >= phaseIndex(currentPhase) ? maxEventPhase : currentPhase;
   })();
 
   const getPhaseStatus = (phaseId: number) => {
@@ -227,22 +270,27 @@ export default function PhaseTimeline({ currentPhase, completedPhases, events = 
     // If phase is completed, show as completed (green)
     if (completedPhases.includes(phaseId)) return 'completed';
 
+    // Use display-order index for phase comparisons (handles non-sequential IDs)
+    const thisIdx = phaseIndex(phaseId);
+    const effectiveIdx = phaseIndex(effectiveCurrentPhase);
+    const failureIdx = failurePhase !== null ? phaseIndex(failurePhase) : -1;
+
     // Handle failed sessions
     if (sessionStatus === 'Failed' && failurePhase !== null) {
       if (phaseId === failurePhase) return 'failed';
-      if (phaseId < failurePhase) return 'completed';
+      if (thisIdx < failureIdx) return 'completed';
       return 'pending';
     }
 
     // WhiteGlove Pending: pre-provisioning is complete, all reached phases are done
     if (sessionStatus === 'Pending') {
-      if (phaseId <= effectiveCurrentPhase) return 'completed';
+      if (thisIdx <= effectiveIdx) return 'completed';
       return 'pending';
     }
 
-    // Normal in-progress logic (using effectiveCurrentPhase to stay in sync with events)
+    // Normal in-progress logic (using display-order index to stay in sync with events)
     if (phaseId === effectiveCurrentPhase) return 'current';
-    if (phaseId < effectiveCurrentPhase) return 'completed';
+    if (thisIdx < effectiveIdx) return 'completed';
     return 'pending';
   };
 

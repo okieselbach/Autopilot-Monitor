@@ -522,26 +522,66 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             if (_espEverSeen && !string.Equals(_lastEspPhase, "AccountSetup", StringComparison.OrdinalIgnoreCase))
             {
                 var previousPhase = _lastEspPhase ?? "unknown";
-                _lastEspPhase = "AccountSetup";
-                _logger.Info($"EnrollmentTracker: Desktop arrival confirmed AccountSetup phase (was: {previousPhase}) — phase corrected on timeline");
 
-                _emitEvent(new EnrollmentEvent
+                if (_skipUserStatusPage == true)
                 {
-                    SessionId = _sessionId,
-                    TenantId = _tenantId,
-                    EventType = "esp_phase_changed",
-                    Severity = EventSeverity.Info,
-                    Source = "DesktopArrivalDetector",
-                    Phase = EnrollmentPhase.AccountSetup,
-                    Message = $"ESP phase: AccountSetup (auto-detected from desktop arrival, was: {previousPhase})",
-                    Data = new Dictionary<string, object>
+                    // SkipUserStatusPage=true: ESP skips Account Setup entirely.
+                    // Desktop arrival means device setup is done → transition directly to FinalizingSetup.
+                    // User apps will install in background (tracked as AppsUser phase later).
+                    _lastEspPhase = "FinalizingSetup";
+                    _stateData.LastEspPhase = "FinalizingSetup";
+                    _espFinalExitSeen = true;
+                    _stateData.EspFinalExitSeen = true;
+                    _stateData.EspFinalExitUtc = DateTime.UtcNow;
+                    _hasAutoSwitchedToAppsPhase = false; // Reset to allow AppsUser detection for background user apps
+                    RecordSignal("desktop_arrived_skip_user");
+                    _logger.Info($"EnrollmentTracker: Desktop arrival with SkipUserStatusPage=true — skipping AccountSetup, transitioning to FinalizingSetup (was: {previousPhase})");
+
+                    _emitEvent(new EnrollmentEvent
                     {
-                        { "espPhase", "AccountSetup" },
-                        { "autoDetected", true },
-                        { "correctedBy", "desktop_arrival" },
-                        { "previousPhase", previousPhase }
-                    }
-                });
+                        SessionId = _sessionId,
+                        TenantId = _tenantId,
+                        EventType = "esp_phase_changed",
+                        Severity = EventSeverity.Info,
+                        Source = "DesktopArrivalDetector",
+                        Phase = EnrollmentPhase.FinalizingSetup,
+                        Message = $"ESP phase: FinalizingSetup (SkipUserStatusPage — desktop arrival, was: {previousPhase})",
+                        Data = new Dictionary<string, object>
+                        {
+                            { "espPhase", "FinalizingSetup" },
+                            { "autoDetected", true },
+                            { "correctedBy", "desktop_arrival" },
+                            { "previousPhase", previousPhase },
+                            { "skipUserStatusPage", true }
+                        }
+                    });
+
+                    CollectDeviceInfoAtFinalizingSetup("desktop_arrived_skip_user");
+                }
+                else
+                {
+                    // Normal flow: desktop arrival confirms AccountSetup phase
+                    _lastEspPhase = "AccountSetup";
+                    _logger.Info($"EnrollmentTracker: Desktop arrival confirmed AccountSetup phase (was: {previousPhase}) — phase corrected on timeline");
+
+                    _emitEvent(new EnrollmentEvent
+                    {
+                        SessionId = _sessionId,
+                        TenantId = _tenantId,
+                        EventType = "esp_phase_changed",
+                        Severity = EventSeverity.Info,
+                        Source = "DesktopArrivalDetector",
+                        Phase = EnrollmentPhase.AccountSetup,
+                        Message = $"ESP phase: AccountSetup (auto-detected from desktop arrival, was: {previousPhase})",
+                        Data = new Dictionary<string, object>
+                        {
+                            { "espPhase", "AccountSetup" },
+                            { "autoDetected", true },
+                            { "correctedBy", "desktop_arrival" },
+                            { "previousPhase", previousPhase }
+                        }
+                    });
+                }
             }
 
             // Start Hello wait timer ONLY when ESP is NOT actively running.
