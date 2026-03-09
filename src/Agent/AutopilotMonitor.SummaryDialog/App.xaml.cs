@@ -170,9 +170,12 @@ namespace AutopilotMonitor.SummaryDialog
 
                 // PowerShell Wait-Process: waits for our actual process exit (no polling),
                 // then short delay for file handle cleanup, then Remove-Item.
+                // Two-pass delete: -Recurse clears contents, second call removes the
+                // now-empty folder (Windows/PowerShell timing issue can leave it behind).
                 var psScript = $"Wait-Process -Id {pid} -Timeout 30 -ErrorAction SilentlyContinue; " +
                                $"Start-Sleep -Seconds 2; " +
-                               $"Remove-Item -LiteralPath '{exeDir}' -Recurse -Force -ErrorAction SilentlyContinue";
+                               $"Remove-Item -LiteralPath '{exeDir}' -Recurse -Force -ErrorAction SilentlyContinue; " +
+                               $"Remove-Item -LiteralPath '{exeDir}' -Force -ErrorAction SilentlyContinue";
                 var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(psScript));
 
                 // Full path to powershell.exe — don't rely on PATH resolution
