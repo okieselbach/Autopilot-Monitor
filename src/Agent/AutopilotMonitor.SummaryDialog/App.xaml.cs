@@ -1,7 +1,6 @@
 using System;
 using System.Diagnostics;
 using System.IO;
-using System.Text;
 using System.Windows;
 
 namespace AutopilotMonitor.SummaryDialog
@@ -138,8 +137,8 @@ namespace AutopilotMonitor.SummaryDialog
 
         /// <summary>
         /// Self-cleanup: delete the staging folder this EXE was launched from.
-        /// Uses PowerShell Wait-Process to cleanly wait for our process to exit,
-        /// then deletes the folder. No polling loops or race conditions.
+        /// Spawns cmd.exe with a short delay (ping loopback), then rd /s /q.
+        /// Simple and reliable — no PowerShell dependency or execution policy issues.
         /// </summary>
         private void SelfCleanup()
         {
@@ -161,28 +160,27 @@ namespace AutopilotMonitor.SummaryDialog
                                 || exeDir.StartsWith(legacyStaging, StringComparison.OrdinalIgnoreCase)
                                 || exeDir.StartsWith(tempRoot, StringComparison.OrdinalIgnoreCase);
                 if (!isStagedCopy)
-                    return;
-
-                var pid = Process.GetCurrentProcess().Id;
-
-                // PowerShell Wait-Process: waits for our process to actually exit (no polling),
-                // then deletes the staging folder. 60s timeout as safety net.
-                var psScript = $"Wait-Process -Id {pid} -Timeout 60 -ErrorAction SilentlyContinue; " +
-                               $"Start-Sleep -Seconds 1; " +
-                               $"Remove-Item -LiteralPath '{exeDir}' -Recurse -Force -ErrorAction SilentlyContinue";
-                var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(psScript));
-
-                Log($"SelfCleanup: spawning PowerShell to delete '{exeDir}' after PID {pid} exits");
-
-                var psi = new ProcessStartInfo
                 {
-                    FileName = "powershell.exe",
-                    Arguments = $"-NoProfile -NonInteractive -EncodedCommand {encoded}",
-                    WindowStyle = ProcessWindowStyle.Hidden,
+                    Log($"SelfCleanup: not a staged copy, skipping (exeDir={exeDir})");
+                    return;
+                }
+
+                // cmd.exe /c: ping loopback ~5s (waits for our process to exit + file handles to close),
+                // then rd /s /q to recursively delete the staging folder.
+                var cmdExe = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe");
+                var cmdArgs = $"/c ping -n 6 127.0.0.1 > nul 2>&1 & rd /s /q \"{exeDir}\"";
+
+                Log($"SelfCleanup: spawning cmd.exe to delete '{exeDir}'");
+
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = cmdExe,
+                    Arguments = cmdArgs,
                     CreateNoWindow = true,
                     UseShellExecute = false
-                };
-                Process.Start(psi);
+                });
+
+                Log("SelfCleanup: cleanup process started");
             }
             catch (Exception ex)
             {
