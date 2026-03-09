@@ -163,6 +163,8 @@ public static class EndpointAccessPolicyCatalog
         new("GET",    "galactic/session-reports",   EndpointPolicy.GalacticAdminOnly),
         new("GET",    "galactic/session-reports/download-url", EndpointPolicy.GalacticAdminOnly),
         new("PATCH",  "galactic/session-reports/{reportId}/note", EndpointPolicy.GalacticAdminOnly),
+        new("GET",    "galactic/rules/gather",      EndpointPolicy.GalacticAdminOnly),
+        new("GET",    "galactic/rules/analyze",     EndpointPolicy.GalacticAdminOnly),
         new("GET",    "galactic/devices/blocked",   EndpointPolicy.GalacticAdminOnly),
         new("GET",    "devices/blocked",            EndpointPolicy.GalacticAdminOnly),
         new("POST",   "devices/block",              EndpointPolicy.GalacticAdminOnly),

@@ -7,6 +7,7 @@ import { ProtectedRoute } from "../../components/ProtectedRoute";
 import { useTenant } from "../../contexts/TenantContext";
 import { useAuth } from "../../contexts/AuthContext";
 import { API_BASE_URL } from "@/lib/config";
+import { authenticatedFetch } from "@/lib/authenticatedFetch";
 import { downloadAsJson, stripInternalFields, bumpVersion } from "@/lib/rulePageHelpers";
 import { StatCard } from "@/components/rules/StatCard";
 import { RuleFilterBar } from "@/components/rules/RuleFilterBar";
@@ -17,10 +18,15 @@ import { GatherRule, NewRuleForm, EMPTY_FORM, CATEGORY_COLORS } from "./types";
 import { GatherRuleFormFields } from "./components/GatherRuleFormFields";
 import { GatherRuleCard } from "./components/GatherRuleCard";
 
+interface TenantInfo {
+  tenantId: string;
+  domainName: string;
+}
+
 export default function GatherRulesPage() {
   const router = useRouter();
   const { tenantId } = useTenant();
-  const { user } = useAuth();
+  const { user, getAccessToken } = useAuth();
 
   const { successMessage, error, showSuccess, showError } = useNotificationMessages();
 
@@ -60,24 +66,72 @@ export default function GatherRulesPage() {
   const [togglingRule, setTogglingRule] = useState<string | null>(null);
   const [deletingRule, setDeletingRule] = useState<string | null>(null);
 
+  // Galactic admin mode
+  const [galacticAdminMode] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('galacticAdminMode') === 'true';
+    }
+    return false;
+  });
+  const [tenants, setTenants] = useState<TenantInfo[]>([]);
+  const [selectedTenantId, setSelectedTenantId] = useState<string>('');
+
+  useEffect(() => {
+    if (!galacticAdminMode || !user?.isGalacticAdmin) return;
+    const fetchTenants = async () => {
+      try {
+        const response = await authenticatedFetch(`${API_BASE_URL}/api/config/all`, getAccessToken);
+        if (response.ok) {
+          const data = await response.json();
+          const mapped: TenantInfo[] = data.map((t: { tenantId: string; domainName: string }) => ({
+            tenantId: t.tenantId,
+            domainName: t.domainName || '',
+          }));
+          mapped.sort((a, b) => {
+            const nameA = a.domainName || a.tenantId;
+            const nameB = b.domainName || b.tenantId;
+            return nameA.localeCompare(nameB);
+          });
+          setTenants(mapped);
+        }
+      } catch (err) {
+        console.error('Error fetching tenant list:', err);
+      }
+    };
+    fetchTenants();
+  }, [galacticAdminMode, user?.isGalacticAdmin, getAccessToken]);
+
+  useEffect(() => {
+    if (tenantId && !selectedTenantId) {
+      setSelectedTenantId(tenantId);
+    }
+  }, [tenantId]);
+
+  const isGalacticOverride = galacticAdminMode && user?.isGalacticAdmin && selectedTenantId && selectedTenantId !== tenantId;
+  const effectiveTenantId = (galacticAdminMode && user?.isGalacticAdmin && selectedTenantId) ? selectedTenantId : tenantId;
+
   const fetchRules = useCallback(async () => {
+    if (!effectiveTenantId) return;
+    const url = isGalacticOverride
+      ? `${API_BASE_URL}/api/galactic/rules/gather?tenantId=${effectiveTenantId}`
+      : `${API_BASE_URL}/api/rules/gather?tenantId=${effectiveTenantId}`;
     await fetchRulesExec(
-      `${API_BASE_URL}/api/rules/gather?tenantId=${tenantId}`,
+      url,
       undefined,
       { transform: (d) => (d as { rules?: GatherRule[] }).rules || [] }
     );
-  }, [tenantId, fetchRulesExec]);
+  }, [effectiveTenantId, isGalacticOverride, fetchRulesExec]);
 
   useEffect(() => {
-    if (tenantId) {
+    if (effectiveTenantId) {
       fetchRules();
     }
-  }, [tenantId, fetchRules]);
+  }, [effectiveTenantId, fetchRules]);
 
   const handleToggleRule = async (rule: GatherRule) => {
     setTogglingRule(rule.ruleId);
     const result = await mutate(
-      `${API_BASE_URL}/api/rules/gather/${rule.ruleId}?tenantId=${tenantId}`,
+      `${API_BASE_URL}/api/rules/gather/${rule.ruleId}?tenantId=${effectiveTenantId}`,
       {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -100,7 +154,7 @@ export default function GatherRulesPage() {
 
     setDeletingRule(rule.ruleId);
     const result = await mutate(
-      `${API_BASE_URL}/api/rules/gather/${rule.ruleId}?tenantId=${tenantId}`,
+      `${API_BASE_URL}/api/rules/gather/${rule.ruleId}?tenantId=${effectiveTenantId}`,
       { method: "DELETE" }
     );
     if (result !== null) {
@@ -158,7 +212,7 @@ export default function GatherRulesPage() {
     };
 
     const result = await mutate(
-      `${API_BASE_URL}/api/rules/gather?tenantId=${tenantId}`,
+      `${API_BASE_URL}/api/rules/gather?tenantId=${effectiveTenantId}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -228,7 +282,7 @@ export default function GatherRulesPage() {
     };
 
     const result = await mutate(
-      `${API_BASE_URL}/api/rules/gather/${rule.ruleId}?tenantId=${tenantId}`,
+      `${API_BASE_URL}/api/rules/gather/${rule.ruleId}?tenantId=${effectiveTenantId}`,
       {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -281,6 +335,15 @@ export default function GatherRulesPage() {
   return (
     <ProtectedRoute>
       <div className="min-h-screen bg-gray-50">
+        {galacticAdminMode && user?.isGalacticAdmin && (
+          <div className="bg-purple-700 text-white text-sm px-4 py-2 flex items-center justify-center space-x-2">
+            <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span className="font-medium">Galactic Admin View</span>
+            <span className="text-purple-300">&mdash; access to all tenants</span>
+          </div>
+        )}
         {/* Header */}
         <header className="bg-white shadow">
           <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
@@ -305,6 +368,24 @@ export default function GatherRulesPage() {
                   <p className="text-sm text-gray-600 mt-1">Manage data collection rules for device enrollment</p>
                 </div>
               </div>
+              {galacticAdminMode && user?.isGalacticAdmin && tenants.length > 0 && (
+                <div className="flex items-center gap-3">
+                  <label className="text-sm text-gray-500 hidden sm:inline">Tenant:</label>
+                  <select
+                    value={selectedTenantId}
+                    onChange={(e) => setSelectedTenantId(e.target.value)}
+                    className="text-sm border border-gray-300 rounded-md px-2 py-1.5 max-w-[220px] sm:max-w-xs"
+                  >
+                    {tenants.map((t) => (
+                      <option key={t.tenantId} value={t.tenantId}>
+                        {t.domainName
+                          ? `${t.domainName} (${t.tenantId.substring(0, 8)}...)`
+                          : t.tenantId}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
           </div>
         </header>
@@ -379,9 +460,9 @@ export default function GatherRulesPage() {
                   },
                 ]}
                 onExportAll={handleExportAll}
-                onCreateNew={() => { setShowCreateForm(!showCreateForm); if (showCreateForm) setNewRule({ ...EMPTY_FORM }); }}
+                onCreateNew={isGalacticOverride ? undefined : () => { setShowCreateForm(!showCreateForm); if (showCreateForm) setNewRule({ ...EMPTY_FORM }); }}
                 createLabel="Create Custom Rule"
-                showCreateForm={showCreateForm}
+                showCreateForm={showCreateForm && !isGalacticOverride}
               />
 
               {/* Create Custom Rule Form */}
