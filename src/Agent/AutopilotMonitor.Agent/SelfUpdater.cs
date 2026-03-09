@@ -188,15 +188,33 @@ namespace AutopilotMonitor.Agent
 
         /// <summary>
         /// Compares two version strings. Returns true if latest is newer than current.
+        /// Strips SemVer suffixes (+metadata, -prerelease) before parsing because
+        /// System.Version cannot handle them (e.g. "1.0.386+b7f8d3c..." would fail).
         /// </summary>
         private static bool IsNewerVersion(string current, string latest)
         {
-            if (!Version.TryParse(current, out var currentVer))
+            if (!Version.TryParse(StripVersionSuffix(current), out var currentVer))
                 return false;
-            if (!Version.TryParse(latest, out var latestVer))
+            if (!Version.TryParse(StripVersionSuffix(latest), out var latestVer))
                 return false;
 
             return latestVer > currentVer;
+        }
+
+        private static string StripVersionSuffix(string version)
+        {
+            if (string.IsNullOrEmpty(version))
+                return version;
+
+            var plusIndex = version.IndexOf('+');
+            if (plusIndex >= 0)
+                version = version.Substring(0, plusIndex);
+
+            var dashIndex = version.IndexOf('-');
+            if (dashIndex >= 0)
+                version = version.Substring(0, dashIndex);
+
+            return version;
         }
 
         /// <summary>
