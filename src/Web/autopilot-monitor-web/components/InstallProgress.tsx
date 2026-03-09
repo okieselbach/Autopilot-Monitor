@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 interface InstallEvent {
   timestamp: string;
@@ -237,6 +237,19 @@ export default function InstallProgress({ events, summaryStats }: InstallProgres
 
 function InstallItemRow({ item }: { item: InstallItem }) {
   const [showDetails, setShowDetails] = useState(false);
+  const [elapsedMs, setElapsedMs] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (item.state !== "Installing" || !item.startedAt) {
+      setElapsedMs(null);
+      return;
+    }
+    const startTime = new Date(item.startedAt).getTime();
+    const tick = () => setElapsedMs(Date.now() - startTime);
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [item.state, item.startedAt]);
 
   const containerClass = item.state === "Skipped"
     ? "bg-gray-50 border border-gray-300"
@@ -278,7 +291,10 @@ function InstallItemRow({ item }: { item: InstallItem }) {
           )}
         </div>
         <div className="flex items-center space-x-3 text-xs text-gray-500 flex-shrink-0 ml-2">
-          {item.durationMs != null && item.durationMs > 0 && (
+          {elapsedMs != null && elapsedMs > 0 && (
+            <span className="font-medium text-indigo-600 tabular-nums">{formatDuration(elapsedMs)}</span>
+          )}
+          {elapsedMs == null && item.durationMs != null && item.durationMs > 0 && (
             <span className="font-medium">{formatDuration(item.durationMs)}</span>
           )}
           {item.eventData && Object.keys(item.eventData).length > 0 && (
