@@ -171,6 +171,24 @@ namespace AutopilotMonitor.Agent
                 catch { /* ignore corrupt file */ }
             }
 
+            // Await-enrollment config: if no --await-enrollment CLI arg, check for persisted config file.
+            // RunInstallMode persists await-enrollment.json so the Scheduled Task picks it up on restart.
+            var awaitConfigPath = Path.Combine(dataDirectory, "await-enrollment.json");
+            if (!awaitEnrollment && File.Exists(awaitConfigPath))
+            {
+                try
+                {
+                    var json = File.ReadAllText(awaitConfigPath);
+                    var awaitConfig = Newtonsoft.Json.JsonConvert.DeserializeObject<AwaitEnrollmentConfigFile>(json);
+                    if (awaitConfig != null)
+                    {
+                        awaitEnrollment = true;
+                        awaitEnrollmentTimeoutMinutes = awaitConfig.TimeoutMinutes;
+                    }
+                }
+                catch { /* ignore corrupt file */ }
+            }
+
             var useBootstrapToken = !string.IsNullOrEmpty(bootstrapToken);
 
             return new AgentConfiguration

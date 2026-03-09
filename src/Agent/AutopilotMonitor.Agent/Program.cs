@@ -92,6 +92,7 @@ namespace AutopilotMonitor.Agent
 
                 logger.Info($"======================= Agent starting ({(consoleMode ? "console" : "background/SYSTEM")}) =======================");
                 logger.Info($"Agent version: {agentVersion}");
+                logger.Info($"Command line: {FormatArgsForLog(args)}");
 
                 // Check for enrollment complete marker (handles scheduled task cleanup retry)
                 if (CheckEnrollmentCompleteMarker(config, logger, consoleMode))
@@ -168,6 +169,23 @@ namespace AutopilotMonitor.Agent
                         {
                             logger.Warning("Await-enrollment: MDM certificate found but TenantId not yet in registry");
                         }
+                    }
+
+                    // Remove persisted config so subsequent restarts proceed normally
+                    try
+                    {
+                        var awaitConfigPath = Path.Combine(
+                            Environment.ExpandEnvironmentVariables(Constants.AgentDataDirectory),
+                            "await-enrollment.json");
+                        if (File.Exists(awaitConfigPath))
+                        {
+                            File.Delete(awaitConfigPath);
+                            logger.Info("Await-enrollment: Config file removed — subsequent starts will proceed normally");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.Warning($"Await-enrollment: Could not remove config file: {ex.Message}");
                     }
                 }
 
@@ -256,6 +274,23 @@ namespace AutopilotMonitor.Agent
             Console.WriteLine("  --replay-speed-factor <FACTOR>    Time compression factor (default: 50)");
         }
 
+        static string FormatArgsForLog(string[] args)
+        {
+            if (args == null || args.Length == 0)
+                return "(none)";
+
+            var parts = new string[args.Length];
+            for (int i = 0; i < args.Length; i++)
+            {
+                if (i > 0 && string.Equals(args[i - 1], "--bootstrap-token", StringComparison.OrdinalIgnoreCase))
+                    parts[i] = "***REDACTED***";
+                else
+                    parts[i] = args[i];
+            }
+
+            return string.Join(" ", parts);
+        }
+
         /// <summary>
         /// Checks if another AutopilotMonitor.Agent.exe process is already running.
         /// </summary>
@@ -286,5 +321,16 @@ namespace AutopilotMonitor.Agent
     {
         public string BootstrapToken { get; set; }
         public string TenantId { get; set; }
+    }
+
+    /// <summary>
+    /// Persisted await-enrollment configuration.
+    /// Saved to %ProgramData%\AutopilotMonitor\await-enrollment.json by RunInstallMode
+    /// so the Scheduled Task enters await-enrollment mode on startup.
+    /// Deleted after the MDM certificate is found.
+    /// </summary>
+    class AwaitEnrollmentConfigFile
+    {
+        public int TimeoutMinutes { get; set; } = 480;
     }
 }

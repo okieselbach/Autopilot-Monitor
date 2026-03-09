@@ -58,6 +58,22 @@ namespace AutopilotMonitor.Agent
                     logger.Info("Bootstrap config persisted for Scheduled Task");
                 }
 
+                // Persist await-enrollment config if --await-enrollment was provided.
+                // The Scheduled Task command line has no args, so the agent reads this file on restart.
+                if (args.Contains("--await-enrollment"))
+                {
+                    var dataDir = Environment.ExpandEnvironmentVariables(Constants.AgentDataDirectory);
+                    var awaitConfigPath = Path.Combine(dataDir, "await-enrollment.json");
+                    var awaitTimeoutArg = GetArgValue(args, "--await-enrollment-timeout");
+                    var timeoutMinutes = 480;
+                    if (!string.IsNullOrEmpty(awaitTimeoutArg) && int.TryParse(awaitTimeoutArg, out var parsed))
+                        timeoutMinutes = parsed;
+
+                    var awaitConfig = new AwaitEnrollmentConfigFile { TimeoutMinutes = timeoutMinutes };
+                    File.WriteAllText(awaitConfigPath, Newtonsoft.Json.JsonConvert.SerializeObject(awaitConfig));
+                    logger.Info($"Await-enrollment config persisted for Scheduled Task (timeout: {timeoutMinutes}min)");
+                }
+
                 var taskName = Constants.ScheduledTaskName;
                 var taskCommand = $"\"{targetExePath}\"";
 
