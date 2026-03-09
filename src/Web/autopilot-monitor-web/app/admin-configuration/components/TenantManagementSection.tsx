@@ -13,7 +13,6 @@ export interface TenantConfiguration {
   disabled: boolean;
   disabledReason?: string;
   disabledUntil?: string;
-  previewNotificationEmail?: string;
   rateLimitRequestsPerMinute: number;
   manufacturerWhitelist: string;
   modelWhitelist: string;
@@ -60,6 +59,7 @@ export function TenantManagementSection({
   // Preview Whitelist state
   const [togglingPreviewTenant, setTogglingPreviewTenant] = useState<string | null>(null);
   const [sendingWelcomeEmail, setSendingWelcomeEmail] = useState(false);
+  const [notificationEmail, setNotificationEmail] = useState("");
 
   // Filter and sort tenants
   const filteredTenants = tenants.filter(t => {
@@ -403,8 +403,19 @@ export function TenantManagementSection({
                                   : "Approve"}
                               </button>
                               <button
-                                onClick={() => {
+                                onClick={async () => {
                                   setEditingTenant(tenant);
+                                  setNotificationEmail("");
+                                  try {
+                                    const resp = await authenticatedFetch(
+                                      `${API_BASE_URL}/api/preview/notification-email/${tenant.tenantId}`,
+                                      getAccessToken
+                                    );
+                                    if (resp.ok) {
+                                      const data = await resp.json();
+                                      setNotificationEmail(data.email || "");
+                                    }
+                                  } catch { /* best-effort */ }
                                 }}
                                 className="px-4 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
                               >
@@ -529,14 +540,14 @@ export function TenantManagementSection({
                 <div className="flex items-center gap-2">
                   <input
                     type="email"
-                    value={editingTenant.previewNotificationEmail || ''}
-                    onChange={(e) => setEditingTenant({ ...editingTenant, previewNotificationEmail: e.target.value })}
+                    value={notificationEmail}
+                    onChange={(e) => setNotificationEmail(e.target.value)}
                     placeholder="user@example.com"
                     className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
                   />
                   <button
-                    onClick={() => handleSendWelcomeEmail(editingTenant.tenantId, editingTenant.previewNotificationEmail)}
-                    disabled={sendingWelcomeEmail || !editingTenant.previewNotificationEmail?.trim()}
+                    onClick={() => handleSendWelcomeEmail(editingTenant.tenantId, notificationEmail)}
+                    disabled={sendingWelcomeEmail || !notificationEmail.trim()}
                     className="px-3 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap flex items-center gap-1.5"
                     title="Send or resend the Private Preview welcome email"
                   >
@@ -556,7 +567,7 @@ export function TenantManagementSection({
                   </button>
                 </div>
                 <p className="text-xs text-indigo-600 mt-2">
-                  Save changes first if you edited the email. The welcome email is also sent automatically on approval if set.
+                  The email is saved and sent in one step. Also sent automatically on approval if set.
                 </p>
               </div>
 

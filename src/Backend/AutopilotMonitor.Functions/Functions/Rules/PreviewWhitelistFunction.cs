@@ -115,10 +115,11 @@ public class PreviewWhitelistFunction
             }
 
             // Fire-and-forget: send welcome email if notification email is configured
-            if (!string.IsNullOrWhiteSpace(tenantConfig.PreviewNotificationEmail))
+            var notificationEmail = await _previewWhitelistService.GetNotificationEmailAsync(tenantId);
+            if (!string.IsNullOrWhiteSpace(notificationEmail))
             {
                 _ = _resendEmailService.SendPreviewApprovedEmailAsync(
-                        tenantConfig.PreviewNotificationEmail, tenantConfig.DomainName)
+                        notificationEmail, tenantConfig.DomainName)
                     .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException,
                         "Fire-and-forget welcome email failed for tenant {TenantId}", tenantId),
                         TaskContinuationOptions.OnlyOnFaulted);
@@ -162,6 +163,24 @@ public class PreviewWhitelistFunction
     }
 
     /// <summary>
+    /// GET /api/preview/notification-email/{tenantId}
+    /// Returns the notification email for a tenant. Galactic Admin only.
+    /// </summary>
+    [Function("GetPreviewNotificationEmail")]
+    [Authorize]
+    public async Task<HttpResponseData> GetNotificationEmail(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "preview/notification-email/{tenantId}")] HttpRequestData req,
+        string tenantId,
+        FunctionContext context)
+    {
+        var email = await _previewWhitelistService.GetNotificationEmailAsync(tenantId);
+
+        var response = req.CreateResponse(HttpStatusCode.OK);
+        await response.WriteAsJsonAsync(new { email = email ?? "" });
+        return response;
+    }
+
+    /// <summary>
     /// PUT /api/preview/notification-email
     /// Saves the caller's notification email for Private Preview approval.
     /// AuthenticatedUser policy — preview-blocked users can call this.
@@ -192,9 +211,7 @@ public class PreviewWhitelistFunction
             return bad;
         }
 
-        var tenantConfig = await _tenantConfigurationService.GetConfigurationAsync(tenantId);
-        tenantConfig.PreviewNotificationEmail = email;
-        await _tenantConfigurationService.SaveConfigurationAsync(tenantConfig);
+        await _previewWhitelistService.SaveNotificationEmailAsync(tenantId, email);
 
         _logger.LogInformation(
             "Preview notification email updated for tenant {TenantId}: {Email}",
@@ -208,7 +225,7 @@ public class PreviewWhitelistFunction
     /// <summary>
     /// POST /api/preview/send-welcome-email/{tenantId}
     /// Sends (or resends) the Private Preview welcome email. Galactic Admin only.
-    /// Accepts optional { email } in body — if provided, saves it to tenant config before sending.
+    /// Accepts optional { email } in body — if provided, saves it to PreviewWhitelist table before sending.
     /// </summary>
     [Function("SendPreviewWelcomeEmail")]
     [Authorize]
@@ -219,18 +236,17 @@ public class PreviewWhitelistFunction
     {
         // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
 
-        var tenantConfig = await _tenantConfigurationService.GetConfigurationAsync(tenantId);
-
         // If the caller provides an email in the body, save it first
         var body = await req.ReadFromJsonAsync<SaveNotificationEmailRequest>();
         var bodyEmail = body?.Email?.Trim();
         if (!string.IsNullOrWhiteSpace(bodyEmail))
         {
-            tenantConfig.PreviewNotificationEmail = bodyEmail;
-            await _tenantConfigurationService.SaveConfigurationAsync(tenantConfig);
+            await _previewWhitelistService.SaveNotificationEmailAsync(tenantId, bodyEmail);
         }
 
-        var email = tenantConfig.PreviewNotificationEmail;
+        var email = !string.IsNullOrWhiteSpace(bodyEmail)
+            ? bodyEmail
+            : await _previewWhitelistService.GetNotificationEmailAsync(tenantId);
 
         if (string.IsNullOrWhiteSpace(email))
         {
@@ -239,6 +255,7 @@ public class PreviewWhitelistFunction
             return bad;
         }
 
+        var tenantConfig = await _tenantConfigurationService.GetConfigurationAsync(tenantId);
         await _resendEmailService.SendPreviewApprovedEmailAsync(email, tenantConfig.DomainName);
 
         var principal = context.GetUser();

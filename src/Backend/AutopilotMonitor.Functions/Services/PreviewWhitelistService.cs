@@ -113,6 +113,52 @@ public class PreviewWhitelistService
 
         return results.OrderBy(e => e.PartitionKey).ToList();
     }
+
+    /// <summary>
+    /// Gets the notification email for a tenant (stored in PreviewWhitelist table).
+    /// </summary>
+    public async Task<string?> GetNotificationEmailAsync(string tenantId)
+    {
+        try
+        {
+            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.PreviewWhitelist);
+            var entity = await tableClient.GetEntityAsync<PreviewNotificationEntity>(tenantId, "notification-email");
+            return entity?.Value?.Email;
+        }
+        catch (RequestFailedException ex) when (ex.Status == 404)
+        {
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to read notification email for tenant {TenantId}", tenantId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Saves (or clears) the notification email for a tenant.
+    /// </summary>
+    public async Task SaveNotificationEmailAsync(string tenantId, string? email)
+    {
+        var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.PreviewWhitelist);
+
+        if (string.IsNullOrWhiteSpace(email))
+        {
+            // Clear: delete the row if it exists
+            try { await tableClient.DeleteEntityAsync(tenantId, "notification-email"); }
+            catch (RequestFailedException ex) when (ex.Status == 404) { /* already gone */ }
+            return;
+        }
+
+        var entity = new PreviewNotificationEntity
+        {
+            PartitionKey = tenantId,
+            RowKey = "notification-email",
+            Email = email.Trim()
+        };
+        await tableClient.UpsertEntityAsync(entity);
+    }
 }
 
 /// <summary>
@@ -127,4 +173,19 @@ public class PreviewWhitelistEntity : ITableEntity
 
     public DateTime ApprovedAt { get; set; }
     public string ApprovedBy { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Entity storing the notification email for a tenant in the PreviewWhitelist table.
+/// PartitionKey = TenantId, RowKey = "notification-email".
+/// Temporary — remove after GA.
+/// </summary>
+public class PreviewNotificationEntity : ITableEntity
+{
+    public string PartitionKey { get; set; } = string.Empty; // TenantId
+    public string RowKey { get; set; } = "notification-email";
+    public DateTimeOffset? Timestamp { get; set; }
+    public ETag ETag { get; set; }
+
+    public string Email { get; set; } = string.Empty;
 }
