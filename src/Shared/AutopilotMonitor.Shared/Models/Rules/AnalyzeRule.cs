@@ -161,7 +161,7 @@ namespace AutopilotMonitor.Shared.Models
         public string DataField { get; set; }
 
         /// <summary>
-        /// Comparison operator: "equals", "contains", "regex", "gt", "lt", "gte", "lte", "exists", "count_gte"
+        /// Comparison operator: "equals", "not_equals", "contains", "not_contains", "regex", "not_regex", "gt", "lt", "gte", "lte", "exists", "not_exists", "count_gte"
         /// For "event_correlation": operator for the Event B filter (applied to DataField).
         /// </summary>
         public string Operator { get; set; }

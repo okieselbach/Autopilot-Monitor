@@ -298,13 +298,29 @@ namespace AutopilotMonitor.Functions.Services
                 case "equals":
                     return string.Equals(fieldValue, compareValue, StringComparison.OrdinalIgnoreCase);
 
+                case "not_equals":
+                    return !string.Equals(fieldValue, compareValue, StringComparison.OrdinalIgnoreCase);
+
                 case "contains":
                     return fieldValue.IndexOf(compareValue, StringComparison.OrdinalIgnoreCase) >= 0;
+
+                case "not_contains":
+                    return fieldValue.IndexOf(compareValue, StringComparison.OrdinalIgnoreCase) < 0;
 
                 case "regex":
                     try
                     {
                         return Regex.IsMatch(fieldValue, compareValue, RegexOptions.IgnoreCase, TimeSpan.FromSeconds(1));
+                    }
+                    catch
+                    {
+                        return false;
+                    }
+
+                case "not_regex":
+                    try
+                    {
+                        return !Regex.IsMatch(fieldValue, compareValue, RegexOptions.IgnoreCase, TimeSpan.FromSeconds(1));
                     }
                     catch
                     {
@@ -325,6 +341,9 @@ namespace AutopilotMonitor.Functions.Services
 
                 case "exists":
                     return !string.IsNullOrEmpty(fieldValue);
+
+                case "not_exists":
+                    return string.IsNullOrEmpty(fieldValue);
 
                 default:
                     return false;

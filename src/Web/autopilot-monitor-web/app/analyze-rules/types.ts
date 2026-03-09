@@ -74,7 +74,7 @@ export interface RuleForm {
 export const CATEGORIES = ["network", "identity", "apps", "device", "esp", "enrollment"] as const;
 export const SEVERITIES = ["info", "warning", "high", "critical"] as const;
 export const TRIGGERS = ["single", "correlation"] as const;
-export const OPERATORS = ["equals", "contains", "regex", "gt", "lt", "gte", "lte", "exists", "count_gte"] as const;
+export const OPERATORS = ["equals", "not_equals", "contains", "not_contains", "regex", "not_regex", "gt", "lt", "gte", "lte", "exists", "not_exists", "count_gte"] as const;
 export const SOURCES = ["event_type", "event_data", "phase_duration", "event_count", "event_correlation"] as const;
 
 export const SEVERITY_COLORS: Record<string, { bg: string; text: string; border: string; dot: string }> = {
