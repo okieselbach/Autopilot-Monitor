@@ -52,7 +52,6 @@ export function TenantManagementSection({
   const [tenantSectionExpanded, setTenantSectionExpanded] = useState(false);
   const [editingTenant, setEditingTenant] = useState<TenantConfiguration | null>(null);
   const [savingTenant, setSavingTenant] = useState(false);
-  const [togglingSecurityBypassTenant, setTogglingSecurityBypassTenant] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(0);
   const tenantsPerPage = tenantSectionExpanded ? 7 : 3;
 
@@ -121,52 +120,6 @@ export function TenantManagementSection({
       setError(err instanceof Error ? err.message : "Failed to save tenant configuration");
     } finally {
       setSavingTenant(false);
-    }
-  };
-
-  const handleToggleSecurityBypass = async (tenant: TenantConfiguration) => {
-    try {
-      setTogglingSecurityBypassTenant(tenant.tenantId);
-      setError(null);
-      setSuccessMessage(null);
-
-      const newValue = !tenant.allowInsecureAgentRequests;
-      const updatedTenant = { ...tenant, allowInsecureAgentRequests: newValue };
-
-      const response = await authenticatedFetch(`${API_BASE_URL}/api/config/${tenant.tenantId}`, getAccessToken, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updatedTenant),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `Failed to update security bypass: ${response.statusText}`);
-      }
-
-      const result = await response.json();
-
-      setTenants(prev => prev.map(t =>
-        t.tenantId === tenant.tenantId ? result.config : t
-      ));
-
-      setEditingTenant(prev => prev && prev.tenantId === tenant.tenantId
-        ? { ...prev, allowInsecureAgentRequests: newValue }
-        : prev);
-
-      setSuccessMessage(
-        newValue
-          ? `Security bypass enabled for tenant ${tenant.tenantId}.`
-          : `Security bypass disabled for tenant ${tenant.tenantId}.`
-      );
-      setTimeout(() => setSuccessMessage(null), 4000);
-    } catch (err) {
-      if (err instanceof TokenExpiredError) {
-        console.error("Session expired while toggling security bypass");
-      }
-      setError(err instanceof Error ? err.message : "Failed to update security bypass");
-    } finally {
-      setTogglingSecurityBypassTenant(null);
     }
   };
 
@@ -584,37 +537,6 @@ export function TenantManagementSection({
                 />
               </div>
 
-              {/* Hardware Whitelist */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Manufacturer Whitelist</label>
-                <input
-                  type="text"
-                  value={editingTenant.manufacturerWhitelist}
-                  onChange={(e) => setEditingTenant({ ...editingTenant, manufacturerWhitelist: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Model Whitelist</label>
-                <input
-                  type="text"
-                  value={editingTenant.modelWhitelist}
-                  onChange={(e) => setEditingTenant({ ...editingTenant, modelWhitelist: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                />
-              </div>
-
-              <label className="flex items-center space-x-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={editingTenant.validateAutopilotDevice}
-                  onChange={(e) => setEditingTenant({ ...editingTenant, validateAutopilotDevice: e.target.checked })}
-                  className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                />
-                <span className="text-sm font-medium text-gray-700">Autopilot Device Validation</span>
-              </label>
-
               <label className="flex items-center space-x-2 cursor-pointer">
                 <input
                   type="checkbox"
@@ -624,33 +546,6 @@ export function TenantManagementSection({
                 />
                 <span className="text-sm font-medium text-gray-700">Enable Bootstrap Token</span>
               </label>
-
-              <div className="border border-amber-300 bg-amber-50 rounded-lg p-3">
-                <p className="text-sm font-semibold text-amber-900">Galactic Admin Test Bypass</p>
-                <p className="text-xs text-amber-800 mt-1">
-                  Allows agent requests even when Autopilot device validation is disabled. Use only for temporary test tenants.
-                </p>
-                <div className="mt-3 flex items-center justify-between">
-                  <span className={`text-xs font-medium ${editingTenant.allowInsecureAgentRequests ? "text-red-700" : "text-green-700"}`}>
-                    {editingTenant.allowInsecureAgentRequests ? "Bypass is ENABLED" : "Bypass is DISABLED"}
-                  </span>
-                  <button
-                    onClick={() => handleToggleSecurityBypass(editingTenant)}
-                    disabled={togglingSecurityBypassTenant === editingTenant.tenantId}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-md text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                      editingTenant.allowInsecureAgentRequests
-                        ? "bg-red-600 hover:bg-red-700"
-                        : "bg-amber-600 hover:bg-amber-700"
-                    }`}
-                  >
-                    {togglingSecurityBypassTenant === editingTenant.tenantId
-                      ? "Updating..."
-                      : editingTenant.allowInsecureAgentRequests
-                      ? "Disable Bypass"
-                      : "Enable Bypass"}
-                  </button>
-                </div>
-              </div>
 
               {/* Data Management */}
               <div>
@@ -672,18 +567,6 @@ export function TenantManagementSection({
                 ) : (
                   <p className="text-xs text-gray-400 mt-1">Tenant range: 7–180. Set 0 for infinite retention. No upper limit for Galactic.</p>
                 )}
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Session Timeout (Hours)</label>
-                <input
-                  type="number"
-                  min="1"
-                  max="48"
-                  value={editingTenant.sessionTimeoutHours}
-                  onChange={(e) => setEditingTenant({ ...editingTenant, sessionTimeoutHours: parseInt(e.target.value) || 5 })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                />
               </div>
 
             </div>

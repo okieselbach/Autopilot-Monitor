@@ -10,6 +10,8 @@ interface TenantAdmin {
   isEnabled: boolean;
   addedDate: string;
   addedBy: string;
+  role: string | null;
+  canManageBootstrapTokens: boolean;
 }
 
 interface TenantAdminSectionProps {
@@ -260,6 +262,15 @@ export function TenantAdminSection({
                       <div className="flex-1">
                         <div className="flex items-center space-x-2">
                           <div className="font-medium text-gray-900">{admin.upn}</div>
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                            (admin.role ?? "Admin") === "Admin"
+                              ? "bg-purple-100 text-purple-800"
+                              : (admin.role === "Operator")
+                              ? "bg-blue-100 text-blue-800"
+                              : "bg-gray-100 text-gray-700"
+                          }`}>
+                            {admin.role ?? "Admin"}
+                          </span>
                           {!admin.isEnabled && (
                             <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-200 text-gray-700">
                               Disabled
