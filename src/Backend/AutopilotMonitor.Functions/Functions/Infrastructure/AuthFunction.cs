@@ -21,6 +21,7 @@ public class AuthFunction
     private readonly TableStorageService _storageService;
     private readonly PreviewWhitelistService _previewWhitelistService;
     private readonly TelegramNotificationService _telegramNotificationService;
+    private readonly GalacticNotificationService _galacticNotificationService;
 
     public AuthFunction(
         ILogger<AuthFunction> logger,
@@ -29,7 +30,8 @@ public class AuthFunction
         TenantAdminsService tenantAdminsService,
         TableStorageService storageService,
         PreviewWhitelistService previewWhitelistService,
-        TelegramNotificationService telegramNotificationService)
+        TelegramNotificationService telegramNotificationService,
+        GalacticNotificationService galacticNotificationService)
     {
         _logger = logger;
         _galacticAdminService = galacticAdminService;
@@ -38,6 +40,7 @@ public class AuthFunction
         _storageService = storageService;
         _previewWhitelistService = previewWhitelistService;
         _telegramNotificationService = telegramNotificationService;
+        _galacticNotificationService = galacticNotificationService;
     }
 
     /// <summary>
@@ -91,6 +94,12 @@ public class AuthFunction
                     .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException,
                         "Fire-and-forget Telegram notification failed for tenant {TenantId}", tenantId),
                         TaskContinuationOptions.OnlyOnFaulted);
+
+                // Persistent in-app notification for Galactic Admins — best effort
+                _ = _galacticNotificationService.CreateNotificationAsync(
+                    "preview_signup",
+                    "New Preview Signup",
+                    $"Tenant {tenantId} ({domain}), UPN: {upn}");
             }
         }
 

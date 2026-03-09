@@ -5,6 +5,7 @@ import { AuthProvider } from "../contexts/AuthContext";
 import { SignalRProvider } from "../contexts/SignalRContext";
 import { TenantProvider } from "../contexts/TenantContext";
 import { NotificationProvider } from "../contexts/NotificationContext";
+import { GalacticNotificationProvider } from "../contexts/GalacticNotificationContext";
 import { ThemeProvider } from "../contexts/ThemeContext";
 import Navbar from "../components/Navbar";
 import ScrollToTopButton from "../components/ScrollToTopButton";
@@ -113,13 +114,15 @@ export default function RootLayout({
         <ThemeProvider>
           <AuthProvider>
             <NotificationProvider>
-              <TenantProvider>
-                <SignalRProvider>
-                  <Navbar />
-                  {children}
-                  <ScrollToTopButton />
-                </SignalRProvider>
-              </TenantProvider>
+              <GalacticNotificationProvider>
+                <TenantProvider>
+                  <SignalRProvider>
+                    <Navbar />
+                    {children}
+                    <ScrollToTopButton />
+                  </SignalRProvider>
+                </TenantProvider>
+              </GalacticNotificationProvider>
             </NotificationProvider>
           </AuthProvider>
         </ThemeProvider>

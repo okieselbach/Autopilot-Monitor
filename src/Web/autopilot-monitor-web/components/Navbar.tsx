@@ -2,6 +2,7 @@
 
 import { useAuth } from '@/contexts/AuthContext';
 import { useNotifications } from '@/contexts/NotificationContext';
+import { useGalacticNotifications } from '@/contexts/GalacticNotificationContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
@@ -11,6 +12,7 @@ import { usePathname } from 'next/navigation';
 export default function Navbar() {
   const { isAuthenticated, user, logout } = useAuth();
   const { notifications, unreadCount, markAsRead, markAllAsRead, removeNotification, clearAll } = useNotifications();
+  const { notifications: galacticNotifications, dismissNotification: dismissGalactic, dismissAll: dismissAllGalactic } = useGalacticNotifications();
   const { theme, toggleTheme } = useTheme();
   const pathname = usePathname();
 
@@ -274,33 +276,42 @@ export default function Navbar() {
                 <svg className="w-5 h-5 text-gray-600" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
                   <path d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path>
                 </svg>
-                {unreadCount > 0 && (
-                  <span className="absolute top-0.5 right-0.5 inline-flex items-center justify-center w-4 h-4 text-[10px] font-bold leading-none text-white bg-red-600 rounded-full">
-                    {unreadCount > 9 ? '9+' : unreadCount}
-                  </span>
-                )}
+                {(() => {
+                  const galacticCount = (user?.isGalacticAdmin && galacticAdminMode) ? galacticNotifications.length : 0;
+                  const totalUnread = unreadCount + galacticCount;
+                  return totalUnread > 0 ? (
+                    <span className="absolute top-0.5 right-0.5 inline-flex items-center justify-center w-4 h-4 text-[10px] font-bold leading-none text-white bg-red-600 rounded-full">
+                      {totalUnread > 9 ? '9+' : totalUnread}
+                    </span>
+                  ) : null;
+                })()}
               </button>
 
               {/* Notification Dropdown */}
-              {showNotifications && (
+              {showNotifications && (() => {
+                const showGalactic = user?.isGalacticAdmin && galacticAdminMode;
+                const visibleGalactic = showGalactic ? galacticNotifications : [];
+                const hasAny = notifications.length > 0 || visibleGalactic.length > 0;
+
+                return (
                 <div className="absolute right-0 mt-2 w-96 bg-white rounded-lg shadow-lg border border-gray-200 z-50 max-h-96 overflow-hidden flex flex-col">
                   <div className="px-4 py-3 border-b border-gray-200 flex justify-between items-center">
                     <h3 className="text-sm font-semibold text-gray-900">Notifications</h3>
-                    {notifications.length > 0 && (
+                    {hasAny && (
                       <div className="flex space-x-2">
                         {unreadCount > 0 && (
                           <button onClick={markAllAsRead} className="text-xs text-blue-600 hover:text-blue-800">
                             Mark all read
                           </button>
                         )}
-                        <button onClick={clearAll} className="text-xs text-gray-500 hover:text-gray-700">
+                        <button onClick={() => { clearAll(); if (showGalactic) dismissAllGalactic(); }} className="text-xs text-gray-500 hover:text-gray-700">
                           Clear all
                         </button>
                       </div>
                     )}
                   </div>
                   <div className="overflow-y-auto flex-1">
-                    {notifications.length === 0 ? (
+                    {!hasAny ? (
                       <div className="p-6 text-center text-gray-400">
                         <svg className="w-10 h-10 mx-auto mb-2 text-gray-300" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
                           <path d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"></path>
@@ -309,6 +320,30 @@ export default function Navbar() {
                       </div>
                     ) : (
                       <div className="divide-y divide-gray-100">
+                        {/* Persistent Galactic Admin Notifications (top section) */}
+                        {visibleGalactic.map((gn) => (
+                          <div key={`ga-${gn.id}`} className="px-4 py-3 hover:bg-purple-50/50 transition-colors border-l-4 border-purple-500 bg-purple-50/30">
+                            <div className="flex items-start justify-between">
+                              <div className="flex items-start space-x-2.5 flex-1">
+                                <span className="text-lg">{gn.type === 'session_report' ? '\uD83D\uDCCB' : '\uD83C\uDF1F'}</span>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-1.5">
+                                    <p className="text-sm font-medium text-gray-900">{gn.title}</p>
+                                    <span className="text-[9px] font-semibold text-purple-700 bg-purple-100 px-1 py-0.5 rounded">GA</span>
+                                  </div>
+                                  <p className="text-xs text-gray-600 mt-0.5">{gn.message}</p>
+                                  <p className="text-[10px] text-gray-400 mt-1">{formatTime(new Date(gn.createdAt))}</p>
+                                </div>
+                              </div>
+                              <button onClick={(e) => { e.stopPropagation(); dismissGalactic(gn.id); }} className="ml-2 text-gray-300 hover:text-gray-500" title="Dismiss">
+                                <svg className="w-3.5 h-3.5" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path d="M6 18L18 6M6 6l12 12"></path>
+                                </svg>
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                        {/* Ephemeral Notifications */}
                         {notifications.map((notification) => (
                           <div key={notification.id} className={`px-4 py-3 hover:bg-gray-50 transition-colors cursor-pointer ${!notification.read ? 'bg-blue-50' : ''}`} onClick={() => { if (!notification.read) { markAsRead(notification.id); } }}>
                             <div className="flex items-start justify-between">
@@ -343,7 +378,8 @@ export default function Navbar() {
                     )}
                   </div>
                 </div>
-              )}
+                );
+              })()}
             </div>
 
             {/* Settings Menu */}

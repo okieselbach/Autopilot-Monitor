@@ -235,6 +235,9 @@ namespace AutopilotMonitor.Shared
             // Bootstrap sessions (OOBE pre-enrollment agent deployment)
             public const string BootstrapSessions = "BootstrapSessions";
 
+            // Galactic Admin in-app notifications (persistent until dismissed)
+            public const string GalacticNotifications = "GalacticNotifications";
+
             /// <summary>
             /// Returns all table names for initialization
             /// </summary>
@@ -261,7 +264,8 @@ namespace AutopilotMonitor.Shared
                 BlockedDevices,
                 BlockedVersions,
                 SessionReports,
-                BootstrapSessions
+                BootstrapSessions,
+                GalacticNotifications
             };
         }
     }

@@ -129,6 +129,7 @@ builder.Services.AddSingleton<AutopilotMonitor.Functions.Security.CorporateIdent
 builder.Services.AddHttpClient<TeamsNotificationService>();
 builder.Services.AddHttpClient<TelegramNotificationService>();
 builder.Services.AddSingleton<ResendEmailService>();
+builder.Services.AddSingleton<GalacticNotificationService>();
 
 var app = builder.Build();
 

@@ -15,19 +15,22 @@ namespace AutopilotMonitor.Functions.Functions.Reports
         private readonly TableStorageService _storageService;
         private readonly GalacticAdminService _galacticAdminService;
         private readonly TelegramNotificationService _telegramNotificationService;
+        private readonly GalacticNotificationService _galacticNotificationService;
 
         public SubmitSessionReportFunction(
             ILogger<SubmitSessionReportFunction> logger,
             SessionReportService sessionReportService,
             TableStorageService storageService,
             GalacticAdminService galacticAdminService,
-            TelegramNotificationService telegramNotificationService)
+            TelegramNotificationService telegramNotificationService,
+            GalacticNotificationService galacticNotificationService)
         {
             _logger = logger;
             _sessionReportService = sessionReportService;
             _storageService = storageService;
             _galacticAdminService = galacticAdminService;
             _telegramNotificationService = telegramNotificationService;
+            _galacticNotificationService = galacticNotificationService;
         }
 
         [Function("SubmitSessionReport")]
@@ -94,6 +97,12 @@ namespace AutopilotMonitor.Functions.Functions.Reports
                 // Telegram notification — best effort
                 _ = _telegramNotificationService.SendSessionReportAsync(
                     request.TenantId, userIdentifier, sessionId, metadata.ReportId, request.Comment ?? string.Empty);
+
+                // Persistent in-app notification for Galactic Admins — best effort
+                _ = _galacticNotificationService.CreateNotificationAsync(
+                    "session_report",
+                    "New Session Report",
+                    $"{userIdentifier} — Session {sessionId} (Tenant: {request.TenantId})");
 
                 _logger.LogInformation("Session report submitted: ReportId={ReportId}, Session={SessionId}, By={User}",
                     metadata.ReportId, sessionId, userIdentifier);

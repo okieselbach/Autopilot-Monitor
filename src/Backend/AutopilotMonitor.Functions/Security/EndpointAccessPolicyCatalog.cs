@@ -176,6 +176,9 @@ public static class EndpointAccessPolicyCatalog
         new("GET",    "health/detailed",            EndpointPolicy.GalacticAdminOnly),
         new("POST",   "rules/reseed-from-github",   EndpointPolicy.GalacticAdminOnly),
         new("POST",   "rules/ime-log-patterns/reseed", EndpointPolicy.GalacticAdminOnly),
+        new("GET",    "galactic/notifications",                          EndpointPolicy.GalacticAdminOnly),
+        new("POST",   "galactic/notifications/dismiss-all",              EndpointPolicy.GalacticAdminOnly),
+        new("POST",   "galactic/notifications/{notificationId}/dismiss", EndpointPolicy.GalacticAdminOnly),
     };
 
     /// <summary>
