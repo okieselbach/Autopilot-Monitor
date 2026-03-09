@@ -20,7 +20,7 @@ export const msalConfig: Configuration = {
   },
   cache: {
     cacheLocation: "sessionStorage", // Using sessionStorage for better XSS protection
-    storeAuthStateInCookie: false, // Set to true for IE11 or Edge legacy
+    storeAuthStateInCookie: true, // Required for Safari ITP compatibility during auth redirects
   },
   system: {
     loggerOptions: {

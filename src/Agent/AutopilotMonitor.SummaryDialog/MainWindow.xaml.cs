@@ -3,9 +3,11 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -43,6 +45,7 @@ namespace AutopilotMonitor.SummaryDialog
 
                 ApplyScrollBarStyle();
                 ApplyContentClip();
+                ApplyRoundedCorners();
                 ApplyTaskbarIcon();
 
                 LoadStatusData();
@@ -426,6 +429,32 @@ namespace AutopilotMonitor.SummaryDialog
         }
 
         /// <summary>
+        /// Tells Windows 11 DWM to round the window corners natively at the compositor level.
+        /// Without AllowsTransparency the Win32 window is rectangular — this API makes the
+        /// OS clip it to rounded corners, matching our Border's CornerRadius.
+        /// Silently ignored on Windows 10 (no visual effect, no error).
+        /// </summary>
+        private void ApplyRoundedCorners()
+        {
+            try
+            {
+                var hwnd = new WindowInteropHelper(this).Handle;
+                if (hwnd == IntPtr.Zero) return;
+
+                // DWMWA_WINDOW_CORNER_PREFERENCE = 33, DWMWCP_ROUND = 2
+                int preference = 2;
+                DwmSetWindowAttribute(hwnd, 33, ref preference, sizeof(int));
+            }
+            catch (Exception ex)
+            {
+                App.Log($"ApplyRoundedCorners: {ex.Message}");
+            }
+        }
+
+        [DllImport("dwmapi.dll", PreserveSig = true)]
+        private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
+
+        /// <summary>
         /// Clips the inner content Grid to a rounded rectangle so child elements
         /// (like the title bar) don't bleed past the outer Border's rounded corners.
         /// </summary>
@@ -433,7 +462,7 @@ namespace AutopilotMonitor.SummaryDialog
         {
             // Clip the entire content Border to a rounded rectangle.
             // This prevents child backgrounds from bleeding past the rounded corners.
-            const double radius = 11; // matches inner CornerRadius (outer 12 minus 1px border)
+            const double radius = 12; // matches Border CornerRadius
 
             void UpdateClip()
             {

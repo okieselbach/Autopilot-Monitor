@@ -1,7 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
-import { PublicClientApplication, AccountInfo, InteractionStatus } from '@azure/msal-browser';
+import { PublicClientApplication, AccountInfo, InteractionStatus, InteractionRequiredAuthError } from '@azure/msal-browser';
 import { MsalProvider, useMsal, useIsAuthenticated } from '@azure/msal-react';
 import { msalConfig, loginRequest, apiRequest } from '@/lib/msalConfig';
 import { API_BASE_URL } from '@/lib/config';
@@ -134,9 +134,25 @@ function AuthProviderInternal({ children }: { children: React.ReactNode }) {
         canManageBootstrapTokens: data.canManageBootstrapTokens || false,
       };
     } catch (error) {
+      // If the refresh token is expired or consent is required, redirect to
+      // interactive login immediately instead of falling back to stale claims.
+      if (error instanceof InteractionRequiredAuthError) {
+        console.warn('[Auth] Interactive login required — redirecting:', error.errorCode);
+        try {
+          await instance.acquireTokenRedirect({
+            scopes: apiRequest.scopes,
+            account: account,
+          });
+        } catch (redirectError) {
+          console.error('[Auth] Redirect for re-auth failed:', redirectError);
+        }
+        return null;
+      }
+
       console.error('[Auth] Failed to fetch user info:', error);
 
-      // Fallback to token claims if API call fails
+      // Fallback to token claims only for non-auth errors (network issues,
+      // backend cold starts, etc.) so the user can still see the app.
       return {
         displayName: account.name || '',
         upn: account.username || '',

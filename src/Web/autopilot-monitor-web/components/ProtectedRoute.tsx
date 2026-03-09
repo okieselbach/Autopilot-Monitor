@@ -14,7 +14,7 @@ interface ProtectedRouteProps {
  * Optionally requires Galactic Admin role
  */
 export function ProtectedRoute({ children, requireGalacticAdmin = false }: ProtectedRouteProps) {
-  const { isAuthenticated, user, isLoading } = useAuth();
+  const { isAuthenticated, user, isLoading, login } = useAuth();
   const router = useRouter();
 
   // Once authenticated, remember it so transient auth-state flips (e.g. MSAL
@@ -24,17 +24,27 @@ export function ProtectedRoute({ children, requireGalacticAdmin = false }: Prote
     wasAuthenticated.current = true;
   }
 
-  useEffect(() => {
-    // Only redirect if MSAL has fully settled (!isLoading) and we were never
-    // authenticated in this session. wasAuthenticated guards against transient
-    // isAuthenticated=false flips during MSAL's double handleRedirectPromise cycle.
-    if (!isLoading && !isAuthenticated && !wasAuthenticated.current) {
-      router.push("/");
-    }
-  }, [isAuthenticated, isLoading, router]);
+  // Prevent infinite redirect loops: only attempt re-login once per mount.
+  const reloginAttempted = useRef(false);
 
-  // Show loading state only on the very first load (never been authenticated yet)
-  if (isLoading && !wasAuthenticated.current) {
+  useEffect(() => {
+    if (!isLoading && !isAuthenticated) {
+      if (wasAuthenticated.current && !reloginAttempted.current) {
+        // Session was lost (e.g. Safari tab suspension cleared sessionStorage).
+        // Trigger MSAL login redirect once to re-authenticate.
+        reloginAttempted.current = true;
+        login().catch(() => {
+          router.push("/");
+        });
+      } else {
+        // Never authenticated in this session, or re-login already attempted.
+        router.push("/");
+      }
+    }
+  }, [isAuthenticated, isLoading, router, login]);
+
+  // Show loading spinner while MSAL settles or while re-login redirect is pending.
+  if (isLoading || (!isAuthenticated && wasAuthenticated.current)) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
         <div className="text-center">

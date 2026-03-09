@@ -14,7 +14,18 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
     ///
     /// Registry path: HKLM\SOFTWARE\Microsoft\Provisioning\AutopilotSettings
     /// Values: DevicePreparationCategory.Status, DeviceSetupCategory.Status, AccountSetupCategory.Status
-    /// Each value is a JSON string with categorySucceeded (bool) and categoryStatusMessage (string).
+    ///
+    /// JSON format varies across Windows versions:
+    ///   Flat:   { "CertificatesSubcategory": "Certificates (1 of 1 applied)", "categorySucceeded": true, ... }
+    ///   Nested: { "CertificatesSubcategory": { "subcategoryState": "succeeded", "subcategoryStatusText": "..." }, ... }
+    ///
+    /// categorySucceeded (bool) appears only once the category has finalized.
+    /// Until then, subcategory states ("succeeded"/"failed"/...) provide progressive status.
+    ///
+    /// Event emission strategy:
+    ///   - Emit once when a category first appears in the registry (initial snapshot)
+    ///   - Emit once when categorySucceeded resolves to true or false (final outcome)
+    ///   - Do NOT emit on every intermediate subcategory text change (avoids spam)
     /// </summary>
     public partial class EspAndHelloTracker
     {
@@ -28,8 +39,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             "AccountSetupCategory.Status"
         };
 
-        // Last known JSON per category — only emit events on changes
-        private Dictionary<string, string> _lastProvisioningStatus;
+        // Track the raw JSON per category — used to detect any changes at all
+        private Dictionary<string, string> _lastProvisioningJson;
+        // Track which categories have been seen (for first-seen event)
+        private HashSet<string> _provisioningCategorySeen;
+        // Track the last known categorySucceeded per category (null = not yet resolved)
+        private Dictionary<string, bool?> _lastCategorySucceeded;
         // Fire-once guard per category — prevent duplicate EspFailureDetected calls
         private HashSet<string> _provisioningFailureFired;
         // Track which categories have reported a final categorySucceeded value
@@ -37,7 +52,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 
         private void StartProvisioningStatusPolling()
         {
-            _lastProvisioningStatus = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            _lastProvisioningJson = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            _provisioningCategorySeen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            _lastCategorySucceeded = new Dictionary<string, bool?>(StringComparer.OrdinalIgnoreCase);
             _provisioningFailureFired = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             _provisioningCategoriesResolved = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -86,29 +103,29 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                         if (string.IsNullOrEmpty(jsonValue))
                             continue;
 
-                        // Skip if unchanged since last poll
-                        if (_lastProvisioningStatus.TryGetValue(categoryName, out var lastJson) && lastJson == jsonValue)
+                        // Skip if JSON is identical to last poll (no change at all)
+                        if (_lastProvisioningJson.TryGetValue(categoryName, out var lastJson) && lastJson == jsonValue)
                             continue;
 
-                        _lastProvisioningStatus[categoryName] = jsonValue;
+                        _lastProvisioningJson[categoryName] = jsonValue;
                         var result = ProcessCategoryStatus(categoryName, jsonValue);
 
-                        if (result.HasValue && !result.Value)
+                        if (result.IsFailed)
                         {
                             failureDetected = true;
                             failureType = result.FailureType;
                         }
                     }
 
-                    // Self-termination: all observed categories have reported a final status
+                    // Self-termination: all observed categories have reported a final categorySucceeded
                     if (_provisioningCategoriesResolved.Count > 0
-                        && _lastProvisioningStatus.Count > 0
-                        && _provisioningCategoriesResolved.Count >= _lastProvisioningStatus.Count)
+                        && _lastProvisioningJson.Count > 0
+                        && _provisioningCategoriesResolved.Count >= _lastProvisioningJson.Count)
                     {
                         StopProvisioningStatusPolling("all_resolved");
                     }
 
-                    // Fire EspFailureDetected AFTER timer stop decision and AFTER event emission
+                    // Fire EspFailureDetected AFTER event emission
                     // (matches the pattern in ShellCoreTracking.cs — event in spool before agent reacts)
                     if (failureDetected && failureType != null)
                     {
@@ -132,10 +149,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         }
 
         /// <summary>
-        /// Processes a single category status JSON value. Emits an info event for timeline visibility.
-        /// Returns a result indicating whether the category succeeded, failed, or couldn't be determined.
+        /// Processes a single category status JSON value.
+        /// Emits events only on first-seen and on categorySucceeded resolution (not on every intermediate change).
         /// </summary>
-        private CategoryStatusResult ProcessCategoryStatus(string categoryName, string jsonValue)
+        private ProvisioningResult ProcessCategoryStatus(string categoryName, string jsonValue)
         {
             var categoryLabel = categoryName.Replace("Category.Status", "");
 
@@ -145,161 +162,329 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                 {
                     var root = doc.RootElement;
 
-                    // Extract core fields — defensive against unexpected JSON value types
-                    bool? categorySucceeded = null;
-                    string categoryStatusMessage = null;
+                    // 1. Extract categorySucceeded — the authoritative outcome signal
+                    bool? categorySucceeded = SafeGetBool(root, "categorySucceeded");
+                    string categoryStatusMessage = SafeGetString(root, "categoryStatusMessage");
 
-                    if (root.TryGetProperty("categorySucceeded", out var succeededProp))
+                    // 2. Parse subcategories — handles both flat strings and nested objects
+                    var subcategories = ParseSubcategories(root);
+
+                    // 3. Derive a meaningful status summary
+                    string statusText;
+                    if (categoryStatusMessage != null)
+                        statusText = categoryStatusMessage;
+                    else if (categorySucceeded == true)
+                        statusText = "Complete";
+                    else if (categorySucceeded == false)
+                        statusText = "Failed";
+                    else
+                        statusText = BuildProgressSummary(subcategories);
+
+                    // 4. Decide whether to emit an event
+                    bool isFirstSeen = !_provisioningCategorySeen.Contains(categoryName);
+                    bool categorySucceededChanged = HasCategorySucceededChanged(categoryName, categorySucceeded);
+
+                    if (isFirstSeen)
                     {
-                        if (succeededProp.ValueKind == JsonValueKind.True)
-                            categorySucceeded = true;
-                        else if (succeededProp.ValueKind == JsonValueKind.False)
-                            categorySucceeded = false;
-                        else if (succeededProp.ValueKind == JsonValueKind.String
-                            && bool.TryParse(succeededProp.GetString(), out var parsed))
-                            categorySucceeded = parsed;
+                        _provisioningCategorySeen.Add(categoryName);
+                        _lastCategorySucceeded[categoryName] = categorySucceeded;
+                        EmitProvisioningEvent(categoryLabel, categorySucceeded, statusText, subcategories, EventSeverity.Info);
                     }
-
-                    if (root.TryGetProperty("categoryStatusMessage", out var messageProp)
-                        && messageProp.ValueKind == JsonValueKind.String)
+                    else if (categorySucceededChanged)
                     {
-                        categoryStatusMessage = messageProp.GetString();
+                        _lastCategorySucceeded[categoryName] = categorySucceeded;
+                        var severity = categorySucceeded == false ? EventSeverity.Warning : EventSeverity.Info;
+                        EmitProvisioningEvent(categoryLabel, categorySucceeded, statusText, subcategories, severity);
                     }
+                    // else: intermediate subcategory text change — log only, no event
 
-                    // Collect subcategory details — values can be strings or objects, use ToString() as fallback
-                    var subcategories = new Dictionary<string, string>();
-                    foreach (var prop in root.EnumerateObject())
-                    {
-                        if (prop.Name.Contains("Subcategory", StringComparison.OrdinalIgnoreCase))
-                        {
-                            subcategories[prop.Name] = prop.Value.ValueKind == JsonValueKind.String
-                                ? prop.Value.GetString() ?? ""
-                                : prop.Value.ToString();
-                        }
-                    }
-
-                    // Determine severity based on outcome
-                    var severity = categorySucceeded == false ? EventSeverity.Warning : EventSeverity.Info;
-                    var statusText = categoryStatusMessage ?? (categorySucceeded == true ? "Complete" : categorySucceeded == false ? "Failed" : "Unknown");
-
-                    // Build event data
-                    var eventData = new Dictionary<string, object>
-                    {
-                        { "category", categoryLabel },
-                        { "categorySucceeded", categorySucceeded?.ToString() ?? "unknown" },
-                        { "categoryStatusMessage", statusText }
-                    };
-
-                    // Add subcategory details
-                    if (subcategories.Count > 0)
-                        eventData["subcategories"] = subcategories;
-
-                    // Emit timeline event for every status change
-                    _onEventCollected(new EnrollmentEvent
-                    {
-                        SessionId = _sessionId,
-                        TenantId = _tenantId,
-                        EventType = Constants.EventTypes.EspProvisioningStatus,
-                        Severity = severity,
-                        Source = "EspAndHelloTracker",
-                        Phase = EnrollmentPhase.Unknown,
-                        Message = $"ESP provisioning status: {categoryLabel} — {statusText}",
-                        Data = eventData
-                    });
-
-                    _logger.Info($"Provisioning status: {categoryLabel} — succeeded={categorySucceeded}, message={statusText}");
-
-                    // Track resolved categories (both success and failure are final)
+                    // 5. Track resolved categories (both success and failure are final)
                     if (categorySucceeded.HasValue)
                         _provisioningCategoriesResolved.Add(categoryName);
 
-                    // Handle failure
+                    // 6. Handle failure
                     if (categorySucceeded == false)
                     {
                         if (_provisioningFailureFired.Contains(categoryName))
-                            return CategoryStatusResult.AlreadyFired;
+                            return ProvisioningResult.NoAction;
 
                         _provisioningFailureFired.Add(categoryName);
 
-                        var failureType = ExtractProvisioningFailureType(categoryLabel, subcategories);
-                        _logger.Warning($"Provisioning failure detected: {failureType}");
+                        var failedSubcategory = FindFailedSubcategory(subcategories);
+                        var failureTypeName = failedSubcategory != null
+                            ? $"Provisioning_{categoryLabel}_{failedSubcategory}_Failed"
+                            : $"Provisioning_{categoryLabel}_Failed";
 
-                        return CategoryStatusResult.Failed(failureType);
+                        _logger.Warning($"Provisioning failure detected: {failureTypeName}");
+                        return ProvisioningResult.Failure(failureTypeName);
                     }
 
-                    return categorySucceeded == true
-                        ? CategoryStatusResult.Succeeded
-                        : CategoryStatusResult.Unknown;
+                    return ProvisioningResult.NoAction;
                 }
             }
             catch (JsonException ex)
             {
                 _logger.Warning($"Failed to parse provisioning status JSON for {categoryLabel}: {ex.Message}");
-                return CategoryStatusResult.Unknown;
+                return ProvisioningResult.NoAction;
             }
-        }
-
-        /// <summary>
-        /// Builds a structured failure type string from the category and its subcategories.
-        /// E.g. "Provisioning_DeviceSetup_Certificates_Failed" when the Certificates subcategory failed.
-        /// </summary>
-        private static string ExtractProvisioningFailureType(string categoryLabel, Dictionary<string, string> subcategories)
-        {
-            // Try to find which subcategory failed by looking for values that don't indicate success
-            foreach (var kvp in subcategories)
+            catch (Exception ex)
             {
-                var value = kvp.Value;
-                // Success indicators in subcategory values
-                if (value.Contains("Complete", StringComparison.OrdinalIgnoreCase)
-                    || value.Contains("applied", StringComparison.OrdinalIgnoreCase)
-                    || value.Contains("installed", StringComparison.OrdinalIgnoreCase)
-                    || value.Contains("added", StringComparison.OrdinalIgnoreCase)
-                    || value.Contains("No setup needed", StringComparison.OrdinalIgnoreCase)
-                    || value.Contains("Succeeded", StringComparison.OrdinalIgnoreCase)
-                    || value.Contains("Identified", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                // This subcategory did not succeed — extract a clean name
-                // E.g. "CertificatesSubcategory" -> "Certificates"
-                //      "SecurityPoliciesSubcategory" -> "SecurityPolicies"
-                //      "AccountSetup.CertificatesSubcategory" -> "Certificates"
-                var subcategoryName = kvp.Key
-                    .Replace("Subcategory", "")
-                    .Replace("AccountSetup.", "")
-                    .Replace("DeviceSetup.", "");
-
-                // Remove any remaining dots for clean naming
-                if (subcategoryName.Contains('.'))
-                    subcategoryName = subcategoryName.Split('.').Last();
-
-                return $"Provisioning_{categoryLabel}_{subcategoryName}_Failed";
+                _logger.Warning($"Unexpected error processing provisioning status for {categoryLabel}: {ex.Message}");
+                return ProvisioningResult.NoAction;
             }
-
-            return $"Provisioning_{categoryLabel}_Failed";
         }
 
         /// <summary>
-        /// Result of processing a single category status value.
+        /// Checks whether categorySucceeded has transitioned from null to true/false.
+        /// This ensures we only emit one event when the outcome is decided.
         /// </summary>
-        private readonly struct CategoryStatusResult
+        private bool HasCategorySucceededChanged(string categoryName, bool? newValue)
         {
-            public readonly bool HasValue;
-            public readonly bool Value; // true = succeeded, false = failed
+            if (!_lastCategorySucceeded.TryGetValue(categoryName, out var oldValue))
+                return false; // First-seen is handled separately
+
+            // Transition from null (in-progress) to true/false (resolved)
+            return oldValue != newValue;
+        }
+
+        private void EmitProvisioningEvent(string categoryLabel, bool? succeeded, string statusText,
+            List<SubcategoryInfo> subcategories, EventSeverity severity)
+        {
+            var eventData = new Dictionary<string, object>
+            {
+                { "category", categoryLabel },
+                { "categorySucceeded", succeeded?.ToString() ?? "in_progress" },
+                { "categoryStatusMessage", statusText }
+            };
+
+            if (subcategories.Count > 0)
+            {
+                var subcatData = new Dictionary<string, object>();
+                foreach (var sub in subcategories)
+                {
+                    subcatData[sub.Name] = new Dictionary<string, string>
+                    {
+                        { "state", sub.State },
+                        { "statusText", sub.StatusText }
+                    };
+                }
+                eventData["subcategories"] = subcatData;
+            }
+
+            _onEventCollected(new EnrollmentEvent
+            {
+                SessionId = _sessionId,
+                TenantId = _tenantId,
+                EventType = Constants.EventTypes.EspProvisioningStatus,
+                Severity = severity,
+                Source = "EspAndHelloTracker",
+                Phase = EnrollmentPhase.Unknown,
+                Message = $"ESP provisioning status: {categoryLabel} — {statusText}",
+                Data = eventData
+            });
+
+            _logger.Info($"Provisioning status event: {categoryLabel} — {statusText} (succeeded={succeeded?.ToString() ?? "in_progress"})");
+        }
+
+        // ===== JSON Parsing Helpers =====
+
+        /// <summary>
+        /// Parses subcategory entries from the JSON. Handles both formats:
+        ///   Flat:   "CertificatesSubcategory": "Certificates (1 of 1 applied)"
+        ///   Nested: "CertificatesSubcategory": { "subcategoryState": "succeeded", "subcategoryStatusText": "..." }
+        /// </summary>
+        private static List<SubcategoryInfo> ParseSubcategories(JsonElement root)
+        {
+            var result = new List<SubcategoryInfo>();
+
+            foreach (var prop in root.EnumerateObject())
+            {
+                if (!prop.Name.Contains("Subcategory", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var name = CleanSubcategoryName(prop.Name);
+
+                switch (prop.Value.ValueKind)
+                {
+                    case JsonValueKind.String:
+                        // Flat format: value is the status text, derive state from text content
+                        var text = prop.Value.GetString() ?? "";
+                        result.Add(new SubcategoryInfo
+                        {
+                            Name = name,
+                            State = InferStateFromText(text),
+                            StatusText = text
+                        });
+                        break;
+
+                    case JsonValueKind.Object:
+                        // Nested format: { "subcategoryState": "...", "subcategoryStatusText": "..." }
+                        result.Add(new SubcategoryInfo
+                        {
+                            Name = name,
+                            State = SafeGetString(prop.Value, "subcategoryState") ?? "unknown",
+                            StatusText = SafeGetString(prop.Value, "subcategoryStatusText") ?? ""
+                        });
+                        break;
+
+                    default:
+                        // Unknown format — include with raw value for debugging
+                        result.Add(new SubcategoryInfo
+                        {
+                            Name = name,
+                            State = "unknown",
+                            StatusText = prop.Value.ToString()
+                        });
+                        break;
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Cleans a subcategory property name to a readable short name.
+        /// "AccountSetup.CertificatesSubcategory" -> "Certificates"
+        /// "SecurityPoliciesSubcategory" -> "SecurityPolicies"
+        /// </summary>
+        private static string CleanSubcategoryName(string rawName)
+        {
+            var name = rawName;
+
+            // Remove "Subcategory" suffix
+            var idx = name.IndexOf("Subcategory", StringComparison.OrdinalIgnoreCase);
+            if (idx >= 0)
+                name = name.Substring(0, idx);
+
+            // Remove category prefix (e.g. "AccountSetup.", "DeviceSetup.", "DevicePreparation.")
+            var dotIdx = name.LastIndexOf('.');
+            if (dotIdx >= 0 && dotIdx < name.Length - 1)
+                name = name.Substring(dotIdx + 1);
+
+            return string.IsNullOrEmpty(name) ? rawName : name;
+        }
+
+        /// <summary>
+        /// Infers a state string from flat-format subcategory text.
+        /// Used when the JSON doesn't have explicit subcategoryState.
+        /// </summary>
+        private static string InferStateFromText(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return "unknown";
+
+            if (text.Contains("Complete", StringComparison.OrdinalIgnoreCase)
+                || text.Contains("applied", StringComparison.OrdinalIgnoreCase)
+                || text.Contains("installed", StringComparison.OrdinalIgnoreCase)
+                || text.Contains("added", StringComparison.OrdinalIgnoreCase)
+                || text.Contains("No setup needed", StringComparison.OrdinalIgnoreCase)
+                || text.Contains("Identified", StringComparison.OrdinalIgnoreCase))
+            {
+                return "succeeded";
+            }
+
+            if (text.Contains("Error", StringComparison.OrdinalIgnoreCase)
+                || text.Contains("Failed", StringComparison.OrdinalIgnoreCase)
+                || text.Contains("Failure", StringComparison.OrdinalIgnoreCase))
+            {
+                return "failed";
+            }
+
+            return "in_progress";
+        }
+
+        /// <summary>
+        /// Finds the first subcategory that is not in a succeeded state.
+        /// Returns the clean name, or null if all succeeded (generic failure).
+        /// </summary>
+        private static string FindFailedSubcategory(List<SubcategoryInfo> subcategories)
+        {
+            foreach (var sub in subcategories)
+            {
+                if (!string.Equals(sub.State, "succeeded", StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(sub.State, "notRequired", StringComparison.OrdinalIgnoreCase))
+                {
+                    return sub.Name;
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Builds a human-readable progress summary from subcategory states.
+        /// E.g. "3 of 5 subcategories completed"
+        /// </summary>
+        private static string BuildProgressSummary(List<SubcategoryInfo> subcategories)
+        {
+            if (subcategories.Count == 0)
+                return "In progress";
+
+            var succeeded = subcategories.Count(s =>
+                string.Equals(s.State, "succeeded", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(s.State, "notRequired", StringComparison.OrdinalIgnoreCase));
+
+            var failed = subcategories.Count(s =>
+                string.Equals(s.State, "failed", StringComparison.OrdinalIgnoreCase));
+
+            if (failed > 0)
+                return $"{failed} of {subcategories.Count} subcategories failed";
+
+            return $"{succeeded} of {subcategories.Count} subcategories completed";
+        }
+
+        /// <summary>
+        /// Safely extracts a boolean from a JSON property. Handles True, False, and string "true"/"false".
+        /// Returns null if the property doesn't exist or has an unexpected type.
+        /// </summary>
+        private static bool? SafeGetBool(JsonElement element, string propertyName)
+        {
+            if (!element.TryGetProperty(propertyName, out var prop))
+                return null;
+
+            switch (prop.ValueKind)
+            {
+                case JsonValueKind.True: return true;
+                case JsonValueKind.False: return false;
+                case JsonValueKind.String:
+                    return bool.TryParse(prop.GetString(), out var parsed) ? parsed : (bool?)null;
+                default: return null;
+            }
+        }
+
+        /// <summary>
+        /// Safely extracts a string from a JSON property. Returns null if missing or not a string.
+        /// </summary>
+        private static string SafeGetString(JsonElement element, string propertyName)
+        {
+            if (!element.TryGetProperty(propertyName, out var prop))
+                return null;
+
+            return prop.ValueKind == JsonValueKind.String ? prop.GetString() : null;
+        }
+
+        // ===== Internal Types =====
+
+        private class SubcategoryInfo
+        {
+            public string Name { get; set; }
+            public string State { get; set; }      // "succeeded", "failed", "in_progress", "unknown", "notRequired"
+            public string StatusText { get; set; }  // Human-readable text
+        }
+
+        private readonly struct ProvisioningResult
+        {
+            public readonly bool IsFailed;
             public readonly string FailureType;
 
-            private CategoryStatusResult(bool hasValue, bool value, string failureType = null)
+            private ProvisioningResult(bool isFailed, string failureType)
             {
-                HasValue = hasValue;
-                Value = value;
+                IsFailed = isFailed;
                 FailureType = failureType;
             }
 
-            public static CategoryStatusResult Succeeded => new CategoryStatusResult(true, true);
-            public static CategoryStatusResult AlreadyFired => new CategoryStatusResult(false, false);
-            public static CategoryStatusResult Unknown => new CategoryStatusResult(false, false);
-            public static CategoryStatusResult Failed(string failureType) => new CategoryStatusResult(true, false, failureType);
+            public static ProvisioningResult NoAction => new ProvisioningResult(false, null);
+            public static ProvisioningResult Failure(string failureType) => new ProvisioningResult(true, failureType);
         }
     }
 }
