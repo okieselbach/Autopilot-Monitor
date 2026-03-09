@@ -8,8 +8,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 {
     /// <summary>
     /// Launches a process in the logged-in user's desktop session from a SYSTEM context.
-    /// Uses WTSQueryUserToken to obtain the proper interactive session token, then
-    /// CreateProcessAsUser to launch the process in the user's desktop.
+    /// Uses WTSQueryUserToken + CreateProcessWithTokenW (LOGON_WITH_PROFILE) to launch
+    /// the process with the user's full interactive context including loaded profile.
+    /// Falls back to CreateProcessAsUser if CreateProcessWithTokenW is unavailable.
     /// </summary>
     internal static class UserSessionProcessLauncher
     {
@@ -26,8 +27,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         /// Launches the specified executable in the logged-in user's desktop session.
         /// Returns true if the process was launched successfully, false otherwise.
         /// This is fire-and-forget — the caller does not wait for the process to exit.
-        /// If the process fails with 0x8007045A (desktop locked by credential UI),
-        /// retries for up to maxRetrySeconds.
+        /// If the process fails with 0x8007045A (DLL init failed), retries for up to maxRetrySeconds.
         /// </summary>
         public static bool LaunchInUserSession(string exePath, string arguments, AgentLogger logger, int maxRetrySeconds = 120)
         {
@@ -37,8 +37,6 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             try
             {
                 // Find explorer.exe in a non-zero session owned by a real user.
-                // We need the session ID for WTSQueryUserToken and the user validation
-                // to ensure a real interactive user is logged in.
                 var explorerProcess = FindExplorerProcess(logger);
                 if (explorerProcess == null)
                 {
@@ -53,10 +51,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     logger.Info($"UserSessionProcessLauncher: Found explorer.exe PID {explorerProcess.Id} in session {sessionId}");
                 }
 
-                // Get the proper interactive session token via WTS.
-                // Unlike OpenProcessToken + DuplicateTokenEx, WTSQueryUserToken returns the
-                // real session token with full desktop/GPU access — required for WPF apps
-                // that use AllowsTransparency/layered windows (DLL init fails without it).
+                // Get the interactive session token via WTS.
                 if (!NativeMethods.WTSQueryUserToken(sessionId, out userToken))
                 {
                     var error = Marshal.GetLastWin32Error();
@@ -68,7 +63,6 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 if (!NativeMethods.CreateEnvironmentBlock(out environment, userToken, false))
                 {
                     logger.Warning($"UserSessionProcessLauncher: CreateEnvironmentBlock failed (error {Marshal.GetLastWin32Error()})");
-                    // Non-fatal: we can proceed without it, but env vars may be wrong
                     environment = IntPtr.Zero;
                 }
 
@@ -86,22 +80,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 var commandLine = $"\"{exePath}\" {arguments}";
                 var workingDirectory = System.IO.Path.GetDirectoryName(exePath);
 
-                var procSa = new NativeMethods.SECURITY_ATTRIBUTES();
-                procSa.nLength = Marshal.SizeOf(procSa);
-                var threadSa = new NativeMethods.SECURITY_ATTRIBUTES();
-                threadSa.nLength = Marshal.SizeOf(threadSa);
-
-                // During Autopilot enrollment the user's desktop may be locked by the
-                // CloudExperienceHost (CXH) process which hosts ESP + Windows Hello.
-                // GUI processes fail with 0x8007045A (DLL init) when the desktop isn't accessible.
-                //
-                // Strategy: retry loop with integrated CXH monitoring.
-                // - On 24H2+ and ≤22H2: CXH exits cleanly after Hello → we wake up immediately
-                //   (Process.WaitForExit instead of blind Thread.Sleep).
-                // - On 23H2: CXH stays running even after Hello/desktop → WaitForExit times out
-                //   after retryInterval, behaves like a normal retry sleep.
-                // This gives us instant wake-up when CXH cooperates, and a reliable fallback
-                // when it doesn't — all within a single unified loop.
+                // Retry loop with integrated CXH monitoring.
+                // See WaitForCxhOrSleep for the CXH wake-up strategy.
                 const int retryIntervalSeconds = 10;
                 var retryStopwatch = System.Diagnostics.Stopwatch.StartNew();
                 int attempt = 0;
@@ -126,21 +106,51 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 {
                     attempt++;
 
-                    if (!NativeMethods.CreateProcessAsUser(
+                    // Try CreateProcessWithTokenW first (LOGON_WITH_PROFILE loads the user
+                    // profile — required for USER32.dll/GDI32.dll DllMain to succeed).
+                    // Falls back to CreateProcessAsUser if the Secondary Logon service is unavailable.
+                    bool created;
+                    NativeMethods.PROCESS_INFORMATION pi;
+
+                    created = NativeMethods.CreateProcessWithTokenW(
                         userToken,
-                        null,           // lpApplicationName (null, use command line)
-                        commandLine,    // lpCommandLine
-                        ref procSa,
-                        ref threadSa,
-                        false,          // bInheritHandles
+                        NativeMethods.LOGON_WITH_PROFILE,
+                        null,
+                        commandLine,
                         creationFlags,
                         environment,
                         workingDirectory,
                         ref si,
-                        out var pi))
+                        out pi);
+
+                    if (!created)
                     {
-                        logger.Warning($"UserSessionProcessLauncher: CreateProcessAsUser failed (error {Marshal.GetLastWin32Error()})");
-                        return false;
+                        var tokenError = Marshal.GetLastWin32Error();
+
+                        // 1314 = ERROR_PRIVILEGE_NOT_HELD, 1058 = ERROR_SERVICE_DISABLED (seclogon)
+                        // Fall back to CreateProcessAsUser
+                        if (tokenError == 1314 || tokenError == 1058)
+                        {
+                            if (attempt == 1)
+                                logger.Info($"UserSessionProcessLauncher: CreateProcessWithTokenW unavailable (error {tokenError}) — falling back to CreateProcessAsUser");
+
+                            var procSa = new NativeMethods.SECURITY_ATTRIBUTES();
+                            procSa.nLength = Marshal.SizeOf(procSa);
+                            var threadSa = new NativeMethods.SECURITY_ATTRIBUTES();
+                            threadSa.nLength = Marshal.SizeOf(threadSa);
+
+                            created = NativeMethods.CreateProcessAsUser(
+                                userToken, null, commandLine,
+                                ref procSa, ref threadSa, false,
+                                creationFlags, environment, workingDirectory,
+                                ref si, out pi);
+                        }
+
+                        if (!created)
+                        {
+                            logger.Warning($"UserSessionProcessLauncher: CreateProcess failed (error {Marshal.GetLastWin32Error()})");
+                            return false;
+                        }
                     }
 
                     NativeMethods.CloseHandle(pi.hThread);
@@ -161,7 +171,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     NativeMethods.GetExitCodeProcess(pi.hProcess, out var exitCode);
                     NativeMethods.CloseHandle(pi.hProcess);
 
-                    // 0x8007045A = ERROR_DLL_INIT_FAILED — desktop locked by credential UI.
+                    // 0x8007045A = ERROR_DLL_INIT_FAILED — profile or desktop issue.
                     // Retry until the desktop becomes accessible or we exceed the retry window.
                     if (exitCode == 0x8007045A && retryStopwatch.Elapsed.TotalSeconds < maxRetrySeconds)
                     {
@@ -178,7 +188,6 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                                 cxhProcess = null;
                                 System.Threading.Thread.Sleep(500); // brief delay for desktop init
                             }
-                            // else: CXH still running (23H2 behavior) — retry anyway
                         }
                         else
                         {
@@ -229,7 +238,6 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     {
                         if ((uint)proc.SessionId == sessionId)
                         {
-                            // Dispose the rest
                             foreach (var other in processes)
                             {
                                 if (other.Id != proc.Id)
@@ -275,8 +283,6 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                             continue;
                         }
 
-                        // Found a valid user-session explorer.exe
-                        // Dispose the others
                         foreach (var other in explorerProcesses)
                         {
                             if (other.Id != proc.Id)
@@ -355,6 +361,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             public const int STARTF_USESHOWWINDOW = 0x00000001;
             public const short SW_SHOW = 5;
             public const uint WAIT_TIMEOUT = 258;
+            public const uint LOGON_WITH_PROFILE = 1;
 
             [StructLayout(LayoutKind.Sequential)]
             public struct SECURITY_ATTRIBUTES
@@ -398,6 +405,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 
             [DllImport("Wtsapi32.dll", SetLastError = true)]
             public static extern bool WTSQueryUserToken(uint SessionId, out IntPtr phToken);
+
+            [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+            public static extern bool CreateProcessWithTokenW(
+                IntPtr hToken, uint dwLogonFlags,
+                string lpApplicationName, string lpCommandLine,
+                uint dwCreationFlags, IntPtr lpEnvironment,
+                string lpCurrentDirectory,
+                ref STARTUPINFO lpStartupInfo, out PROCESS_INFORMATION lpProcessInformation);
 
             [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
             public static extern bool CreateProcessAsUser(

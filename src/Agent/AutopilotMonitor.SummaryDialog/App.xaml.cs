@@ -12,6 +12,7 @@ namespace AutopilotMonitor.SummaryDialog
         internal static int TimeoutSeconds { get; private set; } = 60;
         internal static string BrandingImageUrl { get; private set; }
         internal static bool? ForceTheme { get; private set; } // true=dark, false=light, null=auto
+        internal static bool NoCleanup { get; private set; }
 
         private static string _logFile;
         private static string _tempLogFile; // error log in %TEMP% (survives self-cleanup)
@@ -95,7 +96,10 @@ namespace AutopilotMonitor.SummaryDialog
             Log("OnExit — shutting down");
             base.OnExit(e);
             CleanupTempErrorLog();
-            SelfCleanup();
+            if (!NoCleanup)
+                SelfCleanup();
+            else
+                Log("SelfCleanup skipped (--no-cleanup)");
         }
 
         private void ParseArguments(string[] args)
@@ -119,6 +123,9 @@ namespace AutopilotMonitor.SummaryDialog
                         break;
                     case "--light-theme":
                         ForceTheme = false;
+                        break;
+                    case "--no-cleanup":
+                        NoCleanup = true;
                         break;
                 }
             }

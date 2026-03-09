@@ -24,6 +24,15 @@ namespace AutopilotMonitor.Agent
         private const string OldFileSuffix = ".old";
 
         /// <summary>
+        /// Writes an init banner to the log file to visually separate this agent process
+        /// from install-mode logs that share the same file.
+        /// </summary>
+        public static void LogInit(string agentVersion)
+        {
+            LogToFile($"======================= Agent init (v{agentVersion}) =======================");
+        }
+
+        /// <summary>
         /// Deletes leftover .old files from a previous self-update.
         /// Called early in startup before any other logic.
         /// </summary>

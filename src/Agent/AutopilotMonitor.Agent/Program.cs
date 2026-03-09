@@ -65,6 +65,9 @@ namespace AutopilotMonitor.Agent
                 Console.WriteLine();
             }
 
+            // Log init banner to separate this process from install-mode logs in the same file
+            SelfUpdater.LogInit(GetAgentVersion());
+
             // Self-update: check for newer agent version in blob storage and apply if available.
             // Priority: speed over update — 1s version check, 10s download timeout.
             // Any failure → continue with current version (never block startup).
