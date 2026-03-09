@@ -38,6 +38,10 @@ export interface NewRuleForm {
   logPattern: string;
   trackPosition: boolean;
   maxLines: string;
+  jsonPath: string;
+  xpath: string;
+  xmlNamespaces: string;
+  maxResults: string;
   trigger: string;
   intervalSeconds: number;
   triggerPhase: string;
@@ -47,7 +51,7 @@ export interface NewRuleForm {
 }
 
 export const CATEGORIES = ["network", "identity", "apps", "device", "esp", "enrollment"] as const;
-export const COLLECTOR_TYPES = ["registry", "eventlog", "wmi", "file", "command_allowlisted", "logparser"] as const;
+export const COLLECTOR_TYPES = ["registry", "eventlog", "wmi", "file", "command_allowlisted", "logparser", "json", "xml"] as const;
 export const TRIGGERS = ["startup", "phase_change", "interval", "on_event"] as const;
 export const SEVERITIES = ["info", "warning", "error", "critical"] as const;
 
@@ -68,6 +72,8 @@ export const COLLECTOR_TYPE_LABELS: Record<string, string> = {
   command_allowlisted: "Command (Allowlisted)",
   command: "Command (Allowlisted)",
   logparser: "Log Parser",
+  json: "JSON (JSONPath)",
+  xml: "XML (XPath)",
 };
 
 export const TARGET_PLACEHOLDERS: Record<string, string> = {
@@ -77,6 +83,8 @@ export const TARGET_PLACEHOLDERS: Record<string, string> = {
   file: "e.g., C:\\Windows\\Panther\\UnattendGC\\setupact.log",
   command_allowlisted: "e.g., Get-Tpm or dsregcmd /status",
   logparser: "e.g., %ProgramData%\\Microsoft\\IntuneManagementExtension\\Logs\\AppWorkload.log",
+  json: "e.g., C:\\ProgramData\\Microsoft\\IntuneManagementExtension\\Logs\\config.json",
+  xml: "e.g., C:\\Windows\\Panther\\unattend.xml",
 };
 
 export const TARGET_HINTS: Record<string, string> = {
@@ -86,6 +94,8 @@ export const TARGET_HINTS: Record<string, string> = {
   file: "File path. Environment variables like %ProgramData% are supported. Must be within allowed directories.",
   command_allowlisted: "Exact command string from the agent's allowlist. Custom commands are not permitted.",
   logparser: "Path to a CMTrace-format log file. Environment variables are expanded. Requires a regex pattern in parameters.",
+  json: "Path to a JSON file. Environment variables supported. Must be within allowed directories. Use JSONPath to extract values.",
+  xml: "Path to an XML file. Environment variables supported. Must be within allowed directories. Use XPath to extract values.",
 };
 
 export const EMPTY_FORM: NewRuleForm = {
@@ -104,6 +114,10 @@ export const EMPTY_FORM: NewRuleForm = {
   logPattern: "",
   trackPosition: true,
   maxLines: "",
+  jsonPath: "",
+  xpath: "",
+  xmlNamespaces: "",
+  maxResults: "",
   trigger: "startup",
   intervalSeconds: 60,
   triggerPhase: "",

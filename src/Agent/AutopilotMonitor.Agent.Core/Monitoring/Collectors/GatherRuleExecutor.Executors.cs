@@ -8,15 +8,19 @@ using System.Management;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
+using System.Xml;
+using System.Xml.Linq;
+using System.Xml.XPath;
 using AutopilotMonitor.Agent.Core.Logging;
 using AutopilotMonitor.Agent.Core.Monitoring.Tracking;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Win32;
+using Newtonsoft.Json.Linq;
 
 namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 {
     /// <summary>
-    /// Partial: Individual rule executor implementations (registry, WMI, command, file, eventlog, logparser).
+    /// Partial: Individual rule executor implementations (registry, WMI, command, file, eventlog, logparser, json, xml).
     /// </summary>
     public partial class GatherRuleExecutor
     {
@@ -630,6 +634,221 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             if (string.IsNullOrEmpty(message) || message.Length <= maxLength)
                 return message;
             return message.Substring(0, maxLength) + "...";
+        }
+
+        private Dictionary<string, object> ExecuteJsonRule(GatherRule rule)
+        {
+            var data = new Dictionary<string, object>();
+            var filePath = rule.Target;
+
+            if (string.IsNullOrEmpty(filePath))
+                return data;
+
+            filePath = Environment.ExpandEnvironmentVariables(filePath);
+
+            if (!GatherRuleGuards.IsFilePathAllowed(filePath))
+                return EmitSecurityWarning(rule, "json", filePath);
+
+            string jsonPath;
+            if (rule.Parameters == null || !rule.Parameters.TryGetValue("jsonpath", out jsonPath) ||
+                string.IsNullOrEmpty(jsonPath))
+            {
+                _logger.Warning($"JSON rule {rule.RuleId} has no 'jsonpath' parameter");
+                data["error"] = "Missing required 'jsonpath' parameter";
+                return data;
+            }
+
+            int maxResults = 20;
+            string maxResultsStr;
+            if (rule.Parameters.TryGetValue("maxResults", out maxResultsStr))
+                int.TryParse(maxResultsStr, out maxResults);
+            maxResults = Math.Min(maxResults, 100);
+
+            try
+            {
+                if (!File.Exists(filePath))
+                {
+                    data["exists"] = false;
+                    data["path"] = filePath;
+                    return data;
+                }
+
+                var info = new FileInfo(filePath);
+                if (info.Length > 200 * 1024) // 200 KB limit
+                {
+                    data["error"] = $"File too large ({info.Length} bytes, max 200 KB)";
+                    data["path"] = filePath;
+                    return data;
+                }
+
+                string content;
+                using (var reader = new StreamReader(filePath))
+                {
+                    content = reader.ReadToEnd();
+                }
+
+                var token = JToken.Parse(content);
+                var results = token.SelectTokens(jsonPath).Take(maxResults).ToList();
+
+                data["path"] = filePath;
+                data["query"] = jsonPath;
+                data["matchCount"] = results.Count;
+
+                if (results.Count == 1)
+                {
+                    data["value"] = TruncateMessage(results[0].ToString(), 2000);
+                }
+
+                if (results.Count > 0)
+                {
+                    var matchStrings = results.Select(r => TruncateMessage(r.ToString(), 500)).ToList();
+                    data["matches"] = string.Join("\n---\n", matchStrings);
+                }
+            }
+            catch (Exception ex)
+            {
+                data["error"] = ex.Message;
+                data["path"] = filePath;
+                data["query"] = jsonPath;
+            }
+
+            return data;
+        }
+
+        private Dictionary<string, object> ExecuteXmlRule(GatherRule rule)
+        {
+            var data = new Dictionary<string, object>();
+            var filePath = rule.Target;
+
+            if (string.IsNullOrEmpty(filePath))
+                return data;
+
+            filePath = Environment.ExpandEnvironmentVariables(filePath);
+
+            if (!GatherRuleGuards.IsFilePathAllowed(filePath))
+                return EmitSecurityWarning(rule, "xml", filePath);
+
+            string xpath;
+            if (rule.Parameters == null || !rule.Parameters.TryGetValue("xpath", out xpath) ||
+                string.IsNullOrEmpty(xpath))
+            {
+                _logger.Warning($"XML rule {rule.RuleId} has no 'xpath' parameter");
+                data["error"] = "Missing required 'xpath' parameter";
+                return data;
+            }
+
+            int maxResults = 20;
+            string maxResultsStr;
+            if (rule.Parameters.TryGetValue("maxResults", out maxResultsStr))
+                int.TryParse(maxResultsStr, out maxResults);
+            maxResults = Math.Min(maxResults, 100);
+
+            try
+            {
+                if (!File.Exists(filePath))
+                {
+                    data["exists"] = false;
+                    data["path"] = filePath;
+                    return data;
+                }
+
+                var info = new FileInfo(filePath);
+                if (info.Length > 200 * 1024) // 200 KB limit
+                {
+                    data["error"] = $"File too large ({info.Length} bytes, max 200 KB)";
+                    data["path"] = filePath;
+                    return data;
+                }
+
+                // Parse XML with DTD processing disabled (XXE prevention)
+                var settings = new XmlReaderSettings
+                {
+                    DtdProcessing = DtdProcessing.Prohibit,
+                    XmlResolver = null
+                };
+
+                XDocument doc;
+                using (var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                using (var xmlReader = XmlReader.Create(stream, settings))
+                {
+                    doc = XDocument.Load(xmlReader);
+                }
+
+                // Set up namespace resolver if namespaces are provided
+                XmlNamespaceManager nsManager = null;
+                string namespacesStr;
+                if (rule.Parameters.TryGetValue("namespaces", out namespacesStr) &&
+                    !string.IsNullOrEmpty(namespacesStr))
+                {
+                    nsManager = new XmlNamespaceManager(new NameTable());
+                    foreach (var ns in namespacesStr.Split(';'))
+                    {
+                        var parts = ns.Split(new[] { '=' }, 2);
+                        if (parts.Length == 2 && !string.IsNullOrEmpty(parts[0]) && !string.IsNullOrEmpty(parts[1]))
+                        {
+                            nsManager.AddNamespace(parts[0].Trim(), parts[1].Trim());
+                        }
+                    }
+                }
+
+                // Execute XPath — try element selection first, fall back to evaluate for scalar/attribute results
+                var elements = nsManager != null
+                    ? doc.XPathSelectElements(xpath, nsManager).Take(maxResults).ToList()
+                    : doc.XPathSelectElements(xpath).Take(maxResults).ToList();
+
+                data["path"] = filePath;
+                data["query"] = xpath;
+
+                if (elements.Count > 0)
+                {
+                    data["matchCount"] = elements.Count;
+                    if (elements.Count == 1)
+                    {
+                        data["value"] = TruncateMessage(elements[0].ToString(), 2000);
+                    }
+                    var matchStrings = elements.Select(e => TruncateMessage(e.ToString(), 500)).ToList();
+                    data["matches"] = string.Join("\n---\n", matchStrings);
+                }
+                else
+                {
+                    // Try XPathEvaluate for scalar results (attributes, text(), count(), etc.)
+                    var evalResult = nsManager != null
+                        ? doc.XPathEvaluate(xpath, nsManager)
+                        : doc.XPathEvaluate(xpath);
+
+                    if (evalResult is IEnumerable<object> enumerable)
+                    {
+                        var items = enumerable.Take(maxResults).ToList();
+                        data["matchCount"] = items.Count;
+                        if (items.Count == 1)
+                        {
+                            data["value"] = TruncateMessage(items[0].ToString(), 2000);
+                        }
+                        if (items.Count > 0)
+                        {
+                            data["matches"] = string.Join("\n---\n",
+                                items.Select(i => TruncateMessage(i.ToString(), 500)));
+                        }
+                    }
+                    else if (evalResult != null)
+                    {
+                        data["matchCount"] = 1;
+                        data["value"] = TruncateMessage(evalResult.ToString(), 2000);
+                    }
+                    else
+                    {
+                        data["matchCount"] = 0;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                data["error"] = ex.Message;
+                data["path"] = filePath;
+                data["query"] = xpath;
+            }
+
+            return data;
         }
 
         /// <summary>

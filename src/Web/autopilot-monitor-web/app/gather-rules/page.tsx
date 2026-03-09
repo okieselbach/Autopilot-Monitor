@@ -184,6 +184,15 @@ export default function GatherRulesPage() {
       params.trackPosition = form.trackPosition ? "true" : "false";
       if (form.maxLines) params.maxLines = form.maxLines;
     }
+    if (form.collectorType === "json") {
+      if (form.jsonPath) params.jsonpath = form.jsonPath;
+      if (form.maxResults) params.maxResults = form.maxResults;
+    }
+    if (form.collectorType === "xml") {
+      if (form.xpath) params.xpath = form.xpath;
+      if (form.xmlNamespaces) params.namespaces = form.xmlNamespaces;
+      if (form.maxResults) params.maxResults = form.maxResults;
+    }
     return params;
   };
 
@@ -248,6 +257,10 @@ export default function GatherRulesPage() {
       logPattern: rule.parameters?.pattern || "",
       trackPosition: rule.parameters?.trackPosition !== "false",
       maxLines: rule.parameters?.maxLines || "",
+      jsonPath: rule.parameters?.jsonpath || "",
+      xpath: rule.parameters?.xpath || "",
+      xmlNamespaces: rule.parameters?.namespaces || "",
+      maxResults: rule.parameters?.maxResults || "",
       trigger: rule.trigger,
       intervalSeconds: rule.intervalSeconds || 60,
       triggerPhase: rule.triggerPhase || "",

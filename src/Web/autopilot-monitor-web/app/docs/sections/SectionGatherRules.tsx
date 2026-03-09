@@ -310,6 +310,90 @@ export function SectionGatherRules() {
         </div>
       </div>
 
+      {/* JSON (JSONPath) */}
+      <div className="border border-gray-200 rounded-lg overflow-hidden">
+        <div className="px-4 py-2.5 bg-gray-100 border-b border-gray-200">
+          <p className="font-semibold text-sm text-gray-900">JSON (JSONPath)</p>
+        </div>
+        <div className="px-4 py-4 space-y-3 text-sm text-gray-700">
+          <p>Parses a <strong>JSON file</strong> and extracts values using <strong>JSONPath</strong> expressions.
+          Returns matched values as event data. File size limit is 200 KB.</p>
+          <div>
+            <p className="font-medium text-gray-900">Target</p>
+            <p>Path to a JSON file. Environment variables are expanded. Must be within allowed directories (same as File collector).</p>
+          </div>
+          <div>
+            <p className="font-medium text-gray-900">Parameters</p>
+            <ul className="list-disc ml-5 space-y-1">
+              <li><code className="bg-gray-100 px-1 rounded">jsonpath</code> <span className="text-red-500">(required)</span> — JSONPath expression to query the document.</li>
+              <li><code className="bg-gray-100 px-1 rounded">maxResults</code> — Maximum matches to return (default: 20, max: 100).</li>
+            </ul>
+          </div>
+          <div>
+            <p className="font-medium text-gray-900">JSONPath Syntax</p>
+            <div className="bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs font-mono space-y-0.5">
+              <p><span className="text-gray-400">$</span>            — Root element</p>
+              <p><span className="text-gray-400">$.key</span>         — Property of root</p>
+              <p><span className="text-gray-400">$.store.book[0]</span> — First array element</p>
+              <p><span className="text-gray-400">$.store.book[*].author</span> — All authors</p>
+              <p><span className="text-gray-400">$..price</span>      — Recursive descent (all prices anywhere)</p>
+              <p><span className="text-gray-400">{`$.items[?(@.active==true)]`}</span> — Filter expression</p>
+            </div>
+          </div>
+          <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
+            <p className="font-semibold text-green-900 text-xs mb-1">Example — Read IME Policy JSON</p>
+            <div className="mt-1 text-xs space-y-0.5">
+              <p>Target: <strong>C:\ProgramData\Microsoft\IntuneManagementExtension\Logs\HealthScripts.json</strong></p>
+              <p>JSONPath: <strong>$..DetectionScript</strong></p>
+              <p>Trigger: <strong>Startup</strong></p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* XML (XPath) */}
+      <div className="border border-gray-200 rounded-lg overflow-hidden">
+        <div className="px-4 py-2.5 bg-gray-100 border-b border-gray-200">
+          <p className="font-semibold text-sm text-gray-900">XML (XPath)</p>
+        </div>
+        <div className="px-4 py-4 space-y-3 text-sm text-gray-700">
+          <p>Parses an <strong>XML file</strong> and extracts values using <strong>XPath</strong> expressions.
+          Returns matched elements/attributes as event data. File size limit is 200 KB. DTD processing is disabled for security.</p>
+          <div>
+            <p className="font-medium text-gray-900">Target</p>
+            <p>Path to an XML file. Environment variables are expanded. Must be within allowed directories (same as File collector).</p>
+          </div>
+          <div>
+            <p className="font-medium text-gray-900">Parameters</p>
+            <ul className="list-disc ml-5 space-y-1">
+              <li><code className="bg-gray-100 px-1 rounded">xpath</code> <span className="text-red-500">(required)</span> — XPath expression to query the document.</li>
+              <li><code className="bg-gray-100 px-1 rounded">namespaces</code> — Namespace declarations (format: <code className="bg-gray-100 px-1 rounded">prefix=uri;prefix2=uri2</code>).</li>
+              <li><code className="bg-gray-100 px-1 rounded">maxResults</code> — Maximum matches to return (default: 20, max: 100).</li>
+            </ul>
+          </div>
+          <div>
+            <p className="font-medium text-gray-900">XPath Syntax</p>
+            <div className="bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs font-mono space-y-0.5">
+              <p><span className="text-gray-400">/root/element</span>   — Absolute path</p>
+              <p><span className="text-gray-400">//element</span>       — Anywhere in document</p>
+              <p><span className="text-gray-400">{`/root/item[@id='1']`}</span> — Attribute filter</p>
+              <p><span className="text-gray-400">/root/element/@attr</span> — Attribute value</p>
+              <p><span className="text-gray-400">/root/element/text()</span> — Text content</p>
+              <p><span className="text-gray-400">count(//item)</span>   — Count elements</p>
+            </div>
+          </div>
+          <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
+            <p className="font-semibold text-green-900 text-xs mb-1">Example — Unattend.xml Settings</p>
+            <div className="mt-1 text-xs space-y-0.5">
+              <p>Target: <strong>C:\Windows\Panther\unattend.xml</strong></p>
+              <p>XPath: <strong>{`//ns:setting[@name='ComputerName']/@value`}</strong></p>
+              <p>Namespaces: <strong>ns=urn:schemas-microsoft-com:unattend</strong></p>
+              <p>Trigger: <strong>Startup</strong></p>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* ── Trigger Types ── */}
       <h3 className="text-xl font-semibold text-gray-900 pt-4 border-t border-gray-200">Trigger Types</h3>
 

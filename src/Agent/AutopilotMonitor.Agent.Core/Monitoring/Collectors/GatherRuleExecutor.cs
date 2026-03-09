@@ -17,7 +17,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 {
     /// <summary>
     /// Executes gather rules received from the backend API
-    /// Supports registry, eventlog, wmi, file, command_allowlisted, and logparser collector types
+    /// Supports registry, eventlog, wmi, file, command_allowlisted, logparser, json, and xml collector types
     /// </summary>
     public partial class GatherRuleExecutor : IDisposable
     {
@@ -159,6 +159,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 
                     case "eventlog":
                         result = ExecuteEventLogRule(rule);
+                        break;
+
+                    case "json":
+                        result = ExecuteJsonRule(rule);
+                        break;
+
+                    case "xml":
+                        result = ExecuteXmlRule(rule);
                         break;
 
                     case "logparser":

@@ -251,6 +251,98 @@ export function GatherRuleFormFields({ form, setForm, showRuleId }: GatherRuleFo
         </div>
       )}
 
+      {/* JSON: JSONPath expression + optional max results */}
+      {form.collectorType === "json" && (
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              JSONPath Expression <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={form.jsonPath}
+              onChange={(e) => setForm({ ...form, jsonPath: e.target.value })}
+              placeholder="e.g., $.settings.tenantId or $..errorCode"
+              autoComplete="off"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+            />
+            <p className="text-xs text-gray-400 mt-1">
+              JSONPath query to extract values. Examples: <code className="bg-gray-100 px-1 rounded">$.key</code> (root property),{" "}
+              <code className="bg-gray-100 px-1 rounded">$..name</code> (recursive search),{" "}
+              <code className="bg-gray-100 px-1 rounded">$.items[0]</code> (array index),{" "}
+              <code className="bg-gray-100 px-1 rounded">$.items[?(@.active==true)]</code> (filter).
+            </p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Max Results</label>
+            <input
+              type="number"
+              min={1}
+              max={100}
+              value={form.maxResults}
+              onChange={(e) => setForm({ ...form, maxResults: e.target.value })}
+              placeholder="20"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+            />
+            <p className="text-xs text-gray-400 mt-1">Maximum number of matches to return (1-100, default: 20).</p>
+          </div>
+        </div>
+      )}
+
+      {/* XML: XPath expression + optional namespaces + max results */}
+      {form.collectorType === "xml" && (
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              XPath Expression <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={form.xpath}
+              onChange={(e) => setForm({ ...form, xpath: e.target.value })}
+              placeholder="e.g., /configuration/appSettings/add[@key='Setting1']/@value"
+              autoComplete="off"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+            />
+            <p className="text-xs text-gray-400 mt-1">
+              XPath query to extract values. Examples: <code className="bg-gray-100 px-1 rounded">/root/element</code> (path),{" "}
+              <code className="bg-gray-100 px-1 rounded">//element</code> (anywhere),{" "}
+              <code className="bg-gray-100 px-1 rounded">/root/item[@attr=&apos;value&apos;]</code> (filter),{" "}
+              <code className="bg-gray-100 px-1 rounded">/root/element/text()</code> (text content).
+            </p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Namespaces</label>
+              <input
+                type="text"
+                value={form.xmlNamespaces}
+                onChange={(e) => setForm({ ...form, xmlNamespaces: e.target.value })}
+                placeholder="e.g., ns=http://schemas.example.com/config"
+                autoComplete="off"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+              />
+              <p className="text-xs text-gray-400 mt-1">
+                Optional. Format: <code className="bg-gray-100 px-1 rounded">prefix=uri;prefix2=uri2</code>
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Max Results</label>
+              <input
+                type="number"
+                min={1}
+                max={100}
+                value={form.maxResults}
+                onChange={(e) => setForm({ ...form, maxResults: e.target.value })}
+                placeholder="20"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+              />
+              <p className="text-xs text-gray-400 mt-1">Max matches to return (1-100, default: 20).</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Trigger */}
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-1">Trigger</label>
