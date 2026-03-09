@@ -37,7 +37,14 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
             {
                 // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
 
-                var metrics = await _usageMetricsService.ComputeUsageMetricsAsync();
+                // Optional tenantId query parameter: when provided, return tenant-specific metrics
+                var tenantId = req.Url.Query?.Contains("tenantId=") == true
+                    ? System.Web.HttpUtility.ParseQueryString(req.Url.Query).Get("tenantId")
+                    : null;
+
+                var metrics = !string.IsNullOrEmpty(tenantId)
+                    ? await _usageMetricsService.ComputeTenantUsageMetricsAsync(tenantId)
+                    : await _usageMetricsService.ComputeUsageMetricsAsync();
 
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(metrics);
