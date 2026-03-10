@@ -35,6 +35,13 @@ namespace AutopilotMonitor.Agent
                 return;
             }
 
+            // IME matching mode: parse IME log files offline and produce ime_pattern_matching.log.
+            if (args.Contains("--run-ime-matching"))
+            {
+                RunImeMatchingMode(args);
+                return;
+            }
+
             // Always run directly - no ServiceBase.Run.
             // The agent is started by the Scheduled Task (SYSTEM) or manually with --console.
             // Both paths land here and run identically; --console just enables console output.
@@ -242,6 +249,8 @@ namespace AutopilotMonitor.Agent
             Console.WriteLine("Modes:");
             Console.WriteLine("  --install                         Deploy payload, create Scheduled Task, and start it");
             Console.WriteLine("  --run-gather-rules                Execute startup gather rules once and exit");
+            Console.WriteLine("  --run-ime-matching <PATH>         Parse IME logs and produce ime_pattern_matching.log");
+            Console.WriteLine("                                    PATH = folder (all IME logs) or single log file");
             Console.WriteLine("  (default)                         Run enrollment monitoring");
             Console.WriteLine();
             Console.WriteLine("General options:");
@@ -268,6 +277,9 @@ namespace AutopilotMonitor.Agent
             Console.WriteLine("  --backend-api <URL>               Alias for --api-url");
             Console.WriteLine("  --ime-log-path <PATH>             Override IME logs directory");
             Console.WriteLine("  --ime-match-log <PATH>            Write matched IME log lines to file (debug)");
+            Console.WriteLine();
+            Console.WriteLine("IME matching options:");
+            Console.WriteLine("  --patterns <FILE>                 Use local patterns JSON instead of GitHub");
             Console.WriteLine();
             Console.WriteLine("Replay (testing/simulation):");
             Console.WriteLine("  --replay-log-dir <PATH>           Directory with real IME logs for replay");
