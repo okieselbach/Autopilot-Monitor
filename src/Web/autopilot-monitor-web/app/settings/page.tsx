@@ -9,6 +9,7 @@ import { useNotifications } from "../../contexts/NotificationContext";
 import { API_BASE_URL } from "@/lib/config";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 import UnsavedChangesModal from "../../components/UnsavedChangesModal";
+import { ScrollSpySidebar, SidebarSection } from "../../components/ScrollSpySidebar";
 import AutopilotValidationSection from "./components/AutopilotValidationSection";
 import AdminManagementSection from "./components/AdminManagementSection";
 import HardwareWhitelistSection from "./components/HardwareWhitelistSection";
@@ -907,6 +908,33 @@ export default function SettingsPage() {
     }
   };
 
+  // Build sidebar sections based on user role
+  const settingsSections: SidebarSection[] = useMemo(() => {
+    const sections: SidebarSection[] = [];
+    if (user?.isTenantAdmin) {
+      sections.push(
+        { id: "autopilot-validation", label: "Autopilot Validation" },
+        { id: "admin-management", label: "Admin Management" },
+        { id: "hardware-whitelist", label: "Hardware Whitelist" },
+        { id: "agent-settings", label: "Agent Settings" },
+        { id: "agent-analyzers", label: "Agent Analyzers" },
+        { id: "teams-notifications", label: "Teams Notifications" },
+        { id: "diagnostics", label: "Diagnostics" },
+      );
+    }
+    if (config?.bootstrapTokenEnabled && (user?.isTenantAdmin || user?.canManageBootstrapTokens)) {
+      sections.push({ id: "bootstrap-sessions", label: "Bootstrap Sessions" });
+    }
+    if (user?.isTenantAdmin) {
+      sections.push(
+        { id: "data-management", label: "Data Management" },
+        { id: "offboarding", label: "Offboarding" },
+        { id: "config-info", label: "Configuration Info" },
+      );
+    }
+    return sections;
+  }, [user, config?.bootstrapTokenEnabled]);
+
   // Access gate: Admin → full settings, Operator with bootstrap → bootstrap only, others → redirect
   if (user && !user.isTenantAdmin && !user.isGalacticAdmin) {
     if (user.role === 'Operator' && user.canManageBootstrapTokens) {
@@ -964,13 +992,14 @@ export default function SettingsPage() {
         </header>
 
       {/* Main Content */}
-      <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {loading ? (
           <div className="bg-white rounded-lg shadow p-8 text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto"></div>
             <p className="mt-4 text-gray-600">Loading configuration...</p>
           </div>
         ) : (
+          <ScrollSpySidebar sections={settingsSections} title="Settings">
           <div className="space-y-6">
             {/* Success Message */}
             {successMessage && (
@@ -995,6 +1024,7 @@ export default function SettingsPage() {
 
             {/* Admin-only sections — hidden for Operators */}
             {user?.isTenantAdmin && (
+              <div id="autopilot-validation">
               <AutopilotValidationSection
                 validateAutopilotDevice={validateAutopilotDevice}
                 setValidateAutopilotDevice={setValidateAutopilotDevice}
@@ -1004,9 +1034,11 @@ export default function SettingsPage() {
                 saving={saving}
                 onBeginConsent={beginDeviceValidationConsentFlow}
               />
+              </div>
             )}
 
             {user?.isTenantAdmin && (
+              <div id="admin-management">
               <AdminManagementSection
                 admins={admins}
                 loadingAdmins={loadingAdmins}
@@ -1027,18 +1059,22 @@ export default function SettingsPage() {
                 onToggleAdmin={handleToggleTenantAdmin}
                 onUpdatePermissions={handleUpdatePermissions}
               />
+              </div>
             )}
 
             {user?.isTenantAdmin && (
+              <div id="hardware-whitelist">
               <HardwareWhitelistSection
                 manufacturerWhitelist={manufacturerWhitelist}
                 setManufacturerWhitelist={setManufacturerWhitelist}
                 modelWhitelist={modelWhitelist}
                 setModelWhitelist={setModelWhitelist}
               />
+              </div>
             )}
 
             {user?.isTenantAdmin && (
+            <div id="agent-settings">
             <AgentSettingsSection
               enablePerformanceCollector={enablePerformanceCollector}
               setEnablePerformanceCollector={setEnablePerformanceCollector}
@@ -1071,9 +1107,11 @@ export default function SettingsPage() {
               enrollmentSummaryLaunchRetrySeconds={enrollmentSummaryLaunchRetrySeconds}
               setEnrollmentSummaryLaunchRetrySeconds={setEnrollmentSummaryLaunchRetrySeconds}
             />
+            </div>
             )}
 
             {user?.isTenantAdmin && (
+            <div id="agent-analyzers">
             <AgentAnalyzersSection
               enableLocalAdminAnalyzer={enableLocalAdminAnalyzer}
               setEnableLocalAdminAnalyzer={setEnableLocalAdminAnalyzer}
@@ -1082,9 +1120,11 @@ export default function SettingsPage() {
               newAllowedAccount={newAllowedAccount}
               setNewAllowedAccount={setNewAllowedAccount}
             />
+            </div>
             )}
 
             {user?.isTenantAdmin && (
+            <div id="teams-notifications">
             <TeamsNotificationsSection
               teamsWebhookUrl={teamsWebhookUrl}
               setTeamsWebhookUrl={setTeamsWebhookUrl}
@@ -1093,9 +1133,11 @@ export default function SettingsPage() {
               teamsNotifyOnFailure={teamsNotifyOnFailure}
               setTeamsNotifyOnFailure={setTeamsNotifyOnFailure}
             />
+            </div>
             )}
 
             {user?.isTenantAdmin && (
+            <div id="diagnostics">
             <DiagnosticsSection
               diagnosticsBlobSasUrl={diagnosticsBlobSasUrl}
               setDiagnosticsBlobSasUrl={setDiagnosticsBlobSasUrl}
@@ -1110,10 +1152,12 @@ export default function SettingsPage() {
               newDiagDesc={newDiagDesc}
               setNewDiagDesc={setNewDiagDesc}
             />
+            </div>
             )}
 
             {/* Bootstrap section: visible to Admins always, Operators with bootstrap permission */}
             {config?.bootstrapTokenEnabled && (user?.isTenantAdmin || user?.canManageBootstrapTokens) && (
+              <div id="bootstrap-sessions">
               <BootstrapSessionsSection
                 sessions={bootstrapSessions}
                 loading={bootstrapLoading}
@@ -1121,9 +1165,11 @@ export default function SettingsPage() {
                 onRevoke={revokeBootstrapSession}
                 onCreate={createBootstrapSession}
               />
+              </div>
             )}
 
             {user?.isTenantAdmin && (
+            <div id="data-management">
             <DataManagementSection
               dataRetentionDays={dataRetentionDays}
               setDataRetentionDays={setDataRetentionDays}
@@ -1131,9 +1177,11 @@ export default function SettingsPage() {
               setSessionTimeoutHours={setSessionTimeoutHours}
               isGalacticAdmin={user?.isGalacticAdmin}
             />
+            </div>
             )}
 
             {user?.isTenantAdmin && (
+              <div id="offboarding">
               <OffboardingSection
                 showOffboardDialog={showOffboardDialog}
                 setShowOffboardDialog={setShowOffboardDialog}
@@ -1144,11 +1192,12 @@ export default function SettingsPage() {
                 setOffboardError={setOffboardError}
                 onOffboard={handleOffboard}
               />
+              </div>
             )}
 
             {/* Configuration Info — Admin only */}
             {config && user?.isTenantAdmin && (
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <div id="config-info" className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                 <div className="flex items-start space-x-3">
                   <svg className="w-5 h-5 text-blue-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -1163,6 +1212,7 @@ export default function SettingsPage() {
             )}
 
           </div>
+          </ScrollSpySidebar>
         )}
       </main>
       </div>

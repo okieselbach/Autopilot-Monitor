@@ -14,6 +14,7 @@ import { VersionBlockSection } from "./components/VersionBlockSection";
 import { SessionExportSection } from "./components/SessionExportSection";
 import { AdminConfigSettingsSection } from "./components/AdminConfigSettingsSection";
 import { SessionReportsSection } from "./components/SessionReportsSection";
+import { ScrollSpySidebar, SidebarSection } from "../../components/ScrollSpySidebar";
 
 interface AdminConfiguration {
   partitionKey: string;
@@ -247,6 +248,17 @@ export default function AdminConfigurationPage() {
     setError(null);
   };
 
+  const adminSections: SidebarSection[] = [
+    { id: "tenant-management", label: "Tenant Management" },
+    { id: "session-reports", label: "Session Reports" },
+    { id: "session-export", label: "Session Export" },
+    { id: "global-settings", label: "Global Settings" },
+    { id: "diagnostics-log-paths", label: "Diagnostics Log Paths" },
+    { id: "maintenance", label: "Maintenance" },
+    { id: "device-block", label: "Device Block" },
+    { id: "version-block", label: "Version Block" },
+  ];
+
   if (!galacticAdminMode) {
     return null;
   }
@@ -275,7 +287,8 @@ export default function AdminConfigurationPage() {
         </header>
 
         {/* Main Content */}
-        <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <ScrollSpySidebar sections={adminSections} title="Admin">
           <div className="space-y-6">
             {/* Success Message */}
             {successMessage && (
@@ -298,6 +311,7 @@ export default function AdminConfigurationPage() {
             )}
 
             {/* Tenant Management */}
+            <div id="tenant-management">
             <TenantManagementSection
               tenants={tenants}
               loadingTenants={loadingTenants}
@@ -309,20 +323,26 @@ export default function AdminConfigurationPage() {
               setError={setError}
               setSuccessMessage={setSuccessMessage}
             />
+            </div>
 
             {/* Session Reports */}
+            <div id="session-reports">
             <SessionReportsSection
               getAccessToken={getAccessToken}
               setError={setError}
             />
+            </div>
 
             {/* Session Event Export */}
+            <div id="session-export">
             <SessionExportSection
               tenants={tenants}
               getAccessToken={getAccessToken}
             />
+            </div>
 
             {/* Global Settings */}
+            <div id="global-settings">
             <AdminConfigSettingsSection
               loadingConfig={loadingConfig}
               savingConfig={savingConfig}
@@ -336,8 +356,10 @@ export default function AdminConfigurationPage() {
               onSave={handleSaveAdminConfig}
               onReset={handleResetAdminConfig}
             />
+            </div>
 
             {/* Diagnostics Log Paths */}
+            <div id="diagnostics-log-paths">
             <DiagnosticsLogPathsSection
               globalDiagPaths={globalDiagPaths}
               setGlobalDiagPaths={setGlobalDiagPaths}
@@ -346,15 +368,19 @@ export default function AdminConfigurationPage() {
               adminConfigExists={!!adminConfig}
               onSave={handleSaveDiagPaths}
             />
+            </div>
 
             {/* Maintenance + Reseed Sections */}
+            <div id="maintenance">
             <MaintenanceSection
               getAccessToken={getAccessToken}
               setError={setError}
               setSuccessMessage={setSuccessMessage}
             />
+            </div>
 
             {/* Device Block Management */}
+            <div id="device-block">
             <DeviceBlockSection
               tenants={tenants}
               maxSessionWindowHours={maxSessionWindowHours}
@@ -368,14 +394,18 @@ export default function AdminConfigurationPage() {
               setError={setError}
               setSuccessMessage={setSuccessMessage}
             />
+            </div>
 
             {/* Version Block Management */}
+            <div id="version-block">
             <VersionBlockSection
               getAccessToken={getAccessToken}
               setError={setError}
               setSuccessMessage={setSuccessMessage}
             />
+            </div>
           </div>
+          </ScrollSpySidebar>
         </main>
       </div>
     </ProtectedRoute>
