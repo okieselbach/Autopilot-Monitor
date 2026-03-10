@@ -1,7 +1,6 @@
 using System;
 using System.ComponentModel;
 using System.Threading;
-using System.Threading.Tasks;
 using AutopilotMonitor.Agent.Core.Monitoring.Interop;
 using Microsoft.Win32;
 using Microsoft.Win32.SafeHandles;
@@ -10,72 +9,83 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 {
     /// <summary>
     /// Watches a registry key for changes using RegNotifyChangeKeyValue.
-    /// Fires the Changed event on each detected change.
-    ///
-    /// Usage:
-    ///   var watcher = new RegistryWatcher(RegistryHive.LocalMachine, @"SOFTWARE\...", watchSubtree: true);
-    ///   watcher.Changed += (s, e) => { /* read values */ };
-    ///   watcher.Start();
-    ///   // later:
-    ///   await watcher.StopAsync();
-    ///   watcher.Dispose();
-    ///
-    /// Important: one change per registration — the watcher re-registers automatically after each notification.
-    /// The watched scope is a key (including values); to track a specific value, compare in the Changed handler.
+    /// Raises Changed whenever the watched key/subtree changes.
+    /// 
+    /// Notes:
+    /// - Notification is for the key scope, not one individual value.
+    /// - To track a specific value, read/compare that value in the Changed handler.
+    /// - Uses a dedicated background thread for robustness.
     /// </summary>
     internal sealed class RegistryWatcher : IDisposable
     {
         private readonly UIntPtr _hive;
         private readonly string _subKey;
         private readonly bool _watchSubtree;
+        private readonly RegistryView _view;
         private readonly RegistryNativeMethods.RegChangeNotifyFilter _filter;
 
-        private CancellationTokenSource _cts;
-        private Task _watchTask;
         private readonly object _sync = new object();
 
-        /// <summary>
-        /// Fired when the watched key (or subtree) changes. Handler runs on a thread pool thread.
-        /// </summary>
-        public event EventHandler Changed;
+        private CancellationTokenSource _cts;
+        private Thread _thread;
+        private Exception _backgroundException;
+        private bool _disposed;
 
-        /// <summary>
-        /// Fired when the Changed handler throws. Allows the consumer to log without crashing the watcher.
-        /// </summary>
+        public event EventHandler Changed;
         public event EventHandler<Exception> Error;
 
         public RegistryWatcher(
             RegistryHive hive,
             string subKey,
             bool watchSubtree = false,
+            RegistryView view = RegistryView.Default,
             RegistryNativeMethods.RegChangeNotifyFilter filter =
-                RegistryNativeMethods.RegChangeNotifyFilter.LastSet)
+                RegistryNativeMethods.RegChangeNotifyFilter.LastSet |
+                RegistryNativeMethods.RegChangeNotifyFilter.ThreadAgnostic)
         {
             _hive = HiveToPointer(hive);
             _subKey = subKey ?? throw new ArgumentNullException(nameof(subKey));
             _watchSubtree = watchSubtree;
+            _view = view;
             _filter = filter;
         }
 
-        /// <summary>
-        /// Starts watching on a background thread pool thread.
-        /// Throws Win32Exception if the registry key cannot be opened.
-        /// </summary>
+        public bool IsRunning
+        {
+            get
+            {
+                lock (_sync)
+                {
+                    return _thread != null;
+                }
+            }
+        }
+
         public void Start()
         {
+            ThrowIfDisposed();
+
             lock (_sync)
             {
-                if (_watchTask != null)
+                if (_thread != null)
                     throw new InvalidOperationException("Watcher is already running.");
 
+                _backgroundException = null;
                 _cts = new CancellationTokenSource();
-                _watchTask = Task.Run(() => WatchLoopAsync(_cts.Token));
+
+                _thread = new Thread(WatchThreadMain)
+                {
+                    IsBackground = true,
+                    Name = $"RegistryWatcher: {_subKey}"
+                };
+
+                _thread.Start(_cts.Token);
             }
         }
 
         /// <summary>
-        /// Non-blocking stop request. Safe to call from within the Changed handler
-        /// (does not wait for the loop to exit, so no deadlock).
+        /// Requests stop without blocking.
+        /// Safe to call from Changed handlers.
         /// </summary>
         public void RequestStop()
         {
@@ -86,59 +96,107 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         }
 
         /// <summary>
-        /// Cancels the watcher and waits for the background loop to exit.
-        /// Do NOT call from within the Changed handler — use RequestStop() instead.
+        /// Stops and waits for the watcher thread to exit.
+        /// Avoid calling from inside Changed; use RequestStop there.
         /// </summary>
-        public async Task StopAsync()
+        public void Stop()
         {
-            Task taskToWait;
+            Thread threadToJoin = null;
+            CancellationTokenSource ctsToDispose = null;
+            Exception backgroundException = null;
 
             lock (_sync)
             {
-                if (_cts == null)
+                if (_thread == null)
                     return;
 
                 _cts.Cancel();
-                taskToWait = _watchTask;
+                threadToJoin = _thread;
             }
 
-            if (taskToWait != null)
-            {
-                try
-                {
-                    await taskToWait.ConfigureAwait(false);
-                }
-                catch (OperationCanceledException) { }
-                catch (Win32Exception) { }
-            }
+            threadToJoin.Join();
 
             lock (_sync)
             {
-                _cts?.Dispose();
+                backgroundException = _backgroundException;
+
+                ctsToDispose = _cts;
                 _cts = null;
-                _watchTask = null;
+                _thread = null;
+                _backgroundException = null;
+            }
+
+            ctsToDispose?.Dispose();
+
+            if (backgroundException != null &&
+                !(backgroundException is OperationCanceledException))
+            {
+                throw new InvalidOperationException(
+                    "Registry watcher stopped because the background thread failed.",
+                    backgroundException);
             }
         }
 
-        private async Task WatchLoopAsync(CancellationToken cancellationToken)
+        private void WatchThreadMain(object state)
         {
+            var cancellationToken = (CancellationToken)state;
+
+            try
+            {
+                WatchLoop(cancellationToken);
+            }
+            catch (OperationCanceledException ex)
+            {
+                lock (_sync)
+                {
+                    _backgroundException = ex;
+                }
+            }
+            catch (Exception ex)
+            {
+                lock (_sync)
+                {
+                    _backgroundException = ex;
+                }
+
+                try
+                {
+                    Error?.Invoke(this, ex);
+                }
+                catch
+                {
+                    // Never let handler exceptions escape the background thread.
+                }
+            }
+        }
+
+        private void WatchLoop(CancellationToken cancellationToken)
+        {
+            int samDesired = RegistryNativeMethods.GetSamDesired(_view);
+
             int openResult = RegistryNativeMethods.RegOpenKeyEx(
-                _hive, _subKey, 0, RegistryNativeMethods.KEY_NOTIFY,
+                _hive,
+                _subKey,
+                0,
+                samDesired,
                 out SafeRegistryHandle keyHandle);
 
             if (openResult != 0)
-                throw new Win32Exception(openResult, $"RegOpenKeyEx failed for '{_subKey}'");
+            {
+                throw new Win32Exception(
+                    openResult,
+                    $"RegOpenKeyEx failed for '{_subKey}' (view: {_view}).");
+            }
 
             using (keyHandle)
             using (var changedEvent = new AutoResetEvent(false))
             using (var cancelEvent = new ManualResetEvent(false))
             using (cancellationToken.Register(() => cancelEvent.Set()))
             {
-                var waitHandles = new WaitHandle[] { changedEvent, cancelEvent };
+                WaitHandle[] waitHandles = { changedEvent, cancelEvent };
 
                 while (!cancellationToken.IsCancellationRequested)
                 {
-                    // Register for exactly ONE change notification
                     int notifyResult = RegistryNativeMethods.RegNotifyChangeKeyValue(
                         keyHandle,
                         _watchSubtree,
@@ -147,25 +205,35 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                         true);
 
                     if (notifyResult != 0)
-                        throw new Win32Exception(notifyResult, "RegNotifyChangeKeyValue failed");
+                    {
+                        throw new Win32Exception(
+                            notifyResult,
+                            $"RegNotifyChangeKeyValue failed for '{_subKey}'.");
+                    }
 
-                    // Wait for change or cancellation
                     int signaled = WaitHandle.WaitAny(waitHandles);
 
-                    if (signaled == 1)
-                        break; // cancel requested
+                    if (signaled == WaitHandle.WaitTimeout)
+                        continue;
 
-                    // Notify consumer
+                    if (signaled == 1)
+                        break;
+
                     try
                     {
                         Changed?.Invoke(this, EventArgs.Empty);
                     }
                     catch (Exception ex)
                     {
-                        Error?.Invoke(this, ex);
+                        try
+                        {
+                            Error?.Invoke(this, ex);
+                        }
+                        catch
+                        {
+                            // Ignore secondary error-handler failures.
+                        }
                     }
-
-                    await Task.Yield();
                 }
 
                 cancellationToken.ThrowIfCancellationRequested();
@@ -174,28 +242,43 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 
         public void Dispose()
         {
+            if (_disposed)
+                return;
+
             try
             {
-                StopAsync().GetAwaiter().GetResult();
+                Stop();
             }
             catch
             {
-                // Dispose must not throw
+                // Dispose must not throw.
             }
+
+            _disposed = true;
         }
 
-        // ===== Helpers =====
+        private void ThrowIfDisposed()
+        {
+            if (_disposed)
+                throw new ObjectDisposedException(nameof(RegistryWatcher));
+        }
 
         private static UIntPtr HiveToPointer(RegistryHive hive)
         {
             switch (hive)
             {
-                case RegistryHive.ClassesRoot: return (UIntPtr)0x80000000u;
-                case RegistryHive.CurrentUser: return (UIntPtr)0x80000001u;
-                case RegistryHive.LocalMachine: return (UIntPtr)0x80000002u;
-                case RegistryHive.Users: return (UIntPtr)0x80000003u;
-                case RegistryHive.CurrentConfig: return (UIntPtr)0x80000005u;
-                default: throw new ArgumentOutOfRangeException(nameof(hive));
+                case RegistryHive.ClassesRoot:
+                    return (UIntPtr)0x80000000u;
+                case RegistryHive.CurrentUser:
+                    return (UIntPtr)0x80000001u;
+                case RegistryHive.LocalMachine:
+                    return (UIntPtr)0x80000002u;
+                case RegistryHive.Users:
+                    return (UIntPtr)0x80000003u;
+                case RegistryHive.CurrentConfig:
+                    return (UIntPtr)0x80000005u;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(hive));
             }
         }
     }
