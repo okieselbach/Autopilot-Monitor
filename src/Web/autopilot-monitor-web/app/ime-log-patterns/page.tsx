@@ -228,7 +228,7 @@ export default function ImeLogPatternsPage() {
                 </p>
               </div>
               <Link
-                href="/docs#ime-log-patterns"
+                href="/docs/gather-rules"
                 className="text-sm text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

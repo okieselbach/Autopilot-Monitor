@@ -53,6 +53,70 @@ export default function ChangelogPage() {
             <div>
               <div className="flex items-center gap-3 mb-3">
                 <span className="text-xs font-mono font-semibold text-gray-400 uppercase tracking-wider">
+                  2026-03-10 - 12:00 CET
+                </span>
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                  Platform Update
+                </span>
+              </div>
+              <h2 className="text-base font-semibold text-gray-900 mb-2">
+                Security architecture, session timeline improvements, and new agent capabilities
+              </h2>
+              <ul className="space-y-2 text-sm text-gray-600 leading-relaxed list-none">
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Role-based access control</span> — Admin and Operator roles with role management in Settings. API authorization and policy enforcement middleware ensure proper access control across all endpoints.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Agent self-update</span> — Agents can now update themselves automatically, ensuring outdated versions in the field get replaced without manual intervention.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Bootstrap sessions</span> — New bootstrap session flow with explicit token enablement for initial device onboarding. (support for bootstrap tokens enabled by request)</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Raw event timeline</span> — A new raw view of the event timeline with full search support, useful for deep-dive troubleshooting.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Enrollment summary dialog</span> — Optional summary dialog shown at the end of enrollment, with event timeline search and clickable phases in the phase tracker.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Original ESP tracking</span> — The agent now tracks the original ESP provisioning status to catch non-IME errors such as certificate failures.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Analyze &amp; gather rules</span> — Added negative compare operators for analyze rules, XML and JSON gather options, and a built-in &ldquo;old OS version&rdquo; warning rule.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Email notifications</span> — Email notification (Welcome and instructions) for Joining the Private Preview.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Agent version management</span> — Block specific agent versions from connecting, along with expanded data retention configuration options.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Install progress</span> — The agent install progress page now shows download and install phases with elapsed time.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">TPM info collection</span> — TPM details are now collected at enrollment time for improved hardware diagnostics.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Firewall compatibility</span> — The agent now sends a dedicated User-Agent header to simplify firewall allowlisting.</span>
+                </li>
+              </ul>
+            </div>
+
+            <div>
+              <div className="flex items-center gap-3 mb-3">
+                <span className="text-xs font-mono font-semibold text-gray-400 uppercase tracking-wider">
                   2026-03-01 - 16:00 CET
                 </span>
                 <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
