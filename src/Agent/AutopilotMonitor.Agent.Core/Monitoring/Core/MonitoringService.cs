@@ -325,8 +325,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             // Apply log level from remote config
             if (Enum.TryParse<Logging.AgentLogLevel>(config.LogLevel, ignoreCase: true, out var remoteLogLevel))
             {
+                var oldLogLevel = _configuration.LogLevel;
                 _configuration.LogLevel = remoteLogLevel;
                 _logger.SetLogLevel(remoteLogLevel);
+                if (oldLogLevel != remoteLogLevel)
+                    _logger.Info($"Log level changed: {oldLogLevel} -> {remoteLogLevel}");
             }
 
             _configuration.ShowEnrollmentSummary = config.ShowEnrollmentSummary;

@@ -93,6 +93,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 _pendingEspFailureType = failureType;
 
                 // Cancel existing timer if any (e.g. second timeout event)
+                if (_espFailureTimer != null)
+                    _logger.Debug($"EnrollmentTracker: resetting existing grace period timer (previous pending: '{_pendingEspFailureType}')");
                 _espFailureTimer?.Dispose();
                 _espFailureTimer = new Timer(
                     OnEspFailureGracePeriodExpired,
@@ -143,7 +145,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         private void OnWaitingForHelloSafetyTimeout(object state)
         {
             if (!_isWaitingForHello || _enrollmentCompleteEmitted)
+            {
+                _logger.Debug($"EnrollmentTracker: Hello safety timeout fired but not applicable (waiting={_isWaitingForHello}, emitted={_enrollmentCompleteEmitted})");
                 return;
+            }
 
             _logger.Warning($"EnrollmentTracker: waiting_for_hello safety timeout ({WaitingForHelloSafetyTimeoutSeconds}s) expired — forcing completion");
             _isWaitingForHello = false;
@@ -329,7 +334,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         {
             var loaded = _statePersistence.Load();
             if (loaded == null)
+            {
+                _logger.Debug("EnrollmentTracker: no persisted state found (fresh enrollment)");
                 return;
+            }
 
             _espEverSeen = loaded.EspEverSeen;
             _espFinalExitSeen = loaded.EspFinalExitSeen;
@@ -367,7 +375,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         private void RecordSignal(string signal)
         {
             if (!_stateData.SignalsSeen.Contains(signal))
+            {
                 _stateData.SignalsSeen.Add(signal);
+                _logger.Verbose($"EnrollmentTracker: signal recorded: '{signal}' (total: {_stateData.SignalsSeen.Count})");
+            }
+            else
+            {
+                _logger.Debug($"EnrollmentTracker: signal '{signal}' already recorded — deduplicated");
+            }
             _stateDirty = true;
         }
 
@@ -387,7 +402,15 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             }
 
             if (string.IsNullOrEmpty(source))
+            {
+                _logger.Debug("EnrollmentTracker: TryEmitEnrollmentComplete called with empty source — ignoring");
                 return;
+            }
+
+            _logger.Debug($"EnrollmentTracker: TryEmitEnrollmentComplete('{source}') — evaluating guards " +
+                          $"[espEverSeen={_espEverSeen}, espFinalExitSeen={_espFinalExitSeen}, desktopArrived={_desktopArrived}, " +
+                          $"helloCompleted={_espAndHelloTracker?.IsHelloCompleted ?? false}, helloPolicyConfigured={_espAndHelloTracker?.IsPolicyConfigured ?? false}, " +
+                          $"enrollmentType={_enrollmentType}]");
 
             // Hello-Check: Hello must be resolved before we can complete
             bool helloResolved = _espAndHelloTracker == null
@@ -412,6 +435,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 return;
             }
 
+            _logger.Info($"EnrollmentTracker: all guards passed for source '{source}' — emitting enrollment_complete");
             _enrollmentCompleteEmitted = true;
             _stateData.EnrollmentCompleteEmitted = true;
 
@@ -509,7 +533,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         public void NotifyDesktopArrived()
         {
             if (_desktopArrived)
+            {
+                _logger.Debug("EnrollmentTracker: NotifyDesktopArrived called but already arrived — ignoring");
                 return;
+            }
 
             _desktopArrived = true;
             _stateData.DesktopArrived = true;

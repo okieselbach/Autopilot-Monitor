@@ -93,8 +93,17 @@ namespace AutopilotMonitor.Agent
             try
             {
                 var config = LoadConfiguration(args);
+
+                // CLI --log-level override (takes precedence over config file)
+                var cliLogLevel = GetArgValue(args, "--log-level");
+                if (!string.IsNullOrEmpty(cliLogLevel) && Enum.TryParse<AgentLogLevel>(cliLogLevel, ignoreCase: true, out var parsedLevel))
+                    config.LogLevel = parsedLevel;
+
                 var logDir = Environment.ExpandEnvironmentVariables(config.LogDirectory);
                 var logger = new AgentLogger(logDir, config.LogLevel);
+                if (consoleMode)
+                    logger.EnableConsoleOutput = true;
+
                 var agentVersion = GetAgentVersion();
 
                 logger.Info($"======================= Agent starting ({(consoleMode ? "console" : "background/SYSTEM")}) =======================");
@@ -255,7 +264,8 @@ namespace AutopilotMonitor.Agent
             Console.WriteLine();
             Console.WriteLine("General options:");
             Console.WriteLine("  --help, -h, -?                    Show this help message");
-            Console.WriteLine("  --console                         Enable console output (auto-enabled when interactive)");
+            Console.WriteLine("  --console                         Enable console output (mirrors log to stdout)");
+            Console.WriteLine("  --log-level <LEVEL>               Override log level (Info, Debug, Verbose, Trace)");
             Console.WriteLine("  --new-session                     Force a new session ID (delete persisted session)");
             Console.WriteLine("  --keep-logfile                    Preserve log directory after self-destruct cleanup");
             Console.WriteLine("  --no-cleanup                      Disable self-destruct on enrollment completion");

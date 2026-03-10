@@ -26,7 +26,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
     ///
     /// Event emission strategy:
     ///   - Emit once when a category first appears in the registry (initial snapshot)
-    ///   - Emit when subcategory states change meaningfully (in_progress->succeeded, any->failed)
+    ///   - Emit on every JSON change (progress updates like "Apps 1/5 → 2/5", state transitions)
     ///   - Emit once when categorySucceeded resolves to true or false (final outcome)
     ///   - Fire EspFailureDetected on subcategory failure even if categorySucceeded is still null
     ///
@@ -295,7 +295,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     }
                     else
                     {
-                        // Check for subcategory failure transitions (only failures trigger events — success transitions are expected noise)
+                        // Emit on every JSON change — the registry dedup ensures we only reach here
+                        // when actual progress happened (e.g. "Apps 1/5 → 2/5", subcategory completions).
                         var transitions = DetectSubcategoryTransitions(categoryName, subcategories);
                         StoreSubcategoryStates(categoryName, subcategories);
 
@@ -311,9 +312,16 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                             _logger.Trace($"ProcessCategory: {categoryLabel} — EMITTING failure transition event");
                             EmitProvisioningEvent(categoryLabel, categorySucceeded, statusText, subcategories, EventSeverity.Warning, failureTransitions);
                         }
+                        else if (transitions.Count > 0)
+                        {
+                            _logger.Trace($"ProcessCategory: {categoryLabel} — EMITTING subcategory transition event");
+                            EmitProvisioningEvent(categoryLabel, categorySucceeded, statusText, subcategories, EventSeverity.Info, transitions);
+                        }
                         else
                         {
-                            _logger.Trace($"ProcessCategory: {categoryLabel} — NO event emitted (no first-seen, no succeeded change, no failure transitions)");
+                            // JSON changed but no state transitions — progress text changed (e.g. "Apps 1/5 → 2/5")
+                            _logger.Trace($"ProcessCategory: {categoryLabel} — EMITTING progress update (JSON changed, no state transitions)");
+                            EmitProvisioningEvent(categoryLabel, categorySucceeded, statusText, subcategories, EventSeverity.Info);
                         }
                     }
 
@@ -365,6 +373,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                 ? $"Provisioning_{categoryLabel}_{failedSubcategory}_Failed"
                 : $"Provisioning_{categoryLabel}_Failed";
 
+            _logger.Info($"Provisioning subcategory failure: {categoryLabel}/{failedSubcategory ?? "category-level"} — escalating as {failureTypeName}");
             _logger.Warning($"Provisioning failure detected: {failureTypeName}");
             return ProvisioningResult.Failure(failureTypeName);
         }

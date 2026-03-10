@@ -18,13 +18,20 @@ namespace AutopilotMonitor.Agent.Core.Logging
     }
 
     /// <summary>
-    /// Simple file-based logger for the agent
+    /// Simple file-based logger for the agent.
+    /// Optionally mirrors output to the console when EnableConsoleOutput is set.
     /// </summary>
     public class AgentLogger
     {
         private readonly string _logFilePath;
         private AgentLogLevel _logLevel;
         private readonly object _lockObject = new object();
+
+        /// <summary>
+        /// When true, log entries are also written to Console.Out (same format as the log file).
+        /// Set via --console flag or programmatically.
+        /// </summary>
+        public bool EnableConsoleOutput { get; set; }
 
         public AgentLogger(string logDirectory, AgentLogLevel logLevel = AgentLogLevel.Info)
         {
@@ -93,6 +100,11 @@ namespace AutopilotMonitor.Agent.Core.Logging
                     var logEntry = $"[{timestamp}] [{level}] {SanitizeLogMessage(message)}";
 
                     File.AppendAllText(_logFilePath, logEntry + Environment.NewLine);
+
+                    if (EnableConsoleOutput)
+                    {
+                        try { Console.WriteLine(logEntry); } catch { }
+                    }
                 }
             }
             catch

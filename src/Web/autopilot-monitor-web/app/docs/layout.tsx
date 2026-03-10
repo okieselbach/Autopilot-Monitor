@@ -22,7 +22,7 @@ export const metadata: Metadata = {
     title: "Documentation – Autopilot Monitor",
     description:
       "Complete setup and configuration guide for Autopilot Monitor. Deploy the bootstrapper via Intune and start monitoring Windows Autopilot enrollments.",
-    url: "https://autopilotmonitor.com/docs",
+    url: "https://www.autopilotmonitor.com/docs",
   },
   twitter: {
     title: "Documentation – Autopilot Monitor",
@@ -30,7 +30,7 @@ export const metadata: Metadata = {
       "Complete setup and configuration guide for Autopilot Monitor. Deploy the bootstrapper via Intune and start monitoring Windows Autopilot enrollments.",
   },
   alternates: {
-    canonical: "https://autopilotmonitor.com/docs",
+    canonical: "https://www.autopilotmonitor.com/docs",
   },
 };
 

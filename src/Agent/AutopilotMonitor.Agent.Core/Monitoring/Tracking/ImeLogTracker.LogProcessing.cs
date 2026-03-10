@@ -44,7 +44,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     if (!fileInfo.Exists) continue;
 
                     var startPos = _positionTracker.GetSafePosition(filePath, fileInfo.Length);
-                    if (startPos >= fileInfo.Length) continue;
+                    if (startPos >= fileInfo.Length)
+                    {
+                        _logger.Trace($"ImeLogTracker: {Path.GetFileName(filePath)} — no new data (pos={startPos}, size={fileInfo.Length})");
+                        continue;
+                    }
+                    _logger.Trace($"ImeLogTracker: reading {Path.GetFileName(filePath)} from pos {startPos} (size={fileInfo.Length}, delta={fileInfo.Length - startPos})");
 
                     using (var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
                     {
@@ -93,7 +98,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                                     }
                                     catch (RegexMatchTimeoutException)
                                     {
-                                        // Skip this pattern match to prevent ReDoS
+                                        _logger.Debug($"ImeLogTracker: regex timeout for pattern '{pattern.PatternId}' — skipped to prevent ReDoS");
                                     }
                                 }
                             }
@@ -106,7 +111,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 catch (FileNotFoundException) { }
                 catch (IOException ex)
                 {
-                    _logger.Debug($"ImeLogTracker: IO error reading {Path.GetFileName(filePath)}: {ex.Message}");
+                    _logger.Debug($"ImeLogTracker: IO error reading {filePath}: {ex.Message}");
                 }
             }
         }

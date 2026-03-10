@@ -131,9 +131,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
             // Use NDJSON (newline-delimited JSON) + gzip for efficient event upload
             // This reduces bandwidth significantly (70-80% compression typical for JSON)
             var ndjson = CreateNdjson(request);
+            var ndjsonLength = System.Text.Encoding.UTF8.GetByteCount(ndjson);
             var compressedContent = CompressWithGzip(ndjson);
 
             _logger?.Debug($"IngestEventsAsync: POST {url} — {request.Events.Count} events, {compressedContent.Length} bytes compressed");
+            _logger?.Verbose($"IngestEventsAsync: NDJSON {ndjsonLength} bytes → gzip {compressedContent.Length} bytes ({(ndjsonLength > 0 ? (100 - compressedContent.Length * 100 / ndjsonLength) : 0)}% reduction)");
 
             var httpRequest = new HttpRequestMessage(HttpMethod.Post, url)
             {
@@ -264,9 +266,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
                 await _httpClient.SendAsync(httpRequest, cts.Token);
                 // Response status is deliberately ignored — endpoint always returns 200
             }
-            catch
+            catch (Exception ex)
             {
                 // Swallow all exceptions — the emergency channel must never cascade failures
+                _logger?.Debug($"ReportAgentErrorAsync: emergency channel failed: {ex.Message}");
             }
         }
 
@@ -373,13 +376,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
         /// </summary>
         private void AddSecurityHeaders(HttpRequestMessage request)
         {
-            _logger?.Verbose("Adding security headers to request...");
+            _logger?.Trace("Adding security headers to request...");
 
             // Bootstrap token auth (pre-MDM, OOBE bootstrapped agents)
             if (_useBootstrapTokenAuth && !string.IsNullOrEmpty(_bootstrapToken))
             {
                 request.Headers.Add("X-Bootstrap-Token", _bootstrapToken);
-                _logger?.Verbose("  X-Bootstrap-Token: [set]");
+                _logger?.Trace("  X-Bootstrap-Token: [set]");
             }
 
             // Client certificate is sent at TLS layer via HttpClientHandler.ClientCertificates (mTLS)
@@ -388,27 +391,27 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
             if (!string.IsNullOrEmpty(_manufacturer))
             {
                 request.Headers.Add("X-Device-Manufacturer", _manufacturer);
-                _logger?.Verbose($"  X-Device-Manufacturer: {_manufacturer}");
+                _logger?.Trace($"  X-Device-Manufacturer: {_manufacturer}");
             }
 
             if (!string.IsNullOrEmpty(_model))
             {
                 request.Headers.Add("X-Device-Model", _model);
-                _logger?.Verbose($"  X-Device-Model: {_model}");
+                _logger?.Trace($"  X-Device-Model: {_model}");
             }
 
             // Add serial number for Autopilot device validation against Intune registration
             if (!string.IsNullOrEmpty(_serialNumber))
             {
                 request.Headers.Add("X-Device-SerialNumber", _serialNumber);
-                _logger?.Verbose($"  X-Device-SerialNumber: {_serialNumber}");
+                _logger?.Trace($"  X-Device-SerialNumber: {_serialNumber}");
             }
 
             // Add agent version for version-based block/kill management
             if (!string.IsNullOrEmpty(_agentVersion))
             {
                 request.Headers.Add("X-Agent-Version", _agentVersion);
-                _logger?.Verbose($"  X-Agent-Version: {_agentVersion}");
+                _logger?.Trace($"  X-Agent-Version: {_agentVersion}");
             }
         }
 

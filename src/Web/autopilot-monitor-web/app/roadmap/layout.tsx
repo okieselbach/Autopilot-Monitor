@@ -15,7 +15,7 @@ export const metadata: Metadata = {
     title: "Roadmap – Autopilot Monitor",
     description:
       "See what's coming next for Autopilot Monitor. Explore planned features including MSP multi-tenant support and upcoming improvements.",
-    url: "https://autopilotmonitor.com/roadmap",
+    url: "https://www.autopilotmonitor.com/roadmap",
   },
   twitter: {
     title: "Roadmap – Autopilot Monitor",
@@ -23,7 +23,7 @@ export const metadata: Metadata = {
       "See what's coming next for Autopilot Monitor. Explore planned features including MSP multi-tenant support and upcoming improvements.",
   },
   alternates: {
-    canonical: "https://autopilotmonitor.com/roadmap",
+    canonical: "https://www.autopilotmonitor.com/roadmap",
   },
 };
 

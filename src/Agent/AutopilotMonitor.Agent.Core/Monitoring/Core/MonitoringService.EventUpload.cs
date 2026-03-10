@@ -68,13 +68,15 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 isPhaseTransition = true;
 
                 // Notify gather rule executor of phase change
-                try { _gatherRuleExecutor?.OnPhaseChanged(evt.Phase); } catch { }
+                try { _gatherRuleExecutor?.OnPhaseChanged(evt.Phase); }
+                catch (Exception ex) { _logger.Verbose($"GatherRuleExecutor.OnPhaseChanged failed: {ex.Message}"); }
             }
 
             // Notify gather rule executor of event type (for on_event triggers)
             if (!string.IsNullOrEmpty(evt.EventType))
             {
-                try { _gatherRuleExecutor?.OnEvent(evt.EventType); } catch { }
+                try { _gatherRuleExecutor?.OnEvent(evt.EventType); }
+                catch (Exception ex) { _logger.Verbose($"GatherRuleExecutor.OnEvent('{evt.EventType}') failed: {ex.Message}"); }
             }
 
             // Check for WhiteGlove completion — agent exits gracefully, session stays open
@@ -230,7 +232,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             // Prevent concurrent uploads — if one is already in flight, skip this call.
             // The events will be picked up by the next trigger or debounce timer.
             if (!_uploadSemaphore.Wait(0))
+            {
+                _logger.Verbose("UploadEventsAsync: skipped — concurrent upload already in flight");
                 return;
+            }
 
             try
             {
@@ -253,7 +258,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 
                 if (response.DeviceKillSignal)
                 {
-                    _logger.Warning("=== REMOTE KILL SIGNAL received from administrator. Initiating self-destruct... ===");
+                    _logger.Warning($"=== REMOTE KILL SIGNAL received from administrator. Spool: {_spool.GetCount()} events pending. Initiating self-destruct... ===");
 
                     // Stop all timers — no further uploads
                     _uploadTimer?.Change(Timeout.Infinite, Timeout.Infinite);
@@ -286,6 +291,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     _logger.Info($"Uploaded {response.EventsProcessed} events");
 
                     // Reset failure counters on success
+                    if (_consecutiveAuthFailures > 0 || _consecutiveUploadFailures > 0)
+                        _logger.Info($"Upload success — resetting failure counters (auth={_consecutiveAuthFailures}, upload={_consecutiveUploadFailures})");
                     _consecutiveAuthFailures = 0;
                     _firstAuthFailureTime = null;
                     _consecutiveUploadFailures = 0;
@@ -304,6 +311,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             {
                 _consecutiveUploadFailures++;
                 _logger.Error("Error uploading events", ex);
+
+                _logger.Info($"Upload failure #{_consecutiveUploadFailures}: {ex.Message}");
 
                 // After N consecutive non-auth failures, signal the emergency channel once.
                 // The EmergencyReporter deduplicates further calls for the same error category.

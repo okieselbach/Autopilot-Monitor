@@ -42,6 +42,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     perfInterval
                 );
                 _performanceCollector.Start();
+                _logger.Info($"PerformanceCollector started (interval={perfInterval}s)");
 
                 // AgentSelfMetricsCollector: measures the agent's own CPU, memory, and network footprint
                 if (collectors?.EnableAgentSelfMetrics != false)
@@ -57,6 +58,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                         selfMetricsInterval
                     );
                     _agentSelfMetricsCollector.Start();
+                    _logger.Info($"AgentSelfMetricsCollector started (interval={selfMetricsInterval}s)");
                 }
 
                 // Collector idle timeout — stop periodic collectors when enrollment goes quiet
@@ -101,6 +103,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                         sendTraceEvents: _configuration.SendTraceEvents
                     );
                     _enrollmentTracker.Start();
+                    _logger.Info("EnrollmentTracker started — listening for IME patterns");
                 }
 
                 // Desktop arrival detector — detects real user desktop for no-ESP completion
@@ -109,6 +112,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 _desktopArrivalDetector.OnTraceEvent = (decision, reason, context) =>
                     EmitTraceEvent("DesktopArrivalDetector", decision, reason, context);
                 _desktopArrivalDetector.Start();
+                _logger.Info("DesktopArrivalDetector started — monitoring for real user desktop");
 
                 // Agent max lifetime safety net — prevents zombie agents
                 var maxLifetimeMinutes = collectors?.AgentMaxLifetimeMinutes ?? _configuration.AgentMaxLifetimeMinutes;
@@ -171,7 +175,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         {
             if (_enrollmentTerminalEventSeen)
             {
-                _logger.Debug("Max lifetime timer fired but terminal event already seen — ignoring");
+                _logger.Info("Max lifetime timer fired but terminal event already seen — ignoring");
                 return;
             }
 
@@ -354,6 +358,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 {
                     _idleCheckTimer?.Change(TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(60));
                 }
+
+                _logger.Info("Periodic collectors restarted successfully");
             }
             catch (Exception ex)
             {
@@ -383,6 +389,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     _configuration.ImeLogPathOverride
                 );
                 _gatherRuleExecutor.UpdateRules(config.GatherRules);
+                _logger.Info($"GatherRuleExecutor started with {config.GatherRules.Count} rule(s)");
             }
             catch (Exception ex)
             {

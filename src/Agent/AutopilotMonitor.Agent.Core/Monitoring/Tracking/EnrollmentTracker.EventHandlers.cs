@@ -53,8 +53,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             // which is correct — we only suppress the event emission to the backend.
             if (string.Equals(phase, "AccountSetup", StringComparison.OrdinalIgnoreCase))
             {
-                if (!HasRealUserProfile())
+                var hasReal = HasRealUserProfile();
+                _logger.Debug($"EnrollmentTracker: AccountSetup verification — HasRealUserProfile={hasReal}");
+                if (!hasReal)
                 {
+                    _logger.Info("EnrollmentTracker: AccountSetup suppressed — no real user profile (likely WhiteGlove)");
                     EmitTraceEvent("AccountSetup_suppressed",
                         "ESP reported AccountSetup but no real user profile found — likely WhiteGlove pre-provisioning",
                         new Dictionary<string, object> { { "espPhase", phase }, { "previousPhase", _lastEspPhase ?? "null" } });
@@ -142,6 +145,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
 
         private void HandleAppStateChanged(AppPackageState app, AppInstallationState oldState, AppInstallationState newState)
         {
+            _logger.Verbose($"EnrollmentTracker: app state change '{app.Name ?? app.Id}': {oldState} -> {newState}");
+
             // Auto-switch to app installation phase when first app activity detected
             // If we're in DeviceSetup and an app starts downloading/installing, switch to AppsDevice
             // If we're in AccountSetup and an app starts downloading/installing, switch to AppsUser
@@ -385,7 +390,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
 
         private void HandleScriptCompleted(ScriptExecutionState script)
         {
-            if (script == null || string.IsNullOrEmpty(script.PolicyId)) return;
+            if (script == null || string.IsNullOrEmpty(script.PolicyId))
+            {
+                _logger.Debug($"EnrollmentTracker: HandleScriptCompleted — skipped (script={script != null}, policyId='{script?.PolicyId}')");
+                return;
+            }
 
             var isSuccess = string.Equals(script.Result, "Success", StringComparison.OrdinalIgnoreCase)
                             || (script.ExitCode.HasValue && script.ExitCode.Value == 0 && string.IsNullOrEmpty(script.Result));

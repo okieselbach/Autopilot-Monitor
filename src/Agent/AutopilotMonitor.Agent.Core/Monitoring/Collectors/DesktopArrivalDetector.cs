@@ -103,7 +103,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                                         $"explorer.exe found but owned by excluded user '{owner}' — not a real user desktop",
                                         new Dictionary<string, object> { { "pid", proc.Id }, { "session", proc.SessionId }, { "owner", owner } });
                                 }
-                                catch { }
+                                catch (Exception ex) { _logger.Verbose($"DesktopArrivalDetector: OnTraceEvent failed: {ex.Message}"); }
                             }
                             continue;
                         }
@@ -119,13 +119,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                                 $"Real user desktop detected (explorer.exe PID {proc.Id}, user '[redacted]')",
                                 new Dictionary<string, object> { { "pid", proc.Id }, { "session", proc.SessionId }, { "owner", "[redacted]" } });
                         }
-                        catch { }
+                        catch (Exception ex) { _logger.Verbose($"DesktopArrivalDetector: OnTraceEvent failed: {ex.Message}"); }
 
                         // Stop polling
                         _pollingTimer?.Dispose();
                         _pollingTimer = null;
 
-                        try { DesktopArrived?.Invoke(this, EventArgs.Empty); } catch { }
+                        try { DesktopArrived?.Invoke(this, EventArgs.Empty); }
+                        catch (Exception ex) { _logger.Warning($"DesktopArrivalDetector: DesktopArrived handler failed: {ex.Message}"); }
                         return;
                     }
                     catch (Exception ex)

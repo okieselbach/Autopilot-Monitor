@@ -302,6 +302,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             _stateData.SkipUserStatusPage = _skipUserStatusPage;
             _stateData.SkipDeviceStatusPage = _skipDeviceStatusPage;
             _stateDirty = true;
+
+            _logger.Info($"EnrollmentTracker: enrollment type detected: {_enrollmentType ?? "unknown"} " +
+                         $"(skipUserStatusPage={_skipUserStatusPage}, skipDeviceStatusPage={_skipDeviceStatusPage})");
         }
 
         /// <summary>

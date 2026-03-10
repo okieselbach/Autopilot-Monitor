@@ -15,7 +15,7 @@ export const metadata: Metadata = {
     title: "About Autopilot Monitor",
     description:
       "Learn about Autopilot Monitor – an open-source real-time monitoring and troubleshooting platform for Windows Autopilot enrollments.",
-    url: "https://autopilotmonitor.com/about",
+    url: "https://www.autopilotmonitor.com/about",
   },
   twitter: {
     title: "About Autopilot Monitor",
@@ -23,7 +23,7 @@ export const metadata: Metadata = {
       "Learn about Autopilot Monitor – an open-source real-time monitoring and troubleshooting platform for Windows Autopilot enrollments.",
   },
   alternates: {
-    canonical: "https://autopilotmonitor.com/about",
+    canonical: "https://www.autopilotmonitor.com/about",
   },
 };
 

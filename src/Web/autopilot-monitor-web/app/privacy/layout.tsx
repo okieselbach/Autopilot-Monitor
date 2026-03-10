@@ -8,10 +8,10 @@ export const metadata: Metadata = {
     title: "Privacy Policy – Autopilot Monitor",
     description:
       "Privacy Policy for Autopilot Monitor. Learn how we collect, store, and protect your data.",
-    url: "https://autopilotmonitor.com/privacy",
+    url: "https://www.autopilotmonitor.com/privacy",
   },
   alternates: {
-    canonical: "https://autopilotmonitor.com/privacy",
+    canonical: "https://www.autopilotmonitor.com/privacy",
   },
   robots: {
     index: true,

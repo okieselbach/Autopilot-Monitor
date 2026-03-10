@@ -7,10 +7,10 @@ export const metadata: Metadata = {
   openGraph: {
     title: "Terms of Use – Autopilot Monitor",
     description: "Terms of Use for Autopilot Monitor. Read the usage terms and conditions.",
-    url: "https://autopilotmonitor.com/terms",
+    url: "https://www.autopilotmonitor.com/terms",
   },
   alternates: {
-    canonical: "https://autopilotmonitor.com/terms",
+    canonical: "https://www.autopilotmonitor.com/terms",
   },
   robots: {
     index: true,

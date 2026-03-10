@@ -159,7 +159,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     ScriptType = "remediation",
                     ScriptPart = "detection" // detection runs first; updated if remediation runs
                 };
-                _logger.Debug($"ImeLogTracker: remediation script started: {id}");
+                _logger.Info($"ImeLogTracker: remediation script started: {id}");
             }
             else
             {
@@ -173,7 +173,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     };
                 }
                 _lastPlatformScriptPolicyId = id;
-                _logger.Debug($"ImeLogTracker: platform script started: {id} (source: {source ?? "ime"})");
+                _logger.Info($"ImeLogTracker: platform script started: {id} (source: {source ?? "ime"})");
             }
         }
 
