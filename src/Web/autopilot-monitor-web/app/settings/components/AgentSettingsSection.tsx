@@ -260,7 +260,7 @@ export default function AgentSettingsSection({
           <div className="flex items-center justify-between p-4 rounded-lg border border-gray-200 hover:border-violet-200 transition-colors">
             <div>
               <p className="font-medium text-gray-900">Log Level</p>
-              <p className="text-sm text-gray-500">Agent log verbosity — Info for normal operation, Debug for troubleshooting, Verbose for full tracing</p>
+              <p className="text-sm text-gray-500">Agent log verbosity — Info for normal operation, Debug for troubleshooting, Verbose for detailed tracing, Trace for full diagnostic output</p>
             </div>
             <select
               value={logLevel}
@@ -270,6 +270,7 @@ export default function AgentSettingsSection({
               <option value="Info">Info</option>
               <option value="Debug">Debug</option>
               <option value="Verbose">Verbose</option>
+              <option value="Trace">Trace</option>
             </select>
           </div>
 

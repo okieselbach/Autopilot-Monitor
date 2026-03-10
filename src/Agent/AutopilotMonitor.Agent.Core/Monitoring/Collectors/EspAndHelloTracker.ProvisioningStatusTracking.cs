@@ -99,6 +99,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                 }
 
                 // Capture initial state before watcher starts
+                _logger.Trace("ProvisioningWatcher: capturing initial state before watcher starts");
                 CheckProvisioningStatus();
 
                 // Create and start watcher
@@ -106,9 +107,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     RegistryHive.LocalMachine,
                     ProvisioningStatusRegistryPath,
                     watchSubtree: true,
-                    filter: RegistryNativeMethods.RegChangeNotifyFilter.LastSet);
+                    filter: RegistryNativeMethods.RegChangeNotifyFilter.LastSet,
+                    trace: msg => _logger.Trace($"RegistryWatcher: {msg}"));
 
-                _provisioningWatcher.Changed += (s, e) => CheckProvisioningStatus();
+                _provisioningWatcher.Changed += (s, e) =>
+                {
+                    _logger.Trace("ProvisioningWatcher: Changed event fired — calling CheckProvisioningStatus");
+                    CheckProvisioningStatus();
+                };
                 _provisioningWatcher.Error += (s, ex) => _logger.Warning($"Provisioning watcher handler error: {ex.Message}");
 
                 _provisioningWatcher.Start();
@@ -151,20 +157,38 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     using (var key = Registry.LocalMachine.OpenSubKey(ProvisioningStatusRegistryPath, writable: false))
                     {
                         if (key == null)
+                        {
+                            _logger.Trace("CheckProvisioningStatus: registry key not found");
                             return;
+                        }
 
                         bool failureDetected = false;
                         string failureType = null;
+                        int changedCount = 0;
+                        int unchangedCount = 0;
+                        int missingCount = 0;
 
                         foreach (var categoryName in ProvisioningCategoryNames)
                         {
                             var jsonValue = key.GetValue(categoryName)?.ToString();
                             if (string.IsNullOrEmpty(jsonValue))
+                            {
+                                missingCount++;
+                                _logger.Trace($"CheckProvisioningStatus: {categoryName} — not present in registry");
                                 continue;
+                            }
 
                             // Skip if JSON is identical to last check (no change at all)
                             if (_lastProvisioningJson.TryGetValue(categoryName, out var lastJson) && lastJson == jsonValue)
+                            {
+                                unchangedCount++;
                                 continue;
+                            }
+
+                            changedCount++;
+                            bool isNew = !_lastProvisioningJson.ContainsKey(categoryName);
+                            _logger.Trace($"CheckProvisioningStatus: {categoryName} — {(isNew ? "NEW" : "CHANGED")} (json length={jsonValue.Length})");
+                            _logger.Trace($"CheckProvisioningStatus: {categoryName} — raw JSON: {jsonValue}");
 
                             _lastProvisioningJson[categoryName] = jsonValue;
                             var result = ProcessCategoryStatus(categoryName, jsonValue);
@@ -175,6 +199,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                                 failureType = result.FailureType;
                             }
                         }
+
+                        _logger.Trace($"CheckProvisioningStatus: summary — changed={changedCount}, unchanged={unchangedCount}, missing={missingCount}, " +
+                                     $"seen={_provisioningCategorySeen.Count}, resolved={_provisioningCategoriesResolved.Count}/{_lastProvisioningJson.Count}, " +
+                                     $"failuresFired={_provisioningFailureFired.Count}");
 
                         // Self-termination: only auto-stop when all categories resolved with success (no failures).
                         // Uses RequestStop() which is safe to call from within the Changed handler (non-blocking).
@@ -245,8 +273,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     bool isFirstSeen = !_provisioningCategorySeen.Contains(categoryName);
                     bool categorySucceededChanged = HasCategorySucceededChanged(categoryName, categorySucceeded);
 
+                    _logger.Trace($"ProcessCategory: {categoryLabel} — succeeded={categorySucceeded?.ToString() ?? "null"}, " +
+                                 $"isFirstSeen={isFirstSeen}, succeededChanged={categorySucceededChanged}, " +
+                                 $"subcategories={subcategories.Count} [{string.Join(", ", subcategories.Select(s => $"{s.Name}={s.State}"))}]");
+
                     if (isFirstSeen)
                     {
+                        _logger.Trace($"ProcessCategory: {categoryLabel} — EMITTING first-seen event");
                         _provisioningCategorySeen.Add(categoryName);
                         _lastCategorySucceeded[categoryName] = categorySucceeded;
                         StoreSubcategoryStates(categoryName, subcategories);
@@ -254,6 +287,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     }
                     else if (categorySucceededChanged)
                     {
+                        _logger.Trace($"ProcessCategory: {categoryLabel} — EMITTING categorySucceeded change ({_lastCategorySucceeded[categoryName]?.ToString() ?? "null"} → {categorySucceeded?.ToString() ?? "null"})");
                         _lastCategorySucceeded[categoryName] = categorySucceeded;
                         StoreSubcategoryStates(categoryName, subcategories);
                         var severity = categorySucceeded == false ? EventSeverity.Warning : EventSeverity.Info;
@@ -266,9 +300,20 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                         StoreSubcategoryStates(categoryName, subcategories);
 
                         var failureTransitions = transitions.Where(t => t.IsFailure).ToList();
+                        if (transitions.Count > 0)
+                        {
+                            _logger.Trace($"ProcessCategory: {categoryLabel} — subcategory transitions: " +
+                                         string.Join(", ", transitions.Select(t => $"{t.SubcategoryName}: {t.OldState}→{t.NewState} (failure={t.IsFailure})")));
+                        }
+
                         if (failureTransitions.Count > 0)
                         {
+                            _logger.Trace($"ProcessCategory: {categoryLabel} — EMITTING failure transition event");
                             EmitProvisioningEvent(categoryLabel, categorySucceeded, statusText, subcategories, EventSeverity.Warning, failureTransitions);
+                        }
+                        else
+                        {
+                            _logger.Trace($"ProcessCategory: {categoryLabel} — NO event emitted (no first-seen, no succeeded change, no failure transitions)");
                         }
                     }
 

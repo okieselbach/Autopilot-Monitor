@@ -68,7 +68,7 @@ namespace AutopilotMonitor.Shared.Models
 
         /// <summary>
         /// Log verbosity level for the agent.
-        /// "Info" = normal messages, "Debug" = component state/decisions, "Verbose" = per-event tracing.
+        /// "Info" = normal messages, "Debug" = component state/decisions, "Verbose" = per-event tracing, "Trace" = full diagnostic output.
         /// Default: "Info"
         /// </summary>
         public string LogLevel { get; set; } = "Info";

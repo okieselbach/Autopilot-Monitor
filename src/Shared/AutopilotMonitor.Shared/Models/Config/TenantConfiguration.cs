@@ -213,7 +213,7 @@ namespace AutopilotMonitor.Shared.Models
 
         /// <summary>
         /// Log verbosity level override for this tenant's agents.
-        /// null = use agent default ("Info"). Values: "Info", "Debug", "Verbose".
+        /// null = use agent default ("Info"). Values: "Info", "Debug", "Verbose", "Trace".
         /// </summary>
         public string LogLevel { get; set; }
 

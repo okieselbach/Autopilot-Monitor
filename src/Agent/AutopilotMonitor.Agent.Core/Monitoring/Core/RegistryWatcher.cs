@@ -23,6 +23,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         private readonly bool _watchSubtree;
         private readonly RegistryView _view;
         private readonly RegistryNativeMethods.RegChangeNotifyFilter _filter;
+        private readonly Action<string> _trace;
 
         private readonly object _sync = new object();
 
@@ -34,6 +35,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         public event EventHandler Changed;
         public event EventHandler<Exception> Error;
 
+        /// <param name="trace">Optional trace callback for diagnostic logging (called on every loop iteration).</param>
         public RegistryWatcher(
             RegistryHive hive,
             string subKey,
@@ -41,13 +43,15 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             RegistryView view = RegistryView.Default,
             RegistryNativeMethods.RegChangeNotifyFilter filter =
                 RegistryNativeMethods.RegChangeNotifyFilter.LastSet |
-                RegistryNativeMethods.RegChangeNotifyFilter.ThreadAgnostic)
+                RegistryNativeMethods.RegChangeNotifyFilter.ThreadAgnostic,
+            Action<string> trace = null)
         {
             _hive = HiveToPointer(hive);
             _subKey = subKey ?? throw new ArgumentNullException(nameof(subKey));
             _watchSubtree = watchSubtree;
             _view = view;
             _filter = filter;
+            _trace = trace;
         }
 
         public bool IsRunning
@@ -174,6 +178,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         {
             int samDesired = RegistryNativeMethods.GetSamDesired(_view);
 
+            _trace?.Invoke($"RegOpenKeyEx '{_subKey}' (view: {_view}, sam: 0x{samDesired:X})");
+
             int openResult = RegistryNativeMethods.RegOpenKeyEx(
                 _hive,
                 _subKey,
@@ -188,15 +194,22 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     $"RegOpenKeyEx failed for '{_subKey}' (view: {_view}).");
             }
 
+            _trace?.Invoke($"RegOpenKeyEx succeeded — handle valid: {!keyHandle.IsInvalid}");
+
             using (keyHandle)
             using (var changedEvent = new AutoResetEvent(false))
             using (var cancelEvent = new ManualResetEvent(false))
             using (cancellationToken.Register(() => cancelEvent.Set()))
             {
                 WaitHandle[] waitHandles = { changedEvent, cancelEvent };
+                int iteration = 0;
 
                 while (!cancellationToken.IsCancellationRequested)
                 {
+                    iteration++;
+
+                    _trace?.Invoke($"Iteration {iteration}: calling RegNotifyChangeKeyValue (subtree={_watchSubtree}, filter=0x{(uint)_filter:X})");
+
                     int notifyResult = RegistryNativeMethods.RegNotifyChangeKeyValue(
                         keyHandle,
                         _watchSubtree,
@@ -211,13 +224,23 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                             $"RegNotifyChangeKeyValue failed for '{_subKey}'.");
                     }
 
+                    _trace?.Invoke($"Iteration {iteration}: waiting for change notification...");
+
                     int signaled = WaitHandle.WaitAny(waitHandles);
 
                     if (signaled == WaitHandle.WaitTimeout)
+                    {
+                        _trace?.Invoke($"Iteration {iteration}: WaitAny returned WaitTimeout — continuing");
                         continue;
+                    }
 
                     if (signaled == 1)
+                    {
+                        _trace?.Invoke($"Iteration {iteration}: cancel event signaled — exiting loop");
                         break;
+                    }
+
+                    _trace?.Invoke($"Iteration {iteration}: change notification received — invoking Changed handler");
 
                     try
                     {
@@ -234,8 +257,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                             // Ignore secondary error-handler failures.
                         }
                     }
+
+                    _trace?.Invoke($"Iteration {iteration}: Changed handler completed");
                 }
 
+                _trace?.Invoke("WatchLoop exiting (cancellation requested)");
                 cancellationToken.ThrowIfCancellationRequested();
             }
         }
