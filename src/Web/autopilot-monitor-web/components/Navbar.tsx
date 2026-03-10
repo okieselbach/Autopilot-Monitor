@@ -19,7 +19,8 @@ export default function Navbar() {
   const [showNotifications, setShowNotifications] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [showOverflow, setShowOverflow] = useState(false);
+  const [showNavMenu, setShowNavMenu] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   const [adminMode, setAdminMode] = useState(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('adminMode') === 'true';
@@ -42,7 +43,8 @@ export default function Navbar() {
   const notificationRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const settingsRef = useRef<HTMLDivElement>(null);
-  const overflowRef = useRef<HTMLDivElement>(null);
+  const navMenuRef = useRef<HTMLDivElement>(null);
+  const helpRef = useRef<HTMLDivElement>(null);
 
   // Update localStorage when modes change and dispatch custom event
   useEffect(() => {
@@ -102,8 +104,11 @@ export default function Navbar() {
       if (settingsRef.current && !settingsRef.current.contains(event.target as Node)) {
         setShowSettings(false);
       }
-      if (overflowRef.current && !overflowRef.current.contains(event.target as Node)) {
-        setShowOverflow(false);
+      if (navMenuRef.current && !navMenuRef.current.contains(event.target as Node)) {
+        setShowNavMenu(false);
+      }
+      if (helpRef.current && !helpRef.current.contains(event.target as Node)) {
+        setShowHelp(false);
       }
     }
 
@@ -242,7 +247,8 @@ export default function Navbar() {
               </div>
               <span className="text-lg font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
                 <span className="hidden md:inline">Autopilot Monitor</span>
-                <span className="md:hidden">AP Monitor</span>
+                <span className="hidden sm:inline md:hidden">AP Monitor</span>
+                <span className="sm:hidden">AP Mon</span>
               </span>
             </Link>
           </div>
@@ -382,7 +388,91 @@ export default function Navbar() {
               })()}
             </div>
 
-            {/* Settings Menu */}
+            {/* Navigation Menu (Hamburger) — "Where do I go?" */}
+            <div className="relative" ref={navMenuRef}>
+              <button onClick={() => setShowNavMenu(!showNavMenu)} className="p-2 rounded-lg hover:bg-gray-100 transition-colors" title="Navigation">
+                <svg className="w-5 h-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+              </button>
+
+              {showNavMenu && (
+                <div className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-lg border border-gray-200 z-50 max-h-[32rem] overflow-y-auto">
+                  <div className="p-3">
+                    {/* MONITORING */}
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 mb-1.5">Monitoring</p>
+
+                    <Link href="/fleet-health" className="flex items-center gap-2 py-2 px-2.5 rounded-md hover:bg-gray-50 transition-colors" onClick={() => setShowNavMenu(false)}>
+                      <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                      </svg>
+                      <span className="text-sm text-gray-700">Fleet Health</span>
+                    </Link>
+
+                    <Link href="/usage-metrics" className="flex items-center gap-2 py-2 px-2.5 rounded-md hover:bg-gray-50 transition-colors" onClick={() => setShowNavMenu(false)}>
+                      <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                      </svg>
+                      <span className="text-sm text-gray-700">Usage Metrics</span>
+                    </Link>
+
+                    <Link href="/geographic-performance" className="flex items-center gap-2 py-2 px-2.5 rounded-md hover:bg-gray-50 transition-colors" onClick={() => setShowNavMenu(false)}>
+                      <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <span className="text-sm text-gray-700">Geographic Performance</span>
+                    </Link>
+
+                    <Link href="/progress" className="flex items-center gap-2 py-2 px-2.5 rounded-md hover:bg-gray-50 transition-colors" onClick={() => setShowNavMenu(false)}>
+                      <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                      </svg>
+                      <span className="text-sm text-gray-700">Progress Portal</span>
+                    </Link>
+
+                    {/* OPERATIONS */}
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 mt-3 mb-1.5">Operations</p>
+
+                    <Link href="/audit" className="flex items-center gap-2 py-2 px-2.5 rounded-md hover:bg-gray-50 transition-colors" onClick={() => setShowNavMenu(false)}>
+                      <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                      <span className="text-sm text-gray-700">Audit Log</span>
+                    </Link>
+
+                    <Link href="/health-check" className="flex items-center gap-2 py-2 px-2.5 rounded-md hover:bg-gray-50 transition-colors" onClick={() => setShowNavMenu(false)}>
+                      <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <span className="text-sm text-gray-700">System Health</span>
+                    </Link>
+
+                    {/* GALACTIC ADMIN — only visible when galacticAdminMode is active */}
+                    {galacticAdminMode && (
+                      <>
+                        <p className="text-[11px] font-semibold uppercase tracking-wider text-purple-400 mt-3 mb-1.5">Galactic Admin</p>
+
+                        <Link href="/platform-usage-metrics" className="flex items-center gap-2 py-2 px-2.5 rounded-md hover:bg-purple-50 transition-colors" onClick={() => setShowNavMenu(false)}>
+                          <svg className="w-4 h-4 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                          <span className="text-sm text-purple-700">Platform Usage Metrics</span>
+                        </Link>
+
+                        <Link href="/platform-metrics" className="flex items-center gap-2 py-2 px-2.5 rounded-md hover:bg-purple-50 transition-colors" onClick={() => setShowNavMenu(false)}>
+                          <svg className="w-4 h-4 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
+                          </svg>
+                          <span className="text-sm text-purple-700">Platform Metrics</span>
+                        </Link>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Settings Menu (Gear) — "How do I configure?" */}
             <div className="relative" ref={settingsRef}>
               <button onClick={() => setShowSettings(!showSettings)} className="p-2 rounded-lg hover:bg-gray-100 transition-colors" title="Settings">
                 <svg className="w-5 h-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -391,11 +481,10 @@ export default function Navbar() {
                 </svg>
               </button>
 
-              {/* Settings Dropdown — Restructured with categories */}
               {showSettings && (
                 <div className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-lg border border-gray-200 z-50 max-h-[32rem] overflow-y-auto">
                   <div className="p-3">
-                    {/* ADMINISTRATION — only for Admins */}
+                    {/* MODE TOGGLES */}
                     {isTenantAdmin && (
                       <>
                     <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 mb-2">Administration</p>
@@ -434,31 +523,7 @@ export default function Navbar() {
                       </div>
                     )}
 
-                    {/* MONITORING */}
-                    <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 mt-3 mb-1.5">Monitoring</p>
-
-                    <Link href="/fleet-health" className="flex items-center gap-2 py-2 px-2.5 rounded-md hover:bg-gray-50 transition-colors" onClick={() => setShowSettings(false)}>
-                      <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                      </svg>
-                      <span className="text-sm text-gray-700">Fleet Health</span>
-                    </Link>
-
-                    <Link href="/usage-metrics" className="flex items-center gap-2 py-2 px-2.5 rounded-md hover:bg-gray-50 transition-colors" onClick={() => setShowSettings(false)}>
-                      <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-                      </svg>
-                      <span className="text-sm text-gray-700">Usage Metrics</span>
-                    </Link>
-
-                    <Link href="/geographic-performance" className="flex items-center gap-2 py-2 px-2.5 rounded-md hover:bg-gray-50 transition-colors" onClick={() => setShowSettings(false)}>
-                      <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                      <span className="text-sm text-gray-700">Geographic Performance</span>
-                    </Link>
-
-                    {/* CONFIGURATION — Admin-only items + Settings for Operators with bootstrap permission */}
+                    {/* CONFIGURATION */}
                     {(isTenantAdmin || (isOperator && user?.canManageBootstrapTokens)) && (
                       <>
                     <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 mt-3 mb-1.5">Configuration</p>
@@ -467,7 +532,7 @@ export default function Navbar() {
                       <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
                       </svg>
-                      <span className="text-sm text-gray-700">Configuration</span>
+                      <span className="text-sm text-gray-700">Tenant Settings</span>
                     </Link>
                       </>
                     )}
@@ -499,31 +564,7 @@ export default function Navbar() {
                       </>
                     )}
 
-                    {/* OPERATIONS */}
-                    <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 mt-3 mb-1.5">Operations</p>
-
-                    <Link href="/progress" className="flex items-center gap-2 py-2 px-2.5 rounded-md hover:bg-gray-50 transition-colors" onClick={() => setShowSettings(false)}>
-                      <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                      </svg>
-                      <span className="text-sm text-gray-700">Progress Portal</span>
-                    </Link>
-
-                    <Link href="/audit" className="flex items-center gap-2 py-2 px-2.5 rounded-md hover:bg-gray-50 transition-colors" onClick={() => setShowSettings(false)}>
-                      <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                      </svg>
-                      <span className="text-sm text-gray-700">Audit Log</span>
-                    </Link>
-
-                    <Link href="/health-check" className="flex items-center gap-2 py-2 px-2.5 rounded-md hover:bg-gray-50 transition-colors" onClick={() => setShowSettings(false)}>
-                      <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                      <span className="text-sm text-gray-700">System Health</span>
-                    </Link>
-
-                    {/* GALACTIC ADMIN — only visible when galacticAdminMode is active */}
+                    {/* GALACTIC ADMIN CONFIG — only visible when galacticAdminMode is active */}
                     {galacticAdminMode && (
                       <>
                         <p className="text-[11px] font-semibold uppercase tracking-wider text-purple-400 mt-3 mb-1.5">Galactic Admin</p>
@@ -534,21 +575,6 @@ export default function Navbar() {
                           </svg>
                           <span className="text-sm text-purple-700">Admin Configuration</span>
                         </Link>
-
-                        <Link href="/platform-usage-metrics" className="flex items-center gap-2 py-2 px-2.5 rounded-md hover:bg-purple-50 transition-colors" onClick={() => setShowSettings(false)}>
-                          <svg className="w-4 h-4 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                          </svg>
-                          <span className="text-sm text-purple-700">Platform Usage Metrics</span>
-                        </Link>
-
-                        <Link href="/platform-metrics" className="flex items-center gap-2 py-2 px-2.5 rounded-md hover:bg-purple-50 transition-colors" onClick={() => setShowSettings(false)}>
-                          <svg className="w-4 h-4 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
-                          </svg>
-                          <span className="text-sm text-purple-700">Platform Metrics</span>
-                        </Link>
-
                       </>
                     )}
                   </div>
@@ -556,21 +582,20 @@ export default function Navbar() {
               )}
             </div>
 
-            {/* Overflow Menu (three-dot) — Tier 2: Dark Mode, Docs */}
-            <div className="relative" ref={overflowRef}>
-              <button onClick={() => setShowOverflow(!showOverflow)} className="p-2 rounded-lg hover:bg-gray-100 transition-colors" title="More">
+            {/* Help Menu (?) — "How do I learn?" */}
+            <div className="relative" ref={helpRef}>
+              <button onClick={() => setShowHelp(!showHelp)} className="p-2 rounded-lg hover:bg-gray-100 transition-colors" title="Help & Info">
                 <svg className="w-5 h-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
               </button>
 
-              {showOverflow && (
+              {showHelp && (
                 <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 z-50 py-1">
-                  {/* Documentation */}
                   <Link
                     href="/docs"
                     className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-                    onClick={() => setShowOverflow(false)}
+                    onClick={() => setShowHelp(false)}
                   >
                     <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
@@ -581,7 +606,7 @@ export default function Navbar() {
                   <Link
                     href="/roadmap"
                     className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-                    onClick={() => setShowOverflow(false)}
+                    onClick={() => setShowHelp(false)}
                   >
                     <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 01.553-.894L9 2m0 18l6-3m-6 3V2m6 15l5.447-2.724A1 1 0 0021 13.382V2.618a1 1 0 00-.553-.894L15 2m0 15V2" />
@@ -592,18 +617,20 @@ export default function Navbar() {
                   <Link
                     href="/changelog"
                     className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-                    onClick={() => setShowOverflow(false)}
+                    onClick={() => setShowHelp(false)}
                   >
                     <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                     </svg>
-                    <span>Preview Changelog</span>
+                    <span>Changelog</span>
                   </Link>
+
+                  <div className="border-t border-gray-100 my-1"></div>
 
                   <Link
                     href="/privacy"
                     className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-                    onClick={() => setShowOverflow(false)}
+                    onClick={() => setShowHelp(false)}
                   >
                     <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
@@ -614,7 +641,7 @@ export default function Navbar() {
                   <Link
                     href="/terms"
                     className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-                    onClick={() => setShowOverflow(false)}
+                    onClick={() => setShowHelp(false)}
                   >
                     <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
