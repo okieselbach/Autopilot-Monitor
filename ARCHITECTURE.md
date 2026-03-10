@@ -56,6 +56,7 @@ Device (Agent) ──NDJSON+gzip──► Azure Functions ──► Azure Table 
 | Component | Technology | Purpose |
 |-----------|------------|---------|
 | **Agent** | .NET Framework 4.8 (Windows) | Runs on devices during enrollment, collects telemetry |
+| **SummaryDialog** | .NET Framework 4.8 (WPF) | Post-enrollment summary UI (outcome, app timeline, auto-close) |
 | **Backend** | Azure Functions .NET 8 (Isolated Worker) | REST API, event processing, rule engine, storage |
 | **Web** | Next.js 15 + TypeScript + React 18 | Dashboard, settings, analytics, real-time UI |
 | **Shared** | .NET Standard 2.0 | DTOs, models, enums, constants shared between Agent & Backend |
@@ -89,7 +90,8 @@ AutopilotMonitor.sln
 │   ├── Shared/AutopilotMonitor.Shared/          (netstandard2.0)
 │   ├── Agent/
 │   │   ├── AutopilotMonitor.Agent/              (net48, Exe – entry point)
-│   │   └── AutopilotMonitor.Agent.Core/         (net48, Lib – core logic)
+│   │   ├── AutopilotMonitor.Agent.Core/         (net48, Lib – core logic)
+│   │   └── AutopilotMonitor.SummaryDialog/      (net48, WPF – enrollment summary UI)
 │   ├── Backend/
 │   │   ├── AutopilotMonitor.Functions/          (net8.0, Azure Functions v4)
 │   │   └── AutopilotMonitor.Functions.Tests/    (net8.0, xUnit)
@@ -108,6 +110,7 @@ AutopilotMonitor.sln
 **Project References:**
 ```
 Shared ◄── Agent.Core ◄── Agent
+                         ◄── SummaryDialog
 Shared ◄── Functions ◄── Functions.Tests
 Web (independent – communicates via REST + SignalR)
 ```
@@ -160,6 +163,7 @@ Monitoring/
 ├── Analyzers/         Security checks (LocalAdminAnalyzer)
 ├── Collectors/        Data collectors (ESP, Hello, Performance, GatherRules, Diagnostics)
 ├── Core/              Orchestration (MonitoringService, EventSpool, SessionPersistence)
+├── Interop/           P/Invoke declarations (process creation, registry change notifications)
 ├── Network/           API client, emergency reporter, geo-location, network metrics
 ├── Replay/            Log replay for testing/simulation
 └── Tracking/          Enrollment state machine, IME parser, script tracking
@@ -206,7 +210,7 @@ Monitoring/
 - **Monitoring:** Application Insights with sampling
 - **Entry Point:** `src/Backend/AutopilotMonitor.Functions/Program.cs`
 
-### Endpoints (~60 Functions)
+### Endpoints (~61 Functions)
 
 **Agent-to-Cloud (device auth via cert/bootstrap):**
 
@@ -217,6 +221,13 @@ Monitoring/
 | `/agent/config` | GET | Fetch agent configuration |
 | `/agent/upload-url` | POST | Get short-lived SAS URL for diagnostics |
 | `/agent/error` | POST | Report agent errors |
+
+**Version Management:**
+
+| Route | Method | Purpose |
+|-------|--------|---------|
+| `/versions/block` | POST | Add version block/kill rule |
+| `/versions/blocked` | GET | List active version block rules |
 
 **Bootstrap (pre-MDM auth):**
 
@@ -241,7 +252,8 @@ Monitoring/
 | **Devices** | `POST /devices/block`, `DELETE /devices/block/{serial}`, `GET /devices/blocked` |
 | **Reports** | `POST /sessions/{id}/report`, `GET /galactic/session-reports` |
 | **Metrics** | `GET /metrics/usage`, `GET /metrics/app`, `GET /metrics/geographic`, `GET /stats/platform` |
-| **Galactic** | `/galactic/metrics/*`, `/galactic/audit/logs`, `/galactic/session-reports` |
+| **Galactic** | `/galactic/metrics/*`, `/galactic/audit/logs`, `/galactic/session-reports`, `/galactic/notifications` (CRUD + dismiss) |
+| **Progress** | `GET /progress/sessions`, `GET /progress/sessions/{id}/events` |
 | **SignalR** | `POST /realtime/negotiate`, `POST /realtime/groups/join`, `POST /realtime/groups/leave` |
 | **Health** | `GET /health`, `GET /health/detailed` |
 
@@ -263,6 +275,11 @@ Monitoring/
 | `BlockedDeviceService` | Device block/kill signal management |
 | `SessionReportService` | Report ZIP generation + Blob upload |
 | `GraphTokenService` | MS Graph token acquisition for Autopilot device validation |
+| `BlockedVersionService` | Version-based block/kill rules with wildcard and ceiling patterns |
+| `GalacticNotificationService` | Persistent in-app notifications for Galactic Admins (survives page reloads) |
+| `HealthCheckService` | Health checks for Storage, Processing, and Agent binary availability |
+| `PreviewWhitelistService` | Private Preview tenant whitelist with 5-min cache |
+| `ResendEmailService` | Transactional emails via Resend.com for Preview notifications |
 
 ### Event Processing Pipeline
 
@@ -332,6 +349,14 @@ Agent POST /api/agent/ingest (NDJSON+gzip)
 | `/audit` | Audit log viewer | Yes | Tenant Admin |
 | `/health-check` | Backend health status | Yes | Galactic Admin |
 | `/geographic-performance` | Geo map of deployments | Yes | Galactic Admin |
+| `/progress` | Real-time enrollment progress tracking | Yes | Tenant Admin |
+| `/preview` | Private Preview waitlist/approval page | Yes | Unapproved tenants |
+| `/changelog` | Platform change log & known issues | Public | — |
+| `/roadmap` | Planned features & current focus areas | Public | — |
+| `/about` | Platform introduction & quick links | Public | — |
+| `/privacy` | Privacy policy & data handling | Public | — |
+| `/terms` | Terms of use & legal disclaimers | Public | — |
+| `/go/[code]` | Bootstrap script generator (validates code → returns PS1) | Public | — |
 | `/docs/[section]` | Documentation | Public | — |
 
 ### State Management
@@ -399,12 +424,12 @@ React Context API (no Redux/Zustand):
 
 ## Data Model
 
-### Azure Table Storage (21 Tables)
+### Azure Table Storage (23 Tables)
 
 | Table | PartitionKey | RowKey | Purpose |
 |-------|-------------|--------|---------|
 | `Sessions` | TenantId | SessionId | Enrollment sessions |
-| `EnrollmentEvents` | TenantId | Timestamp_EventId | Individual events |
+| `Events` | SessionId | Timestamp_Sequence | Individual events |
 | `AdminConfiguration` | "GlobalConfig" | "config" | Platform-wide settings |
 | `TenantConfiguration` | TenantId | "config" | Per-tenant settings |
 | `GatherRules` | TenantId | RuleId | Data collection rules |
@@ -424,6 +449,8 @@ React Context API (no Redux/Zustand):
 | `UserActivity` | TenantId | UserId | User login tracking |
 | `RuleStates` | TenantId | RuleId | Rule enable/disable state |
 | `PreviewConfig` | "Preview" | "config" | Preview feature config |
+| `BlockedVersions` | "BlockedVersions" | Pattern | Version block/kill rules (wildcards, ceilings) |
+| `GalacticNotifications` | "GalacticNotifications" | InvertedTicks_Id | Persistent in-app notifications for Galactic Admins |
 
 ### Azure Blob Storage
 
@@ -636,7 +663,7 @@ AdminConfiguration (global, single row in Azure Table)
             │   Bootstrap token enablement
             │
             └──► AgentConfigResponse (delivered to agent via /api/agent/config)
-                    │   ConfigVersion (currently 14)
+                    │   ConfigVersion (currently 16)
                     │   CollectorConfiguration (nested)
                     │   AnalyzerConfiguration (nested)
                     │   GatherRules[] (merged built-in + tenant)
@@ -738,21 +765,25 @@ cd rules && node scripts/combine.js
 ### Agent CLI Arguments
 
 ```
---install                    Deploy via Scheduled Task (Intune package)
---run-gather-rules           One-shot data collection, then exit
---console                    Enable console output
---cert-thumbprint {thumb}    Override cert search
---tenant-id {id}             Override registry tenant
---api-url {url}              Override API endpoint
---bootstrap-token {token}    Pre-MDM bootstrap auth
---ime-log-path {path}        Override IME log folder
---replay-log-dir {path}      Enable log replay mode
---replay-speed-factor {n}    Compression factor (default 50)
---no-auth                    Disable cert auth
---no-cleanup                 Disable self-destruct
---reboot-on-complete         Trigger reboot after enrollment
---new-session                Start fresh session
---keep-logfile               Preserve logs after cleanup
+--install                           Deploy via Scheduled Task (Intune package)
+--run-gather-rules                  One-shot data collection, then exit
+--console                           Enable console output
+--cert-thumbprint {thumb}           Override cert search
+--tenant-id {id}                    Override registry tenant
+--api-url {url}                     Override API endpoint (alias: --backend-api)
+--bootstrap-token {token}           Pre-MDM bootstrap auth
+--ime-log-path {path}               Override IME log folder
+--ime-match-log {path}              Write matched IME log lines to file (debug)
+--replay-log-dir {path}             Enable log replay mode
+--replay-speed-factor {n}           Compression factor (default 50)
+--no-auth                           Disable cert auth
+--no-cleanup                        Disable self-destruct
+--reboot-on-complete                Trigger reboot after enrollment
+--new-session                       Start fresh session
+--keep-logfile                      Preserve logs after cleanup
+--await-enrollment                  Wait for MDM certificate before starting
+--await-enrollment-timeout {min}    MDM cert wait timeout (default 480min)
+--disable-geolocation               Skip geo-location detection
 ```
 
 ### Key Design Conventions
@@ -760,7 +791,7 @@ cd rules && node scripts/combine.js
 | Convention | Details |
 |------------|---------|
 | Agent endpoint security | All agent endpoints use `req.ValidateSecurityAsync()` from `SecurityValidationExtensions.cs` |
-| ConfigVersion | Tracks agent capability level (currently 14 = script execution tracking) |
+| ConfigVersion | Tracks agent capability level (currently 16 = trace events for decision auditing) |
 | Phase progression | Forward-only: DeviceSetup(1) → AccountSetup(2), no backward transitions |
 | Phase isolation | App IDs seen in earlier phases are ignored in later phases (IME tracker) |
 | Completion throttling | Max 1 `completion_check` event per source per minute |
