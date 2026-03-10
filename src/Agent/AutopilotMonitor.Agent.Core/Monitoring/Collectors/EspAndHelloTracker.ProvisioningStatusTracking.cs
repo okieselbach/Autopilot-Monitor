@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
+using System.Threading;
+using AutopilotMonitor.Agent.Core.Monitoring.Interop;
 using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Win32;
@@ -9,7 +11,7 @@ using Microsoft.Win32;
 namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 {
     /// <summary>
-    /// Partial: Polls ESP provisioning category status from registry to detect failures
+    /// Partial: Watches ESP provisioning category status from registry to detect failures
     /// that Shell-Core event 62407 patterns may miss (e.g. Certificate provisioning failures).
     ///
     /// Registry path: HKLM\SOFTWARE\Microsoft\Provisioning\AutopilotSettings
@@ -24,13 +26,15 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
     ///
     /// Event emission strategy:
     ///   - Emit once when a category first appears in the registry (initial snapshot)
+    ///   - Emit when subcategory states change meaningfully (in_progress->succeeded, any->failed)
     ///   - Emit once when categorySucceeded resolves to true or false (final outcome)
-    ///   - Do NOT emit on every intermediate subcategory text change (avoids spam)
+    ///   - Fire EspFailureDetected on subcategory failure even if categorySucceeded is still null
+    ///
+    /// Uses RegNotifyChangeKeyValue for instant registry change detection (no polling timer).
     /// </summary>
     public partial class EspAndHelloTracker
     {
         private const string ProvisioningStatusRegistryPath = @"SOFTWARE\Microsoft\Provisioning\AutopilotSettings";
-        private const int ProvisioningStatusPollIntervalSeconds = 15;
 
         private static readonly string[] ProvisioningCategoryNames =
         {
@@ -49,108 +53,229 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         private HashSet<string> _provisioningFailureFired;
         // Track which categories have reported a final categorySucceeded value
         private HashSet<string> _provisioningCategoriesResolved;
+        // Track subcategory states per category — detect meaningful state transitions
+        private Dictionary<string, Dictionary<string, string>> _lastSubcategoryStates;
 
-        private void StartProvisioningStatusPolling()
+        private void StartProvisioningStatusWatcher()
         {
             _lastProvisioningJson = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             _provisioningCategorySeen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             _lastCategorySucceeded = new Dictionary<string, bool?>(StringComparer.OrdinalIgnoreCase);
             _provisioningFailureFired = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             _provisioningCategoriesResolved = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            _lastSubcategoryStates = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
 
-            _provisioningStatusTimer = new System.Threading.Timer(
-                CheckProvisioningStatus,
-                null,
-                TimeSpan.FromSeconds(10),  // Initial delay — give enrollment time to start writing values
-                TimeSpan.FromSeconds(ProvisioningStatusPollIntervalSeconds)
-            );
+            _registryWatcherStopEvent = RegistryWatcherNativeMethods.CreateEvent(IntPtr.Zero, true, false, null);
+            if (_registryWatcherStopEvent == IntPtr.Zero)
+            {
+                _logger.Warning("Failed to create registry watcher stop event — provisioning status tracking disabled");
+                return;
+            }
 
-            _logger.Info($"Provisioning status polling started (interval: {ProvisioningStatusPollIntervalSeconds}s)");
+            _registryWatcherThread = new Thread(RegistryWatcherLoop)
+            {
+                IsBackground = true,
+                Name = "ProvisioningStatusWatcher"
+            };
+            _registryWatcherThread.Start();
+
+            _logger.Info("Provisioning status registry watcher started");
         }
 
-        private void StopProvisioningStatusPolling(string reason)
+        private void StopProvisioningStatusWatcher(string reason)
         {
-            if (_provisioningStatusTimer == null)
+            if (_registryWatcherStopEvent == IntPtr.Zero)
                 return;
 
             try
             {
-                _provisioningStatusTimer.Dispose();
-                _provisioningStatusTimer = null;
-                _logger.Info($"Provisioning status polling stopped: {reason}");
+                // Signal stop event to wake up the watcher thread
+                RegistryWatcherNativeMethods.SetEvent(_registryWatcherStopEvent);
+
+                // Wait for thread to exit
+                if (_registryWatcherThread != null && _registryWatcherThread.IsAlive)
+                {
+                    _registryWatcherThread.Join(TimeSpan.FromSeconds(3));
+                }
+
+                RegistryWatcherNativeMethods.CloseHandle(_registryWatcherStopEvent);
+                _registryWatcherStopEvent = IntPtr.Zero;
+                _registryWatcherThread = null;
+
+                _logger.Info($"Provisioning status watcher stopped: {reason}");
             }
             catch (Exception ex)
             {
-                _logger.Error("Error stopping provisioning status polling timer", ex);
+                _logger.Error("Error stopping provisioning status watcher", ex);
             }
         }
 
-        private void CheckProvisioningStatus(object state)
+        /// <summary>
+        /// Background thread: opens the provisioning registry key and waits for value changes
+        /// via RegNotifyChangeKeyValue. Falls back to retry loop if key doesn't exist yet.
+        /// </summary>
+        private void RegistryWatcherLoop()
+        {
+            IntPtr hKey = IntPtr.Zero;
+            IntPtr hNotifyEvent = IntPtr.Zero;
+
+            try
+            {
+                // Wait for registry key to appear (enrollment may not have started yet)
+                while (true)
+                {
+                    int result = RegistryWatcherNativeMethods.RegOpenKeyEx(
+                        RegistryWatcherNativeMethods.HKEY_LOCAL_MACHINE,
+                        ProvisioningStatusRegistryPath,
+                        0,
+                        RegistryWatcherNativeMethods.KEY_NOTIFY | RegistryWatcherNativeMethods.KEY_READ,
+                        out hKey);
+
+                    if (result == 0)
+                        break; // Key opened successfully
+
+                    // Key doesn't exist yet — wait 2 seconds or until stop signaled
+                    uint waitResult = RegistryWatcherNativeMethods.WaitForSingleObject(_registryWatcherStopEvent, 2000);
+                    if (waitResult == RegistryWatcherNativeMethods.WAIT_OBJECT_0)
+                        return; // Stop requested
+                }
+
+                // Do an initial check now that the key exists
+                CheckProvisioningStatus();
+
+                // Create notification event
+                hNotifyEvent = RegistryWatcherNativeMethods.CreateEvent(IntPtr.Zero, false, false, null);
+                if (hNotifyEvent == IntPtr.Zero)
+                {
+                    _logger.Warning("Failed to create registry notify event — watcher thread exiting");
+                    return;
+                }
+
+                var waitHandles = new[] { hNotifyEvent, _registryWatcherStopEvent };
+
+                // Main watch loop
+                while (true)
+                {
+                    // Register for value change notifications
+                    int regResult = RegistryWatcherNativeMethods.RegNotifyChangeKeyValue(
+                        hKey,
+                        true,  // Watch subtree
+                        RegistryWatcherNativeMethods.REG_NOTIFY_CHANGE_LAST_SET,
+                        hNotifyEvent,
+                        true); // Asynchronous
+
+                    if (regResult != 0)
+                    {
+                        _logger.Warning($"RegNotifyChangeKeyValue failed (error {regResult}) — watcher thread exiting");
+                        return;
+                    }
+
+                    // Wait for either a registry change or stop signal
+                    uint waitResult = RegistryWatcherNativeMethods.WaitForMultipleObjects(
+                        (uint)waitHandles.Length,
+                        waitHandles,
+                        false,
+                        RegistryWatcherNativeMethods.INFINITE);
+
+                    if (waitResult == RegistryWatcherNativeMethods.WAIT_OBJECT_0)
+                    {
+                        // Registry changed — check status
+                        CheckProvisioningStatus();
+                    }
+                    else if (waitResult == RegistryWatcherNativeMethods.WAIT_OBJECT_0 + 1)
+                    {
+                        // Stop requested
+                        return;
+                    }
+                    else
+                    {
+                        // Unexpected wait result
+                        _logger.Warning($"Registry watcher unexpected wait result: {waitResult} — exiting");
+                        return;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"Registry watcher thread failed: {ex.Message}");
+            }
+            finally
+            {
+                if (hNotifyEvent != IntPtr.Zero)
+                    RegistryWatcherNativeMethods.CloseHandle(hNotifyEvent);
+                if (hKey != IntPtr.Zero)
+                    RegistryWatcherNativeMethods.RegCloseKey(hKey);
+            }
+        }
+
+        private void CheckProvisioningStatus()
         {
             try
             {
-                using (var key = Registry.LocalMachine.OpenSubKey(ProvisioningStatusRegistryPath, writable: false))
+                lock (_stateLock)
                 {
-                    if (key == null)
-                        return; // Key not yet created — enrollment hasn't started writing status
-
-                    bool failureDetected = false;
-                    string failureType = null;
-
-                    foreach (var categoryName in ProvisioningCategoryNames)
+                    using (var key = Registry.LocalMachine.OpenSubKey(ProvisioningStatusRegistryPath, writable: false))
                     {
-                        var jsonValue = key.GetValue(categoryName)?.ToString();
-                        if (string.IsNullOrEmpty(jsonValue))
-                            continue;
+                        if (key == null)
+                            return;
 
-                        // Skip if JSON is identical to last poll (no change at all)
-                        if (_lastProvisioningJson.TryGetValue(categoryName, out var lastJson) && lastJson == jsonValue)
-                            continue;
+                        bool failureDetected = false;
+                        string failureType = null;
 
-                        _lastProvisioningJson[categoryName] = jsonValue;
-                        var result = ProcessCategoryStatus(categoryName, jsonValue);
-
-                        if (result.IsFailed)
+                        foreach (var categoryName in ProvisioningCategoryNames)
                         {
-                            failureDetected = true;
-                            failureType = result.FailureType;
+                            var jsonValue = key.GetValue(categoryName)?.ToString();
+                            if (string.IsNullOrEmpty(jsonValue))
+                                continue;
+
+                            // Skip if JSON is identical to last check (no change at all)
+                            if (_lastProvisioningJson.TryGetValue(categoryName, out var lastJson) && lastJson == jsonValue)
+                                continue;
+
+                            _lastProvisioningJson[categoryName] = jsonValue;
+                            var result = ProcessCategoryStatus(categoryName, jsonValue);
+
+                            if (result.IsFailed)
+                            {
+                                failureDetected = true;
+                                failureType = result.FailureType;
+                            }
                         }
-                    }
 
-                    // Self-termination: all observed categories have reported a final categorySucceeded
-                    if (_provisioningCategoriesResolved.Count > 0
-                        && _lastProvisioningJson.Count > 0
-                        && _provisioningCategoriesResolved.Count >= _lastProvisioningJson.Count)
-                    {
-                        StopProvisioningStatusPolling("all_resolved");
-                    }
-
-                    // Fire EspFailureDetected AFTER event emission
-                    // (matches the pattern in ShellCoreTracking.cs — event in spool before agent reacts)
-                    if (failureDetected && failureType != null)
-                    {
-                        StopProvisioningStatusPolling("failure_detected");
-
-                        try
+                        // Self-termination: only auto-stop when all categories resolved with success (no failures)
+                        if (_provisioningCategoriesResolved.Count > 0
+                            && _lastProvisioningJson.Count > 0
+                            && _provisioningCategoriesResolved.Count >= _lastProvisioningJson.Count
+                            && !_provisioningFailureFired.Any())
                         {
-                            EspFailureDetected?.Invoke(this, failureType);
+                            StopProvisioningStatusWatcher("all_resolved_success");
                         }
-                        catch (Exception ex)
+
+                        // Fire EspFailureDetected AFTER event emission
+                        // (matches the pattern in ShellCoreTracking.cs — event in spool before agent reacts)
+                        if (failureDetected && failureType != null)
                         {
-                            _logger.Error($"EspFailureDetected handler failed for '{failureType}'", ex);
+                            try
+                            {
+                                EspFailureDetected?.Invoke(this, failureType);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.Error($"EspFailureDetected handler failed for '{failureType}'", ex);
+                            }
                         }
                     }
                 }
             }
             catch (Exception ex)
             {
-                _logger.Warning($"Provisioning status polling failed: {ex.Message}");
+                _logger.Warning($"Provisioning status check failed: {ex.Message}");
             }
         }
 
         /// <summary>
         /// Processes a single category status JSON value.
-        /// Emits events only on first-seen and on categorySucceeded resolution (not on every intermediate change).
+        /// Emits events on first-seen, subcategory state transitions, and categorySucceeded resolution.
         /// </summary>
         private ProvisioningResult ProcessCategoryStatus(string categoryName, string jsonValue)
         {
@@ -188,35 +313,47 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     {
                         _provisioningCategorySeen.Add(categoryName);
                         _lastCategorySucceeded[categoryName] = categorySucceeded;
+                        StoreSubcategoryStates(categoryName, subcategories);
                         EmitProvisioningEvent(categoryLabel, categorySucceeded, statusText, subcategories, EventSeverity.Info);
                     }
                     else if (categorySucceededChanged)
                     {
                         _lastCategorySucceeded[categoryName] = categorySucceeded;
+                        StoreSubcategoryStates(categoryName, subcategories);
                         var severity = categorySucceeded == false ? EventSeverity.Warning : EventSeverity.Info;
                         EmitProvisioningEvent(categoryLabel, categorySucceeded, statusText, subcategories, severity);
                     }
-                    // else: intermediate subcategory text change — log only, no event
+                    else
+                    {
+                        // Check for meaningful subcategory state transitions
+                        var transitions = DetectSubcategoryTransitions(categoryName, subcategories);
+                        StoreSubcategoryStates(categoryName, subcategories);
+
+                        if (transitions.Count > 0)
+                        {
+                            // Emit updated status with transition details
+                            var hasFailure = transitions.Any(t => t.IsFailure);
+                            var severity = hasFailure ? EventSeverity.Warning : EventSeverity.Info;
+                            EmitProvisioningEvent(categoryLabel, categorySucceeded, statusText, subcategories, severity, transitions);
+                        }
+                    }
 
                     // 5. Track resolved categories (both success and failure are final)
                     if (categorySucceeded.HasValue)
                         _provisioningCategoriesResolved.Add(categoryName);
 
-                    // 6. Handle failure
+                    // 6. Handle failure — either via categorySucceeded or subcategory state
                     if (categorySucceeded == false)
                     {
-                        if (_provisioningFailureFired.Contains(categoryName))
-                            return ProvisioningResult.NoAction;
+                        return TryFireProvisioningFailure(categoryName, categoryLabel, subcategories);
+                    }
 
-                        _provisioningFailureFired.Add(categoryName);
-
-                        var failedSubcategory = FindFailedSubcategory(subcategories);
-                        var failureTypeName = failedSubcategory != null
-                            ? $"Provisioning_{categoryLabel}_{failedSubcategory}_Failed"
-                            : $"Provisioning_{categoryLabel}_Failed";
-
-                        _logger.Warning($"Provisioning failure detected: {failureTypeName}");
-                        return ProvisioningResult.Failure(failureTypeName);
+                    // 7. Check for subcategory-level failures even when categorySucceeded is still null
+                    //    (catches timeout scenarios where the category never formally fails)
+                    var failedSub = FindFailedSubcategory(subcategories);
+                    if (failedSub != null && categorySucceeded == null)
+                    {
+                        return TryFireProvisioningFailure(categoryName, categoryLabel, subcategories);
                     }
 
                     return ProvisioningResult.NoAction;
@@ -235,6 +372,25 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         }
 
         /// <summary>
+        /// Attempts to fire EspFailureDetected for a provisioning failure. Uses fire-once guard.
+        /// </summary>
+        private ProvisioningResult TryFireProvisioningFailure(string categoryName, string categoryLabel, List<SubcategoryInfo> subcategories)
+        {
+            if (_provisioningFailureFired.Contains(categoryName))
+                return ProvisioningResult.NoAction;
+
+            _provisioningFailureFired.Add(categoryName);
+
+            var failedSubcategory = FindFailedSubcategory(subcategories);
+            var failureTypeName = failedSubcategory != null
+                ? $"Provisioning_{categoryLabel}_{failedSubcategory}_Failed"
+                : $"Provisioning_{categoryLabel}_Failed";
+
+            _logger.Warning($"Provisioning failure detected: {failureTypeName}");
+            return ProvisioningResult.Failure(failureTypeName);
+        }
+
+        /// <summary>
         /// Checks whether categorySucceeded has transitioned from null to true/false.
         /// This ensures we only emit one event when the outcome is decided.
         /// </summary>
@@ -247,8 +403,63 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             return oldValue != newValue;
         }
 
+        /// <summary>
+        /// Stores current subcategory states for later transition detection.
+        /// </summary>
+        private void StoreSubcategoryStates(string categoryName, List<SubcategoryInfo> subcategories)
+        {
+            var states = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var sub in subcategories)
+                states[sub.Name] = sub.State;
+            _lastSubcategoryStates[categoryName] = states;
+        }
+
+        /// <summary>
+        /// Detects meaningful subcategory state transitions by comparing current states to last known states.
+        /// Meaningful transitions: any -> failed (Warning), in_progress -> succeeded (Info).
+        /// NOT meaningful: notStarted -> in_progress (expected progression, noise).
+        /// </summary>
+        private List<SubcategoryTransition> DetectSubcategoryTransitions(string categoryName, List<SubcategoryInfo> subcategories)
+        {
+            var transitions = new List<SubcategoryTransition>();
+
+            if (!_lastSubcategoryStates.TryGetValue(categoryName, out var lastStates))
+                return transitions; // No previous states to compare
+
+            foreach (var sub in subcategories)
+            {
+                if (!lastStates.TryGetValue(sub.Name, out var oldState))
+                    continue; // New subcategory — skip (first-seen already emitted the snapshot)
+
+                if (string.Equals(oldState, sub.State, StringComparison.OrdinalIgnoreCase))
+                    continue; // No change
+
+                bool isFailure = string.Equals(sub.State, "failed", StringComparison.OrdinalIgnoreCase);
+                bool isCompletion = string.Equals(sub.State, "succeeded", StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(oldState, "succeeded", StringComparison.OrdinalIgnoreCase);
+
+                // Skip noise: notStarted -> in_progress is expected progression
+                bool isNoise = string.Equals(oldState, "notStarted", StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(sub.State, "in_progress", StringComparison.OrdinalIgnoreCase);
+
+                if (isFailure || isCompletion)
+                {
+                    transitions.Add(new SubcategoryTransition(sub.Name, oldState, sub.State, isFailure));
+                }
+                else if (!isNoise)
+                {
+                    // Other non-noise transitions (e.g., unknown -> failed) — include if meaningful
+                    if (isFailure)
+                        transitions.Add(new SubcategoryTransition(sub.Name, oldState, sub.State, true));
+                }
+            }
+
+            return transitions;
+        }
+
         private void EmitProvisioningEvent(string categoryLabel, bool? succeeded, string statusText,
-            List<SubcategoryInfo> subcategories, EventSeverity severity)
+            List<SubcategoryInfo> subcategories, EventSeverity severity,
+            List<SubcategoryTransition> transitions = null)
         {
             var eventData = new Dictionary<string, object>
             {
@@ -269,6 +480,22 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     };
                 }
                 eventData["subcategories"] = subcatData;
+            }
+
+            if (transitions != null && transitions.Count > 0)
+            {
+                eventData["changeType"] = "subcategory_state_change";
+                var transitionData = new List<Dictionary<string, string>>();
+                foreach (var t in transitions)
+                {
+                    transitionData.Add(new Dictionary<string, string>
+                    {
+                        { "subcategory", t.SubcategoryName },
+                        { "previousState", t.OldState },
+                        { "newState", t.NewState }
+                    });
+                }
+                eventData["transitions"] = transitionData;
             }
 
             _onEventCollected(new EnrollmentEvent
@@ -394,18 +621,15 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         }
 
         /// <summary>
-        /// Finds the first subcategory that is not in a succeeded state.
-        /// Returns the clean name, or null if all succeeded (generic failure).
+        /// Finds the first subcategory that is in a failed state.
+        /// Returns the clean name, or null if none are failed.
         /// </summary>
         private static string FindFailedSubcategory(List<SubcategoryInfo> subcategories)
         {
             foreach (var sub in subcategories)
             {
-                if (!string.Equals(sub.State, "succeeded", StringComparison.OrdinalIgnoreCase)
-                    && !string.Equals(sub.State, "notRequired", StringComparison.OrdinalIgnoreCase))
-                {
+                if (string.Equals(sub.State, "failed", StringComparison.OrdinalIgnoreCase))
                     return sub.Name;
-                }
             }
 
             return null;
@@ -472,6 +696,22 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             public string StatusText { get; set; }  // Human-readable text
         }
 
+        private readonly struct SubcategoryTransition
+        {
+            public readonly string SubcategoryName;
+            public readonly string OldState;
+            public readonly string NewState;
+            public readonly bool IsFailure;
+
+            public SubcategoryTransition(string subcategoryName, string oldState, string newState, bool isFailure)
+            {
+                SubcategoryName = subcategoryName;
+                OldState = oldState;
+                NewState = newState;
+                IsFailure = isFailure;
+            }
+        }
+
         private readonly struct ProvisioningResult
         {
             public readonly bool IsFailed;
@@ -486,5 +726,6 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             public static ProvisioningResult NoAction => new ProvisioningResult(false, null);
             public static ProvisioningResult Failure(string failureType) => new ProvisioningResult(true, failureType);
         }
+
     }
 }

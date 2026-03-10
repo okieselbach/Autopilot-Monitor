@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Management;
 using System.Runtime.InteropServices;
 using AutopilotMonitor.Agent.Core.Logging;
+using AutopilotMonitor.Agent.Core.Monitoring.Interop;
 
 namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 {
@@ -54,7 +55,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 }
 
                 // Get the interactive session token via WTS.
-                if (!NativeMethods.WTSQueryUserToken(sessionId, out userToken))
+                if (!ProcessNativeMethods.WTSQueryUserToken(sessionId, out userToken))
                 {
                     var error = Marshal.GetLastWin32Error();
                     logger.Warning($"UserSessionProcessLauncher: WTSQueryUserToken failed for session {sessionId} (error {error})");
@@ -66,14 +67,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 // needs TokenSessionId explicitly set to avoid Session 0 placement
                 // (the calling service runs in Session 0; without stamping, the child
                 // process inherits Session 0 even though the token belongs to the user).
-                if (!NativeMethods.DuplicateTokenEx(userToken, NativeMethods.MAXIMUM_ALLOWED, IntPtr.Zero,
-                    NativeMethods.SECURITY_IMPERSONATION, NativeMethods.TOKEN_PRIMARY, out dupToken))
+                if (!ProcessNativeMethods.DuplicateTokenEx(userToken, ProcessNativeMethods.MAXIMUM_ALLOWED, IntPtr.Zero,
+                    ProcessNativeMethods.SECURITY_IMPERSONATION, ProcessNativeMethods.TOKEN_PRIMARY, out dupToken))
                 {
                     logger.Warning($"UserSessionProcessLauncher: DuplicateTokenEx failed (error {Marshal.GetLastWin32Error()})");
                     return false;
                 }
 
-                if (!NativeMethods.SetTokenInformation(dupToken, NativeMethods.TokenSessionId,
+                if (!ProcessNativeMethods.SetTokenInformation(dupToken, ProcessNativeMethods.TokenSessionId,
                     ref sessionId, (uint)Marshal.SizeOf(typeof(uint))))
                 {
                     logger.Warning($"UserSessionProcessLauncher: SetTokenInformation(SessionId={sessionId}) failed (error {Marshal.GetLastWin32Error()})");
@@ -83,7 +84,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 logger.Info($"UserSessionProcessLauncher: Token duplicated and stamped to session {sessionId}");
 
                 // Create an environment block for the user (using session-stamped token)
-                if (!NativeMethods.CreateEnvironmentBlock(out environment, dupToken, false))
+                if (!ProcessNativeMethods.CreateEnvironmentBlock(out environment, dupToken, false))
                 {
                     logger.Warning($"UserSessionProcessLauncher: CreateEnvironmentBlock failed (error {Marshal.GetLastWin32Error()})");
                     environment = IntPtr.Zero;
@@ -91,15 +92,15 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 
                 // Set up startup info — empty lpDesktop lets Windows select the correct
                 // desktop for the session-stamped token.
-                var si = new NativeMethods.STARTUPINFO();
+                var si = new ProcessNativeMethods.STARTUPINFO();
                 si.cb = Marshal.SizeOf(si);
                 si.lpDesktop = "";
-                si.dwFlags = NativeMethods.STARTF_USESHOWWINDOW | NativeMethods.STARTF_FORCEONFEEDBACK;
-                si.wShowWindow = NativeMethods.SW_SHOW;
+                si.dwFlags = ProcessNativeMethods.STARTF_USESHOWWINDOW | ProcessNativeMethods.STARTF_FORCEONFEEDBACK;
+                si.wShowWindow = ProcessNativeMethods.SW_SHOW;
 
                 uint creationFlags = 0;
                 if (environment != IntPtr.Zero)
-                    creationFlags |= NativeMethods.CREATE_UNICODE_ENVIRONMENT;
+                    creationFlags |= ProcessNativeMethods.CREATE_UNICODE_ENVIRONMENT;
 
                 var commandLine = $"\"{exePath}\" {arguments}";
                 var workingDirectory = System.IO.Path.GetDirectoryName(exePath);
@@ -134,14 +135,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     // The duplicated token has TokenSessionId set to the user's session,
                     // ensuring the process lands on the interactive desktop (not Session 0).
                     bool created;
-                    NativeMethods.PROCESS_INFORMATION pi;
+                    ProcessNativeMethods.PROCESS_INFORMATION pi;
 
-                    var procSa = new NativeMethods.SECURITY_ATTRIBUTES();
+                    var procSa = new ProcessNativeMethods.SECURITY_ATTRIBUTES();
                     procSa.nLength = Marshal.SizeOf(procSa);
-                    var threadSa = new NativeMethods.SECURITY_ATTRIBUTES();
+                    var threadSa = new ProcessNativeMethods.SECURITY_ATTRIBUTES();
                     threadSa.nLength = Marshal.SizeOf(threadSa);
 
-                    created = NativeMethods.CreateProcessAsUser(
+                    created = ProcessNativeMethods.CreateProcessAsUser(
                         dupToken, null, commandLine,
                         ref procSa, ref threadSa, false,
                         creationFlags, environment, workingDirectory,
@@ -153,23 +154,23 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                         return false;
                     }
 
-                    NativeMethods.CloseHandle(pi.hThread);
+                    ProcessNativeMethods.CloseHandle(pi.hThread);
                     logger.Info($"UserSessionProcessLauncher: Attempt {attempt} — created PID {pi.dwProcessId}, verifying startup...");
 
                     // Wait 3s to verify the process survives DLL init + CLR bootstrap.
-                    var waitResult = NativeMethods.WaitForSingleObject(pi.hProcess, 3000);
-                    if (waitResult == NativeMethods.WAIT_TIMEOUT)
+                    var waitResult = ProcessNativeMethods.WaitForSingleObject(pi.hProcess, 3000);
+                    if (waitResult == ProcessNativeMethods.WAIT_TIMEOUT)
                     {
                         // Process is still running after 3s — success
-                        NativeMethods.CloseHandle(pi.hProcess);
+                        ProcessNativeMethods.CloseHandle(pi.hProcess);
                         logger.Info($"UserSessionProcessLauncher: Successfully launched PID {pi.dwProcessId} in user session" +
                                    (attempt > 1 ? $" (after {attempt} attempts, {retryStopwatch.Elapsed.TotalSeconds:F0}s)" : ""));
                         return true;
                     }
 
                     // Process exited within 3s — check why
-                    NativeMethods.GetExitCodeProcess(pi.hProcess, out var exitCode);
-                    NativeMethods.CloseHandle(pi.hProcess);
+                    ProcessNativeMethods.GetExitCodeProcess(pi.hProcess, out var exitCode);
+                    ProcessNativeMethods.CloseHandle(pi.hProcess);
 
                     // 0x8007045A = ERROR_DLL_INIT_FAILED — profile or desktop issue.
                     // Retry until the desktop becomes accessible or we exceed the retry window.
@@ -217,11 +218,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             finally
             {
                 if (environment != IntPtr.Zero)
-                    NativeMethods.DestroyEnvironmentBlock(environment);
+                    ProcessNativeMethods.DestroyEnvironmentBlock(environment);
                 if (dupToken != IntPtr.Zero)
-                    NativeMethods.CloseHandle(dupToken);
+                    ProcessNativeMethods.CloseHandle(dupToken);
                 if (userToken != IntPtr.Zero)
-                    NativeMethods.CloseHandle(userToken);
+                    ProcessNativeMethods.CloseHandle(userToken);
             }
         }
 
@@ -354,97 +355,5 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             return false;
         }
 
-        /// <summary>
-        /// Win32 P/Invoke declarations for process creation in user session.
-        /// </summary>
-        private static class NativeMethods
-        {
-            public const uint CREATE_UNICODE_ENVIRONMENT = 0x00000400;
-            public const int STARTF_USESHOWWINDOW = 0x00000001;
-            public const int STARTF_FORCEONFEEDBACK = 0x00000040;
-            public const short SW_SHOW = 5;
-            public const uint WAIT_TIMEOUT = 258;
-            public const uint MAXIMUM_ALLOWED = 0x02000000;
-            public const int SECURITY_IMPERSONATION = 2;
-            public const int TOKEN_PRIMARY = 1;
-            public const int TokenSessionId = 12;
-
-            [StructLayout(LayoutKind.Sequential)]
-            public struct SECURITY_ATTRIBUTES
-            {
-                public int nLength;
-                public IntPtr lpSecurityDescriptor;
-                public bool bInheritHandle;
-            }
-
-            [StructLayout(LayoutKind.Sequential)]
-            public struct STARTUPINFO
-            {
-                public int cb;
-                public string lpReserved;
-                public string lpDesktop;
-                public string lpTitle;
-                public int dwX;
-                public int dwY;
-                public int dwXSize;
-                public int dwYSize;
-                public int dwXCountChars;
-                public int dwYCountChars;
-                public int dwFillAttribute;
-                public int dwFlags;
-                public short wShowWindow;
-                public short cbReserved2;
-                public IntPtr lpReserved2;
-                public IntPtr hStdInput;
-                public IntPtr hStdOutput;
-                public IntPtr hStdError;
-            }
-
-            [StructLayout(LayoutKind.Sequential)]
-            public struct PROCESS_INFORMATION
-            {
-                public IntPtr hProcess;
-                public IntPtr hThread;
-                public int dwProcessId;
-                public int dwThreadId;
-            }
-
-            [DllImport("Wtsapi32.dll", SetLastError = true)]
-            public static extern bool WTSQueryUserToken(uint SessionId, out IntPtr phToken);
-
-            [DllImport("advapi32.dll", SetLastError = true)]
-            public static extern bool DuplicateTokenEx(
-                IntPtr hExistingToken, uint dwDesiredAccess, IntPtr lpTokenAttributes,
-                int ImpersonationLevel, int TokenType, out IntPtr phNewToken);
-
-            [DllImport("advapi32.dll", SetLastError = true)]
-            public static extern bool SetTokenInformation(
-                IntPtr TokenHandle, int TokenInformationClass,
-                ref uint TokenInformation, uint TokenInformationLength);
-
-            [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-            public static extern bool CreateProcessAsUser(
-                IntPtr hToken, string lpApplicationName, string lpCommandLine,
-                ref SECURITY_ATTRIBUTES lpProcessAttributes,
-                ref SECURITY_ATTRIBUTES lpThreadAttributes,
-                bool bInheritHandles, uint dwCreationFlags,
-                IntPtr lpEnvironment, string lpCurrentDirectory,
-                ref STARTUPINFO lpStartupInfo, out PROCESS_INFORMATION lpProcessInformation);
-
-            [DllImport("userenv.dll", SetLastError = true)]
-            public static extern bool CreateEnvironmentBlock(out IntPtr lpEnvironment, IntPtr hToken, bool bInherit);
-
-            [DllImport("userenv.dll", SetLastError = true)]
-            public static extern bool DestroyEnvironmentBlock(IntPtr lpEnvironment);
-
-            [DllImport("kernel32.dll", SetLastError = true)]
-            public static extern bool CloseHandle(IntPtr hObject);
-
-            [DllImport("kernel32.dll")]
-            public static extern uint WaitForSingleObject(IntPtr hHandle, uint dwMilliseconds);
-
-            [DllImport("kernel32.dll", SetLastError = true)]
-            public static extern bool GetExitCodeProcess(IntPtr hProcess, out uint lpExitCode);
-        }
     }
 }
