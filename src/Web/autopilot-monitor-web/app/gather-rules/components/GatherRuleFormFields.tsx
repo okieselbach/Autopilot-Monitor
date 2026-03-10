@@ -204,9 +204,25 @@ export function GatherRuleFormFields({ form, setForm, showRuleId }: GatherRuleFo
         </div>
       )}
 
-      {/* LogParser: required pattern + optional settings */}
+      {/* LogParser: format, pattern, max lines, track position */}
       {form.collectorType === "logparser" && (
         <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Log Format</label>
+            <select
+              value={form.logFormat}
+              onChange={(e) => setForm({ ...form, logFormat: e.target.value })}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+            >
+              <option value="cmtrace">CMTrace (default)</option>
+              <option value="text">Plain Text</option>
+            </select>
+            <p className="text-xs text-gray-400 mt-1">
+              {form.logFormat === "cmtrace"
+                ? "Parses CMTrace-format logs. Regex is matched against the message field. Extracts timestamp, component, and log type."
+                : "Parses plain text files line by line. Regex is matched against the raw line. Use for any text-based log format."}
+            </p>
+          </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Pattern <span className="text-red-500">*</span>
@@ -215,7 +231,9 @@ export function GatherRuleFormFields({ form, setForm, showRuleId }: GatherRuleFo
               type="text"
               value={form.logPattern}
               onChange={(e) => setForm({ ...form, logPattern: e.target.value })}
-              placeholder={`e.g., (?<action>Install|Uninstall).*(?<appName>[A-Za-z0-9_-]+)`}
+              placeholder={form.logFormat === "text"
+                ? `e.g., (?<timestamp>\\d{4}-\\d{2}-\\d{2}).*(?<level>ERROR|WARN|INFO).*(?<message>.*)`
+                : `e.g., (?<action>Install|Uninstall).*(?<appName>[A-Za-z0-9_-]+)`}
               autoComplete="off"
               className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
             />
@@ -233,7 +251,7 @@ export function GatherRuleFormFields({ form, setForm, showRuleId }: GatherRuleFo
                 placeholder="1000"
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
               />
-              <p className="text-xs text-gray-400 mt-1">Max lines to parse per execution (default: 1000).</p>
+              <p className="text-xs text-gray-400 mt-1">Max lines to parse per file per execution (default: 1000).</p>
             </div>
             <div className="flex flex-col justify-center">
               <label className="flex items-center gap-2 cursor-pointer mt-4">

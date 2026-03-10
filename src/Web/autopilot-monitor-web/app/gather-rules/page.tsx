@@ -181,6 +181,7 @@ export default function GatherRulesPage() {
     }
     if (form.collectorType === "logparser") {
       if (form.logPattern) params.pattern = form.logPattern;
+      if (form.logFormat && form.logFormat !== "cmtrace") params.format = form.logFormat;
       params.trackPosition = form.trackPosition ? "true" : "false";
       if (form.maxLines) params.maxLines = form.maxLines;
     }
@@ -255,6 +256,7 @@ export default function GatherRulesPage() {
       source: rule.parameters?.source || "",
       readContent: rule.parameters?.readContent === "true",
       logPattern: rule.parameters?.pattern || "",
+      logFormat: rule.parameters?.format || "cmtrace",
       trackPosition: rule.parameters?.trackPosition !== "false",
       maxLines: rule.parameters?.maxLines || "",
       jsonPath: rule.parameters?.jsonpath || "",

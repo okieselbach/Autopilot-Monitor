@@ -284,27 +284,49 @@ export function SectionGatherRules() {
           <p className="font-semibold text-sm text-gray-900">Log Parser</p>
         </div>
         <div className="px-4 py-4 space-y-3 text-sm text-gray-700">
-          <p>Parses <strong>CMTrace-format</strong> log files using regex patterns with named capture groups.
-          Each match emits a separate event. Supports position tracking to resume from the last read position.</p>
+          <p>Parses log files using regex patterns with named capture groups.
+          Each match emits a separate event. Supports <strong>CMTrace</strong> format (default) and <strong>plain text</strong> mode.
+          Supports position tracking to resume from the last read position.</p>
           <div>
             <p className="font-medium text-gray-900">Target</p>
-            <p>Path to a CMTrace-format log file. Environment variables are expanded.</p>
-            <code className="block mt-1 bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs">%ProgramData%\Microsoft\IntuneManagementExtension\Logs\AppWorkload.log</code>
+            <p>Path to a log file. Environment variables are expanded. Supports <strong>wildcards</strong> (<code className="bg-gray-100 px-1 rounded">*</code> and <code className="bg-gray-100 px-1 rounded">?</code>) in the filename to match multiple files.</p>
+            <div className="mt-1 bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs font-mono space-y-0.5">
+              <p>%ProgramData%\Microsoft\IntuneManagementExtension\Logs\AppWorkload.log</p>
+              <p className="text-gray-400"># Wildcard examples:</p>
+              <p>%ProgramData%\Microsoft\IntuneManagementExtension\Logs\AppWorkload*.log</p>
+              <p>C:\Windows\Logs\CBS\CBS-??????.log</p>
+            </div>
+            <p className="text-xs text-gray-400 mt-1">Wildcard matches are sorted by last write time (newest first), capped at 20 files. Position tracking works per file.</p>
           </div>
           <div>
             <p className="font-medium text-gray-900">Parameters</p>
             <ul className="list-disc ml-5 space-y-1">
               <li><code className="bg-gray-100 px-1 rounded">pattern</code> <span className="text-red-500">(required)</span> — Regex with named capture groups, e.g., <code className="bg-gray-100 px-1 rounded">{`(?<appName>\\w+)`}</code></li>
+              <li><code className="bg-gray-100 px-1 rounded">format</code> — <code className="bg-gray-100 px-1 rounded">cmtrace</code> (default) or <code className="bg-gray-100 px-1 rounded">text</code>.
+                CMTrace mode parses log structure and matches regex against the message field.
+                Text mode matches regex directly against each raw line.</li>
               <li><code className="bg-gray-100 px-1 rounded">trackPosition</code> — <code className="bg-gray-100 px-1 rounded">true</code> (default) to resume from last read position across executions.</li>
-              <li><code className="bg-gray-100 px-1 rounded">maxLines</code> — Max lines to read per execution (default: 1000).</li>
+              <li><code className="bg-gray-100 px-1 rounded">maxLines</code> — Max lines to read per file per execution (default: 1000).</li>
             </ul>
           </div>
-          <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
-            <p className="font-semibold text-green-900 text-xs mb-1">Example — IME App Workload Parsing</p>
-            <div className="mt-1 text-xs space-y-0.5">
-              <p>Target: <strong>%ProgramData%\Microsoft\IntuneManagementExtension\Logs\AppWorkload.log</strong></p>
-              <p>Pattern: <strong>{`(?<action>Install|Uninstall).*(?<appName>[A-Za-z0-9_-]+)`}</strong></p>
-              <p>Trigger: <strong>Interval</strong> → 30 seconds</p>
+          <div className="space-y-2">
+            <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
+              <p className="font-semibold text-green-900 text-xs mb-1">Example — CMTrace: IME App Workload</p>
+              <div className="mt-1 text-xs space-y-0.5">
+                <p>Target: <strong>%ProgramData%\Microsoft\IntuneManagementExtension\Logs\AppWorkload.log</strong></p>
+                <p>Format: <strong>CMTrace</strong> (default)</p>
+                <p>Pattern: <strong>{`(?<action>Install|Uninstall).*(?<appName>[A-Za-z0-9_-]+)`}</strong></p>
+                <p>Trigger: <strong>Interval</strong> → 30 seconds</p>
+              </div>
+            </div>
+            <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
+              <p className="font-semibold text-green-900 text-xs mb-1">Example — Plain Text: CBS Logs with Wildcard</p>
+              <div className="mt-1 text-xs space-y-0.5">
+                <p>Target: <strong>C:\Windows\Logs\CBS\CBS*.log</strong></p>
+                <p>Format: <strong>Text</strong></p>
+                <p>Pattern: <strong>{`(?<timestamp>\\d{4}-\\d{2}-\\d{2}).*(?<level>Error|Warning).*(?<message>.*)`}</strong></p>
+                <p>Trigger: <strong>Startup</strong></p>
+              </div>
             </div>
           </div>
         </div>

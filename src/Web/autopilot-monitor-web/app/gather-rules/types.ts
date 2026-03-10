@@ -36,6 +36,7 @@ export interface NewRuleForm {
   source: string;
   readContent: boolean;
   logPattern: string;
+  logFormat: string;
   trackPosition: boolean;
   maxLines: string;
   jsonPath: string;
@@ -82,7 +83,7 @@ export const TARGET_PLACEHOLDERS: Record<string, string> = {
   wmi: "e.g., SELECT * FROM Win32_BIOS",
   file: "e.g., C:\\Windows\\Panther\\UnattendGC\\setupact.log",
   command_allowlisted: "e.g., Get-Tpm or dsregcmd /status",
-  logparser: "e.g., %ProgramData%\\Microsoft\\IntuneManagementExtension\\Logs\\AppWorkload.log",
+  logparser: "e.g., %ProgramData%\\Microsoft\\IntuneManagementExtension\\Logs\\AppWorkload*.log",
   json: "e.g., C:\\ProgramData\\Microsoft\\IntuneManagementExtension\\Logs\\config.json",
   xml: "e.g., C:\\Windows\\Panther\\unattend.xml",
 };
@@ -93,7 +94,7 @@ export const TARGET_HINTS: Record<string, string> = {
   wmi: "Full WQL query (SELECT * FROM ...). Must use an allowed WMI class.",
   file: "File path. Environment variables like %ProgramData% are supported. Must be within allowed directories.",
   command_allowlisted: "Exact command string from the agent's allowlist. Custom commands are not permitted.",
-  logparser: "Path to a CMTrace-format log file. Environment variables are expanded. Requires a regex pattern in parameters.",
+  logparser: "Path to a log file. Supports wildcards (* and ?) in the filename, e.g. AppWorkload-*.log. Environment variables are expanded.",
   json: "Path to a JSON file. Environment variables supported. Must be within allowed directories. Use JSONPath to extract values.",
   xml: "Path to an XML file. Environment variables supported. Must be within allowed directories. Use XPath to extract values.",
 };
@@ -112,6 +113,7 @@ export const EMPTY_FORM: NewRuleForm = {
   source: "",
   readContent: false,
   logPattern: "",
+  logFormat: "cmtrace",
   trackPosition: true,
   maxLines: "",
   jsonPath: "",

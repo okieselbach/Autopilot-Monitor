@@ -491,6 +491,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             if (rule.Parameters.TryGetValue("maxLines", out maxLinesStr))
                 int.TryParse(maxLinesStr, out maxLines);
 
+            // Determine format: "cmtrace" (default) or "text" for plain text logs
+            string formatStr;
+            bool isTextMode = false;
+            if (rule.Parameters.TryGetValue("format", out formatStr))
+                isTextMode = string.Equals(formatStr, "text", StringComparison.OrdinalIgnoreCase);
+
             Regex pattern;
             try
             {
@@ -502,12 +508,55 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                 return;
             }
 
-            if (!File.Exists(filePath))
+            // Resolve file paths — supports wildcards (* and ?) in the filename portion
+            var resolvedPaths = ResolveLogPaths(filePath, rule.RuleId);
+            if (resolvedPaths.Count == 0)
             {
-                _logger.Debug($"LogParser rule {rule.RuleId}: file not found: {filePath}");
+                _logger.Debug($"LogParser rule {rule.RuleId}: no files found for: {filePath}");
                 return;
             }
 
+            foreach (var resolvedPath in resolvedPaths)
+            {
+                ProcessLogFile(resolvedPath, rule, pattern, trackPosition, maxLines, isTextMode);
+            }
+        }
+
+        private List<string> ResolveLogPaths(string filePath, string ruleId)
+        {
+            var fileNamePart = Path.GetFileName(filePath);
+
+            // No wildcards — single file
+            if (!fileNamePart.Contains("*") && !fileNamePart.Contains("?"))
+            {
+                if (File.Exists(filePath))
+                    return new List<string> { filePath };
+                return new List<string>();
+            }
+
+            // Wildcard expansion
+            var directory = Path.GetDirectoryName(filePath);
+            if (string.IsNullOrEmpty(directory) || !Directory.Exists(directory))
+                return new List<string>();
+
+            try
+            {
+                // Return matched files sorted by last write time (newest first), capped at 20
+                return Directory.GetFiles(directory, fileNamePart)
+                    .OrderByDescending(f => new FileInfo(f).LastWriteTimeUtc)
+                    .Take(20)
+                    .ToList();
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"LogParser rule {ruleId}: wildcard expansion failed for {filePath}: {ex.Message}");
+                return new List<string>();
+            }
+        }
+
+        private void ProcessLogFile(string filePath, GatherRule rule, Regex pattern,
+            bool trackPosition, int maxLines, bool isTextMode)
+        {
             try
             {
                 var fileInfo = new FileInfo(filePath);
@@ -534,58 +583,110 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                         {
                             linesRead++;
 
-                            CmTraceLogEntry entry;
-                            if (!CmTraceLogParser.TryParseLine(line, out entry))
-                                continue;
-
-                            Match match;
-                            try
+                            if (isTextMode)
                             {
-                                match = pattern.Match(entry.Message);
+                                // Text mode: match regex directly against the raw line
+                                Match match;
+                                try
+                                {
+                                    match = pattern.Match(line);
+                                }
+                                catch (RegexMatchTimeoutException)
+                                {
+                                    continue;
+                                }
+                                if (!match.Success)
+                                    continue;
+
+                                var data = new Dictionary<string, object>();
+                                foreach (var groupName in pattern.GetGroupNames())
+                                {
+                                    if (groupName == "0") continue;
+                                    var group = match.Groups[groupName];
+                                    if (group.Success)
+                                        data[groupName] = group.Value;
+                                }
+
+                                data["logLine"] = TruncateMessage(line, 500);
+                                data["logLineNumber"] = linesRead;
+                                data["logFile"] = Path.GetFileName(filePath);
+                                data["ruleId"] = rule.RuleId;
+                                data["ruleTitle"] = rule.Title;
+
+                                var eventType = !string.IsNullOrEmpty(rule.OutputEventType)
+                                    ? rule.OutputEventType
+                                    : "logparser_match";
+                                var severity = ParseSeverity(rule.OutputSeverity);
+
+                                _onEventCollected(new EnrollmentEvent
+                                {
+                                    SessionId = _sessionId,
+                                    TenantId = _tenantId,
+                                    Timestamp = DateTime.UtcNow,
+                                    EventType = eventType,
+                                    Severity = severity,
+                                    Source = "GatherRuleExecutor",
+                                    Message = $"Gather: {rule.Title}",
+                                    Data = data
+                                });
+
+                                matchCount++;
                             }
-                            catch (RegexMatchTimeoutException)
+                            else
                             {
-                                continue;
+                                // CMTrace mode: parse line as CMTrace format, match regex against message
+                                CmTraceLogEntry entry;
+                                if (!CmTraceLogParser.TryParseLine(line, out entry))
+                                    continue;
+
+                                Match match;
+                                try
+                                {
+                                    match = pattern.Match(entry.Message);
+                                }
+                                catch (RegexMatchTimeoutException)
+                                {
+                                    continue;
+                                }
+                                if (!match.Success)
+                                    continue;
+
+                                var data = new Dictionary<string, object>();
+                                foreach (var groupName in pattern.GetGroupNames())
+                                {
+                                    if (groupName == "0") continue;
+                                    var group = match.Groups[groupName];
+                                    if (group.Success)
+                                        data[groupName] = group.Value;
+                                }
+
+                                data["logTimestamp"] = entry.Timestamp.ToString("o");
+                                data["logComponent"] = entry.Component;
+                                data["logType"] = entry.Type;
+                                data["logMessage"] = TruncateMessage(entry.Message, 500);
+                                data["logFile"] = Path.GetFileName(filePath);
+                                data["ruleId"] = rule.RuleId;
+                                data["ruleTitle"] = rule.Title;
+
+                                var eventType = !string.IsNullOrEmpty(rule.OutputEventType)
+                                    ? rule.OutputEventType
+                                    : "logparser_match";
+                                var severity = MapCmTraceTypeToSeverity(entry.Type, rule.OutputSeverity);
+
+                                _onEventCollected(new EnrollmentEvent
+                                {
+                                    SessionId = _sessionId,
+                                    TenantId = _tenantId,
+                                    Timestamp = entry.Timestamp,
+                                    EventType = eventType,
+                                    Severity = severity,
+                                    Source = "GatherRuleExecutor",
+                                    Message = $"Gather: {rule.Title}",
+                                    Data = data
+                                });
+
+                                matchCount++;
                             }
-                            if (!match.Success)
-                                continue;
-
-                            // Build data dictionary from named capture groups
-                            var data = new Dictionary<string, object>();
-                            foreach (var groupName in pattern.GetGroupNames())
-                            {
-                                if (groupName == "0") continue; // Skip full match group
-                                var group = match.Groups[groupName];
-                                if (group.Success)
-                                    data[groupName] = group.Value;
-                            }
-
-                            // Add CMTrace metadata
-                            data["logTimestamp"] = entry.Timestamp.ToString("o");
-                            data["logComponent"] = entry.Component;
-                            data["logType"] = entry.Type;
-                            data["logMessage"] = TruncateMessage(entry.Message, 500);
-                            data["ruleId"] = rule.RuleId;
-                            data["ruleTitle"] = rule.Title;
-
-                            var eventType = !string.IsNullOrEmpty(rule.OutputEventType)
-                                ? rule.OutputEventType
-                                : "logparser_match";
-                            var severity = MapCmTraceTypeToSeverity(entry.Type, rule.OutputSeverity);
-
-                            _onEventCollected(new EnrollmentEvent
-                            {
-                                SessionId = _sessionId,
-                                TenantId = _tenantId,
-                                Timestamp = entry.Timestamp,
-                                EventType = eventType,
-                                Severity = severity,
-                                Source = "GatherRuleExecutor",
-                                Message = $"Gather: {rule.Title}",
-                                Data = data
-                            });
-
-                            matchCount++;
                         }
 
                         // Capture the final stream position after reading
