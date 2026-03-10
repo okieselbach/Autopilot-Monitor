@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics.Eventing.Reader;
 using System.Threading;
 using AutopilotMonitor.Agent.Core.Logging;
+using AutopilotMonitor.Agent.Core.Monitoring.Core;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Win32;
 
@@ -36,8 +37,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         private System.Threading.Timer _policyCheckTimer;
         private System.Threading.Timer _helloWaitTimer;
         private System.Threading.Timer _helloCompletionTimer;
-        private Thread _registryWatcherThread;
-        private IntPtr _registryWatcherStopEvent = IntPtr.Zero;
+        private RegistryWatcher _provisioningWatcher;
+        private System.Threading.Timer _provisioningWatcherRetryTimer;
 
         private bool _isPolicyConfigured = false;
         private bool _isHelloPolicyEnabled = false; // true when Hello policy is explicitly detected as enabled

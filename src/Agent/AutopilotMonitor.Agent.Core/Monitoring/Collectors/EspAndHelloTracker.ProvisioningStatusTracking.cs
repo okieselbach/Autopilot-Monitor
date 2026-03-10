@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
-using System.Threading;
+using AutopilotMonitor.Agent.Core.Monitoring.Core;
 using AutopilotMonitor.Agent.Core.Monitoring.Interop;
 using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.Models;
@@ -30,7 +30,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
     ///   - Emit once when categorySucceeded resolves to true or false (final outcome)
     ///   - Fire EspFailureDetected on subcategory failure even if categorySucceeded is still null
     ///
-    /// Uses RegNotifyChangeKeyValue for instant registry change detection (no polling timer).
+    /// Uses RegistryWatcher (RegNotifyChangeKeyValue) for instant registry change detection.
     /// </summary>
     public partial class EspAndHelloTracker
     {
@@ -65,159 +65,80 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             _provisioningCategoriesResolved = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             _lastSubcategoryStates = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
 
-            _registryWatcherStopEvent = RegistryWatcherNativeMethods.CreateEvent(IntPtr.Zero, true, false, null);
-            if (_registryWatcherStopEvent == IntPtr.Zero)
+            // Try to start immediately; if key doesn't exist yet, retry every 2s
+            if (!TryStartProvisioningWatcher())
             {
-                _logger.Warning("Failed to create registry watcher stop event — provisioning status tracking disabled");
-                return;
-            }
-
-            _registryWatcherThread = new Thread(RegistryWatcherLoop)
-            {
-                IsBackground = true,
-                Name = "ProvisioningStatusWatcher"
-            };
-            _registryWatcherThread.Start();
-
-            _logger.Info("Provisioning status registry watcher started");
-        }
-
-        private void StopProvisioningStatusWatcher(string reason)
-        {
-            if (_registryWatcherStopEvent == IntPtr.Zero)
-                return;
-
-            try
-            {
-                // Signal stop event to wake up the watcher thread
-                RegistryWatcherNativeMethods.SetEvent(_registryWatcherStopEvent);
-
-                // Wait for thread to exit
-                if (_registryWatcherThread != null && _registryWatcherThread.IsAlive)
-                {
-                    _registryWatcherThread.Join(TimeSpan.FromSeconds(3));
-                }
-
-                RegistryWatcherNativeMethods.CloseHandle(_registryWatcherStopEvent);
-                _registryWatcherStopEvent = IntPtr.Zero;
-                _registryWatcherThread = null;
-
-                _logger.Info($"Provisioning status watcher stopped: {reason}");
-            }
-            catch (Exception ex)
-            {
-                _logger.Error("Error stopping provisioning status watcher", ex);
+                _logger.Info("Provisioning status registry key not yet present — retrying every 2s");
+                _provisioningWatcherRetryTimer = new System.Threading.Timer(
+                    _ =>
+                    {
+                        if (TryStartProvisioningWatcher())
+                        {
+                            _provisioningWatcherRetryTimer?.Dispose();
+                            _provisioningWatcherRetryTimer = null;
+                        }
+                    },
+                    null,
+                    TimeSpan.FromSeconds(2),
+                    TimeSpan.FromSeconds(2));
             }
         }
 
         /// <summary>
-        /// Background thread: opens the provisioning registry key and waits for value changes
-        /// via RegNotifyChangeKeyValue. Falls back to retry loop if key doesn't exist yet.
+        /// Attempts to create and start the RegistryWatcher for the provisioning key.
+        /// Returns false if the key doesn't exist yet.
         /// </summary>
-        private void RegistryWatcherLoop()
+        private bool TryStartProvisioningWatcher()
         {
-            IntPtr hKey = IntPtr.Zero;
-            IntPtr hNotifyEvent = IntPtr.Zero;
-
             try
             {
-                // Wait for registry key to appear (enrollment may not have started yet)
-                while (true)
+                using (var key = Registry.LocalMachine.OpenSubKey(ProvisioningStatusRegistryPath))
                 {
-                    int result = RegistryWatcherNativeMethods.RegOpenKeyEx(
-                        RegistryWatcherNativeMethods.HKEY_LOCAL_MACHINE,
-                        ProvisioningStatusRegistryPath,
-                        0,
-                        RegistryWatcherNativeMethods.KEY_NOTIFY | RegistryWatcherNativeMethods.KEY_READ,
-                        out hKey);
-
-                    if (result == 0)
-                        break;
-
-                    // Key doesn't exist yet — wait 2 seconds or until stop signaled
-                    uint waitResult = RegistryWatcherNativeMethods.WaitForSingleObject(_registryWatcherStopEvent, 2000);
-                    if (waitResult == RegistryWatcherNativeMethods.WAIT_OBJECT_0)
-                        return; // Stop requested
+                    if (key == null)
+                        return false;
                 }
 
-                // Capture initial state before notification loop.
-                // Any changes between this read and the first RegNotifyChangeKeyValue registration
-                // are covered by the 15s heartbeat fallback.
+                // Capture initial state before watcher starts
                 CheckProvisioningStatus();
 
-                // Create notification event
-                hNotifyEvent = RegistryWatcherNativeMethods.CreateEvent(IntPtr.Zero, false, false, null);
-                if (hNotifyEvent == IntPtr.Zero)
+                // Create and start watcher
+                _provisioningWatcher = new RegistryWatcher(
+                    RegistryHive.LocalMachine,
+                    ProvisioningStatusRegistryPath,
+                    watchSubtree: true,
+                    filter: RegistryNativeMethods.RegChangeNotifyFilter.LastSet);
+
+                _provisioningWatcher.Changed += (s, e) => CheckProvisioningStatus();
+                _provisioningWatcher.Error += (s, ex) => _logger.Warning($"Provisioning watcher handler error: {ex.Message}");
+
+                _provisioningWatcher.Start();
+                _logger.Info("Provisioning status registry watcher started");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"Failed to start provisioning watcher: {ex.Message}");
+                return false;
+            }
+        }
+
+        private void StopProvisioningStatusWatcher(string reason)
+        {
+            try
+            {
+                _provisioningWatcherRetryTimer?.Dispose();
+                _provisioningWatcherRetryTimer = null;
+
+                if (_provisioningWatcher != null)
                 {
-                    _logger.Warning("Failed to create registry notify event — watcher thread exiting");
-                    return;
-                }
-
-                var waitHandles = new[] { hNotifyEvent, _registryWatcherStopEvent };
-
-                // Main watch loop: register → wait → read
-                // IMPORTANT: CheckProvisioningStatus() must run AFTER WaitForMultipleObjects, not between
-                // RegNotifyChangeKeyValue and Wait. The managed Registry.OpenSubKey() call interferes with
-                // pending RegNotifyChangeKeyValue notifications when called before Wait (proven in Build 416).
-                // The 15s heartbeat ensures changes are detected even if a notification is missed.
-                const uint heartbeatMs = 15_000;
-
-                while (true)
-                {
-                    // 1. Register for value change notifications
-                    int regResult = RegistryWatcherNativeMethods.RegNotifyChangeKeyValue(
-                        hKey,
-                        true,  // Watch subtree
-                        RegistryWatcherNativeMethods.REG_NOTIFY_CHANGE_LAST_SET,
-                        hNotifyEvent,
-                        true); // Asynchronous
-
-                    if (regResult != 0)
-                    {
-                        _logger.Warning($"RegNotifyChangeKeyValue failed (error {regResult}) — watcher thread exiting");
-                        return;
-                    }
-
-                    // 2. Wait for registry change notification or heartbeat timeout
-                    uint waitResult = RegistryWatcherNativeMethods.WaitForMultipleObjects(
-                        (uint)waitHandles.Length,
-                        waitHandles,
-                        false,
-                        heartbeatMs);
-
-                    if (waitResult == RegistryWatcherNativeMethods.WAIT_OBJECT_0)
-                    {
-                        // Registry notification fired — instant detection
-                        _logger.Debug("Provisioning status watcher: registry change notification received");
-                    }
-                    else if (waitResult == RegistryWatcherNativeMethods.WAIT_OBJECT_0 + 1)
-                    {
-                        return; // Stop requested
-                    }
-                    else if (waitResult == RegistryWatcherNativeMethods.WAIT_TIMEOUT)
-                    {
-                        // Heartbeat — re-read to catch any missed notifications
-                    }
-                    else
-                    {
-                        _logger.Warning($"Registry watcher unexpected wait result: {waitResult} — exiting");
-                        return;
-                    }
-
-                    // 3. Read current state AFTER wait (not between register and wait)
-                    CheckProvisioningStatus();
+                    _provisioningWatcher.Dispose();
+                    _provisioningWatcher = null;
+                    _logger.Info($"Provisioning status watcher stopped: {reason}");
                 }
             }
             catch (Exception ex)
             {
-                _logger.Warning($"Registry watcher thread failed: {ex.Message}");
-            }
-            finally
-            {
-                if (hNotifyEvent != IntPtr.Zero)
-                    RegistryWatcherNativeMethods.CloseHandle(hNotifyEvent);
-                if (hKey != IntPtr.Zero)
-                    RegistryWatcherNativeMethods.RegCloseKey(hKey);
+                _logger.Error("Error stopping provisioning status watcher", ex);
             }
         }
 
@@ -255,16 +176,15 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                             }
                         }
 
-                        // Self-termination: only auto-stop when all categories resolved with success (no failures)
-                        // Signal the stop event directly (we're on the watcher thread — can't call StopProvisioningStatusWatcher
-                        // which would Join() on ourselves)
+                        // Self-termination: only auto-stop when all categories resolved with success (no failures).
+                        // Uses RequestStop() which is safe to call from within the Changed handler (non-blocking).
                         if (_provisioningCategoriesResolved.Count > 0
                             && _lastProvisioningJson.Count > 0
                             && _provisioningCategoriesResolved.Count >= _lastProvisioningJson.Count
                             && !_provisioningFailureFired.Any())
                         {
-                            _logger.Info("Provisioning status watcher: all categories resolved with success — signaling stop");
-                            RegistryWatcherNativeMethods.SetEvent(_registryWatcherStopEvent);
+                            _logger.Info("Provisioning status watcher: all categories resolved with success — requesting stop");
+                            _provisioningWatcher?.RequestStop();
                         }
 
                         // Fire EspFailureDetected AFTER event emission
