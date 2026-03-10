@@ -132,7 +132,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                         out hKey);
 
                     if (result == 0)
-                        break; // Key opened successfully
+                    {
+                        _logger.Info("Provisioning status registry key opened successfully");
+                        break;
+                    }
 
                     // Key doesn't exist yet — wait 2 seconds or until stop signaled
                     uint waitResult = RegistryWatcherNativeMethods.WaitForSingleObject(_registryWatcherStopEvent, 2000);
@@ -140,10 +143,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                         return; // Stop requested
                 }
 
-                // Do an initial check now that the key exists
-                CheckProvisioningStatus();
-
-                // Create notification event
+                // Create notification event BEFORE first read (standard RegNotifyChangeKeyValue pattern)
                 hNotifyEvent = RegistryWatcherNativeMethods.CreateEvent(IntPtr.Zero, false, false, null);
                 if (hNotifyEvent == IntPtr.Zero)
                 {
@@ -153,10 +153,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 
                 var waitHandles = new[] { hNotifyEvent, _registryWatcherStopEvent };
 
-                // Main watch loop
+                // Main watch loop: register → read → wait (prevents race condition between read and register)
                 while (true)
                 {
-                    // Register for value change notifications
+                    // 1. Register for value change notifications FIRST
                     int regResult = RegistryWatcherNativeMethods.RegNotifyChangeKeyValue(
                         hKey,
                         true,  // Watch subtree
@@ -170,7 +170,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                         return;
                     }
 
-                    // Wait for either a registry change or stop signal
+                    // 2. Read current state (catches existing values + anything that changed since registration)
+                    CheckProvisioningStatus();
+
+                    // 3. Wait for NEXT change (if a change happened between register and read,
+                    //    the notification is already pending and this returns immediately)
                     uint waitResult = RegistryWatcherNativeMethods.WaitForMultipleObjects(
                         (uint)waitHandles.Length,
                         waitHandles,
@@ -179,12 +183,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 
                     if (waitResult == RegistryWatcherNativeMethods.WAIT_OBJECT_0)
                     {
-                        // Registry changed — check status
-                        CheckProvisioningStatus();
+                        // Registry changed — loop continues: re-register → read → wait
                     }
                     else if (waitResult == RegistryWatcherNativeMethods.WAIT_OBJECT_0 + 1)
                     {
                         // Stop requested
+                        _logger.Info("Provisioning status watcher thread: stop event received");
                         return;
                     }
                     else
@@ -243,12 +247,15 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                         }
 
                         // Self-termination: only auto-stop when all categories resolved with success (no failures)
+                        // Signal the stop event directly (we're on the watcher thread — can't call StopProvisioningStatusWatcher
+                        // which would Join() on ourselves)
                         if (_provisioningCategoriesResolved.Count > 0
                             && _lastProvisioningJson.Count > 0
                             && _provisioningCategoriesResolved.Count >= _lastProvisioningJson.Count
                             && !_provisioningFailureFired.Any())
                         {
-                            StopProvisioningStatusWatcher("all_resolved_success");
+                            _logger.Info("Provisioning status watcher: all categories resolved with success — signaling stop");
+                            RegistryWatcherNativeMethods.SetEvent(_registryWatcherStopEvent);
                         }
 
                         // Fire EspFailureDetected AFTER event emission
