@@ -189,12 +189,19 @@ namespace AutopilotMonitor.SummaryDialog
 
                 Log($"SelfCleanup: spawning PowerShell to delete '{exeDir}' after PID {pid} exits");
 
+                // WorkingDirectory MUST NOT be exeDir — on Windows a process cannot
+                // delete a directory that is its own CWD.  When the agent launches
+                // the dialog via CreateProcessAsUser it sets CWD = exeDir, and
+                // PowerShell would inherit that, making Remove-Item silently fail.
+                var safeDir = Environment.GetFolderPath(Environment.SpecialFolder.System);
+
                 Process.Start(new ProcessStartInfo
                 {
                     FileName = psExe,
                     Arguments = $"-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand {encoded}",
                     UseShellExecute = true,
-                    WindowStyle = ProcessWindowStyle.Hidden
+                    WindowStyle = ProcessWindowStyle.Hidden,
+                    WorkingDirectory = safeDir
                 });
 
                 Log("SelfCleanup: cleanup process started");
