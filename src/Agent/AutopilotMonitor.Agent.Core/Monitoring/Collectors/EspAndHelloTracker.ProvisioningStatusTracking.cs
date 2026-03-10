@@ -132,10 +132,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                         out hKey);
 
                     if (result == 0)
-                    {
-                        _logger.Info("Provisioning status registry key opened successfully");
                         break;
-                    }
 
                     // Key doesn't exist yet — wait 2 seconds or until stop signaled
                     uint waitResult = RegistryWatcherNativeMethods.WaitForSingleObject(_registryWatcherStopEvent, 2000);
@@ -187,9 +184,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     }
                     else if (waitResult == RegistryWatcherNativeMethods.WAIT_OBJECT_0 + 1)
                     {
-                        // Stop requested
-                        _logger.Info("Provisioning status watcher thread: stop event received");
-                        return;
+                        return; // Stop requested
                     }
                     else
                     {
@@ -332,16 +327,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     }
                     else
                     {
-                        // Check for meaningful subcategory state transitions
+                        // Check for subcategory failure transitions (only failures trigger events — success transitions are expected noise)
                         var transitions = DetectSubcategoryTransitions(categoryName, subcategories);
                         StoreSubcategoryStates(categoryName, subcategories);
 
-                        if (transitions.Count > 0)
+                        var failureTransitions = transitions.Where(t => t.IsFailure).ToList();
+                        if (failureTransitions.Count > 0)
                         {
-                            // Emit updated status with transition details
-                            var hasFailure = transitions.Any(t => t.IsFailure);
-                            var severity = hasFailure ? EventSeverity.Warning : EventSeverity.Info;
-                            EmitProvisioningEvent(categoryLabel, categorySucceeded, statusText, subcategories, severity, transitions);
+                            EmitProvisioningEvent(categoryLabel, categorySucceeded, statusText, subcategories, EventSeverity.Warning, failureTransitions);
                         }
                     }
 
