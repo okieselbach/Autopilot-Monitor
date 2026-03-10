@@ -35,6 +35,17 @@ interface EnrollmentEvent {
   data?: Record<string, any>;
 }
 
+function formatDuration(ms: number): string {
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  if (minutes < 60) return `${minutes}m ${remainingSeconds}s`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return `${hours}h ${remainingMinutes}m`;
+}
+
 const phaseSteps = [
   { id: 0, label: "Setup start", shortLabel: "Start" },
   { id: 1, label: "Device preparation", shortLabel: "Preparation" },
@@ -351,6 +362,78 @@ export default function ProgressPortalPage() {
     // No active download — return just the counter so it stays visible
     return { appName: null, bytesDownloaded: 0, bytesTotal: 0, downloadRateBps: 0, isComplete: true, completedCount, active: false };
   }, [events]);
+
+  // Derive current app install state from app_install_* events
+  const currentInstall = useMemo(() => {
+    const installTypes = new Set(["app_install_started", "app_install_completed", "app_install_failed", "app_install_skipped"]);
+    const installEvents = events.filter((e) => installTypes.has(e.eventType));
+    if (installEvents.length === 0) return null;
+
+    const sorted = [...installEvents].sort(
+      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
+
+    const appState = new Map<string, { state: string; startedAt?: string }>();
+    for (const evt of sorted) {
+      const d = evt.data;
+      if (!d) continue;
+      const appName = d.appName ?? d.app_name ?? d.appId ?? d.app_id ?? null;
+      if (!appName) continue;
+      const existing = appState.get(appName);
+
+      if (evt.eventType === "app_install_started") {
+        if (existing?.state === "Installed") continue;
+        appState.set(appName, { state: "Installing", startedAt: evt.timestamp });
+      } else if (evt.eventType === "app_install_completed") {
+        if (existing?.state === "Installed") continue;
+        appState.set(appName, { state: "Installed" });
+      } else if (evt.eventType === "app_install_failed") {
+        if (existing?.state === "Installed") continue;
+        appState.set(appName, { state: "Failed" });
+      } else if (evt.eventType === "app_install_skipped") {
+        if (existing?.state === "Installed" || existing?.state === "Failed") continue;
+        appState.set(appName, { state: "Skipped" });
+      }
+    }
+
+    const entries = Array.from(appState.entries());
+    const completedCount = entries.filter(([, v]) => v.state === "Installed").length;
+    const failedCount = entries.filter(([, v]) => v.state === "Failed").length;
+    const totalCount = entries.filter(([, v]) => v.state !== "Skipped").length;
+
+    // Find currently installing app (last one in Installing state)
+    let activeApp: string | null = null;
+    let activeStartedAt: string | null = null;
+    for (const [name, v] of entries) {
+      if (v.state === "Installing") {
+        activeApp = name;
+        activeStartedAt = v.startedAt ?? null;
+      }
+    }
+
+    return {
+      appName: activeApp,
+      startedAt: activeStartedAt,
+      completedCount,
+      failedCount,
+      totalCount,
+      active: activeApp !== null,
+    };
+  }, [events]);
+
+  // Live timer for current install
+  const [installElapsedMs, setInstallElapsedMs] = useState<number | null>(null);
+  useEffect(() => {
+    if (!currentInstall?.active || !currentInstall?.startedAt) {
+      setInstallElapsedMs(null);
+      return;
+    }
+    const startTime = new Date(currentInstall.startedAt).getTime();
+    const tick = () => setInstallElapsedMs(Date.now() - startTime);
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [currentInstall?.active, currentInstall?.startedAt]);
 
   // Derive progress
   const overallProgress = session
@@ -693,16 +776,13 @@ export default function ProgressPortalPage() {
                   })}
                 </div>
 
-                {/* Estimated Time / Active Download / Status */}
-                {session.status === "InProgress" && currentDownload && (
-                  <div className="bg-blue-50 rounded-lg p-4">
-                    {currentDownload.completedCount > 0 && (
-                      <p className="text-xs text-blue-500 mb-2">
-                        {currentDownload.completedCount} App installs completed
-                      </p>
-                    )}
-                    {currentDownload.active && currentDownload.appName && (
-                      <>
+                {/* Activity Details / Estimated Time */}
+                {session.status === "InProgress" && (currentDownload?.active || currentInstall?.active || currentInstall?.completedCount || estimatedRemaining) && (
+                  <div className="bg-blue-50 rounded-lg p-4 space-y-3">
+                    {/* Download section */}
+                    {currentDownload?.active && currentDownload.appName && (
+                      <div>
+                        <p className="text-xs text-blue-500 mb-1 font-medium">Downloading</p>
                         <div className="flex items-center justify-between mb-1">
                           <span className="text-sm text-blue-700 font-medium truncate pr-2">
                             {currentDownload.appName}
@@ -739,19 +819,46 @@ export default function ProgressPortalPage() {
                             </div>
                           </>
                         )}
-                      </>
+                      </div>
                     )}
-                  </div>
-                )}
 
-                {session.status === "InProgress" && !currentDownload && estimatedRemaining != null && estimatedRemaining > 0 && (
-                  <div className="bg-blue-50 rounded-lg p-4 text-center">
-                    <div className="text-sm text-blue-700">
-                      Estimated time remaining:{" "}
-                      <span className="font-semibold">
-                        ~{estimatedRemaining} minutes
-                      </span>
-                    </div>
+                    {/* Install section */}
+                    {currentInstall && (currentInstall.active || currentInstall.completedCount > 0) && (
+                      <div>
+                        {currentInstall.active && currentInstall.appName && (
+                          <div className="flex items-center justify-between mb-1">
+                            <div className="flex items-center space-x-1.5 min-w-0">
+                              <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse flex-shrink-0" />
+                              <span className="text-sm text-blue-700 font-medium truncate">
+                                {currentInstall.appName}
+                              </span>
+                            </div>
+                            {installElapsedMs != null && installElapsedMs > 0 && (
+                              <span className="text-xs text-blue-600 font-medium tabular-nums flex-shrink-0 ml-2">
+                                {formatDuration(installElapsedMs)}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        <div className="flex items-center justify-between text-xs text-blue-500">
+                          <span>
+                            {currentInstall.completedCount}{currentInstall.failedCount > 0 ? ` + ${currentInstall.failedCount} failed` : ""} / {currentInstall.totalCount} apps installed
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Estimated time - only when no active download or install */}
+                    {!currentDownload?.active && !currentInstall?.active && estimatedRemaining != null && estimatedRemaining > 0 && (
+                      <div className="text-center">
+                        <div className="text-sm text-blue-700">
+                          Estimated time remaining:{" "}
+                          <span className="font-semibold">
+                            ~{estimatedRemaining} minutes
+                          </span>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
