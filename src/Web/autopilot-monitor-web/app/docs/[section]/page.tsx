@@ -4,6 +4,7 @@ import { NAV_SECTIONS, type SectionId } from "../docsNavSections";
 import { SectionPrivatePreview } from "../sections/SectionPrivatePreview";
 import { SectionOverview } from "../sections/SectionOverview";
 import { SectionSetup } from "../sections/SectionSetup";
+import { SectionAgent } from "../sections/SectionAgent";
 import { SectionAgentSetup } from "../sections/SectionAgentSetup";
 import { SectionSettings } from "../sections/SectionSettings";
 import { SectionGatherRules } from "../sections/SectionGatherRules";
@@ -13,6 +14,7 @@ const SECTION_COMPONENTS: Record<SectionId, React.ComponentType> = {
   "private-preview": SectionPrivatePreview,
   "overview":        SectionOverview,
   "setup":           SectionSetup,
+  "agent":           SectionAgent,
   "agent-setup":     SectionAgentSetup,
   "settings":        SectionSettings,
   "gather-rules":    SectionGatherRules,
