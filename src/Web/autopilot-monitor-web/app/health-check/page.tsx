@@ -2,7 +2,7 @@
 
 import { useAuth } from '@/contexts/AuthContext';
 import { useNotifications } from '@/contexts/NotificationContext';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { API_BASE_URL } from '@/lib/config';
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 
@@ -16,7 +16,6 @@ interface HealthCheck {
 
 interface HealthCheckResult {
   service: string;
-  version: string;
   timestamp: string;
   overallStatus: string;
   checks: HealthCheck[];
@@ -27,15 +26,16 @@ export default function HealthCheckPage() {
   const { addNotification } = useNotifications();
   const [healthResult, setHealthResult] = useState<HealthCheckResult | null>(null);
   const [loading, setLoading] = useState(false);
+  const [hasRun, setHasRun] = useState(false);
 
-  const performHealthCheck = async () => {
+  const performHealthCheck = useCallback(async () => {
     setLoading(true);
     try {
       const response = await authenticatedFetch(`${API_BASE_URL}/api/health/detailed`, getAccessToken);
 
       if (!response.ok) {
         if (response.status === 403) {
-          addNotification('error', 'Access Denied', 'Only Galactic Admins can access health checks', 'health-check-forbidden');
+          addNotification('error', 'Access Denied', 'You do not have permission to access health checks', 'health-check-forbidden');
         } else {
           addNotification('error', 'Health Check Failed', `Status: ${response.status}`, 'health-check-failed');
         }
@@ -44,12 +44,6 @@ export default function HealthCheckPage() {
 
       const data = await response.json();
       setHealthResult(data);
-
-      if (data.overallStatus === 'healthy') {
-        addNotification('success', 'Health Check Complete', 'All systems are healthy');
-      } else {
-        addNotification('warning', 'Health Check Complete', 'Some systems are unhealthy');
-      }
     } catch (error) {
       if (error instanceof TokenExpiredError) {
         addNotification('error', 'Session Expired', error.message, 'session-expired-error');
@@ -59,189 +53,159 @@ export default function HealthCheckPage() {
       }
     } finally {
       setLoading(false);
+      setHasRun(true);
     }
-  };
+  }, [getAccessToken, addNotification]);
+
+  // Auto-run health check on page load
+  useEffect(() => {
+    if (user && !hasRun) {
+      performHealthCheck();
+    }
+  }, [user, hasRun, performHealthCheck]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'healthy':
-        return 'text-green-600 bg-green-50 border-green-200';
-      case 'unhealthy':
-        return 'text-red-600 bg-red-50 border-red-200';
-      case 'warning':
-        return 'text-yellow-600 bg-yellow-50 border-yellow-200';
-      default:
-        return 'text-gray-600 bg-gray-50 border-gray-200';
+      case 'healthy': return { bg: 'bg-green-50', border: 'border-green-200', text: 'text-green-700', accent: 'border-green-500', badge: 'bg-green-100 text-green-800' };
+      case 'unhealthy': return { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-700', accent: 'border-red-500', badge: 'bg-red-100 text-red-800' };
+      case 'warning': return { bg: 'bg-yellow-50', border: 'border-yellow-200', text: 'text-yellow-700', accent: 'border-yellow-500', badge: 'bg-yellow-100 text-yellow-800' };
+      default: return { bg: 'bg-gray-50', border: 'border-gray-200', text: 'text-gray-700', accent: 'border-gray-500', badge: 'bg-gray-100 text-gray-800' };
     }
   };
 
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'healthy':
-        return '✅';
-      case 'unhealthy':
-        return '❌';
-      case 'warning':
-        return '⚠️';
-      default:
-        return '❓';
-    }
-  };
-
-  // Check if user is galactic admin
-  if (!user?.isGalacticAdmin) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-        <div className="max-w-md w-full bg-white rounded-lg shadow-lg p-8 text-center">
-          <div className="text-6xl mb-4">🔒</div>
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">Access Denied</h1>
-          <p className="text-gray-600">
-            Only Galactic Admins can access the health check dashboard.
-          </p>
-        </div>
-      </div>
-    );
-  }
+  const overallColors = healthResult ? getStatusColor(healthResult.overallStatus) : null;
 
   return (
-    <div className="min-h-screen bg-gray-50 p-4 sm:p-6 lg:p-8">
-      <div className="max-w-6xl mx-auto">
-        {/* Header */}
-        <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900 mb-2">System Health Check</h1>
-              <p className="text-gray-600">
-                Health monitoring for Autopilot Monitor infrastructure
-              </p>
-            </div>
-            <button
-              onClick={performHealthCheck}
-              disabled={loading}
-              className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium flex items-center gap-2"
-            >
-              {loading ? (
-                <>
-                  <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+    <div className="min-h-screen bg-gray-50">
+      <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+        {/* Header Section */}
+        <div className="bg-white rounded-lg shadow mb-6">
+          <div className="p-6 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-indigo-50">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-lg bg-blue-500 flex items-center justify-center">
+                  <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
                   </svg>
-                  Running...
-                </>
-              ) : (
-                <>
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-                  </svg>
-                  Run Health Check
-                </>
-              )}
-            </button>
-          </div>
-        </div>
-
-        {/* Health Check Results */}
-        {healthResult && (
-          <>
-            {/* Overall Status */}
-            <div className={`rounded-lg shadow-lg p-6 mb-6 border-2 ${getStatusColor(healthResult.overallStatus)}`}>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="text-5xl">{getStatusIcon(healthResult.overallStatus)}</div>
-                  <div>
-                    <h2 className="text-2xl font-bold">Overall Status: {healthResult.overallStatus.toUpperCase()}</h2>
-                    <p className="text-sm mt-1">
-                      {healthResult.service} v{healthResult.version}
-                    </p>
-                    <p className="text-xs mt-1 opacity-75">
-                      Last checked: {new Date(healthResult.timestamp).toLocaleString()}
-                    </p>
-                  </div>
                 </div>
-                <div className="text-right">
-                  <div className="text-sm font-medium">
-                    {healthResult.checks.filter(c => c.status === 'healthy').length} / {healthResult.checks.length} Healthy
-                  </div>
+                <div>
+                  <h1 className="text-xl font-semibold text-gray-900">System Health</h1>
+                  <p className="text-sm text-gray-500">Infrastructure health monitoring</p>
                 </div>
               </div>
+              <button
+                onClick={performHealthCheck}
+                disabled={loading}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-medium flex items-center gap-2"
+              >
+                {loading ? (
+                  <>
+                    <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Checking...
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    Re-check
+                  </>
+                )}
+              </button>
             </div>
+          </div>
 
-            {/* Individual Checks */}
-            <div className="grid gap-6 md:grid-cols-2">
-              {healthResult.checks.map((check, index) => (
-                <div key={index} className={`bg-white rounded-lg shadow-lg p-6 border-l-4 ${getStatusColor(check.status)}`}>
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="flex items-center gap-3">
-                      <span className="text-3xl">{getStatusIcon(check.status)}</span>
-                      <div>
-                        <h3 className="text-xl font-bold text-gray-900">{check.name}</h3>
-                        <p className="text-sm text-gray-600">{check.description}</p>
+          {/* Overall Status Bar */}
+          {healthResult && overallColors && (
+            <div className={`p-4 flex items-center justify-between ${overallColors.bg}`}>
+              <div className="flex items-center space-x-3">
+                <div className={`w-3 h-3 rounded-full ${healthResult.overallStatus === 'healthy' ? 'bg-green-500' : healthResult.overallStatus === 'unhealthy' ? 'bg-red-500' : 'bg-yellow-500'}`}></div>
+                <span className={`text-sm font-medium ${overallColors.text}`}>
+                  {healthResult.overallStatus === 'healthy' ? 'All systems operational' : healthResult.overallStatus === 'unhealthy' ? 'System issues detected' : 'Warnings detected'}
+                </span>
+                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${overallColors.badge}`}>
+                  {healthResult.checks.filter(c => c.status === 'healthy').length}/{healthResult.checks.length} healthy
+                </span>
+              </div>
+              <span className="text-xs text-gray-500">
+                Last checked: {new Date(healthResult.timestamp).toLocaleString()}
+              </span>
+            </div>
+          )}
+
+          {/* Loading State */}
+          {loading && !healthResult && (
+            <div className="p-8 flex flex-col items-center justify-center">
+              <svg className="animate-spin h-8 w-8 text-blue-500 mb-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              <p className="text-sm text-gray-500">Running health checks...</p>
+            </div>
+          )}
+        </div>
+
+        {/* Individual Check Cards */}
+        {healthResult && (
+          <div className="grid gap-5 sm:grid-cols-2">
+            {healthResult.checks.map((check, index) => {
+              const colors = getStatusColor(check.status);
+              return (
+                <div key={index} className={`bg-white rounded-lg shadow border-l-4 ${colors.accent}`}>
+                  <div className="p-6">
+                    <div className="flex items-start justify-between mb-3">
+                      <div className="flex items-center space-x-3">
+                        <div className={`w-8 h-8 rounded-full ${colors.bg} flex items-center justify-center`}>
+                          {check.status === 'healthy' ? (
+                            <svg className="w-5 h-5 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                            </svg>
+                          ) : check.status === 'unhealthy' ? (
+                            <svg className="w-5 h-5 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          ) : (
+                            <svg className="w-5 h-5 text-yellow-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                          )}
+                        </div>
+                        <div>
+                          <h3 className="text-lg font-semibold text-gray-900">{check.name}</h3>
+                          <p className="text-xs text-gray-500">{check.description}</p>
+                        </div>
                       </div>
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${colors.badge}`}>
+                        {check.status}
+                      </span>
                     </div>
-                  </div>
 
-                  <div className="mb-4">
-                    <p className={`text-sm font-medium ${
-                      check.status === 'healthy' ? 'text-green-700' :
-                      check.status === 'warning' ? 'text-yellow-700' :
-                      'text-red-700'
-                    }`}>
+                    <p className={`text-sm ${colors.text}`}>
                       {check.message}
                     </p>
+
+                    {check.details && Object.keys(check.details).length > 0 && (
+                      <div className="mt-4 bg-gray-50 rounded-lg p-3 border border-gray-200">
+                        <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">Details</h4>
+                        <dl className="space-y-1">
+                          {Object.entries(check.details).map(([key, value]) => (
+                            <div key={key} className="flex justify-between text-xs">
+                              <dt className="font-medium text-gray-600">{key}</dt>
+                              <dd className="text-gray-900 font-mono">
+                                {Array.isArray(value) ? value.join(', ') : typeof value === 'object' ? JSON.stringify(value) : String(value)}
+                              </dd>
+                            </div>
+                          ))}
+                        </dl>
+                      </div>
+                    )}
                   </div>
-
-                  {check.details && Object.keys(check.details).length > 0 && (
-                    <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                      <h4 className="text-xs font-semibold text-gray-700 uppercase mb-2">Details</h4>
-                      <dl className="space-y-2">
-                        {Object.entries(check.details).map(([key, value]) => (
-                          <div key={key} className="flex justify-between text-sm">
-                            <dt className="font-medium text-gray-600">{key}:</dt>
-                            <dd className="text-gray-900 font-mono">
-                              {Array.isArray(value) ? (
-                                <div className="text-right">
-                                  {value.map((item, i) => (
-                                    <div key={i}>{item}</div>
-                                  ))}
-                                </div>
-                              ) : typeof value === 'object' ? (
-                                JSON.stringify(value)
-                              ) : (
-                                String(value)
-                              )}
-                            </dd>
-                          </div>
-                        ))}
-                      </dl>
-                    </div>
-                  )}
                 </div>
-              ))}
-            </div>
-          </>
-        )}
-
-        {/* Initial State - No Results */}
-        {!healthResult && !loading && (
-          <div className="bg-white rounded-lg shadow-lg p-12 text-center">
-            <div className="text-6xl mb-4">🏥</div>
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">No Health Check Results</h2>
-            <p className="text-gray-600 mb-6">
-              Click &quot;Run Health Check&quot; to perform a comprehensive system health check
-            </p>
-            <div className="max-w-2xl mx-auto text-left bg-gray-50 rounded-lg p-6">
-              <h3 className="font-semibold text-gray-900 mb-3">What will be checked:</h3>
-              <ul className="space-y-2 text-sm text-gray-700">
-                <li className="flex items-start gap-2">
-                  <span className="text-blue-600 mt-0.5">•</span>
-                  <span><strong>Table Storage:</strong> Azure Table Storage connectivity and response time</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="text-blue-600 mt-0.5">•</span>
-                  <span><strong>Functions Host:</strong> Azure Functions host process status and uptime</span>
-                </li>
-              </ul>
-            </div>
+              );
+            })}
           </div>
         )}
       </div>

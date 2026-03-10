@@ -173,7 +173,7 @@ public static class EndpointAccessPolicyCatalog
         new("POST",   "versions/block",             EndpointPolicy.GalacticAdminOnly),
         new("DELETE", "versions/block/{encodedPattern}", EndpointPolicy.GalacticAdminOnly),
         new("POST",   "maintenance/trigger",        EndpointPolicy.GalacticAdminOnly),
-        new("GET",    "health/detailed",            EndpointPolicy.GalacticAdminOnly),
+        new("GET",    "health/detailed",            EndpointPolicy.AuthenticatedUser),
         new("POST",   "rules/reseed-from-github",   EndpointPolicy.GalacticAdminOnly),
         new("POST",   "rules/ime-log-patterns/reseed", EndpointPolicy.GalacticAdminOnly),
         new("GET",    "galactic/notifications",                          EndpointPolicy.GalacticAdminOnly),

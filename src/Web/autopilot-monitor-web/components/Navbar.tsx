@@ -516,6 +516,13 @@ export default function Navbar() {
                       <span className="text-sm text-gray-700">Audit Log</span>
                     </Link>
 
+                    <Link href="/health-check" className="flex items-center gap-2 py-2 px-2.5 rounded-md hover:bg-gray-50 transition-colors" onClick={() => setShowSettings(false)}>
+                      <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <span className="text-sm text-gray-700">System Health</span>
+                    </Link>
+
                     {/* GALACTIC ADMIN — only visible when galacticAdminMode is active */}
                     {galacticAdminMode && (
                       <>
@@ -542,12 +549,6 @@ export default function Navbar() {
                           <span className="text-sm text-purple-700">Platform Metrics</span>
                         </Link>
 
-                        <Link href="/health-check" className="flex items-center gap-2 py-2 px-2.5 rounded-md hover:bg-purple-50 transition-colors" onClick={() => setShowSettings(false)}>
-                          <svg className="w-4 h-4 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                          </svg>
-                          <span className="text-sm text-purple-700">System Health Check</span>
-                        </Link>
                       </>
                     )}
                   </div>

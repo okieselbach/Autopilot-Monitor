@@ -2,6 +2,7 @@ using System.Net;
 using AutopilotMonitor.Functions.Services;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 
 namespace AutopilotMonitor.Functions.Functions.Infrastructure
@@ -10,31 +11,66 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure
     {
         private readonly ILogger<HealthCheckFunction> _logger;
         private readonly HealthCheckService _healthCheckService;
+        private readonly IMemoryCache _cache;
+
+        private const int MaxRequestsPerMinute = 30;
+        private static readonly TimeSpan RateWindow = TimeSpan.FromMinutes(1);
 
         public HealthCheckFunction(
             ILogger<HealthCheckFunction> logger,
-            HealthCheckService healthCheckService)
+            HealthCheckService healthCheckService,
+            IMemoryCache cache)
         {
             _logger = logger;
             _healthCheckService = healthCheckService;
+            _cache = cache;
         }
 
         /// <summary>
         /// GET /api/health
-        /// Basic health check endpoint (anonymous access)
+        /// Basic health check endpoint (anonymous access, IP-rate-limited)
         /// </summary>
         [Function("HealthCheck")]
         public async Task<HttpResponseData> Run(
             [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "health")] HttpRequestData req)
         {
-            _logger.LogInformation("Basic health check requested");
+            // IP-based rate limiting for the public anonymous endpoint
+            var clientIp = req.Headers.Contains("X-Forwarded-For")
+                ? req.Headers.GetValues("X-Forwarded-For").FirstOrDefault()?.Split(',')[0]?.Trim() ?? "unknown"
+                : "unknown";
+
+            var cacheKey = $"health_ratelimit_{clientIp}";
+            var now = DateTime.UtcNow;
+
+            var requestHistory = _cache.GetOrCreate(cacheKey, entry =>
+            {
+                entry.SlidingExpiration = RateWindow;
+                entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(1);
+                return new List<DateTime>();
+            })!;
+
+            lock (requestHistory)
+            {
+                requestHistory.RemoveAll(t => t < now.Subtract(RateWindow));
+
+                if (requestHistory.Count >= MaxRequestsPerMinute)
+                {
+                    var retryAfter = requestHistory.Min().Add(RateWindow).Subtract(now);
+                    _logger.LogWarning("Health endpoint rate limit exceeded for IP {ClientIp} ({Count} requests)", clientIp, requestHistory.Count);
+
+                    var rateLimitResponse = req.CreateResponse(HttpStatusCode.TooManyRequests);
+                    rateLimitResponse.Headers.Add("Retry-After", ((int)Math.Ceiling(retryAfter.TotalSeconds)).ToString());
+                    return rateLimitResponse;
+                }
+
+                requestHistory.Add(now);
+            }
 
             var response = req.CreateResponse(HttpStatusCode.OK);
             await response.WriteAsJsonAsync(new
             {
                 status = "healthy",
                 service = "Autopilot Monitor API",
-                version = "1.0.0", // TODO: Version should be dynamically retrieved from assembly info or configuration
                 timestamp = DateTime.UtcNow
             });
 
@@ -63,7 +99,6 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure
             await response.WriteAsJsonAsync(new
             {
                 service = "Autopilot Monitor API",
-                version = "1.0.0-phase1",
                 timestamp = healthCheckResult.Timestamp,
                 overallStatus = healthCheckResult.OverallStatus,
                 checks = healthCheckResult.Checks
