@@ -56,23 +56,56 @@ namespace AutopilotMonitor.Functions.Security
             var normalizedManufacturer = manufacturer.Trim();
             var normalizedModel = model.Trim();
             var normalizedSerial = serialNumber.Trim();
-            var cacheKey = BuildCacheKey(tenantId, normalizedManufacturer, normalizedModel, normalizedSerial, sessionId);
+            var cacheKey = BuildCacheKey(tenantId, normalizedManufacturer, normalizedModel, normalizedSerial);
 
             if (_cache.TryGetValue(cacheKey, out CorporateIdentifierValidationResult? cached) && cached != null)
             {
                 return cached;
             }
 
+            // Retry once on transient failures (token acquisition, Graph API errors)
+            const int maxAttempts = 2;
+            CorporateIdentifierValidationResult? lastTransientResult = null;
+
+            for (int attempt = 1; attempt <= maxAttempts; attempt++)
+            {
+                var result = await TryValidateViaGraphAsync(tenantId, normalizedManufacturer, normalizedModel, normalizedSerial, sessionId, cacheKey, attempt);
+
+                if (result.IsValid || !result.IsTransient)
+                {
+                    return result;
+                }
+
+                lastTransientResult = result;
+                if (attempt < maxAttempts)
+                {
+                    _logger.LogWarning(
+                        "Corporate identifier validation transient failure for tenant {TenantId}, serial {SerialNumber} (attempt {Attempt}/{MaxAttempts}). Retrying...",
+                        tenantId, normalizedSerial, attempt, maxAttempts);
+                    await Task.Delay(TimeSpan.FromSeconds(2));
+                }
+            }
+
+            _logger.LogWarning(
+                "Corporate identifier validation failed after {MaxAttempts} attempts for tenant {TenantId}, serial {SerialNumber}",
+                maxAttempts, tenantId, normalizedSerial);
+
+            return lastTransientResult!;
+        }
+
+        private async Task<CorporateIdentifierValidationResult> TryValidateViaGraphAsync(
+            string tenantId, string normalizedManufacturer, string normalizedModel, string normalizedSerial,
+            string? sessionId, string cacheKey, int attempt)
+        {
             try
             {
                 var accessToken = await _graphTokenService.GetAccessTokenAsync(tenantId);
                 if (string.IsNullOrEmpty(accessToken))
                 {
-                    // Do not cache token-acquisition failures — this is a backend/propagation issue,
-                    // not a device issue. The next enrollment attempt should retry immediately.
                     return new CorporateIdentifierValidationResult
                     {
                         IsValid = false,
+                        IsTransient = true,
                         ErrorMessage = "Graph access token could not be acquired"
                     };
                 }
@@ -81,8 +114,6 @@ namespace AutopilotMonitor.Functions.Security
                 graphClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
 
                 // POST https://graph.microsoft.com/beta/deviceManagement/importedDeviceIdentities/searchExistingIdentities
-                // Body: {"importedDeviceIdentities":[{"importedDeviceIdentityType":"manufacturerModelSerial",
-                //        "importedDeviceIdentifier":"manufacturer,model,serialNumber"}]}
                 var identifier = $"{normalizedManufacturer},{normalizedModel},{normalizedSerial}";
                 var requestBody = new
                 {
@@ -108,16 +139,16 @@ namespace AutopilotMonitor.Functions.Security
                 if (!response.IsSuccessStatusCode)
                 {
                     _logger.LogWarning(
-                        "Corporate identifier validation Graph query failed for tenant {TenantId}. Status: {StatusCode}. Body: {ResponseBody}",
-                        tenantId,
-                        (int)response.StatusCode,
-                        responseBody);
+                        "Corporate identifier validation Graph query failed for tenant {TenantId} (attempt {Attempt}). Status: {StatusCode}. Body: {ResponseBody}",
+                        tenantId, attempt, (int)response.StatusCode, responseBody);
 
-                    return CacheAndReturn(cacheKey, new CorporateIdentifierValidationResult
+                    // Graph errors are transient — do NOT cache
+                    return new CorporateIdentifierValidationResult
                     {
                         IsValid = false,
+                        IsTransient = true,
                         ErrorMessage = $"Graph query failed with status {(int)response.StatusCode}"
-                    }, isPositive: false);
+                    };
                 }
 
                 var data = JsonConvert.DeserializeObject<JObject>(responseBody);
@@ -125,6 +156,7 @@ namespace AutopilotMonitor.Functions.Security
 
                 if (identities == null || identities.Count == 0)
                 {
+                    // Definitive: device not found — cache negative result
                     return CacheAndReturn(cacheKey, new CorporateIdentifierValidationResult
                     {
                         IsValid = false,
@@ -150,29 +182,27 @@ namespace AutopilotMonitor.Functions.Security
             {
                 _logger.LogError(
                     ex,
-                    "Error during corporate identifier validation for tenant {TenantId}, session {SessionId}, identifier {Manufacturer},{Model},{SerialNumber}",
+                    "Error during corporate identifier validation for tenant {TenantId}, session {SessionId}, identifier {Manufacturer},{Model},{SerialNumber} (attempt {Attempt})",
                     tenantId,
                     sessionId ?? "<none>",
                     normalizedManufacturer,
                     normalizedModel,
-                    normalizedSerial);
+                    normalizedSerial,
+                    attempt);
 
-                return CacheAndReturn(cacheKey, new CorporateIdentifierValidationResult
+                // Exceptions are transient — do NOT cache
+                return new CorporateIdentifierValidationResult
                 {
                     IsValid = false,
+                    IsTransient = true,
                     ErrorMessage = $"Error during corporate identifier validation: {ex.Message}"
-                }, isPositive: false);
+                };
             }
         }
 
-        private static string BuildCacheKey(string tenantId, string manufacturer, string model, string serialNumber, string? sessionId)
+        private static string BuildCacheKey(string tenantId, string manufacturer, string model, string serialNumber)
         {
-            var baseKey = $"corporate-id-validation:{tenantId}:{manufacturer}:{model}:{serialNumber}";
-            if (!string.IsNullOrWhiteSpace(sessionId))
-            {
-                return $"{baseKey}:{sessionId}";
-            }
-            return baseKey;
+            return $"corporate-id-validation:{tenantId}:{manufacturer}:{model}:{serialNumber}";
         }
 
         private CorporateIdentifierValidationResult CacheAndReturn(
@@ -193,6 +223,13 @@ namespace AutopilotMonitor.Functions.Security
     public class CorporateIdentifierValidationResult
     {
         public bool IsValid { get; set; }
+
+        /// <summary>
+        /// True when the failure is transient (Graph API error, token issue, network timeout).
+        /// Transient failures are NOT cached and should trigger a 503 Retry-After to the agent.
+        /// </summary>
+        public bool IsTransient { get; set; }
+
         public string? Identifier { get; set; }
         public string? ErrorMessage { get; set; }
     }

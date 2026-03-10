@@ -63,6 +63,22 @@ namespace AutopilotMonitor.Functions.Security
                         }
                     });
                 }
+                else if (validation.StatusCode == HttpStatusCode.ServiceUnavailable)
+                {
+                    // Transient device validation failure — tell agent to retry
+                    if (validation.RetryAfterSeconds.HasValue)
+                    {
+                        response.Headers.Add("Retry-After", validation.RetryAfterSeconds.Value.ToString());
+                    }
+
+                    await response.WriteAsJsonAsync(new
+                    {
+                        success = false,
+                        message = validation.ErrorMessage,
+                        details = validation.Details,
+                        retryAfterSeconds = validation.RetryAfterSeconds
+                    });
+                }
                 else
                 {
                     // Other security errors

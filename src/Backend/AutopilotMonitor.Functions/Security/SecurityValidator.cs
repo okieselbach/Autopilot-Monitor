@@ -261,6 +261,7 @@ namespace AutopilotMonitor.Functions.Security
                 : null;
             string? autopilotDeviceId = null;
             bool deviceValidated = false;
+            bool deviceValidationTransient = false;
             string? deviceValidationError = null;
 
             if (config.ValidateAutopilotDevice)
@@ -274,6 +275,7 @@ namespace AutopilotMonitor.Functions.Security
                 else
                 {
                     deviceValidationError = autopilotResult.ErrorMessage;
+                    deviceValidationTransient = autopilotResult.IsTransient;
                 }
             }
 
@@ -287,11 +289,30 @@ namespace AutopilotMonitor.Functions.Security
                 else
                 {
                     deviceValidationError = corpResult.ErrorMessage;
+                    deviceValidationTransient = corpResult.IsTransient;
                 }
             }
 
             if ((config.ValidateAutopilotDevice || config.ValidateCorporateIdentifier) && !deviceValidated)
             {
+                // Transient failures (Graph API down, token issues) → 503 Retry-After so agent retries
+                // Definitive failures (device not registered) → 403 Forbidden
+                if (deviceValidationTransient)
+                {
+                    _logger.LogWarning(
+                        "Device validation transient failure for tenant {TenantId}, serial {SerialNumber}. Returning 503 Retry-After.",
+                        tenantId, serialNumber);
+
+                    return new SecurityValidationResult
+                    {
+                        IsValid = false,
+                        StatusCode = HttpStatusCode.ServiceUnavailable,
+                        ErrorMessage = "Device validation temporarily unavailable",
+                        Details = deviceValidationError,
+                        RetryAfterSeconds = 30
+                    };
+                }
+
                 return new SecurityValidationResult
                 {
                     IsValid = false,
@@ -369,6 +390,11 @@ namespace AutopilotMonitor.Functions.Security
         /// Rate limit result (if validation succeeded)
         /// </summary>
         public RateLimitResult? RateLimitResult { get; set; }
+
+        /// <summary>
+        /// Suggested retry delay in seconds (set when StatusCode is 503 ServiceUnavailable)
+        /// </summary>
+        public int? RetryAfterSeconds { get; set; }
 
         /// <summary>
         /// Whether this request was authenticated via a bootstrap token (pre-MDM OOBE auth)

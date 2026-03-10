@@ -187,34 +187,61 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
                 : Constants.ApiEndpoints.GetAgentConfig;
             var url = $"{_baseUrl}{configEndpoint}?tenantId={Uri.EscapeDataString(tenantId)}";
 
-            var httpRequest = new HttpRequestMessage(HttpMethod.Get, url);
-            AddSecurityHeaders(httpRequest);
-
-            _logger?.Debug($"GetAgentConfigAsync: GET {url}");
-
-            var sw = Stopwatch.StartNew();
-            var failed = false;
-            long bytesDown = 0;
-            try
+            // Retry on 503 (backend signals transient device validation failure)
+            const int maxAttempts = 3;
+            for (int attempt = 1; attempt <= maxAttempts; attempt++)
             {
-                var response = await _httpClient.SendAsync(httpRequest);
-                response.EnsureSuccessStatusCode();
+                var httpRequest = new HttpRequestMessage(HttpMethod.Get, url);
+                AddSecurityHeaders(httpRequest);
 
-                var responseJson = await response.Content.ReadAsStringAsync();
-                bytesDown = Encoding.UTF8.GetByteCount(responseJson);
-                var result = JsonConvert.DeserializeObject<AgentConfigResponse>(responseJson);
-                return result;
+                _logger?.Debug($"GetAgentConfigAsync: GET {url} (attempt {attempt}/{maxAttempts})");
+
+                var sw = Stopwatch.StartNew();
+                var failed = false;
+                long bytesDown = 0;
+                try
+                {
+                    var response = await _httpClient.SendAsync(httpRequest);
+
+                    if (response.StatusCode == System.Net.HttpStatusCode.ServiceUnavailable && attempt < maxAttempts)
+                    {
+                        // Backend says "try again" — parse Retry-After or default to 30s
+                        var retryAfterSeconds = 30;
+                        if (response.Headers.TryGetValues("Retry-After", out var retryValues) &&
+                            int.TryParse(System.Linq.Enumerable.FirstOrDefault(retryValues), out var parsedRetry))
+                        {
+                            retryAfterSeconds = parsedRetry;
+                        }
+
+                        _logger?.Warning($"GetAgentConfigAsync: 503 Service Unavailable (attempt {attempt}/{maxAttempts}). Retrying in {retryAfterSeconds}s...");
+                        sw.Stop();
+                        _networkMetrics.RecordRequest(0, 0, sw.ElapsedMilliseconds, true);
+                        await System.Threading.Tasks.Task.Delay(retryAfterSeconds * 1000);
+                        continue;
+                    }
+
+                    ThrowOnAuthFailure(response);
+                    response.EnsureSuccessStatusCode();
+
+                    var responseJson = await response.Content.ReadAsStringAsync();
+                    bytesDown = Encoding.UTF8.GetByteCount(responseJson);
+                    var result = JsonConvert.DeserializeObject<AgentConfigResponse>(responseJson);
+                    return result;
+                }
+                catch
+                {
+                    failed = true;
+                    throw;
+                }
+                finally
+                {
+                    sw.Stop();
+                    _networkMetrics.RecordRequest(0, bytesDown, sw.ElapsedMilliseconds, failed);
+                }
             }
-            catch
-            {
-                failed = true;
-                throw;
-            }
-            finally
-            {
-                sw.Stop();
-                _networkMetrics.RecordRequest(0, bytesDown, sw.ElapsedMilliseconds, failed);
-            }
+
+            // Final 503 after all retries — throw so caller falls back to cached/default config
+            throw new Exception("GetAgentConfigAsync: backend returned 503 after all retry attempts");
         }
 
         /// <summary>

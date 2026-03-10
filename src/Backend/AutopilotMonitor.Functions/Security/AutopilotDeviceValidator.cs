@@ -50,22 +50,63 @@ namespace AutopilotMonitor.Functions.Security
             }
 
             var normalizedSerial = serialNumber.Trim();
-            var cacheKey = BuildCacheKey(tenantId, normalizedSerial, sessionId);
+            var cacheKey = BuildCacheKey(tenantId, normalizedSerial);
+
             if (_cache.TryGetValue(cacheKey, out AutopilotDeviceValidationResult? cached) && cached != null)
             {
                 return cached;
             }
 
+            // Retry once on transient failures (token acquisition, Graph API errors)
+            const int maxAttempts = 2;
+            AutopilotDeviceValidationResult? lastTransientResult = null;
+
+            for (int attempt = 1; attempt <= maxAttempts; attempt++)
+            {
+                var result = await TryValidateViaGraphAsync(tenantId, normalizedSerial, sessionId, cacheKey, attempt);
+
+                if (result.IsValid || !result.IsTransient)
+                {
+                    // Definitive result (success or "device not found") — return immediately
+                    return result;
+                }
+
+                // Transient failure — retry after short delay
+                lastTransientResult = result;
+                if (attempt < maxAttempts)
+                {
+                    _logger.LogWarning(
+                        "Autopilot device validation transient failure for tenant {TenantId}, serial {SerialNumber} (attempt {Attempt}/{MaxAttempts}). Retrying...",
+                        tenantId, normalizedSerial, attempt, maxAttempts);
+                    await Task.Delay(TimeSpan.FromSeconds(2));
+                }
+            }
+
+            // All retries exhausted — return transient failure (NOT cached, so next request retries)
+            _logger.LogWarning(
+                "Autopilot device validation failed after {MaxAttempts} attempts for tenant {TenantId}, serial {SerialNumber}",
+                maxAttempts, tenantId, normalizedSerial);
+
+            return lastTransientResult!;
+        }
+
+        /// <summary>
+        /// Single attempt to validate a device via Graph API.
+        /// Returns IsTransient=true for failures that should be retried (Graph errors, token issues).
+        /// Returns IsTransient=false for definitive results (device found or not found).
+        /// </summary>
+        private async Task<AutopilotDeviceValidationResult> TryValidateViaGraphAsync(
+            string tenantId, string normalizedSerial, string? sessionId, string cacheKey, int attempt)
+        {
             try
             {
                 var accessToken = await _graphTokenService.GetAccessTokenAsync(tenantId);
                 if (string.IsNullOrEmpty(accessToken))
                 {
-                    // Do not cache token-acquisition failures — this is a backend/propagation issue,
-                    // not a device issue. The next enrollment attempt should retry immediately.
                     return new AutopilotDeviceValidationResult
                     {
                         IsValid = false,
+                        IsTransient = true,
                         SerialNumber = normalizedSerial,
                         ErrorMessage = "Graph access token could not be acquired"
                     };
@@ -86,23 +127,24 @@ namespace AutopilotMonitor.Functions.Security
                 if (!response.IsSuccessStatusCode)
                 {
                     _logger.LogWarning(
-                        "Autopilot device validation Graph query failed for tenant {TenantId}. Status: {StatusCode}. Body: {ResponseBody}",
-                        tenantId,
-                        (int)response.StatusCode,
-                        responseBody);
+                        "Autopilot device validation Graph query failed for tenant {TenantId} (attempt {Attempt}). Status: {StatusCode}. Body: {ResponseBody}",
+                        tenantId, attempt, (int)response.StatusCode, responseBody);
 
-                    return CacheAndReturn(cacheKey, new AutopilotDeviceValidationResult
+                    // Graph errors are transient — do NOT cache
+                    return new AutopilotDeviceValidationResult
                     {
                         IsValid = false,
+                        IsTransient = true,
                         SerialNumber = normalizedSerial,
                         ErrorMessage = $"Graph query failed with status {(int)response.StatusCode}"
-                    }, isPositive: false);
+                    };
                 }
 
                 var data = JsonConvert.DeserializeObject<JObject>(responseBody);
                 var devices = data?["value"] as JArray;
                 if (devices == null || devices.Count == 0)
                 {
+                    // Definitive: device not found — cache negative result
                     return CacheAndReturn(cacheKey, new AutopilotDeviceValidationResult
                     {
                         IsValid = false,
@@ -120,6 +162,7 @@ namespace AutopilotMonitor.Functions.Security
 
                 if (exactDevice == null)
                 {
+                    // Definitive: device not found — cache negative result
                     return CacheAndReturn(cacheKey, new AutopilotDeviceValidationResult
                     {
                         IsValid = false,
@@ -148,27 +191,25 @@ namespace AutopilotMonitor.Functions.Security
             {
                 _logger.LogError(
                     ex,
-                    "Error during Autopilot device validation for tenant {TenantId}, session {SessionId}, serial {SerialNumber}",
+                    "Error during Autopilot device validation for tenant {TenantId}, session {SessionId}, serial {SerialNumber} (attempt {Attempt})",
                     tenantId,
                     sessionId ?? "<none>",
-                    normalizedSerial);
+                    normalizedSerial,
+                    attempt);
 
-                return CacheAndReturn(cacheKey, new AutopilotDeviceValidationResult
+                // Exceptions are transient — do NOT cache
+                return new AutopilotDeviceValidationResult
                 {
                     IsValid = false,
+                    IsTransient = true,
                     SerialNumber = normalizedSerial,
                     ErrorMessage = $"Error during Autopilot device validation: {ex.Message}"
-                }, isPositive: false);
+                };
             }
         }
 
-        private static string BuildCacheKey(string tenantId, string serialNumber, string? sessionId)
+        private static string BuildCacheKey(string tenantId, string serialNumber)
         {
-            if (!string.IsNullOrWhiteSpace(sessionId))
-            {
-                return $"autopilot-device-validation:{tenantId}:{sessionId}:{serialNumber}";
-            }
-
             return $"autopilot-device-validation:{tenantId}:{serialNumber}";
         }
 
@@ -190,6 +231,13 @@ namespace AutopilotMonitor.Functions.Security
     public class AutopilotDeviceValidationResult
     {
         public bool IsValid { get; set; }
+
+        /// <summary>
+        /// True when the failure is transient (Graph API error, token issue, network timeout).
+        /// Transient failures are NOT cached and should trigger a 503 Retry-After to the agent.
+        /// </summary>
+        public bool IsTransient { get; set; }
+
         public string? SerialNumber { get; set; }
         public string? AutopilotDeviceId { get; set; }
         public string? ErrorMessage { get; set; }
