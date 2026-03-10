@@ -2,7 +2,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
-using System.Net;
+using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
 using AutopilotMonitor.Shared;
@@ -148,20 +148,10 @@ namespace AutopilotMonitor.Agent
             {
                 var versionUrl = $"{Constants.AgentBlobBaseUrl}/{Constants.AgentVersionFileName}";
 
-                using (var client = new WebClient())
+                using (var handler = new HttpClientHandler())
+                using (var client = new HttpClient(handler) { Timeout = TimeSpan.FromMilliseconds(VersionCheckTimeoutMs) })
                 {
-                    var downloadTask = client.DownloadStringTaskAsync(versionUrl);
-                    var timeoutTask = Task.Delay(VersionCheckTimeoutMs);
-
-                    var completed = await Task.WhenAny(downloadTask, timeoutTask);
-                    if (completed == timeoutTask)
-                    {
-                        log("Self-update: version check timed out (1s) — skipping update");
-                        client.CancelAsync();
-                        return null;
-                    }
-
-                    var json = await downloadTask;
+                    var json = await client.GetStringAsync(versionUrl);
                     var obj = JObject.Parse(json);
                     var version = obj["version"]?.ToString();
 
@@ -174,7 +164,12 @@ namespace AutopilotMonitor.Agent
                     return version.Trim();
                 }
             }
-            catch (WebException ex) when ((ex.Response as HttpWebResponse)?.StatusCode == HttpStatusCode.NotFound)
+            catch (TaskCanceledException)
+            {
+                log("Self-update: version check timed out (1s) — skipping update");
+                return null;
+            }
+            catch (HttpRequestException ex) when (ex.Message.Contains("404"))
             {
                 log("Self-update: version.json not found (404) — skipping update");
                 return null;
@@ -230,25 +225,27 @@ namespace AutopilotMonitor.Agent
                 if (File.Exists(zipPath))
                     File.Delete(zipPath);
 
-                using (var client = new WebClient())
+                using (var handler = new HttpClientHandler())
+                using (var client = new HttpClient(handler) { Timeout = TimeSpan.FromMilliseconds(DownloadTimeoutMs) })
                 {
-                    var downloadTask = client.DownloadFileTaskAsync(zipUrl, zipPath);
-                    var timeoutTask = Task.Delay(DownloadTimeoutMs);
-
-                    var completed = await Task.WhenAny(downloadTask, timeoutTask);
-                    if (completed == timeoutTask)
+                    using (var response = await client.GetAsync(zipUrl))
                     {
-                        log("Self-update: ZIP download timed out (10s) — aborting update");
-                        client.CancelAsync();
-                        try { File.Delete(zipPath); } catch { }
-                        return false;
+                        response.EnsureSuccessStatusCode();
+                        using (var fileStream = new FileStream(zipPath, FileMode.Create, FileAccess.Write, FileShare.None))
+                        {
+                            await response.Content.CopyToAsync(fileStream);
+                        }
                     }
-
-                    await downloadTask; // Propagate any exception
                 }
 
                 log($"Self-update: ZIP downloaded ({new FileInfo(zipPath).Length / 1024}KB)");
                 return true;
+            }
+            catch (TaskCanceledException)
+            {
+                log("Self-update: ZIP download timed out (10s) — aborting update");
+                try { File.Delete(zipPath); } catch { }
+                return false;
             }
             catch (Exception ex)
             {

@@ -11,7 +11,7 @@ interface FormJsonToggleProps {
   onApplyJson: () => void;
   children: React.ReactNode;
   textareaRows?: number;
-  description?: string;
+  description?: React.ReactNode;
 }
 
 export function FormJsonToggle({
@@ -31,7 +31,7 @@ export function FormJsonToggle({
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             {description && (
-              <p className="text-sm text-gray-600" dangerouslySetInnerHTML={{ __html: description }} />
+              <p className="text-sm text-gray-600">{description}</p>
             )}
             <button
               type="button"

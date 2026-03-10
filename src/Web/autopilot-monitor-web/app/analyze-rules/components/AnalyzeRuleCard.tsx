@@ -245,7 +245,7 @@ export default function AnalyzeRuleCard({
               }
             }}
             textareaRows={30}
-            description='Edit the rule as JSON. All fields are supported including <code class="bg-gray-100 px-1 rounded text-xs">event_correlation</code> condition properties.'
+            description={<>Edit the rule as JSON. All fields are supported including <code className="bg-gray-100 px-1 rounded text-xs">event_correlation</code> condition properties.</>}
           >
             <AnalyzeRuleFormFields form={editForm} setForm={setEditForm} showRuleId={false} />
           </FormJsonToggle>

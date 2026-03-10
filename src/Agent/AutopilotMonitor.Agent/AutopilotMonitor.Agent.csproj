@@ -66,6 +66,10 @@
   </Target>
 
   <ItemGroup>
+    <Reference Include="System.Net.Http" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\AutopilotMonitor.Agent.Core\AutopilotMonitor.Agent.Core.csproj" />
     <ProjectReference Include="..\..\Shared\AutopilotMonitor.Shared\AutopilotMonitor.Shared.csproj" />
   </ItemGroup>

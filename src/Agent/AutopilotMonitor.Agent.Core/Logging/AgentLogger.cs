@@ -90,7 +90,7 @@ namespace AutopilotMonitor.Agent.Core.Logging
                 lock (_lockObject)
                 {
                     var timestamp = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss.fff");
-                    var logEntry = $"[{timestamp}] [{level}] {message}";
+                    var logEntry = $"[{timestamp}] [{level}] {SanitizeLogMessage(message)}";
 
                     File.AppendAllText(_logFilePath, logEntry + Environment.NewLine);
                 }
@@ -99,6 +99,21 @@ namespace AutopilotMonitor.Agent.Core.Logging
             {
                 // Swallow logging errors to prevent crashes
             }
+        }
+
+        /// <summary>
+        /// Sanitizes log messages to prevent log injection attacks.
+        /// Escapes control characters that could forge log entries.
+        /// Redaction patterns can be added here later as needed.
+        /// </summary>
+        private static string SanitizeLogMessage(string message)
+        {
+            if (string.IsNullOrEmpty(message)) return message;
+
+            // Escape newlines and carriage returns to prevent log injection
+            message = message.Replace("\r", "\\r").Replace("\n", "\\n");
+
+            return message;
         }
     }
 }

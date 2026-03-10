@@ -351,7 +351,7 @@ export function GatherRuleCard({
             jsonError={jsonError}
             onApplyJson={onApplyJson}
             textareaRows={20}
-            description='Edit the rule as JSON. All fields are supported including <code class="bg-gray-100 px-1 rounded text-xs">parameters</code> for collector-specific options.'
+            description={<>Edit the rule as JSON. All fields are supported including <code className="bg-gray-100 px-1 rounded text-xs">parameters</code> for collector-specific options.</>}
           >
             <GatherRuleFormFields form={editForm} setForm={setEditForm} showRuleId={false} />
           </FormJsonToggle>

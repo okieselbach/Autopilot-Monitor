@@ -10,6 +10,30 @@ const nextConfig: NextConfig = {
       { source: "/docs", destination: "/docs/overview", permanent: false },
     ];
   },
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "X-Frame-Options", value: "DENY" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          {
+            key: "Content-Security-Policy",
+            value: [
+              "default-src 'self'",
+              "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+              "style-src 'self' 'unsafe-inline'",
+              "img-src 'self' data: blob: https://*.tile.openstreetmap.org",
+              "font-src 'self'",
+              "connect-src 'self' https://autopilotmonitor-api.azurewebsites.net https://autopilotmonitor.blob.core.windows.net https://login.microsoftonline.com https://*.service.signalr.net wss://*.service.signalr.net",
+              "frame-ancestors 'none'",
+            ].join("; "),
+          },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;
