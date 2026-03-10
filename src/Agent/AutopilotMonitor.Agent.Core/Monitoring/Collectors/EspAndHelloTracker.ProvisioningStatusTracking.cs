@@ -140,7 +140,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                         return; // Stop requested
                 }
 
-                // Create notification event BEFORE first read (standard RegNotifyChangeKeyValue pattern)
+                // Capture initial state before notification loop.
+                // Any changes between this read and the first RegNotifyChangeKeyValue registration
+                // are covered by the 15s heartbeat fallback.
+                CheckProvisioningStatus();
+
+                // Create notification event
                 hNotifyEvent = RegistryWatcherNativeMethods.CreateEvent(IntPtr.Zero, false, false, null);
                 if (hNotifyEvent == IntPtr.Zero)
                 {
@@ -150,10 +155,16 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 
                 var waitHandles = new[] { hNotifyEvent, _registryWatcherStopEvent };
 
-                // Main watch loop: register → read → wait (prevents race condition between read and register)
+                // Main watch loop: register → wait → read
+                // IMPORTANT: CheckProvisioningStatus() must run AFTER WaitForMultipleObjects, not between
+                // RegNotifyChangeKeyValue and Wait. The managed Registry.OpenSubKey() call interferes with
+                // pending RegNotifyChangeKeyValue notifications when called before Wait (proven in Build 416).
+                // The 15s heartbeat ensures changes are detected even if a notification is missed.
+                const uint heartbeatMs = 15_000;
+
                 while (true)
                 {
-                    // 1. Register for value change notifications FIRST
+                    // 1. Register for value change notifications
                     int regResult = RegistryWatcherNativeMethods.RegNotifyChangeKeyValue(
                         hKey,
                         true,  // Watch subtree
@@ -167,31 +178,34 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                         return;
                     }
 
-                    // 2. Read current state (catches existing values + anything that changed since registration)
-                    CheckProvisioningStatus();
-
-                    // 3. Wait for NEXT change (if a change happened between register and read,
-                    //    the notification is already pending and this returns immediately)
+                    // 2. Wait for registry change notification or heartbeat timeout
                     uint waitResult = RegistryWatcherNativeMethods.WaitForMultipleObjects(
                         (uint)waitHandles.Length,
                         waitHandles,
                         false,
-                        RegistryWatcherNativeMethods.INFINITE);
+                        heartbeatMs);
 
                     if (waitResult == RegistryWatcherNativeMethods.WAIT_OBJECT_0)
                     {
-                        // Registry changed — loop continues: re-register → read → wait
+                        // Registry notification fired — instant detection
+                        _logger.Debug("Provisioning status watcher: registry change notification received");
                     }
                     else if (waitResult == RegistryWatcherNativeMethods.WAIT_OBJECT_0 + 1)
                     {
                         return; // Stop requested
                     }
+                    else if (waitResult == RegistryWatcherNativeMethods.WAIT_TIMEOUT)
+                    {
+                        // Heartbeat — re-read to catch any missed notifications
+                    }
                     else
                     {
-                        // Unexpected wait result
                         _logger.Warning($"Registry watcher unexpected wait result: {waitResult} — exiting");
                         return;
                     }
+
+                    // 3. Read current state AFTER wait (not between register and wait)
+                    CheckProvisioningStatus();
                 }
             }
             catch (Exception ex)

@@ -15,6 +15,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Interop
         public const uint KEY_READ = 0x20019;
         public const uint REG_NOTIFY_CHANGE_LAST_SET = 0x00000004;
         public const uint WAIT_OBJECT_0 = 0;
+        public const uint WAIT_TIMEOUT = 258;
         public const uint INFINITE = 0xFFFFFFFF;
 
         [DllImport("advapi32.dll", SetLastError = true)]
