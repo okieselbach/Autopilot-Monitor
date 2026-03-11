@@ -137,19 +137,33 @@ namespace AutopilotMonitor.SummaryDialog
 
             var summary = _status.AppSummary;
 
-            // Update progress bar
-            var progressWidth = summary.TotalApps > 0
-                ? (double)summary.CompletedApps / summary.TotalApps * ProgressBarSuccess.Parent.As<Grid>().ActualWidth
+            // Count skipped apps across all phases to exclude from totals
+            var skippedCount = _status.PackageStatesByPhase != null
+                ? _status.PackageStatesByPhase.Values.SelectMany(p => p)
+                    .Count(a => string.Equals(a.State, "Skipped", StringComparison.OrdinalIgnoreCase))
                 : 0;
 
-            // We need to set this after layout, use Dispatcher
+            var visibleTotal = summary.TotalApps - skippedCount;
+            var visibleCompleted = summary.CompletedApps - skippedCount;
+            if (visibleTotal < 0) visibleTotal = 0;
+            if (visibleCompleted < 0) visibleCompleted = 0;
+
+            // If all apps were skipped, show "no apps" message
+            if (visibleTotal == 0)
+            {
+                NoAppsText.Visibility = Visibility.Visible;
+                AppSummaryText.Visibility = Visibility.Collapsed;
+                return;
+            }
+
+            // Update progress bar
             Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
             {
                 var parentGrid = (Grid)ProgressBarSuccess.Parent;
                 var totalWidth = parentGrid.ActualWidth;
-                if (totalWidth > 0 && summary.TotalApps > 0)
+                if (totalWidth > 0 && visibleTotal > 0)
                 {
-                    ProgressBarSuccess.Width = (double)summary.CompletedApps / summary.TotalApps * totalWidth;
+                    ProgressBarSuccess.Width = (double)visibleCompleted / visibleTotal * totalWidth;
                     if (summary.ErrorCount > 0)
                         ProgressBarSuccess.Background = (Brush)FindResource("ProgressError");
                 }
@@ -158,12 +172,12 @@ namespace AutopilotMonitor.SummaryDialog
             // Summary text
             if (summary.ErrorCount > 0)
             {
-                AppSummaryText.Text = $"{summary.CompletedApps} of {summary.TotalApps} apps installed, {summary.ErrorCount} failed";
+                AppSummaryText.Text = $"{visibleCompleted} of {visibleTotal} apps installed, {summary.ErrorCount} failed";
                 AppSummaryText.Foreground = (Brush)FindResource("ErrorColor");
             }
             else
             {
-                AppSummaryText.Text = $"{summary.CompletedApps} of {summary.TotalApps} apps installed";
+                AppSummaryText.Text = $"{visibleCompleted} of {visibleTotal} apps installed";
             }
 
             // Render phases
@@ -180,10 +194,14 @@ namespace AutopilotMonitor.SummaryDialog
         {
             if (apps == null || apps.Count == 0) return;
 
+            // Filter out skipped apps — they are not actionable for the user
+            var visibleApps = apps.Where(a => !string.Equals(a.State, "Skipped", StringComparison.OrdinalIgnoreCase)).ToList();
+            if (visibleApps.Count == 0) return;
+
             // Phase header
             var header = new TextBlock
             {
-                Text = $"{FormatPhaseName(phaseName)} ({apps.Count})",
+                Text = $"{FormatPhaseName(phaseName)} ({visibleApps.Count})",
                 FontFamily = new FontFamily("Segoe UI Semibold"),
                 FontSize = 12,
                 Foreground = (Brush)FindResource("PhaseHeaderText"),
@@ -192,7 +210,7 @@ namespace AutopilotMonitor.SummaryDialog
             };
             AppListPanel.Children.Add(header);
 
-            foreach (var app in apps)
+            foreach (var app in visibleApps)
             {
                 AppListPanel.Children.Add(CreateAppItem(app));
             }
