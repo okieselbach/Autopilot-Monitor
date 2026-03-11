@@ -136,7 +136,7 @@ namespace AutopilotMonitor.Functions.Functions.Config
             var response = req.CreateResponse(HttpStatusCode.OK);
             await response.WriteAsJsonAsync(new AgentConfigResponse
             {
-                ConfigVersion = 16, // trace events for agent decision auditing
+                ConfigVersion = 17, // unrestricted mode for tenant-level guardrail bypass
                 UploadIntervalSeconds = 30,
                 SelfDestructOnComplete = tenantConfig.SelfDestructOnComplete ?? true,
                 KeepLogFile = tenantConfig.KeepLogFile ?? false,
@@ -162,6 +162,7 @@ namespace AutopilotMonitor.Functions.Functions.Config
                     LocalAdminAllowedAccounts = tenantConfig.GetLocalAdminAllowedAccounts()
                 },
                 SendTraceEvents = tenantConfig.SendTraceEvents,
+                UnrestrictedMode = tenantConfig.UnrestrictedMode,
                 GatherRules = gatherRules,
                 ImeLogPatterns = imeLogPatterns
             });

@@ -55,7 +55,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             }
 
             // Guard: only allow enrollment-relevant registry paths
-            if (!GatherRuleGuards.IsRegistryPathAllowed(subPath))
+            if (!GatherRuleGuards.IsRegistryPathAllowed(subPath, UnrestrictedMode))
                 return EmitSecurityWarning(rule, "registry", path);
 
             // Determine explicit valueName from parameters
@@ -145,7 +145,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                 return data;
 
             // Guard: only allow known-safe WMI classes
-            if (!GatherRuleGuards.IsWmiQueryAllowed(query))
+            if (!GatherRuleGuards.IsWmiQueryAllowed(query, UnrestrictedMode))
                 return EmitSecurityWarning(rule, "wmi", query);
 
             try
@@ -201,7 +201,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                 return data;
 
             // SECURITY: Check command against allowlist
-            if (!GatherRuleGuards.IsCommandAllowed(command))
+            if (!GatherRuleGuards.IsCommandAllowed(command, UnrestrictedMode))
             {
                 _logger.Warning($"SECURITY: Command blocked by allowlist: {command} (Rule: {rule.RuleId})");
                 data["blocked"] = true;
@@ -299,7 +299,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             filePath = Environment.ExpandEnvironmentVariables(filePath);
 
             // Guard: only allow enrollment-relevant file paths
-            if (!GatherRuleGuards.IsFilePathAllowed(filePath))
+            if (!GatherRuleGuards.IsFilePathAllowed(filePath, UnrestrictedMode))
                 return EmitSecurityWarning(rule, "file", filePath);
 
             try
@@ -747,7 +747,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 
             filePath = Environment.ExpandEnvironmentVariables(filePath);
 
-            if (!GatherRuleGuards.IsFilePathAllowed(filePath))
+            if (!GatherRuleGuards.IsFilePathAllowed(filePath, UnrestrictedMode))
                 return EmitSecurityWarning(rule, "json", filePath);
 
             string jsonPath;
@@ -826,7 +826,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 
             filePath = Environment.ExpandEnvironmentVariables(filePath);
 
-            if (!GatherRuleGuards.IsFilePathAllowed(filePath))
+            if (!GatherRuleGuards.IsFilePathAllowed(filePath, UnrestrictedMode))
                 return EmitSecurityWarning(rule, "xml", filePath);
 
             string xpath;

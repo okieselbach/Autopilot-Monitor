@@ -122,7 +122,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                         // 4. Configured additional log paths (global + tenant, validated by guards)
                         foreach (var entry in _configuration.DiagnosticsLogPaths ?? new System.Collections.Generic.List<Shared.Models.DiagnosticsLogPath>())
                         {
-                            if (!Collectors.DiagnosticsPathGuards.IsDiagnosticsPathAllowed(entry.Path))
+                            if (!Collectors.DiagnosticsPathGuards.IsDiagnosticsPathAllowed(entry.Path, _configuration.UnrestrictedMode))
                             {
                                 _logger.Warning($"Diagnostics path blocked by guard: {entry.Path}");
                                 continue;

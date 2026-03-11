@@ -33,6 +33,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         private readonly LogFilePositionTracker _filePositionTracker = new LogFilePositionTracker();
         private CountdownEvent _startupRulesLatch;   // non-null only while startup rules are pending
 
+        /// <summary>
+        /// When true, guardrails are relaxed: all registry, WMI, and command targets are allowed.
+        /// File paths allow everything except C:\Users. Set from tenant configuration.
+        /// </summary>
+        public bool UnrestrictedMode { get; set; } = false;
+
         public GatherRuleExecutor(string sessionId, string tenantId, Action<EnrollmentEvent> onEventCollected,
             AgentLogger logger, string imeLogPathOverride = null)
         {

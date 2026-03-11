@@ -149,6 +149,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             "Get-HotFix | Select-Object -First 10 HotFixID, InstalledOn, Description"
         };
 
+        // Hard block: C:\Users is never allowed, even in unrestricted mode
+        private static readonly string BlockedUsersPrefix = Path.GetFullPath(@"C:\Users");
+
         // -----------------------------------------------------------------------
         // Guard methods
         // -----------------------------------------------------------------------
@@ -158,9 +161,19 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         /// with segment-bounded matching (next char must be '\' or end of string).
         /// </summary>
         public static bool IsRegistryPathAllowed(string subPath)
+            => IsRegistryPathAllowed(subPath, unrestrictedMode: false);
+
+        /// <summary>
+        /// Returns true if the registry subPath is allowed.
+        /// When unrestrictedMode is true, all registry paths are allowed.
+        /// </summary>
+        public static bool IsRegistryPathAllowed(string subPath, bool unrestrictedMode)
         {
             if (string.IsNullOrEmpty(subPath))
                 return false;
+
+            if (unrestrictedMode)
+                return true;
 
             return AllowedRegistryPrefixes.Any(prefix =>
                 subPath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
@@ -172,6 +185,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         /// with segment-bounded matching and path normalization to prevent traversal.
         /// </summary>
         public static bool IsFilePathAllowed(string expandedPath)
+            => IsFilePathAllowed(expandedPath, unrestrictedMode: false);
+
+        /// <summary>
+        /// Returns true if the expanded file path is allowed.
+        /// When unrestrictedMode is true, all paths are allowed except C:\Users (privacy protection).
+        /// Path normalization and traversal protection always apply regardless of mode.
+        /// </summary>
+        public static bool IsFilePathAllowed(string expandedPath, bool unrestrictedMode)
         {
             if (string.IsNullOrEmpty(expandedPath))
                 return false;
@@ -186,6 +207,17 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                 return false;
             }
 
+            // C:\Users block always applies (even in unrestricted mode)
+            if (normalizedPath.StartsWith(BlockedUsersPrefix, StringComparison.OrdinalIgnoreCase) &&
+                (normalizedPath.Length == BlockedUsersPrefix.Length ||
+                 normalizedPath[BlockedUsersPrefix.Length] == Path.DirectorySeparatorChar))
+            {
+                return false;
+            }
+
+            if (unrestrictedMode)
+                return true;
+
             return AllowedFilePrefixes.Any(prefix =>
                 normalizedPath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
                 (normalizedPath.Length == prefix.Length || normalizedPath[prefix.Length] == '\\'));
@@ -196,9 +228,19 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         /// with boundary matching (next char must be whitespace or end of string).
         /// </summary>
         public static bool IsWmiQueryAllowed(string query)
+            => IsWmiQueryAllowed(query, unrestrictedMode: false);
+
+        /// <summary>
+        /// Returns true if the WMI query is allowed.
+        /// When unrestrictedMode is true, all WMI queries are allowed.
+        /// </summary>
+        public static bool IsWmiQueryAllowed(string query, bool unrestrictedMode)
         {
             if (string.IsNullOrEmpty(query))
                 return false;
+
+            if (unrestrictedMode)
+                return true;
 
             var trimmed = query.Trim();
             return AllowedWmiQueryPrefixes.Any(prefix =>
@@ -211,9 +253,19 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         /// Exact matching is intentional — no prefix spoofing possible.
         /// </summary>
         public static bool IsCommandAllowed(string command)
+            => IsCommandAllowed(command, unrestrictedMode: false);
+
+        /// <summary>
+        /// Returns true if the command is allowed.
+        /// When unrestrictedMode is true, all commands are allowed.
+        /// </summary>
+        public static bool IsCommandAllowed(string command, bool unrestrictedMode)
         {
             if (string.IsNullOrEmpty(command))
                 return false;
+
+            if (unrestrictedMode)
+                return true;
 
             return AllowedCommands.Contains(command.Trim());
         }

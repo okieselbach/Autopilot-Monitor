@@ -224,6 +224,13 @@ namespace AutopilotMonitor.Agent.Core.Configuration
         public bool SendTraceEvents { get; set; } = true;
 
         /// <summary>
+        /// When true, agent guardrails are relaxed: all registry, WMI, and command targets are allowed.
+        /// File/diagnostics paths allow everything except C:\Users.
+        /// Default: false.
+        /// </summary>
+        public bool UnrestrictedMode { get; set; } = false;
+
+        /// <summary>
         /// Sanitized command-line arguments for the agent_started event.
         /// Secrets (e.g. bootstrap token) are redacted before assignment.
         /// </summary>

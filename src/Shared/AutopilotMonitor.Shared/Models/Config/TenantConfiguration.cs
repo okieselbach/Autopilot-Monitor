@@ -301,6 +301,15 @@ namespace AutopilotMonitor.Shared.Models
         /// </summary>
         public bool BootstrapTokenEnabled { get; set; } = false;
 
+        // ===== UNRESTRICTED MODE =====
+
+        /// <summary>
+        /// When enabled, agent guardrails are relaxed: all registry paths, WMI queries, and commands
+        /// are allowed via GatherRules. File paths and diagnostics paths are allowed except C:\Users.
+        /// Default: false. Enabling this is at the tenant admin's own risk and responsibility.
+        /// </summary>
+        public bool UnrestrictedMode { get; set; } = false;
+
         // ===== DIAGNOSTICS LOG PATHS =====
 
         /// <summary>

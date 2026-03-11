@@ -346,6 +346,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             _configuration.EnrollmentSummaryBrandingImageUrl = config.EnrollmentSummaryBrandingImageUrl;
             _configuration.EnrollmentSummaryLaunchRetrySeconds = config.EnrollmentSummaryLaunchRetrySeconds;
             _configuration.SendTraceEvents = config.SendTraceEvents;
+            _configuration.UnrestrictedMode = config.UnrestrictedMode;
             _enrollmentTracker?.UpdateSendTraceEvents(config.SendTraceEvents);
 
             _logger.Info("Applied runtime settings from remote config");

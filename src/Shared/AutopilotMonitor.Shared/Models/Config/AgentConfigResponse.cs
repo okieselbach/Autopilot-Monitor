@@ -152,6 +152,13 @@ namespace AutopilotMonitor.Shared.Models
         /// Default: true (on in preview).
         /// </summary>
         public bool SendTraceEvents { get; set; } = true;
+
+        /// <summary>
+        /// When true, agent guardrails are relaxed: all registry, WMI, and command targets are allowed.
+        /// File/diagnostics paths allow everything except C:\Users.
+        /// Default: false.
+        /// </summary>
+        public bool UnrestrictedMode { get; set; } = false;
     }
 
     /// <summary>

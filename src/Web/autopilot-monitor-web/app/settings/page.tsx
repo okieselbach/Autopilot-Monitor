@@ -20,6 +20,7 @@ import DiagnosticsSection, { parseSasExpiry } from "./components/DiagnosticsSect
 import DataManagementSection from "./components/DataManagementSection";
 import OffboardingSection from "./components/OffboardingSection";
 import BootstrapSessionsSection, { BootstrapSessionItem } from "./components/BootstrapSessionsSection";
+import UnrestrictedModeSection from "./components/UnrestrictedModeSection";
 
 export interface DiagnosticsLogPath {
   path: string;
@@ -76,6 +77,8 @@ export interface TenantConfiguration {
   localAdminAllowedAccountsJson?: string;
   // Bootstrap token
   bootstrapTokenEnabled?: boolean;
+  // Unrestricted mode
+  unrestrictedMode?: boolean;
 }
 
 export interface TenantAdmin {
@@ -172,6 +175,9 @@ export default function SettingsPage() {
   const [localAdminAllowedAccounts, setLocalAdminAllowedAccounts] = useState<string[]>([]);
   const [newAllowedAccount, setNewAllowedAccount] = useState("");
 
+  // Unrestricted mode state
+  const [unrestrictedMode, setUnrestrictedMode] = useState(false);
+
   // Derived: true when form differs from last-saved config
   const hasUnsavedChanges = useMemo(() => {
     if (!config) return false;
@@ -209,7 +215,8 @@ export default function SettingsPage() {
       enableLocalAdminAnalyzer !== (config.enableLocalAdminAnalyzer ?? true) ||
       JSON.stringify(localAdminAllowedAccounts) !== JSON.stringify(
         config.localAdminAllowedAccountsJson ? (() => { try { return JSON.parse(config.localAdminAllowedAccountsJson!); } catch { return []; } })() : []
-      )
+      ) ||
+      unrestrictedMode !== (config.unrestrictedMode ?? false)
     );
   }, [
     config,
@@ -221,7 +228,7 @@ export default function SettingsPage() {
     enrollmentSummaryBrandingImageUrl, enrollmentSummaryLaunchRetrySeconds,
     webhookProviderType, webhookUrl, webhookNotifyOnSuccess, webhookNotifyOnFailure,
     diagnosticsBlobSasUrl, diagnosticsUploadMode, tenantDiagPaths,
-    enableLocalAdminAnalyzer, localAdminAllowedAccounts,
+    enableLocalAdminAnalyzer, localAdminAllowedAccounts, unrestrictedMode,
   ]);
 
   // Fetch configuration
@@ -296,6 +303,7 @@ export default function SettingsPage() {
         } catch {
           setLocalAdminAllowedAccounts([]);
         }
+        setUnrestrictedMode(data.unrestrictedMode ?? false);
 
         // Parse SAS expiry and fire notification to bell if needed
         if (sasUrl) {
@@ -537,6 +545,7 @@ export default function SettingsPage() {
         diagnosticsLogPathsJson: tenantDiagPaths.length > 0 ? JSON.stringify(tenantDiagPaths) : undefined,
         enableLocalAdminAnalyzer,
         localAdminAllowedAccountsJson: localAdminAllowedAccounts.length > 0 ? JSON.stringify(localAdminAllowedAccounts) : undefined,
+        unrestrictedMode,
       };
 
       const response = await authenticatedFetch(`${API_BASE_URL}/api/config/${tenantId}`, getAccessToken, {
@@ -964,6 +973,7 @@ export default function SettingsPage() {
         { id: "hardware-whitelist", label: "Hardware Whitelist" },
         { id: "agent-settings", label: "Agent Settings" },
         { id: "agent-analyzers", label: "Agent Analyzers" },
+        { id: "unrestricted-mode", label: "Unrestricted Mode" },
         { id: "notifications", label: "Notifications" },
         { id: "diagnostics", label: "Diagnostics" },
       );
@@ -1164,6 +1174,15 @@ export default function SettingsPage() {
               setLocalAdminAllowedAccounts={setLocalAdminAllowedAccounts}
               newAllowedAccount={newAllowedAccount}
               setNewAllowedAccount={setNewAllowedAccount}
+            />
+            </div>
+            )}
+
+            {user?.isTenantAdmin && (
+            <div id="unrestricted-mode">
+            <UnrestrictedModeSection
+              unrestrictedMode={unrestrictedMode}
+              setUnrestrictedMode={setUnrestrictedMode}
             />
             </div>
             )}

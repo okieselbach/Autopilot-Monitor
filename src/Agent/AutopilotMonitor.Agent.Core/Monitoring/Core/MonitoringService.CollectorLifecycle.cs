@@ -388,6 +388,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     _logger,
                     _configuration.ImeLogPathOverride
                 );
+                _gatherRuleExecutor.UnrestrictedMode = _configuration.UnrestrictedMode;
                 _gatherRuleExecutor.UpdateRules(config.GatherRules);
                 _logger.Info($"GatherRuleExecutor started with {config.GatherRules.Count} rule(s)");
             }

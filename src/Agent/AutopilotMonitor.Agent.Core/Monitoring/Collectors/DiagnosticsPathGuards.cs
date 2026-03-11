@@ -60,12 +60,23 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             @"C:\Windows\Logs\CBS",
         };
 
+        // Hard block: C:\Users is never allowed, even in unrestricted mode
+        private static readonly string BlockedUsersPrefix = Path.GetFullPath(@"C:\Users");
+
         /// <summary>
         /// Returns true if the given path is allowed for diagnostics collection.
         /// Expands environment variables and normalises to a full path before checking.
         /// Wildcards in the last path segment are supported.
         /// </summary>
         public static bool IsDiagnosticsPathAllowed(string rawPath)
+            => IsDiagnosticsPathAllowed(rawPath, unrestrictedMode: false);
+
+        /// <summary>
+        /// Returns true if the given path is allowed for diagnostics collection.
+        /// When unrestrictedMode is true, all paths are allowed except C:\Users (privacy protection).
+        /// Path normalization and traversal protection always apply regardless of mode.
+        /// </summary>
+        public static bool IsDiagnosticsPathAllowed(string rawPath, bool unrestrictedMode)
         {
             if (string.IsNullOrWhiteSpace(rawPath))
                 return false;
@@ -90,6 +101,18 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                 {
                     normalizedDir = Path.GetFullPath(expanded);
                 }
+
+                // C:\Users block always applies (even in unrestricted mode)
+                if (normalizedDir.StartsWith(BlockedUsersPrefix, StringComparison.OrdinalIgnoreCase) &&
+                    (normalizedDir.Length == BlockedUsersPrefix.Length ||
+                     normalizedDir[BlockedUsersPrefix.Length] == Path.DirectorySeparatorChar))
+                {
+                    return false;
+                }
+
+                // In unrestricted mode, everything except C:\Users is allowed
+                if (unrestrictedMode)
+                    return true;
 
                 foreach (var prefix in AllowedDiagnosticsPathPrefixes)
                 {
