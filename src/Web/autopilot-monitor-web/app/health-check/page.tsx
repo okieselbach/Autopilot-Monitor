@@ -27,7 +27,7 @@ interface HealthCheckResult {
 export default function HealthCheckPage() {
   const { user, getAccessToken } = useAuth();
   const { addNotification } = useNotifications();
-  const { connectionState, connectionId, isConnected, joinedGroups, joinGroup } = useSignalR();
+  const { connectionState, isConnected, joinedGroups, joinGroup } = useSignalR();
   const { tenantId } = useTenant();
   const [healthResult, setHealthResult] = useState<HealthCheckResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -187,145 +187,80 @@ export default function HealthCheckPage() {
         {/* Real-Time Connection Status */}
         <div className="mb-6">
           <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Real-Time Connection</h2>
-          <div className="grid gap-5 sm:grid-cols-2">
-            {/* SignalR Connection Card */}
-            {(() => {
-              const connStatus = getConnectionStatus();
-              const colors = getStatusColor(connStatus);
-              return (
-                <div className={`bg-white rounded-lg shadow border-l-4 ${colors.accent}`}>
-                  <div className="p-6">
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex items-center space-x-3">
-                        <div className={`w-8 h-8 rounded-full ${colors.bg} flex items-center justify-center`}>
-                          {connStatus === 'healthy' ? (
-                            <svg className="w-5 h-5 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                            </svg>
-                          ) : connStatus === 'unhealthy' ? (
-                            <svg className="w-5 h-5 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                            </svg>
-                          ) : (
-                            <svg className="w-5 h-5 text-yellow-600 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                            </svg>
-                          )}
-                        </div>
-                        <div>
-                          <h3 className="text-lg font-semibold text-gray-900">SignalR Connection</h3>
-                          <p className="text-xs text-gray-500">Real-time event hub (20 concurrent client limit)</p>
-                        </div>
-                      </div>
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${colors.badge}`}>
-                        {getConnectionStateLabel(connectionState)}
-                      </span>
-                    </div>
-                    <p className={`text-sm ${colors.text}`}>
-                      {connStatus === 'healthy'
-                        ? 'Connected to real-time event hub'
-                        : connStatus === 'warning'
-                        ? 'Attempting to establish connection...'
-                        : 'Not connected — real-time updates unavailable'}
-                    </p>
-                    <div className="mt-4 bg-gray-50 rounded-lg p-3 border border-gray-200">
-                      <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">Details</h4>
-                      <dl className="space-y-1">
-                        <div className="flex justify-between text-xs">
-                          <dt className="font-medium text-gray-600">Connection ID</dt>
-                          <dd className="text-gray-900 font-mono">{connectionId || 'N/A'}</dd>
-                        </div>
-                        <div className="flex justify-between text-xs">
-                          <dt className="font-medium text-gray-600">State</dt>
-                          <dd className="text-gray-900 font-mono">{getConnectionStateLabel(connectionState)}</dd>
-                        </div>
-                      </dl>
-                    </div>
-                  </div>
-                </div>
-              );
-            })()}
-
-            {/* Group Membership Card */}
-            {(() => {
-              const tenantGroup = `tenant-${tenantId}`;
-              const hasTenantGroup = joinedGroups.includes(tenantGroup);
-              const groupStatus = !isConnected ? 'unhealthy' : joinedGroups.length > 0 ? 'healthy' : 'warning';
-              const colors = getStatusColor(groupStatus);
-              return (
-                <div className={`bg-white rounded-lg shadow border-l-4 ${colors.accent}`}>
-                  <div className="p-6">
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex items-center space-x-3">
-                        <div className={`w-8 h-8 rounded-full ${colors.bg} flex items-center justify-center`}>
-                          {groupStatus === 'healthy' ? (
-                            <svg className="w-5 h-5 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                            </svg>
-                          ) : groupStatus === 'unhealthy' ? (
-                            <svg className="w-5 h-5 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                            </svg>
-                          ) : (
-                            <svg className="w-5 h-5 text-yellow-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                          )}
-                        </div>
-                        <div>
-                          <h3 className="text-lg font-semibold text-gray-900">Group Membership</h3>
-                          <p className="text-xs text-gray-500">SignalR group subscriptions for real-time updates</p>
-                        </div>
-                      </div>
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${colors.badge}`}>
-                        {joinedGroups.length} joined
-                      </span>
-                    </div>
-                    <p className={`text-sm ${colors.text}`}>
-                      {!isConnected
-                        ? 'Cannot join groups — no connection'
-                        : hasTenantGroup
-                        ? 'Tenant group joined — receiving real-time events'
-                        : joinedGroups.length > 0
-                        ? 'Connected to groups but tenant group not joined'
-                        : 'No groups joined — navigate to a page with live data or test below'}
-                    </p>
-                    <div className="mt-4 bg-gray-50 rounded-lg p-3 border border-gray-200">
-                      <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">Details</h4>
-                      <dl className="space-y-1">
-                        <div className="flex justify-between text-xs">
-                          <dt className="font-medium text-gray-600">Tenant Group</dt>
-                          <dd className={`font-mono ${hasTenantGroup ? 'text-green-700' : 'text-gray-400'}`}>
-                            {hasTenantGroup ? 'Joined' : 'Not joined'}
-                          </dd>
-                        </div>
-                        {joinedGroups.length > 0 && (
-                          <div className="flex justify-between text-xs">
-                            <dt className="font-medium text-gray-600">Active Groups</dt>
-                            <dd className="text-gray-900 font-mono">{joinedGroups.join(', ')}</dd>
-                          </div>
+          {(() => {
+            const tenantGroup = `tenant-${tenantId}`;
+            const hasTenantGroup = joinedGroups.includes(tenantGroup);
+            const connStatus = getConnectionStatus();
+            const colors = getStatusColor(connStatus);
+            return (
+              <div className={`bg-white rounded-lg shadow border-l-4 ${colors.accent}`}>
+                <div className="p-6">
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex items-center space-x-3">
+                      <div className={`w-8 h-8 rounded-full ${colors.bg} flex items-center justify-center`}>
+                        {connStatus === 'healthy' ? (
+                          <svg className="w-5 h-5 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                        ) : connStatus === 'unhealthy' ? (
+                          <svg className="w-5 h-5 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        ) : (
+                          <svg className="w-5 h-5 text-yellow-600 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                          </svg>
                         )}
-                      </dl>
-                      {isConnected && !hasTenantGroup && (
-                        <button
-                          onClick={testGroupJoin}
-                          disabled={groupJoinTest === 'testing'}
-                          className="mt-3 px-3 py-1.5 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
-                        >
-                          {groupJoinTest === 'testing' ? 'Testing...' : groupJoinTest === 'failed' ? 'Retry Join Test' : 'Test Group Join'}
-                        </button>
-                      )}
-                      {groupJoinTest === 'failed' && (
-                        <p className="mt-2 text-xs text-red-600">
-                          Group join failed — likely hit the 20 concurrent client limit
-                        </p>
-                      )}
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-semibold text-gray-900">Live Updates</h3>
+                        <p className="text-xs text-gray-500">Real-time event hub (Private Preview: 20 concurrent clients)</p>
+                      </div>
                     </div>
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${colors.badge}`}>
+                      {getConnectionStateLabel(connectionState)}
+                    </span>
+                  </div>
+                  <p className={`text-sm ${colors.text}`}>
+                    {connStatus === 'healthy'
+                      ? 'Connected to real-time event hub'
+                      : connStatus === 'warning'
+                      ? 'Attempting to establish connection...'
+                      : 'Not connected — real-time updates unavailable'}
+                  </p>
+                  <div className="mt-4 bg-gray-50 rounded-lg p-3 border border-gray-200">
+                    <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">Details</h4>
+                    <dl className="space-y-1">
+                      <div className="flex justify-between text-xs">
+                        <dt className="font-medium text-gray-600">State</dt>
+                        <dd className="text-gray-900 font-mono">{getConnectionStateLabel(connectionState)}</dd>
+                      </div>
+                      <div className="flex justify-between text-xs">
+                        <dt className="font-medium text-gray-600">Tenant Group</dt>
+                        <dd className={`font-mono ${hasTenantGroup ? 'text-green-700' : 'text-gray-400'}`}>
+                          {hasTenantGroup ? 'Joined' : 'Not joined'}
+                        </dd>
+                      </div>
+                    </dl>
+                    {isConnected && !hasTenantGroup && (
+                      <button
+                        onClick={testGroupJoin}
+                        disabled={groupJoinTest === 'testing'}
+                        className="mt-3 px-3 py-1.5 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                      >
+                        {groupJoinTest === 'testing' ? 'Testing...' : groupJoinTest === 'failed' ? 'Retry Join Test' : 'Test Group Join'}
+                      </button>
+                    )}
+                    {groupJoinTest === 'failed' && (
+                      <p className="mt-2 text-xs text-red-600">
+                        Group join failed — likely hit the 20 concurrent client limit
+                      </p>
+                    )}
                   </div>
                 </div>
-              );
-            })()}
-          </div>
+              </div>
+            );
+          })()}
         </div>
 
         {/* Individual Check Cards */}
