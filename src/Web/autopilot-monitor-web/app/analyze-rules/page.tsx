@@ -111,6 +111,7 @@ export default function AnalyzeRulesPage() {
 
   const isGalacticOverride = galacticAdminMode && user?.isGalacticAdmin && selectedTenantId && selectedTenantId !== tenantId;
   const effectiveTenantId = (galacticAdminMode && user?.isGalacticAdmin && selectedTenantId) ? selectedTenantId : tenantId;
+  const isReadOnly = !user?.isTenantAdmin && !user?.isGalacticAdmin;
 
   const fetchRules = useCallback(async () => {
     if (!effectiveTenantId) return;
@@ -431,10 +432,10 @@ export default function AnalyzeRulesPage() {
                     ],
                   },
                 ]}
-                onExportAll={handleExportAll}
-                onCreateNew={isGalacticOverride ? undefined : () => { setShowCreateForm(!showCreateForm); if (showCreateForm) setNewRule({ ...EMPTY_FORM, conditions: [{ ...EMPTY_CONDITION }] }); }}
+                onExportAll={isReadOnly ? undefined : handleExportAll}
+                onCreateNew={isReadOnly || isGalacticOverride ? undefined : () => { setShowCreateForm(!showCreateForm); if (showCreateForm) setNewRule({ ...EMPTY_FORM, conditions: [{ ...EMPTY_CONDITION }] }); }}
                 createLabel="Create Custom Rule"
-                showCreateForm={showCreateForm && !isGalacticOverride}
+                showCreateForm={showCreateForm && !isGalacticOverride && !isReadOnly}
               />
 
               {/* Create Custom Rule Form */}
@@ -546,6 +547,7 @@ export default function AnalyzeRulesPage() {
                       onSetJsonModeEdit={setJsonModeEdit}
                       onSetJsonText={setJsonText}
                       onSetJsonError={setJsonError}
+                      readOnly={isReadOnly}
                     />
                   ))}
                 </div>

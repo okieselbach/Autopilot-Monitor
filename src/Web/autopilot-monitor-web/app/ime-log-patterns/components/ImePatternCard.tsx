@@ -28,6 +28,7 @@ interface ImePatternCardProps {
   onSetJsonModeEdit: (mode: boolean) => void;
   onSetJsonText: (text: string) => void;
   onSetJsonError: (error: string | null) => void;
+  readOnly?: boolean;
 }
 
 export default function ImePatternCard({
@@ -38,6 +39,7 @@ export default function ImePatternCard({
   onToggle, onToggleEnabled, onStartEditing, onSaveEdit, onCancelEdit,
   onExport,
   onSetJsonModeEdit, onSetJsonText, onSetJsonError,
+  readOnly = false,
 }: ImePatternCardProps) {
   const catColor = CATEGORY_COLORS[pattern.category] || { bg: "bg-gray-100", text: "text-gray-700" };
 
@@ -196,30 +198,32 @@ export default function ImePatternCard({
             </div>
           )}
 
-          <div className="flex items-center justify-end space-x-3 pt-4 border-t border-gray-200">
-            <button
-              onClick={() => onExport(pattern)}
-              className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors flex items-center space-x-2"
-              title="Export pattern as JSON"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-              </svg>
-              <span>Export</span>
-            </button>
-            {canEdit && (
+          {!readOnly && (
+            <div className="flex items-center justify-end space-x-3 pt-4 border-t border-gray-200">
               <button
-                onClick={() => onStartEditing(pattern)}
-                className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center space-x-2"
-                title="Edit pattern (Galactic Admin)"
+                onClick={() => onExport(pattern)}
+                className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors flex items-center space-x-2"
+                title="Export pattern as JSON"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                 </svg>
-                <span>Edit (Global)</span>
+                <span>Export</span>
               </button>
-            )}
-          </div>
+              {canEdit && (
+                <button
+                  onClick={() => onStartEditing(pattern)}
+                  className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center space-x-2"
+                  title="Edit pattern (Galactic Admin)"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                  </svg>
+                  <span>Edit (Global)</span>
+                </button>
+              )}
+            </div>
+          )}
         </div>
       )}
 

@@ -206,6 +206,7 @@ export default function ImeLogPatternsPage() {
   const uniqueActions = [...new Set(patternsList.map((p) => p.action))].sort();
 
   const canEdit = isGalacticAdmin && galacticAdminMode;
+  const isReadOnly = !user?.isTenantAdmin && !user?.isGalacticAdmin;
 
   return (
     <ProtectedRoute>
@@ -224,7 +225,6 @@ export default function ImeLogPatternsPage() {
                 <h1 className="text-3xl font-bold text-gray-900">IME Log Patterns</h1>
                 <p className="text-sm text-gray-600 mt-1">
                   Regex patterns used by the agent to parse Intune Management Extension logs during enrollment tracking.
-                  {!canEdit && " Read-only view — editing requires Galactic Admin privileges."}
                 </p>
               </div>
               <Link
@@ -305,7 +305,7 @@ export default function ImeLogPatternsPage() {
                     ],
                   },
                 ]}
-                onExportAll={handleExportAll}
+                onExportAll={isReadOnly ? undefined : handleExportAll}
               />
 
               {/* Patterns List */}
@@ -349,6 +349,7 @@ export default function ImeLogPatternsPage() {
                     onSetJsonModeEdit={setJsonModeEdit}
                     onSetJsonText={setJsonText}
                     onSetJsonError={setJsonError}
+                    readOnly={isReadOnly}
                   />
                 ))
               )}

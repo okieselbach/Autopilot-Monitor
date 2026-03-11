@@ -26,6 +26,7 @@ interface AnalyzeRuleCardProps {
   onSetJsonModeEdit: (mode: boolean) => void;
   onSetJsonText: (text: string) => void;
   onSetJsonError: (error: string | null) => void;
+  readOnly?: boolean;
 }
 
 export default function AnalyzeRuleCard({
@@ -35,6 +36,7 @@ export default function AnalyzeRuleCard({
   onToggle, onToggleEnabled, onStartEditing, onSaveEdit, onCancelEdit,
   onDelete, onExport,
   onSetJsonModeEdit, onSetJsonText, onSetJsonError,
+  readOnly = false,
 }: AnalyzeRuleCardProps) {
   const sevColor = getSeverityColor(rule.severity);
   const catColor = getCategoryColor(rule.category);
@@ -49,9 +51,15 @@ export default function AnalyzeRuleCard({
       {/* Collapsed Header */}
       <div className="p-4 cursor-pointer select-none" onClick={() => { if (isEditing) return; onToggle(); }}>
         <div className="flex items-center space-x-4">
-          <button onClick={(e) => { e.stopPropagation(); onToggleEnabled(rule); }} disabled={togglingRuleId === rule.ruleId} className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${togglingRuleId === rule.ruleId ? "opacity-50 cursor-not-allowed" : "cursor-pointer"} ${rule.enabled ? "bg-green-500" : "bg-gray-300"}`} title={rule.enabled ? "Disable rule" : "Enable rule"}>
-            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${rule.enabled ? "translate-x-6" : "translate-x-1"}`} />
-          </button>
+          {readOnly ? (
+            <span className={`inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full ${rule.enabled ? "bg-green-500" : "bg-gray-300"}`} title={rule.enabled ? "Enabled" : "Disabled"}>
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white ${rule.enabled ? "translate-x-6" : "translate-x-1"}`} />
+            </span>
+          ) : (
+            <button onClick={(e) => { e.stopPropagation(); onToggleEnabled(rule); }} disabled={togglingRuleId === rule.ruleId} className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${togglingRuleId === rule.ruleId ? "opacity-50 cursor-not-allowed" : "cursor-pointer"} ${rule.enabled ? "bg-green-500" : "bg-gray-300"}`} title={rule.enabled ? "Disable rule" : "Enable rule"}>
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${rule.enabled ? "translate-x-6" : "translate-x-1"}`} />
+            </button>
+          )}
           <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${sevColor.bg} ${sevColor.text} flex-shrink-0`}>
             <span className={`w-1.5 h-1.5 rounded-full ${sevColor.dot} mr-1.5`}></span>
             {rule.severity.charAt(0).toUpperCase() + rule.severity.slice(1)}
@@ -182,28 +190,30 @@ export default function AnalyzeRuleCard({
           )}
 
           {/* Actions */}
-          <div className="flex items-center justify-end space-x-3 pt-4 border-t border-gray-200">
-            <button onClick={() => onExport(rule)} className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors flex items-center space-x-2" title="Export rule as JSON">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-              <span>Export</span>
-            </button>
-            {canEdit && (
-              <button onClick={() => onStartEditing(rule)} className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center space-x-2" title="Edit rule">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                <span>Edit</span>
+          {!readOnly && (
+            <div className="flex items-center justify-end space-x-3 pt-4 border-t border-gray-200">
+              <button onClick={() => onExport(rule)} className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors flex items-center space-x-2" title="Export rule as JSON">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                <span>Export</span>
               </button>
-            )}
-            {!rule.isBuiltIn && !rule.isCommunity && (
-              <button onClick={() => onDelete(rule)} disabled={deletingRuleId === rule.ruleId} className="px-4 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-2" title="Delete rule">
-                {deletingRuleId === rule.ruleId ? (<><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div><span>Deleting...</span></>) : (<><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg><span>Delete</span></>)}
-              </button>
-            )}
-          </div>
+              {canEdit && (
+                <button onClick={() => onStartEditing(rule)} className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center space-x-2" title="Edit rule">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                  <span>Edit</span>
+                </button>
+              )}
+              {!rule.isBuiltIn && !rule.isCommunity && (
+                <button onClick={() => onDelete(rule)} disabled={deletingRuleId === rule.ruleId} className="px-4 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-2" title="Delete rule">
+                  {deletingRuleId === rule.ruleId ? (<><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div><span>Deleting...</span></>) : (<><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg><span>Delete</span></>)}
+                </button>
+              )}
+            </div>
+          )}
         </div>
       )}
 
       {/* Edit Form */}
-      {isExpanded && isEditing && (
+      {isExpanded && isEditing && !readOnly && (
         <div className="border-t border-gray-200 p-6">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center space-x-2">

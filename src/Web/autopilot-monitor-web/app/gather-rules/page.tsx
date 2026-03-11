@@ -109,6 +109,7 @@ export default function GatherRulesPage() {
 
   const isGalacticOverride = galacticAdminMode && user?.isGalacticAdmin && selectedTenantId && selectedTenantId !== tenantId;
   const effectiveTenantId = (galacticAdminMode && user?.isGalacticAdmin && selectedTenantId) ? selectedTenantId : tenantId;
+  const isReadOnly = !user?.isTenantAdmin && !user?.isGalacticAdmin;
 
   const fetchRules = useCallback(async () => {
     if (!effectiveTenantId) return;
@@ -474,10 +475,10 @@ export default function GatherRulesPage() {
                     ],
                   },
                 ]}
-                onExportAll={handleExportAll}
-                onCreateNew={isGalacticOverride ? undefined : () => { setShowCreateForm(!showCreateForm); if (showCreateForm) setNewRule({ ...EMPTY_FORM }); }}
+                onExportAll={isReadOnly ? undefined : handleExportAll}
+                onCreateNew={isReadOnly || isGalacticOverride ? undefined : () => { setShowCreateForm(!showCreateForm); if (showCreateForm) setNewRule({ ...EMPTY_FORM }); }}
                 createLabel="Create Custom Rule"
-                showCreateForm={showCreateForm && !isGalacticOverride}
+                showCreateForm={showCreateForm && !isGalacticOverride && !isReadOnly}
               />
 
               {/* Create Custom Rule Form */}
@@ -640,6 +641,7 @@ export default function GatherRulesPage() {
                           setJsonError(e instanceof Error ? e.message : "Invalid JSON");
                         }
                       }}
+                      readOnly={isReadOnly}
                     />
                   ))
                 )}
