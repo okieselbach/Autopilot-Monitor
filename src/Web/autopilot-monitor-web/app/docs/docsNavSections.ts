@@ -1,5 +1,6 @@
 export const NAV_SECTIONS = [
   { id: "private-preview", label: "Private Preview",   description: "Private preview access and onboarding for Autopilot Monitor." },
+  { id: "general",         label: "General",            description: "General concepts: Admin Mode, session statuses, and user roles." },
   { id: "overview",        label: "Overview",          description: "Overview of Autopilot Monitor architecture and capabilities." },
   { id: "setup",           label: "Setup",             description: "Step-by-step setup guide for deploying Autopilot Monitor." },
   { id: "agent",            label: "Agent",              description: "Autopilot Monitor agent overview, version, and configuration details." },

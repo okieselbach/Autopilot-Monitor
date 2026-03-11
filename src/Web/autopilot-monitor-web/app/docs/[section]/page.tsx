@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { NAV_SECTIONS, type SectionId } from "../docsNavSections";
 import { SectionPrivatePreview } from "../sections/SectionPrivatePreview";
+import { SectionGeneral } from "../sections/SectionGeneral";
 import { SectionOverview } from "../sections/SectionOverview";
 import { SectionSetup } from "../sections/SectionSetup";
 import { SectionAgent } from "../sections/SectionAgent";
@@ -12,6 +13,7 @@ import { SectionAnalyzeRules } from "../sections/SectionAnalyzeRules";
 
 const SECTION_COMPONENTS: Record<SectionId, React.ComponentType> = {
   "private-preview": SectionPrivatePreview,
+  "general":         SectionGeneral,
   "overview":        SectionOverview,
   "setup":           SectionSetup,
   "agent":           SectionAgent,
