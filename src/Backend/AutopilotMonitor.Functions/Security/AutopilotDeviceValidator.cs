@@ -100,8 +100,8 @@ namespace AutopilotMonitor.Functions.Security
         {
             try
             {
-                var accessToken = await _graphTokenService.GetAccessTokenAsync(tenantId);
-                if (string.IsNullOrEmpty(accessToken))
+                var tokenResult = await _graphTokenService.GetAccessTokenAsync(tenantId);
+                if (string.IsNullOrEmpty(tokenResult.AccessToken))
                 {
                     return new AutopilotDeviceValidationResult
                     {
@@ -113,7 +113,7 @@ namespace AutopilotMonitor.Functions.Security
                 }
 
                 var graphClient = _httpClientFactory.CreateClient();
-                graphClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+                graphClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", tokenResult.AccessToken);
 
                 // For windowsAutopilotDeviceIdentities, eq on serialNumber is unreliable and often returns 400.
                 // Use contains for server-side narrowing, then perform exact match client-side.

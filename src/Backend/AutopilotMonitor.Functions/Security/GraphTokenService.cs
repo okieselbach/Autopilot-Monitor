@@ -43,24 +43,37 @@ namespace AutopilotMonitor.Functions.Security
                 return cached;
             }
 
-            var accessToken = await GetAccessTokenAsync(tenantId);
+            var tokenResult = await GetAccessTokenAsync(tenantId);
             var result = new GraphConsentStatusResult
             {
-                IsConsented = !string.IsNullOrWhiteSpace(accessToken),
-                Message = string.IsNullOrWhiteSpace(accessToken)
-                    ? "Admin consent for Graph application permissions is missing or app credentials are invalid."
-                    : "Admin consent is available for this tenant."
+                IsConsented = !string.IsNullOrWhiteSpace(tokenResult.AccessToken),
+                IsTransient = tokenResult.IsTransient,
+                Message = !string.IsNullOrWhiteSpace(tokenResult.AccessToken)
+                    ? "Admin consent is available for this tenant."
+                    : tokenResult.IsTransient
+                        ? "Could not verify consent status due to a transient error. Will retry on next request."
+                        : "Admin consent for Graph application permissions is missing or app credentials are invalid."
             };
 
-            _cache.Set(cacheKey, result, new MemoryCacheEntryOptions
+            // Only cache definitive results — never cache transient failures
+            if (!tokenResult.IsTransient)
             {
-                AbsoluteExpirationRelativeToNow = ConsentStatusTtl
-            });
+                _cache.Set(cacheKey, result, new MemoryCacheEntryOptions
+                {
+                    AbsoluteExpirationRelativeToNow = ConsentStatusTtl
+                });
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "Consent status check for tenant {TenantId} returned transient error — result NOT cached",
+                    tenantId);
+            }
 
             return result;
         }
 
-        public async Task<string?> GetAccessTokenAsync(string tenantId)
+        public async Task<GraphTokenResult> GetAccessTokenAsync(string tenantId)
         {
             var clientId = _configuration["EntraId:ClientId"];
             var clientSecret = _configuration["EntraId:ClientSecret"];
@@ -69,7 +82,7 @@ namespace AutopilotMonitor.Functions.Security
             {
                 _logger.LogError(
                     "Device validation is enabled but Entra ID app credentials are not configured. Set EntraId:ClientId and EntraId:ClientSecret.");
-                return null;
+                return GraphTokenResult.PermanentFailure();
             }
 
             var tokenUrl = $"https://login.microsoftonline.com/{tenantId}/oauth2/v2.0/token";
@@ -80,64 +93,131 @@ namespace AutopilotMonitor.Functions.Security
             var retryDelays = new[] { TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(30) };
             string? responseBody = null;
             int attempt = 0;
+            bool lastAttemptWasTransient = false;
 
             while (true)
             {
-                var tokenClient = _httpClientFactory.CreateClient();
-                var body = new FormUrlEncodedContent(new Dictionary<string, string>
+                try
                 {
-                    ["client_id"] = clientId,
-                    ["client_secret"] = clientSecret,
-                    ["scope"] = "https://graph.microsoft.com/.default",
-                    ["grant_type"] = "client_credentials"
-                });
+                    var tokenClient = _httpClientFactory.CreateClient();
+                    var body = new FormUrlEncodedContent(new Dictionary<string, string>
+                    {
+                        ["client_id"] = clientId,
+                        ["client_secret"] = clientSecret,
+                        ["scope"] = "https://graph.microsoft.com/.default",
+                        ["grant_type"] = "client_credentials"
+                    });
 
-                var response = await tokenClient.PostAsync(tokenUrl, body);
-                responseBody = await response.Content.ReadAsStringAsync();
+                    var response = await tokenClient.PostAsync(tokenUrl, body);
+                    responseBody = await response.Content.ReadAsStringAsync();
 
-                if (response.IsSuccessStatusCode)
-                {
-                    var tokenJson = JsonConvert.DeserializeObject<JObject>(responseBody);
-                    return tokenJson?["access_token"]?.ToString();
-                }
+                    if (response.IsSuccessStatusCode)
+                    {
+                        var tokenJson = JsonConvert.DeserializeObject<JObject>(responseBody);
+                        var accessToken = tokenJson?["access_token"]?.ToString();
+                        return GraphTokenResult.Success(accessToken);
+                    }
 
-                // Only retry on transient consent-propagation errors (unauthorized_client, invalid_client).
-                // Do not retry on permanent errors like invalid credentials or tenant not found.
-                var isRetryable = response.StatusCode == System.Net.HttpStatusCode.Unauthorized
-                    || response.StatusCode == System.Net.HttpStatusCode.BadRequest
-                    && (responseBody.Contains("unauthorized_client", StringComparison.OrdinalIgnoreCase)
-                        || responseBody.Contains("AADSTS700016", StringComparison.OrdinalIgnoreCase)
-                        || responseBody.Contains("AADSTS7000215", StringComparison.OrdinalIgnoreCase));
+                    // Classify the error: consent-propagation errors are retryable but ultimately permanent (no consent).
+                    // Server errors (500, 502, 503, 504) and timeouts (408) are truly transient.
+                    var statusCode = (int)response.StatusCode;
+                    var isConsentError = response.StatusCode == System.Net.HttpStatusCode.BadRequest
+                        && (responseBody.Contains("unauthorized_client", StringComparison.OrdinalIgnoreCase)
+                            || responseBody.Contains("AADSTS700016", StringComparison.OrdinalIgnoreCase)
+                            || responseBody.Contains("AADSTS7000215", StringComparison.OrdinalIgnoreCase));
+                    var isServerError = statusCode == 408 || statusCode == 429
+                        || statusCode >= 500 && statusCode <= 599;
+                    var isRetryable = response.StatusCode == System.Net.HttpStatusCode.Unauthorized
+                        || isConsentError || isServerError;
 
-                if (!isRetryable || attempt >= retryDelays.Length)
-                {
-                    _logger.LogWarning(
-                        "Failed to acquire Graph token for tenant {TenantId} after {Attempts} attempt(s). Status: {StatusCode}. Body: {ResponseBody}",
+                    lastAttemptWasTransient = isServerError;
+
+                    if (!isRetryable || attempt >= retryDelays.Length)
+                    {
+                        _logger.LogWarning(
+                            "Failed to acquire Graph token for tenant {TenantId} after {Attempts} attempt(s). Status: {StatusCode}. Body: {ResponseBody}",
+                            tenantId,
+                            attempt + 1,
+                            statusCode,
+                            responseBody);
+
+                        // Server errors are transient (infrastructure issue), consent errors are permanent (no consent granted)
+                        return lastAttemptWasTransient
+                            ? GraphTokenResult.TransientFailure()
+                            : GraphTokenResult.PermanentFailure();
+                    }
+
+                    var delay = retryDelays[attempt];
+
+                    // Respect Retry-After header from Azure AD / Graph throttling
+                    if (response.Headers.RetryAfter?.Delta is TimeSpan retryAfterDelta && retryAfterDelta > delay)
+                    {
+                        delay = retryAfterDelta;
+                    }
+
+                    _logger.LogInformation(
+                        "Graph token acquisition for tenant {TenantId} returned {StatusCode} (attempt {Attempt}/{MaxAttempts}). Retrying in {Delay}s — likely Azure AD consent propagation delay.",
                         tenantId,
+                        statusCode,
                         attempt + 1,
-                        (int)response.StatusCode,
-                        responseBody);
-                    return null;
+                        retryDelays.Length + 1,
+                        delay.TotalSeconds);
+
+                    await Task.Delay(delay);
+                    attempt++;
                 }
+                catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+                {
+                    // Network errors and timeouts are transient
+                    if (attempt >= retryDelays.Length)
+                    {
+                        _logger.LogWarning(ex,
+                            "Graph token acquisition for tenant {TenantId} failed with network error after {Attempts} attempt(s)",
+                            tenantId, attempt + 1);
+                        return GraphTokenResult.TransientFailure();
+                    }
 
-                var delay = retryDelays[attempt];
-                _logger.LogInformation(
-                    "Graph token acquisition for tenant {TenantId} returned {StatusCode} (attempt {Attempt}/{MaxAttempts}). Retrying in {Delay}s — likely Azure AD consent propagation delay.",
-                    tenantId,
-                    (int)response.StatusCode,
-                    attempt + 1,
-                    retryDelays.Length + 1,
-                    delay.TotalSeconds);
+                    var delay = retryDelays[attempt];
+                    _logger.LogWarning(ex,
+                        "Graph token acquisition for tenant {TenantId} network error (attempt {Attempt}/{MaxAttempts}). Retrying in {Delay}s",
+                        tenantId, attempt + 1, retryDelays.Length + 1, delay.TotalSeconds);
 
-                await Task.Delay(delay);
-                attempt++;
+                    await Task.Delay(delay);
+                    attempt++;
+                }
             }
         }
+    }
+
+    /// <summary>
+    /// Result of a Graph token acquisition attempt.
+    /// Distinguishes between success, permanent failure (no consent), and transient failure (network/server error).
+    /// </summary>
+    public class GraphTokenResult
+    {
+        public string? AccessToken { get; private set; }
+
+        /// <summary>
+        /// True when the failure is transient (network error, server error, timeout).
+        /// Transient failures should NOT be cached as "no consent".
+        /// </summary>
+        public bool IsTransient { get; private set; }
+
+        public static GraphTokenResult Success(string? token) => new() { AccessToken = token };
+        public static GraphTokenResult PermanentFailure() => new() { AccessToken = null, IsTransient = false };
+        public static GraphTokenResult TransientFailure() => new() { AccessToken = null, IsTransient = true };
     }
 
     public class GraphConsentStatusResult
     {
         public bool IsConsented { get; set; }
+
+        /// <summary>
+        /// True when the result is due to a transient error (network/server issue).
+        /// Callers should treat this as "unknown" rather than "not consented".
+        /// </summary>
+        public bool IsTransient { get; set; }
+
         public string? Message { get; set; }
     }
 }

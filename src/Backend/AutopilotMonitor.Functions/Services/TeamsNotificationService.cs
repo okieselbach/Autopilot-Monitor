@@ -115,21 +115,14 @@ namespace AutopilotMonitor.Functions.Services
                            .Replace("\"context\":", "\"@context\":");
 
                 var content = new StringContent(json, Encoding.UTF8, "application/json");
-                var response = await _http.PostAsync(webhookUrl, content);
+                var sent = await PostWithRetryAsync(webhookUrl, content, $"enrollment:{deviceName}");
 
-                if (!response.IsSuccessStatusCode)
-                {
-                    var body = await response.Content.ReadAsStringAsync();
-                    _logger.LogWarning($"Teams webhook returned {(int)response.StatusCode}: {body}");
-                }
-                else
-                {
-                    _logger.LogInformation($"Teams enrollment notification sent for device '{deviceName}' (success={success})");
-                }
+                if (sent)
+                    _logger.LogInformation("Teams enrollment notification sent for device '{DeviceName}' (success={Success})", deviceName, success);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, $"Failed to send Teams enrollment notification for device '{deviceName}'");
+                _logger.LogWarning(ex, "Failed to send Teams enrollment notification for device '{DeviceName}'", deviceName);
             }
         }
 
@@ -195,22 +188,56 @@ namespace AutopilotMonitor.Functions.Services
                            .Replace("\"context\":", "\"@context\":");
 
                 var content = new StringContent(json, Encoding.UTF8, "application/json");
-                var response = await _http.PostAsync(webhookUrl, content);
+                var sent = await PostWithRetryAsync(webhookUrl, content, $"whiteglove:{deviceName}");
 
-                if (!response.IsSuccessStatusCode)
-                {
-                    var body = await response.Content.ReadAsStringAsync();
-                    _logger.LogWarning($"Teams webhook returned {(int)response.StatusCode}: {body}");
-                }
-                else
-                {
-                    _logger.LogInformation($"Teams WhiteGlove notification sent for device '{deviceName}' (success={success})");
-                }
+                if (sent)
+                    _logger.LogInformation("Teams WhiteGlove notification sent for device '{DeviceName}' (success={Success})", deviceName, success);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, $"Failed to send Teams WhiteGlove notification for device '{deviceName}'");
+                _logger.LogWarning(ex, "Failed to send Teams WhiteGlove notification for device '{DeviceName}'", deviceName);
             }
+        }
+
+        /// <summary>
+        /// Posts content to a webhook URL with a single retry on transient failures (429, 5xx, network errors).
+        /// </summary>
+        private async Task<bool> PostWithRetryAsync(string webhookUrl, StringContent content, string context)
+        {
+            const int maxAttempts = 2;
+            for (int attempt = 1; attempt <= maxAttempts; attempt++)
+            {
+                try
+                {
+                    var response = await _http.PostAsync(webhookUrl, content);
+
+                    if (response.IsSuccessStatusCode)
+                        return true;
+
+                    var statusCode = (int)response.StatusCode;
+                    var isTransient = statusCode == 429 || statusCode >= 500 && statusCode <= 599;
+
+                    if (!isTransient || attempt >= maxAttempts)
+                    {
+                        var body = await response.Content.ReadAsStringAsync();
+                        _logger.LogWarning("Teams webhook returned {StatusCode} for {Context}: {Body}", statusCode, context, body);
+                        return false;
+                    }
+
+                    _logger.LogWarning(
+                        "Teams webhook returned {StatusCode} for {Context} (attempt {Attempt}/{MaxAttempts}). Retrying in 2s",
+                        statusCode, context, attempt, maxAttempts);
+                    await Task.Delay(TimeSpan.FromSeconds(2));
+                }
+                catch (Exception ex) when (attempt < maxAttempts && (ex is HttpRequestException or TaskCanceledException))
+                {
+                    _logger.LogWarning(ex,
+                        "Teams webhook network error for {Context} (attempt {Attempt}/{MaxAttempts}). Retrying in 2s",
+                        context, attempt, maxAttempts);
+                    await Task.Delay(TimeSpan.FromSeconds(2));
+                }
+            }
+            return false;
         }
 
         private static string BuildHardwareText(string? manufacturer, string? model)

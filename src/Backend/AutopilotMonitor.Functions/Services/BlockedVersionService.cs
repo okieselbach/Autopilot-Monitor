@@ -24,9 +24,12 @@ namespace AutopilotMonitor.Functions.Services
         private readonly TableStorageService _storageService;
         private readonly ILogger<BlockedVersionService> _logger;
 
+        private static readonly TimeSpan CacheRefreshInterval = TimeSpan.FromMinutes(5);
+
         // In-memory cache of all version block rules
         private readonly ConcurrentDictionary<string, VersionBlockCacheEntry> _cache = new(StringComparer.OrdinalIgnoreCase);
         private volatile bool _loaded;
+        private DateTime _lastLoadedUtc = DateTime.MinValue;
 
         public BlockedVersionService(TableStorageService storageService, ILogger<BlockedVersionService> logger)
         {
@@ -43,7 +46,7 @@ namespace AutopilotMonitor.Functions.Services
             if (string.IsNullOrEmpty(agentVersion))
                 return (false, "Block", null);
 
-            if (!_loaded)
+            if (!_loaded || DateTime.UtcNow - _lastLoadedUtc > CacheRefreshInterval)
                 await LoadBlockListAsync();
 
             string? matchedAction = null;
@@ -272,22 +275,36 @@ namespace AutopilotMonitor.Functions.Services
             try
             {
                 var tableClient = _storageService.GetTableServiceClient().GetTableClient(Constants.TableNames.BlockedVersions);
+                var freshCache = new ConcurrentDictionary<string, VersionBlockCacheEntry>(StringComparer.OrdinalIgnoreCase);
 
                 await foreach (var entity in tableClient.QueryAsync<TableEntity>(e => e.PartitionKey == "global"))
                 {
                     var pattern = entity.GetString("VersionPattern") ?? DecodeRowKey(entity.RowKey);
-                    _cache[pattern] = new VersionBlockCacheEntry
+                    freshCache[pattern] = new VersionBlockCacheEntry
                     {
                         Action = entity.GetString("Action") ?? "Block"
                     };
                 }
 
-                _logger.LogDebug("Loaded {Count} version block rules", _cache.Count);
+                // Atomically replace cache contents
+                _cache.Clear();
+                foreach (var kvp in freshCache)
+                {
+                    _cache[kvp.Key] = kvp.Value;
+                }
+
+                _lastLoadedUtc = DateTime.UtcNow;
+                _logger.LogDebug("Loaded {Count} version block rules (refresh interval: {Interval}min)", _cache.Count, CacheRefreshInterval.TotalMinutes);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to load version block rules");
-                _loaded = false;
+                // On error: if we had data before, keep it (stale > nothing). Only reset _loaded if we never loaded.
+                if (_lastLoadedUtc == DateTime.MinValue)
+                {
+                    _loaded = false;
+                }
+                // Otherwise keep _loaded=true and _lastLoadedUtc as-is so we retry on next interval
             }
         }
 

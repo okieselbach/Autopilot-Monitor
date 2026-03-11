@@ -59,16 +59,9 @@ namespace AutopilotMonitor.Functions.Services
 
                 var json = JsonConvert.SerializeObject(payload);
                 var content = new StringContent(json, Encoding.UTF8, "application/json");
-                var response = await _http.PostAsync(webhookUrl, content);
+                var sent = await PostWithRetryAsync(webhookUrl, content, $"signup:{tenantId}");
 
-                if (!response.IsSuccessStatusCode)
-                {
-                    var body = await response.Content.ReadAsStringAsync();
-                    _logger.LogWarning(
-                        "Telegram webhook returned {StatusCode} for tenant {TenantId}: {Body}",
-                        (int)response.StatusCode, tenantId, body);
-                }
-                else
+                if (sent)
                 {
                     _logger.LogInformation(
                         "Telegram Private Preview signup notification sent for tenant {TenantId}, UPN {Upn}",
@@ -107,16 +100,9 @@ namespace AutopilotMonitor.Functions.Services
 
                 var json = JsonConvert.SerializeObject(payload);
                 var content = new StringContent(json, Encoding.UTF8, "application/json");
-                var response = await _http.PostAsync(webhookUrl, content);
+                var sent = await PostWithRetryAsync(webhookUrl, content, $"report:{reportId}");
 
-                if (!response.IsSuccessStatusCode)
-                {
-                    var body = await response.Content.ReadAsStringAsync();
-                    _logger.LogWarning(
-                        "Telegram webhook returned {StatusCode} for session report {ReportId}: {Body}",
-                        (int)response.StatusCode, reportId, body);
-                }
-                else
+                if (sent)
                 {
                     _logger.LogInformation(
                         "Telegram session report notification sent for report {ReportId}", reportId);
@@ -126,6 +112,47 @@ namespace AutopilotMonitor.Functions.Services
             {
                 _logger.LogWarning(ex, "Failed to send Telegram session report notification for {ReportId}", reportId);
             }
+        }
+
+        /// <summary>
+        /// Posts content to a webhook URL with a single retry on transient failures (429, 5xx, network errors).
+        /// </summary>
+        private async Task<bool> PostWithRetryAsync(string webhookUrl, StringContent content, string context)
+        {
+            const int maxAttempts = 2;
+            for (int attempt = 1; attempt <= maxAttempts; attempt++)
+            {
+                try
+                {
+                    var response = await _http.PostAsync(webhookUrl, content);
+
+                    if (response.IsSuccessStatusCode)
+                        return true;
+
+                    var statusCode = (int)response.StatusCode;
+                    var isTransient = statusCode == 429 || statusCode >= 500 && statusCode <= 599;
+
+                    if (!isTransient || attempt >= maxAttempts)
+                    {
+                        var body = await response.Content.ReadAsStringAsync();
+                        _logger.LogWarning("Telegram webhook returned {StatusCode} for {Context}: {Body}", statusCode, context, body);
+                        return false;
+                    }
+
+                    _logger.LogWarning(
+                        "Telegram webhook returned {StatusCode} for {Context} (attempt {Attempt}/{MaxAttempts}). Retrying in 2s",
+                        statusCode, context, attempt, maxAttempts);
+                    await Task.Delay(TimeSpan.FromSeconds(2));
+                }
+                catch (Exception ex) when (attempt < maxAttempts && (ex is HttpRequestException or TaskCanceledException))
+                {
+                    _logger.LogWarning(ex,
+                        "Telegram webhook network error for {Context} (attempt {Attempt}/{MaxAttempts}). Retrying in 2s",
+                        context, attempt, maxAttempts);
+                    await Task.Delay(TimeSpan.FromSeconds(2));
+                }
+            }
+            return false;
         }
 
         private async Task<string?> GetWebhookUrlAsync()

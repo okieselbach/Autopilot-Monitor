@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using Microsoft.Extensions.Caching.Memory;
@@ -15,6 +16,11 @@ namespace AutopilotMonitor.Functions.Services
         private readonly IMemoryCache _cache;
         private readonly ILogger<RateLimitService> _logger;
         private readonly TimeSpan _windowDuration;
+
+        // Dedicated lock objects per device to avoid race conditions when cache evicts the request history list.
+        // Using the list itself as a lock target is unsafe because cache eviction can create a new list instance,
+        // causing different threads to lock on different objects.
+        private readonly ConcurrentDictionary<string, object> _locks = new();
 
         public RateLimitService(IMemoryCache cache, ILogger<RateLimitService> logger)
         {
@@ -44,14 +50,16 @@ namespace AutopilotMonitor.Functions.Services
             var now = DateTime.UtcNow;
 
             // Get or create request history for this device
+            var lockObj = _locks.GetOrAdd(cacheKey, _ => new object());
             var requestHistory = _cache.GetOrCreate(cacheKey, entry =>
             {
                 entry.SlidingExpiration = _windowDuration;
                 entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(1);
+                entry.RegisterPostEvictionCallback((key, _, _, _) => _locks.TryRemove((string)key, out _));
                 return new List<DateTime>();
-            });
+            })!;
 
-            lock (requestHistory!)
+            lock (lockObj)
             {
                 // Remove requests outside the sliding window
                 var windowStart = now.Subtract(_windowDuration);

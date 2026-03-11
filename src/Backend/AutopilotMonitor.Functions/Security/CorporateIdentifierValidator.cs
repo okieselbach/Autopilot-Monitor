@@ -99,8 +99,8 @@ namespace AutopilotMonitor.Functions.Security
         {
             try
             {
-                var accessToken = await _graphTokenService.GetAccessTokenAsync(tenantId);
-                if (string.IsNullOrEmpty(accessToken))
+                var tokenResult = await _graphTokenService.GetAccessTokenAsync(tenantId);
+                if (string.IsNullOrEmpty(tokenResult.AccessToken))
                 {
                     return new CorporateIdentifierValidationResult
                     {
@@ -111,7 +111,7 @@ namespace AutopilotMonitor.Functions.Security
                 }
 
                 var graphClient = _httpClientFactory.CreateClient();
-                graphClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+                graphClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", tokenResult.AccessToken);
 
                 // POST https://graph.microsoft.com/beta/deviceManagement/importedDeviceIdentities/searchExistingIdentities
                 var identifier = $"{normalizedManufacturer},{normalizedModel},{normalizedSerial}";
