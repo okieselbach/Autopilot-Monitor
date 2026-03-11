@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ProtectedRoute } from "../../components/ProtectedRoute";
 import { useTenant } from "../../contexts/TenantContext";
@@ -220,22 +219,11 @@ export default function ImeLogPatternsPage() {
             >
               &larr; Back to Dashboard
             </button>
-            <div className="flex items-center justify-between">
-              <div>
-                <h1 className="text-3xl font-bold text-gray-900">IME Log Patterns</h1>
-                <p className="text-sm text-gray-600 mt-1">
-                  Regex patterns used by the agent to parse Intune Management Extension logs during enrollment tracking.
-                </p>
-              </div>
-              <Link
-                href="/docs/gather-rules"
-                className="text-sm text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                Documentation
-              </Link>
+            <div>
+              <h1 className="text-3xl font-bold text-gray-900">IME Log Patterns</h1>
+              <p className="text-sm text-gray-600 mt-1">
+                Regex patterns used by the agent to parse Intune Management Extension logs during enrollment tracking.
+              </p>
             </div>
           </div>
         </header>
