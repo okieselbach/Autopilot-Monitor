@@ -191,9 +191,9 @@ export default function AdminManagementSection({
                                 : "bg-gray-100 border-gray-300"
                             }`}
                           >
-                            <div className="flex items-center justify-between">
+                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                               <div className="flex-1 min-w-0">
-                                <div className="flex items-center space-x-2">
+                                <div className="flex flex-wrap items-center gap-1.5">
                                   <div className="font-medium text-gray-900 truncate">{admin.upn}</div>
                                   {getRoleBadge(admin.role)}
                                   {!admin.isEnabled && (
@@ -206,7 +206,7 @@ export default function AdminManagementSection({
                                   Added {new Date(admin.addedDate).toLocaleDateString()} by {admin.addedBy}
                                 </div>
                               </div>
-                              <div className="flex items-center space-x-2 ml-4">
+                              <div className="flex flex-wrap items-center gap-2">
                                 {isCurrentUser ? (
                                   <span className="text-sm text-blue-600 font-medium">(You)</span>
                                 ) : (
@@ -304,7 +304,7 @@ export default function AdminManagementSection({
             <p className="text-sm text-gray-500 mb-2">
               Enter the user email (UPN) and select a role to grant access.
             </p>
-            <div className="flex space-x-2">
+            <div className="flex flex-wrap gap-2">
               <input
                 type="email"
                 name="new-admin-email"
@@ -313,7 +313,7 @@ export default function AdminManagementSection({
                 onChange={(e) => setNewAdminEmail(e.target.value)}
                 placeholder="user@tenant.com"
                 autoComplete="off"
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-colors"
+                className="flex-1 min-w-0 px-4 py-2 border border-gray-300 rounded-lg text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-colors"
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     e.preventDefault();

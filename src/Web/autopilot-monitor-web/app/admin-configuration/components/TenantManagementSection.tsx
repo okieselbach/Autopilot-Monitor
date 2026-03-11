@@ -490,13 +490,13 @@ export function TenantManagementSection({
               {/* Preview Notification Email */}
               <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
                 <h3 className="font-semibold text-indigo-900 mb-3">Preview Notification Email</h3>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <input
                     type="email"
                     value={notificationEmail}
                     onChange={(e) => setNotificationEmail(e.target.value)}
                     placeholder="user@example.com"
-                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+                    className="flex-1 min-w-0 px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
                   />
                   <button
                     onClick={() => handleSendWelcomeEmail(editingTenant.tenantId, notificationEmail)}

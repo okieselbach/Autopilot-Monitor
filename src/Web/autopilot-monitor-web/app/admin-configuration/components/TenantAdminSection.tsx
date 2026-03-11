@@ -255,13 +255,13 @@ export function TenantAdminSection({
                   {paginatedAdmins.map((admin) => (
                     <div
                       key={admin.upn}
-                      className={`flex items-center justify-between p-2 bg-white border rounded text-sm ${
+                      className={`flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-2 bg-white border rounded text-sm ${
                         admin.isEnabled ? 'border-purple-200' : 'border-gray-300 bg-gray-50'
                       }`}
                     >
-                      <div className="flex-1">
-                        <div className="flex items-center space-x-2">
-                          <div className="font-medium text-gray-900">{admin.upn}</div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <div className="font-medium text-gray-900 truncate">{admin.upn}</div>
                           <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
                             (admin.role ?? "Admin") === "Admin"
                               ? "bg-purple-100 text-purple-800"
