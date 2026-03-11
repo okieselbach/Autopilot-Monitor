@@ -371,7 +371,7 @@ export default function AdminConfigurationPage() {
             </div>
 
             {/* Maintenance + Reseed Sections */}
-            <div id="maintenance">
+            <div id="maintenance" className="space-y-6">
             <MaintenanceSection
               getAccessToken={getAccessToken}
               setError={setError}

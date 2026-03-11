@@ -1073,7 +1073,7 @@ export default function SettingsPage() {
             )}
 
             {user?.isTenantAdmin && (
-            <div id="agent-settings">
+            <div id="agent-settings" className="space-y-6">
             <AgentSettingsSection
               enablePerformanceCollector={enablePerformanceCollector}
               setEnablePerformanceCollector={setEnablePerformanceCollector}
