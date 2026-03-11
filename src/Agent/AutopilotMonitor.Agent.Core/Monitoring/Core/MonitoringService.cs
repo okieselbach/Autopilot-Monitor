@@ -151,7 +151,19 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             _spool.StartWatching();
             _logger.Info("FileSystemWatcher started for efficient event upload");
 
-            // Emit agent_started event
+            // Emit agent_started event with startup context so the portal shows how the agent was launched
+            var startupData = new Dictionary<string, object>
+            {
+                { "agentVersion", _agentVersion },
+                { "commandLineArgs", _configuration.CommandLineArgs ?? "(none)" },
+                { "isBootstrapSession", _configuration.UseBootstrapTokenAuth },
+                { "awaitEnrollment", _configuration.AwaitEnrollment },
+                { "selfDestructOnComplete", _configuration.SelfDestructOnComplete },
+                { "certAuth", _configuration.UseClientCertAuth },
+                { "agentMaxLifetimeMinutes", _configuration.AgentMaxLifetimeMinutes },
+                { "diagnosticsUploadMode", _configuration.DiagnosticsUploadMode ?? "Off" }
+            };
+
             EmitEvent(new EnrollmentEvent
             {
                 SessionId = _configuration.SessionId,
@@ -161,10 +173,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 Source = "Agent",
                 Phase = EnrollmentPhase.Start,
                 Message = "Autopilot Monitor Agent started",
-                Data = new Dictionary<string, object>
-                {
-                    { "agentVersion", _agentVersion }
-                }
+                Data = startupData
             });
 
             // WhiteGlove Part 2 detection: if the previous boot completed pre-provisioning,

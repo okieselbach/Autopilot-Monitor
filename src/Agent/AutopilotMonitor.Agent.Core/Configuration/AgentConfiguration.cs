@@ -224,6 +224,12 @@ namespace AutopilotMonitor.Agent.Core.Configuration
         public bool SendTraceEvents { get; set; } = true;
 
         /// <summary>
+        /// Sanitized command-line arguments for the agent_started event.
+        /// Secrets (e.g. bootstrap token) are redacted before assignment.
+        /// </summary>
+        public string CommandLineArgs { get; set; }
+
+        /// <summary>
         /// When true, the agent waits for an MDM certificate to appear before starting.
         /// Used when deploying the agent before Intune enrollment completes.
         /// The agent polls the certificate store every 5 seconds until a valid cert is found.

@@ -214,7 +214,8 @@ namespace AutopilotMonitor.Agent
                 BootstrapToken        = bootstrapToken,
                 UseBootstrapTokenAuth = useBootstrapToken,
                 AwaitEnrollment       = awaitEnrollment,
-                AwaitEnrollmentTimeoutMinutes = awaitEnrollmentTimeoutMinutes
+                AwaitEnrollmentTimeoutMinutes = awaitEnrollmentTimeoutMinutes,
+                CommandLineArgs       = FormatArgsForLog(args)
             };
         }
 
