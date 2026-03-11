@@ -104,7 +104,7 @@ export function SectionGeneral() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               <tr>
-                <td className="px-4 py-2.5"><span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">In Progress</span></td>
+                <td className="px-4 py-2.5"><span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">InProgress</span></td>
                 <td className="px-4 py-2.5 text-gray-600">Enrollment events are actively being received from the device. The agent is monitoring the enrollment process.</td>
               </tr>
               <tr>
