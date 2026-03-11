@@ -54,7 +54,7 @@ export function SectionPrivatePreview() {
         </p>
         <div className="flex flex-wrap gap-3 mb-6">
           <a
-            href="https://www.linkedin.com/in/nicobostelmann"
+            href="https://www.linkedin.com/in/oliver-kieselbach"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-2 px-4 py-2 bg-blue-700 hover:bg-blue-800 text-white text-sm font-medium rounded-lg transition-colors"
@@ -65,7 +65,7 @@ export function SectionPrivatePreview() {
             Contact on LinkedIn
           </a>
           <a
-            href="https://github.com/nicobostelmann/autopilot-monitor/issues"
+            href="https://github.com/okieselbach/autopilot-monitor/issues"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-900 text-white text-sm font-medium rounded-lg transition-colors"
