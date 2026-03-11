@@ -109,7 +109,7 @@ export default function AgentSettingsSection({
             </div>
             <button
               onClick={() => setEnablePerformanceCollector(!enablePerformanceCollector)}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${enablePerformanceCollector ? 'bg-emerald-500' : 'bg-gray-300'}`}
+              className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${enablePerformanceCollector ? 'bg-emerald-500' : 'bg-gray-300'}`}
             >
               <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${enablePerformanceCollector ? 'translate-x-6' : 'translate-x-1'}`} />
             </button>
@@ -166,7 +166,7 @@ export default function AgentSettingsSection({
               <p className="text-sm text-gray-500">Remove Scheduled Task and all agent files when enrollment completes</p>
             </div>
             <button onClick={() => setSelfDestructOnComplete(!selfDestructOnComplete)}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${selfDestructOnComplete ? 'bg-violet-500' : 'bg-gray-300'}`}>
+              className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${selfDestructOnComplete ? 'bg-violet-500' : 'bg-gray-300'}`}>
               <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${selfDestructOnComplete ? 'translate-x-6' : 'translate-x-1'}`} />
             </button>
           </div>
@@ -179,7 +179,7 @@ export default function AgentSettingsSection({
                 <p className="text-sm text-gray-500">Preserve the agent log during self-destruct (all other files are removed)</p>
               </div>
               <button onClick={() => setKeepLogFile(!keepLogFile)}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${keepLogFile ? 'bg-violet-500' : 'bg-gray-300'}`}>
+                className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${keepLogFile ? 'bg-violet-500' : 'bg-gray-300'}`}>
                 <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${keepLogFile ? 'translate-x-6' : 'translate-x-1'}`} />
               </button>
             </div>
@@ -192,7 +192,7 @@ export default function AgentSettingsSection({
               <p className="text-sm text-gray-500">Reboot the device after enrollment completes (and after self-destruct if enabled)</p>
             </div>
             <button onClick={() => setRebootOnComplete(!rebootOnComplete)}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${rebootOnComplete ? 'bg-violet-500' : 'bg-gray-300'}`}>
+              className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${rebootOnComplete ? 'bg-violet-500' : 'bg-gray-300'}`}>
               <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${rebootOnComplete ? 'translate-x-6' : 'translate-x-1'}`} />
             </button>
           </div>
@@ -224,7 +224,7 @@ export default function AgentSettingsSection({
               <p className="text-sm text-gray-500">Capture device location, ISP and network info at enrollment start (queries external IP service)</p>
             </div>
             <button onClick={() => setEnableGeoLocation(!enableGeoLocation)}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${enableGeoLocation ? 'bg-violet-500' : 'bg-gray-300'}`}>
+              className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${enableGeoLocation ? 'bg-violet-500' : 'bg-gray-300'}`}>
               <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${enableGeoLocation ? 'translate-x-6' : 'translate-x-1'}`} />
             </button>
           </div>
@@ -239,7 +239,7 @@ export default function AgentSettingsSection({
               </p>
             </div>
             <button onClick={() => setEnableImeMatchLog(!enableImeMatchLog)}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${enableImeMatchLog ? 'bg-violet-500' : 'bg-gray-300'}`}>
+              className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${enableImeMatchLog ? 'bg-violet-500' : 'bg-gray-300'}`}>
               <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${enableImeMatchLog ? 'translate-x-6' : 'translate-x-1'}`} />
             </button>
           </div>

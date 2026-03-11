@@ -114,6 +114,9 @@ body {
 .dark .hover\:bg-indigo-50:hover {
   background-color: #1e1b4b !important;
 }
+.dark .hover\:bg-cyan-50:hover {
+  background-color: #0c2a3d !important;
+}
 
 /* -- Input fields -- */
 .dark input,
@@ -195,6 +198,12 @@ body {
 .dark .bg-teal-100 {
   background-color: #0d2e2e !important;
 }
+.dark .bg-cyan-50 {
+  background-color: #0c2a3d !important;
+}
+.dark .bg-cyan-100 {
+  background-color: #0c2a3d !important;
+}
 .dark .bg-sky-50 {
   background-color: #0c2a3d !important;
 }
@@ -254,6 +263,17 @@ body {
 .dark [class*="to-emerald-50"],
 .dark [class*="to-emerald-100"] {
   --tw-gradient-to: #0d2e20 !important;
+}
+.dark [class*="from-cyan-50"] {
+  --tw-gradient-from: #0c2a3d !important;
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important;
+}
+.dark [class*="from-rose-50"] {
+  --tw-gradient-from: #3b1c26 !important;
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important;
+}
+.dark [class*="to-red-50"] {
+  --tw-gradient-to: #3b1c1c !important;
 }
 
 /* -- Colored text in dark mode (light text on dark colored backgrounds) -- */
@@ -382,6 +402,24 @@ body {
 .dark .border-sky-100,
 .dark .border-sky-200 {
   border-color: #0c2a3d !important;
+}
+.dark .border-cyan-200,
+.dark .border-cyan-300 {
+  border-color: #0c3d4d !important;
+}
+
+/* -- Cyan text in dark mode -- */
+.dark .text-cyan-600 {
+  color: #22d3ee !important; /* cyan-400 */
+}
+.dark .text-cyan-700 {
+  color: #22d3ee !important; /* cyan-400 */
+}
+.dark .text-cyan-800 {
+  color: #67e8f9 !important; /* cyan-300 */
+}
+.dark .text-rose-600 {
+  color: #fb7185 !important; /* rose-400 */
 }
 
 /* -- Progress bars and charts keep their vivid colors -- */

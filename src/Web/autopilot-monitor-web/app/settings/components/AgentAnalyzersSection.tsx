@@ -73,7 +73,7 @@ export default function AgentAnalyzersSection({
           </div>
           <button
             onClick={() => setEnableLocalAdminAnalyzer(!enableLocalAdminAnalyzer)}
-            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${enableLocalAdminAnalyzer ? 'bg-rose-500' : 'bg-gray-300'}`}
+            className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${enableLocalAdminAnalyzer ? 'bg-rose-500' : 'bg-gray-300'}`}
           >
             <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${enableLocalAdminAnalyzer ? 'translate-x-6' : 'translate-x-1'}`} />
           </button>

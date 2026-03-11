@@ -1,0 +1,45 @@
+"use client";
+
+import { useRouter } from "next/navigation";
+
+/**
+ * Route-level error boundary — catches unhandled exceptions within page
+ * components while the root layout (and thus AuthProvider / Navbar) stays
+ * intact. Typical trigger: MSAL interaction failure during re-auth after a
+ * long idle period.
+ */
+export default function Error({
+  error,
+  reset,
+}: {
+  error: Error & { digest?: string };
+  reset: () => void;
+}) {
+  const router = useRouter();
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
+      <div className="bg-white rounded-lg shadow-xl p-8 max-w-md w-full text-center">
+        <div className="text-4xl mb-3">!</div>
+        <h2 className="text-xl font-semibold text-gray-900 mb-2">Something went wrong</h2>
+        <p className="text-gray-600 mb-6 leading-relaxed">
+          Your session may have expired. Try reloading the page or signing in again.
+        </p>
+        <div className="flex gap-3 justify-center flex-wrap">
+          <button
+            onClick={() => router.push("/")}
+            className="px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm"
+          >
+            Back to Home
+          </button>
+          <button
+            onClick={() => reset()}
+            className="px-5 py-2.5 bg-gray-100 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-200 transition-colors font-medium text-sm"
+          >
+            Try again
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

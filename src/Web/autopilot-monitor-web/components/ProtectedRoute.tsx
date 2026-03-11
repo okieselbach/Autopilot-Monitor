@@ -33,12 +33,16 @@ export function ProtectedRoute({ children, requireGalacticAdmin = false }: Prote
         // Session was lost (e.g. Safari tab suspension cleared sessionStorage).
         // Trigger MSAL login redirect once to re-authenticate.
         reloginAttempted.current = true;
-        login().catch(() => {
+        login().catch((err) => {
+          console.warn('[ProtectedRoute] Re-login redirect failed, navigating to landing:', err);
           router.push("/");
         });
       } else {
         // Never authenticated in this session, or re-login already attempted.
-        router.push("/");
+        // Small delay lets any in-flight MSAL redirect settle before we navigate
+        // away, preventing a race between router.push and MSAL redirect.
+        const id = setTimeout(() => router.push("/"), 100);
+        return () => clearTimeout(id);
       }
     }
   }, [isAuthenticated, isLoading, router, login]);

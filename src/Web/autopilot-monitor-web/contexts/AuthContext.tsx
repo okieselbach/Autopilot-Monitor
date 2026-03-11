@@ -1,7 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
-import { PublicClientApplication, AccountInfo, InteractionStatus, InteractionRequiredAuthError } from '@azure/msal-browser';
+import { PublicClientApplication, AccountInfo, InteractionStatus, InteractionRequiredAuthError, BrowserAuthError } from '@azure/msal-browser';
 import { MsalProvider, useMsal, useIsAuthenticated } from '@azure/msal-react';
 import { msalConfig, loginRequest, apiRequest } from '@/lib/msalConfig';
 import { API_BASE_URL } from '@/lib/config';
@@ -9,13 +9,55 @@ import { API_BASE_URL } from '@/lib/config';
 // Initialize MSAL instance
 const msalInstance = new PublicClientApplication(msalConfig);
 
-// Initialize MSAL
-msalInstance.initialize().then(() => {
-  // Handle redirect promise
-  msalInstance.handleRedirectPromise().catch((error) => {
-    console.error('[Auth] Redirect error:', error);
+// Track MSAL initialization state so components can wait for it.
+let msalReady = false;
+const msalInitPromise = msalInstance
+  .initialize()
+  .then(() => msalInstance.handleRedirectPromise())
+  .then(() => {
+    msalReady = true;
+  })
+  .catch((error) => {
+    console.error('[Auth] MSAL initialization/redirect error:', error);
+    // Mark as ready even on error so the app doesn't hang forever.
+    // Auth operations will fail individually and trigger appropriate recovery.
+    msalReady = true;
   });
-});
+
+/**
+ * Module-level guard: only one acquireTokenRedirect may be in-flight at a time.
+ * Multiple call-sites (ProtectedRoute, getAccessToken, fetchUserInfo) can all
+ * independently decide that a redirect is needed.  Without this gate the second
+ * call throws BrowserAuthError: interaction_in_progress which is unrecoverable
+ * and causes the "Application error" crash on mobile.
+ */
+let redirectInFlight = false;
+
+async function safeAcquireTokenRedirect(
+  instance: PublicClientApplication,
+  account: AccountInfo | undefined,
+): Promise<void> {
+  if (redirectInFlight) {
+    console.log('[Auth] Redirect already in-flight, skipping duplicate');
+    return;
+  }
+  redirectInFlight = true;
+  try {
+    await instance.acquireTokenRedirect({
+      scopes: apiRequest.scopes,
+      account,
+    });
+  } catch (err) {
+    // interaction_in_progress means another redirect beat us — not an error.
+    if (err instanceof BrowserAuthError && err.errorCode === 'interaction_in_progress') {
+      console.log('[Auth] Redirect already in progress (BrowserAuthError), ignoring');
+    } else {
+      console.error('[Auth] acquireTokenRedirect failed:', err);
+    }
+  } finally {
+    redirectInFlight = false;
+  }
+}
 
 interface UserInfo {
   displayName: string;
@@ -138,14 +180,13 @@ function AuthProviderInternal({ children }: { children: React.ReactNode }) {
       // interactive login immediately instead of falling back to stale claims.
       if (error instanceof InteractionRequiredAuthError) {
         console.warn('[Auth] Interactive login required — redirecting:', error.errorCode);
-        try {
-          await instance.acquireTokenRedirect({
-            scopes: apiRequest.scopes,
-            account: account,
-          });
-        } catch (redirectError) {
-          console.error('[Auth] Redirect for re-auth failed:', redirectError);
-        }
+        await safeAcquireTokenRedirect(instance as PublicClientApplication, account);
+        return null;
+      }
+
+      // interaction_in_progress — another redirect is already handling this.
+      if (error instanceof BrowserAuthError && error.errorCode === 'interaction_in_progress') {
+        console.log('[Auth] Interaction already in progress during fetchUserInfo, waiting');
         return null;
       }
 
@@ -177,10 +218,18 @@ function AuthProviderInternal({ children }: { children: React.ReactNode }) {
   }, [accounts, fetchUserInfo]);
 
   /**
-   * Load user info when authentication state changes
+   * Load user info when authentication state changes.
+   * Waits for MSAL to be fully initialized before proceeding.
    */
   useEffect(() => {
     const loadUserInfo = async () => {
+      // Wait for MSAL initialization to complete before evaluating auth state.
+      // This prevents the 3-second timeout from firing prematurely while MSAL
+      // is still processing the redirect promise.
+      if (!msalReady) {
+        await msalInitPromise;
+      }
+
       if (inProgress === InteractionStatus.None) {
         if (accounts.length > 0) {
           const userInfo = await fetchUserInfo(accounts[0]);
@@ -195,14 +244,15 @@ function AuthProviderInternal({ children }: { children: React.ReactNode }) {
 
     loadUserInfo();
 
-    // Fallback: if MSAL doesn't initialize within 3 seconds, set loading to false anyway
+    // Fallback: if MSAL doesn't settle within 5 seconds, set loading to false
+    // anyway so the user isn't stuck on a spinner forever.
     const timeout = setTimeout(() => {
       if (isLoadingRef.current) {
         console.warn('[Auth] MSAL initialization timeout - setting isLoading to false');
         isLoadingRef.current = false;
         setIsLoading(false);
       }
-    }, 3000);
+    }, 5000);
 
     return () => clearTimeout(timeout);
   }, [accounts, inProgress, fetchUserInfo]);
@@ -221,6 +271,7 @@ function AuthProviderInternal({ children }: { children: React.ReactNode }) {
       await instance.loginRedirect(loginRequest);
     } catch (error: any) {
       // Ignore interaction_in_progress errors - this can happen if user clicks button multiple times
+      // or if another part of the app already triggered a redirect.
       if (error?.errorCode === 'interaction_in_progress') {
         console.log('[Auth] Interaction already in progress, ignoring duplicate login attempt');
         return;
@@ -262,22 +313,20 @@ function AuthProviderInternal({ children }: { children: React.ReactNode }) {
 
       return response.accessToken;
     } catch (error) {
+      // interaction_in_progress — another redirect is already in flight.
+      // Return null and let the redirect complete; the page will reload.
+      if (error instanceof BrowserAuthError && error.errorCode === 'interaction_in_progress') {
+        console.log('[Auth] Interaction already in progress during getAccessToken, returning null');
+        return null;
+      }
+
       console.error('[Auth] Token acquisition error:', error);
 
       // If silent token acquisition fails, trigger interactive redirect
-      // Note: acquireTokenRedirect doesn't return a token, it redirects the browser
-      // The token will be available after the redirect via handleRedirectPromise
-      try {
-        await instance.acquireTokenRedirect({
-          scopes: apiRequest.scopes,
-          account: accounts[0],
-        });
-        // This line won't be reached as the browser will redirect
-        return null;
-      } catch (interactiveError) {
-        console.error('[Auth] Interactive token acquisition error:', interactiveError);
-        return null;
-      }
+      // via the guarded helper to avoid duplicate redirects.
+      await safeAcquireTokenRedirect(instance as PublicClientApplication, accounts[0]);
+      // Browser will redirect; this line is only reached if the redirect was skipped.
+      return null;
     }
   }, [instance, accounts]);
 
