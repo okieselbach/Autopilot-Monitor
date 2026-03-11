@@ -104,12 +104,12 @@ export function SectionGeneral() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               <tr>
-                <td className="px-4 py-2.5"><span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">Pending</span></td>
-                <td className="px-4 py-2.5 text-gray-600">The session has been registered but no enrollment events have been received yet.</td>
+                <td className="px-4 py-2.5"><span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">In Progress</span></td>
+                <td className="px-4 py-2.5 text-gray-600">Enrollment events are actively being received from the device. The agent is monitoring the enrollment process.</td>
               </tr>
               <tr>
-                <td className="px-4 py-2.5"><span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">In Progress</span></td>
-                <td className="px-4 py-2.5 text-gray-600">Enrollment events are actively being received from the device. The agent is monitoring the enrollment process.</td>
+                <td className="px-4 py-2.5"><span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">Pending</span></td>
+                <td className="px-4 py-2.5 text-gray-600">The session has been registered but is waiting for the user enrollment phase. This typically occurs after a White Glove (pre-provisioning) enrollment, where the device phase is complete and the device is waiting for the user to sign in and continue enrollment.</td>
               </tr>
               <tr>
                 <td className="px-4 py-2.5"><span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">Complete</span></td>
