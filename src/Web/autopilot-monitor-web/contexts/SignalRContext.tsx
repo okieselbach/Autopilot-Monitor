@@ -9,12 +9,14 @@ import { useAuth } from './AuthContext';
 interface SignalRContextType {
   connection: signalR.HubConnection | null;
   connectionState: signalR.HubConnectionState;
+  connectionId: string | null;
   on: (eventName: string, callback: (...args: any[]) => void) => void;
   off: (eventName: string, callback: (...args: any[]) => void) => void;
   invoke: (methodName: string, ...args: any[]) => Promise<any>;
   joinGroup: (groupName: string) => Promise<void>;
   leaveGroup: (groupName: string) => Promise<void>;
   isConnected: boolean;
+  joinedGroups: string[];
 }
 
 const SignalRContext = createContext<SignalRContextType | undefined>(undefined);
@@ -25,8 +27,13 @@ export function SignalRProvider({ children }: { children: React.ReactNode }) {
   const [connectionState, setConnectionState] = useState<signalR.HubConnectionState>(signalR.HubConnectionState.Disconnected);
   const connectionRef = useRef<signalR.HubConnection | null>(null);
   const joinedGroupsRef = useRef<Set<string>>(new Set());
+  const [joinedGroups, setJoinedGroups] = useState<string[]>([]);
   const retryCountRef = useRef(0);
   const maxRetries = 3;
+
+  const syncJoinedGroups = useCallback(() => {
+    setJoinedGroups(Array.from(joinedGroupsRef.current));
+  }, []);
 
   useEffect(() => {
     // Only create connection if authenticated
@@ -65,6 +72,7 @@ export function SignalRProvider({ children }: { children: React.ReactNode }) {
     newConnection.onclose((error) => {
       setConnectionState(signalR.HubConnectionState.Disconnected);
       joinedGroupsRef.current.clear(); // Clear joined groups on disconnect
+      syncJoinedGroups();
     });
 
     newConnection.onreconnecting((error) => {
@@ -79,6 +87,7 @@ export function SignalRProvider({ children }: { children: React.ReactNode }) {
       // The server-side connection ID changed, so all group memberships are lost.
       const previousGroups = Array.from(joinedGroupsRef.current);
       joinedGroupsRef.current.clear();
+      syncJoinedGroups();
 
       for (const groupName of previousGroups) {
         try {
@@ -94,6 +103,7 @@ export function SignalRProvider({ children }: { children: React.ReactNode }) {
 
           if (response.ok) {
             joinedGroupsRef.current.add(groupName);
+            syncJoinedGroups();
           } else {
             console.warn(`[SignalR] Failed to rejoin group ${groupName} after reconnect (status ${response.status})`);
           }
@@ -171,11 +181,13 @@ export function SignalRProvider({ children }: { children: React.ReactNode }) {
 
     // Add to Set immediately to prevent race conditions with multiple simultaneous calls
     joinedGroupsRef.current.add(groupName);
+    syncJoinedGroups();
 
     try {
       const connectionId = connection.connectionId;
       if (!connectionId) {
         joinedGroupsRef.current.delete(groupName); // Remove if we can't get connection ID
+        syncJoinedGroups();
         return;
       }
 
@@ -192,13 +204,15 @@ export function SignalRProvider({ children }: { children: React.ReactNode }) {
       if (!response.ok) {
         // Remove from Set if API call failed (so we can retry)
         joinedGroupsRef.current.delete(groupName);
+        syncJoinedGroups();
       }
     } catch (error) {
       console.error(`[SignalR] Error joining group ${groupName}:`, error);
       // Remove from Set if API call failed (so we can retry)
       joinedGroupsRef.current.delete(groupName);
+      syncJoinedGroups();
     }
-  }, [connection, connectionState, getAccessToken]);
+  }, [connection, connectionState, getAccessToken, syncJoinedGroups]);
 
   const leaveGroup = useCallback(async (groupName: string) => {
     if (!connection || connectionState !== signalR.HubConnectionState.Connected) {
@@ -212,6 +226,7 @@ export function SignalRProvider({ children }: { children: React.ReactNode }) {
 
     // Remove from Set immediately to prevent race conditions with multiple simultaneous calls
     joinedGroupsRef.current.delete(groupName);
+    syncJoinedGroups();
 
     try {
       const connectionId = connection.connectionId;
@@ -232,25 +247,29 @@ export function SignalRProvider({ children }: { children: React.ReactNode }) {
       if (!response.ok) {
         // Re-add to Set if API call failed (so we can retry)
         joinedGroupsRef.current.add(groupName);
+        syncJoinedGroups();
       }
     } catch (error) {
       console.error(`[SignalR] Error leaving group ${groupName}:`, error);
       // Re-add to Set if API call failed (so we can retry)
       joinedGroupsRef.current.add(groupName);
+      syncJoinedGroups();
     }
-  }, [connection, connectionState, getAccessToken]);
+  }, [connection, connectionState, getAccessToken, syncJoinedGroups]);
 
   return (
     <SignalRContext.Provider
       value={{
         connection,
         connectionState,
+        connectionId: connection?.connectionId ?? null,
         on,
         off,
         invoke,
         joinGroup,
         leaveGroup,
         isConnected: connectionState === signalR.HubConnectionState.Connected,
+        joinedGroups,
       }}
     >
       {children}
