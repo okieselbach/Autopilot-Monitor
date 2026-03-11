@@ -135,6 +135,7 @@ public static class EndpointAccessPolicyCatalog
         new("DELETE", "tenants/{tenantId}/offboard", EndpointPolicy.TenantAdminOrGA),
         new("GET",    "config/{tenantId}/autopilot-device-validation/consent-url",    EndpointPolicy.TenantAdminOrGA),
         new("GET",    "config/{tenantId}/autopilot-device-validation/consent-status",  EndpointPolicy.TenantAdminOrGA),
+        new("POST",   "config/{tenantId}/test-notification",                           EndpointPolicy.TenantAdminOrGA),
 
         // ── BootstrapManagerOrGA ────────────────────────────────────────
         new("GET",    "bootstrap/sessions",        EndpointPolicy.BootstrapManagerOrGA),

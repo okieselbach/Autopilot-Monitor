@@ -15,7 +15,7 @@ import AdminManagementSection from "./components/AdminManagementSection";
 import HardwareWhitelistSection from "./components/HardwareWhitelistSection";
 import AgentSettingsSection from "./components/AgentSettingsSection";
 import AgentAnalyzersSection from "./components/AgentAnalyzersSection";
-import TeamsNotificationsSection from "./components/TeamsNotificationsSection";
+import NotificationsSection from "./components/NotificationsSection";
 import DiagnosticsSection, { parseSasExpiry } from "./components/DiagnosticsSection";
 import DataManagementSection from "./components/DataManagementSection";
 import OffboardingSection from "./components/OffboardingSection";
@@ -51,10 +51,15 @@ export interface TenantConfiguration {
   enableGeoLocation?: boolean;
   enableImeMatchLog?: boolean;
   logLevel?: string;
-  // Teams notifications
+  // Teams notifications (legacy)
   teamsWebhookUrl?: string;
   teamsNotifyOnSuccess?: boolean;
   teamsNotifyOnFailure?: boolean;
+  // Webhook notifications (new)
+  webhookProviderType?: number;
+  webhookUrl?: string;
+  webhookNotifyOnSuccess?: boolean;
+  webhookNotifyOnFailure?: boolean;
   // Diagnostics package
   diagnosticsBlobSasUrl?: string;
   diagnosticsUploadMode?: string;
@@ -145,10 +150,13 @@ export default function SettingsPage() {
   const [enrollmentSummaryBrandingImageUrl, setEnrollmentSummaryBrandingImageUrl] = useState("");
   const [enrollmentSummaryLaunchRetrySeconds, setEnrollmentSummaryLaunchRetrySeconds] = useState(120);
 
-  // Teams notifications state
-  const [teamsWebhookUrl, setTeamsWebhookUrl] = useState("");
-  const [teamsNotifyOnSuccess, setTeamsNotifyOnSuccess] = useState(true);
-  const [teamsNotifyOnFailure, setTeamsNotifyOnFailure] = useState(true);
+  // Webhook notifications state
+  const [webhookProviderType, setWebhookProviderType] = useState(0);
+  const [webhookUrl, setWebhookUrl] = useState("");
+  const [webhookNotifyOnSuccess, setWebhookNotifyOnSuccess] = useState(true);
+  const [webhookNotifyOnFailure, setWebhookNotifyOnFailure] = useState(true);
+  const [testingWebhook, setTestingWebhook] = useState(false);
+  const [testWebhookResult, setTestWebhookResult] = useState<{ success: boolean; message: string } | null>(null);
 
   // Diagnostics package state
   const [diagnosticsBlobSasUrl, setDiagnosticsBlobSasUrl] = useState("");
@@ -189,9 +197,10 @@ export default function SettingsPage() {
       enrollmentSummaryTimeoutSeconds !== (config.enrollmentSummaryTimeoutSeconds ?? 60) ||
       enrollmentSummaryBrandingImageUrl !== (config.enrollmentSummaryBrandingImageUrl ?? "") ||
       enrollmentSummaryLaunchRetrySeconds !== (config.enrollmentSummaryLaunchRetrySeconds ?? 120) ||
-      teamsWebhookUrl !== (config.teamsWebhookUrl ?? "") ||
-      teamsNotifyOnSuccess !== (config.teamsNotifyOnSuccess ?? true) ||
-      teamsNotifyOnFailure !== (config.teamsNotifyOnFailure ?? true) ||
+      webhookProviderType !== (config.webhookProviderType ?? (config.teamsWebhookUrl ? 1 : 0)) ||
+      webhookUrl !== (config.webhookUrl ?? config.teamsWebhookUrl ?? "") ||
+      webhookNotifyOnSuccess !== (config.webhookNotifyOnSuccess ?? config.teamsNotifyOnSuccess ?? true) ||
+      webhookNotifyOnFailure !== (config.webhookNotifyOnFailure ?? config.teamsNotifyOnFailure ?? true) ||
       diagnosticsBlobSasUrl !== (config.diagnosticsBlobSasUrl ?? "") ||
       diagnosticsUploadMode !== (config.diagnosticsUploadMode ?? "Off") ||
       JSON.stringify(tenantDiagPaths) !== JSON.stringify(
@@ -210,7 +219,7 @@ export default function SettingsPage() {
     rebootOnComplete, rebootDelaySeconds, enableGeoLocation, enableImeMatchLog,
     logLevel, showScriptOutput, showEnrollmentSummary, enrollmentSummaryTimeoutSeconds,
     enrollmentSummaryBrandingImageUrl, enrollmentSummaryLaunchRetrySeconds,
-    teamsWebhookUrl, teamsNotifyOnSuccess, teamsNotifyOnFailure,
+    webhookProviderType, webhookUrl, webhookNotifyOnSuccess, webhookNotifyOnFailure,
     diagnosticsBlobSasUrl, diagnosticsUploadMode, tenantDiagPaths,
     enableLocalAdminAnalyzer, localAdminAllowedAccounts,
   ]);
@@ -256,9 +265,23 @@ export default function SettingsPage() {
         setEnrollmentSummaryTimeoutSeconds(data.enrollmentSummaryTimeoutSeconds ?? 60);
         setEnrollmentSummaryBrandingImageUrl(data.enrollmentSummaryBrandingImageUrl ?? "");
         setEnrollmentSummaryLaunchRetrySeconds(data.enrollmentSummaryLaunchRetrySeconds ?? 120);
-        setTeamsWebhookUrl(data.teamsWebhookUrl ?? "");
-        setTeamsNotifyOnSuccess(data.teamsNotifyOnSuccess ?? true);
-        setTeamsNotifyOnFailure(data.teamsNotifyOnFailure ?? true);
+        // Webhook notifications: auto-migrate from legacy fields
+        if (data.webhookUrl && data.webhookProviderType) {
+          setWebhookProviderType(data.webhookProviderType);
+          setWebhookUrl(data.webhookUrl);
+          setWebhookNotifyOnSuccess(data.webhookNotifyOnSuccess ?? true);
+          setWebhookNotifyOnFailure(data.webhookNotifyOnFailure ?? true);
+        } else if (data.teamsWebhookUrl) {
+          setWebhookProviderType(1); // TeamsLegacyConnector
+          setWebhookUrl(data.teamsWebhookUrl);
+          setWebhookNotifyOnSuccess(data.teamsNotifyOnSuccess ?? true);
+          setWebhookNotifyOnFailure(data.teamsNotifyOnFailure ?? true);
+        } else {
+          setWebhookProviderType(0);
+          setWebhookUrl("");
+          setWebhookNotifyOnSuccess(true);
+          setWebhookNotifyOnFailure(true);
+        }
         const sasUrl = data.diagnosticsBlobSasUrl ?? "";
         setDiagnosticsBlobSasUrl(sasUrl);
         setDiagnosticsUploadMode(data.diagnosticsUploadMode ?? "Off");
@@ -423,6 +446,23 @@ export default function SettingsPage() {
     }
   };
 
+  const handleTestWebhook = async () => {
+    if (!tenantId) return;
+    setTestingWebhook(true);
+    setTestWebhookResult(null);
+    try {
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/config/${tenantId}/test-notification`, getAccessToken, {
+        method: "POST",
+      });
+      const data = await response.json();
+      setTestWebhookResult({ success: data.success, message: data.message });
+    } catch (err) {
+      setTestWebhookResult({ success: false, message: err instanceof Error ? err.message : "Failed to send test notification." });
+    } finally {
+      setTestingWebhook(false);
+    }
+  };
+
   const handleSaveAndNavigate = async () => {
     setShowUnsavedModal(false);
     const destination = pendingNavigationRef.current;
@@ -483,9 +523,15 @@ export default function SettingsPage() {
         enrollmentSummaryTimeoutSeconds,
         enrollmentSummaryBrandingImageUrl: enrollmentSummaryBrandingImageUrl || undefined,
         enrollmentSummaryLaunchRetrySeconds,
-        teamsWebhookUrl: teamsWebhookUrl || undefined,
-        teamsNotifyOnSuccess,
-        teamsNotifyOnFailure,
+        // New webhook fields
+        webhookProviderType,
+        webhookUrl: webhookUrl || undefined,
+        webhookNotifyOnSuccess,
+        webhookNotifyOnFailure,
+        // Legacy compat: mirror to old fields during transition
+        teamsWebhookUrl: webhookProviderType === 1 ? (webhookUrl || undefined) : undefined,
+        teamsNotifyOnSuccess: webhookNotifyOnSuccess,
+        teamsNotifyOnFailure: webhookNotifyOnFailure,
         diagnosticsBlobSasUrl: diagnosticsBlobSasUrl || undefined,
         diagnosticsUploadMode,
         diagnosticsLogPathsJson: tenantDiagPaths.length > 0 ? JSON.stringify(tenantDiagPaths) : undefined,
@@ -918,7 +964,7 @@ export default function SettingsPage() {
         { id: "hardware-whitelist", label: "Hardware Whitelist" },
         { id: "agent-settings", label: "Agent Settings" },
         { id: "agent-analyzers", label: "Agent Analyzers" },
-        { id: "teams-notifications", label: "Teams Notifications" },
+        { id: "notifications", label: "Notifications" },
         { id: "diagnostics", label: "Diagnostics" },
       );
     }
@@ -1123,14 +1169,19 @@ export default function SettingsPage() {
             )}
 
             {user?.isTenantAdmin && (
-            <div id="teams-notifications">
-            <TeamsNotificationsSection
-              teamsWebhookUrl={teamsWebhookUrl}
-              setTeamsWebhookUrl={setTeamsWebhookUrl}
-              teamsNotifyOnSuccess={teamsNotifyOnSuccess}
-              setTeamsNotifyOnSuccess={setTeamsNotifyOnSuccess}
-              teamsNotifyOnFailure={teamsNotifyOnFailure}
-              setTeamsNotifyOnFailure={setTeamsNotifyOnFailure}
+            <div id="notifications">
+            <NotificationsSection
+              webhookProviderType={webhookProviderType}
+              setWebhookProviderType={setWebhookProviderType}
+              webhookUrl={webhookUrl}
+              setWebhookUrl={setWebhookUrl}
+              webhookNotifyOnSuccess={webhookNotifyOnSuccess}
+              setWebhookNotifyOnSuccess={setWebhookNotifyOnSuccess}
+              webhookNotifyOnFailure={webhookNotifyOnFailure}
+              setWebhookNotifyOnFailure={setWebhookNotifyOnFailure}
+              onTestWebhook={handleTestWebhook}
+              testingWebhook={testingWebhook}
+              testWebhookResult={testWebhookResult}
             />
             </div>
             )}

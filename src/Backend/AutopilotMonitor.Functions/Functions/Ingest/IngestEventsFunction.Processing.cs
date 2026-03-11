@@ -2,7 +2,9 @@ using System.Linq;
 using System.Net;
 using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Functions.Services;
+using AutopilotMonitor.Functions.Services.Notifications;
 using AutopilotMonitor.Shared.Models;
+using AutopilotMonitor.Shared.Models.Notifications;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Extensions.SignalRService;
@@ -235,8 +237,8 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                         sessionPrefix, updatedSession?.IsPreProvisioned, updatedSession?.Status);
                 }
 
-                // Send Teams notifications (fire-and-forget, non-fatal)
-                await SendTeamsNotificationsAsync(
+                // Send webhook notifications (fire-and-forget, non-fatal)
+                await SendWebhookNotificationsAsync(
                     request, sessionPrefix, classification, updatedSession,
                     statusTransitioned, whiteGloveStatusTransitioned, failureReason);
 
@@ -406,86 +408,95 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
         }
 
         /// <summary>
-        /// Sends Teams notifications for enrollment completion, WhiteGlove, and ESP failure events.
+        /// Sends webhook notifications for enrollment completion, WhiteGlove, and ESP failure events.
+        /// Uses the channel-agnostic notification system with provider-specific renderers.
         /// </summary>
-        private async Task SendTeamsNotificationsAsync(
+        private async Task SendWebhookNotificationsAsync(
             IngestEventsRequest request, string sessionPrefix, EventClassification c,
             SessionSummary? updatedSession, bool statusTransitioned, bool whiteGloveStatusTransitioned, string? failureReason)
         {
-            // Send Teams notification on enrollment completion (fire-and-forget, non-fatal)
+            // Read config once (was 3 separate reads before)
+            var tenantConfig = await _configService.GetConfigurationAsync(request.TenantId);
+            var (webhookUrl, providerTypeInt) = tenantConfig.GetEffectiveWebhookConfig();
+
+            if (string.IsNullOrEmpty(webhookUrl) || providerTypeInt == 0)
+                return;
+
+            var providerType = (WebhookProviderType)providerTypeInt;
+            var sessionUrl = updatedSession != null
+                ? $"https://www.autopilotmonitor.com/session/{request.TenantId}/{request.SessionId}"
+                : null;
+
+            // Enrollment completion/failure notification
             // Only send when statusTransitioned=true to prevent duplicates on retry/double-upload
             if (statusTransitioned && (c.CompletionEvent != null || c.FailureEvent != null))
             {
-                var tenantConfig = await _configService.GetConfigurationAsync(request.TenantId);
-                if (!string.IsNullOrEmpty(tenantConfig.TeamsWebhookUrl))
+                var notifySuccess = c.CompletionEvent != null && tenantConfig.GetEffectiveNotifyOnSuccess();
+                var notifyFailure = c.FailureEvent != null && tenantConfig.GetEffectiveNotifyOnFailure();
+                if (notifySuccess || notifyFailure)
                 {
-                    var notifySuccess = c.CompletionEvent != null && tenantConfig.TeamsNotifyOnSuccess;
-                    var notifyFailure = c.FailureEvent != null && tenantConfig.TeamsNotifyOnFailure;
-                    if (notifySuccess || notifyFailure)
+                    var duration = updatedSession?.DurationSeconds != null
+                        ? TimeSpan.FromSeconds(updatedSession.DurationSeconds.Value)
+                        : (TimeSpan?)null;
+
+                    // For WhiteGlove sessions: show user enrollment duration only (Duration 2)
+                    if (updatedSession?.IsPreProvisioned == true && updatedSession?.ResumedAt != null)
                     {
-                        var duration = updatedSession?.DurationSeconds != null
-                            ? TimeSpan.FromSeconds(updatedSession.DurationSeconds.Value)
-                            : (TimeSpan?)null;
-
-                        // For WhiteGlove sessions: show user enrollment duration only (Duration 2)
-                        if (updatedSession?.IsPreProvisioned == true && updatedSession?.ResumedAt != null)
-                        {
-                            var completionTime = c.CompletionEvent?.Timestamp ?? c.FailureEvent?.Timestamp;
-                            if (completionTime.HasValue)
-                                duration = completionTime.Value - updatedSession.ResumedAt.Value;
-                        }
-
-                        _ = _teamsNotificationService.SendEnrollmentNotificationAsync(
-                            tenantConfig.TeamsWebhookUrl,
-                            updatedSession?.DeviceName,
-                            updatedSession?.SerialNumber,
-                            updatedSession?.Manufacturer,
-                            updatedSession?.Model,
-                            success: c.CompletionEvent != null,
-                            failureReason: failureReason,
-                            duration: duration);
+                        var completionTime = c.CompletionEvent?.Timestamp ?? c.FailureEvent?.Timestamp;
+                        if (completionTime.HasValue)
+                            duration = completionTime.Value - updatedSession.ResumedAt.Value;
                     }
-                }
-            }
 
-            // Send Teams notification on WhiteGlove pre-provisioning completion
-            if (whiteGloveStatusTransitioned && c.WhiteGloveEvent != null)
-            {
-                var tenantConfig = await _configService.GetConfigurationAsync(request.TenantId);
-                if (!string.IsNullOrEmpty(tenantConfig.TeamsWebhookUrl) && tenantConfig.TeamsNotifyOnSuccess)
-                {
-                    var duration = updatedSession?.DurationSeconds != null
-                        ? TimeSpan.FromSeconds(updatedSession.DurationSeconds.Value)
-                        : (TimeSpan?)null;
-                    _ = _teamsNotificationService.SendWhiteGloveNotificationAsync(
-                        tenantConfig.TeamsWebhookUrl,
+                    var alert = NotificationAlertBuilder.BuildEnrollmentAlert(
                         updatedSession?.DeviceName,
                         updatedSession?.SerialNumber,
                         updatedSession?.Manufacturer,
                         updatedSession?.Model,
-                        success: true,
-                        duration: duration);
+                        success: c.CompletionEvent != null,
+                        failureReason: failureReason,
+                        duration: duration,
+                        sessionUrl: sessionUrl);
+
+                    _ = _webhookNotificationService.SendNotificationAsync(webhookUrl, providerType, alert);
                 }
             }
 
-            // Send Teams notification on WhiteGlove pre-provisioning failure via esp_failure
-            if (c.EspFailureEvent != null && updatedSession?.IsPreProvisioned == true)
+            // WhiteGlove pre-provisioning completion
+            if (whiteGloveStatusTransitioned && c.WhiteGloveEvent != null && tenantConfig.GetEffectiveNotifyOnSuccess())
             {
-                var tenantConfig = await _configService.GetConfigurationAsync(request.TenantId);
-                if (!string.IsNullOrEmpty(tenantConfig.TeamsWebhookUrl) && tenantConfig.TeamsNotifyOnFailure)
-                {
-                    var duration = updatedSession?.DurationSeconds != null
-                        ? TimeSpan.FromSeconds(updatedSession.DurationSeconds.Value)
-                        : (TimeSpan?)null;
-                    _ = _teamsNotificationService.SendWhiteGloveNotificationAsync(
-                        tenantConfig.TeamsWebhookUrl,
-                        updatedSession?.DeviceName,
-                        updatedSession?.SerialNumber,
-                        updatedSession?.Manufacturer,
-                        updatedSession?.Model,
-                        success: false,
-                        duration: duration);
-                }
+                var duration = updatedSession?.DurationSeconds != null
+                    ? TimeSpan.FromSeconds(updatedSession.DurationSeconds.Value)
+                    : (TimeSpan?)null;
+
+                var alert = NotificationAlertBuilder.BuildWhiteGloveAlert(
+                    updatedSession?.DeviceName,
+                    updatedSession?.SerialNumber,
+                    updatedSession?.Manufacturer,
+                    updatedSession?.Model,
+                    success: true,
+                    duration: duration,
+                    sessionUrl: sessionUrl);
+
+                _ = _webhookNotificationService.SendNotificationAsync(webhookUrl, providerType, alert);
+            }
+
+            // WhiteGlove pre-provisioning failure via esp_failure
+            if (c.EspFailureEvent != null && updatedSession?.IsPreProvisioned == true && tenantConfig.GetEffectiveNotifyOnFailure())
+            {
+                var duration = updatedSession?.DurationSeconds != null
+                    ? TimeSpan.FromSeconds(updatedSession.DurationSeconds.Value)
+                    : (TimeSpan?)null;
+
+                var alert = NotificationAlertBuilder.BuildWhiteGloveAlert(
+                    updatedSession?.DeviceName,
+                    updatedSession?.SerialNumber,
+                    updatedSession?.Manufacturer,
+                    updatedSession?.Model,
+                    success: false,
+                    duration: duration,
+                    sessionUrl: sessionUrl);
+
+                _ = _webhookNotificationService.SendNotificationAsync(webhookUrl, providerType, alert);
             }
         }
 

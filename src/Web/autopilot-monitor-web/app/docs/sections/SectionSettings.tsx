@@ -170,19 +170,41 @@ export function SectionSettings() {
         </SettingsRow>
       </SettingsGroup>
 
-      {/* Teams Notifications */}
-      <SettingsGroup title="Teams Notifications" color="bg-indigo-50 text-indigo-900" borderColor="border-indigo-200">
-        <SettingsRow name="Incoming Webhook URL">
-          A Microsoft Teams Incoming Webhook URL. Once configured, the portal can send enrollment outcome notifications
-          directly to a Teams channel. To create one: open the target channel in Teams &rarr; <em>Connectors</em> &rarr; search
-          for <em>Incoming Webhook</em> &rarr; configure and copy the URL.
+      {/* Notifications */}
+      <SettingsGroup title="Notifications" color="bg-indigo-50 text-indigo-900" borderColor="border-indigo-200">
+        <SettingsRow name="Notification Provider">
+          Select how you want to receive enrollment notifications. Available providers:
+          <ul className="list-disc ml-6 mt-1 space-y-1">
+            <li>
+              <strong>Microsoft Teams (Workflow Webhook)</strong> <span className="text-green-700 text-xs font-medium">(Recommended)</span> &mdash;
+              In Teams, go to the target channel &rarr; <em>Manage channel</em> &rarr; <em>Workflows</em> &rarr;
+              add <em>&quot;Post to a channel when a webhook request is received&quot;</em> &rarr; copy the generated URL.
+              Workflow webhooks are free and do not require a Power Automate Premium license.
+            </li>
+            <li>
+              <strong>Microsoft Teams (Legacy Connector)</strong> <span className="text-amber-700 text-xs font-medium">(Deprecated)</span> &mdash;
+              Uses the legacy Office 365 Connector webhook format (MessageCard). Microsoft has deprecated this method.
+              Existing configurations will continue to work, but switching to Workflow Webhooks is recommended.
+            </li>
+            <li>
+              <strong>Slack</strong> &mdash;
+              In Slack, go to your workspace &rarr; <em>Apps</em> &rarr; <em>Incoming Webhooks</em> &rarr;
+              create a new webhook for the target channel &rarr; copy the webhook URL.
+            </li>
+          </ul>
+        </SettingsRow>
+        <SettingsRow name="Webhook URL">
+          The webhook URL for your selected notification provider. Paste the URL generated during the provider setup.
         </SettingsRow>
         <SettingsRow name="Notify on Success" defaultVal="Enabled (if webhook configured)">
-          Send a Teams notification when an enrollment session completes successfully.
+          Send a notification when an enrollment session completes successfully.
         </SettingsRow>
         <SettingsRow name="Notify on Failure" defaultVal="Enabled (if webhook configured)">
-          Send a Teams notification when an enrollment session ends in failure. Recommended to keep enabled so
+          Send a notification when an enrollment session ends in failure. Recommended to keep enabled so
           failed enrollments are surfaced immediately without having to check the portal manually.
+        </SettingsRow>
+        <SettingsRow name="Send Test Notification">
+          Sends a sample notification to your configured webhook to verify the connection is working correctly.
         </SettingsRow>
       </SettingsGroup>
 

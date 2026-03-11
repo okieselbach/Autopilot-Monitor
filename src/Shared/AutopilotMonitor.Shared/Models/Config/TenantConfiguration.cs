@@ -373,7 +373,61 @@ namespace AutopilotMonitor.Shared.Models
         /// </summary>
         public bool TeamsNotifyOnFailure { get; set; } = true;
 
+        // ===== WEBHOOK NOTIFICATIONS =====
+
+        /// <summary>
+        /// Webhook provider type. Determines which renderer formats the notification payload.
+        /// 0=None, 1=TeamsLegacyConnector, 2=TeamsWorkflowWebhook, 10=Slack.
+        /// Legacy tenants with TeamsWebhookUrl are auto-resolved via GetEffectiveWebhookConfig().
+        /// </summary>
+        public int WebhookProviderType { get; set; } = 0;
+
+        /// <summary>
+        /// Generic webhook URL for enrollment notifications.
+        /// Replaces TeamsWebhookUrl for new configurations.
+        /// </summary>
+        public string WebhookUrl { get; set; }
+
+        /// <summary>
+        /// Send a webhook notification when enrollment succeeds. Default: true.
+        /// </summary>
+        public bool WebhookNotifyOnSuccess { get; set; } = true;
+
+        /// <summary>
+        /// Send a webhook notification when enrollment fails. Default: true.
+        /// </summary>
+        public bool WebhookNotifyOnFailure { get; set; } = true;
+
         // ===== HELPER METHODS =====
+
+        /// <summary>
+        /// Returns the effective webhook URL and provider type, handling legacy TeamsWebhookUrl migration.
+        /// New fields take priority; falls back to TeamsWebhookUrl as TeamsLegacyConnector.
+        /// </summary>
+        public (string Url, int ProviderType) GetEffectiveWebhookConfig()
+        {
+            // New fields take priority
+            if (!string.IsNullOrEmpty(WebhookUrl) && WebhookProviderType != 0)
+                return (WebhookUrl, WebhookProviderType);
+
+            // Legacy fallback: existing TeamsWebhookUrl → treat as Legacy Connector
+            if (!string.IsNullOrEmpty(TeamsWebhookUrl))
+                return (TeamsWebhookUrl, (int)Notifications.WebhookProviderType.TeamsLegacyConnector);
+
+            return (null, 0);
+        }
+
+        /// <summary>
+        /// Returns effective notify-on-success setting, preferring new fields over legacy.
+        /// </summary>
+        public bool GetEffectiveNotifyOnSuccess()
+            => !string.IsNullOrEmpty(WebhookUrl) ? WebhookNotifyOnSuccess : TeamsNotifyOnSuccess;
+
+        /// <summary>
+        /// Returns effective notify-on-failure setting, preferring new fields over legacy.
+        /// </summary>
+        public bool GetEffectiveNotifyOnFailure()
+            => !string.IsNullOrEmpty(WebhookUrl) ? WebhookNotifyOnFailure : TeamsNotifyOnFailure;
 
         /// <summary>
         /// Checks if the tenant is currently disabled

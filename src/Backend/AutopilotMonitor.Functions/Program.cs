@@ -126,7 +126,7 @@ builder.Services.AddSingleton<ReportAgentErrorFunction>();
 builder.Services.AddSingleton<AutopilotMonitor.Functions.Security.GraphTokenService>();
 builder.Services.AddSingleton<AutopilotMonitor.Functions.Security.AutopilotDeviceValidator>();
 builder.Services.AddSingleton<AutopilotMonitor.Functions.Security.CorporateIdentifierValidator>();
-builder.Services.AddHttpClient<TeamsNotificationService>();
+builder.Services.AddHttpClient<AutopilotMonitor.Functions.Services.Notifications.WebhookNotificationService>();
 builder.Services.AddHttpClient<TelegramNotificationService>();
 builder.Services.AddSingleton<ResendEmailService>();
 builder.Services.AddSingleton<GalacticNotificationService>();

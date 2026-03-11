@@ -1,6 +1,7 @@
 using System.Net;
 using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Functions.Services;
+using AutopilotMonitor.Functions.Services.Notifications;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -18,7 +19,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
         private readonly AutopilotDeviceValidator _autopilotDeviceValidator;
         private readonly CorporateIdentifierValidator _corporateIdentifierValidator;
         private readonly AnalyzeRuleService _analyzeRuleService;
-        private readonly TeamsNotificationService _teamsNotificationService;
+        private readonly WebhookNotificationService _webhookNotificationService;
         private readonly BlockedDeviceService _blockedDeviceService;
         private readonly BlockedVersionService _blockedVersionService;
         private readonly BootstrapSessionService _bootstrapSessionService;
@@ -31,7 +32,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             AutopilotDeviceValidator autopilotDeviceValidator,
             CorporateIdentifierValidator corporateIdentifierValidator,
             AnalyzeRuleService analyzeRuleService,
-            TeamsNotificationService teamsNotificationService,
+            WebhookNotificationService webhookNotificationService,
             BlockedDeviceService blockedDeviceService,
             BlockedVersionService blockedVersionService,
             BootstrapSessionService bootstrapSessionService)
@@ -43,7 +44,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             _autopilotDeviceValidator = autopilotDeviceValidator;
             _corporateIdentifierValidator = corporateIdentifierValidator;
             _analyzeRuleService = analyzeRuleService;
-            _teamsNotificationService = teamsNotificationService;
+            _webhookNotificationService = webhookNotificationService;
             _blockedDeviceService = blockedDeviceService;
             _blockedVersionService = blockedVersionService;
             _bootstrapSessionService = bootstrapSessionService;
