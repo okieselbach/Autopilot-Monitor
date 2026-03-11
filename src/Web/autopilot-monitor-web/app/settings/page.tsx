@@ -929,7 +929,6 @@ export default function SettingsPage() {
       sections.push(
         { id: "data-management", label: "Data Management" },
         { id: "offboarding", label: "Offboarding" },
-        { id: "config-info", label: "Configuration Info" },
       );
     }
     return sections;
