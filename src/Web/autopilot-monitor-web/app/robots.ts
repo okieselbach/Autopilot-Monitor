@@ -5,7 +5,7 @@ export default function robots(): MetadataRoute.Robots {
     rules: [
       {
         userAgent: "*",
-        allow: ["/", "/about", "/docs", "/roadmap", "/privacy", "/terms"],
+        allow: ["/", "/about", "/docs", "/roadmap", "/changelog", "/privacy", "/terms"],
         disallow: [
           "/dashboard",
           "/fleet-health",
@@ -13,9 +13,12 @@ export default function robots(): MetadataRoute.Robots {
           "/usage-metrics",
           "/audit",
           "/platform-usage-metrics",
+          "/platform-metrics",
           "/progress",
           "/gather-rules",
           "/analyze-rules",
+          "/ime-log-patterns",
+          "/geographic-performance",
           "/sessions/",
           "/diagnosis/",
           "/admin-configuration",

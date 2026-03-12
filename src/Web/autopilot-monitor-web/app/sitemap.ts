@@ -1,8 +1,16 @@
 import type { MetadataRoute } from "next";
+import { NAV_SECTIONS } from "./docs/docsNavSections";
 
 const BASE_URL = "https://www.autopilotmonitor.com";
 
 export default function sitemap(): MetadataRoute.Sitemap {
+  const docsSections: MetadataRoute.Sitemap = NAV_SECTIONS.map((section) => ({
+    url: `${BASE_URL}/docs/${section.id}`,
+    lastModified: new Date(),
+    changeFrequency: "weekly",
+    priority: 0.8,
+  }));
+
   return [
     {
       url: `${BASE_URL}/`,
@@ -16,6 +24,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
       changeFrequency: "weekly",
       priority: 0.9,
     },
+    ...docsSections,
     {
       url: `${BASE_URL}/about`,
       lastModified: new Date(),
@@ -27,6 +36,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
       lastModified: new Date(),
       changeFrequency: "weekly",
       priority: 0.7,
+    },
+    {
+      url: `${BASE_URL}/changelog`,
+      lastModified: new Date(),
+      changeFrequency: "monthly",
+      priority: 0.5,
     },
     {
       url: `${BASE_URL}/privacy`,
