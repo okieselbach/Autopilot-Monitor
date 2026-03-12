@@ -109,7 +109,17 @@ export default function HealthCheckPage() {
     }
   };
 
-  const overallColors = healthResult ? getStatusColor(healthResult.overallStatus) : null;
+  const connStatus = getConnectionStatus();
+  const totalChecks = healthResult ? healthResult.checks.length + 1 : 0;
+  const healthyChecks = healthResult ? healthResult.checks.filter(c => c.status === 'healthy').length + (connStatus === 'healthy' ? 1 : 0) : 0;
+  const combinedOverallStatus = healthResult
+    ? (connStatus === 'unhealthy' || healthResult.overallStatus === 'unhealthy')
+      ? 'unhealthy'
+      : (connStatus === 'warning' || healthResult.overallStatus === 'warning')
+        ? 'warning'
+        : 'healthy'
+    : null;
+  const overallColors = combinedOverallStatus ? getStatusColor(combinedOverallStatus) : null;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -158,12 +168,12 @@ export default function HealthCheckPage() {
           {healthResult && overallColors && (
             <div className={`p-4 flex items-center justify-between ${overallColors.bg}`}>
               <div className="flex items-center space-x-3">
-                <div className={`w-3 h-3 rounded-full ${healthResult.overallStatus === 'healthy' ? 'bg-green-500' : healthResult.overallStatus === 'unhealthy' ? 'bg-red-500' : 'bg-yellow-500'}`}></div>
+                <div className={`w-3 h-3 rounded-full ${combinedOverallStatus === 'healthy' ? 'bg-green-500' : combinedOverallStatus === 'unhealthy' ? 'bg-red-500' : 'bg-yellow-500'}`}></div>
                 <span className={`text-sm font-medium ${overallColors.text}`}>
-                  {healthResult.overallStatus === 'healthy' ? 'All systems operational' : healthResult.overallStatus === 'unhealthy' ? 'System issues detected' : 'Warnings detected'}
+                  {combinedOverallStatus === 'healthy' ? 'All systems operational' : combinedOverallStatus === 'unhealthy' ? 'System issues detected' : 'Warnings detected'}
                 </span>
                 <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${overallColors.badge}`}>
-                  {healthResult.checks.filter(c => c.status === 'healthy').length}/{healthResult.checks.length} healthy
+                  {healthyChecks}/{totalChecks} healthy
                 </span>
               </div>
               <span className="text-xs text-gray-500">
@@ -190,7 +200,6 @@ export default function HealthCheckPage() {
           {(() => {
             const tenantGroup = `tenant-${tenantId}`;
             const hasTenantGroup = joinedGroups.includes(tenantGroup);
-            const connStatus = getConnectionStatus();
             const colors = getStatusColor(connStatus);
             return (
               <div className={`bg-white rounded-lg shadow border-l-4 ${colors.accent}`}>
