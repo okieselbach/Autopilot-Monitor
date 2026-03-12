@@ -1,63 +1,7 @@
-"use client";
-
-import { useAuth } from "../contexts/AuthContext";
-import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
 import { PublicSiteNavbar } from "../components/PublicSiteNavbar";
-
-interface PlatformStatsManifest {
-  latest: string;
-  generatedAtUtc: string;
-}
-
-interface PlatformStatsPayload {
-  totalEnrollments?: number;
-  totalUsers?: number;
-  totalTenants?: number;
-  totalSignedUpTenants?: number;
-  uniqueDeviceModels?: number;
-  totalEventsProcessed?: number;
-  successfulEnrollments?: number;
-  issuesDetected?: number;
-  lastFullCompute?: string;
-  lastUpdated?: string;
-}
-
-const DEFAULT_PLATFORM_STATS = {
-  totalEnrollments: 123,
-  totalTenants: 2,
-  totalSignedUpTenants: 2,
-  uniqueDeviceModels: 1,
-  totalEventsProcessed: 0,
-  issuesDetected: 0,
-  lastUpdated: null as string | null,
-};
-
-function resolvePlatformStatsManifestUrl(rawUrl?: string): string {
-  const trimmed = rawUrl?.trim();
-  if (!trimmed) {
-    return "/platform-stats.json";
-  }
-
-  const hashIndex = trimmed.indexOf("#");
-  const withoutHash = hashIndex >= 0 ? trimmed.slice(0, hashIndex) : trimmed;
-  const hash = hashIndex >= 0 ? trimmed.slice(hashIndex) : "";
-
-  const queryIndex = withoutHash.indexOf("?");
-  const basePath = queryIndex >= 0 ? withoutHash.slice(0, queryIndex) : withoutHash;
-  const query = queryIndex >= 0 ? withoutHash.slice(queryIndex) : "";
-
-  if (/\.json$/i.test(basePath)) {
-    return trimmed;
-  }
-
-  const normalizedBasePath = basePath.endsWith("/") ? basePath.slice(0, -1) : basePath;
-  const manifestPath = `${normalizedBasePath}/platform-stats.json`;
-  return `${manifestPath}${query}${hash}`;
-}
-
-const PLATFORM_STATS_MANIFEST_URL =
-  resolvePlatformStatsManifestUrl(process.env.NEXT_PUBLIC_PLATFORM_STATS_MANIFEST_URL);
+import { AuthGate } from "../components/landing/AuthGate";
+import { LoginButton } from "../components/landing/LoginButton";
+import { PlatformStats } from "../components/landing/PlatformStats";
 
 const QUICK_START = [
   {
@@ -160,82 +104,11 @@ function StepIcon({ icon }: { icon: string }) {
 }
 
 export default function LandingPage() {
-  const { login, isAuthenticated, isLoading, user, isPreviewBlocked } = useAuth();
-  const router = useRouter();
-  const [platformStats, setPlatformStats] = useState(DEFAULT_PLATFORM_STATS);
-
-  // Redirect after login: preview-blocked → /preview, admins/operators → /dashboard, users → /progress
-  useEffect(() => {
-    if (isAuthenticated && !isLoading && user) {
-      if (isPreviewBlocked) {
-        router.push("/preview");
-      } else if (user.isTenantAdmin || user.isGalacticAdmin || user.role === 'Operator') {
-        router.push("/dashboard");
-      } else {
-        router.push("/progress");
-      }
-    }
-  }, [isAuthenticated, isLoading, user, isPreviewBlocked, router]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const loadPlatformStats = async () => {
-      try {
-        const manifestResponse = await fetch(PLATFORM_STATS_MANIFEST_URL, { cache: "no-store" });
-        if (!manifestResponse.ok) {
-          return;
-        }
-
-        const manifest = (await manifestResponse.json()) as PlatformStatsManifest;
-        if (!manifest?.latest) {
-          return;
-        }
-
-        const versionedUrl = new URL(manifest.latest, manifestResponse.url).toString();
-        const statsResponse = await fetch(versionedUrl, { cache: "force-cache" });
-        if (!statsResponse.ok) {
-          return;
-        }
-
-        const payload = (await statsResponse.json()) as PlatformStatsPayload;
-        if (cancelled) {
-          return;
-        }
-
-        setPlatformStats({
-          totalEnrollments: payload.totalEnrollments ?? DEFAULT_PLATFORM_STATS.totalEnrollments,
-          totalTenants: payload.totalTenants ?? DEFAULT_PLATFORM_STATS.totalTenants,
-          totalSignedUpTenants: payload.totalSignedUpTenants ?? DEFAULT_PLATFORM_STATS.totalSignedUpTenants,
-          uniqueDeviceModels: payload.uniqueDeviceModels ?? DEFAULT_PLATFORM_STATS.uniqueDeviceModels,
-          totalEventsProcessed: payload.totalEventsProcessed ?? DEFAULT_PLATFORM_STATS.totalEventsProcessed,
-          issuesDetected: payload.issuesDetected ?? DEFAULT_PLATFORM_STATS.issuesDetected,
-          lastUpdated: payload.lastUpdated ?? null,
-        });
-      } catch {
-        // Keep defaults if manifest/versioned files are not reachable.
-      }
-    };
-
-    loadPlatformStats();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  if (isLoading) {
-    return (
-      <div className="landing-page min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading...</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="landing-page min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50">
+      {/* Client component: handles auth redirect + loading overlay */}
+      <AuthGate />
+
       <PublicSiteNavbar showSectionLinks={true} />
 
       {/* Hero Section */}
@@ -269,8 +142,7 @@ export default function LandingPage() {
               Monitor every phase, run customizable analyze rules, and resolve issues faster than ever before.
             </p>
             <div className="flex items-center justify-center space-x-4">
-              <button
-                onClick={login}
+              <LoginButton
                 className="px-8 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg font-semibold text-lg shadow-xl hover:shadow-2xl transform hover:-translate-y-0.5 transition-all flex items-center space-x-2"
               >
                 <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
@@ -278,31 +150,14 @@ export default function LandingPage() {
                   <path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd" />
                 </svg>
                 <span>Get Started</span>
-              </button>
+              </LoginButton>
             </div>
             <p className="mt-4 text-sm text-gray-500">
               Free to use • Open-Source • Sign in to request early access
             </p>
 
-            {/* Platform Stats - compact inline */}
-            <div className="mt-10 text-xs text-gray-400">
-              <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-2 sm:gap-x-4">
-                <span><span className="font-semibold text-gray-600">{platformStats.totalSignedUpTenants.toLocaleString()}</span> organisations</span>
-                <span className="w-px h-2.5 bg-gray-300 hidden sm:inline-block" />
-                <span><span className="font-semibold text-gray-600">{platformStats.uniqueDeviceModels.toLocaleString()}</span> device models</span>
-                <span className="w-px h-2.5 bg-gray-300 hidden sm:inline-block" />
-                <span><span className="font-semibold text-gray-600">{platformStats.totalEnrollments.toLocaleString()}</span> enrollments monitored</span>
-                <span className="w-px h-2.5 bg-gray-300 hidden sm:inline-block" />
-                <span><span className="font-semibold text-gray-600">{platformStats.issuesDetected.toLocaleString()}</span> detected issues</span>
-                <span className="w-px h-2.5 bg-gray-300 hidden sm:inline-block" />
-                <span><span className="font-semibold text-gray-600">{platformStats.totalEventsProcessed.toLocaleString()}</span> events processed</span>
-              </div>
-              {platformStats.lastUpdated && (
-                <p className="mt-1.5 text-[10px] text-gray-300">
-                  last updated: {new Date(platformStats.lastUpdated).toLocaleString()}
-                </p>
-              )}
-            </div>
+            {/* Platform Stats - client component fetches live data */}
+            <PlatformStats />
 
             {/* Product Preview Showcase */}
             <div className="mt-14 relative max-w-5xl mx-auto">
@@ -530,12 +385,11 @@ export default function LandingPage() {
                     One pipeline from deployment to action
                   </h3>
                 </div>
-                <button
-                  onClick={login}
+                <LoginButton
                   className="px-5 py-2.5 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold shadow-lg hover:shadow-xl transition-all"
                 >
                   Start Now
-                </button>
+                </LoginButton>
               </div>
 
               <div className="mt-6 relative">
@@ -905,12 +759,11 @@ export default function LandingPage() {
           <p className="text-xl text-gray-600 mb-8">
             Join organizations using Autopilot Monitor to react faster and monitor more reliably.
           </p>
-          <button
-            onClick={login}
+          <LoginButton
             className="px-8 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg font-semibold text-lg shadow-xl hover:shadow-2xl transform hover:-translate-y-0.5 transition-all"
           >
             Start Monitoring Now
-          </button>
+          </LoginButton>
         </div>
       </div>
 
@@ -1004,51 +857,6 @@ export default function LandingPage() {
           </div>
         </div>
       </footer>
-
-      <style jsx>{`
-        @keyframes stepReveal {
-          0% {
-            transform: translateY(8px);
-            opacity: 0;
-          }
-          100% {
-            transform: translateY(0);
-            opacity: 1;
-          }
-        }
-
-        @keyframes dotPulse {
-          0%,
-          100% {
-            box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.04);
-            transform: scale(1);
-          }
-          2% {
-            box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.16);
-            transform: scale(1.01);
-          }
-          8% {
-            box-shadow: 0 0 0 5px rgba(59, 130, 246, 0.30);
-            transform: scale(1.05);
-          }
-          14.5% {
-            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.18);
-            transform: scale(1.02);
-          }
-          15.87% {
-            box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.04);
-            transform: scale(1);
-          }
-        }
-
-        .step-card {
-          animation: stepReveal 0.45s ease-out both;
-        }
-
-        .dot-pulse {
-          animation: dotPulse 12.6s linear infinite;
-        }
-      `}</style>
     </div>
   );
 }

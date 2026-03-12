@@ -579,3 +579,47 @@ html:hover ::-webkit-scrollbar-thumb {
 .dark ::-webkit-scrollbar-thumb:hover {
   background: #94a3b8 !important;
 }
+
+/* ===== LANDING PAGE ANIMATIONS ===== */
+@keyframes stepReveal {
+  0% {
+    transform: translateY(8px);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes dotPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.04);
+    transform: scale(1);
+  }
+  2% {
+    box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.16);
+    transform: scale(1.01);
+  }
+  8% {
+    box-shadow: 0 0 0 5px rgba(59, 130, 246, 0.30);
+    transform: scale(1.05);
+  }
+  14.5% {
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.18);
+    transform: scale(1.02);
+  }
+  15.87% {
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.04);
+    transform: scale(1);
+  }
+}
+
+.landing-page .step-card {
+  animation: stepReveal 0.45s ease-out both;
+}
+
+.landing-page .dot-pulse {
+  animation: dotPulse 12.6s linear infinite;
+}
