@@ -102,10 +102,10 @@ export default function HealthCheckPage() {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'healthy': return { bg: 'bg-green-50', border: 'border-green-200', text: 'text-green-700', accent: 'border-green-500', badge: 'bg-green-100 text-green-800' };
-      case 'unhealthy': return { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-700', accent: 'border-red-500', badge: 'bg-red-100 text-red-800' };
-      case 'warning': return { bg: 'bg-yellow-50', border: 'border-yellow-200', text: 'text-yellow-700', accent: 'border-yellow-500', badge: 'bg-yellow-100 text-yellow-800' };
-      default: return { bg: 'bg-gray-50', border: 'border-gray-200', text: 'text-gray-700', accent: 'border-gray-500', badge: 'bg-gray-100 text-gray-800' };
+      case 'healthy': return { bg: 'bg-green-50 dark:bg-green-900/20', border: 'border-green-200 dark:border-green-800', text: 'text-green-700 dark:text-green-400', accent: 'border-green-500', badge: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-400' };
+      case 'unhealthy': return { bg: 'bg-red-50 dark:bg-red-900/20', border: 'border-red-200 dark:border-red-800', text: 'text-red-700 dark:text-red-400', accent: 'border-red-500', badge: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-400' };
+      case 'warning': return { bg: 'bg-yellow-50 dark:bg-yellow-900/20', border: 'border-yellow-200 dark:border-yellow-800', text: 'text-yellow-700 dark:text-yellow-400', accent: 'border-yellow-500', badge: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-400' };
+      default: return { bg: 'bg-gray-50 dark:bg-gray-800', border: 'border-gray-200 dark:border-gray-700', text: 'text-gray-700 dark:text-gray-300', accent: 'border-gray-500', badge: 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300' };
     }
   };
 
@@ -122,11 +122,11 @@ export default function HealthCheckPage() {
   const overallColors = combinedOverallStatus ? getStatusColor(combinedOverallStatus) : null;
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
         {/* Header Section */}
-        <div className="bg-white rounded-lg shadow mb-6">
-          <div className="p-6 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-indigo-50">
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow mb-6">
+          <div className="p-6 border-b border-gray-200 dark:border-gray-700 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-3">
                 <div className="w-10 h-10 rounded-lg bg-blue-500 flex items-center justify-center">
@@ -135,8 +135,8 @@ export default function HealthCheckPage() {
                   </svg>
                 </div>
                 <div>
-                  <h1 className="text-xl font-semibold text-gray-900">System Health</h1>
-                  <p className="text-sm text-gray-500">Infrastructure health monitoring</p>
+                  <h1 className="text-xl font-semibold text-gray-900 dark:text-white">System Health</h1>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Infrastructure health monitoring</p>
                 </div>
               </div>
               <button
@@ -176,7 +176,7 @@ export default function HealthCheckPage() {
                   {healthyChecks}/{totalChecks} healthy
                 </span>
               </div>
-              <span className="text-xs text-gray-500">
+              <span className="text-xs text-gray-500 dark:text-gray-400 dark:text-gray-400">
                 Last checked: {new Date(healthResult.timestamp).toLocaleString()}
               </span>
             </div>
@@ -189,20 +189,20 @@ export default function HealthCheckPage() {
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
               </svg>
-              <p className="text-sm text-gray-500">Running health checks...</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Running health checks...</p>
             </div>
           )}
         </div>
 
         {/* Real-Time Connection Status */}
         <div className="mb-6">
-          <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Real-Time Connection</h2>
+          <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Real-Time Connection</h2>
           {(() => {
             const tenantGroup = `tenant-${tenantId}`;
             const hasTenantGroup = joinedGroups.includes(tenantGroup);
             const colors = getStatusColor(connStatus);
             return (
-              <div className={`bg-white rounded-lg shadow border-l-4 ${colors.accent}`}>
+              <div className={`bg-white dark:bg-gray-800 rounded-lg shadow border-l-4 ${colors.accent}`}>
                 <div className="p-6">
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex items-center space-x-3">
@@ -222,8 +222,8 @@ export default function HealthCheckPage() {
                         )}
                       </div>
                       <div>
-                        <h3 className="text-lg font-semibold text-gray-900">Live Updates</h3>
-                        <p className="text-xs text-gray-500">Real-time event hub (Private Preview: 20 concurrent clients)</p>
+                        <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Live Updates</h3>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">Real-time event hub (Private Preview: 20 concurrent clients)</p>
                       </div>
                     </div>
                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${colors.badge}`}>
@@ -237,16 +237,16 @@ export default function HealthCheckPage() {
                       ? 'Attempting to establish connection...'
                       : 'Not connected — real-time updates unavailable'}
                   </p>
-                  <div className="mt-4 bg-gray-50 rounded-lg p-3 border border-gray-200">
+                  <div className="mt-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 border border-gray-200 dark:border-gray-600">
                     <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">Details</h4>
                     <dl className="space-y-1">
                       <div className="flex justify-between text-xs">
-                        <dt className="font-medium text-gray-600">State</dt>
-                        <dd className="text-gray-900 font-mono">{getConnectionStateLabel(connectionState)}</dd>
+                        <dt className="font-medium text-gray-600 dark:text-gray-400">State</dt>
+                        <dd className="text-gray-900 dark:text-gray-100 font-mono">{getConnectionStateLabel(connectionState)}</dd>
                       </div>
                       <div className="flex justify-between text-xs">
-                        <dt className="font-medium text-gray-600">Tenant Group</dt>
-                        <dd className={`font-mono ${hasTenantGroup ? 'text-green-700' : 'text-gray-400'}`}>
+                        <dt className="font-medium text-gray-600 dark:text-gray-400">Tenant Group</dt>
+                        <dd className={`font-mono ${hasTenantGroup ? 'text-green-700 dark:text-green-400' : 'text-gray-400'}`}>
                           {hasTenantGroup ? 'Joined' : 'Not joined'}
                         </dd>
                       </div>
@@ -275,12 +275,12 @@ export default function HealthCheckPage() {
         {/* Individual Check Cards */}
         {healthResult && (
           <div>
-          <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Backend Services</h2>
+          <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Backend Services</h2>
           <div className="grid gap-5 sm:grid-cols-2">
             {healthResult.checks.map((check, index) => {
               const colors = getStatusColor(check.status);
               return (
-                <div key={index} className={`bg-white rounded-lg shadow border-l-4 ${colors.accent}`}>
+                <div key={index} className={`bg-white dark:bg-gray-800 rounded-lg shadow border-l-4 ${colors.accent}`}>
                   <div className="p-6">
                     <div className="flex items-start justify-between mb-3">
                       <div className="flex items-center space-x-3">
@@ -300,8 +300,8 @@ export default function HealthCheckPage() {
                           )}
                         </div>
                         <div>
-                          <h3 className="text-lg font-semibold text-gray-900">{check.name}</h3>
-                          <p className="text-xs text-gray-500">{check.description}</p>
+                          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{check.name}</h3>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">{check.description}</p>
                         </div>
                       </div>
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${colors.badge}`}>
@@ -314,13 +314,13 @@ export default function HealthCheckPage() {
                     </p>
 
                     {check.details && Object.keys(check.details).length > 0 && (
-                      <div className="mt-4 bg-gray-50 rounded-lg p-3 border border-gray-200">
+                      <div className="mt-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 border border-gray-200 dark:border-gray-600">
                         <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">Details</h4>
                         <dl className="space-y-1">
                           {Object.entries(check.details).map(([key, value]) => (
                             <div key={key} className="flex justify-between text-xs">
-                              <dt className="font-medium text-gray-600">{key}</dt>
-                              <dd className="text-gray-900 font-mono">
+                              <dt className="font-medium text-gray-600 dark:text-gray-400">{key}</dt>
+                              <dd className="text-gray-900 dark:text-gray-100 font-mono">
                                 {Array.isArray(value) ? value.join(', ') : typeof value === 'object' ? JSON.stringify(value) : String(value)}
                               </dd>
                             </div>
