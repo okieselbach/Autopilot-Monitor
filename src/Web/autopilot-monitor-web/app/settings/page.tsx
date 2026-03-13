@@ -563,8 +563,10 @@ export default function SettingsPage() {
 
       const result = await response.json();
       setConfig(result.config);
+      // Sync form state variables with the server response to keep UI consistent
       setValidateAutopilotDevice(result.config.validateAutopilotDevice);
       setValidateCorporateIdentifier(result.config.validateCorporateIdentifier ?? false);
+      setUnrestrictedMode(result.config.unrestrictedMode ?? false);
       setSuccessMessage("Configuration saved successfully!");
       setTimeout(() => setSuccessMessage(null), 3000);
     } finally {
