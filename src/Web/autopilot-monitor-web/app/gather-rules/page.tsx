@@ -242,6 +242,8 @@ export default function GatherRulesPage() {
   };
 
   const startEditing = (rule: GatherRule) => {
+    // Ensure the card stays expanded when entering edit mode
+    setExpandedRuleId(rule.ruleId);
     setEditingRuleId(rule.ruleId);
     setEditForm({
       ruleId: rule.ruleId,
