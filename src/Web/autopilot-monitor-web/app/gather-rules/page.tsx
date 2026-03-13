@@ -300,6 +300,8 @@ export default function GatherRulesPage() {
       enabled: rule.enabled,
       author: rule.author,
       createdAt: rule.createdAt,
+      isBuiltIn: rule.isBuiltIn ?? false,
+      isCommunity: rule.isCommunity ?? false,
     };
 
     const result = await mutate(

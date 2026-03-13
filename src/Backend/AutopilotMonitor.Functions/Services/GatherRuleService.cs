@@ -98,6 +98,10 @@ namespace AutopilotMonitor.Functions.Services
                 return await _storageService.StoreRuleStateAsync(tenantId, rule.RuleId, rule.Enabled);
             }
 
+            // Ensure custom rules keep correct flags (the incoming payload may
+            // omit them, causing them to default to IsBuiltIn=true in the model).
+            rule.IsBuiltIn = false;
+            rule.IsCommunity = false;
             rule.UpdatedAt = DateTime.UtcNow;
             return await _storageService.StoreGatherRuleAsync(rule, tenantId);
         }
