@@ -81,11 +81,20 @@ namespace AutopilotMonitor.Functions.Services
         /// Updates a gather rule.
         /// For built-in/community rules: only the enabled/disabled state is stored (per tenant).
         /// For custom rules: the full rule is updated in the tenant partition.
+        /// The rule type is determined from existing data (not the incoming payload) to prevent
+        /// partial payloads (e.g. toggle requests with only { enabled: bool }) from being
+        /// misclassified and overwriting rule data.
         /// </summary>
         public async Task<bool> UpdateRuleAsync(string tenantId, GatherRule rule)
         {
-            if (rule.IsBuiltIn || rule.IsCommunity)
+            // Always check global rules for type determination — the incoming payload
+            // may not include isBuiltIn/isCommunity (e.g. toggle requests).
+            var globalRules = await _storageService.GetGatherRulesAsync("global");
+            var globalRule = globalRules.FirstOrDefault(r => r.RuleId == rule.RuleId);
+
+            if (globalRule != null && (globalRule.IsBuiltIn || globalRule.IsCommunity))
             {
+                // Built-in/community rule: only persist enabled state per tenant
                 return await _storageService.StoreRuleStateAsync(tenantId, rule.RuleId, rule.Enabled);
             }
 

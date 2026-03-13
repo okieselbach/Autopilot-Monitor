@@ -239,7 +239,8 @@ namespace AutopilotMonitor.Functions.Services
                 { "SendTraceEvents", config.SendTraceEvents },
                 { "EnableLocalAdminAnalyzer", config.EnableLocalAdminAnalyzer },
                 { "LocalAdminAllowedAccountsJson", config.LocalAdminAllowedAccountsJson },
-                { "BootstrapTokenEnabled", config.BootstrapTokenEnabled }
+                { "BootstrapTokenEnabled", config.BootstrapTokenEnabled },
+                { "UnrestrictedMode", config.UnrestrictedMode }
             };
 
             return entity;
@@ -297,7 +298,8 @@ namespace AutopilotMonitor.Functions.Services
                 SendTraceEvents = entity.GetBoolean("SendTraceEvents") ?? true,
                 EnableLocalAdminAnalyzer = entity.GetBoolean("EnableLocalAdminAnalyzer"),
                 LocalAdminAllowedAccountsJson = entity.GetString("LocalAdminAllowedAccountsJson"),
-                BootstrapTokenEnabled = entity.GetBoolean("BootstrapTokenEnabled") ?? false
+                BootstrapTokenEnabled = entity.GetBoolean("BootstrapTokenEnabled") ?? false,
+                UnrestrictedMode = entity.GetBoolean("UnrestrictedMode") ?? false
             };
         }
     }

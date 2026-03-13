@@ -136,7 +136,7 @@ export default function GatherRulesPage() {
       {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled: !rule.enabled }),
+        body: JSON.stringify({ enabled: !rule.enabled, isBuiltIn: rule.isBuiltIn, isCommunity: rule.isCommunity }),
       }
     );
     if (result !== null) {
@@ -295,6 +295,9 @@ export default function GatherRulesPage() {
       outputEventType: form.outputEventType,
       outputSeverity: form.outputSeverity,
       version: bumpVersion(rule.version),
+      enabled: rule.enabled,
+      author: rule.author,
+      createdAt: rule.createdAt,
     };
 
     const result = await mutate(
