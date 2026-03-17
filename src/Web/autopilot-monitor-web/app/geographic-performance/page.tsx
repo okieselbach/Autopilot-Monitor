@@ -426,10 +426,14 @@ export default function GeographicPerformancePage() {
                         <tr
                           key={loc.locationKey}
                           id={`loc-${loc.locationKey.replace(/[^a-zA-Z0-9]/g, "-")}`}
-                          className={`hover:bg-gray-50 transition-colors ${
+                          className={`hover:bg-gray-50 transition-colors cursor-pointer ${
                             loc.isOutlier ? "border-l-4 border-l-red-400" : ""
                           } ${selectedLocation === loc.locationKey ? "bg-blue-50" : ""}`}
-                          onClick={() => setSelectedLocation(loc.locationKey)}
+                          onClick={() => {
+                            const days = timeRange === "7d" ? 7 : timeRange === "30d" ? 30 : 90;
+                            router.push(`/geographic-performance/sessions?locationKey=${encodeURIComponent(loc.locationKey)}&days=${days}&groupBy=${groupBy}`);
+                          }}
+                          onMouseEnter={() => setSelectedLocation(loc.locationKey)}
                         >
                           <td className="px-4 py-3 text-sm text-gray-900">
                             <div className="flex items-center">
@@ -493,20 +497,25 @@ export default function GeographicPerformancePage() {
                             {formatThroughput(loc.avgThroughputBytesPerSec)}
                           </td>
                           <td className="px-4 py-3 text-sm">
-                            {loc.durationVsGlobalPct !== 0 ? (
-                              <span
-                                className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                                  loc.durationVsGlobalPct > 0
-                                    ? "bg-red-50 text-red-700"
-                                    : "bg-green-50 text-green-700"
-                                }`}
-                              >
-                                {loc.durationVsGlobalPct > 0 ? "+" : ""}
-                                {loc.durationVsGlobalPct.toFixed(0)}%
-                              </span>
-                            ) : (
-                              <span className="text-gray-400">—</span>
-                            )}
+                            <div className="flex items-center justify-between">
+                              {loc.durationVsGlobalPct !== 0 ? (
+                                <span
+                                  className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                                    loc.durationVsGlobalPct > 0
+                                      ? "bg-red-50 text-red-700"
+                                      : "bg-green-50 text-green-700"
+                                  }`}
+                                >
+                                  {loc.durationVsGlobalPct > 0 ? "+" : ""}
+                                  {loc.durationVsGlobalPct.toFixed(0)}%
+                                </span>
+                              ) : (
+                                <span className="text-gray-400">—</span>
+                              )}
+                              <svg className="w-4 h-4 text-gray-400 ml-2 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                              </svg>
+                            </div>
                           </td>
                         </tr>
                       ))}

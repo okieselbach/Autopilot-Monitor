@@ -195,7 +195,7 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
             };
         }
 
-        private static string GetLocationKey(SessionSummary session, string groupBy)
+        internal static string GetLocationKey(SessionSummary session, string groupBy)
         {
             return groupBy.ToLower() switch
             {
