@@ -165,14 +165,6 @@ export function GatherRuleCard({
       {/* Expanded Details */}
       {isExpanded && !isEditing && (
         <div className="border-t border-gray-200 p-6 space-y-6">
-          {/* JSON view (replaces detail view for built-in / community rules) */}
-          {showJson && !canEdit ? (
-            <ReadOnlyJsonView
-              jsonText={JSON.stringify(stripInternalFields(rule), null, 2)}
-              textareaRows={20}
-            />
-          ) : (
-          <>
           {/* Meta Info Row + Details/JSON toggle */}
           <div className="flex items-start justify-between gap-4">
             <div className="flex flex-wrap items-center gap-4 text-sm text-gray-500">
@@ -194,7 +186,6 @@ export function GatherRuleCard({
                 {rule.ruleId}
               </span>
             </div>
-            {/* Details / JSON toggle for built-in and community rules */}
             {!canEdit && (
               <div className="flex items-center bg-gray-100 rounded-lg p-1 flex-shrink-0">
                 <button
@@ -216,6 +207,15 @@ export function GatherRuleCard({
               </div>
             )}
           </div>
+
+          {/* JSON view (replaces detail view for built-in / community rules) */}
+          {showJson && !canEdit ? (
+            <ReadOnlyJsonView
+              jsonText={JSON.stringify(stripInternalFields(rule), null, 2)}
+              textareaRows={20}
+            />
+          ) : (
+          <>
 
           {/* Tags */}
           {rule.tags && rule.tags.length > 0 && (

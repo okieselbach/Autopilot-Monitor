@@ -85,14 +85,7 @@ export default function AnalyzeRuleCard({
       {/* Expanded Details (read-only) */}
       {isExpanded && !isEditing && (
         <div className="border-t border-gray-200 p-6 space-y-6">
-          {/* JSON view (replaces detail view for built-in / community rules) */}
-          {showJson && !canEdit ? (
-            <ReadOnlyJsonView
-              jsonText={JSON.stringify(stripInternalFields(rule), null, 2)}
-              textareaRows={24}
-            />
-          ) : (
-          <>
+          {/* Meta Info Row + Details/JSON toggle */}
           <div className="flex items-start justify-between gap-4">
             <div className="flex flex-wrap items-center gap-4 text-sm text-gray-500">
               <span><span className="font-medium text-gray-700">Version:</span> {rule.version}</span>
@@ -102,7 +95,6 @@ export default function AnalyzeRuleCard({
               <span><span className="font-medium text-gray-700">Updated:</span> {new Date(rule.updatedAt).toLocaleDateString()}</span>
               <span className="text-xs font-mono text-gray-400 sm:hidden">{rule.ruleId}</span>
             </div>
-            {/* Details / JSON toggle for built-in and community rules */}
             {!canEdit && (
               <div className="flex items-center bg-gray-100 rounded-lg p-1 flex-shrink-0">
                 <button
@@ -124,6 +116,15 @@ export default function AnalyzeRuleCard({
               </div>
             )}
           </div>
+
+          {/* JSON view (replaces detail view for built-in / community rules) */}
+          {showJson && !canEdit ? (
+            <ReadOnlyJsonView
+              jsonText={JSON.stringify(stripInternalFields(rule), null, 2)}
+              textareaRows={24}
+            />
+          ) : (
+          <>
 
           {rule.tags && rule.tags.length > 0 && (
             <div className="flex flex-wrap gap-2">
