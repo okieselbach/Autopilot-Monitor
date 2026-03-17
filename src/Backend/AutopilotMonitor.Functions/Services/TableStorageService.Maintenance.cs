@@ -414,5 +414,81 @@ namespace AutopilotMonitor.Functions.Services
                 return 0;
             }
         }
+
+        // ===== SESSION INDEX BACKFILL =====
+
+        /// <summary>
+        /// Backfills the SessionsIndex table from the Sessions table.
+        /// Finds sessions that don't have an IndexRowKey property and creates the corresponding
+        /// index entry. Idempotent — safe to run repeatedly.
+        /// Returns the number of sessions backfilled.
+        /// </summary>
+        public async Task<int> BackfillSessionIndexAsync()
+        {
+            try
+            {
+                var sessionsTable = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
+                var query = sessionsTable.QueryAsync<TableEntity>();
+
+                int backfilledCount = 0;
+
+                await foreach (var entity in query)
+                {
+                    var existingIndexRowKey = entity.GetString("IndexRowKey");
+                    if (!string.IsNullOrEmpty(existingIndexRowKey))
+                        continue; // Already indexed
+
+                    var startedAt = entity.GetDateTimeOffset("StartedAt")?.UtcDateTime ?? DateTime.UtcNow;
+
+                    try
+                    {
+                        await UpsertSessionIndexAsync(entity, startedAt);
+                        backfilledCount++;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to backfill session index for {TenantId}/{SessionId}",
+                            entity.PartitionKey, entity.RowKey);
+                    }
+                }
+
+                if (backfilledCount > 0)
+                {
+                    _logger.LogInformation("Session index backfill completed: {Count} sessions indexed", backfilledCount);
+                }
+
+                return backfilledCount;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Session index backfill failed");
+                return 0;
+            }
+        }
+
+        /// <summary>
+        /// Checks if the SessionsIndex table is empty.
+        /// Used by startup backfill to determine if a full migration is needed.
+        /// </summary>
+        public async Task<bool> IsSessionIndexEmptyAsync()
+        {
+            try
+            {
+                var indexTable = _tableServiceClient.GetTableClient(Constants.TableNames.SessionsIndex);
+                var query = indexTable.QueryAsync<TableEntity>(maxPerPage: 1, select: new[] { "PartitionKey" });
+
+                await foreach (var _ in query)
+                {
+                    return false; // At least one entity exists
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to check if session index is empty");
+                return true; // Assume empty on error → trigger backfill
+            }
+        }
     }
 }

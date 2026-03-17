@@ -28,18 +28,21 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
             {
                 // Authentication + MemberRead authorization enforced by PolicyEnforcementMiddleware
                 var tenantId = TenantHelper.GetTenantId(req);
+                var query = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
+                var cursor = query["cursor"];
 
-                _logger.LogInformation($"Fetching sessions for tenant {tenantId}");
+                _logger.LogInformation("Fetching sessions for tenant {TenantId} (cursor: {Cursor})", tenantId, cursor ?? "none");
 
-                // Get sessions from storage
-                var sessions = await _storageService.GetSessionsAsync(tenantId, maxResults: 100);
+                var page = await _storageService.GetSessionsAsync(tenantId, maxResults: 100, cursor: cursor);
 
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(new
                 {
                     success = true,
-                    count = sessions.Count,
-                    sessions = sessions
+                    count = page.Sessions.Count,
+                    hasMore = page.HasMore,
+                    cursor = page.Cursor,
+                    sessions = page.Sessions
                 });
 
                 return response;
@@ -54,6 +57,7 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
                     success = false,
                     message = "Internal server error",
                     count = 0,
+                    hasMore = false,
                     sessions = Array.Empty<object>()
                 });
 

@@ -44,7 +44,7 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
                 var geoEnabled = tenantConfig?.EnableGeoLocation ?? true;
 
                 var cutoff = DateTime.UtcNow.AddDays(-days);
-                var sessions = await _storageService.GetSessionsAsync(tenantId, maxResults: 10000, since: cutoff);
+                var sessions = await _storageService.GetSessionsByDateRangeAsync(cutoff, DateTime.UtcNow.AddDays(1), tenantId);
                 var allSummaries = await _storageService.GetAppInstallSummariesByTenantAsync(tenantId);
                 var summaries = allSummaries.Where(s => s.StartedAt >= cutoff).ToList();
 

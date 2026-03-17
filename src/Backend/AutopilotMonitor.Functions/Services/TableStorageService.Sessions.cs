@@ -10,6 +10,229 @@ namespace AutopilotMonitor.Functions.Services
 {
     public partial class TableStorageService
     {
+        // ===== SESSION INDEX HELPERS =====
+
+        /// <summary>
+        /// Computes the inverted-tick RowKey for the SessionsIndex table.
+        /// Newest sessions have the smallest RowKey, so Azure Table Storage returns them first.
+        /// Format: "{invertedTicks:D19}_{sessionId}" to guarantee uniqueness.
+        /// </summary>
+        private static string ComputeIndexRowKey(DateTime startedAt, string sessionId)
+            => $"{(DateTime.MaxValue.Ticks - startedAt.Ticks):D19}_{sessionId}";
+
+        /// <summary>
+        /// Extracts the SessionId from an index RowKey ("{invertedTicks}_{sessionId}").
+        /// </summary>
+        private static string ExtractSessionIdFromIndexRowKey(string indexRowKey)
+        {
+            var underscoreIndex = indexRowKey.IndexOf('_');
+            return underscoreIndex >= 0 ? indexRowKey.Substring(underscoreIndex + 1) : indexRowKey;
+        }
+
+        /// <summary>
+        /// Upserts a session entry in the SessionsIndex table and stores the IndexRowKey
+        /// back in the Sessions entity. Copies all SessionSummary-relevant fields so that
+        /// listing queries only need to hit the index table.
+        /// </summary>
+        private async Task UpsertSessionIndexAsync(TableEntity sessionEntity, DateTime startedAt)
+        {
+            try
+            {
+                var tenantId = sessionEntity.PartitionKey;
+                var sessionId = sessionEntity.RowKey;
+                var indexRowKey = ComputeIndexRowKey(startedAt, sessionId);
+
+                var indexTableClient = _tableServiceClient.GetTableClient(Constants.TableNames.SessionsIndex);
+
+                // Check if there's an existing index entry with a different RowKey (StartedAt changed)
+                var existingIndexRowKey = sessionEntity.GetString("IndexRowKey");
+                if (!string.IsNullOrEmpty(existingIndexRowKey) && existingIndexRowKey != indexRowKey)
+                {
+                    // StartedAt shifted — delete old index entry
+                    try
+                    {
+                        await indexTableClient.DeleteEntityAsync(tenantId, existingIndexRowKey);
+                    }
+                    catch (RequestFailedException ex) when (ex.Status == 404)
+                    {
+                        // Old index entry already gone — fine
+                    }
+                }
+
+                // Build index entity with all SessionSummary fields
+                var indexEntity = new TableEntity(tenantId, indexRowKey)
+                {
+                    ["SessionId"] = sessionId,
+                    ["SerialNumber"] = sessionEntity.GetString("SerialNumber") ?? string.Empty,
+                    ["DeviceName"] = sessionEntity.GetString("DeviceName") ?? string.Empty,
+                    ["Manufacturer"] = sessionEntity.GetString("Manufacturer") ?? string.Empty,
+                    ["Model"] = sessionEntity.GetString("Model") ?? string.Empty,
+                    ["StartedAt"] = EnsureUtc(startedAt),
+                    ["Status"] = sessionEntity.GetString("Status") ?? "InProgress",
+                    ["CurrentPhase"] = sessionEntity.GetInt32("CurrentPhase") ?? 0,
+                    ["CurrentPhaseDetail"] = sessionEntity.GetString("CurrentPhaseDetail") ?? string.Empty,
+                    ["EventCount"] = sessionEntity.GetInt32("EventCount") ?? 0,
+                    ["EnrollmentType"] = sessionEntity.GetString("EnrollmentType") ?? "v1",
+                    ["IsPreProvisioned"] = sessionEntity.GetBoolean("IsPreProvisioned") ?? false,
+                    ["IsHybridJoin"] = sessionEntity.GetBoolean("IsHybridJoin") ?? false,
+                    ["IsUserDriven"] = sessionEntity.GetBoolean("IsUserDriven") ?? false,
+                    ["AgentVersion"] = sessionEntity.GetString("AgentVersion") ?? string.Empty,
+                    ["OsName"] = sessionEntity.GetString("OsName") ?? string.Empty,
+                    ["OsBuild"] = sessionEntity.GetString("OsBuild") ?? string.Empty,
+                    ["OsDisplayVersion"] = sessionEntity.GetString("OsDisplayVersion") ?? string.Empty,
+                    ["OsEdition"] = sessionEntity.GetString("OsEdition") ?? string.Empty,
+                    ["OsLanguage"] = sessionEntity.GetString("OsLanguage") ?? string.Empty,
+                    ["GeoCountry"] = sessionEntity.GetString("GeoCountry") ?? string.Empty,
+                    ["GeoRegion"] = sessionEntity.GetString("GeoRegion") ?? string.Empty,
+                    ["GeoCity"] = sessionEntity.GetString("GeoCity") ?? string.Empty,
+                    ["GeoLoc"] = sessionEntity.GetString("GeoLoc") ?? string.Empty
+                };
+
+                // Copy nullable fields
+                var completedAt = sessionEntity.GetDateTimeOffset("CompletedAt")?.UtcDateTime;
+                if (completedAt.HasValue)
+                    indexEntity["CompletedAt"] = EnsureUtc(completedAt.Value);
+
+                var failureReason = sessionEntity.GetString("FailureReason");
+                if (!string.IsNullOrEmpty(failureReason))
+                    indexEntity["FailureReason"] = failureReason;
+
+                var durationSeconds = sessionEntity.GetInt32("DurationSeconds");
+                if (durationSeconds.HasValue)
+                    indexEntity["DurationSeconds"] = durationSeconds.Value;
+
+                var diagnosticsBlobName = sessionEntity.GetString("DiagnosticsBlobName");
+                if (!string.IsNullOrEmpty(diagnosticsBlobName))
+                    indexEntity["DiagnosticsBlobName"] = diagnosticsBlobName;
+
+                var lastEventAt = sessionEntity.GetDateTimeOffset("LastEventAt")?.UtcDateTime;
+                if (lastEventAt.HasValue)
+                    indexEntity["LastEventAt"] = EnsureUtc(lastEventAt.Value);
+
+                var resumedAt = sessionEntity.GetDateTimeOffset("ResumedAt")?.UtcDateTime;
+                if (resumedAt.HasValue)
+                    indexEntity["ResumedAt"] = EnsureUtc(resumedAt.Value);
+
+                await indexTableClient.UpsertEntityAsync(indexEntity);
+
+                // Store IndexRowKey back in the Sessions entity so Merge-mode updates can find it
+                var sessionsTableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
+                var indexRefUpdate = new TableEntity(tenantId, sessionId)
+                {
+                    ["IndexRowKey"] = indexRowKey
+                };
+                await sessionsTableClient.UpdateEntityAsync(indexRefUpdate, ETag.All, TableUpdateMode.Merge);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to upsert session index for {SessionId}", sessionEntity.RowKey);
+            }
+        }
+
+        /// <summary>
+        /// Merges specific changed fields into the SessionsIndex entry.
+        /// Used by Merge-mode update methods to keep the index in sync without full entity rewrite.
+        /// </summary>
+        private async Task MergeSessionIndexAsync(string tenantId, string indexRowKey, TableEntity fieldsToMerge)
+        {
+            if (string.IsNullOrEmpty(indexRowKey))
+                return;
+
+            try
+            {
+                var indexTableClient = _tableServiceClient.GetTableClient(Constants.TableNames.SessionsIndex);
+                var indexUpdate = new TableEntity(tenantId, indexRowKey);
+
+                foreach (var kvp in fieldsToMerge)
+                {
+                    if (kvp.Key == "odata.etag" || kvp.Key == "PartitionKey" || kvp.Key == "RowKey" || kvp.Key == "Timestamp")
+                        continue;
+                    indexUpdate[kvp.Key] = kvp.Value;
+                }
+
+                await indexTableClient.UpdateEntityAsync(indexUpdate, ETag.All, TableUpdateMode.Merge);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to merge session index for {TenantId}/{IndexRowKey}", tenantId, indexRowKey);
+            }
+        }
+
+        /// <summary>
+        /// Deletes a session entry from the SessionsIndex table.
+        /// </summary>
+        private async Task DeleteSessionIndexAsync(string tenantId, string? indexRowKey)
+        {
+            if (string.IsNullOrEmpty(indexRowKey))
+                return;
+
+            try
+            {
+                var indexTableClient = _tableServiceClient.GetTableClient(Constants.TableNames.SessionsIndex);
+                await indexTableClient.DeleteEntityAsync(tenantId, indexRowKey);
+            }
+            catch (RequestFailedException ex) when (ex.Status == 404)
+            {
+                // Already gone — fine
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to delete session index for {TenantId}/{IndexRowKey}", tenantId, indexRowKey);
+            }
+        }
+
+        /// <summary>
+        /// Maps an index entity (from SessionsIndex table) to SessionSummary.
+        /// The key difference from MapToSessionSummary: SessionId comes from a stored property
+        /// instead of RowKey (which contains the inverted-tick key in the index).
+        /// </summary>
+        private SessionSummary MapIndexEntityToSessionSummary(TableEntity entity)
+        {
+            var startedAt = SafeGetDateTime(entity, "StartedAt") ?? DateTime.UtcNow;
+            var completedAt = SafeGetDateTime(entity, "CompletedAt");
+
+            var statusString = entity.GetString("Status") ?? "InProgress";
+            if (!Enum.TryParse<SessionStatus>(statusString, ignoreCase: true, out var status))
+            {
+                status = SessionStatus.Unknown;
+            }
+
+            return new SessionSummary
+            {
+                SessionId = entity.GetString("SessionId") ?? ExtractSessionIdFromIndexRowKey(entity.RowKey),
+                TenantId = entity.PartitionKey,
+                SerialNumber = entity.GetString("SerialNumber") ?? string.Empty,
+                DeviceName = entity.GetString("DeviceName") ?? string.Empty,
+                Manufacturer = entity.GetString("Manufacturer") ?? string.Empty,
+                Model = entity.GetString("Model") ?? string.Empty,
+                StartedAt = startedAt,
+                CompletedAt = completedAt,
+                CurrentPhase = SafeGetInt32(entity, "CurrentPhase") ?? 0,
+                CurrentPhaseDetail = entity.GetString("CurrentPhaseDetail") ?? string.Empty,
+                Status = status,
+                FailureReason = entity.GetString("FailureReason") ?? string.Empty,
+                EventCount = SafeGetInt32(entity, "EventCount") ?? 0,
+                DurationSeconds = ComputeEffectiveDuration(entity, status, startedAt, completedAt),
+                EnrollmentType = entity.GetString("EnrollmentType") ?? "v1",
+                DiagnosticsBlobName = entity.GetString("DiagnosticsBlobName"),
+                LastEventAt = SafeGetDateTime(entity, "LastEventAt"),
+                IsPreProvisioned = entity.GetBoolean("IsPreProvisioned") ?? false,
+                IsHybridJoin = entity.GetBoolean("IsHybridJoin") ?? false,
+                ResumedAt = SafeGetDateTime(entity, "ResumedAt"),
+                OsName = entity.GetString("OsName") ?? string.Empty,
+                OsBuild = entity.GetString("OsBuild") ?? string.Empty,
+                OsDisplayVersion = entity.GetString("OsDisplayVersion") ?? string.Empty,
+                OsEdition = entity.GetString("OsEdition") ?? string.Empty,
+                OsLanguage = entity.GetString("OsLanguage") ?? string.Empty,
+                IsUserDriven = entity.GetBoolean("IsUserDriven") ?? false,
+                AgentVersion = entity.GetString("AgentVersion") ?? string.Empty,
+                GeoCountry = entity.GetString("GeoCountry") ?? string.Empty,
+                GeoRegion = entity.GetString("GeoRegion") ?? string.Empty,
+                GeoCity = entity.GetString("GeoCity") ?? string.Empty,
+                GeoLoc = entity.GetString("GeoLoc") ?? string.Empty
+            };
+        }
+
         // ===== SESSION MANAGEMENT METHODS =====
 
         /// <summary>
@@ -176,6 +399,10 @@ namespace AutopilotMonitor.Functions.Services
                     entity["GeoLoc"] = geoLoc;
 
                 await tableClient.UpsertEntityAsync(entity);
+
+                // Dual-write: upsert into SessionsIndex for time-sorted listing
+                await UpsertSessionIndexAsync(entity, startedAt);
+
                 _logger.LogInformation($"Stored session {registration.SessionId}");
                 return true;
             }
@@ -323,82 +550,202 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
-        /// Gets all sessions for a tenant
+        /// Gets sessions for a tenant, ordered newest-first, with cursor-based pagination.
+        /// Queries the SessionsIndex table where RowKey = inverted-tick + sessionId,
+        /// so Azure Table Storage returns results in descending time order natively.
+        /// Falls back to the Sessions table if SessionsIndex is empty (pre-migration).
         /// </summary>
-        public async Task<List<SessionSummary>> GetSessionsAsync(string tenantId, int maxResults = 100, DateTime? since = null)
+        public async Task<SessionPage> GetSessionsAsync(string tenantId, int maxResults = 100, string? cursor = null)
         {
             SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
 
             try
             {
-                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
-                var sessions = new List<SessionSummary>();
+                var indexTableClient = _tableServiceClient.GetTableClient(Constants.TableNames.SessionsIndex);
 
-                // Query sessions by tenant (PartitionKey), optionally filtered by StartedAt
-                // maxPerPage capped at 1000 (Azure Table Storage limit), pagination is automatic
+                // Build filter: PartitionKey scope + optional cursor for "Load More"
                 var filter = $"PartitionKey eq '{tenantId}'";
-                if (since.HasValue)
+                if (!string.IsNullOrEmpty(cursor))
                 {
-                    filter += $" and StartedAt ge datetime'{since.Value:yyyy-MM-ddTHH:mm:ss.fffffffZ}'";
+                    filter += $" and RowKey gt '{cursor}'";
                 }
 
-                var query = tableClient.QueryAsync<TableEntity>(
+                // Fetch maxResults + 1 to determine hasMore
+                var fetchCount = maxResults + 1;
+                var query = indexTableClient.QueryAsync<TableEntity>(
                     filter: filter,
-                    maxPerPage: Math.Min(maxResults, 1000)
+                    maxPerPage: Math.Min(fetchCount, 1000)
                 );
 
+                var sessions = new List<SessionSummary>();
                 await foreach (var entity in query)
                 {
-                    sessions.Add(MapToSessionSummary(entity));
-                    if (sessions.Count >= maxResults) break;
+                    sessions.Add(MapIndexEntityToSessionSummary(entity));
+                    if (sessions.Count >= fetchCount) break;
                 }
 
-                // Sort by StartedAt descending (most recent first)
-                return sessions.OrderByDescending(s => s.StartedAt).ToList();
+                // If SessionsIndex is empty and no cursor, fall back to Sessions table (pre-migration)
+                if (sessions.Count == 0 && string.IsNullOrEmpty(cursor))
+                {
+                    return await GetSessionsFromPrimaryTableAsync(tenantId, maxResults);
+                }
+
+                var hasMore = sessions.Count > maxResults;
+                if (hasMore)
+                    sessions.RemoveAt(sessions.Count - 1);
+
+                // Cursor = RowKey of the last returned item (opaque to frontend)
+                string? nextCursor = null;
+                if (hasMore && sessions.Count > 0)
+                {
+                    var lastSession = sessions[sessions.Count - 1];
+                    nextCursor = ComputeIndexRowKey(lastSession.StartedAt, lastSession.SessionId);
+                }
+
+                return new SessionPage
+                {
+                    Sessions = sessions,
+                    HasMore = hasMore,
+                    Cursor = nextCursor
+                };
             }
             catch (Exception ex)
             {
                 _logger.LogError("Failed to get sessions for tenant {TenantId}: {ExType}: {ExMessage}\n{StackTrace}",
                     tenantId, ex.GetType().Name, ex.Message, ex.StackTrace);
-                return new List<SessionSummary>();
+                return new SessionPage();
             }
         }
 
         /// <summary>
-        /// Gets all sessions across all tenants (for galactic admin mode)
+        /// Fallback: queries the Sessions table directly (pre-migration, before SessionsIndex is populated).
         /// </summary>
-        public async Task<List<SessionSummary>> GetAllSessionsAsync(int maxResults = 100, DateTime? since = null)
+        private async Task<SessionPage> GetSessionsFromPrimaryTableAsync(string tenantId, int maxResults)
+        {
+            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
+            var filter = $"PartitionKey eq '{tenantId}'";
+            var query = tableClient.QueryAsync<TableEntity>(filter: filter, maxPerPage: Math.Min(maxResults + 1, 1000));
+
+            var sessions = new List<SessionSummary>();
+            await foreach (var entity in query)
+            {
+                sessions.Add(MapToSessionSummary(entity));
+                if (sessions.Count >= maxResults + 1) break;
+            }
+
+            sessions = sessions.OrderByDescending(s => s.StartedAt).ToList();
+            var hasMore = sessions.Count > maxResults;
+            if (hasMore)
+                sessions.RemoveAt(sessions.Count - 1);
+
+            return new SessionPage { Sessions = sessions, HasMore = hasMore };
+        }
+
+        /// <summary>
+        /// Gets all sessions across all tenants (galactic admin mode), ordered newest-first,
+        /// with cursor-based pagination. Queries SessionsIndex cross-partition.
+        /// Cross-partition queries require in-memory sort since Azure Table Storage only
+        /// guarantees RowKey order within a single partition.
+        /// </summary>
+        public async Task<SessionPage> GetAllSessionsAsync(int maxResults = 100, string? cursor = null)
         {
             try
             {
-                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
-                var sessions = new List<SessionSummary>();
+                var indexTableClient = _tableServiceClient.GetTableClient(Constants.TableNames.SessionsIndex);
 
-                // Query all sessions, optionally filtered by StartedAt to limit dataset size
-                // maxPerPage is capped at 1000 (Azure Table Storage limit); pagination is automatic
-                string? filter = since.HasValue
-                    ? $"StartedAt ge datetime'{since.Value:yyyy-MM-ddTHH:mm:ss.fffffffZ}'"
-                    : null;
-
-                var query = tableClient.QueryAsync<TableEntity>(
-                    filter: filter,
-                    maxPerPage: Math.Min(maxResults, 1000)
-                );
-
-                await foreach (var entity in query)
+                // For galactic queries, use StartedAt filter derived from cursor for efficiency
+                string? filter = null;
+                if (!string.IsNullOrEmpty(cursor))
                 {
-                    sessions.Add(MapToSessionSummary(entity));
-                    if (sessions.Count >= maxResults) break;
+                    // Cursor format: "{invertedTicks}_{sessionId}" — extract StartedAt from inverted ticks
+                    var underscoreIdx = cursor.IndexOf('_');
+                    if (underscoreIdx > 0 && long.TryParse(cursor.Substring(0, underscoreIdx), out var invertedTicks))
+                    {
+                        var cursorStartedAt = new DateTime(DateTime.MaxValue.Ticks - invertedTicks, DateTimeKind.Utc);
+                        // Fetch sessions started at or before the cursor time (with small buffer)
+                        filter = $"StartedAt le datetime'{cursorStartedAt.AddSeconds(1):yyyy-MM-ddTHH:mm:ssZ}'";
+                    }
                 }
 
-                // Sort by StartedAt descending (most recent first)
-                return sessions.OrderByDescending(s => s.StartedAt).ToList();
+                // Over-fetch for cross-partition: we need enough to sort and paginate
+                var fetchCount = maxResults + 100;
+                var query = indexTableClient.QueryAsync<TableEntity>(
+                    filter: filter,
+                    maxPerPage: Math.Min(fetchCount, 1000)
+                );
+
+                var sessions = new List<SessionSummary>();
+                await foreach (var entity in query)
+                {
+                    sessions.Add(MapIndexEntityToSessionSummary(entity));
+                    if (sessions.Count >= fetchCount) break;
+                }
+
+                // If SessionsIndex is empty and no cursor, fall back to Sessions table
+                if (sessions.Count == 0 && string.IsNullOrEmpty(cursor))
+                {
+                    return await GetAllSessionsFromPrimaryTableAsync(maxResults);
+                }
+
+                // Sort by StartedAt descending (cross-partition results are not pre-sorted)
+                sessions = sessions.OrderByDescending(s => s.StartedAt).ToList();
+
+                // Apply cursor: skip sessions we've already returned
+                if (!string.IsNullOrEmpty(cursor))
+                {
+                    var cursorSessionId = ExtractSessionIdFromIndexRowKey(cursor);
+                    var cursorIdx = sessions.FindIndex(s => s.SessionId == cursorSessionId);
+                    if (cursorIdx >= 0)
+                    {
+                        sessions = sessions.Skip(cursorIdx + 1).ToList();
+                    }
+                }
+
+                var hasMore = sessions.Count > maxResults;
+                sessions = sessions.Take(maxResults).ToList();
+
+                string? nextCursor = null;
+                if (hasMore && sessions.Count > 0)
+                {
+                    var lastSession = sessions[sessions.Count - 1];
+                    nextCursor = ComputeIndexRowKey(lastSession.StartedAt, lastSession.SessionId);
+                }
+
+                return new SessionPage
+                {
+                    Sessions = sessions,
+                    HasMore = hasMore,
+                    Cursor = nextCursor
+                };
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to get all sessions");
-                return new List<SessionSummary>();
+                return new SessionPage();
             }
+        }
+
+        /// <summary>
+        /// Fallback: queries the Sessions table directly for galactic admin (pre-migration).
+        /// </summary>
+        private async Task<SessionPage> GetAllSessionsFromPrimaryTableAsync(int maxResults)
+        {
+            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
+            var query = tableClient.QueryAsync<TableEntity>(maxPerPage: Math.Min(maxResults + 1, 1000));
+
+            var sessions = new List<SessionSummary>();
+            await foreach (var entity in query)
+            {
+                sessions.Add(MapToSessionSummary(entity));
+                if (sessions.Count >= maxResults + 1) break;
+            }
+
+            sessions = sessions.OrderByDescending(s => s.StartedAt).ToList();
+            var hasMore = sessions.Count > maxResults;
+            if (hasMore)
+                sessions.RemoveAt(sessions.Count - 1);
+
+            return new SessionPage { Sessions = sessions, HasMore = hasMore };
         }
 
         /// <summary>
@@ -573,6 +920,10 @@ namespace AutopilotMonitor.Functions.Services
                     // This drastically reduces ETag conflicts when concurrent requests update different fields.
                     await tableClient.UpdateEntityAsync(update, session.ETag, TableUpdateMode.Merge);
 
+                    // Dual-write: merge the same fields into SessionsIndex
+                    var indexRowKey = session.GetString("IndexRowKey");
+                    await MergeSessionIndexAsync(tenantId, indexRowKey, update);
+
                     _logger.LogInformation($"Updated session {sessionId} status to {status}");
                     return true;
                 }
@@ -676,6 +1027,11 @@ namespace AutopilotMonitor.Functions.Services
 
                             // Unconditional merge write — ETag.All bypasses concurrency check
                             await forceTableClient.UpdateEntityAsync(forceUpdate, ETag.All, TableUpdateMode.Merge);
+
+                            // Dual-write: merge the same fields into SessionsIndex
+                            var forceIndexRowKey = freshSession.GetString("IndexRowKey");
+                            await MergeSessionIndexAsync(tenantId, forceIndexRowKey, forceUpdate);
+
                             _logger.LogInformation($"Force-updated session {sessionId} status to {status} (unconditional merge after ETag exhaustion)");
                             return true;
                         }
@@ -767,6 +1123,11 @@ namespace AutopilotMonitor.Functions.Services
                     }
 
                     await tableClient.UpdateEntityAsync(update, entity.Value.ETag, TableUpdateMode.Merge);
+
+                    // Dual-write: merge the same fields into SessionsIndex
+                    var indexRowKey = entity.Value.GetString("IndexRowKey");
+                    await MergeSessionIndexAsync(tenantId, indexRowKey, update);
+
                     return;
                 }
                 catch (Azure.RequestFailedException ex) when (ex.Status == 412)
@@ -844,6 +1205,11 @@ namespace AutopilotMonitor.Functions.Services
                 };
 
                 await tableClient.UpdateEntityAsync(update, entity.Value.ETag, Azure.Data.Tables.TableUpdateMode.Merge);
+
+                // Dual-write: merge into SessionsIndex
+                var indexRowKey = entity.Value.GetString("IndexRowKey");
+                await MergeSessionIndexAsync(tenantId, indexRowKey, update);
+
                 _logger.LogInformation($"Stored diagnostics blob name for session {sessionId}: {blobName}");
             }
             catch (Exception ex)
@@ -880,6 +1246,20 @@ namespace AutopilotMonitor.Functions.Services
             }
 
             await tableClient.UpdateEntityAsync(update, ETag.All, TableUpdateMode.Merge);
+
+            // Dual-write: read IndexRowKey and merge into SessionsIndex
+            try
+            {
+                var entity = await tableClient.GetEntityAsync<TableEntity>(tenantId, sessionId,
+                    select: new[] { "IndexRowKey" });
+                var indexRowKey = entity.Value.GetString("IndexRowKey");
+                await MergeSessionIndexAsync(tenantId, indexRowKey, update);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to sync session index for SetPreProvisioned {SessionId}", sessionId);
+            }
+
             _logger.LogInformation($"Set IsPreProvisioned={isPreProvisioned}, Status={status?.ToString() ?? "(unchanged)"}, IsUserDriven={isUserDriven?.ToString() ?? "(unchanged)"} for session {sessionId} (unconditional merge)");
         }
 
@@ -900,6 +1280,7 @@ namespace AutopilotMonitor.Functions.Services
                 var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
 
                 // Check if geo fields are already populated (avoid redundant writes)
+                string? indexRowKey = null;
                 try
                 {
                     var existing = await tableClient.GetEntityAsync<TableEntity>(tenantId, sessionId);
@@ -909,6 +1290,7 @@ namespace AutopilotMonitor.Functions.Services
                         _logger.LogDebug("Session {SessionId} already has geo data, skipping update", sessionId);
                         return;
                     }
+                    indexRowKey = existing.Value.GetString("IndexRowKey");
                 }
                 catch (RequestFailedException ex) when (ex.Status == 404)
                 {
@@ -924,6 +1306,10 @@ namespace AutopilotMonitor.Functions.Services
                 };
 
                 await tableClient.UpdateEntityAsync(update, ETag.All, TableUpdateMode.Merge);
+
+                // Dual-write: merge into SessionsIndex
+                await MergeSessionIndexAsync(tenantId, indexRowKey, update);
+
                 _logger.LogDebug("Updated geo for session {SessionId}: {City}, {Region}, {Country}", sessionId, city, region, country);
             }
             catch (Exception ex)
@@ -940,7 +1326,26 @@ namespace AutopilotMonitor.Functions.Services
             try
             {
                 var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
-                var response = await tableClient.DeleteEntityAsync(tenantId, sessionId);
+
+                // Read IndexRowKey before deleting so we can also delete the index entry
+                string? indexRowKey = null;
+                try
+                {
+                    var entity = await tableClient.GetEntityAsync<TableEntity>(tenantId, sessionId,
+                        select: new[] { "IndexRowKey" });
+                    indexRowKey = entity.Value.GetString("IndexRowKey");
+                }
+                catch (RequestFailedException ex) when (ex.Status == 404)
+                {
+                    // Session already gone — nothing to delete
+                    return true;
+                }
+
+                await tableClient.DeleteEntityAsync(tenantId, sessionId);
+
+                // Dual-write: delete from SessionsIndex
+                await DeleteSessionIndexAsync(tenantId, indexRowKey);
+
                 _logger.LogInformation($"Deleted session {sessionId} for tenant {tenantId}");
                 return true;
             }

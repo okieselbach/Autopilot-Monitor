@@ -202,6 +202,17 @@ namespace AutopilotMonitor.Shared.Models
     }
 
     /// <summary>
+    /// Paginated result of session listings.
+    /// Used by GetSessionsAsync and GetAllSessionsAsync to support cursor-based "Load More".
+    /// </summary>
+    public class SessionPage
+    {
+        public List<SessionSummary> Sessions { get; set; } = new();
+        public bool HasMore { get; set; }
+        public string Cursor { get; set; }
+    }
+
+    /// <summary>
     /// Status of an enrollment session
     /// </summary>
     public enum SessionStatus

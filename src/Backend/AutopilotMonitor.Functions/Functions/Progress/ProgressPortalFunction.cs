@@ -46,14 +46,14 @@ public class ProgressPortalFunction
 
             _logger.LogInformation("ProgressGetSessions: Fetching sessions for tenant {TenantId}", tenantId);
 
-            var sessions = await _storageService.GetSessionsAsync(tenantId, maxResults: 100);
+            var page = await _storageService.GetSessionsAsync(tenantId, maxResults: 100);
 
             var response = req.CreateResponse(HttpStatusCode.OK);
             await response.WriteAsJsonAsync(new
             {
                 success = true,
-                count = sessions.Count,
-                sessions = sessions
+                count = page.Sessions.Count,
+                sessions = page.Sessions
             });
             return response;
         }
