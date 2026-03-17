@@ -190,6 +190,27 @@
         "certificates",
         "scep"
       ]
+    },
+    {
+      "ruleId": "GATHER-ID-002",
+      "title": "Machine certificate store (PowerShell)",
+      "description": "Enumerates certificates in the local machine personal store (Cert:\\LocalMachine\\My) using PowerShell. Returns structured JSON with subject, thumbprint, issuer, and validity dates for each certificate. Useful for verifying MDM enrollment certificates, SCEP certificates, and any other machine certificates provisioned during Autopilot enrollment.",
+      "category": "identity",
+      "version": "1.0.0",
+      "author": "Community",
+      "isCommunity": true,
+      "enabled": true,
+      "collectorType": "command_allowlisted",
+      "target": "$c = Get-ChildItem Cert:\\LocalMachine\\My; if ($c) { $c | Select-Object Subject, Thumbprint, Issuer, NotBefore, NotAfter, HasPrivateKey | ConvertTo-Json } else { '{\"CertificateCount\": 0}' }",
+      "trigger": "startup",
+      "outputEventType": "gather_machine_cert_store",
+      "outputSeverity": "Info",
+      "tags": [
+        "identity",
+        "certificates",
+        "machine-store",
+        "powershell"
+      ]
     }
   ]
 }
