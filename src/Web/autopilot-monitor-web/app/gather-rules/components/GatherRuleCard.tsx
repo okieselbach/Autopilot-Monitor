@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { GatherRule, NewRuleForm, CATEGORY_COLORS, COLLECTOR_TYPE_LABELS, EMPTY_FORM, formatTrigger } from "../types";
 import { GatherRuleFormFields } from "./GatherRuleFormFields";
-import { FormJsonToggle, JsonModeToggleButtons } from "@/components/rules/FormJsonToggle";
+import { FormJsonToggle, JsonModeToggleButtons, ReadOnlyJsonView } from "@/components/rules/FormJsonToggle";
 import { validateGatherRuleTarget } from "@/lib/guardValidation";
 import { ValidationIndicator } from "@/components/ValidationIndicator";
+import { stripInternalFields } from "@/lib/rulePageHelpers";
 
 interface GatherRuleCardProps {
   rule: GatherRule;
@@ -58,6 +59,7 @@ export function GatherRuleCard({
   readOnly = false,
   unrestrictedMode = false,
 }: GatherRuleCardProps) {
+  const [showJson, setShowJson] = useState(false);
   const catColor = CATEGORY_COLORS[rule.category] || { bg: "bg-gray-100", text: "text-gray-700" };
   const canEdit = !rule.isBuiltIn && !rule.isCommunity;
 
@@ -297,9 +299,31 @@ export function GatherRuleCard({
             </div>
           </div>
 
+          {/* Read-only JSON view for built-in / community rules */}
+          {showJson && !canEdit && (
+            <ReadOnlyJsonView
+              jsonText={JSON.stringify(stripInternalFields(rule), null, 2)}
+              textareaRows={20}
+            />
+          )}
+
           {/* Actions */}
           {!readOnly && (
             <div className="flex items-center justify-end space-x-3 pt-4 border-t border-gray-200">
+              {!canEdit && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); setShowJson(!showJson); }}
+                  className={`px-4 py-2 text-sm rounded-lg transition-colors flex items-center space-x-2 ${
+                    showJson ? "bg-indigo-100 text-indigo-700 hover:bg-indigo-200" : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                  }`}
+                  title={showJson ? "Hide JSON" : "View rule as JSON"}
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+                  </svg>
+                  <span>{showJson ? "Hide JSON" : "View JSON"}</span>
+                </button>
+              )}
               <button
                 onClick={(e) => { e.stopPropagation(); onExport(); }}
                 className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors flex items-center space-x-2"

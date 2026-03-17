@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 
 interface FormJsonToggleProps {
   jsonMode: boolean;
@@ -56,6 +56,59 @@ export function FormJsonToggle({
         children
       )}
     </>
+  );
+}
+
+/** Read-only JSON view for built-in / community rules (view & copy, no editing). */
+export function ReadOnlyJsonView({
+  jsonText,
+  textareaRows = 20,
+}: {
+  jsonText: string;
+  textareaRows?: number;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(jsonText);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // fallback: select the textarea content
+    }
+  };
+
+  return (
+    <div className="space-y-3 mt-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-gray-600">Rule definition as JSON &mdash; copy to use as a template for a new custom rule.</p>
+        <button
+          type="button"
+          onClick={handleCopy}
+          className="flex items-center space-x-1.5 px-3 py-1.5 text-xs font-medium text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 rounded-md transition-colors whitespace-nowrap ml-4"
+        >
+          {copied ? (
+            <>
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+              <span>Copied!</span>
+            </>
+          ) : (
+            <>
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+              <span>Copy JSON</span>
+            </>
+          )}
+        </button>
+      </div>
+      <textarea
+        value={jsonText}
+        readOnly
+        rows={textareaRows}
+        spellCheck={false}
+        className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm font-mono text-gray-900 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 resize-y cursor-default"
+      />
+    </div>
   );
 }
 

@@ -1,8 +1,10 @@
 "use client";
 
+import { useState } from "react";
 import { AnalyzeRule, RuleForm, getSeverityColor, getCategoryColor } from "../types";
-import { FormJsonToggle, JsonModeToggleButtons } from "@/components/rules/FormJsonToggle";
+import { FormJsonToggle, JsonModeToggleButtons, ReadOnlyJsonView } from "@/components/rules/FormJsonToggle";
 import AnalyzeRuleFormFields from "./AnalyzeRuleFormFields";
+import { stripInternalFields } from "@/lib/rulePageHelpers";
 
 interface AnalyzeRuleCardProps {
   rule: AnalyzeRule;
@@ -38,6 +40,7 @@ export default function AnalyzeRuleCard({
   onSetJsonModeEdit, onSetJsonText, onSetJsonError,
   readOnly = false,
 }: AnalyzeRuleCardProps) {
+  const [showJson, setShowJson] = useState(false);
   const sevColor = getSeverityColor(rule.severity);
   const catColor = getCategoryColor(rule.category);
   const canEdit = !rule.isBuiltIn && !rule.isCommunity;
@@ -189,9 +192,31 @@ export default function AnalyzeRuleCard({
             </div>
           )}
 
+          {/* Read-only JSON view for built-in / community rules */}
+          {showJson && !canEdit && (
+            <ReadOnlyJsonView
+              jsonText={JSON.stringify(stripInternalFields(rule), null, 2)}
+              textareaRows={24}
+            />
+          )}
+
           {/* Actions */}
           {!readOnly && (
             <div className="flex items-center justify-end space-x-3 pt-4 border-t border-gray-200">
+              {!canEdit && (
+                <button
+                  onClick={() => setShowJson(!showJson)}
+                  className={`px-4 py-2 text-sm rounded-lg transition-colors flex items-center space-x-2 ${
+                    showJson ? "bg-indigo-100 text-indigo-700 hover:bg-indigo-200" : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                  }`}
+                  title={showJson ? "Hide JSON" : "View rule as JSON"}
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+                  </svg>
+                  <span>{showJson ? "Hide JSON" : "View JSON"}</span>
+                </button>
+              )}
               <button onClick={() => onExport(rule)} className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors flex items-center space-x-2" title="Export rule as JSON">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
                 <span>Export</span>
