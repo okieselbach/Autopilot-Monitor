@@ -224,6 +224,17 @@ export function SectionGatherRules() {
               </div>
             </GuardToggle>
           </div>
+          <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900">
+            <p className="font-semibold mb-1">Data fields produced</p>
+            <p className="mb-2">Unlike structured collectors (JSON, XML, WMI) where individual fields are extracted, a command produces <strong>raw text output</strong>. The event data contains:</p>
+            <ul className="list-disc ml-5 space-y-0.5">
+              <li><code className="bg-amber-100 px-1 rounded">output</code> — Standard output (stdout) of the command, max 32 KB</li>
+              <li><code className="bg-amber-100 px-1 rounded">error_output</code> — Standard error (stderr), max 8 KB</li>
+              <li><code className="bg-amber-100 px-1 rounded">exit_code</code> — Process exit code (0 = success)</li>
+              <li><code className="bg-amber-100 px-1 rounded">command</code> — The command string that was executed</li>
+            </ul>
+            <p className="mt-2">In Analyze Rules, use <code className="bg-amber-100 px-1 rounded">dataField: &quot;output&quot;</code> with operators like <code className="bg-amber-100 px-1 rounded">contains</code>, <code className="bg-amber-100 px-1 rounded">not_contains</code>, or <code className="bg-amber-100 px-1 rounded">regex</code> to inspect the command output.</p>
+          </div>
           <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
             <p className="font-semibold text-green-900 text-xs mb-1">Example — TPM at Enrollment Complete</p>
             <div className="mt-1 text-xs space-y-0.5">
@@ -407,8 +418,33 @@ export function SectionGatherRules() {
       <p className="text-gray-700 text-sm">
         Each gather rule execution emits an event with the configured <strong>Output Event Type</strong> and <strong>Severity</strong>.
         The collected data is stored in the event&apos;s <code className="bg-gray-100 px-1 rounded">data</code> field as key-value pairs.
-        These events appear in the session timeline.
+        These events appear in the session timeline and can be inspected by <strong>Analyze Rules</strong> using the <code className="bg-gray-100 px-1 rounded">event_data</code> condition source.
       </p>
+
+      <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-900">
+        <p className="font-semibold mb-2">Data fields by collector type</p>
+        <p className="text-xs mb-3">Each collector type produces different data fields. When writing Analyze Rules, you reference these fields via <code className="bg-amber-100 px-1 rounded">dataField</code> in <code className="bg-amber-100 px-1 rounded">event_data</code> conditions.</p>
+        <div className="border border-amber-200 rounded-lg overflow-hidden">
+          <table className="w-full text-xs">
+            <thead className="bg-amber-100/50 border-b border-amber-200">
+              <tr>
+                <th className="px-3 py-1.5 text-left font-semibold">Collector</th>
+                <th className="px-3 py-1.5 text-left font-semibold">Data Fields</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-amber-100">
+              <tr><td className="px-3 py-1.5 font-medium">Registry</td><td className="px-3 py-1.5">Value names as keys (e.g., <code className="bg-amber-100 px-1 rounded">DisplayName</code>), or <code className="bg-amber-100 px-1 rounded">subkey_count</code> + <code className="bg-amber-100 px-1 rounded">subkey_0</code>, <code className="bg-amber-100 px-1 rounded">subkey_1</code>, …</td></tr>
+              <tr><td className="px-3 py-1.5 font-medium">Event Log</td><td className="px-3 py-1.5">Event properties as key-value pairs (varies by event)</td></tr>
+              <tr><td className="px-3 py-1.5 font-medium">WMI Query</td><td className="px-3 py-1.5">WMI object properties as keys (e.g., <code className="bg-amber-100 px-1 rounded">Name</code>, <code className="bg-amber-100 px-1 rounded">Status</code>)</td></tr>
+              <tr><td className="px-3 py-1.5 font-medium">File</td><td className="px-3 py-1.5"><code className="bg-amber-100 px-1 rounded">exists</code>, <code className="bg-amber-100 px-1 rounded">path</code>, <code className="bg-amber-100 px-1 rounded">size_bytes</code>, <code className="bg-amber-100 px-1 rounded">content</code> (if readContent is true)</td></tr>
+              <tr className="bg-amber-100/30"><td className="px-3 py-1.5 font-medium">Command</td><td className="px-3 py-1.5"><code className="bg-amber-100 px-1 rounded">output</code> (stdout), <code className="bg-amber-100 px-1 rounded">error_output</code> (stderr), <code className="bg-amber-100 px-1 rounded">exit_code</code>, <code className="bg-amber-100 px-1 rounded">command</code> — raw text only, no parsed fields</td></tr>
+              <tr><td className="px-3 py-1.5 font-medium">Log Parser</td><td className="px-3 py-1.5">Named capture groups from regex (e.g., <code className="bg-amber-100 px-1 rounded">appName</code>, <code className="bg-amber-100 px-1 rounded">action</code>)</td></tr>
+              <tr><td className="px-3 py-1.5 font-medium">JSON</td><td className="px-3 py-1.5">Matched JSON values as structured key-value pairs</td></tr>
+              <tr><td className="px-3 py-1.5 font-medium">XML</td><td className="px-3 py-1.5">Matched XML elements/attributes as key-value pairs</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </section>
   );
 }

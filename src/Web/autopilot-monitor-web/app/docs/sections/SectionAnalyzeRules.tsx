@@ -57,15 +57,21 @@ export function SectionAnalyzeRules() {
           </div>
           <div className="px-4 py-4 space-y-2 text-sm text-gray-700">
             <p>Inspects a field inside the <code className="bg-gray-100 px-1 rounded">data</code> payload of a specific event type. Use this to match on values like error codes or app names.</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded text-xs text-amber-900">
+              <strong>Important:</strong> The available data fields depend on <strong>which collector type</strong> produced the event.
+              Structured collectors (Registry, WMI, JSON, XML) expose individual named fields.
+              <strong>Command</strong> collectors produce only raw text — use <code className="bg-amber-100 px-1 rounded">dataField: &quot;output&quot;</code> with <code className="bg-amber-100 px-1 rounded">contains</code> or <code className="bg-amber-100 px-1 rounded">regex</code> to search the command output.
+              See the <em>Data fields by collector type</em> table in the Gather Rules section for a full reference.
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs mt-2">
               <div>
                 <p className="font-medium text-gray-900">Operators</p>
                 <ul className="mt-1 space-y-0.5 text-gray-500">
                   <li><code className="bg-gray-100 px-1 rounded">equals</code> — exact match</li>
-                  <li><code className="bg-gray-100 px-1 rounded">contains</code> — substring match</li>
-                  <li><code className="bg-gray-100 px-1 rounded">regex</code> — regular expression match</li>
+                  <li><code className="bg-gray-100 px-1 rounded">contains</code> / <code className="bg-gray-100 px-1 rounded">not_contains</code> — substring match</li>
+                  <li><code className="bg-gray-100 px-1 rounded">regex</code> / <code className="bg-gray-100 px-1 rounded">not_regex</code> — regular expression match</li>
                   <li><code className="bg-gray-100 px-1 rounded">gt / lt / gte / lte</code> — numeric comparisons</li>
-                  <li><code className="bg-gray-100 px-1 rounded">exists</code> — field is present with any value</li>
+                  <li><code className="bg-gray-100 px-1 rounded">exists</code> / <code className="bg-gray-100 px-1 rounded">not_exists</code> — field presence check</li>
                 </ul>
               </div>
               <div>
@@ -75,12 +81,19 @@ export function SectionAnalyzeRules() {
                   <li><code className="bg-gray-100 px-1 rounded">appName</code> — application name</li>
                   <li><code className="bg-gray-100 px-1 rounded">exitCode</code> — process exit code</li>
                   <li><code className="bg-gray-100 px-1 rounded">phase</code> — enrollment phase name</li>
+                  <li><code className="bg-gray-100 px-1 rounded">output</code> — command stdout (Command collector)</li>
+                  <li><code className="bg-gray-100 px-1 rounded">error_output</code> — command stderr (Command collector)</li>
                 </ul>
               </div>
             </div>
             <div className="p-3 bg-green-50 border border-green-200 rounded-lg text-xs">
               <p className="font-semibold text-green-900 mb-1">Example — detect error code 0x80070002</p>
               <p>Source: <strong>event_data</strong> · Event Type: <strong>app_install_failed</strong> · Data Field: <strong>errorCode</strong> · Operator: <strong>equals</strong> · Value: <strong>0x80070002</strong></p>
+            </div>
+            <div className="p-3 bg-green-50 border border-green-200 rounded-lg text-xs">
+              <p className="font-semibold text-green-900 mb-1">Example — check command output for a certificate subject</p>
+              <p>Source: <strong>event_data</strong> · Event Type: <strong>gather_machine_cert_store</strong> · Data Field: <strong>output</strong> · Operator: <strong>not_contains</strong> · Value: <strong>CN=MyCertificate</strong></p>
+              <p className="text-green-700 mt-1">Confidence Factor: <code className="bg-green-100 px-1 rounded">gather_machine_cert_store.error_output exists</code> → +10 (command had errors)</p>
             </div>
           </div>
         </div>
@@ -269,6 +282,35 @@ export function SectionAnalyzeRules() {
               <p>{`source: "event_data"  eventType: "app_install_failed"  dataField: "errorCode"  operator: "equals"  value: "0x80070070"`}</p>
               <p className="text-gray-400 pt-1">{`// Confidence Factor (+30 if disk space event also fired)`}</p>
               <p>{`signal: "disk_event"  condition: "event_type disk_space_low exists"  weight: 30`}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Example 5 */}
+        <div className="border border-gray-200 rounded-lg overflow-hidden">
+          <div className="px-4 py-2.5 bg-indigo-50 border-b border-indigo-200">
+            <p className="font-semibold text-sm text-indigo-900">Example 5 — Analyze Command Output (Gather Rule)</p>
+            <p className="text-xs text-indigo-700 mt-0.5">Check if a certificate subject is missing from certutil output</p>
+          </div>
+          <div className="px-4 py-4 text-xs space-y-2">
+            <div className="p-2 bg-gray-100 rounded text-gray-600">
+              <strong>Gather Rule:</strong> <code>certutil -store My</code> → outputs as event type <code>gather_machine_cert_store</code>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <div><p className="text-gray-500">Category</p><p className="font-medium">identity</p></div>
+              <div><p className="text-gray-500">Severity</p><p className="font-medium">warning</p></div>
+              <div><p className="text-gray-500">Base Confidence</p><p className="font-medium">50</p></div>
+              <div><p className="text-gray-500">Threshold</p><p className="font-medium">40</p></div>
+            </div>
+            <div className="bg-gray-50 border border-gray-200 rounded px-3 py-2 font-mono space-y-1">
+              <p className="text-gray-400">{`// Condition 1 — certutil data was gathered`}</p>
+              <p>{`source: "event_type"  eventType: "gather_machine_cert_store"  operator: "exists"`}</p>
+              <p className="text-gray-400 pt-1">{`// Condition 2 — certificate subject not found in command output`}</p>
+              <p>{`source: "event_data"  eventType: "gather_machine_cert_store"  dataField: "output"  operator: "not_contains"  value: "CN=MyCert"`}</p>
+              <p className="text-gray-400 pt-1">{`// Confidence Factor (+20 if command produced no output at all)`}</p>
+              <p>{`signal: "no_output"  condition: "gather_machine_cert_store.output not_exists"  weight: 20`}</p>
+              <p className="text-gray-400">{`// Confidence Factor (+10 if command had errors)`}</p>
+              <p>{`signal: "cmd_error"  condition: "gather_machine_cert_store.error_output exists"  weight: 10`}</p>
             </div>
           </div>
         </div>
