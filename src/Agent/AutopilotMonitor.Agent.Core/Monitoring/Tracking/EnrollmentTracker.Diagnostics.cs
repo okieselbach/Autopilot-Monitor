@@ -173,6 +173,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             _espFailureTimer?.Dispose();
             _deviceOnlyEspTimer?.Dispose();
             _waitingForHelloSafetyTimer?.Dispose();
+            _deviceOnlyCompletionSafetyTimer?.Dispose();
             _summaryTimer?.Dispose();
             _debugStateTimer?.Dispose();
             _imeLogTracker?.Dispose();

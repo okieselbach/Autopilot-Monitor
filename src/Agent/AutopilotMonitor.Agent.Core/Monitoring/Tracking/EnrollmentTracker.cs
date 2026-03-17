@@ -74,6 +74,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         private Timer _waitingForHelloSafetyTimer;
         private const int WaitingForHelloSafetyTimeoutSeconds = 420; // 7 min — longer than Hello chain (330s)
 
+        // Safety-net timer for device-only ESP completion (SkipUserStatusPage=true)
+        private Timer _deviceOnlyCompletionSafetyTimer;
+        private const int DeviceOnlyCompletionSafetyTimeoutSeconds = 420; // 7 min — same as Hello safety
+
         // State persistence for crash recovery
         private readonly EnrollmentStatePersistence _statePersistence;
         private EnrollmentStateData _stateData = new EnrollmentStateData();

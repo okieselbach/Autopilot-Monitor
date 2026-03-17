@@ -109,7 +109,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 }
             });
 
-            CollectDeviceInfoAtFinalizingSetup("self_deploying_provisioning_complete");
+            try { CollectDeviceInfoAtFinalizingSetup("self_deploying_provisioning_complete"); }
+            catch (Exception ex) { _logger.Warning($"EnrollmentTracker: final device info collection failed (self_deploying): {ex.Message}"); }
 
             // Attempt completion — Hello guard is bypassed for Self-Deploying (IsSelfDeploying)
             TryEmitEnrollmentComplete("self_deploying_provisioning_complete");
@@ -231,6 +232,36 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         }
 
         /// <summary>
+        /// Safety-net callback for device-only ESP (SkipUserStatusPage=true) completion.
+        /// If the normal Hello timer chain (30s wait + 300s completion) failed for any reason
+        /// (exception, timer disposal, race condition), this forces enrollment_complete instead
+        /// of waiting for the 6h max lifetime timer.
+        /// </summary>
+        private void OnDeviceOnlyCompletionSafetyTimeout(object state)
+        {
+            if (_enrollmentCompleteEmitted)
+            {
+                _logger.Debug("EnrollmentTracker: device-only completion safety timeout fired but enrollment already completed — ignoring");
+                return;
+            }
+
+            _logger.Warning($"EnrollmentTracker: device-only ESP completion safety timeout ({DeviceOnlyCompletionSafetyTimeoutSeconds}s) expired — forcing completion");
+
+            // Force-resolve Hello if still pending so the Hello guard in TryEmitEnrollmentComplete passes
+            if (_espAndHelloTracker != null && !_espAndHelloTracker.IsHelloCompleted)
+            {
+                _espAndHelloTracker.ForceMarkHelloCompleted("device_only_safety_timeout");
+            }
+
+            TryEmitEnrollmentComplete("device_only_esp_safety_timeout");
+
+            if (!_enrollmentCompleteEmitted)
+            {
+                _logger.Error("EnrollmentTracker: device-only ESP safety timeout — TryEmitEnrollmentComplete still did not fire (unexpected guard block)");
+            }
+        }
+
+        /// <summary>
         /// Emits an enrollment_failed event. The MonitoringService handles shutdown identically to enrollment_complete.
         /// </summary>
         private void EmitEnrollmentFailed(string failureType, string failureSource)
@@ -313,7 +344,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                         }
                     });
 
-                    CollectDeviceInfoAtFinalizingSetup(reason);
+                    try { CollectDeviceInfoAtFinalizingSetup(reason); }
+                    catch (Exception ex) { _logger.Warning($"EnrollmentTracker: final device info collection failed (esp_final_exit): {ex.Message}"); }
 
                     // Start Hello wait timer (waits for Hello wizard to start or timeout)
                     _espAndHelloTracker?.StartHelloWaitTimer();
@@ -351,9 +383,25 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                         }
                     });
 
-                    CollectDeviceInfoAtFinalizingSetup("device_only_esp_registry");
+                    try { CollectDeviceInfoAtFinalizingSetup("device_only_esp_registry"); }
+                    catch (Exception ex) { _logger.Warning($"EnrollmentTracker: final device info collection failed (device_only_esp_registry): {ex.Message}"); }
+
                     _espAndHelloTracker?.StartHelloWaitTimer();
                     TryEmitEnrollmentComplete("device_only_esp_registry");
+
+                    // Safety net: if enrollment_complete didn't fire immediately (Hello pending),
+                    // start a safety timer to force completion. Without this, a failed Hello timer
+                    // chain would leave the session hanging until the 6h max lifetime timer.
+                    if (!_enrollmentCompleteEmitted)
+                    {
+                        _logger.Info($"EnrollmentTracker: device-only ESP completion pending — starting safety timer ({DeviceOnlyCompletionSafetyTimeoutSeconds}s)");
+                        _deviceOnlyCompletionSafetyTimer?.Dispose();
+                        _deviceOnlyCompletionSafetyTimer = new Timer(
+                            OnDeviceOnlyCompletionSafetyTimeout,
+                            null,
+                            TimeSpan.FromSeconds(DeviceOnlyCompletionSafetyTimeoutSeconds),
+                            TimeSpan.FromMilliseconds(-1));
+                    }
                 }
                 else
                 {
@@ -392,7 +440,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     }
                 });
 
-                CollectDeviceInfoAtFinalizingSetup(reason);
+                try { CollectDeviceInfoAtFinalizingSetup(reason); }
+                catch (Exception ex) { _logger.Warning($"EnrollmentTracker: final device info collection failed (hello_wizard_started): {ex.Message}"); }
             }
         }
 
@@ -516,6 +565,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             _summaryTimerActive = false;
             _debugStateTimer?.Change(Timeout.Infinite, Timeout.Infinite);
             _debugStateTimerActive = false;
+            _deviceOnlyCompletionSafetyTimer?.Change(Timeout.Infinite, Timeout.Infinite);
 
             var helloOutcome = _espAndHelloTracker?.HelloOutcome ?? "unknown";
 
@@ -661,7 +711,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                         }
                     });
 
-                    CollectDeviceInfoAtFinalizingSetup("desktop_arrived_skip_user");
+                    try { CollectDeviceInfoAtFinalizingSetup("desktop_arrived_skip_user"); }
+                    catch (Exception ex) { _logger.Warning($"EnrollmentTracker: final device info collection failed (desktop_arrived_skip_user): {ex.Message}"); }
                 }
                 else
                 {
