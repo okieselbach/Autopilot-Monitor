@@ -167,6 +167,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 _espAndHelloTracker.FinalizingSetupPhaseTriggered -= OnFinalizingSetupPhaseTriggered;
                 _espAndHelloTracker.WhiteGloveCompleted -= OnWhiteGloveCompleted;
                 _espAndHelloTracker.EspFailureDetected -= OnEspFailureDetected;
+                _espAndHelloTracker.DeviceSetupProvisioningComplete -= OnDeviceSetupProvisioningComplete;
             }
 
             _espFailureTimer?.Dispose();
@@ -223,6 +224,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     signalTimestamps["helloResolved"] = _stateData.HelloResolvedUtc.Value.ToString("o");
                 if (_stateData.ImePatternSeenUtc.HasValue)
                     signalTimestamps["imePatternSeen"] = _stateData.ImePatternSeenUtc.Value.ToString("o");
+                if (_stateData.DeviceSetupProvisioningCompleteUtc.HasValue)
+                    signalTimestamps["deviceSetupProvisioningComplete"] = _stateData.DeviceSetupProvisioningCompleteUtc.Value.ToString("o");
 
                 // Build per-phase package states: snapshots from completed phases + current phase
                 var phaseSnapshots = _imeLogTracker?.PhasePackageSnapshots;

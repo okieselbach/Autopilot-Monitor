@@ -111,12 +111,16 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         public bool? SkipUserStatusPage { get; set; }
         public bool? SkipDeviceStatusPage { get; set; }
 
+        // Autopilot deployment mode: 0=UserDriven, 1=SelfDeploying, 2=PreProvisioning, null=unknown
+        public int? AutopilotMode { get; set; }
+
         // Signal timestamps for audit trail
         public DateTime? EspFirstSeenUtc { get; set; }
         public DateTime? EspFinalExitUtc { get; set; }
         public DateTime? DesktopArrivedUtc { get; set; }
         public DateTime? HelloResolvedUtc { get; set; }
         public DateTime? ImePatternSeenUtc { get; set; }
+        public DateTime? DeviceSetupProvisioningCompleteUtc { get; set; }
         public List<string> SignalsSeen { get; set; } = new List<string>();
     }
 }

@@ -131,10 +131,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         /// Note: AutopilotMode and DomainJoinMethod reflect profile capabilities (what is allowed),
         /// not the actual live enrollment state.
         /// </summary>
-        private (string enrollmentType, bool isHybridJoin) CollectAutopilotProfile()
+        private (string enrollmentType, bool isHybridJoin, int? autopilotMode) CollectAutopilotProfile()
         {
             var detectedType = "v1";
             var isHybridJoin = false;
+            int? detectedAutopilotMode = null;
 
             try
             {
@@ -185,6 +186,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                             : null;
                         if (autopilotModeStr != null && int.TryParse(autopilotModeStr, out var autopilotMode))
                         {
+                            detectedAutopilotMode = autopilotMode;
                             string modeLabel;
                             switch (autopilotMode)
                             {
@@ -269,7 +271,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                 _logger.Warning($"EnrollmentTracker: failed to collect autopilot profile: {ex.Message}");
             }
 
-            return (detectedType, isHybridJoin);
+            return (detectedType, isHybridJoin, detectedAutopilotMode);
         }
 
         private void CollectSecureBootStatus()

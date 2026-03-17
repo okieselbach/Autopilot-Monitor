@@ -55,6 +55,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         private HashSet<string> _provisioningCategoriesResolved;
         // Track subcategory states per category — detect meaningful state transitions
         private Dictionary<string, Dictionary<string, string>> _lastSubcategoryStates;
+        // Fire-once guard for DeviceSetupProvisioningComplete event
+        private bool _deviceSetupProvisioningCompleteFired;
 
         private void StartProvisioningStatusWatcher()
         {
@@ -64,6 +66,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             _provisioningFailureFired = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             _provisioningCategoriesResolved = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             _lastSubcategoryStates = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+            _deviceSetupProvisioningCompleteFired = false;
 
             // Try to start immediately; if key doesn't exist yet, retry every 2s
             if (!TryStartProvisioningWatcher())
@@ -226,6 +229,25 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                             catch (Exception ex)
                             {
                                 _logger.Error($"EspFailureDetected handler failed for '{failureType}'", ex);
+                            }
+                        }
+
+                        // Fire DeviceSetupProvisioningComplete when DeviceSetup category resolves with success.
+                        // Used as completion signal for Self-Deploying mode where Shell-Core ESP exit
+                        // and desktop arrival may never arrive.
+                        if (!_deviceSetupProvisioningCompleteFired
+                            && _lastCategorySucceeded.TryGetValue("DeviceSetupCategory.Status", out var dsSucceeded)
+                            && dsSucceeded == true)
+                        {
+                            _deviceSetupProvisioningCompleteFired = true;
+                            _logger.Info("Provisioning status: DeviceSetup succeeded — firing DeviceSetupProvisioningComplete");
+                            try
+                            {
+                                DeviceSetupProvisioningComplete?.Invoke(this, EventArgs.Empty);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.Error("DeviceSetupProvisioningComplete handler failed", ex);
                             }
                         }
                     }

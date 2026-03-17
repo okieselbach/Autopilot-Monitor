@@ -501,6 +501,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             _debugStateTimer?.Change(Timeout.Infinite, Timeout.Infinite);
             _debugStateTimerActive = false;
 
+            // Self-Deploying mode: skip Hello wait entirely — no user session for Hello
+            if (IsSelfDeploying)
+            {
+                _logger.Info("EnrollmentTracker: Self-Deploying mode — skipping Hello wait, proceeding to completion");
+                TryEmitEnrollmentComplete("ime_pattern");
+                return;
+            }
+
             // Check if Windows Hello is configured but not yet completed
             if (_espAndHelloTracker != null)
             {

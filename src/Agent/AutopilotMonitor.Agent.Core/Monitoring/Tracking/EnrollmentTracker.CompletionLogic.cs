@@ -48,6 +48,74 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         }
 
         /// <summary>
+        /// Called when DeviceSetup provisioning status shows all subcategories succeeded.
+        /// In Self-Deploying mode, this is the primary completion signal because no user session
+        /// means no Hello, no desktop arrival, and possibly no Shell-Core ESP exit event.
+        /// In non-Self-Deploying mode, this is informational only — normal paths handle completion.
+        /// </summary>
+        private void OnDeviceSetupProvisioningComplete(object sender, EventArgs e)
+        {
+            _logger.Info("EnrollmentTracker: DeviceSetup provisioning completed successfully");
+            RecordSignal("device_setup_provisioning_complete");
+            _stateData.DeviceSetupProvisioningCompleteUtc = DateTime.UtcNow;
+            _stateDirty = true;
+
+            if (!IsSelfDeploying)
+            {
+                _logger.Info("EnrollmentTracker: DeviceSetup provisioning complete but not Self-Deploying — " +
+                             "using normal completion paths (ESP exit + Hello)");
+                EmitTraceEvent("device_setup_complete_non_self_deploying",
+                    "DeviceSetup provisioning complete in non-Self-Deploying mode — no action, normal paths apply",
+                    new Dictionary<string, object> { { "autopilotMode", _autopilotMode } });
+                return;
+            }
+
+            // Self-Deploying mode: this is our primary completion signal.
+            // No user session → no Hello, no desktop arrival, possibly no Shell-Core ESP exit.
+            _logger.Info("EnrollmentTracker: Self-Deploying mode + DeviceSetup provisioning complete — " +
+                         "transitioning to FinalizingSetup and attempting completion");
+
+            // Mark ESP as seen and final exit (provisioning success implies ESP device phase completed)
+            if (!_espEverSeen)
+            {
+                _espEverSeen = true;
+                _stateData.EspEverSeen = true;
+            }
+            if (!_espFinalExitSeen)
+            {
+                _espFinalExitSeen = true;
+                _stateData.EspFinalExitSeen = true;
+                _stateData.EspFinalExitUtc = DateTime.UtcNow;
+                RecordSignal("self_deploying_esp_final_exit");
+            }
+
+            // Emit FinalizingSetup phase event
+            _emitEvent(new EnrollmentEvent
+            {
+                SessionId = _sessionId,
+                TenantId = _tenantId,
+                EventType = "esp_phase_changed",
+                Severity = EventSeverity.Info,
+                Source = "EnrollmentTracker",
+                Phase = EnrollmentPhase.FinalizingSetup,
+                Message = "ESP phase: FinalizingSetup (Self-Deploying — DeviceSetup provisioning complete, no user session expected)",
+                Data = new Dictionary<string, object>
+                {
+                    { "espPhase", "FinalizingSetup" },
+                    { "autoDetected", true },
+                    { "triggeredBy", "self_deploying_provisioning_complete" },
+                    { "autopilotMode", _autopilotMode },
+                    { "skipUserStatusPage", _skipUserStatusPage }
+                }
+            });
+
+            CollectDeviceInfoAtFinalizingSetup("self_deploying_provisioning_complete");
+
+            // Attempt completion — Hello guard is bypassed for Self-Deploying (IsSelfDeploying)
+            TryEmitEnrollmentComplete("self_deploying_provisioning_complete");
+        }
+
+        /// <summary>
         /// Called when WhiteGlove (Pre-Provisioning) completes successfully.
         /// Emits the whiteglove_complete event. The MonitoringService handles
         /// the actual agent shutdown upon seeing this event type.
@@ -348,6 +416,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             _enrollmentType = loaded.EnrollmentType ?? _enrollmentType;
             _skipUserStatusPage = loaded.SkipUserStatusPage;
             _skipDeviceStatusPage = loaded.SkipDeviceStatusPage;
+            _autopilotMode = loaded.AutopilotMode;
             _stateData = loaded;
 
             _logger.Info($"EnrollmentTracker: state restored — espEverSeen={_espEverSeen}, espFinalExitSeen={_espFinalExitSeen}, desktopArrived={_desktopArrived}, lastEspPhase={_lastEspPhase}, enrollmentCompleteEmitted={_enrollmentCompleteEmitted}");
@@ -410,12 +479,15 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             _logger.Debug($"EnrollmentTracker: TryEmitEnrollmentComplete('{source}') — evaluating guards " +
                           $"[espEverSeen={_espEverSeen}, espFinalExitSeen={_espFinalExitSeen}, desktopArrived={_desktopArrived}, " +
                           $"helloCompleted={_espAndHelloTracker?.IsHelloCompleted ?? false}, helloPolicyConfigured={_espAndHelloTracker?.IsPolicyConfigured ?? false}, " +
-                          $"enrollmentType={_enrollmentType}]");
+                          $"enrollmentType={_enrollmentType}, autopilotMode={_autopilotMode}, isSelfDeploying={IsSelfDeploying}]");
 
-            // Hello-Check: Hello must be resolved before we can complete
+            // Hello-Check: Hello must be resolved before we can complete.
+            // Self-Deploying mode (AutopilotMode=1) has no user session, so Hello is irrelevant —
+            // bypass the Hello guard entirely regardless of whether WHfB policy is configured.
             bool helloResolved = _espAndHelloTracker == null
                 || _espAndHelloTracker.IsHelloCompleted
-                || !_espAndHelloTracker.IsPolicyConfigured;
+                || !_espAndHelloTracker.IsPolicyConfigured
+                || IsSelfDeploying;
 
             if (!helloResolved)
             {
@@ -458,6 +530,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 signalTimestamps["helloResolved"] = _stateData.HelloResolvedUtc.Value.ToString("o");
             if (_stateData.ImePatternSeenUtc.HasValue)
                 signalTimestamps["imePatternSeen"] = _stateData.ImePatternSeenUtc.Value.ToString("o");
+            if (_stateData.DeviceSetupProvisioningCompleteUtc.HasValue)
+                signalTimestamps["deviceSetupProvisioningComplete"] = _stateData.DeviceSetupProvisioningCompleteUtc.Value.ToString("o");
 
             _emitEvent(new EnrollmentEvent
             {
@@ -472,6 +546,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 {
                     { "completionSource", source },
                     { "helloOutcome", helloOutcome },
+                    { "autopilotMode", _autopilotMode?.ToString() ?? "unknown" },
+                    { "isSelfDeploying", IsSelfDeploying },
                     { "signalsSeen", _stateData.SignalsSeen },
                     { "signalTimestamps", signalTimestamps },
                     { "agentUptimeSeconds", (DateTime.UtcNow - _agentStartTimeUtc).TotalSeconds }
@@ -521,7 +597,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     { "enrollmentType", _enrollmentType },
                     { "lastEspPhase", _lastEspPhase ?? "none" },
                     { "skipUserStatusPage", _skipUserStatusPage?.ToString() ?? "unknown" },
-                    { "skipDeviceStatusPage", _skipDeviceStatusPage?.ToString() ?? "unknown" }
+                    { "skipDeviceStatusPage", _skipDeviceStatusPage?.ToString() ?? "unknown" },
+                    { "autopilotMode", _autopilotMode?.ToString() ?? "unknown" },
+                    { "isSelfDeploying", IsSelfDeploying }
                 }
             });
         }
@@ -615,8 +693,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             // During active ESP (AccountSetup runs in background with desktop visible),
             // the Hello timer must wait until ESP exits (started in OnFinalizingSetupPhaseTriggered).
             // Without this guard, Hello timeout-resolves while ESP still installs apps → premature completion.
+            // Self-Deploying: no user session, Hello is irrelevant — skip timer entirely.
             if (_espAndHelloTracker != null && !_espAndHelloTracker.IsHelloCompleted
-                && (!_espEverSeen || _espFinalExitSeen))
+                && (!_espEverSeen || _espFinalExitSeen)
+                && !IsSelfDeploying)
             {
                 _logger.Info("EnrollmentTracker: Desktop arrived with Hello pending (no active ESP) — starting Hello wait timer");
                 _espAndHelloTracker.StartHelloWaitTimer();

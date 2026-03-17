@@ -78,6 +78,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         public event EventHandler<string> EspFailureDetected;
 
         /// <summary>
+        /// Fired when DeviceSetup provisioning status shows categorySucceeded=true.
+        /// Used as a completion signal for Self-Deploying mode where Shell-Core ESP exit
+        /// and desktop arrival signals may never arrive.
+        /// </summary>
+        public event EventHandler DeviceSetupProvisioningComplete;
+
+        /// <summary>
         /// Outcome of Hello provisioning. Set when Hello resolves (via events, timeout, or not configured).
         /// Values: "completed", "timeout", "not_configured", "wizard_not_started", null (not yet resolved).
         /// </summary>

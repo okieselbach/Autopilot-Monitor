@@ -66,6 +66,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         private bool? _skipUserStatusPage;
         private bool? _skipDeviceStatusPage;
 
+        // Autopilot deployment mode: 0=UserDriven, 1=SelfDeploying, 2=PreProvisioning, null=unknown
+        private int? _autopilotMode;
+        private bool IsSelfDeploying => _autopilotMode == 1;
+
         // Safety-net timer for waiting_for_hello state
         private Timer _waitingForHelloSafetyTimer;
         private const int WaitingForHelloSafetyTimeoutSeconds = 420; // 7 min — longer than Hello chain (330s)
@@ -190,6 +194,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 _espAndHelloTracker.FinalizingSetupPhaseTriggered += OnFinalizingSetupPhaseTriggered;
                 _espAndHelloTracker.WhiteGloveCompleted += OnWhiteGloveCompleted;
                 _espAndHelloTracker.EspFailureDetected += OnEspFailureDetected;
+                _espAndHelloTracker.DeviceSetupProvisioningComplete += OnDeviceSetupProvisioningComplete;
             }
         }
 
@@ -298,13 +303,27 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             _enrollmentType = result.enrollmentType;
             _skipUserStatusPage = result.skipUserStatusPage;
             _skipDeviceStatusPage = result.skipDeviceStatusPage;
+            _autopilotMode = result.autopilotMode;
             _stateData.EnrollmentType = _enrollmentType;
             _stateData.SkipUserStatusPage = _skipUserStatusPage;
             _stateData.SkipDeviceStatusPage = _skipDeviceStatusPage;
+            _stateData.AutopilotMode = _autopilotMode;
             _stateDirty = true;
 
             _logger.Info($"EnrollmentTracker: enrollment type detected: {_enrollmentType ?? "unknown"} " +
-                         $"(skipUserStatusPage={_skipUserStatusPage}, skipDeviceStatusPage={_skipDeviceStatusPage})");
+                         $"(autopilotMode={_autopilotMode}, skipUserStatusPage={_skipUserStatusPage}, skipDeviceStatusPage={_skipDeviceStatusPage})");
+
+            if (IsSelfDeploying)
+            {
+                EmitTraceEvent("self_deploying_detected",
+                    "AutopilotMode=1 (Self-Deploying) — Hello guard will be bypassed, provisioning status used as completion signal",
+                    new Dictionary<string, object>
+                    {
+                        { "autopilotMode", _autopilotMode },
+                        { "skipUserStatusPage", _skipUserStatusPage },
+                        { "enrollmentType", _enrollmentType }
+                    });
+            }
         }
 
         /// <summary>
