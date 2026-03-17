@@ -83,6 +83,9 @@ namespace AutopilotMonitor.Functions.Services
                 await CleanupOldDataAsync();
                 await RecomputePlatformStatsAsync();
 
+                // Safety net: backfill any sessions missing from SessionsIndex
+                await _storageService.BackfillSessionIndexAsync();
+
                 maintenanceStart.Stop();
                 _logger.LogInformation($"Daily maintenance completed in {maintenanceStart.ElapsedMilliseconds}ms");
             }

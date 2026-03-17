@@ -273,7 +273,8 @@ namespace AutopilotMonitor.Functions.Services
 
                 foreach (var tid in tenantIds)
                 {
-                    var sessions = await _storageService.GetSessionsAsync(tid, maxResults: 10000);
+                    var sessionsPage = await _storageService.GetSessionsAsync(tid, maxResults: 10000);
+                    var sessions = sessionsPage.Sessions;
                     totalEnrollments += sessions.Count;
                     successfulEnrollments += sessions.Count(s => s.Status == SessionStatus.Succeeded);
 

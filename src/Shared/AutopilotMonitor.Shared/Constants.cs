@@ -195,6 +195,7 @@ namespace AutopilotMonitor.Shared
         {
             // Core data tables
             public const string Sessions       = "Sessions";
+            public const string SessionsIndex  = "SessionsIndex";
             public const string Events         = "Events";
             public const string AuditLogs      = "AuditLogs";
             public const string UsageMetrics   = "UsageMetrics";
@@ -244,6 +245,7 @@ namespace AutopilotMonitor.Shared
             public static string[] All => new[]
             {
                 Sessions,
+                SessionsIndex,
                 Events,
                 AuditLogs,
                 UsageMetrics,

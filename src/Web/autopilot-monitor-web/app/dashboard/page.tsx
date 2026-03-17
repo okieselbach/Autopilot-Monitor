@@ -27,6 +27,9 @@ export default function Home() {
   const [apiStatus, setApiStatus] = useState<"unchecked" | "checking" | "healthy" | "error">("unchecked");
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [cursor, setCursor] = useState<string | null>(null);
   const [serialValidationEnabled, setSerialValidationEnabled] = useState<boolean | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
@@ -70,20 +73,36 @@ export default function Home() {
   // Track whether we've been connected at least once — used to detect reconnects
   const wasConnectedRef = useRef(false);
 
-  const fetchSessions = async () => {
+  const fetchSessions = async (loadMoreCursor?: string) => {
     try {
       // Use different endpoint based on galactic admin mode
-      const endpoint = galacticAdminMode
+      let endpoint = galacticAdminMode
         ? `${API_BASE_URL}/api/galactic/sessions`
         : `${API_BASE_URL}/api/sessions?tenantId=${tenantId}`;
+
+      // Append cursor for "Load More" requests
+      if (loadMoreCursor) {
+        endpoint += endpoint.includes('?') ? '&' : '?';
+        endpoint += `cursor=${encodeURIComponent(loadMoreCursor)}`;
+      }
 
       const response = await authenticatedFetch(endpoint, getAccessToken);
 
       if (response.ok) {
         const data = await response.json();
-        const allSessions = data.sessions || [];
-        setSessions(allSessions);
-        fetchBlockedDevices(allSessions);
+        const newSessions = data.sessions || [];
+
+        if (loadMoreCursor) {
+          // Append to existing sessions (Load More)
+          setSessions(prev => [...prev, ...newSessions]);
+        } else {
+          // Initial load — replace all sessions
+          setSessions(newSessions);
+          fetchBlockedDevices(newSessions);
+        }
+
+        setHasMore(data.hasMore || false);
+        setCursor(data.cursor || null);
       } else {
         addNotification('error', 'Backend Error', `Failed to fetch sessions: ${response.statusText}`, 'backend-error');
       }
@@ -96,7 +115,14 @@ export default function Home() {
       }
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
+  };
+
+  const loadMore = () => {
+    if (!cursor || loadingMore) return;
+    setLoadingMore(true);
+    fetchSessions(cursor);
   };
 
   const fetchBlockedDevices = async (currentSessions: Session[]) => {
@@ -691,6 +717,9 @@ export default function Home() {
               totalPages={totalPages}
               onPreviousPage={handlePreviousPage}
               onNextPage={handleNextPage}
+              hasMore={hasMore}
+              loadingMore={loadingMore}
+              onLoadMore={loadMore}
               adminMode={adminMode}
               galacticAdminMode={galacticAdminMode}
               blockedDevicesSet={blockedDevicesSet}

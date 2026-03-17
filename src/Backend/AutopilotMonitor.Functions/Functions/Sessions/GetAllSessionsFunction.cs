@@ -30,18 +30,21 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
             {
                 // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
                 var userEmail = TenantHelper.GetUserIdentifier(req);
+                var query = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
+                var cursor = query["cursor"];
 
-                _logger.LogInformation($"Fetching all sessions across all tenants (User: {userEmail})");
+                _logger.LogInformation("Fetching all sessions across all tenants (User: {UserEmail}, cursor: {Cursor})", userEmail, cursor ?? "none");
 
-                // Get all sessions from storage (no tenant filter)
-                var sessions = await _storageService.GetAllSessionsAsync(maxResults: 100);
+                var page = await _storageService.GetAllSessionsAsync(maxResults: 100, cursor: cursor);
 
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(new
                 {
                     success = true,
-                    count = sessions.Count,
-                    sessions = sessions
+                    count = page.Sessions.Count,
+                    hasMore = page.HasMore,
+                    cursor = page.Cursor,
+                    sessions = page.Sessions
                 });
 
                 return response;
@@ -56,6 +59,7 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
                     success = false,
                     message = "Internal server error",
                     count = 0,
+                    hasMore = false,
                     sessions = Array.Empty<object>()
                 });
 

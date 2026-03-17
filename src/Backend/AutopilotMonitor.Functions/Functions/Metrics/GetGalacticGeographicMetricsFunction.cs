@@ -40,7 +40,7 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
                 var groupBy = query["groupBy"] ?? "city";
 
                 var cutoff = DateTime.UtcNow.AddDays(-days);
-                var sessions = await _storageService.GetAllSessionsAsync(maxResults: 10000, since: cutoff);
+                var sessions = await _storageService.GetSessionsByDateRangeAsync(cutoff, DateTime.UtcNow.AddDays(1));
                 var allSummaries = await _storageService.GetAllAppInstallSummariesAsync();
                 var summaries = allSummaries.Where(s => s.StartedAt >= cutoff).ToList();
 

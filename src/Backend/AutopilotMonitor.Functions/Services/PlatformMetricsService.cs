@@ -73,7 +73,8 @@ namespace AutopilotMonitor.Functions.Services
         private async Task<PlatformAgentMetricsResponse> ComputePlatformMetricsInternalAsync()
         {
             // 1. Fetch the 100 most recent sessions across all tenants
-            var allSessions = await _storageService.GetAllSessionsAsync(maxResults: 100);
+            var page = await _storageService.GetAllSessionsAsync(maxResults: 100);
+            var allSessions = page.Sessions;
 
             if (allSessions.Count == 0)
             {
