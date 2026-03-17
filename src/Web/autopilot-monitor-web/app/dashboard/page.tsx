@@ -68,6 +68,12 @@ export default function Home() {
   // Track if galactic admin mode has been initialized (to skip initial mount in useEffect)
   const hasGalacticModeInitialized = useRef(false);
 
+  // Refs for SignalR handlers to access current filter state (avoids stale closures)
+  const tenantIdFilterRef = useRef(tenantIdFilter);
+  tenantIdFilterRef.current = tenantIdFilter;
+  const galacticAdminModeRef = useRef(galacticAdminMode);
+  galacticAdminModeRef.current = galacticAdminMode;
+
   // Track if we've joined the tenant group to prevent duplicate joins
   const hasJoinedGroup = useRef(false);
 
@@ -277,6 +283,13 @@ export default function Home() {
   useEffect(() => {
     const handleNewSession = (data: { sessionId: string; tenantId: string; session: Session }) => {
       console.log('New session registered', data);
+
+      // In galactic admin mode with an active tenant filter, ignore sessions from other tenants
+      const activeFilter = tenantIdFilterRef.current.trim();
+      if (galacticAdminModeRef.current && activeFilter && data.tenantId !== activeFilter) {
+        console.log(`Ignoring newSession from tenant ${data.tenantId} (filtered to ${activeFilter})`);
+        return;
+      }
 
       if (data.session) {
         setSessions(prevSessions => {
