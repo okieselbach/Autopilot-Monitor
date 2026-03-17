@@ -1,6 +1,9 @@
 "use client";
 
+import { useMemo } from "react";
 import { DiagnosticsLogPath } from "../page";
+import { validateDiagnosticsPath } from "@/lib/guardValidation";
+import { ValidationIndicator } from "@/components/ValidationIndicator";
 
 /** Parses the expiry date from the `se=` parameter of a SAS URL. Returns null if not found. */
 export function parseSasExpiry(sasUrl: string): Date | null {
@@ -29,6 +32,7 @@ interface DiagnosticsSectionProps {
   setNewDiagPath: (value: string) => void;
   newDiagDesc: string;
   setNewDiagDesc: (value: string) => void;
+  unrestrictedMode?: boolean;
 }
 
 export default function DiagnosticsSection({
@@ -43,9 +47,16 @@ export default function DiagnosticsSection({
   setNewDiagPath,
   newDiagDesc,
   setNewDiagDesc,
+  unrestrictedMode = false,
 }: DiagnosticsSectionProps) {
   // Compute SAS expiry directly from the current URL value so feedback is instant
   const diagnosticsSasExpiry = parseSasExpiry(diagnosticsBlobSasUrl);
+
+  // Live validation for the "add new path" input
+  const newPathValidation = useMemo(
+    () => newDiagPath.trim() ? validateDiagnosticsPath(newDiagPath, unrestrictedMode) : null,
+    [newDiagPath, unrestrictedMode]
+  );
 
   return (
     <div id="diagnostics" className="bg-white rounded-lg shadow">
@@ -158,7 +169,10 @@ export default function DiagnosticsSection({
                 {globalDiagPaths.map((entry, idx) => (
                   <div key={idx} className="flex items-start justify-between bg-gray-100 border border-gray-300 rounded-lg px-3 py-2">
                     <div className="min-w-0 flex-1">
-                      <p className="font-mono text-xs text-gray-700 break-all">{entry.path}</p>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="font-mono text-xs text-gray-700 break-all">{entry.path}</p>
+                        <ValidationIndicator result={validateDiagnosticsPath(entry.path, false)} />
+                      </div>
                       {entry.description && <p className="text-xs text-gray-500 mt-0.5">{entry.description}</p>}
                     </div>
                     <span className="ml-2 flex-shrink-0 text-gray-400 bg-gray-200 rounded-full px-1.5 py-0.5 text-xs">global</span>
@@ -176,7 +190,10 @@ export default function DiagnosticsSection({
                 {tenantDiagPaths.map((entry, idx) => (
                   <div key={idx} className="flex items-start justify-between bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                     <div className="min-w-0 flex-1">
-                      <p className="font-mono text-xs text-amber-900 break-all">{entry.path}</p>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="font-mono text-xs text-amber-900 break-all">{entry.path}</p>
+                        <ValidationIndicator result={validateDiagnosticsPath(entry.path, unrestrictedMode)} />
+                      </div>
                       {entry.description && <p className="text-xs text-amber-600 mt-0.5">{entry.description}</p>}
                     </div>
                     <button
@@ -224,9 +241,12 @@ export default function DiagnosticsSection({
               Add
             </button>
           </div>
-          <p className="text-xs text-gray-400 mt-2">
-            Paths are validated on the agent against an allowlist of safe prefixes. Wildcards are only allowed in the last segment.
-          </p>
+          <div className="flex items-center gap-2 mt-2">
+            <p className="text-xs text-gray-400">
+              Paths are validated on the agent against an allowlist of safe prefixes. Wildcards are only allowed in the last segment.
+            </p>
+            <ValidationIndicator result={newPathValidation} />
+          </div>
         </div>
 
       </div>

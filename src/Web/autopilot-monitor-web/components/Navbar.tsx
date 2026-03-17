@@ -300,7 +300,7 @@ export default function Navbar() {
                 const hasAny = notifications.length > 0 || visibleGalactic.length > 0;
 
                 return (
-                <div className="fixed sm:absolute left-2 right-2 sm:left-auto sm:right-0 mt-2 sm:w-96 bg-white rounded-lg shadow-lg border border-gray-200 z-50 max-h-96 overflow-hidden flex flex-col">
+                <div className="fixed sm:absolute top-16 sm:top-auto left-2 right-2 sm:left-auto sm:right-0 mt-0 sm:mt-2 sm:w-96 bg-white rounded-lg shadow-lg border border-gray-200 z-50 max-h-[calc(100vh-5rem)] sm:max-h-96 overflow-hidden flex flex-col">
                   <div className="px-4 py-3 border-b border-gray-200 flex justify-between items-center">
                     <h3 className="text-sm font-semibold text-gray-900">Notifications</h3>
                     {hasAny && (

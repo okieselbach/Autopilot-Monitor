@@ -249,7 +249,17 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     Message = detectedType == "v2"
                         ? "Enrollment type: Autopilot v2 (Windows Device Preparation)"
                         : "Enrollment type: Autopilot v1 (Classic ESP)",
-                    Data = new Dictionary<string, object> { { "enrollmentType", detectedType } }
+                    Data = new Dictionary<string, object>
+                    {
+                        { "enrollmentType", detectedType },
+                        { "CloudAssignedDeviceRegistration", data.ContainsKey("CloudAssignedDeviceRegistration") ? data["CloudAssignedDeviceRegistration"] : "n/a" },
+                        { "CloudAssignedEspEnabled", data.ContainsKey("CloudAssignedEspEnabled") ? data["CloudAssignedEspEnabled"] : "n/a" },
+                        { "detectionRule", detectedType == "v2"
+                            ? (data.ContainsKey("CloudAssignedDeviceRegistration") && data["CloudAssignedDeviceRegistration"]?.ToString() == "2"
+                                ? "CloudAssignedDeviceRegistration=2"
+                                : "CloudAssignedEspEnabled=0")
+                            : "default (no v2 indicators)" }
+                    }
                 });
 
                 _logger.Info($"EnrollmentTracker: enrollment type detected: {detectedType}");

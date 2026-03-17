@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import {
   NewRuleForm,
   CATEGORIES,
@@ -11,14 +12,21 @@ import {
   TARGET_HINTS,
   formatTrigger,
 } from "../types";
+import { validateGatherRuleTarget } from "@/lib/guardValidation";
+import { ValidationIndicator } from "@/components/ValidationIndicator";
 
 interface GatherRuleFormFieldsProps {
   form: NewRuleForm;
   setForm: (f: NewRuleForm) => void;
   showRuleId: boolean;
+  unrestrictedMode?: boolean;
 }
 
-export function GatherRuleFormFields({ form, setForm, showRuleId }: GatherRuleFormFieldsProps) {
+export function GatherRuleFormFields({ form, setForm, showRuleId, unrestrictedMode = false }: GatherRuleFormFieldsProps) {
+  const targetValidation = useMemo(
+    () => form.target.trim() ? validateGatherRuleTarget(form.collectorType, form.target, unrestrictedMode) : null,
+    [form.collectorType, form.target, unrestrictedMode]
+  );
   return (
     <div className="space-y-5">
       {/* Row 1: Rule ID (create only), Title */}
@@ -110,7 +118,10 @@ export function GatherRuleFormFields({ form, setForm, showRuleId }: GatherRuleFo
           autoComplete="off"
           className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
         />
-        <p className="text-xs text-gray-400 mt-1">{TARGET_HINTS[form.collectorType] || "Registry path, WMI class, event log name, file path, or command depending on collector type"}</p>
+        <div className="flex items-center gap-2 mt-1">
+          <p className="text-xs text-gray-400">{TARGET_HINTS[form.collectorType] || "Registry path, WMI class, event log name, file path, or command depending on collector type"}</p>
+          <ValidationIndicator result={targetValidation} />
+        </div>
       </div>
 
       {/* Registry: optional Value Name */}

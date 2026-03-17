@@ -69,6 +69,10 @@ interface SessionTableProps {
   onLoadMore: () => void;
   adminMode: boolean;
   galacticAdminMode: boolean;
+  tenantIdFilter: string;
+  onTenantIdFilterChange: (value: string) => void;
+  onTenantIdFilterSubmit: () => void;
+  onTenantIdFilterClear: () => void;
   blockedDevicesSet: Set<string>;
   isPreviewBlocked: boolean;
   user: { isGalacticAdmin?: boolean } | null;
@@ -99,6 +103,10 @@ export function SessionTable({
   onLoadMore,
   adminMode,
   galacticAdminMode,
+  tenantIdFilter,
+  onTenantIdFilterChange,
+  onTenantIdFilterSubmit,
+  onTenantIdFilterClear,
   blockedDevicesSet,
   isPreviewBlocked,
   user,
@@ -253,6 +261,43 @@ export function SessionTable({
           )}
         </div>
       </div>
+
+      {/* Tenant ID Filter (Galactic Admin only) */}
+      {galacticAdminMode && (
+        <div className="mb-3 flex items-center gap-2">
+          <div className="relative flex-1">
+            <input
+              type="text"
+              placeholder="Filter by Tenant ID (paste a GUID and press Enter)"
+              value={tenantIdFilter}
+              onChange={(e) => onTenantIdFilterChange(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  onTenantIdFilterSubmit();
+                }
+              }}
+              className="w-full px-4 py-2 pr-10 border border-purple-300 rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-colors font-mono text-sm"
+            />
+            {tenantIdFilter && (
+              <button
+                onClick={onTenantIdFilterClear}
+                className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600 transition-colors"
+                title="Clear tenant filter"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            )}
+          </div>
+          <button
+            onClick={onTenantIdFilterSubmit}
+            className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm font-medium shrink-0"
+          >
+            Filter
+          </button>
+        </div>
+      )}
 
       {/* Search Input */}
       <div className="mb-4 relative">

@@ -66,6 +66,9 @@ export default function GatherRulesPage() {
   const [togglingRule, setTogglingRule] = useState<string | null>(null);
   const [deletingRule, setDeletingRule] = useState<string | null>(null);
 
+  // Unrestricted mode (fetched from tenant config for validation indicators)
+  const [unrestrictedMode, setUnrestrictedMode] = useState(false);
+
   // Galactic admin mode
   const [galacticAdminMode] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -128,6 +131,26 @@ export default function GatherRulesPage() {
       fetchRules();
     }
   }, [effectiveTenantId, fetchRules]);
+
+  // Fetch unrestrictedMode from tenant config (for validation indicators)
+  useEffect(() => {
+    if (!effectiveTenantId) return;
+    const fetchConfig = async () => {
+      try {
+        const url = isGalacticOverride
+          ? `${API_BASE_URL}/api/galactic/config/${effectiveTenantId}`
+          : `${API_BASE_URL}/api/config/${effectiveTenantId}`;
+        const response = await authenticatedFetch(url, getAccessToken);
+        if (response.ok) {
+          const data = await response.json();
+          setUnrestrictedMode(data.unrestrictedMode ?? false);
+        }
+      } catch {
+        // Silently default to restricted mode
+      }
+    };
+    fetchConfig();
+  }, [effectiveTenantId, isGalacticOverride, getAccessToken]);
 
   const handleToggleRule = async (rule: GatherRule) => {
     setTogglingRule(rule.ruleId);
@@ -550,7 +573,7 @@ export default function GatherRulesPage() {
                       textareaRows={20}
                       description='Edit the rule as JSON. All fields are supported including <code class="bg-gray-100 px-1 rounded text-xs">parameters</code> for collector-specific options.'
                     >
-                      <GatherRuleFormFields form={newRule} setForm={setNewRule} showRuleId={true} />
+                      <GatherRuleFormFields form={newRule} setForm={setNewRule} showRuleId={true} unrestrictedMode={unrestrictedMode} />
                     </FormJsonToggle>
 
                     {/* Action Buttons */}
@@ -662,6 +685,7 @@ export default function GatherRulesPage() {
                         }
                       }}
                       readOnly={isReadOnly}
+                      unrestrictedMode={unrestrictedMode}
                     />
                   ))
                 )}

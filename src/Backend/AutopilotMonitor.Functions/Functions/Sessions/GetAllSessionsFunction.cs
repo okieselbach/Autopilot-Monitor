@@ -1,6 +1,7 @@
 using System.Net;
 using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Services;
+using AutopilotMonitor.Shared.Models;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
@@ -32,10 +33,27 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
                 var userEmail = TenantHelper.GetUserIdentifier(req);
                 var query = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
                 var cursor = query["cursor"];
+                var tenantIdFilter = query["tenantId"];
 
-                _logger.LogInformation("Fetching all sessions across all tenants (User: {UserEmail}, cursor: {Cursor})", userEmail, cursor ?? "none");
+                SessionPage page;
 
-                var page = await _storageService.GetAllSessionsAsync(maxResults: 100, cursor: cursor);
+                if (!string.IsNullOrEmpty(tenantIdFilter))
+                {
+                    if (!Guid.TryParse(tenantIdFilter, out _))
+                    {
+                        var badRequest = req.CreateResponse(HttpStatusCode.BadRequest);
+                        await badRequest.WriteAsJsonAsync(new { success = false, message = "Invalid tenantId format" });
+                        return badRequest;
+                    }
+
+                    _logger.LogInformation("Fetching sessions for tenant {TenantId} (User: {UserEmail}, cursor: {Cursor})", tenantIdFilter, userEmail, cursor ?? "none");
+                    page = await _storageService.GetSessionsAsync(tenantIdFilter, maxResults: 100, cursor: cursor);
+                }
+                else
+                {
+                    _logger.LogInformation("Fetching all sessions across all tenants (User: {UserEmail}, cursor: {Cursor})", userEmail, cursor ?? "none");
+                    page = await _storageService.GetAllSessionsAsync(maxResults: 100, cursor: cursor);
+                }
 
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(new

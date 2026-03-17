@@ -1,6 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
+import { validateDiagnosticsPath } from "@/lib/guardValidation";
+import { ValidationIndicator } from "@/components/ValidationIndicator";
 
 export interface DiagnosticsLogPath {
   path: string;
@@ -27,6 +29,11 @@ export function DiagnosticsLogPathsSection({
 }: DiagnosticsLogPathsSectionProps) {
   const [newDiagPath, setNewDiagPath] = useState("");
   const [newDiagDesc, setNewDiagDesc] = useState("");
+
+  const newPathValidation = useMemo(
+    () => newDiagPath.trim() ? validateDiagnosticsPath(newDiagPath, false) : null,
+    [newDiagPath]
+  );
 
   return (
     <div className="bg-gradient-to-br from-teal-50 to-cyan-50 dark:from-gray-800 dark:to-gray-800 border-2 border-teal-300 dark:border-teal-700 rounded-lg shadow-lg">
@@ -65,7 +72,10 @@ export function DiagnosticsLogPathsSection({
             {globalDiagPaths.map((entry, idx) => (
               <div key={idx} className="flex items-start justify-between bg-teal-100 dark:bg-teal-900/40 border border-teal-300 dark:border-teal-700 rounded-lg px-3 py-2">
                 <div className="min-w-0 flex-1">
-                  <p className="font-mono text-sm text-teal-900 dark:text-teal-100 break-all">{entry.path}</p>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="font-mono text-sm text-teal-900 dark:text-teal-100 break-all">{entry.path}</p>
+                    <ValidationIndicator result={validateDiagnosticsPath(entry.path, false)} />
+                  </div>
                   {entry.description && (
                     <p className="text-xs text-teal-600 dark:text-teal-400 mt-0.5">{entry.description}</p>
                   )}
@@ -117,6 +127,11 @@ export function DiagnosticsLogPathsSection({
             Add
           </button>
         </div>
+        {newPathValidation && (
+          <div className="mt-1">
+            <ValidationIndicator result={newPathValidation} />
+          </div>
+        )}
 
         {/* Save button */}
         <div className="flex justify-end pt-2">

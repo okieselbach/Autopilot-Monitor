@@ -1,8 +1,11 @@
 "use client";
 
+import { useMemo } from "react";
 import { GatherRule, NewRuleForm, CATEGORY_COLORS, COLLECTOR_TYPE_LABELS, EMPTY_FORM, formatTrigger } from "../types";
 import { GatherRuleFormFields } from "./GatherRuleFormFields";
 import { FormJsonToggle, JsonModeToggleButtons } from "@/components/rules/FormJsonToggle";
+import { validateGatherRuleTarget } from "@/lib/guardValidation";
+import { ValidationIndicator } from "@/components/ValidationIndicator";
 
 interface GatherRuleCardProps {
   rule: GatherRule;
@@ -27,6 +30,7 @@ interface GatherRuleCardProps {
   onJsonTextChange: (text: string) => void;
   onApplyJson: () => void;
   readOnly?: boolean;
+  unrestrictedMode?: boolean;
 }
 
 export function GatherRuleCard({
@@ -52,9 +56,15 @@ export function GatherRuleCard({
   onJsonTextChange,
   onApplyJson,
   readOnly = false,
+  unrestrictedMode = false,
 }: GatherRuleCardProps) {
   const catColor = CATEGORY_COLORS[rule.category] || { bg: "bg-gray-100", text: "text-gray-700" };
   const canEdit = !rule.isBuiltIn && !rule.isCommunity;
+
+  const targetValidation = useMemo(
+    () => rule.target ? validateGatherRuleTarget(rule.collectorType, rule.target, unrestrictedMode) : null,
+    [rule.collectorType, rule.target, unrestrictedMode]
+  );
 
   return (
     <div
@@ -217,6 +227,7 @@ export function GatherRuleCard({
                 <code className="ml-2 px-2 py-1 bg-gray-200 rounded text-xs font-mono text-gray-800 break-all">
                   {rule.target}
                 </code>
+                <ValidationIndicator result={targetValidation} className="ml-2" />
               </div>
               {rule.parameters && Object.keys(rule.parameters).length > 0 && (
                 <div className="text-sm">
@@ -366,7 +377,7 @@ export function GatherRuleCard({
             textareaRows={20}
             description={<>Edit the rule as JSON. All fields are supported including <code className="bg-gray-100 px-1 rounded text-xs">parameters</code> for collector-specific options.</>}
           >
-            <GatherRuleFormFields form={editForm} setForm={setEditForm} showRuleId={false} />
+            <GatherRuleFormFields form={editForm} setForm={setEditForm} showRuleId={false} unrestrictedMode={unrestrictedMode} />
           </FormJsonToggle>
 
           {/* Action Buttons */}

@@ -1222,6 +1222,7 @@ export default function SettingsPage() {
               setNewDiagPath={setNewDiagPath}
               newDiagDesc={newDiagDesc}
               setNewDiagDesc={setNewDiagDesc}
+              unrestrictedMode={unrestrictedMode}
             />
             </div>
             )}

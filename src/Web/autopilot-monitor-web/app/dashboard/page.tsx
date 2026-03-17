@@ -32,6 +32,7 @@ export default function Home() {
   const [cursor, setCursor] = useState<string | null>(null);
   const [serialValidationEnabled, setSerialValidationEnabled] = useState<boolean | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [tenantIdFilter, setTenantIdFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [sortColumn, setSortColumn] = useState<keyof Session | null>(null);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
@@ -73,11 +74,12 @@ export default function Home() {
   // Track whether we've been connected at least once — used to detect reconnects
   const wasConnectedRef = useRef(false);
 
-  const fetchSessions = async (loadMoreCursor?: string) => {
+  const fetchSessions = async (loadMoreCursor?: string, galacticTenantIdOverride?: string) => {
     try {
       // Use different endpoint based on galactic admin mode
+      const effectiveTenantFilter = galacticTenantIdOverride !== undefined ? galacticTenantIdOverride : tenantIdFilter.trim();
       let endpoint = galacticAdminMode
-        ? `${API_BASE_URL}/api/galactic/sessions`
+        ? `${API_BASE_URL}/api/galactic/sessions${effectiveTenantFilter ? `?tenantId=${encodeURIComponent(effectiveTenantFilter)}` : ''}`
         : `${API_BASE_URL}/api/sessions?tenantId=${tenantId}`;
 
       // Append cursor for "Load More" requests
@@ -384,6 +386,11 @@ export default function Home() {
       return;
     }
 
+    // Clear tenant filter when leaving galactic mode
+    if (!galacticAdminMode) {
+      setTenantIdFilter("");
+    }
+
     setLoading(true);
     fetchSessions();
   }, [galacticAdminMode]);
@@ -392,6 +399,25 @@ export default function Home() {
   useEffect(() => {
     setCurrentPage(1);
   }, [searchQuery, statusFilter, sortColumn, sortDirection, columnFilters]);
+
+  const applyTenantIdFilter = (value: string) => {
+    setTenantIdFilter(value);
+  };
+
+  const submitTenantIdFilter = () => {
+    setCursor(null);
+    setCurrentPage(1);
+    setLoading(true);
+    fetchSessions();
+  };
+
+  const clearTenantIdFilter = () => {
+    setTenantIdFilter("");
+    setCursor(null);
+    setCurrentPage(1);
+    setLoading(true);
+    fetchSessions(undefined, "");
+  };
 
   const deleteSession = (sessionId: string, sessionTenantId: string, deviceName?: string) => {
     setSessionToDelete({ sessionId, tenantId: sessionTenantId, deviceName });
@@ -722,6 +748,10 @@ export default function Home() {
               onLoadMore={loadMore}
               adminMode={adminMode}
               galacticAdminMode={galacticAdminMode}
+              tenantIdFilter={tenantIdFilter}
+              onTenantIdFilterChange={applyTenantIdFilter}
+              onTenantIdFilterSubmit={submitTenantIdFilter}
+              onTenantIdFilterClear={clearTenantIdFilter}
               blockedDevicesSet={blockedDevicesSet}
               isPreviewBlocked={isPreviewBlocked}
               user={user}
