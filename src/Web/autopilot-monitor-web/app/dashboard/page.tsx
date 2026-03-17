@@ -533,20 +533,26 @@ export default function Home() {
     setSessionToBlock(null);
   };
 
-  const activeSessions = sessions.filter(s => s.status === "InProgress");
-  const successRate = sessions.length > 0
-    ? Math.round((sessions.filter(s => s.status === "Succeeded").length / sessions.length) * 100)
+  // Client-side tenant filter: ensures sessions from other tenants are never displayed,
+  // regardless of how they entered the sessions state (SignalR, race conditions, etc.)
+  const effectiveSessions = galacticAdminMode && tenantIdFilter.trim()
+    ? sessions.filter(s => s.tenantId === tenantIdFilter.trim())
+    : sessions;
+
+  const activeSessions = effectiveSessions.filter(s => s.status === "InProgress");
+  const successRate = effectiveSessions.length > 0
+    ? Math.round((effectiveSessions.filter(s => s.status === "Succeeded").length / effectiveSessions.length) * 100)
     : 0;
-  const avgDuration = sessions.length > 0
-    ? Math.round(sessions.reduce((sum, s) => sum + s.durationSeconds, 0) / sessions.length / 60)
+  const avgDuration = effectiveSessions.length > 0
+    ? Math.round(effectiveSessions.reduce((sum, s) => sum + s.durationSeconds, 0) / effectiveSessions.length / 60)
     : 0;
-  const failedToday = sessions.filter(s =>
+  const failedToday = effectiveSessions.filter(s =>
     s.status === "Failed" &&
     new Date(s.startedAt).toDateString() === new Date().toDateString()
   ).length;
 
   // Filter sessions based on status filter, column filters, and search query
-  const filteredSessions = sessions.filter(session => {
+  const filteredSessions = effectiveSessions.filter(session => {
     if (statusFilter && session.status !== statusFilter) return false;
 
     // Apply column filters
@@ -752,7 +758,7 @@ export default function Home() {
           {/* Sessions List */}
           {sessions.length > 0 && (
             <SessionTable
-              sessions={sessions}
+              sessions={effectiveSessions}
               filteredSessions={filteredSessions}
               sortedSessions={sortedSessions}
               paginatedSessions={paginatedSessions}
