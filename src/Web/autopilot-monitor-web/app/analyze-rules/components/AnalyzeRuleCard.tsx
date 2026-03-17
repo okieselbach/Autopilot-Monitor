@@ -85,10 +85,26 @@ export default function AnalyzeRuleCard({
       {/* Expanded Details (read-only) */}
       {isExpanded && !isEditing && (
         <div className="border-t border-gray-200 p-6 space-y-6">
-          {/* Details / JSON toggle for built-in and community rules */}
-          {!canEdit && (
-            <div className="flex justify-end">
-              <div className="flex items-center bg-gray-100 rounded-lg p-1">
+          {/* JSON view (replaces detail view for built-in / community rules) */}
+          {showJson && !canEdit ? (
+            <ReadOnlyJsonView
+              jsonText={JSON.stringify(stripInternalFields(rule), null, 2)}
+              textareaRows={24}
+            />
+          ) : (
+          <>
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex flex-wrap items-center gap-4 text-sm text-gray-500">
+              <span><span className="font-medium text-gray-700">Version:</span> {rule.version}</span>
+              <span><span className="font-medium text-gray-700">Author:</span> {rule.author}</span>
+              <span><span className="font-medium text-gray-700">Trigger:</span> {(rule.trigger || "single").charAt(0).toUpperCase() + (rule.trigger || "single").slice(1)}</span>
+              <span><span className="font-medium text-gray-700">Created:</span> {new Date(rule.createdAt).toLocaleDateString()}</span>
+              <span><span className="font-medium text-gray-700">Updated:</span> {new Date(rule.updatedAt).toLocaleDateString()}</span>
+              <span className="text-xs font-mono text-gray-400 sm:hidden">{rule.ruleId}</span>
+            </div>
+            {/* Details / JSON toggle for built-in and community rules */}
+            {!canEdit && (
+              <div className="flex items-center bg-gray-100 rounded-lg p-1 flex-shrink-0">
                 <button
                   onClick={() => setShowJson(false)}
                   className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
@@ -106,24 +122,7 @@ export default function AnalyzeRuleCard({
                   JSON
                 </button>
               </div>
-            </div>
-          )}
-
-          {/* JSON view (replaces detail view for built-in / community rules) */}
-          {showJson && !canEdit ? (
-            <ReadOnlyJsonView
-              jsonText={JSON.stringify(stripInternalFields(rule), null, 2)}
-              textareaRows={24}
-            />
-          ) : (
-          <>
-          <div className="flex flex-wrap items-center gap-4 text-sm text-gray-500">
-            <span><span className="font-medium text-gray-700">Version:</span> {rule.version}</span>
-            <span><span className="font-medium text-gray-700">Author:</span> {rule.author}</span>
-            <span><span className="font-medium text-gray-700">Trigger:</span> {(rule.trigger || "single").charAt(0).toUpperCase() + (rule.trigger || "single").slice(1)}</span>
-            <span><span className="font-medium text-gray-700">Created:</span> {new Date(rule.createdAt).toLocaleDateString()}</span>
-            <span><span className="font-medium text-gray-700">Updated:</span> {new Date(rule.updatedAt).toLocaleDateString()}</span>
-            <span className="text-xs font-mono text-gray-400 sm:hidden">{rule.ruleId}</span>
+            )}
           </div>
 
           {rule.tags && rule.tags.length > 0 && (

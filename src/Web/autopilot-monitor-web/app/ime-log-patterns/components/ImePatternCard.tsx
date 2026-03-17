@@ -135,9 +135,22 @@ export default function ImePatternCard({
       {/* Expanded Details (Read-Only) */}
       {isExpanded && !isEditing && (
         <div className="border-t border-gray-200 p-6 space-y-6">
-          {/* Details / JSON toggle */}
-          <div className="flex justify-end">
-            <div className="flex items-center bg-gray-100 rounded-lg p-1">
+          {/* JSON view (replaces detail view) */}
+          {showJson ? (
+            <ReadOnlyJsonView
+              jsonText={JSON.stringify(stripInternalFields(pattern), null, 2)}
+              textareaRows={15}
+            />
+          ) : (
+          <>
+          {/* Description + Details/JSON toggle */}
+          <div className="flex items-start justify-between gap-4">
+            {pattern.description ? (
+              <div className="text-sm text-gray-700">
+                {pattern.description}
+              </div>
+            ) : <div />}
+            <div className="flex items-center bg-gray-100 rounded-lg p-1 flex-shrink-0">
               <button
                 onClick={() => setShowJson(false)}
                 className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
@@ -156,20 +169,6 @@ export default function ImePatternCard({
               </button>
             </div>
           </div>
-
-          {/* JSON view (replaces detail view) */}
-          {showJson ? (
-            <ReadOnlyJsonView
-              jsonText={JSON.stringify(stripInternalFields(pattern), null, 2)}
-              textareaRows={15}
-            />
-          ) : (
-          <>
-          {pattern.description && (
-            <div className="text-sm text-gray-700">
-              {pattern.description}
-            </div>
-          )}
 
           <div>
             <h4 className="text-sm font-semibold text-gray-700 mb-2">Regex Pattern</h4>
