@@ -68,6 +68,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         // Desktop arrival detection (no-ESP scenarios)
         private DesktopArrivalDetector _desktopArrivalDetector;
 
+        // Network change detection (always on)
+        private NetworkChangeDetector _networkChangeDetector;
+
         // Agent max lifetime safety net
         private Timer _maxLifetimeTimer;
         private readonly DateTime _agentStartTimeUtc = DateTime.UtcNow;

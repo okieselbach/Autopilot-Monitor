@@ -114,6 +114,17 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 _desktopArrivalDetector.Start();
                 _logger.Info("DesktopArrivalDetector started — monitoring for real user desktop");
 
+                // Network change detector — monitors for NIC/SSID/IP changes during provisioning
+                _networkChangeDetector = new NetworkChangeDetector(
+                    _configuration.SessionId,
+                    _configuration.TenantId,
+                    EmitEvent,
+                    _logger,
+                    _configuration.ApiBaseUrl
+                );
+                _networkChangeDetector.Start();
+                _logger.Info("NetworkChangeDetector started — monitoring for network changes");
+
                 // Agent max lifetime safety net — prevents zombie agents
                 var maxLifetimeMinutes = collectors?.AgentMaxLifetimeMinutes ?? _configuration.AgentMaxLifetimeMinutes;
                 if (maxLifetimeMinutes > 0)
@@ -153,6 +164,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 _desktopArrivalDetector.Dispose();
                 _desktopArrivalDetector = null;
             }
+
+            _networkChangeDetector?.Dispose();
+            _networkChangeDetector = null;
 
             _performanceCollector?.Stop();
             _performanceCollector?.Dispose();

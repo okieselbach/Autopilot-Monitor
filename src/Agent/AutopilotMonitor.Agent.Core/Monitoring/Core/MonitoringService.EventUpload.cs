@@ -726,6 +726,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             _performanceCollector?.Dispose();
             _agentSelfMetricsCollector?.Dispose();
             _enrollmentTracker?.Dispose();
+            _networkChangeDetector?.Dispose();
             _gatherRuleExecutor?.Dispose();
             _remoteConfigService?.Dispose();
             _completionEvent.Dispose();

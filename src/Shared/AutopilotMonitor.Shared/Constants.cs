@@ -134,6 +134,7 @@ namespace AutopilotMonitor.Shared
             public const string AppDownloadStarted  = "app_download_started";
             public const string AppInstallSkipped   = "app_install_skipped";
             public const string NetworkStateChange  = "network_state_change";
+            public const string NetworkConnectivityCheck = "network_connectivity_check";
             public const string ErrorDetected       = "error_detected";
             public const string PerformanceSnapshot = "performance_snapshot";
             public const string LogEntry            = "log_entry";
