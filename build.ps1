@@ -164,6 +164,3 @@ else {
     Write-Host "  3. Test Agent: cd src\Agent\AutopilotMonitor.Agent\bin\$Configuration\net48 && .\AutopilotMonitor.Agent.exe --console" -ForegroundColor Gray
 }
 
-Write-Host ""
-Write-Host "See QUICKSTART.md for detailed instructions." -ForegroundColor Cyan
-Write-Host ""
