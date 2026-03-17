@@ -202,7 +202,8 @@
       "enabled": true,
       "collectorType": "command_allowlisted",
       "target": "$c = Get-ChildItem Cert:\\LocalMachine\\My; if ($c) { $c | Select-Object Subject, Thumbprint, Issuer, NotBefore, NotAfter, HasPrivateKey | ConvertTo-Json } else { '{\"CertificateCount\": 0}' }",
-      "trigger": "startup",
+      "trigger": "phase_change",
+      "triggerPhase": "FinalizingSetup",
       "outputEventType": "gather_machine_cert_store",
       "outputSeverity": "Info",
       "tags": [
