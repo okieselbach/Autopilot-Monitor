@@ -64,6 +64,8 @@ interface SessionTableProps {
   totalPages: number;
   onPreviousPage: () => void;
   onNextPage: () => void;
+  sessionsPerPage: number;
+  onSessionsPerPageChange: (value: number) => void;
   hasMore: boolean;
   loadingMore: boolean;
   onLoadMore: () => void;
@@ -98,6 +100,8 @@ export function SessionTable({
   totalPages,
   onPreviousPage,
   onNextPage,
+  sessionsPerPage,
+  onSessionsPerPageChange,
   hasMore,
   loadingMore,
   onLoadMore,
@@ -201,6 +205,18 @@ export function SessionTable({
           )}
         </h2>
         <div className="flex items-center gap-2">
+          {/* Page Size Selector */}
+          <select
+            value={sessionsPerPage}
+            onChange={(e) => onSessionsPerPageChange(Number(e.target.value))}
+            className="px-2 py-1.5 rounded-lg text-xs font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 border border-gray-200 transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500"
+            title="Sessions per page"
+          >
+            {[10, 15, 20, 50, 100].map((n) => (
+              <option key={n} value={n}>{n} per page</option>
+            ))}
+          </select>
+
           {/* Column Selector */}
           <div className="relative" ref={columnSelectorRef}>
             <button

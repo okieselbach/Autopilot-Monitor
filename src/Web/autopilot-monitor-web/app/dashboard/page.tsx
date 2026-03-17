@@ -38,7 +38,13 @@ export default function Home() {
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [columnFilters, setColumnFilters] = useState<Record<string, Set<string>>>({});
   const [currentPage, setCurrentPage] = useState(1);
-  const sessionsPerPage = 7;
+  const [sessionsPerPage, setSessionsPerPage] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('sessionsPerPage');
+      if (stored) return parseInt(stored, 10);
+    }
+    return 10;
+  });
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [sessionToDelete, setSessionToDelete] = useState<{ sessionId: string; tenantId: string; deviceName?: string } | null>(null);
   const [showBlockConfirm, setShowBlockConfirm] = useState(false);
@@ -408,10 +414,15 @@ export default function Home() {
     fetchSessions();
   }, [galacticAdminMode]);
 
-  // Reset to page 1 when search query, status filter, or sort changes
+  // Reset to page 1 when search query, status filter, sort, or page size changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, sortColumn, sortDirection, columnFilters]);
+  }, [searchQuery, statusFilter, sortColumn, sortDirection, columnFilters, sessionsPerPage]);
+
+  const handleSessionsPerPageChange = (value: number) => {
+    setSessionsPerPage(value);
+    localStorage.setItem('sessionsPerPage', String(value));
+  };
 
   const applyTenantIdFilter = (value: string) => {
     setTenantIdFilter(value);
@@ -756,6 +767,8 @@ export default function Home() {
               totalPages={totalPages}
               onPreviousPage={handlePreviousPage}
               onNextPage={handleNextPage}
+              sessionsPerPage={sessionsPerPage}
+              onSessionsPerPageChange={handleSessionsPerPageChange}
               hasMore={hasMore}
               loadingMore={loadingMore}
               onLoadMore={loadMore}
