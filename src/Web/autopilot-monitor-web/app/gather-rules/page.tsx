@@ -191,8 +191,9 @@ export default function GatherRulesPage() {
 
   const buildParameters = (form: NewRuleForm): Record<string, string> => {
     const params: Record<string, string> = {};
-    if (form.collectorType === "registry" && form.valueName) {
-      params.valueName = form.valueName;
+    if (form.collectorType === "registry") {
+      if (form.valueName) params.valueName = form.valueName;
+      if (form.listSubkeys) params.listSubkeys = "true";
     }
     if (form.collectorType === "eventlog") {
       if (form.eventId) params.eventId = form.eventId;
@@ -276,6 +277,7 @@ export default function GatherRulesPage() {
       collectorType: rule.collectorType,
       target: rule.target,
       valueName: rule.parameters?.valueName || "",
+      listSubkeys: rule.parameters?.listSubkeys === "true",
       eventId: rule.parameters?.eventId || "",
       messageFilter: rule.parameters?.messageFilter || "",
       maxEntries: rule.parameters?.maxEntries || "",

@@ -112,10 +112,13 @@
       "enabled": false,
       "collectorType": "registry",
       "target": "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Component Based Servicing\\RebootPending",
+      "parameters": {
+        "severityIfExists": "Warning"
+      },
       "trigger": "phase_change",
       "triggerPhase": "FinalizingSetup",
       "outputEventType": "gather_pending_reboot",
-      "outputSeverity": "Warning",
+      "outputSeverity": "Info",
       "tags": [
         "device",
         "reboot",
@@ -155,6 +158,9 @@
       "enabled": false,
       "collectorType": "registry",
       "target": "HKLM\\SOFTWARE\\Microsoft\\PolicyManager\\current\\device",
+      "parameters": {
+        "listSubkeys": "true"
+      },
       "trigger": "phase_change",
       "triggerPhase": "FinalizingSetup",
       "outputEventType": "gather_mdm_device_policies",

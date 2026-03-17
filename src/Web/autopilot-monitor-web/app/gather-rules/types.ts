@@ -30,6 +30,7 @@ export interface NewRuleForm {
   collectorType: string;
   target: string;
   valueName: string;
+  listSubkeys: boolean;
   eventId: string;
   messageFilter: string;
   maxEntries: string;
@@ -107,6 +108,7 @@ export const EMPTY_FORM: NewRuleForm = {
   collectorType: "registry",
   target: "",
   valueName: "",
+  listSubkeys: false,
   eventId: "",
   messageFilter: "",
   maxEntries: "",

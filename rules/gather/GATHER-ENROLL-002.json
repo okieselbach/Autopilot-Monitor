@@ -9,6 +9,9 @@
   "enabled": false,
   "collectorType": "registry",
   "target": "HKLM\\SOFTWARE\\Microsoft\\PolicyManager\\current\\device",
+  "parameters": {
+    "listSubkeys": "true"
+  },
   "trigger": "phase_change",
   "triggerPhase": "FinalizingSetup",
   "outputEventType": "gather_mdm_device_policies",

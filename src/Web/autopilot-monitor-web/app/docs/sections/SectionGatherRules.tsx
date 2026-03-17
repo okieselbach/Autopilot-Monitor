@@ -67,6 +67,7 @@ export function SectionGatherRules() {
             <p className="font-medium text-gray-900">Parameters</p>
             <ul className="list-disc ml-5 space-y-1">
               <li><code className="bg-gray-100 px-1 rounded">valueName</code> — Read a specific value. Leave empty to read all values in the key (max 50).</li>
+              <li><code className="bg-gray-100 px-1 rounded">listSubkeys</code> — Set to <code className="bg-gray-100 px-1 rounded">true</code> to enumerate subkey names instead of values (max 100). Useful for keys like <code className="bg-gray-100 px-1 rounded">PolicyManager\current\device</code> where subkeys represent policy areas.</li>
             </ul>
           </div>
           <div>

@@ -30,6 +30,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         private List<GatherRule> _activeRules = new List<GatherRule>();
         private readonly Dictionary<string, Timer> _intervalTimers = new Dictionary<string, Timer>();
         private readonly HashSet<string> _startupRulesExecuted = new HashSet<string>();
+        private readonly HashSet<string> _phaseRulesExecuted = new HashSet<string>();
         private readonly LogFilePositionTracker _filePositionTracker = new LogFilePositionTracker();
         private CountdownEvent _startupRulesLatch;   // non-null only while startup rules are pending
 
@@ -115,6 +116,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                 if (string.IsNullOrEmpty(rule.TriggerPhase) ||
                     string.Equals(rule.TriggerPhase, phaseName, StringComparison.OrdinalIgnoreCase))
                 {
+                    // Deduplicate: only fire once per (ruleId, phase) combination
+                    var deduplicationKey = $"{rule.RuleId}|{phaseName}";
+                    if (!_phaseRulesExecuted.Add(deduplicationKey))
+                    {
+                        _logger.Debug($"Phase rule {rule.RuleId} already executed for phase {phaseName}, skipping");
+                        continue;
+                    }
+
                     _logger.Info($"Phase change triggered rule {rule.RuleId} (phase: {phaseName})");
                     ThreadPool.QueueUserWorkItem(_ => ExecuteRule(rule));
                 }
@@ -190,7 +199,19 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     result["ruleTitle"] = rule.Title;
 
                     var eventType = !string.IsNullOrEmpty(rule.OutputEventType) ? rule.OutputEventType : "gather_result";
-                    var severity = ParseSeverity(rule.OutputSeverity);
+
+                    // Allow collectors to override severity via _severityOverride in result
+                    object severityOverride;
+                    EventSeverity severity;
+                    if (result.TryGetValue("_severityOverride", out severityOverride) && severityOverride is string sev)
+                    {
+                        severity = ParseSeverity(sev);
+                        result.Remove("_severityOverride");
+                    }
+                    else
+                    {
+                        severity = ParseSeverity(rule.OutputSeverity);
+                    }
 
                     _onEventCollected(new EnrollmentEvent
                     {

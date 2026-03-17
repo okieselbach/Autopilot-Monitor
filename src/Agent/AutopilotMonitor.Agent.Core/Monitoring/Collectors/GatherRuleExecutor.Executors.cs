@@ -62,6 +62,17 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             string explicitValueName = null;
             rule.Parameters?.TryGetValue("valueName", out explicitValueName);
 
+            // Check if subkey enumeration is requested
+            string listSubkeysStr = null;
+            rule.Parameters?.TryGetValue("listSubkeys", out listSubkeysStr);
+            bool listSubkeys = string.Equals(listSubkeysStr, "true", StringComparison.OrdinalIgnoreCase);
+
+            // Optional conditional severity based on existence
+            string severityIfExists = null;
+            string severityIfNotExists = null;
+            rule.Parameters?.TryGetValue("severityIfExists", out severityIfExists);
+            rule.Parameters?.TryGetValue("severityIfNotExists", out severityIfNotExists);
+
             try
             {
                 using (var key = hive.OpenSubKey(subPath, false))
@@ -72,7 +83,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                         // check whether the last path segment is a value name in the parent key.
                         // This handles the common case where the user specifies the full
                         // "HKLM\...\KeyName\ValueName" path directly in Target.
-                        if (string.IsNullOrEmpty(explicitValueName))
+                        if (string.IsNullOrEmpty(explicitValueName) && !listSubkeys)
                         {
                             var lastBackslash = subPath.LastIndexOf('\\');
                             if (lastBackslash > 0)
@@ -106,9 +117,19 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     data["exists"] = true;
                     data["path"] = path;
 
-                    // Read specific value if specified in parameters
-                    if (!string.IsNullOrEmpty(explicitValueName))
+                    if (listSubkeys)
                     {
+                        // Enumerate subkey names (max 100)
+                        var subKeyNames = key.GetSubKeyNames().Take(100).ToArray();
+                        data["subkey_count"] = subKeyNames.Length;
+                        for (int i = 0; i < subKeyNames.Length; i++)
+                        {
+                            data[$"subkey_{i + 1}"] = subKeyNames[i];
+                        }
+                    }
+                    else if (!string.IsNullOrEmpty(explicitValueName))
+                    {
+                        // Read specific value if specified in parameters
                         var value = key.GetValue(explicitValueName);
                         data[explicitValueName] = value?.ToString();
                     }
@@ -131,6 +152,16 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             catch (Exception ex)
             {
                 data["error"] = ex.Message;
+            }
+
+            // Apply conditional severity based on existence
+            if (data.ContainsKey("exists"))
+            {
+                var exists = data["exists"] is bool b ? b : data["exists"]?.ToString() == "True";
+                if (exists && !string.IsNullOrEmpty(severityIfExists))
+                    data["_severityOverride"] = severityIfExists;
+                else if (!exists && !string.IsNullOrEmpty(severityIfNotExists))
+                    data["_severityOverride"] = severityIfNotExists;
             }
 
             return data;
@@ -302,6 +333,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             if (!GatherRuleGuards.IsFilePathAllowed(filePath, UnrestrictedMode))
                 return EmitSecurityWarning(rule, "file", filePath);
 
+            // Optional conditional severity based on existence
+            string severityIfExists = null;
+            string severityIfNotExists = null;
+            rule.Parameters?.TryGetValue("severityIfExists", out severityIfExists);
+            rule.Parameters?.TryGetValue("severityIfNotExists", out severityIfNotExists);
+
             try
             {
                 if (File.Exists(filePath))
@@ -359,6 +396,16 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                 data["error"] = ex.Message;
             }
 
+            // Apply conditional severity based on existence
+            if (data.ContainsKey("exists"))
+            {
+                var exists = data["exists"] is bool b ? b : data["exists"]?.ToString() == "True";
+                if (exists && !string.IsNullOrEmpty(severityIfExists))
+                    data["_severityOverride"] = severityIfExists;
+                else if (!exists && !string.IsNullOrEmpty(severityIfNotExists))
+                    data["_severityOverride"] = severityIfNotExists;
+            }
+
             return data;
         }
 
@@ -369,6 +416,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 
             if (string.IsNullOrEmpty(logName))
                 return data;
+
+            // Optional: escalate severity when matching entries are found
+            string severityIfFound = null;
+            rule.Parameters?.TryGetValue("severityIfFound", out severityIfFound);
 
             try
             {
@@ -441,8 +492,15 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     }
                 }
 
-                data["entries"] = string.Join("\n", entries);
+                for (int i = 0; i < entries.Count; i++)
+                {
+                    data[$"entry_{i + 1}"] = entries[i];
+                }
                 data["entries_returned"] = entries.Count;
+
+                // Apply conditional severity when matching entries are found
+                if (entries.Count > 0 && !string.IsNullOrEmpty(severityIfFound))
+                    data["_severityOverride"] = severityIfFound;
             }
             catch (Exception ex)
             {

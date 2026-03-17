@@ -126,17 +126,29 @@ export function GatherRuleFormFields({ form, setForm, showRuleId, unrestrictedMo
 
       {/* Registry: optional Value Name */}
       {form.collectorType === "registry" && (
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Value Name</label>
-          <input
-            type="text"
-            value={form.valueName}
-            onChange={(e) => setForm({ ...form, valueName: e.target.value })}
-            placeholder="e.g., IsRecoveryAllowed (leave empty to read all values)"
-            autoComplete="off"
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
-          />
-          <p className="text-xs text-gray-400 mt-1">Specific registry value to read. Leave empty to read all values in the key.</p>
+        <div className="space-y-3">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Value Name</label>
+            <input
+              type="text"
+              value={form.valueName}
+              onChange={(e) => setForm({ ...form, valueName: e.target.value, listSubkeys: false })}
+              placeholder="e.g., IsRecoveryAllowed (leave empty to read all values)"
+              autoComplete="off"
+              disabled={form.listSubkeys}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors disabled:opacity-50 disabled:bg-gray-50"
+            />
+            <p className="text-xs text-gray-400 mt-1">Specific registry value to read. Leave empty to read all values in the key.</p>
+          </div>
+          <label className="flex items-center space-x-2 text-sm text-gray-700 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={form.listSubkeys}
+              onChange={(e) => setForm({ ...form, listSubkeys: e.target.checked, valueName: e.target.checked ? "" : form.valueName })}
+              className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+            />
+            <span>List subkeys instead of values</span>
+          </label>
         </div>
       )}
 
