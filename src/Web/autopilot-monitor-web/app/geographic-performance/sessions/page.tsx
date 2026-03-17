@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
+import { Suspense, useEffect, useState, useRef, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ProtectedRoute } from "../../../components/ProtectedRoute";
 import { useTenant } from "../../../contexts/TenantContext";
@@ -68,6 +68,18 @@ function formatDate(dateStr: string): string {
 }
 
 export default function LocationSessionsPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-gray-600">Loading...</div>
+      </div>
+    }>
+      <LocationSessionsContent />
+    </Suspense>
+  );
+}
+
+function LocationSessionsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const locationKey = searchParams.get("locationKey") || "";
