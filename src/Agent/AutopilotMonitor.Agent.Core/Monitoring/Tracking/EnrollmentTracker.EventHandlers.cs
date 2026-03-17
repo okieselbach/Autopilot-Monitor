@@ -501,10 +501,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             _debugStateTimer?.Change(Timeout.Infinite, Timeout.Infinite);
             _debugStateTimerActive = false;
 
-            // Self-Deploying mode: skip Hello wait entirely — no user session for Hello
-            if (IsSelfDeploying)
+            // Device-only deployment (Self-Deploying or SkipUserStatusPage=true): skip Hello wait
+            // entirely — no interactive user session means Hello provisioning cannot complete.
+            if (IsDeviceOnlyDeployment)
             {
-                _logger.Info("EnrollmentTracker: Self-Deploying mode — skipping Hello wait, proceeding to completion");
+                _logger.Info($"EnrollmentTracker: Device-only deployment (autopilotMode={_autopilotMode}, skipUserStatusPage={_skipUserStatusPage}) — skipping Hello wait, proceeding to completion");
                 TryEmitEnrollmentComplete("ime_pattern");
                 return;
             }

@@ -60,19 +60,19 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             _stateData.DeviceSetupProvisioningCompleteUtc = DateTime.UtcNow;
             _stateDirty = true;
 
-            if (!IsSelfDeploying)
+            if (!IsDeviceOnlyDeployment)
             {
-                _logger.Info("EnrollmentTracker: DeviceSetup provisioning complete but not Self-Deploying — " +
+                _logger.Info("EnrollmentTracker: DeviceSetup provisioning complete but not device-only deployment — " +
                              "using normal completion paths (ESP exit + Hello)");
-                EmitTraceEvent("device_setup_complete_non_self_deploying",
-                    "DeviceSetup provisioning complete in non-Self-Deploying mode — no action, normal paths apply",
-                    new Dictionary<string, object> { { "autopilotMode", _autopilotMode } });
+                EmitTraceEvent("device_setup_complete_non_device_only",
+                    "DeviceSetup provisioning complete in non-device-only mode — no action, normal paths apply",
+                    new Dictionary<string, object> { { "autopilotMode", _autopilotMode }, { "skipUserStatusPage", _skipUserStatusPage } });
                 return;
             }
 
-            // Self-Deploying mode: this is our primary completion signal.
+            // Device-only deployment: this is our primary completion signal.
             // No user session → no Hello, no desktop arrival, possibly no Shell-Core ESP exit.
-            _logger.Info("EnrollmentTracker: Self-Deploying mode + DeviceSetup provisioning complete — " +
+            _logger.Info($"EnrollmentTracker: Device-only deployment (autopilotMode={_autopilotMode}, skipUserStatusPage={_skipUserStatusPage}) + DeviceSetup provisioning complete — " +
                          "transitioning to FinalizingSetup and attempting completion");
 
             // Mark ESP as seen and final exit (provisioning success implies ESP device phase completed)
@@ -112,7 +112,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             try { CollectDeviceInfoAtFinalizingSetup("self_deploying_provisioning_complete"); }
             catch (Exception ex) { _logger.Warning($"EnrollmentTracker: final device info collection failed (self_deploying): {ex.Message}"); }
 
-            // Attempt completion — Hello guard is bypassed for Self-Deploying (IsSelfDeploying)
+            // Attempt completion — Hello guard is bypassed for device-only deployments (IsDeviceOnlyDeployment)
             TryEmitEnrollmentComplete("self_deploying_provisioning_complete");
         }
 
@@ -528,15 +528,15 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             _logger.Debug($"EnrollmentTracker: TryEmitEnrollmentComplete('{source}') — evaluating guards " +
                           $"[espEverSeen={_espEverSeen}, espFinalExitSeen={_espFinalExitSeen}, desktopArrived={_desktopArrived}, " +
                           $"helloCompleted={_espAndHelloTracker?.IsHelloCompleted ?? false}, helloPolicyConfigured={_espAndHelloTracker?.IsPolicyConfigured ?? false}, " +
-                          $"enrollmentType={_enrollmentType}, autopilotMode={_autopilotMode}, isSelfDeploying={IsSelfDeploying}]");
+                          $"enrollmentType={_enrollmentType}, autopilotMode={_autopilotMode}, isSelfDeploying={IsSelfDeploying}, isDeviceOnlyDeployment={IsDeviceOnlyDeployment}]");
 
             // Hello-Check: Hello must be resolved before we can complete.
-            // Self-Deploying mode (AutopilotMode=1) has no user session, so Hello is irrelevant —
-            // bypass the Hello guard entirely regardless of whether WHfB policy is configured.
+            // Device-only deployments (Self-Deploying or SkipUserStatusPage=true) have no interactive
+            // user session, so Hello provisioning cannot complete — bypass the guard entirely.
             bool helloResolved = _espAndHelloTracker == null
                 || _espAndHelloTracker.IsHelloCompleted
                 || !_espAndHelloTracker.IsPolicyConfigured
-                || IsSelfDeploying;
+                || IsDeviceOnlyDeployment;
 
             if (!helloResolved)
             {
@@ -598,6 +598,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     { "helloOutcome", helloOutcome },
                     { "autopilotMode", _autopilotMode?.ToString() ?? "unknown" },
                     { "isSelfDeploying", IsSelfDeploying },
+                    { "isDeviceOnlyDeployment", IsDeviceOnlyDeployment },
                     { "signalsSeen", _stateData.SignalsSeen },
                     { "signalTimestamps", signalTimestamps },
                     { "agentUptimeSeconds", (DateTime.UtcNow - _agentStartTimeUtc).TotalSeconds }
@@ -649,7 +650,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     { "skipUserStatusPage", _skipUserStatusPage?.ToString() ?? "unknown" },
                     { "skipDeviceStatusPage", _skipDeviceStatusPage?.ToString() ?? "unknown" },
                     { "autopilotMode", _autopilotMode?.ToString() ?? "unknown" },
-                    { "isSelfDeploying", IsSelfDeploying }
+                    { "isSelfDeploying", IsSelfDeploying },
+                    { "isDeviceOnlyDeployment", IsDeviceOnlyDeployment }
                 }
             });
         }
@@ -744,10 +746,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             // During active ESP (AccountSetup runs in background with desktop visible),
             // the Hello timer must wait until ESP exits (started in OnFinalizingSetupPhaseTriggered).
             // Without this guard, Hello timeout-resolves while ESP still installs apps → premature completion.
-            // Self-Deploying: no user session, Hello is irrelevant — skip timer entirely.
+            // Device-only deployment: no user session, Hello is irrelevant — skip timer entirely.
             if (_espAndHelloTracker != null && !_espAndHelloTracker.IsHelloCompleted
                 && (!_espEverSeen || _espFinalExitSeen)
-                && !IsSelfDeploying)
+                && !IsDeviceOnlyDeployment)
             {
                 _logger.Info("EnrollmentTracker: Desktop arrived with Hello pending (no active ESP) — starting Hello wait timer");
                 _espAndHelloTracker.StartHelloWaitTimer();

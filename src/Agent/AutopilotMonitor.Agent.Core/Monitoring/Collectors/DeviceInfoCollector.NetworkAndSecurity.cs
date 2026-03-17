@@ -187,13 +187,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                         if (autopilotModeStr != null && int.TryParse(autopilotModeStr, out var autopilotMode))
                         {
                             detectedAutopilotMode = autopilotMode;
+                            // Only mode 0 is confirmed — modes 1, 2, 3+ are shown as raw integers
+                            // until their meaning is verified across all Autopilot profile variants.
                             string modeLabel;
                             switch (autopilotMode)
                             {
-                                case 0:  modeLabel = "User Driven"; break;
-                                case 1:  modeLabel = "Self Deploying"; break;
-                                case 2:  modeLabel = "Pre-Provisioning (White Glove)"; break;
-                                default: modeLabel = $"Unknown ({autopilotMode})"; break;
+                                case 0:  modeLabel = $"User Driven ({autopilotMode})"; break;
+                                default: modeLabel = $"{autopilotMode}"; break;
                             }
                             data["autopilotModeLabel"] = modeLabel;
                             _logger.Info($"EnrollmentTracker: AutopilotMode={autopilotMode} ({modeLabel})");

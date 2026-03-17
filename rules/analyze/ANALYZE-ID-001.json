@@ -1,0 +1,65 @@
+{
+  "$schema": "../schema/analyze-rule.schema.json",
+  "ruleId": "ANALYZE-ID-001",
+  "title": "No Machine Certificates Found",
+  "description": "Detects when no certificates are present in the local machine personal store (LocalMachine\\My). Missing certificates may indicate that MDM enrollment certificate provisioning or SCEP certificate deployment failed.",
+  "severity": "warning",
+  "category": "identity",
+  "isCommunity": true,
+  "enabled": true,
+  "baseConfidence": 75,
+  "conditions": [
+    {
+      "signal": "cert_store_gathered",
+      "source": "event_type",
+      "eventType": "gather_machine_cert_store",
+      "operator": "exists",
+      "value": "",
+      "required": true
+    },
+    {
+      "signal": "cert_subject_missing",
+      "source": "event_data",
+      "eventType": "gather_machine_cert_store",
+      "dataField": "output",
+      "operator": "not_contains",
+      "value": "CN=YOUR-CERTIFICATE-SUBJECT",
+      "required": true
+    }
+  ],
+  "confidenceFactors": [
+    {
+      "signal": "no_output_at_all",
+      "condition": "gather_machine_cert_store.output not_exists",
+      "weight": 20
+    },
+    {
+      "signal": "command_error",
+      "condition": "gather_machine_cert_store.error_output exists",
+      "weight": 10
+    }
+  ],
+  "confidenceThreshold": 70,
+  "explanation": "The expected certificate with the configured subject was not found in the local machine certificate store (LocalMachine\\My). Customize the 'value' field in the 'cert_subject_missing' condition to match your expected certificate subject (e.g. 'CN=Contoso Root CA'). The check is case-insensitive (substring match). If the certificate should have been provisioned via SCEP or MDM enrollment, this may indicate a deployment failure.",
+  "remediation": [
+    {
+      "title": "Verify the expected certificate",
+      "steps": [
+        "Customize the analyze rule: change 'CN=YOUR-CERTIFICATE-SUBJECT' to your expected certificate subject (case-insensitive substring match)",
+        "Example subjects: 'CN=Contoso SCEP Cert', 'CN=Contoso Root CA', 'CN=MDM Device Certificate'",
+        "Check certlm.msc (Certificates - Local Computer > Personal > Certificates) manually to see what's present"
+      ]
+    },
+    {
+      "title": "Troubleshoot missing certificate",
+      "steps": [
+        "Check if the device is properly enrolled in Intune (dsregcmd /status)",
+        "Verify SCEP/PKCS certificate profiles are assigned and targeted correctly",
+        "Check the NDES/SCEP connector status and reachability",
+        "Review IntuneManagementExtension logs for certificate enrollment errors",
+        "Ensure prerequisite certificates (Trusted Root CA) are deployed before the end-entity profile"
+      ]
+    }
+  ],
+  "tags": ["identity", "certificates", "machine-store", "subject-check"]
+}

@@ -131,7 +131,8 @@
     {
       "category": "Certificate",
       "commands": [
-        "certutil -store My"
+        "certutil -store My",
+        "$c = Get-ChildItem Cert:\\LocalMachine\\My; if ($c) { $c | Select-Object Subject, Thumbprint, Issuer, NotBefore, NotAfter, HasPrivateKey | ConvertTo-Json } else { '{\"CertificateCount\": 0}' }"
       ]
     },
     {

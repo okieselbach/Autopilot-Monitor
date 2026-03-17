@@ -309,9 +309,7 @@ export default function DeviceDetailsCard({ events }: { events: EnrollmentEvent[
               {hasValue(autopilotProfile.AadDeviceId) && <DetailRow label="AAD Device ID" value={`${autopilotProfile.AadDeviceId}`} />}
               {autopilotProfile.AutopilotMode !== undefined && (
                 <DetailRow label="Autopilot Mode" value={autopilotProfile.autopilotModeLabel ?? (
-                  `${autopilotProfile.AutopilotMode}` === "0" ? "User Driven" :
-                  `${autopilotProfile.AutopilotMode}` === "1" ? "Self Deploying" :
-                  `${autopilotProfile.AutopilotMode}` === "2" ? "Pre-Provisioning (White Glove)" :
+                  `${autopilotProfile.AutopilotMode}` === "0" ? "User Driven (0)" :
                   `${autopilotProfile.AutopilotMode}`
                 )} />
               )}

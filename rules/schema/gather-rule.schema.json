@@ -59,6 +59,11 @@
           "description": "Whether this rule is enabled. Set to false to add a rule without activating it immediately.",
           "default": true
         },
+        "isCommunity": {
+          "type": "boolean",
+          "description": "Whether this is a community-contributed rule. Community rules are stored in the global partition alongside built-in rules.",
+          "default": false
+        },
         "collectorType": {
           "type": "string",
           "description": "Type of data collection.",

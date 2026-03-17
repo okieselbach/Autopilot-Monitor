@@ -66,9 +66,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         private bool? _skipUserStatusPage;
         private bool? _skipDeviceStatusPage;
 
-        // Autopilot deployment mode: 0=UserDriven, 1=SelfDeploying, 2=PreProvisioning, null=unknown
+        // Autopilot deployment mode: 0=UserDriven, 1/2/3+=not yet confirmed mapping, null=unknown
         private int? _autopilotMode;
         private bool IsSelfDeploying => _autopilotMode == 1;
+
+        // True when no user ESP session is expected — either Self-Deploying (AutopilotMode=1)
+        // or SkipUserStatusPage=true in registry. Hello provisioning is irrelevant in both cases
+        // because there is no interactive user session during which Hello could complete.
+        private bool IsDeviceOnlyDeployment => IsSelfDeploying || _skipUserStatusPage == true;
 
         // Safety-net timer for waiting_for_hello state
         private Timer _waitingForHelloSafetyTimer;
@@ -317,15 +322,20 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             _logger.Info($"EnrollmentTracker: enrollment type detected: {_enrollmentType ?? "unknown"} " +
                          $"(autopilotMode={_autopilotMode}, skipUserStatusPage={_skipUserStatusPage}, skipDeviceStatusPage={_skipDeviceStatusPage})");
 
-            if (IsSelfDeploying)
+            if (IsDeviceOnlyDeployment)
             {
-                EmitTraceEvent("self_deploying_detected",
-                    "AutopilotMode=1 (Self-Deploying) — Hello guard will be bypassed, provisioning status used as completion signal",
+                var reason = IsSelfDeploying
+                    ? "AutopilotMode=1 (Self-Deploying)"
+                    : $"SkipUserStatusPage=true (autopilotMode={_autopilotMode})";
+                EmitTraceEvent("device_only_deployment_detected",
+                    $"{reason} — Hello guard will be bypassed, provisioning status used as completion signal",
                     new Dictionary<string, object>
                     {
                         { "autopilotMode", _autopilotMode },
                         { "skipUserStatusPage", _skipUserStatusPage },
-                        { "enrollmentType", _enrollmentType }
+                        { "enrollmentType", _enrollmentType },
+                        { "isSelfDeploying", IsSelfDeploying },
+                        { "isDeviceOnlyDeployment", true }
                     });
             }
         }
