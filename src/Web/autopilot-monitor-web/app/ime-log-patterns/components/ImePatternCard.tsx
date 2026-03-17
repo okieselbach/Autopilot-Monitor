@@ -135,6 +135,36 @@ export default function ImePatternCard({
       {/* Expanded Details (Read-Only) */}
       {isExpanded && !isEditing && (
         <div className="border-t border-gray-200 p-6 space-y-6">
+          {/* Details / JSON toggle */}
+          <div className="flex justify-end">
+            <div className="flex items-center bg-gray-100 rounded-lg p-1">
+              <button
+                onClick={() => setShowJson(false)}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                  !showJson ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                Details
+              </button>
+              <button
+                onClick={() => setShowJson(true)}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                  showJson ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                JSON
+              </button>
+            </div>
+          </div>
+
+          {/* JSON view (replaces detail view) */}
+          {showJson ? (
+            <ReadOnlyJsonView
+              jsonText={JSON.stringify(stripInternalFields(pattern), null, 2)}
+              textareaRows={15}
+            />
+          ) : (
+          <>
           {pattern.description && (
             <div className="text-sm text-gray-700">
               {pattern.description}
@@ -201,28 +231,11 @@ export default function ImePatternCard({
             </div>
           )}
 
-          {/* Read-only JSON view */}
-          {showJson && (
-            <ReadOnlyJsonView
-              jsonText={JSON.stringify(stripInternalFields(pattern), null, 2)}
-              textareaRows={15}
-            />
+          </>
           )}
 
           {!readOnly && (
             <div className="flex items-center justify-end space-x-3 pt-4 border-t border-gray-200">
-              <button
-                onClick={() => setShowJson(!showJson)}
-                className={`px-4 py-2 text-sm rounded-lg transition-colors flex items-center space-x-2 ${
-                  showJson ? "bg-indigo-100 text-indigo-700 hover:bg-indigo-200" : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                }`}
-                title={showJson ? "Hide JSON" : "View pattern as JSON"}
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
-                </svg>
-                <span>{showJson ? "Hide JSON" : "View JSON"}</span>
-              </button>
               <button
                 onClick={() => onExport(pattern)}
                 className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors flex items-center space-x-2"
