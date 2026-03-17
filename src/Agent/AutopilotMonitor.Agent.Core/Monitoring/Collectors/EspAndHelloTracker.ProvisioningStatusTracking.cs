@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
+using System.Threading;
 using AutopilotMonitor.Agent.Core.Monitoring.Core;
 using AutopilotMonitor.Agent.Core.Monitoring.Interop;
 using AutopilotMonitor.Shared;
@@ -57,6 +58,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         private Dictionary<string, Dictionary<string, string>> _lastSubcategoryStates;
         // Fire-once guard for DeviceSetupProvisioningComplete event
         private bool _deviceSetupProvisioningCompleteFired;
+        // Fallback: timer for when all subcategories succeeded but categorySucceeded is still null.
+        // Some Windows builds (e.g. 25H2/26200) never set the categorySucceeded boolean.
+        private Timer _deviceSetupFallbackTimer;
+        private const int DeviceSetupFallbackDelaySeconds = 30;
 
         private void StartProvisioningStatusWatcher()
         {
@@ -67,6 +72,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             _provisioningCategoriesResolved = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             _lastSubcategoryStates = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
             _deviceSetupProvisioningCompleteFired = false;
+            _deviceSetupFallbackTimer = null;
 
             // Try to start immediately; if key doesn't exist yet, retry every 2s
             if (!TryStartProvisioningWatcher())
@@ -137,6 +143,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             {
                 _provisioningWatcherRetryTimer?.Dispose();
                 _provisioningWatcherRetryTimer = null;
+
+                _deviceSetupFallbackTimer?.Dispose();
+                _deviceSetupFallbackTimer = null;
 
                 if (_provisioningWatcher != null)
                 {
@@ -250,12 +259,163 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                                 _logger.Error("DeviceSetupProvisioningComplete handler failed", ex);
                             }
                         }
+
+                        // Fallback: All subcategories succeeded but categorySucceeded was never set by Windows.
+                        // Some Windows builds (e.g. 25H2/26200) don't set the boolean even after all subcategories succeed.
+                        // Wait DeviceSetupFallbackDelaySeconds to give Windows time, then treat as success if still consistent.
+                        if (!_deviceSetupProvisioningCompleteFired
+                            && _deviceSetupFallbackTimer == null
+                            && _lastCategorySucceeded.TryGetValue("DeviceSetupCategory.Status", out var dsFallbackState)
+                            && dsFallbackState == null
+                            && _lastSubcategoryStates.TryGetValue("DeviceSetupCategory.Status", out var dsFallbackSubStates)
+                            && dsFallbackSubStates.Count > 0
+                            && dsFallbackSubStates.Values.All(s =>
+                                string.Equals(s, "succeeded", StringComparison.OrdinalIgnoreCase) ||
+                                string.Equals(s, "notRequired", StringComparison.OrdinalIgnoreCase)))
+                        {
+                            _logger.Info($"Provisioning status: DeviceSetup — all {dsFallbackSubStates.Count} subcategories succeeded " +
+                                         $"but categorySucceeded not set by Windows — starting {DeviceSetupFallbackDelaySeconds}s fallback timer");
+                            _deviceSetupFallbackTimer = new Timer(
+                                OnDeviceSetupFallbackTimerExpired,
+                                null,
+                                TimeSpan.FromSeconds(DeviceSetupFallbackDelaySeconds),
+                                Timeout.InfiniteTimeSpan);
+                        }
                     }
                 }
             }
             catch (Exception ex)
             {
                 _logger.Warning($"Provisioning status check failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Fallback timer callback: fires after DeviceSetupFallbackDelaySeconds when all subcategories
+        /// succeeded but categorySucceeded was never set by Windows. Re-reads registry to confirm,
+        /// emits a visible WARNING event for the admin timeline, then fires DeviceSetupProvisioningComplete.
+        /// </summary>
+        private void OnDeviceSetupFallbackTimerExpired(object state)
+        {
+            try
+            {
+                lock (_stateLock)
+                {
+                    if (_deviceSetupProvisioningCompleteFired)
+                    {
+                        _logger.Debug("DeviceSetup fallback timer expired but DeviceSetupProvisioningComplete already fired — ignoring");
+                        return;
+                    }
+
+                    // Re-read registry to confirm state is still consistent
+                    string registryJson = null;
+                    using (var key = Registry.LocalMachine.OpenSubKey(ProvisioningStatusRegistryPath, writable: false))
+                    {
+                        registryJson = key?.GetValue("DeviceSetupCategory.Status")?.ToString();
+                    }
+
+                    if (string.IsNullOrEmpty(registryJson))
+                    {
+                        _logger.Warning("DeviceSetup fallback timer: registry value not found — aborting fallback");
+                        return;
+                    }
+
+                    // Parse and verify: categorySucceeded still null, all subcategories still succeeded
+                    bool? categorySucceeded = null;
+                    List<SubcategoryInfo> subcategories = null;
+                    try
+                    {
+                        using (var doc = JsonDocument.Parse(registryJson))
+                        {
+                            categorySucceeded = SafeGetBool(doc.RootElement, "categorySucceeded");
+                            subcategories = ParseSubcategories(doc.RootElement);
+                        }
+                    }
+                    catch (JsonException ex)
+                    {
+                        _logger.Warning($"DeviceSetup fallback timer: failed to parse registry JSON — aborting fallback: {ex.Message}");
+                        return;
+                    }
+
+                    // If categorySucceeded was set in the meantime, let the normal path handle it
+                    if (categorySucceeded.HasValue)
+                    {
+                        _logger.Info($"DeviceSetup fallback timer: categorySucceeded is now {categorySucceeded.Value} — normal path will handle this");
+                        // Trigger a re-check so the normal path picks up the change
+                        CheckProvisioningStatus();
+                        return;
+                    }
+
+                    // Verify all subcategories are still succeeded/notRequired
+                    if (subcategories == null || subcategories.Count == 0)
+                    {
+                        _logger.Warning("DeviceSetup fallback timer: no subcategories found — aborting fallback");
+                        return;
+                    }
+
+                    var nonSucceeded = subcategories.Where(s =>
+                        !string.Equals(s.State, "succeeded", StringComparison.OrdinalIgnoreCase) &&
+                        !string.Equals(s.State, "notRequired", StringComparison.OrdinalIgnoreCase)).ToList();
+
+                    if (nonSucceeded.Count > 0)
+                    {
+                        _logger.Warning($"DeviceSetup fallback timer: {nonSucceeded.Count} subcategory/ies not succeeded " +
+                                        $"({string.Join(", ", nonSucceeded.Select(s => $"{s.Name}={s.State}"))}) — aborting fallback");
+                        return;
+                    }
+
+                    // All conditions confirmed after delay — dump raw JSON and emit visible WARNING event
+                    EmitRawRegistryDump("DeviceSetup", registryJson, "fallback_confirmed");
+
+                    _logger.Warning($"DeviceSetup fallback: all {subcategories.Count} subcategories succeeded but " +
+                                    $"categorySucceeded was not set by Windows after {DeviceSetupFallbackDelaySeconds}s — treating as complete");
+
+                    var subcatData = new Dictionary<string, object>();
+                    foreach (var sub in subcategories)
+                    {
+                        subcatData[sub.Name] = new Dictionary<string, string>
+                        {
+                            { "state", sub.State },
+                            { "statusText", sub.StatusText }
+                        };
+                    }
+
+                    _onEventCollected(new EnrollmentEvent
+                    {
+                        SessionId = _sessionId,
+                        TenantId = _tenantId,
+                        EventType = Constants.EventTypes.EspProvisioningStatus,
+                        Severity = EventSeverity.Warning,
+                        Source = "EspAndHelloTracker",
+                        Phase = EnrollmentPhase.Unknown,
+                        Message = $"ESP provisioning status: DeviceSetup — all {subcategories.Count} subcategories succeeded " +
+                                  $"but categorySucceeded was not confirmed by Windows — treating as complete (fallback after {DeviceSetupFallbackDelaySeconds}s)",
+                        Data = new Dictionary<string, object>
+                        {
+                            { "category", "DeviceSetup" },
+                            { "categorySucceeded", "in_progress" },
+                            { "fallbackApplied", true },
+                            { "fallbackReason", "all_subcategories_succeeded_category_unresolved" },
+                            { "fallbackDelaySeconds", DeviceSetupFallbackDelaySeconds },
+                            { "subcategoryCount", subcategories.Count },
+                            { "subcategories", subcatData }
+                        }
+                    });
+
+                    _deviceSetupProvisioningCompleteFired = true;
+                    try
+                    {
+                        DeviceSetupProvisioningComplete?.Invoke(this, EventArgs.Empty);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Error("DeviceSetupProvisioningComplete handler failed (fallback path)", ex);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Error($"DeviceSetup fallback timer callback failed: {ex.Message}", ex);
             }
         }
 
@@ -306,6 +466,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                         _lastCategorySucceeded[categoryName] = categorySucceeded;
                         StoreSubcategoryStates(categoryName, subcategories);
                         EmitProvisioningEvent(categoryLabel, categorySucceeded, statusText, subcategories, EventSeverity.Info);
+                        EmitRawRegistryDump(categoryLabel, jsonValue, "first_seen");
                     }
                     else if (categorySucceededChanged)
                     {
@@ -314,6 +475,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                         StoreSubcategoryStates(categoryName, subcategories);
                         var severity = categorySucceeded == false ? EventSeverity.Warning : EventSeverity.Info;
                         EmitProvisioningEvent(categoryLabel, categorySucceeded, statusText, subcategories, severity);
+                        EmitRawRegistryDump(categoryLabel, jsonValue, $"category_resolved_{(categorySucceeded == true ? "success" : "failed")}");
                     }
                     else
                     {
@@ -521,6 +683,32 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             });
 
             _logger.Info($"Provisioning status event: {categoryLabel} — {statusText} (succeeded={succeeded?.ToString() ?? "in_progress"})");
+        }
+
+        /// <summary>
+        /// Emits the raw registry JSON as a Trace-level event for post-mortem format debugging.
+        /// Called at first-seen (initial snapshot) and at resolution (categorySucceeded change or fallback)
+        /// so we capture the registry format at the start and at the critical decision point.
+        /// </summary>
+        private void EmitRawRegistryDump(string categoryLabel, string rawJson, string trigger)
+        {
+            _onEventCollected(new EnrollmentEvent
+            {
+                SessionId = _sessionId,
+                TenantId = _tenantId,
+                EventType = "esp_provisioning_raw",
+                Severity = EventSeverity.Trace,
+                Source = "EspAndHelloTracker",
+                Phase = EnrollmentPhase.Unknown,
+                Message = $"ESP provisioning raw registry: {categoryLabel} ({trigger})",
+                Data = new Dictionary<string, object>
+                {
+                    { "category", categoryLabel },
+                    { "trigger", trigger },
+                    { "registryValue", $"{categoryLabel}Category.Status" },
+                    { "rawJson", rawJson }
+                }
+            });
         }
 
         // ===== JSON Parsing Helpers =====
