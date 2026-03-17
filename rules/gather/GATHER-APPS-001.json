@@ -1,0 +1,16 @@
+{
+  "$schema": "../schema/gather-rule.schema.json",
+  "ruleId": "GATHER-APPS-001",
+  "title": "IME Logs directory check",
+  "description": "Checks whether the Intune Management Extension log directory exists and reports file sizes. Useful to verify IME is active and logs are being written.",
+  "category": "apps",
+  "version": "1.0.0",
+  "author": "Autopilot Monitor",
+  "enabled": false,
+  "collectorType": "file",
+  "target": "C:\\ProgramData\\Microsoft\\IntuneManagementExtension\\Logs",
+  "trigger": "startup",
+  "outputEventType": "gather_ime_logs_directory",
+  "outputSeverity": "Info",
+  "tags": ["apps", "ime", "logs"]
+}

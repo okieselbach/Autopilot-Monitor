@@ -1,0 +1,16 @@
+{
+  "$schema": "../schema/gather-rule.schema.json",
+  "ruleId": "GATHER-ID-001",
+  "title": "Machine certificates",
+  "description": "Lists certificates in the local machine personal store (My). Verifies that the MDM enrollment certificate and any SCEP certificates have been provisioned.",
+  "category": "identity",
+  "version": "1.0.0",
+  "author": "Autopilot Monitor",
+  "enabled": false,
+  "collectorType": "command_allowlisted",
+  "target": "certutil -store My",
+  "trigger": "startup",
+  "outputEventType": "gather_machine_certificates",
+  "outputSeverity": "Info",
+  "tags": ["identity", "certificates", "scep"]
+}

@@ -1,9 +1,22 @@
 /**
  * Client-side port of agent guardrail validation logic.
  *
- * Mirrors GatherRuleGuards.cs and DiagnosticsPathGuards.cs so the UI can
- * show instant "Allowed" / "Not allowed" feedback without a round-trip.
+ * All allowlists are loaded from guardrails.generated.ts which is generated
+ * from the single source of truth: rules/guardrails.json.
+ * Run: node rules/scripts/combine.js
  */
+
+import {
+  ALLOWED_REGISTRY_PREFIXES,
+  ALLOWED_FILE_PREFIXES,
+  ALLOWED_WMI_QUERY_PREFIXES,
+  ALLOWED_COMMANDS_LIST,
+  ALLOWED_DIAGNOSTICS_PATH_PREFIXES,
+  BLOCKED_FILE_PREFIXES,
+} from "./guardrails.generated";
+
+// Re-export for consumers that imported from here
+export { ALLOWED_REGISTRY_PREFIXES, ALLOWED_FILE_PREFIXES, ALLOWED_WMI_QUERY_PREFIXES, ALLOWED_COMMANDS_LIST, ALLOWED_DIAGNOSTICS_PATH_PREFIXES };
 
 // ---------------------------------------------------------------------------
 // Result type
@@ -17,102 +30,14 @@ export interface ValidationResult {
 }
 
 // ---------------------------------------------------------------------------
-// Constants — mirror GatherRuleGuards.cs exactly
+// Derived sets
 // ---------------------------------------------------------------------------
-
-export const ALLOWED_REGISTRY_PREFIXES: readonly string[] = [
-  // MDM / Enrollment
-  "SOFTWARE\\Microsoft\\Enrollments",
-  "SOFTWARE\\Microsoft\\EnterpriseDesktopAppManagement",
-  "SOFTWARE\\Microsoft\\Provisioning",
-  "SOFTWARE\\Microsoft\\PolicyManager",
-  "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\MDM",
-  // AAD / Hybrid Join
-  "SOFTWARE\\Microsoft\\IdentityStore",
-  "SYSTEM\\CurrentControlSet\\Control\\CloudDomainJoin",
-  // Windows Update / WUfB
-  "SOFTWARE\\Microsoft\\WindowsUpdate",
-  "SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate",
-  // BitLocker
-  "SOFTWARE\\Microsoft\\BitLocker",
-  "SYSTEM\\CurrentControlSet\\Control\\BitLockerStatus",
-  // Network / Proxy
-  "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
-  "SYSTEM\\CurrentControlSet\\Services\\Tcpip",
-  // Autopilot / OOBE / Setup
-  "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Setup",
-  "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\OOBE",
-  "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon",
-  // TPM
-  "SYSTEM\\CurrentControlSet\\Services\\TPM",
-  "SOFTWARE\\Microsoft\\Tpm",
-  // Intune IME
-  "SOFTWARE\\Microsoft\\IntuneManagementExtension",
-  // SCEP / Certificates
-  "SOFTWARE\\Microsoft\\SystemCertificates",
-  "SOFTWARE\\Policies\\Microsoft\\SystemCertificates",
-];
-
-export const ALLOWED_FILE_PREFIXES: readonly string[] = [
-  "C:\\ProgramData\\Microsoft\\IntuneManagementExtension\\Logs",
-  "C:\\Windows\\CCM\\Logs",
-  "C:\\Windows\\Logs",
-  "C:\\Windows\\Panther",
-  "C:\\Windows\\SetupDiag",
-  "C:\\ProgramData\\Microsoft\\DiagnosticLogCSP",
-  "C:\\Windows\\SoftwareDistribution\\ReportingEvents.log",
-];
-
-export const ALLOWED_WMI_QUERY_PREFIXES: readonly string[] = [
-  "SELECT * FROM Win32_OperatingSystem",
-  "SELECT * FROM Win32_ComputerSystem",
-  "SELECT * FROM Win32_BIOS",
-  "SELECT * FROM Win32_Processor",
-  "SELECT * FROM Win32_BaseBoard",
-  "SELECT * FROM Win32_Battery",
-  "SELECT * FROM Win32_TPM",
-  "SELECT * FROM Win32_NetworkAdapter",
-  "SELECT * FROM Win32_NetworkAdapterConfiguration",
-  "SELECT * FROM Win32_DiskDrive",
-  "SELECT * FROM Win32_LogicalDisk",
-  "SELECT * FROM SoftwareLicensingProduct",
-];
-
-const ALLOWED_COMMANDS_LIST: readonly string[] = [
-  "Get-Tpm",
-  "Get-SecureBootPolicy",
-  "Get-SecureBootUEFI -Name SetupMode",
-  "Get-BitLockerVolume -MountPoint C:",
-  "Get-NetAdapter | Select-Object Name, Status, InterfaceDescription, MacAddress, LinkSpeed",
-  "Get-DnsClientServerAddress | Select-Object InterfaceAlias, ServerAddresses",
-  "Get-NetIPConfiguration | Select-Object InterfaceAlias, IPv4Address, IPv4DefaultGateway, DNSServer",
-  "netsh winhttp show proxy",
-  "ipconfig /all",
-  "nltest /dsgetdc:",
-  "dsregcmd /status",
-  "certutil -store My",
-  "Get-HotFix | Select-Object -First 10 HotFixID, InstalledOn, Description",
-];
 
 const ALLOWED_COMMANDS_SET = new Set(
   ALLOWED_COMMANDS_LIST.map((c) => c.toLowerCase())
 );
 
-export const ALLOWED_DIAGNOSTICS_PATH_PREFIXES: readonly string[] = [
-  "C:\\ProgramData\\AutopilotMonitor",
-  "C:\\ProgramData\\Microsoft\\IntuneManagementExtension\\Logs",
-  "C:\\Windows\\Panther",
-  "C:\\Windows\\Logs",
-  "C:\\Windows\\SetupDiag",
-  "C:\\Windows\\SoftwareDistribution\\ReportingEvents.log",
-  "C:\\Windows\\System32\\winevt\\Logs",
-  "C:\\Windows\\CCM\\Logs",
-  "C:\\ProgramData\\Microsoft\\DiagnosticLogCSP",
-  "C:\\ProgramData\\Microsoft\\Windows\\WER",
-  "C:\\Windows\\Logs\\CBS",
-];
-
-const BLOCKED_USERS_PREFIX = "C:\\Users";
+const BLOCKED_USERS_PREFIX = BLOCKED_FILE_PREFIXES[0] || "C:\\Users";
 
 // ---------------------------------------------------------------------------
 // Common Windows environment variables (for client-side expansion)

@@ -1,16 +1,17 @@
 #!/usr/bin/env node
 /**
- * Combines individual rule JSON files into dist/ array files.
- * Run: node rules/scripts/combine.js
+ * Combines individual rule JSON files into dist/ array files and generates
+ * TypeScript guardrails from rules/guardrails.json.
  *
- * Reads all .json files from rules/gather/, rules/analyze/, rules/ime-log-patterns/
- * and writes combined arrays to rules/dist/.
+ * Run: node rules/scripts/combine.js
  */
 
 const fs = require('fs');
 const path = require('path');
 
 const rulesRoot = path.resolve(__dirname, '..');
+
+// ── Rule combination ────────────────────────────────────────────────────────
 
 const configs = [
   {
@@ -57,4 +58,89 @@ for (const config of configs) {
   fs.writeFileSync(config.output, JSON.stringify(wrapper, null, 2) + '\n', 'utf8');
 
   console.log(`${path.basename(config.output)}: ${rules.length} rules combined`);
+}
+
+// ── Guardrails generation ───────────────────────────────────────────────────
+
+const guardrailsPath = path.join(rulesRoot, 'guardrails.json');
+const guardrailsOutput = path.resolve(
+  rulesRoot, '..', 'src', 'Web', 'autopilot-monitor-web', 'lib', 'guardrails.generated.ts'
+);
+
+if (fs.existsSync(guardrailsPath)) {
+  const guardrails = JSON.parse(fs.readFileSync(guardrailsPath, 'utf8'));
+
+  /** Escape a string for use inside a TS string literal (double-quoted). */
+  const esc = (s) => s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+
+  /** Render an array of strings as a TS readonly array. */
+  const flatArray = (items) =>
+    items.map((s) => `  "${esc(s)}",`).join('\n');
+
+  /** Render a categorized list as a TS readonly array of { category, items }. */
+  const categorizedArray = (groups, itemsKey) =>
+    groups.map((g) => {
+      const items = g[itemsKey].map((s) => `      "${esc(s)}",`).join('\n');
+      return `  {\n    category: "${esc(g.category)}",\n    items: [\n${items}\n    ],\n  },`;
+    }).join('\n');
+
+  // Flatten categorized lists for validation
+  const flatRegistryPrefixes = guardrails.registryPrefixes.flatMap((g) => g.prefixes);
+  const flatCommands = guardrails.allowedCommands.flatMap((g) => g.commands);
+
+  const ts = `/**
+ * AUTO-GENERATED from rules/guardrails.json — DO NOT EDIT.
+ * Run: node rules/scripts/combine.js
+ */
+
+// ---------------------------------------------------------------------------
+// Categorized data (for documentation / UI display)
+// ---------------------------------------------------------------------------
+
+export interface GuardrailCategory {
+  readonly category: string;
+  readonly items: readonly string[];
+}
+
+export const REGISTRY_PREFIX_CATEGORIES: readonly GuardrailCategory[] = [
+${categorizedArray(guardrails.registryPrefixes, 'prefixes')}
+];
+
+export const COMMAND_CATEGORIES: readonly GuardrailCategory[] = [
+${categorizedArray(guardrails.allowedCommands, 'commands')}
+];
+
+// ---------------------------------------------------------------------------
+// Flat arrays (for validation logic)
+// ---------------------------------------------------------------------------
+
+export const ALLOWED_REGISTRY_PREFIXES: readonly string[] = [
+${flatArray(flatRegistryPrefixes)}
+];
+
+export const ALLOWED_FILE_PREFIXES: readonly string[] = [
+${flatArray(guardrails.filePrefixes)}
+];
+
+export const ALLOWED_WMI_QUERY_PREFIXES: readonly string[] = [
+${flatArray(guardrails.wmiQueryPrefixes)}
+];
+
+export const ALLOWED_COMMANDS_LIST: readonly string[] = [
+${flatArray(flatCommands)}
+];
+
+export const ALLOWED_DIAGNOSTICS_PATH_PREFIXES: readonly string[] = [
+${flatArray(guardrails.diagnosticsPathPrefixes)}
+];
+
+export const BLOCKED_FILE_PREFIXES: readonly string[] = [
+${flatArray(guardrails.blockedFilePrefixes)}
+];
+`;
+
+  fs.writeFileSync(guardrailsOutput, ts, 'utf8');
+  console.log(`guardrails.generated.ts: ${flatRegistryPrefixes.length} registry, ${flatCommands.length} commands, ${guardrails.filePrefixes.length} file prefixes`);
+} else {
+  console.warn('guardrails.json not found — skipping guardrails generation');
 }

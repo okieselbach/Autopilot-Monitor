@@ -1,0 +1,16 @@
+{
+  "$schema": "../schema/gather-rule.schema.json",
+  "ruleId": "GATHER-DEVICE-004",
+  "title": "Recent Windows updates",
+  "description": "Lists the 10 most recent hotfixes/updates installed on the device. Useful for correlating known issues with specific KB articles or verifying that prerequisite updates are present.",
+  "category": "device",
+  "version": "1.0.0",
+  "author": "Autopilot Monitor",
+  "enabled": false,
+  "collectorType": "command_allowlisted",
+  "target": "Get-HotFix | Select-Object -First 10 HotFixID, InstalledOn, Description",
+  "trigger": "startup",
+  "outputEventType": "gather_recent_updates",
+  "outputSeverity": "Info",
+  "tags": ["device", "updates", "hotfix"]
+}

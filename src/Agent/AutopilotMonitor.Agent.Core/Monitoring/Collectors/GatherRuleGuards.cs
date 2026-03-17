@@ -2,17 +2,22 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
+using Newtonsoft.Json.Linq;
 
 namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 {
     /// <summary>
     /// Privacy and security guards for GatherRule collectors.
     ///
-    /// All four allowlists (registry, file, WMI, command) restrict data collection to
-    /// enrollment-relevant information only. Rules targeting paths, queries, or commands
-    /// outside these lists are blocked and reported as security_warning events.
+    /// All allowlists are loaded from the embedded guardrails.json resource
+    /// (source of truth: rules/guardrails.json). They restrict data collection
+    /// to enrollment-relevant information only. Rules targeting paths, queries,
+    /// or commands outside these lists are blocked and reported as security_warning events.
     ///
-    /// To allow additional paths: add a prefix entry to the appropriate list.
+    /// To allow additional paths: edit rules/guardrails.json and run
+    /// node rules/scripts/combine.js to regenerate all derived files.
+    ///
     /// Segment-bounded matching is used: the path must match the prefix exactly
     /// up to a path separator or end of string, preventing prefix spoofing.
     /// Registry paths are expected without the hive prefix (e.g. "SOFTWARE\\Microsoft\\..." not "HKLM\\...").
@@ -22,135 +27,84 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
     public static class GatherRuleGuards
     {
         // -----------------------------------------------------------------------
-        // Registry — subPath after hive prefix stripped (HKLM\\ / HKCU\\)
+        // Loaded from embedded guardrails.json
         // -----------------------------------------------------------------------
-        public static readonly IReadOnlyList<string> AllowedRegistryPrefixes = new[]
-        {
-            // MDM / Enrollment
-            @"SOFTWARE\Microsoft\Enrollments",
-            @"SOFTWARE\Microsoft\EnterpriseDesktopAppManagement",
-            @"SOFTWARE\Microsoft\Provisioning",
-            @"SOFTWARE\Microsoft\PolicyManager",
-            @"SOFTWARE\Microsoft\Windows\CurrentVersion\MDM",
-
-            // AAD / Hybrid Join / Workplace Join
-            @"SOFTWARE\Microsoft\IdentityStore",
-            @"SYSTEM\CurrentControlSet\Control\CloudDomainJoin",
-
-            // Windows Update / WUfB
-            @"SOFTWARE\Microsoft\WindowsUpdate",
-            @"SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate",
-
-            // BitLocker
-            @"SOFTWARE\Microsoft\BitLocker",
-            @"SYSTEM\CurrentControlSet\Control\BitLockerStatus",
-
-            // Network / Proxy (enrollment connectivity)
-            @"SOFTWARE\Microsoft\Windows\CurrentVersion\Internet Settings",
-            @"SYSTEM\CurrentControlSet\Services\Tcpip",
-
-            // Autopilot / OOBE / Setup
-            @"SOFTWARE\Microsoft\Windows\CurrentVersion\Setup",
-            @"SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE",
-            @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon",
-
-            // TPM
-            @"SYSTEM\CurrentControlSet\Services\TPM",
-            @"SOFTWARE\Microsoft\Tpm",
-
-            // Intune IME
-            @"SOFTWARE\Microsoft\IntuneManagementExtension",
-
-            // SCEP / Certificate enrollment
-            @"SOFTWARE\Microsoft\SystemCertificates",
-            @"SOFTWARE\Policies\Microsoft\SystemCertificates",
-        };
-
-        // -----------------------------------------------------------------------
-        // File — after Environment.ExpandEnvironmentVariables
-        // -----------------------------------------------------------------------
-        public static readonly IReadOnlyList<string> AllowedFilePrefixes = new[]
-        {
-            // Intune Management Extension logs
-            @"C:\ProgramData\Microsoft\IntuneManagementExtension\Logs",
-
-            // ConfigMgr / MECM client logs (hybrid scenarios)
-            @"C:\Windows\CCM\Logs",
-
-            // Windows setup / upgrade logs
-            @"C:\Windows\Logs",
-            @"C:\Windows\Panther",
-            @"C:\Windows\SetupDiag",
-
-            // MDM Diagnostics
-            @"C:\ProgramData\Microsoft\DiagnosticLogCSP",
-
-            // Windows Update logs
-            @"C:\Windows\SoftwareDistribution\ReportingEvents.log",
-        };
-
-        // -----------------------------------------------------------------------
-        // WMI — full query string must start with one of these prefixes
-        // Only SELECT queries against known safe classes are permitted.
-        // -----------------------------------------------------------------------
-        public static readonly IReadOnlyList<string> AllowedWmiQueryPrefixes = new[]
-        {
-            // OS / Hardware identity
-            "SELECT * FROM Win32_OperatingSystem",
-            "SELECT * FROM Win32_ComputerSystem",
-            "SELECT * FROM Win32_BIOS",
-            "SELECT * FROM Win32_Processor",
-            "SELECT * FROM Win32_BaseBoard",
-            "SELECT * FROM Win32_Battery",
-
-            // TPM
-            "SELECT * FROM Win32_TPM",
-
-            // Network
-            "SELECT * FROM Win32_NetworkAdapter",
-            "SELECT * FROM Win32_NetworkAdapterConfiguration",
-
-            // Storage
-            "SELECT * FROM Win32_DiskDrive",
-            "SELECT * FROM Win32_LogicalDisk",
-
-            // Windows licensing / activation
-            "SELECT * FROM SoftwareLicensingProduct",
-        };
-
-        // -----------------------------------------------------------------------
-        // Command — exact match (trimmed); no prefix matching for security
-        // -----------------------------------------------------------------------
-        public static readonly IReadOnlyCollection<string> AllowedCommands = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            // TPM and Security
-            "Get-Tpm",
-            "Get-SecureBootPolicy",
-            "Get-SecureBootUEFI -Name SetupMode",
-
-            // BitLocker
-            "Get-BitLockerVolume -MountPoint C:",
-
-            // Network
-            "Get-NetAdapter | Select-Object Name, Status, InterfaceDescription, MacAddress, LinkSpeed",
-            "Get-DnsClientServerAddress | Select-Object InterfaceAlias, ServerAddresses",
-            "Get-NetIPConfiguration | Select-Object InterfaceAlias, IPv4Address, IPv4DefaultGateway, DNSServer",
-            "netsh winhttp show proxy",
-            "ipconfig /all",
-
-            // Domain / Identity
-            "nltest /dsgetdc:",
-            "dsregcmd /status",
-
-            // Certificate
-            "certutil -store My",
-
-            // Windows Update
-            "Get-HotFix | Select-Object -First 10 HotFixID, InstalledOn, Description"
-        };
+        public static readonly IReadOnlyList<string> AllowedRegistryPrefixes;
+        public static readonly IReadOnlyList<string> AllowedFilePrefixes;
+        public static readonly IReadOnlyList<string> AllowedWmiQueryPrefixes;
+        public static readonly IReadOnlyCollection<string> AllowedCommands;
 
         // Hard block: C:\Users is never allowed, even in unrestricted mode
         private static readonly string BlockedUsersPrefix = Path.GetFullPath(@"C:\Users");
+
+        static GatherRuleGuards()
+        {
+            try
+            {
+                var json = LoadEmbeddedGuardrails();
+                if (json != null)
+                {
+                    var obj = JObject.Parse(json);
+
+                    AllowedRegistryPrefixes = FlattenCategorized(obj, "registryPrefixes", "prefixes");
+                    AllowedFilePrefixes = obj["filePrefixes"]?.ToObject<List<string>>() ?? new List<string>();
+                    AllowedWmiQueryPrefixes = obj["wmiQueryPrefixes"]?.ToObject<List<string>>() ?? new List<string>();
+
+                    var commands = FlattenCategorized(obj, "allowedCommands", "commands");
+                    AllowedCommands = new HashSet<string>(commands, StringComparer.OrdinalIgnoreCase);
+                    return;
+                }
+            }
+            catch
+            {
+                // Fallback to empty lists on parse error — agent will block everything
+                // and emit security_warning events, making the issue visible.
+            }
+
+            AllowedRegistryPrefixes = new List<string>();
+            AllowedFilePrefixes = new List<string>();
+            AllowedWmiQueryPrefixes = new List<string>();
+            AllowedCommands = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        private static string LoadEmbeddedGuardrails()
+        {
+            var assembly = Assembly.GetExecutingAssembly();
+            using (var stream = assembly.GetManifestResourceStream(
+                "AutopilotMonitor.Agent.Core.Resources.guardrails.json"))
+            {
+                if (stream == null)
+                    return null;
+                using (var reader = new StreamReader(stream))
+                {
+                    return reader.ReadToEnd();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Flattens a categorized array structure like
+        /// [{ "category": "...", "prefixes": ["a","b"] }, ...] into ["a","b",...].
+        /// </summary>
+        private static List<string> FlattenCategorized(JObject root, string arrayProp, string itemsProp)
+        {
+            var result = new List<string>();
+            var arr = root[arrayProp] as JArray;
+            if (arr == null) return result;
+
+            foreach (var group in arr)
+            {
+                var items = group[itemsProp] as JArray;
+                if (items == null) continue;
+                foreach (var item in items)
+                {
+                    var val = item.Value<string>();
+                    if (!string.IsNullOrEmpty(val))
+                        result.Add(val);
+                }
+            }
+            return result;
+        }
 
         // -----------------------------------------------------------------------
         // Guard methods

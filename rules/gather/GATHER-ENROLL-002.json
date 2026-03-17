@@ -1,0 +1,17 @@
+{
+  "$schema": "../schema/gather-rule.schema.json",
+  "ruleId": "GATHER-ENROLL-002",
+  "title": "Applied MDM device policies",
+  "description": "Reads the PolicyManager registry key to list all MDM device policies that have been applied. Verifies that expected compliance and configuration policies landed on the device during enrollment.",
+  "category": "enrollment",
+  "version": "1.0.0",
+  "author": "Autopilot Monitor",
+  "enabled": false,
+  "collectorType": "registry",
+  "target": "HKLM\\SOFTWARE\\Microsoft\\PolicyManager\\current\\device",
+  "trigger": "phase_change",
+  "triggerPhase": "FinalizingSetup",
+  "outputEventType": "gather_mdm_device_policies",
+  "outputSeverity": "Info",
+  "tags": ["enrollment", "mdm", "policies", "compliance"]
+}

@@ -2,6 +2,25 @@
   "$schema": "../schema/gather-rule.schema.json",
   "rules": [
     {
+      "ruleId": "GATHER-APPS-001",
+      "title": "IME Logs directory check",
+      "description": "Checks whether the Intune Management Extension log directory exists and reports file sizes. Useful to verify IME is active and logs are being written.",
+      "category": "apps",
+      "version": "1.0.0",
+      "author": "Autopilot Monitor",
+      "enabled": false,
+      "collectorType": "file",
+      "target": "C:\\ProgramData\\Microsoft\\IntuneManagementExtension\\Logs",
+      "trigger": "startup",
+      "outputEventType": "gather_ime_logs_directory",
+      "outputSeverity": "Info",
+      "tags": [
+        "apps",
+        "ime",
+        "logs"
+      ]
+    },
+    {
       "ruleId": "GATHER-DEVICE-001",
       "title": "Collect dsregcmd join status",
       "description": "Runs dsregcmd /status to capture the Azure AD / Entra join state when the device enters the Account Setup phase.",
@@ -43,6 +62,127 @@
         "device",
         "startup",
         "boot"
+      ]
+    },
+    {
+      "ruleId": "GATHER-DEVICE-003",
+      "title": "BIOS information",
+      "description": "Queries WMI for BIOS details including manufacturer, version, serial number, and release date. Helps correlate firmware-level issues with enrollment problems.",
+      "category": "device",
+      "version": "1.0.0",
+      "author": "Autopilot Monitor",
+      "enabled": false,
+      "collectorType": "wmi",
+      "target": "SELECT * FROM Win32_BIOS",
+      "trigger": "startup",
+      "outputEventType": "gather_bios_info",
+      "outputSeverity": "Info",
+      "tags": [
+        "device",
+        "bios",
+        "hardware"
+      ]
+    },
+    {
+      "ruleId": "GATHER-DEVICE-004",
+      "title": "Recent Windows updates",
+      "description": "Lists the 10 most recent hotfixes/updates installed on the device. Useful for correlating known issues with specific KB articles or verifying that prerequisite updates are present.",
+      "category": "device",
+      "version": "1.0.0",
+      "author": "Autopilot Monitor",
+      "enabled": false,
+      "collectorType": "command_allowlisted",
+      "target": "Get-HotFix | Select-Object -First 10 HotFixID, InstalledOn, Description",
+      "trigger": "startup",
+      "outputEventType": "gather_recent_updates",
+      "outputSeverity": "Info",
+      "tags": [
+        "device",
+        "updates",
+        "hotfix"
+      ]
+    },
+    {
+      "ruleId": "GATHER-DEVICE-005",
+      "title": "Pending reboot detection",
+      "description": "Checks the Component Based Servicing registry key for a pending reboot after app installations. A pending reboot at FinalizingSetup can delay or block enrollment completion.",
+      "category": "device",
+      "version": "1.0.0",
+      "author": "Autopilot Monitor",
+      "enabled": false,
+      "collectorType": "registry",
+      "target": "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Component Based Servicing\\RebootPending",
+      "trigger": "phase_change",
+      "triggerPhase": "FinalizingSetup",
+      "outputEventType": "gather_pending_reboot",
+      "outputSeverity": "Warning",
+      "tags": [
+        "device",
+        "reboot",
+        "servicing"
+      ]
+    },
+    {
+      "ruleId": "GATHER-ENROLL-001",
+      "title": "MDM enrollment diagnostic events",
+      "description": "Collects recent events from the DeviceManagement Enterprise Diagnostics Provider at the FinalizingSetup phase. Captures MDM sync errors, policy application failures, and enrollment diagnostics accumulated throughout the session.",
+      "category": "enrollment",
+      "version": "1.0.0",
+      "author": "Autopilot Monitor",
+      "enabled": false,
+      "collectorType": "eventlog",
+      "target": "Microsoft-Windows-DeviceManagement-Enterprise-Diagnostics-Provider/Admin",
+      "parameters": {
+        "maxEntries": "10"
+      },
+      "trigger": "phase_change",
+      "triggerPhase": "FinalizingSetup",
+      "outputEventType": "gather_mdm_enrollment_events",
+      "outputSeverity": "Info",
+      "tags": [
+        "enrollment",
+        "mdm",
+        "diagnostics"
+      ]
+    },
+    {
+      "ruleId": "GATHER-ENROLL-002",
+      "title": "Applied MDM device policies",
+      "description": "Reads the PolicyManager registry key to list all MDM device policies that have been applied. Verifies that expected compliance and configuration policies landed on the device during enrollment.",
+      "category": "enrollment",
+      "version": "1.0.0",
+      "author": "Autopilot Monitor",
+      "enabled": false,
+      "collectorType": "registry",
+      "target": "HKLM\\SOFTWARE\\Microsoft\\PolicyManager\\current\\device",
+      "trigger": "phase_change",
+      "triggerPhase": "FinalizingSetup",
+      "outputEventType": "gather_mdm_device_policies",
+      "outputSeverity": "Info",
+      "tags": [
+        "enrollment",
+        "mdm",
+        "policies",
+        "compliance"
+      ]
+    },
+    {
+      "ruleId": "GATHER-ID-001",
+      "title": "Machine certificates",
+      "description": "Lists certificates in the local machine personal store (My). Verifies that the MDM enrollment certificate and any SCEP certificates have been provisioned.",
+      "category": "identity",
+      "version": "1.0.0",
+      "author": "Autopilot Monitor",
+      "enabled": false,
+      "collectorType": "command_allowlisted",
+      "target": "certutil -store My",
+      "trigger": "startup",
+      "outputEventType": "gather_machine_certificates",
+      "outputSeverity": "Info",
+      "tags": [
+        "identity",
+        "certificates",
+        "scep"
       ]
     }
   ]

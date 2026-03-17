@@ -1,0 +1,17 @@
+{
+  "$schema": "../schema/gather-rule.schema.json",
+  "ruleId": "GATHER-DEVICE-005",
+  "title": "Pending reboot detection",
+  "description": "Checks the Component Based Servicing registry key for a pending reboot after app installations. A pending reboot at FinalizingSetup can delay or block enrollment completion.",
+  "category": "device",
+  "version": "1.0.0",
+  "author": "Autopilot Monitor",
+  "enabled": false,
+  "collectorType": "registry",
+  "target": "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Component Based Servicing\\RebootPending",
+  "trigger": "phase_change",
+  "triggerPhase": "FinalizingSetup",
+  "outputEventType": "gather_pending_reboot",
+  "outputSeverity": "Warning",
+  "tags": ["device", "reboot", "servicing"]
+}

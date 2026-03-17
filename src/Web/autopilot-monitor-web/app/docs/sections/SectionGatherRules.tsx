@@ -1,6 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import {
+  REGISTRY_PREFIX_CATEGORIES,
+  COMMAND_CATEGORIES,
+  ALLOWED_FILE_PREFIXES,
+  ALLOWED_WMI_QUERY_PREFIXES,
+} from "@/lib/guardrails.generated";
 
 function GuardToggle({ label, children }: { label: string; children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
@@ -68,36 +74,12 @@ export function SectionGatherRules() {
             <p className="text-xs text-gray-500 mt-0.5">All paths are under <code className="bg-gray-100 px-1 rounded">HKLM\</code> or <code className="bg-gray-100 px-1 rounded">HKCU\</code>. Segment-bounded matching — subkeys are allowed, but sibling keys are not.</p>
             <GuardToggle label="Show allowed registry prefixes">
               <div className="bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs font-mono space-y-1">
-                <p className="text-gray-400 font-sans not-italic">MDM / Enrollment</p>
-                <p>SOFTWARE\Microsoft\Enrollments</p>
-                <p>SOFTWARE\Microsoft\EnterpriseDesktopAppManagement</p>
-                <p>SOFTWARE\Microsoft\Provisioning</p>
-                <p>SOFTWARE\Microsoft\PolicyManager</p>
-                <p>SOFTWARE\Microsoft\Windows\CurrentVersion\MDM</p>
-                <p className="text-gray-400 font-sans not-italic pt-1">AAD / Entra Join</p>
-                <p>SOFTWARE\Microsoft\IdentityStore</p>
-                <p>SYSTEM\CurrentControlSet\Control\CloudDomainJoin</p>
-                <p className="text-gray-400 font-sans not-italic pt-1">Windows Update / WUfB</p>
-                <p>SOFTWARE\Microsoft\WindowsUpdate</p>
-                <p>SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate</p>
-                <p className="text-gray-400 font-sans not-italic pt-1">BitLocker</p>
-                <p>SOFTWARE\Microsoft\BitLocker</p>
-                <p>SYSTEM\CurrentControlSet\Control\BitLockerStatus</p>
-                <p className="text-gray-400 font-sans not-italic pt-1">Network / Proxy</p>
-                <p>SOFTWARE\Microsoft\Windows\CurrentVersion\Internet Settings</p>
-                <p>SYSTEM\CurrentControlSet\Services\Tcpip</p>
-                <p className="text-gray-400 font-sans not-italic pt-1">Autopilot / OOBE / Setup</p>
-                <p>SOFTWARE\Microsoft\Windows\CurrentVersion\Setup</p>
-                <p>SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE</p>
-                <p>SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon</p>
-                <p className="text-gray-400 font-sans not-italic pt-1">TPM</p>
-                <p>SYSTEM\CurrentControlSet\Services\TPM</p>
-                <p>SOFTWARE\Microsoft\Tpm</p>
-                <p className="text-gray-400 font-sans not-italic pt-1">Intune IME</p>
-                <p>SOFTWARE\Microsoft\IntuneManagementExtension</p>
-                <p className="text-gray-400 font-sans not-italic pt-1">Certificates (SCEP)</p>
-                <p>SOFTWARE\Microsoft\SystemCertificates</p>
-                <p>SOFTWARE\Policies\Microsoft\SystemCertificates</p>
+                {REGISTRY_PREFIX_CATEGORIES.map((cat, i) => (
+                  <div key={cat.category}>
+                    <p className={`text-gray-400 font-sans not-italic${i > 0 ? " pt-1" : ""}`}>{cat.category}</p>
+                    {cat.items.map((p) => <p key={p}>{p}</p>)}
+                  </div>
+                ))}
               </div>
             </GuardToggle>
           </div>
@@ -161,18 +143,10 @@ export function SectionGatherRules() {
             <p className="font-medium text-gray-900">Allowed WMI Classes</p>
             <GuardToggle label="Show allowed WMI classes">
               <div className="bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs font-mono columns-2 space-y-0.5">
-                <p>Win32_OperatingSystem</p>
-                <p>Win32_ComputerSystem</p>
-                <p>Win32_BIOS</p>
-                <p>Win32_Processor</p>
-                <p>Win32_BaseBoard</p>
-                <p>Win32_Battery</p>
-                <p>Win32_TPM</p>
-                <p>Win32_NetworkAdapter</p>
-                <p>Win32_NetworkAdapterConfiguration</p>
-                <p>Win32_DiskDrive</p>
-                <p>Win32_LogicalDisk</p>
-                <p>SoftwareLicensingProduct</p>
+                {ALLOWED_WMI_QUERY_PREFIXES.map((q) => {
+                  const cls = q.replace(/^SELECT \* FROM /i, "");
+                  return <p key={cls}>{cls}</p>;
+                })}
               </div>
             </GuardToggle>
           </div>
@@ -209,13 +183,7 @@ export function SectionGatherRules() {
             <p className="font-medium text-gray-900">Allowed Path Prefixes</p>
             <GuardToggle label="Show allowed file path prefixes">
               <div className="bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs font-mono space-y-0.5">
-                <p>C:\ProgramData\Microsoft\IntuneManagementExtension\Logs</p>
-                <p>C:\Windows\CCM\Logs</p>
-                <p>C:\Windows\Logs</p>
-                <p>C:\Windows\Panther</p>
-                <p>C:\Windows\SetupDiag</p>
-                <p>C:\ProgramData\Microsoft\DiagnosticLogCSP</p>
-                <p>C:\Windows\SoftwareDistribution\ReportingEvents.log</p>
+                {ALLOWED_FILE_PREFIXES.map((p) => <p key={p}>{p}</p>)}
               </div>
             </GuardToggle>
           </div>
@@ -246,25 +214,12 @@ export function SectionGatherRules() {
             <p className="font-medium text-gray-900">Allowed Commands</p>
             <GuardToggle label="Show allowed commands">
               <div className="bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs font-mono space-y-0.5">
-                <p className="text-gray-400"># TPM and Security</p>
-                <p>Get-Tpm</p>
-                <p>Get-SecureBootPolicy</p>
-                <p>Get-SecureBootUEFI -Name SetupMode</p>
-                <p className="text-gray-400"># BitLocker</p>
-                <p>Get-BitLockerVolume -MountPoint C:</p>
-                <p className="text-gray-400"># Network</p>
-                <p>Get-NetAdapter | Select-Object Name, Status, InterfaceDescription, MacAddress, LinkSpeed</p>
-                <p>Get-DnsClientServerAddress | Select-Object InterfaceAlias, ServerAddresses</p>
-                <p>Get-NetIPConfiguration | Select-Object InterfaceAlias, IPv4Address, IPv4DefaultGateway, DNSServer</p>
-                <p>netsh winhttp show proxy</p>
-                <p>ipconfig /all</p>
-                <p className="text-gray-400"># Domain / Identity</p>
-                <p>nltest /dsgetdc:</p>
-                <p>dsregcmd /status</p>
-                <p className="text-gray-400"># Certificate</p>
-                <p>certutil -store My</p>
-                <p className="text-gray-400"># Windows Update</p>
-                <p>Get-HotFix | Select-Object -First 10 HotFixID, InstalledOn, Description</p>
+                {COMMAND_CATEGORIES.map((cat) => (
+                  <div key={cat.category}>
+                    <p className="text-gray-400"># {cat.category}</p>
+                    {cat.items.map((cmd) => <p key={cmd}>{cmd}</p>)}
+                  </div>
+                ))}
               </div>
             </GuardToggle>
           </div>

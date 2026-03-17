@@ -1,0 +1,16 @@
+{
+  "$schema": "../schema/gather-rule.schema.json",
+  "ruleId": "GATHER-DEVICE-003",
+  "title": "BIOS information",
+  "description": "Queries WMI for BIOS details including manufacturer, version, serial number, and release date. Helps correlate firmware-level issues with enrollment problems.",
+  "category": "device",
+  "version": "1.0.0",
+  "author": "Autopilot Monitor",
+  "enabled": false,
+  "collectorType": "wmi",
+  "target": "SELECT * FROM Win32_BIOS",
+  "trigger": "startup",
+  "outputEventType": "gather_bios_info",
+  "outputSeverity": "Info",
+  "tags": ["device", "bios", "hardware"]
+}

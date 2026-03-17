@@ -1,0 +1,160 @@
+{
+  "registryPrefixes": [
+    {
+      "category": "MDM / Enrollment",
+      "prefixes": [
+        "SOFTWARE\\Microsoft\\Enrollments",
+        "SOFTWARE\\Microsoft\\EnterpriseDesktopAppManagement",
+        "SOFTWARE\\Microsoft\\Provisioning",
+        "SOFTWARE\\Microsoft\\PolicyManager",
+        "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\MDM"
+      ]
+    },
+    {
+      "category": "AAD / Entra Join",
+      "prefixes": [
+        "SOFTWARE\\Microsoft\\IdentityStore",
+        "SYSTEM\\CurrentControlSet\\Control\\CloudDomainJoin"
+      ]
+    },
+    {
+      "category": "Windows Update / WUfB",
+      "prefixes": [
+        "SOFTWARE\\Microsoft\\WindowsUpdate",
+        "SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate"
+      ]
+    },
+    {
+      "category": "BitLocker",
+      "prefixes": [
+        "SOFTWARE\\Microsoft\\BitLocker",
+        "SYSTEM\\CurrentControlSet\\Control\\BitLockerStatus"
+      ]
+    },
+    {
+      "category": "Network / Proxy",
+      "prefixes": [
+        "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
+        "SYSTEM\\CurrentControlSet\\Services\\Tcpip"
+      ]
+    },
+    {
+      "category": "Autopilot / OOBE / Setup",
+      "prefixes": [
+        "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Setup",
+        "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\OOBE",
+        "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon"
+      ]
+    },
+    {
+      "category": "TPM",
+      "prefixes": [
+        "SYSTEM\\CurrentControlSet\\Services\\TPM",
+        "SOFTWARE\\Microsoft\\Tpm"
+      ]
+    },
+    {
+      "category": "Intune IME",
+      "prefixes": [
+        "SOFTWARE\\Microsoft\\IntuneManagementExtension"
+      ]
+    },
+    {
+      "category": "Certificates (SCEP)",
+      "prefixes": [
+        "SOFTWARE\\Microsoft\\SystemCertificates",
+        "SOFTWARE\\Policies\\Microsoft\\SystemCertificates"
+      ]
+    },
+    {
+      "category": "Servicing",
+      "prefixes": [
+        "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Component Based Servicing"
+      ]
+    }
+  ],
+  "filePrefixes": [
+    "C:\\ProgramData\\Microsoft\\IntuneManagementExtension\\Logs",
+    "C:\\Windows\\CCM\\Logs",
+    "C:\\Windows\\Logs",
+    "C:\\Windows\\Panther",
+    "C:\\Windows\\SetupDiag",
+    "C:\\ProgramData\\Microsoft\\DiagnosticLogCSP",
+    "C:\\Windows\\SoftwareDistribution\\ReportingEvents.log"
+  ],
+  "wmiQueryPrefixes": [
+    "SELECT * FROM Win32_OperatingSystem",
+    "SELECT * FROM Win32_ComputerSystem",
+    "SELECT * FROM Win32_BIOS",
+    "SELECT * FROM Win32_Processor",
+    "SELECT * FROM Win32_BaseBoard",
+    "SELECT * FROM Win32_Battery",
+    "SELECT * FROM Win32_TPM",
+    "SELECT * FROM Win32_NetworkAdapter",
+    "SELECT * FROM Win32_NetworkAdapterConfiguration",
+    "SELECT * FROM Win32_DiskDrive",
+    "SELECT * FROM Win32_LogicalDisk",
+    "SELECT * FROM SoftwareLicensingProduct"
+  ],
+  "allowedCommands": [
+    {
+      "category": "TPM and Security",
+      "commands": [
+        "Get-Tpm",
+        "Get-SecureBootPolicy",
+        "Get-SecureBootUEFI -Name SetupMode"
+      ]
+    },
+    {
+      "category": "BitLocker",
+      "commands": [
+        "Get-BitLockerVolume -MountPoint C:"
+      ]
+    },
+    {
+      "category": "Network",
+      "commands": [
+        "Get-NetAdapter | Select-Object Name, Status, InterfaceDescription, MacAddress, LinkSpeed",
+        "Get-DnsClientServerAddress | Select-Object InterfaceAlias, ServerAddresses",
+        "Get-NetIPConfiguration | Select-Object InterfaceAlias, IPv4Address, IPv4DefaultGateway, DNSServer",
+        "netsh winhttp show proxy",
+        "ipconfig /all"
+      ]
+    },
+    {
+      "category": "Domain / Identity",
+      "commands": [
+        "nltest /dsgetdc:",
+        "dsregcmd /status"
+      ]
+    },
+    {
+      "category": "Certificate",
+      "commands": [
+        "certutil -store My"
+      ]
+    },
+    {
+      "category": "Windows Update",
+      "commands": [
+        "Get-HotFix | Select-Object -First 10 HotFixID, InstalledOn, Description"
+      ]
+    }
+  ],
+  "diagnosticsPathPrefixes": [
+    "C:\\ProgramData\\AutopilotMonitor",
+    "C:\\ProgramData\\Microsoft\\IntuneManagementExtension\\Logs",
+    "C:\\Windows\\Panther",
+    "C:\\Windows\\Logs",
+    "C:\\Windows\\SetupDiag",
+    "C:\\Windows\\SoftwareDistribution\\ReportingEvents.log",
+    "C:\\Windows\\System32\\winevt\\Logs",
+    "C:\\Windows\\CCM\\Logs",
+    "C:\\ProgramData\\Microsoft\\DiagnosticLogCSP",
+    "C:\\ProgramData\\Microsoft\\Windows\\WER",
+    "C:\\Windows\\Logs\\CBS"
+  ],
+  "blockedFilePrefixes": [
+    "C:\\Users"
+  ]
+}

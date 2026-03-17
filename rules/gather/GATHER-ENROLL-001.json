@@ -1,0 +1,20 @@
+{
+  "$schema": "../schema/gather-rule.schema.json",
+  "ruleId": "GATHER-ENROLL-001",
+  "title": "MDM enrollment diagnostic events",
+  "description": "Collects recent events from the DeviceManagement Enterprise Diagnostics Provider at the FinalizingSetup phase. Captures MDM sync errors, policy application failures, and enrollment diagnostics accumulated throughout the session.",
+  "category": "enrollment",
+  "version": "1.0.0",
+  "author": "Autopilot Monitor",
+  "enabled": false,
+  "collectorType": "eventlog",
+  "target": "Microsoft-Windows-DeviceManagement-Enterprise-Diagnostics-Provider/Admin",
+  "parameters": {
+    "maxEntries": "10"
+  },
+  "trigger": "phase_change",
+  "triggerPhase": "FinalizingSetup",
+  "outputEventType": "gather_mdm_enrollment_events",
+  "outputSeverity": "Info",
+  "tags": ["enrollment", "mdm", "diagnostics"]
+}
