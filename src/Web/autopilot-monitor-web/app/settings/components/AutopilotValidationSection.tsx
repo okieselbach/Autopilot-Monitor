@@ -80,6 +80,12 @@ export default function AutopilotValidationSection({
         </div>
       </div>
       <div className="p-6 space-y-5">
+        <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+          <p className="text-sm text-gray-700">
+            Both validations require the <strong>DeviceManagementServiceConfig.Read.All</strong> permission. Enabling either option starts Microsoft Entra admin consent if not already granted. After consent, the setting is saved automatically.
+          </p>
+        </div>
+
         {/* Windows Autopilot (v1) */}
         <div className="space-y-3">
           <p className="text-sm font-semibold text-gray-700 tracking-wide">Windows Autopilot</p>
@@ -87,7 +93,7 @@ export default function AutopilotValidationSection({
             <div>
               <p className="text-sm font-medium text-gray-900">Enable Autopilot Device Validation</p>
               <p className="text-sm text-gray-500">
-                Enabling starts Microsoft Entra admin consent for the <strong>DeviceManagementServiceConfig.Read.All</strong> permission. After consent, the setting is saved automatically.
+                Validates whether the device is registered as a Windows Autopilot device in the tenant.
               </p>
             </div>
             <button
@@ -108,7 +114,6 @@ export default function AutopilotValidationSection({
               <p className="text-sm font-medium text-gray-900">Enable Corporate Identifier Validation</p>
               <p className="text-sm text-gray-500">
                 Validates devices against Intune Corporate Device Identifiers (manufacturer + model + serial number).
-                Uses the <strong>DeviceManagementServiceConfig.Read.All</strong> permission.
               </p>
             </div>
             <button
