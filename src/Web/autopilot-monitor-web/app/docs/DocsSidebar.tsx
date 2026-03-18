@@ -1,9 +1,7 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { usePageSections } from "../../hooks/usePageSections";
 import { PageSectionItem } from "../../contexts/SidebarContext";
-import { useAuth } from "../../contexts/AuthContext";
 import { NAV_SECTIONS } from "./docsNavSections";
 import {
   KeyIcon,
@@ -37,28 +35,14 @@ const docsItems: PageSectionItem[] = NAV_SECTIONS.map((s) => ({
 }));
 
 export function DocsSidebar({ children }: { children: React.ReactNode }) {
-  const router = useRouter();
-  const { isAuthenticated } = useAuth();
-
   usePageSections(docsItems, "Contents", "route");
 
   return (
     <>
-      {/* Page header — top-14 when navbar present (authenticated), top-0 when public */}
-      <header className={`bg-white shadow-sm border-b border-gray-200 sticky ${isAuthenticated ? "top-14" : "top-0"} z-10`}>
-        <div className="px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex items-center justify-between">
-            <button
-              onClick={() => router.back()}
-              className="flex items-center space-x-2 text-gray-600 hover:text-gray-900 transition-colors"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-              </svg>
-              <span>Back</span>
-            </button>
-            <h1 className="text-2xl font-bold text-blue-600">Documentation</h1>
-          </div>
+      {/* Page header */}
+      <header className="bg-white shadow">
+        <div className="py-6 px-4 sm:px-6 lg:px-8">
+          <h1 className="text-3xl font-bold text-gray-900">Documentation</h1>
         </div>
       </header>
 
