@@ -22,7 +22,8 @@ import EventTimeline from "./components/EventTimeline";
 import AnalysisResultsSection from "./components/AnalysisResultsSection";
 import MarkFailedModal from "./components/MarkFailedModal";
 import ReportSessionModal from "./components/ReportSessionModal";
-import { UnifiedSidebar, SidebarItem } from "../../../components/UnifiedSidebar";
+import { usePageSections } from "../../../hooks/usePageSections";
+import { PageSectionItem } from "../../../contexts/SidebarContext";
 import { InformationCircleIcon, ComputerDesktopIcon, PlayCircleIcon, SparklesIcon, ChartBarIcon, CodeBracketIcon, ArrowDownTrayIcon, ListBulletIcon, ClockIcon } from "../../../lib/sidebarIcons";
 import DeviceDetailsCard from "./components/DeviceDetailsCard";
 import { generateUiExport, generateCsvExport, generateSessionCsvExport, generateRuleResultsCsvExport, SessionExportEvent } from "@/lib/sessionExportUtils";
@@ -724,6 +725,22 @@ export default function SessionDetailPage() {
     });
   };
 
+  const sessionSections: PageSectionItem[] = useMemo(() => {
+    const s: PageSectionItem[] = [];
+    if (session) s.push({ id: "section-session-info", label: "Session Info", icon: <InformationCircleIcon /> });
+    if (!isGatherRulesSession) s.push({ id: "section-device-details", label: "Device Details", icon: <ComputerDesktopIcon /> });
+    if (!isGatherRulesSession && session) s.push({ id: "section-enrollment-progress", label: "Enrollment Progress", icon: <PlayCircleIcon /> });
+    if (!isGatherRulesSession) s.push({ id: "section-analysis", label: "Analysis", icon: <SparklesIcon /> });
+    if (!isGatherRulesSession) s.push({ id: "section-performance", label: "Performance", icon: <ChartBarIcon /> });
+    if (!isGatherRulesSession) s.push({ id: "section-scripts", label: "Script Executions", icon: <CodeBracketIcon /> });
+    if (!isGatherRulesSession) s.push({ id: "section-downloads", label: "Downloads", icon: <ArrowDownTrayIcon /> });
+    if (!isGatherRulesSession) s.push({ id: "section-install-progress", label: "Install Progress", icon: <ListBulletIcon /> });
+    s.push({ id: "section-event-timeline", label: "Event Timeline", icon: <ClockIcon /> });
+    return s;
+  }, [session, isGatherRulesSession]);
+
+  usePageSections(sessionSections, "Sections", "scroll-spy");
+
   // Only show full-page loading spinner on the very first load (no data yet).
   // Subsequent refreshes (SignalR, 30s poll) keep the existing UI visible.
   if (loading && !session && events.length === 0) {
@@ -737,19 +754,6 @@ export default function SessionDetailPage() {
   return (
 <ProtectedRoute>
     <div className="min-h-screen bg-gray-50">
-      <UnifiedSidebar items={(() => {
-        const s: SidebarItem[] = [];
-        if (session) s.push({ id: "section-session-info", label: "Session Info", icon: <InformationCircleIcon /> });
-        if (!isGatherRulesSession) s.push({ id: "section-device-details", label: "Device Details", icon: <ComputerDesktopIcon /> });
-        if (!isGatherRulesSession && session) s.push({ id: "section-enrollment-progress", label: "Enrollment Progress", icon: <PlayCircleIcon /> });
-        if (!isGatherRulesSession) s.push({ id: "section-analysis", label: "Analysis", icon: <SparklesIcon /> });
-        if (!isGatherRulesSession) s.push({ id: "section-performance", label: "Performance", icon: <ChartBarIcon /> });
-        if (!isGatherRulesSession) s.push({ id: "section-scripts", label: "Script Executions", icon: <CodeBracketIcon /> });
-        if (!isGatherRulesSession) s.push({ id: "section-downloads", label: "Downloads", icon: <ArrowDownTrayIcon /> });
-        if (!isGatherRulesSession) s.push({ id: "section-install-progress", label: "Install Progress", icon: <ListBulletIcon /> });
-        s.push({ id: "section-event-timeline", label: "Event Timeline", icon: <ClockIcon /> });
-        return s;
-      })()} mode="scroll-spy" title="Sections">
       {/* Header */}
       <header className="bg-white shadow">
         <div className="py-6 px-4 sm:px-6 lg:px-8 flex items-center justify-between">
@@ -980,7 +984,6 @@ export default function SessionDetailPage() {
         />
 
       </main>
-      </UnifiedSidebar>
     </div>
   </ProtectedRoute>
   );

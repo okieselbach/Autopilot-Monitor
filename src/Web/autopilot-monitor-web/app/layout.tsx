@@ -9,6 +9,8 @@ import { GalacticNotificationProvider } from "../contexts/GalacticNotificationCo
 import { ThemeProvider } from "../contexts/ThemeContext";
 import Navbar from "../components/Navbar";
 import ScrollToTopButton from "../components/ScrollToTopButton";
+import { SidebarProvider } from "../contexts/SidebarContext";
+import { GlobalSidebar } from "../components/GlobalSidebar";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -117,9 +119,13 @@ export default function RootLayout({
               <GalacticNotificationProvider>
                 <TenantProvider>
                   <SignalRProvider>
-                    <Navbar />
-                    {children}
-                    <ScrollToTopButton />
+                    <SidebarProvider>
+                      <Navbar />
+                      <GlobalSidebar>
+                        {children}
+                      </GlobalSidebar>
+                      <ScrollToTopButton />
+                    </SidebarProvider>
                   </SignalRProvider>
                 </TenantProvider>
               </GalacticNotificationProvider>

@@ -14,7 +14,8 @@ import { VersionBlockSection } from "./components/VersionBlockSection";
 import { SessionExportSection } from "./components/SessionExportSection";
 import { AdminConfigSettingsSection } from "./components/AdminConfigSettingsSection";
 import { SessionReportsSection } from "./components/SessionReportsSection";
-import { UnifiedSidebar, SidebarItem } from "../../components/UnifiedSidebar";
+import { usePageSections } from "../../hooks/usePageSections";
+import { PageSectionItem } from "../../contexts/SidebarContext";
 import { BuildingOfficeIcon, DocumentTextIcon, ArrowDownTrayIcon, GearIcon, FolderIcon, WrenchScrewdriverIcon, NoSymbolIcon } from "../../lib/sidebarIcons";
 
 interface AdminConfiguration {
@@ -249,7 +250,7 @@ export default function AdminConfigurationPage() {
     setError(null);
   };
 
-  const adminSections: SidebarItem[] = [
+  const adminSections: PageSectionItem[] = [
     { id: "tenant-management", label: "Tenant Management", icon: <BuildingOfficeIcon /> },
     { id: "session-reports", label: "Session Reports", icon: <DocumentTextIcon /> },
     { id: "session-export", label: "Session Export", icon: <ArrowDownTrayIcon /> },
@@ -260,6 +261,8 @@ export default function AdminConfigurationPage() {
     { id: "version-block", label: "Version Block", icon: <NoSymbolIcon /> },
   ];
 
+  usePageSections(adminSections, "Admin", "scroll-spy");
+
   if (!galacticAdminMode) {
     return null;
   }
@@ -267,7 +270,6 @@ export default function AdminConfigurationPage() {
   return (
     <ProtectedRoute requireGalacticAdmin>
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      <UnifiedSidebar items={adminSections} mode="scroll-spy" title="Admin">
         {/* Header */}
         <header className="bg-white dark:bg-gray-800 shadow dark:shadow-gray-700">
           <div className="py-6 px-4 sm:px-6 lg:px-8">
@@ -407,7 +409,6 @@ export default function AdminConfigurationPage() {
             </div>
           </div>
         </main>
-      </UnifiedSidebar>
       </div>
     </ProtectedRoute>
   );

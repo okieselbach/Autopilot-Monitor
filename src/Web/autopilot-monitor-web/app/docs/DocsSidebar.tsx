@@ -1,7 +1,8 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { UnifiedSidebar, SidebarItem } from "../../components/UnifiedSidebar";
+import { usePageSections } from "../../hooks/usePageSections";
+import { PageSectionItem } from "../../contexts/SidebarContext";
 import { NAV_SECTIONS } from "./docsNavSections";
 import {
   KeyIcon,
@@ -27,7 +28,7 @@ const SECTION_ICONS: Record<string, React.ReactNode> = {
   "analyze-rules": <SparklesIcon />,
 };
 
-const docsItems: SidebarItem[] = NAV_SECTIONS.map((s) => ({
+const docsItems: PageSectionItem[] = NAV_SECTIONS.map((s) => ({
   id: s.id,
   label: s.label,
   icon: SECTION_ICONS[s.id],
@@ -37,8 +38,10 @@ const docsItems: SidebarItem[] = NAV_SECTIONS.map((s) => ({
 export function DocsSidebar({ children }: { children: React.ReactNode }) {
   const router = useRouter();
 
+  usePageSections(docsItems, "Contents", "route");
+
   return (
-    <UnifiedSidebar items={docsItems} mode="route" title="Contents">
+    <>
       {/* Page header */}
       <header className="bg-white shadow-sm border-b border-gray-200 sticky top-14 z-10">
         <div className="px-4 sm:px-6 lg:px-8 py-4">
@@ -64,6 +67,6 @@ export function DocsSidebar({ children }: { children: React.ReactNode }) {
           <p>Autopilot Monitor v1.0.0</p>
         </div>
       </div>
-    </UnifiedSidebar>
+    </>
   );
 }

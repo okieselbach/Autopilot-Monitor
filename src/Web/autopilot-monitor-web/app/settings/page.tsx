@@ -9,7 +9,8 @@ import { useNotifications } from "../../contexts/NotificationContext";
 import { API_BASE_URL } from "@/lib/config";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 import UnsavedChangesModal from "../../components/UnsavedChangesModal";
-import { UnifiedSidebar, SidebarItem } from "../../components/UnifiedSidebar";
+import { usePageSections } from "../../hooks/usePageSections";
+import { PageSectionItem } from "../../contexts/SidebarContext";
 import { ShieldCheckIcon, UsersIcon, CpuChipIcon, GearIcon, MagnifyingGlassIcon, LockClosedIcon, BellIcon, CloudArrowUpIcon, KeyIcon, CircleStackIcon, ArrowRightOnRectangleIcon } from "../../lib/sidebarIcons";
 import AutopilotValidationSection from "./components/AutopilotValidationSection";
 import AdminManagementSection from "./components/AdminManagementSection";
@@ -899,8 +900,8 @@ export default function SettingsPage() {
   };
 
   // Build sidebar sections based on user role
-  const settingsSections: SidebarItem[] = useMemo(() => {
-    const sections: SidebarItem[] = [];
+  const settingsSections: PageSectionItem[] = useMemo(() => {
+    const sections: PageSectionItem[] = [];
     if (user?.isTenantAdmin) {
       sections.push(
         { id: "autopilot-validation", label: "Autopilot Validation", icon: <ShieldCheckIcon /> },
@@ -925,6 +926,8 @@ export default function SettingsPage() {
     return sections;
   }, [user, config?.bootstrapTokenEnabled]);
 
+  usePageSections(settingsSections, "Settings", "scroll-spy");
+
   // Access gate: Admin → full settings, Operator with bootstrap → bootstrap only, others → redirect
   if (user && !user.isTenantAdmin && !user.isGalacticAdmin) {
     if (user.role === 'Operator' && user.canManageBootstrapTokens) {
@@ -943,7 +946,6 @@ export default function SettingsPage() {
   return (
     <ProtectedRoute>
       <div className="min-h-screen bg-gray-50">
-      <UnifiedSidebar items={settingsSections} mode="scroll-spy" title="Settings">
         {/* Header */}
         <header className="bg-white shadow">
           <div className="py-6 px-4 sm:px-6 lg:px-8">
@@ -1219,7 +1221,6 @@ export default function SettingsPage() {
           </div>
         )}
       </main>
-      </UnifiedSidebar>
       </div>
 
       <UnsavedChangesModal
