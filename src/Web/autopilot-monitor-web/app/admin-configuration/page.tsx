@@ -16,7 +16,7 @@ import { AdminConfigSettingsSection } from "./components/AdminConfigSettingsSect
 import { SessionReportsSection } from "./components/SessionReportsSection";
 import { usePageSections } from "../../hooks/usePageSections";
 import { PageSectionItem } from "../../contexts/SidebarContext";
-import { BuildingOfficeIcon, DocumentTextIcon, ArrowDownTrayIcon, GearIcon, FolderIcon, WrenchScrewdriverIcon, NoSymbolIcon } from "../../lib/sidebarIcons";
+import { BuildingOfficeIcon, DocumentTextIcon, ArrowDownTrayIcon, GearIcon, FolderIcon, WrenchScrewdriverIcon, NoSymbolIcon, ArrowPathIcon } from "../../lib/sidebarIcons";
 
 interface AdminConfiguration {
   partitionKey: string;
@@ -257,6 +257,7 @@ export default function AdminConfigurationPage() {
     { id: "global-settings", label: "Global Settings", icon: <GearIcon /> },
     { id: "diagnostics-log-paths", label: "Diagnostics Log Paths", icon: <FolderIcon /> },
     { id: "maintenance", label: "Maintenance", icon: <WrenchScrewdriverIcon /> },
+    { id: "fetch-and-reseed", label: "Fetch & Reseed", icon: <ArrowPathIcon /> },
     { id: "device-block", label: "Device Block", icon: <NoSymbolIcon /> },
     { id: "version-block", label: "Version Block", icon: <NoSymbolIcon /> },
   ];

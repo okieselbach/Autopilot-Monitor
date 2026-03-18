@@ -97,11 +97,6 @@ export default function PrivacyPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-4 text-sm">
-          <Link href="/docs" className="text-blue-700 hover:text-blue-800 font-medium">
-            Documentation
-          </Link>
-        </div>
       </main>
     </div>
   );

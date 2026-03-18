@@ -264,7 +264,7 @@ export function MaintenanceSection({
       </div>
 
       {/* Fetch & Reseed from GitHub */}
-      <div className="bg-gradient-to-br from-emerald-50 to-teal-50 dark:from-gray-800 dark:to-gray-800 border-2 border-emerald-300 dark:border-emerald-700 rounded-lg shadow-lg">
+      <div id="fetch-and-reseed" className="bg-gradient-to-br from-emerald-50 to-teal-50 dark:from-gray-800 dark:to-gray-800 border-2 border-emerald-300 dark:border-emerald-700 rounded-lg shadow-lg">
         <div className="p-6 border-b border-emerald-200 dark:border-emerald-700 bg-gradient-to-r from-emerald-100 to-teal-100 dark:from-emerald-900/40 dark:to-teal-900/40">
           <div className="flex items-center space-x-2">
             <svg className="w-6 h-6 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
