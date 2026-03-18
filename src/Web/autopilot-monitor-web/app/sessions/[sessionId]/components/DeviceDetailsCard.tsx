@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { EnrollmentEvent } from "../page";
+import { EnrollmentEvent } from "@/types";
 
 export default function DeviceDetailsCard({ events }: { events: EnrollmentEvent[] }) {
   const [expanded, setExpanded] = useState(false);

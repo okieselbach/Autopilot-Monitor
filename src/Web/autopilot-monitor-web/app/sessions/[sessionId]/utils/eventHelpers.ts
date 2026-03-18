@@ -1,4 +1,4 @@
-import { EnrollmentEvent } from "../page";
+import { EnrollmentEvent } from "@/types";
 
 // Pure helper — groups a flat event list into phase buckets.
 // Extracted from the useMemo so it can be called multiple times for WhiteGlove split timelines.

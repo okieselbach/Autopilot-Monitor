@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { RuleResult } from "../page";
+import { RuleResult } from "@/types";
 
 interface AnalysisResultsSectionProps {
   analysisResults: RuleResult[];

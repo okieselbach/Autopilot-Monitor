@@ -8,32 +8,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { useNotifications } from "../../contexts/NotificationContext";
 import { useSignalR } from "../../contexts/SignalRContext";
 import { ProtectedRoute } from "../../components/ProtectedRoute";
-
-interface Session {
-  sessionId: string;
-  tenantId: string;
-  serialNumber: string;
-  deviceName: string;
-  manufacturer: string;
-  model: string;
-  startedAt: string;
-  status: string;
-  currentPhase: number;
-  eventCount: number;
-  durationSeconds: number;
-  failureReason?: string;
-}
-
-interface EnrollmentEvent {
-  eventId: string;
-  sessionId: string;
-  timestamp: string;
-  eventType: string;
-  phase: number;
-  message: string;
-  sequence: number;
-  data?: Record<string, any>;
-}
+import { Session, EnrollmentEvent } from "@/types";
 
 function formatDuration(ms: number): string {
   const seconds = Math.floor(ms / 1000);

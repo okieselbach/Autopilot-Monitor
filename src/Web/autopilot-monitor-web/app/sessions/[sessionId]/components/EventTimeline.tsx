@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { EnrollmentEvent, Session } from "../page";
+import { EnrollmentEvent, Session } from "@/types";
 import { normalizeEventDataForDisplay } from "../utils/eventHelpers";
 
 interface EventTimelineProps {

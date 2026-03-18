@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { EnrollmentEvent } from "../page";
+import { EnrollmentEvent } from "@/types";
 import { V1_PHASES, V1_SKIP_USER_PHASES, V2_PHASES } from "../utils/phaseConstants";
 
 interface PhaseTimelineProps {

@@ -1,6 +1,6 @@
 "use client";
 
-import { TenantAdmin } from "../page";
+import { TenantAdmin } from "../types";
 
 interface AdminManagementSectionProps {
   admins: TenantAdmin[];

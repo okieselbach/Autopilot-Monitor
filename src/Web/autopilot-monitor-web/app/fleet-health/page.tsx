@@ -10,21 +10,7 @@ import { useNotifications } from "../../contexts/NotificationContext";
 import { API_BASE_URL } from "@/lib/config";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 import FleetStatCard from "./components/FleetStatCard";
-
-interface Session {
-  sessionId: string;
-  tenantId: string;
-  serialNumber: string;
-  deviceName: string;
-  manufacturer: string;
-  model: string;
-  startedAt: string;
-  status: string;
-  currentPhase: number;
-  eventCount: number;
-  durationSeconds: number;
-  failureReason?: string;
-}
+import { Session } from "@/types";
 
 interface AppMetric {
   appName: string;

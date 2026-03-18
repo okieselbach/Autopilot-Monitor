@@ -25,62 +25,7 @@ import ReportSessionModal from "./components/ReportSessionModal";
 import SectionNav, { SectionEntry } from "./components/SectionNav";
 import DeviceDetailsCard from "./components/DeviceDetailsCard";
 import { generateUiExport, generateCsvExport, generateSessionCsvExport, generateRuleResultsCsvExport, SessionExportEvent } from "@/lib/sessionExportUtils";
-
-export interface EnrollmentEvent {
-  eventId: string;
-  sessionId: string;
-  timestamp: string;
-  eventType: string;
-  severity: string;
-  source: string;
-  phase: number;
-  phaseName?: string;
-  message: string;
-  sequence: number;
-  data?: Record<string, any>;
-}
-
-export interface RuleResult {
-  resultId: string;
-  sessionId: string;
-  tenantId: string;
-  ruleId: string;
-  ruleTitle: string;
-  severity: string;
-  category: string;
-  confidenceScore: number;
-  explanation: string;
-  remediation: { title: string; steps: string[] }[];
-  relatedDocs: { title: string; url: string }[];
-  matchedConditions: Record<string, any>;
-  detectedAt: string;
-}
-
-export interface Session {
-  sessionId: string;
-  tenantId: string;
-  serialNumber: string;
-  deviceName: string;
-  manufacturer: string;
-  model: string;
-  startedAt: string;
-  completedAt?: string;
-  status: string;
-  currentPhase: number;
-  eventCount: number;
-  durationSeconds: number;
-  failureReason?: string;
-  enrollmentType?: string; // "v1" | "v2" — absent for sessions before this feature
-  diagnosticsBlobName?: string;
-  lastEventAt?: string;
-  isPreProvisioned?: boolean;
-  isHybridJoin?: boolean;
-  osBuild?: string;
-  osEdition?: string;
-  osLanguage?: string;
-  isUserDriven?: boolean;
-  agentVersion?: string;
-}
+import { Session, EnrollmentEvent, RuleResult } from "@/types";
 
 const GUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 

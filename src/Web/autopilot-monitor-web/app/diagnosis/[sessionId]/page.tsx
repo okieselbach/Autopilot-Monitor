@@ -10,49 +10,7 @@ import { ProtectedRoute } from "../../../components/ProtectedRoute";
 import { API_BASE_URL } from "@/lib/config";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 import { ConfidenceBadge, SeverityBadge } from "./components/DiagnosisBadges";
-
-interface EnrollmentEvent {
-  eventId: string;
-  sessionId: string;
-  timestamp: string;
-  eventType: string;
-  severity: string;
-  source: string;
-  phase: number;
-  phaseName?: string;
-  message: string;
-  sequence: number;
-  data?: Record<string, any>;
-}
-
-interface RuleResult {
-  resultId: string;
-  ruleId: string;
-  ruleTitle: string;
-  severity: string;
-  category: string;
-  confidenceScore: number;
-  explanation: string;
-  remediation: { title: string; steps: string[] }[];
-  relatedDocs: { title: string; url: string }[];
-  matchedConditions: Record<string, any>;
-  detectedAt: string;
-}
-
-interface Session {
-  sessionId: string;
-  tenantId: string;
-  serialNumber: string;
-  deviceName: string;
-  manufacturer: string;
-  model: string;
-  startedAt: string;
-  status: string;
-  currentPhase: number;
-  eventCount: number;
-  durationSeconds: number;
-  failureReason?: string;
-}
+import { Session, EnrollmentEvent, RuleResult } from "@/types";
 
 export default function DiagnosisPage() {
   const params = useParams();

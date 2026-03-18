@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Session } from "../page";
+import { Session } from "@/types";
 
 interface SessionInfoCardProps {
   session: Session;

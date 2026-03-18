@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { zipSync } from "fflate";
-import { Session, EnrollmentEvent, RuleResult } from "../page";
+import { Session, EnrollmentEvent, RuleResult } from "@/types";
 
 const MAX_AGENT_LOG_SIZE = 5 * 1024 * 1024; // 5 MB
 

@@ -1,17 +1,11 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
-using System.Diagnostics.Eventing.Reader;
-using System.IO;
 using System.Linq;
-using System.Management;
-using System.Text;
-using System.Text.RegularExpressions;
 using System.Threading;
 using AutopilotMonitor.Agent.Core.Logging;
+using AutopilotMonitor.Agent.Core.Monitoring.Collectors.GatherCollectors;
 using AutopilotMonitor.Agent.Core.Monitoring.Tracking;
 using AutopilotMonitor.Shared.Models;
-using Microsoft.Win32;
 
 namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 {
@@ -19,35 +13,62 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
     /// Executes gather rules received from the backend API
     /// Supports registry, eventlog, wmi, file, command_allowlisted, logparser, json, and xml collector types
     /// </summary>
-    public partial class GatherRuleExecutor : IDisposable
+    public class GatherRuleExecutor : IDisposable
     {
         private readonly AgentLogger _logger;
-        private readonly string _sessionId;
-        private readonly string _tenantId;
-        private readonly Action<EnrollmentEvent> _onEventCollected;
-        private readonly string _imeLogPathOverride;
+        private readonly GatherRuleContext _context;
+        private readonly Dictionary<string, IGatherRuleCollector> _collectors;
 
         private List<GatherRule> _activeRules = new List<GatherRule>();
         private readonly Dictionary<string, Timer> _intervalTimers = new Dictionary<string, Timer>();
         private readonly HashSet<string> _startupRulesExecuted = new HashSet<string>();
         private readonly HashSet<string> _phaseRulesExecuted = new HashSet<string>();
-        private readonly LogFilePositionTracker _filePositionTracker = new LogFilePositionTracker();
         private CountdownEvent _startupRulesLatch;   // non-null only while startup rules are pending
 
         /// <summary>
         /// When true, guardrails are relaxed: all registry, WMI, and command targets are allowed.
         /// File paths allow everything except C:\Users. Set from tenant configuration.
         /// </summary>
-        public bool UnrestrictedMode { get; set; } = false;
+        public bool UnrestrictedMode
+        {
+            get { return _context.UnrestrictedMode; }
+            set { _context.UnrestrictedMode = value; }
+        }
 
         public GatherRuleExecutor(string sessionId, string tenantId, Action<EnrollmentEvent> onEventCollected,
             AgentLogger logger, string imeLogPathOverride = null)
         {
-            _sessionId = sessionId ?? throw new ArgumentNullException(nameof(sessionId));
-            _tenantId = tenantId ?? throw new ArgumentNullException(nameof(tenantId));
-            _onEventCollected = onEventCollected ?? throw new ArgumentNullException(nameof(onEventCollected));
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-            _imeLogPathOverride = imeLogPathOverride;
+            if (sessionId == null) throw new ArgumentNullException(nameof(sessionId));
+            if (tenantId == null) throw new ArgumentNullException(nameof(tenantId));
+            if (onEventCollected == null) throw new ArgumentNullException(nameof(onEventCollected));
+            if (logger == null) throw new ArgumentNullException(nameof(logger));
+
+            _logger = logger;
+
+            var filePositionTracker = new LogFilePositionTracker();
+            _context = new GatherRuleContext(logger, sessionId, tenantId, onEventCollected, imeLogPathOverride, filePositionTracker);
+
+            // Register all collector strategies
+            var collectorList = new IGatherRuleCollector[]
+            {
+                new RegistryCollector(),
+                new WmiCollector(),
+                new CommandCollector(),
+                new FileCollector(),
+                new EventLogCollector(),
+                new LogParserCollector(),
+                new JsonCollector(),
+                new XmlCollector(),
+            };
+
+            _collectors = new Dictionary<string, IGatherRuleCollector>(StringComparer.OrdinalIgnoreCase);
+            foreach (var collector in collectorList)
+            {
+                _collectors[collector.CollectorType] = collector;
+            }
+
+            // Register legacy alias: "command" maps to the same collector as "command_allowlisted"
+            _collectors["command"] = _collectors["command_allowlisted"];
         }
 
         /// <summary>
@@ -151,49 +172,22 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             {
                 _logger.Info($"Executing gather rule: {rule.RuleId} ({rule.Title})");
 
-                Dictionary<string, object> result = null;
+                var collectorType = rule.CollectorType?.ToLower();
 
-                switch (rule.CollectorType?.ToLower())
+                IGatherRuleCollector collector;
+                if (collectorType == null || !_collectors.TryGetValue(collectorType, out collector))
                 {
-                    case "registry":
-                        result = ExecuteRegistryRule(rule);
-                        break;
-
-                    case "wmi":
-                        result = ExecuteWmiRule(rule);
-                        break;
-
-                    case "command_allowlisted":
-                    case "command": // legacy alias - both enforce the allowlist
-                        result = ExecuteCommandRule(rule);
-                        break;
-
-                    case "file":
-                        result = ExecuteFileRule(rule);
-                        break;
-
-                    case "eventlog":
-                        result = ExecuteEventLogRule(rule);
-                        break;
-
-                    case "json":
-                        result = ExecuteJsonRule(rule);
-                        break;
-
-                    case "xml":
-                        result = ExecuteXmlRule(rule);
-                        break;
-
-                    case "logparser":
-                        ExecuteLogParserRule(rule);
-                        return; // Return early - logparser emits events directly
-
-                    default:
-                        _logger.Warning($"Unknown collector type: {rule.CollectorType} for rule {rule.RuleId}");
-                        return;
+                    _logger.Warning($"Unknown collector type: {rule.CollectorType} for rule {rule.RuleId}");
+                    return;
                 }
 
-                if (result != null && result.Count > 0)
+                Dictionary<string, object> result = collector.Execute(rule, _context);
+
+                // LogParser (and potentially others) emit events directly and return null
+                if (result == null)
+                    return;
+
+                if (result.Count > 0)
                 {
                     result["ruleId"] = rule.RuleId;
                     result["ruleTitle"] = rule.Title;
@@ -205,18 +199,18 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     EventSeverity severity;
                     if (result.TryGetValue("_severityOverride", out severityOverride) && severityOverride is string sev)
                     {
-                        severity = ParseSeverity(sev);
+                        severity = GatherRuleContext.ParseSeverity(sev);
                         result.Remove("_severityOverride");
                     }
                     else
                     {
-                        severity = ParseSeverity(rule.OutputSeverity);
+                        severity = GatherRuleContext.ParseSeverity(rule.OutputSeverity);
                     }
 
-                    _onEventCollected(new EnrollmentEvent
+                    _context.OnEventCollected(new EnrollmentEvent
                     {
-                        SessionId = _sessionId,
-                        TenantId = _tenantId,
+                        SessionId = _context.SessionId,
+                        TenantId = _context.TenantId,
                         Timestamp = DateTime.UtcNow,
                         EventType = eventType,
                         Severity = severity,
@@ -232,5 +226,42 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             }
         }
 
+        private EventSeverity ParseSeverity(string severity)
+        {
+            return GatherRuleContext.ParseSeverity(severity);
+        }
+
+        private void StopAllTimers()
+        {
+            foreach (var timer in _intervalTimers.Values)
+            {
+                timer.Dispose();
+            }
+            _intervalTimers.Clear();
+        }
+
+        /// <summary>
+        /// Blocks until all startup rules that were queued by the most recent <see cref="UpdateRules"/>
+        /// call have finished executing, or the timeout elapses.
+        /// Returns true if all rules completed within the timeout; false if timed out.
+        /// </summary>
+        public bool WaitForStartupRules(int timeoutSeconds = 120)
+        {
+            var latch = _startupRulesLatch;
+            if (latch == null)
+                return true;  // no startup rules were queued
+
+            _logger.Debug($"WaitForStartupRules: waiting up to {timeoutSeconds}s for startup rules to complete...");
+            var completed = latch.Wait(TimeSpan.FromSeconds(timeoutSeconds));
+            _logger.Debug($"WaitForStartupRules: {(completed ? "all rules completed" : "timed out")}");
+            return completed;
+        }
+
+        public void Dispose()
+        {
+            StopAllTimers();
+            _startupRulesLatch?.Dispose();
+            _startupRulesLatch = null;
+        }
     }
 }

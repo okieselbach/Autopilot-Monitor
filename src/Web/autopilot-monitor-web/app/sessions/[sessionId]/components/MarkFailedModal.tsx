@@ -1,6 +1,6 @@
 "use client";
 
-import { Session } from "../page";
+import { Session } from "@/types";
 
 interface MarkFailedModalProps {
   show: boolean;
