@@ -376,7 +376,7 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
       {/* ===== Mobile: chevron toggle (fixed, left edge, vertically centered) ===== */}
       <button
         onClick={() => setMobileDrawerOpen(true)}
-        className="md:hidden fixed left-0 top-1/2 -translate-y-1/2 z-30 flex items-center justify-center w-6 h-16 rounded-r-lg bg-gray-200/90 text-gray-500 shadow-sm border border-l-0 border-gray-300 active:bg-gray-300 transition-colors dark:bg-gray-600/90 dark:text-gray-400 dark:border-gray-500 dark:active:bg-gray-500"
+        className="md:hidden fixed left-0 top-1/2 -translate-y-1/2 z-30 flex items-center justify-center w-5 h-16 rounded-r-lg bg-gray-200/90 text-gray-500 shadow-sm border border-l-0 border-gray-300 active:bg-gray-300 transition-colors dark:bg-gray-600/90 dark:text-gray-400 dark:border-gray-500 dark:active:bg-gray-500"
         aria-label="Open navigation"
       >
         <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
@@ -403,7 +403,7 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
       <button
         onClick={collapseState === "hidden" ? () => setCollapseState("full") : cycleCollapseState}
         className={`hidden md:flex fixed z-30 top-1/2 -translate-y-1/2 items-center justify-center h-16 rounded-r-lg bg-gray-100 text-gray-400 shadow-sm border border-l-0 border-gray-200 transition-all duration-200 hover:bg-gray-200 hover:text-gray-600 dark:bg-gray-700 dark:text-gray-500 dark:border-gray-600 dark:hover:bg-gray-600 dark:hover:text-gray-300 ${
-          collapseState === "hidden" ? "w-6" : "w-4"
+          collapseState === "hidden" ? "w-5" : "w-3.5"
         }`}
         style={{ left: SIDEBAR_PX[collapseState] }}
         aria-label={collapseState === "hidden" ? "Show sidebar" : "Collapse sidebar"}
