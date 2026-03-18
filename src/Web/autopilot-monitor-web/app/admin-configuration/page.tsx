@@ -277,7 +277,7 @@ export default function AdminConfigurationPage() {
             <div className="flex items-center justify-between">
               <div>
                 <div>
-                  <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Admin Configuration</h1>
+                  <h1 className="text-2xl font-normal text-gray-900 dark:text-white">Admin Configuration</h1>
                   <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Galactic Admin Operations</p>
                 </div>
               </div>

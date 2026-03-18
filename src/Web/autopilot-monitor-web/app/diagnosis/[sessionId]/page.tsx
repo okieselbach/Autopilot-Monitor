@@ -262,7 +262,7 @@ export default function DiagnosisPage() {
                     />
                   </svg>
                   <div>
-                    <h1 className="text-3xl font-bold text-gray-900">
+                    <h1 className="text-2xl font-normal text-gray-900">
                       Diagnosis
                     </h1>
                     <p className="text-sm text-gray-500">

@@ -255,7 +255,7 @@ export default function PlatformMetricsPage() {
           <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
             <div className="flex items-center justify-between">
               <div>
-                <h1 className="text-3xl font-bold text-gray-900">Platform Metrics</h1>
+                <h1 className="text-2xl font-normal text-gray-900">Platform Metrics</h1>
                 {cacheInfo && (
                   <p className="text-xs text-gray-400 mt-1">
                     {cacheInfo.fromCache ? 'From cache' : `Computed in ${cacheInfo.computeDurationMs}ms`}

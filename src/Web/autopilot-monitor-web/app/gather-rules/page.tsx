@@ -398,7 +398,7 @@ export default function GatherRulesPage() {
             <div className="flex items-center justify-between">
               <div>
                 <div>
-                  <h1 className="text-3xl font-bold text-gray-900">Gather Rules</h1>
+                  <h1 className="text-2xl font-normal text-gray-900">Gather Rules</h1>
                   <p className="text-sm text-gray-600 mt-1">Manage data collection rules for device enrollment</p>
                 </div>
               </div>

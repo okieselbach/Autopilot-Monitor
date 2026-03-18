@@ -126,7 +126,7 @@ export default function HealthCheckPage() {
       {/* Header */}
       <header className="bg-white shadow dark:bg-gray-800 dark:shadow-gray-700">
         <div className="py-6 px-4 sm:px-6 lg:px-8 flex items-center justify-between">
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">System Health</h1>
+          <h1 className="text-2xl font-normal text-gray-900 dark:text-white">System Health</h1>
           <button
             onClick={performHealthCheck}
             disabled={loading}

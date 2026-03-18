@@ -321,7 +321,7 @@ export default function AnalyzeRulesPage() {
             <div className="flex items-center justify-between">
               <div>
                 <div>
-                  <h1 className="text-3xl font-bold text-gray-900">Analyze Rules</h1>
+                  <h1 className="text-2xl font-normal text-gray-900">Analyze Rules</h1>
                   <p className="text-sm text-gray-600 mt-1">Manage event analysis rules for issue detection</p>
                 </div>
               </div>

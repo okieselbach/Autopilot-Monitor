@@ -952,7 +952,7 @@ export default function SettingsPage() {
             <div className="flex items-center justify-between">
               <div>
                 <div>
-                  <h1 className="text-3xl font-bold text-gray-900">Tenant Configuration</h1>
+                  <h1 className="text-2xl font-normal text-gray-900">Tenant Configuration</h1>
                   <p className="text-sm text-gray-600 mt-1">Tenant: {tenantId}</p>
                 </div>
               </div>

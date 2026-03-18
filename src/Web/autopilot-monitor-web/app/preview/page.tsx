@@ -101,7 +101,7 @@ export default function PreviewPage() {
             </svg>
           </div>
 
-          <h1 className="text-2xl font-bold text-gray-900 mb-3">
+          <h1 className="text-2xl font-normal text-gray-900 mb-3">
             Private Preview
           </h1>
 

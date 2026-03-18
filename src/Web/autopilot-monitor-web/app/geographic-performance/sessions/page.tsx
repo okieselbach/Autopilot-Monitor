@@ -183,7 +183,7 @@ function LocationSessionsContent() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
               </svg>
               <div>
-                <h1 className="text-3xl font-bold text-gray-900">{locationKey}</h1>
+                <h1 className="text-2xl font-normal text-gray-900">{locationKey}</h1>
                 <p className="text-sm text-gray-500 mt-0.5">
                   {timeLabel} &middot; grouped by {groupBy}
                 </p>

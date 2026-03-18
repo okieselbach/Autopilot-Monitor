@@ -177,7 +177,7 @@ export default function AuditPage() {
             <div className="flex items-center justify-between">
               <div>
                 <div>
-                  <h1 className="text-3xl font-bold text-gray-900">Audit Log</h1>
+                  <h1 className="text-2xl font-normal text-gray-900">Audit Log</h1>
                   <p className="text-sm text-gray-600 mt-1">
                     {filteredLogs.length} {filteredLogs.length === 1 ? 'entry' : 'entries'}
                     {filteredLogs.length !== logs.length && ` (of ${logs.length} total)`}

@@ -193,7 +193,7 @@ export default function PlatformUsageMetricsPage() {
           <div className="flex items-center justify-between">
             <div>
               <div>
-                <h1 className="text-3xl font-bold text-gray-900">Platform Usage Metrics</h1>
+                <h1 className="text-2xl font-normal text-gray-900">Platform Usage Metrics</h1>
                 <p className="text-sm text-gray-600 mt-1">
                   Cross-tenant metrics • Computed at {formatTimestamp(metrics.computedAt)} in {metrics.computeDurationMs}ms
                   {metrics.fromCache && (
