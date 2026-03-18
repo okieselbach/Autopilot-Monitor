@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { MapContainer, TileLayer, CircleMarker, Tooltip, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 
@@ -58,15 +58,18 @@ function formatThroughput(bytesPerSec: number): string {
   return `${bytesPerSec.toFixed(0)} B/s`;
 }
 
-// Clean up Leaflet map instance on unmount to prevent _leaflet_pos errors during client-side navigation
+// Clean up Leaflet map on unmount to prevent _leaflet_pos errors during client-side navigation.
+// map.remove() fully destroys the instance, preventing stale transitionend callbacks.
 function MapCleanup() {
   const map = useMap();
+  const mapRef = useRef(map);
+  mapRef.current = map;
 
   useEffect(() => {
     return () => {
-      map.remove();
+      try { mapRef.current.remove(); } catch { /* already removed by react-leaflet */ }
     };
-  }, [map]);
+  }, []);
 
   return null;
 }
