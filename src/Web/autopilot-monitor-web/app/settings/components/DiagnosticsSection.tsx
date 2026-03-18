@@ -229,7 +229,7 @@ export default function DiagnosticsSection({
             />
             <button
               onClick={() => {
-                const p = newDiagPath.trim();
+                const p = newDiagPath.trim().replace(/^["']+|["']+$/g, "");
                 if (!p) return;
                 setTenantDiagPaths([...tenantDiagPaths, { path: p, description: newDiagDesc.trim(), isBuiltIn: false }]);
                 setNewDiagPath("");

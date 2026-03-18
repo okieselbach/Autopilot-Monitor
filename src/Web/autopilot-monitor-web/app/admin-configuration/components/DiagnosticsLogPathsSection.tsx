@@ -115,7 +115,7 @@ export function DiagnosticsLogPathsSection({
           />
           <button
             onClick={() => {
-              const p = newDiagPath.trim();
+              const p = newDiagPath.trim().replace(/^["']+|["']+$/g, "");
               if (!p) return;
               setGlobalDiagPaths([...globalDiagPaths, { path: p, description: newDiagDesc.trim(), isBuiltIn: true }]);
               setNewDiagPath("");

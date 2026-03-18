@@ -275,7 +275,7 @@ export function validateDiagnosticsPath(
   rawPath: string,
   unrestrictedMode: boolean
 ): ValidationResult {
-  const trimmed = rawPath.trim();
+  const trimmed = rawPath.trim().replace(/^["']+|["']+$/g, "");
   if (!trimmed) {
     return { allowed: false, reason: "No path provided", unrestricted: false };
   }
