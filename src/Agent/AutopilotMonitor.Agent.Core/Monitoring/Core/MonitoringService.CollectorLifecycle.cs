@@ -535,6 +535,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     if (response.Success)
                     {
                         _logger.Info($"Session registered successfully: {response.SessionId}");
+
+                        if (!string.IsNullOrEmpty(response.AdminAction))
+                        {
+                            _logger.Warning($"Session already marked as {response.AdminAction} by administrator — will run cleanup after startup");
+                            _pendingAdminAction = response.AdminAction;
+                        }
                         return;
                     }
 

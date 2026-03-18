@@ -20,6 +20,12 @@ namespace AutopilotMonitor.Shared.Models
         public bool Success { get; set; }
         public string Message { get; set; }
         public DateTime RegisteredAt { get; set; }
+
+        /// <summary>
+        /// Non-null when the session was already marked as terminal by an admin before agent restart.
+        /// Values: "Succeeded", "Failed". Agent should run cleanup instead of starting monitoring.
+        /// </summary>
+        public string AdminAction { get; set; }
     }
 
     /// <summary>
@@ -74,6 +80,12 @@ namespace AutopilotMonitor.Shared.Models
         /// The agent should execute its self-destruct routine and exit.
         /// </summary>
         public bool DeviceKillSignal { get; set; }
+
+        /// <summary>
+        /// Non-null when an admin has externally changed the session status.
+        /// Values: "Succeeded", "Failed". Agent should treat as terminal signal and run cleanup.
+        /// </summary>
+        public string AdminAction { get; set; }
     }
 
     /// <summary>

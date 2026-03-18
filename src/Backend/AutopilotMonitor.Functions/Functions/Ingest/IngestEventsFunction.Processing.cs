@@ -242,6 +242,19 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                     request, sessionPrefix, classification, updatedSession,
                     statusTransitioned, whiteGloveStatusTransitioned, failureReason);
 
+                // Check if an admin has externally marked the session as terminal.
+                // Only signal the agent when this batch did NOT contain the terminal event itself
+                // (i.e., the agent didn't just report completion — the admin did it out-of-band).
+                string? adminAction = null;
+                if (updatedSession != null &&
+                    classification.CompletionEvent == null && classification.FailureEvent == null &&
+                    (updatedSession.Status == SessionStatus.Succeeded || updatedSession.Status == SessionStatus.Failed))
+                {
+                    adminAction = updatedSession.Status.ToString();
+                    _logger.LogInformation("{SessionPrefix} Admin override detected — signaling agent: AdminAction={AdminAction}",
+                        sessionPrefix, adminAction);
+                }
+
                 // Build HTTP response + SignalR messages
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(new IngestEventsResponse
@@ -250,7 +263,8 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                     EventsReceived = request.Events.Count,
                     EventsProcessed = processedCount,
                     Message = $"Successfully stored {processedCount} of {request.Events.Count} events",
-                    ProcessedAt = DateTime.UtcNow
+                    ProcessedAt = DateTime.UtcNow,
+                    AdminAction = adminAction
                 });
 
                 var signalRMessages = BuildSignalRMessages(request, updatedSession, processedCount, newRuleResults);

@@ -76,6 +76,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         private readonly DateTime _agentStartTimeUtc = DateTime.UtcNow;
         private bool _enrollmentTerminalEventSeen;
 
+        // Admin override detected during session registration (agent restart after admin action)
+        private string _pendingAdminAction;
+
         // Auth failure circuit breaker
         private int _consecutiveAuthFailures = 0;
         private DateTime? _firstAuthFailureTime = null;
@@ -149,6 +152,34 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 
             // Register session with backend
             RegisterSessionAsync().Wait();
+
+            // Check if admin already terminated this session before we restarted
+            if (!string.IsNullOrEmpty(_pendingAdminAction))
+            {
+                var succeeded = string.Equals(_pendingAdminAction, "Succeeded", StringComparison.OrdinalIgnoreCase);
+                _logger.Warning($"=== ADMIN OVERRIDE on startup: Session already marked as {_pendingAdminAction} by administrator — running cleanup only ===");
+
+                // Start spool watcher briefly so the terminal event gets spooled for upload
+                _spool.StartWatching();
+
+                EmitEvent(new EnrollmentEvent
+                {
+                    SessionId = _configuration.SessionId,
+                    TenantId = _configuration.TenantId,
+                    EventType = succeeded ? "enrollment_complete" : "enrollment_failed",
+                    Severity = succeeded ? EventSeverity.Info : EventSeverity.Warning,
+                    Source = "AdminOverride",
+                    Phase = EnrollmentPhase.Complete,
+                    Message = $"Session {_pendingAdminAction.ToLower()} by administrator (detected on restart) — cleanup initiated",
+                    Timestamp = DateTime.UtcNow,
+                    Data = new Dictionary<string, object>
+                    {
+                        { "adminAction", _pendingAdminAction }
+                    }
+                });
+                // EmitEvent triggers HandleEnrollmentComplete which handles cleanup + exit
+                return;
+            }
 
             // Start FileSystemWatcher for efficient event detection
             _spool.StartWatching();

@@ -20,7 +20,7 @@ import SessionInfoCard from "./components/SessionInfoCard";
 import PhaseTimeline from "./components/PhaseTimeline";
 import EventTimeline from "./components/EventTimeline";
 import AnalysisResultsSection from "./components/AnalysisResultsSection";
-import MarkFailedModal from "./components/MarkFailedModal";
+import AdminOverrideModal from "./components/AdminOverrideModal";
 import ReportSessionModal from "./components/ReportSessionModal";
 import { usePageSections } from "../../../hooks/usePageSections";
 import { PageSectionItem } from "../../../contexts/SidebarContext";
@@ -41,6 +41,7 @@ export default function SessionDetailPage() {
   const [loading, setLoading] = useState(true);
   const [severityFilters, setSeverityFilters] = useState<Set<string>>(new Set(["Info", "Warning", "Error", "Critical"]));
   const [showMarkFailedConfirm, setShowMarkFailedConfirm] = useState(false);
+  const [showMarkSucceededConfirm, setShowMarkSucceededConfirm] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
   const [reportSubmitting, setReportSubmitting] = useState(false);
   const [showScriptOutput, setShowScriptOutput] = useState(true);
@@ -380,8 +381,11 @@ export default function SessionDetailPage() {
     setShowMarkFailedConfirm(true);
   };
 
+  const markAsSucceeded = () => {
+    setShowMarkSucceededConfirm(true);
+  };
+
   const confirmMarkFailed = async () => {
-    // Use the session's tenant ID if available
     const effectiveTenantId = sessionTenantId || tenantId;
 
     try {
@@ -393,12 +397,8 @@ export default function SessionDetailPage() {
 
       if (response.ok) {
         setShowMarkFailedConfirm(false);
-        // Session will be updated via SignalR, but we can also update local state immediately
         if (session) {
-          setSession({
-            ...session,
-            status: 'Failed'
-          });
+          setSession({ ...session, status: 'Failed' });
         }
       } else {
         console.error('Failed to mark session as failed');
@@ -408,8 +408,35 @@ export default function SessionDetailPage() {
     }
   };
 
+  const confirmMarkSucceeded = async () => {
+    const effectiveTenantId = sessionTenantId || tenantId;
+
+    try {
+      const response = await authenticatedFetch(
+        `${API_BASE_URL}/api/sessions/${sessionId}/mark-succeeded?tenantId=${effectiveTenantId}`,
+        getAccessToken,
+        { method: 'POST' }
+      );
+
+      if (response.ok) {
+        setShowMarkSucceededConfirm(false);
+        if (session) {
+          setSession({ ...session, status: 'Succeeded' });
+        }
+      } else {
+        console.error('Failed to mark session as succeeded');
+      }
+    } catch (error) {
+      console.error('Error marking session as succeeded:', error);
+    }
+  };
+
   const cancelMarkFailed = () => {
     setShowMarkFailedConfirm(false);
+  };
+
+  const cancelMarkSucceeded = () => {
+    setShowMarkSucceededConfirm(false);
   };
 
   const handleSubmitReport = async (
@@ -802,15 +829,26 @@ export default function SessionDetailPage() {
               </button>
             )}
             {adminMode && (session?.status === 'InProgress' || session?.status === 'Pending') && (
-              <button
-                onClick={markAsFailed}
-                className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors flex items-center gap-2"
-              >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                </svg>
-                Mark as Failed
-              </button>
+              <>
+                <button
+                  onClick={markAsSucceeded}
+                  className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors flex items-center gap-2"
+                >
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  Mark as Succeeded
+                </button>
+                <button
+                  onClick={markAsFailed}
+                  className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors flex items-center gap-2"
+                >
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                  Mark as Failed
+                </button>
+              </>
             )}
             <button
               onClick={() => setShowReportModal(true)}
@@ -958,12 +996,20 @@ export default function SessionDetailPage() {
           </div>
         </div>
 
-        {/* Mark as Failed Confirmation Modal */}
-        <MarkFailedModal
+        {/* Admin Override Confirmation Modals */}
+        <AdminOverrideModal
           show={showMarkFailedConfirm}
+          action="failed"
           session={session}
           onConfirm={confirmMarkFailed}
           onCancel={cancelMarkFailed}
+        />
+        <AdminOverrideModal
+          show={showMarkSucceededConfirm}
+          action="succeeded"
+          session={session}
+          onConfirm={confirmMarkSucceeded}
+          onCancel={cancelMarkSucceeded}
         />
 
         {/* Report Session Modal */}

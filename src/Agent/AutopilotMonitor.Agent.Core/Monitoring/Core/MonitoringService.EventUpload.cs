@@ -285,6 +285,30 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     return;
                 }
 
+                if (!string.IsNullOrEmpty(response.AdminAction) && !_enrollmentTerminalEventSeen)
+                {
+                    var succeeded = string.Equals(response.AdminAction, "Succeeded", StringComparison.OrdinalIgnoreCase);
+                    _logger.Warning($"=== ADMIN OVERRIDE: Session marked as {response.AdminAction} by administrator. Initiating cleanup... ===");
+
+                    EmitEvent(new EnrollmentEvent
+                    {
+                        SessionId = _configuration.SessionId,
+                        TenantId = _configuration.TenantId,
+                        EventType = succeeded ? "enrollment_complete" : "enrollment_failed",
+                        Severity = succeeded ? EventSeverity.Info : EventSeverity.Warning,
+                        Source = "AdminOverride",
+                        Phase = EnrollmentPhase.Complete,
+                        Message = $"Session {response.AdminAction.ToLower()} by administrator — cleanup initiated",
+                        Timestamp = DateTime.UtcNow,
+                        Data = new Dictionary<string, object>
+                        {
+                            { "adminAction", response.AdminAction }
+                        }
+                    });
+                    // EmitEvent triggers HandleEnrollmentComplete via the normal terminal event path
+                    return;
+                }
+
                 if (response.Success)
                 {
                     _spool.RemoveEvents(events);

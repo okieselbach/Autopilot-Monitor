@@ -116,13 +116,23 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
             // Retrieve the stored session to include full data in SignalR message
             var session = await _storageService.GetSessionAsync(registration.TenantId, registration.SessionId);
 
+            // Check if admin has already marked this session as terminal (e.g., agent restarted after admin override)
+            string? adminAction = null;
+            if (session != null && (session.Status == SessionStatus.Succeeded || session.Status == SessionStatus.Failed))
+            {
+                adminAction = session.Status.ToString();
+                _logger.LogInformation("Session {SessionId} already in terminal state {Status} — signaling agent: AdminAction={AdminAction}",
+                    registration.SessionId, session.Status, adminAction);
+            }
+
             var response = req.CreateResponse(HttpStatusCode.OK);
             var responseData = new RegisterSessionResponse
             {
                 SessionId = registration.SessionId,
                 Success = true,
                 Message = "Session registered successfully",
-                RegisteredAt = DateTime.UtcNow
+                RegisteredAt = DateTime.UtcNow,
+                AdminAction = adminAction
             };
 
             await response.WriteAsJsonAsync(responseData);

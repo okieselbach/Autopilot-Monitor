@@ -136,7 +136,7 @@ namespace AutopilotMonitor.Functions.Functions.Config
             var response = req.CreateResponse(HttpStatusCode.OK);
             await response.WriteAsJsonAsync(new AgentConfigResponse
             {
-                ConfigVersion = 17, // unrestricted mode for tenant-level guardrail bypass
+                ConfigVersion = 18, // admin session override (mark-succeeded + agent cleanup signal via ingest response)
                 UploadIntervalSeconds = 30,
                 SelfDestructOnComplete = tenantConfig.SelfDestructOnComplete ?? true,
                 KeepLogFile = tenantConfig.KeepLogFile ?? false,
