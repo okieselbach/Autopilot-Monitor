@@ -80,11 +80,6 @@
       ]
     }
   ],
-  "relatedDocs": [
-    {
-      "title": "Windows Autopilot known issues",
-      "url": "https://learn.microsoft.com/en-us/autopilot/known-issues"
-    }
-  ],
+  "relatedDocs": [],
   "tags": ["identity", "security", "local-admin", "bypass-detection"]
 }
