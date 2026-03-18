@@ -6,8 +6,9 @@ import { usePathname } from "next/navigation";
 import { useAuth } from "../contexts/AuthContext";
 import { useSidebar, PageSectionItem } from "../contexts/SidebarContext";
 import { CollapseState } from "../hooks/useSidebarState";
-import { DefaultSectionIcon } from "../lib/sidebarIcons";
+import { DefaultSectionIcon, BookOpenIcon, RocketLaunchIcon, InformationCircleIcon, DocumentTextIcon, ShieldCheckIcon } from "../lib/sidebarIcons";
 import { DASHBOARD_ITEM, NAV_GROUPS, REGULAR_USER_ITEMS, NavItem, NavGroup } from "../lib/globalNavConfig";
+import { PublicSiteNavbar } from "./PublicSiteNavbar";
 
 // Sidebar pixel widths
 export const SIDEBAR_PX: Record<CollapseState, number> = {
@@ -134,18 +135,23 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
   // Docs pages are always accessible (public + authenticated)
   const isDocsPage = pathname.startsWith("/docs");
 
+  // All public pages that should show sidebar + navbar
+  const PUBLIC_PATHS = ["/docs", "/terms", "/privacy", "/roadmap", "/about", "/changelog"];
+  const isPublicPage = PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"));
+
   // Landing page: never show sidebar
   if (pathname === "/") {
     return <>{children}</>;
   }
 
-  // Not authenticated and not docs: no sidebar
-  if (!isAuthenticated && !isDocsPage) {
+  // Not authenticated and not a public page: no sidebar
+  if (!isAuthenticated && !isPublicPage) {
     return <>{children}</>;
   }
 
-  // Whether the main Navbar is present (determines sidebar top offset)
-  const hasNavbar = isAuthenticated;
+  // Whether a top navbar is present (determines sidebar top offset)
+  // Authenticated users always have the app navbar; public pages have the PublicSiteNavbar
+  const hasNavbar = isAuthenticated || isPublicPage;
 
   // --- Render helpers ---
 
@@ -156,6 +162,7 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
 
   const isNavActive = (href: string) => {
     if (href === "/dashboard") return pathname === "/dashboard" || pathname === "/";
+    if (href === "/") return pathname === "/";
     return pathname.startsWith(href);
   };
 
@@ -308,15 +315,35 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
         </>
       )}
 
-      {/* Public (unauthenticated): show Home link to landing page */}
+      {/* Public (unauthenticated): show public nav items */}
       {!isAuthenticated && (
-        renderGlobalItem({ id: "home", label: "Home", href: "/", icon: DASHBOARD_ITEM.icon })
+        <>
+          {renderGlobalItem({ id: "home", label: "Home", href: "/", icon: DASHBOARD_ITEM.icon })}
+          <div className={`${collapseState === "full" || isMobile ? "mt-3" : "mt-1"}`}>
+            <ul className="space-y-0.5">
+              {renderGlobalItem({ id: "docs", label: "Docs", href: "/docs", icon: <BookOpenIcon /> })}
+              {renderGlobalItem({ id: "roadmap", label: "Roadmap", href: "/roadmap", icon: <RocketLaunchIcon /> })}
+              {renderGlobalItem({ id: "about", label: "About", href: "/about", icon: <InformationCircleIcon /> })}
+              {renderGlobalItem({ id: "terms", label: "Terms", href: "/terms", icon: <DocumentTextIcon /> })}
+              {renderGlobalItem({ id: "privacy", label: "Privacy", href: "/privacy", icon: <ShieldCheckIcon /> })}
+            </ul>
+          </div>
+        </>
       )}
 
       {/* Divider (only when both global nav and page sections exist) + page sections */}
       {hasPageSections && (
         <>
-          {/* Divider only when global nav is also shown */}
+          {/* Divider / spacing between nav and page sections */}
+          {!isAuthenticated && (
+            collapseState === "icons" && !isMobile ? (
+              <hr className="mx-2 my-2 border-blue-200 dark:border-blue-800" />
+            ) : (
+              <div className="mt-4 mb-2 mx-3">
+                <hr className="border-gray-200 dark:border-gray-700" />
+              </div>
+            )
+          )}
           {isAuthenticated && (
             collapseState === "icons" && !isMobile ? (
               <hr className="mx-2 my-2 border-blue-200 dark:border-blue-800" />
@@ -341,6 +368,9 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
 
   return (
     <>
+      {/* ===== Public pages: show branded navbar without section links ===== */}
+      {!isAuthenticated && isPublicPage && <PublicSiteNavbar showSectionLinks={false} />}
+
       {/* ===== Mobile: overlay ===== */}
       {mobileDrawerOpen && (
         <div

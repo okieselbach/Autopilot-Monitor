@@ -1,11 +1,8 @@
-import Link from "next/link";
 import { PublicPageHeader } from "../../components/PublicPageHeader";
-import { PublicSiteNavbar } from "../../components/PublicSiteNavbar";
 
 export default function RoadmapPage() {
   return (
     <div className="min-h-screen bg-gray-50">
-      <PublicSiteNavbar showSectionLinks={false} />
       <PublicPageHeader title="Roadmap" />
       <main className="px-4 sm:px-6 lg:px-8 py-8">
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 sm:p-10">

@@ -1,13 +1,11 @@
 import Link from "next/link";
 import { PublicPageHeader } from "../../components/PublicPageHeader";
-import { PublicSiteNavbar } from "../../components/PublicSiteNavbar";
 
 const VERSION = "1.0.0";
 
 export default function AboutPage() {
   return (
     <div className="min-h-screen bg-gray-50">
-      <PublicSiteNavbar showSectionLinks={false} />
       <PublicPageHeader title="About" />
       <main className="px-4 sm:px-6 lg:px-8 py-8 space-y-6">
         <div className="bg-white rounded-lg shadow p-6">
