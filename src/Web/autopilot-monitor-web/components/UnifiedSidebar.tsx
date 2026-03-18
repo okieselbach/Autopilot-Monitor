@@ -27,7 +27,7 @@ const SIDEBAR_PX: Record<CollapseState, number> = {
   hidden: 0,
 };
 
-const CHEVRON_PX = 16; // w-4
+const CHEVRON_W = 16; // w-4, visual only — does NOT affect content margin
 
 export function UnifiedSidebar({
   items,
@@ -318,8 +318,8 @@ export function UnifiedSidebar({
       {/* ===== Desktop: chevron toggle — vertically centered at sidebar edge ===== */}
       <button
         onClick={collapseState === "hidden" ? () => setCollapseState("full") : cycleCollapseState}
-        className="hidden md:flex fixed z-20 top-1/2 -translate-y-1/2 items-center justify-center w-4 h-8 rounded-r-md bg-gray-100/80 text-gray-400 transition-all duration-200 hover:bg-gray-200 hover:text-gray-600 dark:bg-gray-700/60 dark:text-gray-500 dark:hover:bg-gray-600 dark:hover:text-gray-300"
-        style={{ left: SIDEBAR_PX[collapseState] }}
+        className="hidden md:flex fixed z-30 top-1/2 -translate-y-1/2 items-center justify-center w-4 h-8 rounded-full bg-gray-100 text-gray-400 shadow-sm border border-gray-200 transition-all duration-200 hover:bg-gray-200 hover:text-gray-600 dark:bg-gray-700 dark:text-gray-500 dark:border-gray-600 dark:hover:bg-gray-600 dark:hover:text-gray-300"
+        style={{ left: SIDEBAR_PX[collapseState] - CHEVRON_W / 2 }}
         aria-label={collapseState === "hidden" ? "Show sidebar" : "Collapse sidebar"}
         title={
           collapseState === "full"
@@ -343,7 +343,7 @@ export function UnifiedSidebar({
       {/* ===== Content — pushed right by sidebar width on desktop ===== */}
       <div
         style={{
-          marginLeft: isDesktop ? SIDEBAR_PX[collapseState] + CHEVRON_PX : 0,
+          marginLeft: isDesktop ? SIDEBAR_PX[collapseState] : 0,
           transition: "margin-left 200ms ease-in-out",
         }}
       >
