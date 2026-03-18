@@ -36,6 +36,13 @@ namespace AutopilotMonitor.Shared.Models
         // ===== TENANT STATUS =====
 
         /// <summary>
+        /// When this tenant was first onboarded (derived from earliest TenantAdmin AddedDate).
+        /// Used for feedback eligibility checks (tenant must be old enough before prompting).
+        /// Backfilled by the maintenance job for existing tenants; set to UtcNow for new tenants.
+        /// </summary>
+        public DateTime? OnboardedAt { get; set; }
+
+        /// <summary>
         /// Whether this tenant is disabled/suspended
         /// If true, users from this tenant cannot log in
         /// Default: false
@@ -511,7 +518,8 @@ namespace AutopilotMonitor.Shared.Models
                 PerformanceCollectorIntervalSeconds = 30,
                 SelfDestructOnComplete = true,
                 KeepLogFile = false,
-                ShowScriptOutput = true
+                ShowScriptOutput = true,
+                OnboardedAt = DateTime.UtcNow
             };
         }
     }

@@ -155,6 +155,44 @@ namespace AutopilotMonitor.Functions.Services
             return false;
         }
 
+        /// <summary>
+        /// Sends a Telegram notification when a user submits feedback via the in-app feedback bubble.
+        /// Best-effort — silently no-ops if the webhook URL is not configured.
+        /// </summary>
+        public async Task SendFeedbackAsync(string tenantId, string upn, string displayName, int rating, string? comment)
+        {
+            try
+            {
+                var webhookUrl = await GetWebhookUrlAsync();
+                if (string.IsNullOrWhiteSpace(webhookUrl))
+                {
+                    _logger.LogDebug("Telegram webhook URL not configured — skipping feedback notification");
+                    return;
+                }
+
+                var stars = new string('\u2605', rating) + new string('\u2606', 5 - rating);
+                var commentLine = string.IsNullOrWhiteSpace(comment) ? "" : $"\nComment: {comment}";
+                var payload = new
+                {
+                    chat_id = "-1003632442830",
+                    text = $"New Feedback!\nRating: {stars} ({rating}/5)\nUser: {displayName} ({upn})\nTenant: {tenantId}{commentLine}"
+                };
+
+                var json = JsonConvert.SerializeObject(payload);
+                var content = new StringContent(json, Encoding.UTF8, "application/json");
+                var sent = await PostWithRetryAsync(webhookUrl, content, $"feedback:{upn}");
+
+                if (sent)
+                {
+                    _logger.LogInformation("Telegram feedback notification sent for user {Upn}", upn);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to send Telegram feedback notification for {Upn}", upn);
+            }
+        }
+
         private async Task<string?> GetWebhookUrlAsync()
         {
             try

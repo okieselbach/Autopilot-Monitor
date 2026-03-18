@@ -97,6 +97,8 @@ public static class EndpointAccessPolicyCatalog
         new("GET",    "progress/sessions",         EndpointPolicy.AuthenticatedUser),
         new("GET",    "progress/sessions/{sessionId}/events", EndpointPolicy.AuthenticatedUser),
         new("PUT",    "preview/notification-email", EndpointPolicy.AuthenticatedUser),
+        new("GET",    "feedback/status",           EndpointPolicy.AuthenticatedUser),
+        new("POST",   "feedback",                  EndpointPolicy.AuthenticatedUser),
 
         // ── MemberRead (Admin + Operator, later + Viewer) ───────────────
         new("GET",    "sessions",                  EndpointPolicy.MemberRead),
@@ -179,6 +181,7 @@ public static class EndpointAccessPolicyCatalog
         new("GET",    "health/detailed",            EndpointPolicy.AuthenticatedUser),
         new("POST",   "rules/reseed-from-github",   EndpointPolicy.GalacticAdminOnly),
         new("POST",   "rules/ime-log-patterns/reseed", EndpointPolicy.GalacticAdminOnly),
+        new("GET",    "feedback/all",                                     EndpointPolicy.GalacticAdminOnly),
         new("GET",    "galactic/notifications",                          EndpointPolicy.GalacticAdminOnly),
         new("POST",   "galactic/notifications/dismiss-all",              EndpointPolicy.GalacticAdminOnly),
         new("POST",   "galactic/notifications/{notificationId}/dismiss", EndpointPolicy.GalacticAdminOnly),

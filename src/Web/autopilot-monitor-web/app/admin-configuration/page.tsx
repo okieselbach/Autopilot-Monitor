@@ -14,9 +14,10 @@ import { VersionBlockSection } from "./components/VersionBlockSection";
 import { SessionExportSection } from "./components/SessionExportSection";
 import { AdminConfigSettingsSection } from "./components/AdminConfigSettingsSection";
 import { SessionReportsSection } from "./components/SessionReportsSection";
+import { FeedbackSection } from "./components/FeedbackSection";
 import { usePageSections } from "../../hooks/usePageSections";
 import { PageSectionItem } from "../../contexts/SidebarContext";
-import { BuildingOfficeIcon, DocumentTextIcon, ArrowDownTrayIcon, GearIcon, FolderIcon, WrenchScrewdriverIcon, NoSymbolIcon, ArrowPathIcon } from "../../lib/sidebarIcons";
+import { BuildingOfficeIcon, DocumentTextIcon, ArrowDownTrayIcon, GearIcon, FolderIcon, WrenchScrewdriverIcon, NoSymbolIcon, ArrowPathIcon, SparklesIcon } from "../../lib/sidebarIcons";
 
 interface AdminConfiguration {
   partitionKey: string;
@@ -253,6 +254,7 @@ export default function AdminConfigurationPage() {
   const adminSections: PageSectionItem[] = useMemo(() => [
     { id: "tenant-management", label: "Tenant Management", icon: <BuildingOfficeIcon /> },
     { id: "session-reports", label: "Session Reports", icon: <DocumentTextIcon /> },
+    { id: "user-feedback", label: "User Feedback", icon: <SparklesIcon /> },
     { id: "session-export", label: "Session Export", icon: <ArrowDownTrayIcon /> },
     { id: "global-settings", label: "Global Settings", icon: <GearIcon /> },
     { id: "diagnostics-log-paths", label: "Diagnostics Log Paths", icon: <FolderIcon /> },
@@ -326,6 +328,14 @@ export default function AdminConfigurationPage() {
             {/* Session Reports */}
             <div id="session-reports">
             <SessionReportsSection
+              getAccessToken={getAccessToken}
+              setError={setError}
+            />
+            </div>
+
+            {/* User Feedback */}
+            <div id="user-feedback">
+            <FeedbackSection
               getAccessToken={getAccessToken}
               setError={setError}
             />

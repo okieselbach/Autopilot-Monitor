@@ -45,6 +45,7 @@ namespace AutopilotMonitor.Functions.Services
         private readonly UsageMetricsService _usageMetricsService;
         private readonly AdminConfigurationService _adminConfigurationService;
         private readonly BlockedDeviceService _blockedDeviceService;
+        private readonly TenantAdminsService _tenantAdminsService;
         private readonly ILogger<MaintenanceService> _logger;
 
         private const string PlatformStatsAliasFileName = "platform-stats.json";
@@ -57,6 +58,7 @@ namespace AutopilotMonitor.Functions.Services
             UsageMetricsService usageMetricsService,
             AdminConfigurationService adminConfigurationService,
             BlockedDeviceService blockedDeviceService,
+            TenantAdminsService tenantAdminsService,
             ILogger<MaintenanceService> logger)
         {
             _storageService = storageService;
@@ -64,6 +66,7 @@ namespace AutopilotMonitor.Functions.Services
             _usageMetricsService = usageMetricsService;
             _adminConfigurationService = adminConfigurationService;
             _blockedDeviceService = blockedDeviceService;
+            _tenantAdminsService = tenantAdminsService;
             _logger = logger;
         }
 
@@ -85,6 +88,9 @@ namespace AutopilotMonitor.Functions.Services
 
                 // Safety net: backfill any sessions missing from SessionsIndex
                 await _storageService.BackfillSessionIndexAsync();
+
+                // Backfill OnboardedAt for tenants that don't have it yet
+                await BackfillTenantOnboardedAtAsync();
 
                 maintenanceStart.Stop();
                 _logger.LogInformation($"Daily maintenance completed in {maintenanceStart.ElapsedMilliseconds}ms");
@@ -314,6 +320,61 @@ namespace AutopilotMonitor.Functions.Services
             {
                 _logger.LogError(ex, "Failed to check for excessive data senders");
                 return 0;
+            }
+        }
+
+        /// <summary>
+        /// Backfills OnboardedAt for tenants that don't have it set yet.
+        /// Derives the value from the earliest TenantAdmin AddedDate for each tenant.
+        /// Self-healing: runs every maintenance cycle, no-ops once all tenants are backfilled.
+        /// </summary>
+        private async Task BackfillTenantOnboardedAtAsync()
+        {
+            _logger.LogInformation("Backfilling OnboardedAt for tenants...");
+
+            try
+            {
+                var allConfigs = await _tenantConfigService.GetAllConfigurationsAsync();
+                var configsWithoutOnboardedAt = allConfigs.Where(c => c.OnboardedAt == null).ToList();
+
+                if (configsWithoutOnboardedAt.Count == 0)
+                {
+                    _logger.LogInformation("All tenants already have OnboardedAt set");
+                    return;
+                }
+
+                int backfilledCount = 0;
+
+                foreach (var config in configsWithoutOnboardedAt)
+                {
+                    try
+                    {
+                        var admins = await _tenantAdminsService.GetTenantAdminsAsync(config.TenantId);
+
+                        if (admins.Count == 0)
+                        {
+                            // No admins yet — use LastUpdated as fallback (config creation date)
+                            config.OnboardedAt = config.LastUpdated;
+                        }
+                        else
+                        {
+                            config.OnboardedAt = admins.Min(a => a.AddedDate);
+                        }
+
+                        await _tenantConfigService.SaveConfigurationAsync(config);
+                        backfilledCount++;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to backfill OnboardedAt for tenant {TenantId}", config.TenantId);
+                    }
+                }
+
+                _logger.LogInformation("OnboardedAt backfill completed: {Count} tenants updated", backfilledCount);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to backfill OnboardedAt for tenants");
             }
         }
 

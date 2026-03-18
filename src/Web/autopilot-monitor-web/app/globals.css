@@ -633,3 +633,19 @@ html:hover ::-webkit-scrollbar-thumb {
 .landing-page .dot-pulse {
   animation: dotPulse 12.6s linear infinite;
 }
+
+/* ===== FEEDBACK BUBBLE ANIMATION ===== */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp 0.3s ease-out both;
+}

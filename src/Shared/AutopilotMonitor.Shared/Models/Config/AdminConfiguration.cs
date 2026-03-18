@@ -72,6 +72,29 @@ namespace AutopilotMonitor.Shared.Models
         /// </summary>
         public int MaintenanceBlockDurationHours { get; set; } = 12;
 
+        // ===== FEEDBACK SETTINGS =====
+
+        /// <summary>
+        /// Global kill-switch for the in-app feedback prompt.
+        /// When false, no user sees the feedback bubble regardless of other settings.
+        /// Default: true.
+        /// </summary>
+        public bool FeedbackEnabled { get; set; } = true;
+
+        /// <summary>
+        /// Minimum tenant age in days before users are prompted for feedback.
+        /// Prevents asking brand-new tenants who haven't had meaningful experience yet.
+        /// Default: 14 days.
+        /// </summary>
+        public int FeedbackMinTenantAgeDays { get; set; } = 14;
+
+        /// <summary>
+        /// Cooldown in days after a user interacts with the feedback prompt
+        /// before they are prompted again. 0 = never re-prompt (single wave only).
+        /// Default: 60 days.
+        /// </summary>
+        public int FeedbackCooldownDays { get; set; } = 60;
+
         // ===== DIAGNOSTICS LOG PATHS =====
 
         /// <summary>

@@ -9,6 +9,7 @@ import { GalacticNotificationProvider } from "../contexts/GalacticNotificationCo
 import { ThemeProvider } from "../contexts/ThemeContext";
 import Navbar from "../components/Navbar";
 import ScrollToTopButton from "../components/ScrollToTopButton";
+import FeedbackBubble from "../components/FeedbackBubble";
 import { SidebarProvider } from "../contexts/SidebarContext";
 import { GlobalSidebar } from "../components/GlobalSidebar";
 
@@ -125,6 +126,7 @@ export default function RootLayout({
                         {children}
                       </GlobalSidebar>
                       <ScrollToTopButton />
+                      <FeedbackBubble />
                     </SidebarProvider>
                   </SignalRProvider>
                 </TenantProvider>

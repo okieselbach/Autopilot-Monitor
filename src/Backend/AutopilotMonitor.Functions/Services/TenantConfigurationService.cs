@@ -242,7 +242,8 @@ namespace AutopilotMonitor.Functions.Services
                 { "LocalAdminAllowedAccountsJson", config.LocalAdminAllowedAccountsJson },
                 { "BootstrapTokenEnabled", config.BootstrapTokenEnabled },
                 { "UnrestrictedModeEnabled", config.UnrestrictedModeEnabled },
-                { "UnrestrictedMode", config.UnrestrictedMode }
+                { "UnrestrictedMode", config.UnrestrictedMode },
+                { "OnboardedAt", config.OnboardedAt }
             };
 
             return entity;
@@ -303,7 +304,8 @@ namespace AutopilotMonitor.Functions.Services
                 LocalAdminAllowedAccountsJson = entity.GetString("LocalAdminAllowedAccountsJson"),
                 BootstrapTokenEnabled = entity.GetBoolean("BootstrapTokenEnabled") ?? false,
                 UnrestrictedModeEnabled = entity.GetBoolean("UnrestrictedModeEnabled") ?? false,
-                UnrestrictedMode = entity.GetBoolean("UnrestrictedMode") ?? false
+                UnrestrictedMode = entity.GetBoolean("UnrestrictedMode") ?? false,
+                OnboardedAt = entity.GetDateTime("OnboardedAt")
             };
         }
     }
