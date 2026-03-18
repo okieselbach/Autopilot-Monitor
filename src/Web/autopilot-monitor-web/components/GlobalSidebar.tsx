@@ -369,7 +369,7 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
   return (
     <>
       {/* ===== Public pages: show branded navbar without section links ===== */}
-      {!isAuthenticated && isPublicPage && <PublicSiteNavbar showSectionLinks={false} />}
+      {!isAuthenticated && isPublicPage && <PublicSiteNavbar showSectionLinks={false} fullWidth />}
 
       {/* ===== Mobile: overlay ===== */}
       {mobileDrawerOpen && (

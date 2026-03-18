@@ -137,7 +137,7 @@ namespace AutopilotMonitor.Functions.Functions.Config
             await response.WriteAsJsonAsync(new AgentConfigResponse
             {
                 ConfigVersion = 18, // admin session override (mark-succeeded + agent cleanup signal via ingest response)
-                UploadIntervalSeconds = 30,
+                UploadIntervalSeconds = 10,
                 SelfDestructOnComplete = tenantConfig.SelfDestructOnComplete ?? true,
                 KeepLogFile = tenantConfig.KeepLogFile ?? false,
                 EnableGeoLocation = tenantConfig.EnableGeoLocation ?? true,
