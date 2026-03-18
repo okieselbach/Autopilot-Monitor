@@ -974,12 +974,12 @@ export default function SessionDetailPage() {
             </div>
           )}
 
-          {/* Install Progress (from app_install_started, app_install_completed, app_install_failed, app_install_skipped events) */}
+          {/* Install Progress (from app_install_started, app_install_completed, app_install_failed, app_install_postponed, app_install_skipped events) */}
           {!isGatherRulesSession && (
             <div id="section-install-progress">
             <InstallProgress
               events={events.filter(
-                e => e.eventType === "app_install_started" || e.eventType === "app_install_completed" || e.eventType === "app_install_failed" || e.eventType === "app_install_skipped"
+                e => e.eventType === "app_install_started" || e.eventType === "app_install_completed" || e.eventType === "app_install_failed" || e.eventType === "app_install_postponed" || e.eventType === "app_install_skipped"
               )}
               summaryStats={appSummaryStats}
             />

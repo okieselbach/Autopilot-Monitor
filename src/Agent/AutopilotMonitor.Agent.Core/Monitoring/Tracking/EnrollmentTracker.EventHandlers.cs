@@ -298,7 +298,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     break;
 
                 case AppInstallationState.Postponed:
-                    eventType = "app_install_failed";
+                    eventType = "app_install_postponed";
                     severity = EventSeverity.Warning;
                     break;
 

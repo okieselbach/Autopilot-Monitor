@@ -23,7 +23,7 @@ interface InstallProgressProps {
 interface InstallItem {
   appName: string;
   appId: string;
-  state: "Installing" | "Installed" | "Failed" | "Skipped";
+  state: "Installing" | "Installed" | "Failed" | "Postponed" | "Skipped";
   startedAt?: string;
   completedAt?: string;
   durationMs?: number;
@@ -123,9 +123,28 @@ export default function InstallProgress({ events, summaryStats }: InstallProgres
           firstSeenIndex: existing?.firstSeenIndex ?? insertionIndex++,
           eventData: d,
         });
+      } else if (evt.eventType === "app_install_postponed") {
+        // Don't downgrade from Installed to Postponed.
+        if (existing?.state === "Installed") continue;
+        const startTime = existing?.startedAt ? new Date(existing.startedAt).getTime() : null;
+        const endTime = new Date(eventTs).getTime();
+        const duration = startTime ? endTime - startTime : undefined;
+
+        installMap.set(appName, {
+          appName,
+          appId,
+          state: "Postponed",
+          startedAt: existing?.startedAt,
+          completedAt: eventTs,
+          durationMs: duration,
+          isCompleted: true,
+          isError: false,
+          firstSeenIndex: existing?.firstSeenIndex ?? insertionIndex++,
+          eventData: d,
+        });
       } else if (evt.eventType === "app_install_skipped") {
         // Don't overwrite terminal states.
-        if (existing?.state === "Installed" || existing?.state === "Failed") continue;
+        if (existing?.state === "Installed" || existing?.state === "Failed" || existing?.state === "Postponed") continue;
         installMap.set(appName, {
           appName,
           appId,
@@ -167,6 +186,7 @@ export default function InstallProgress({ events, summaryStats }: InstallProgres
   const activeCount = installs.filter(d => d.state === "Installing").length;
   const completedCount = installs.filter(d => d.state === "Installed").length;
   const failedCount = installs.filter(d => d.state === "Failed").length;
+  const postponedCount = installs.filter(d => d.state === "Postponed").length;
   const skippedCount = installs.filter(d => d.state === "Skipped").length;
 
   // Use summary stats for "X of Y" if available, fall back to local event counts
@@ -208,6 +228,11 @@ export default function InstallProgress({ events, summaryStats }: InstallProgres
             {failedCount > 0 && (
               <span className="px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">
                 {failedCount} failed
+              </span>
+            )}
+            {postponedCount > 0 && (
+              <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">
+                {postponedCount} postponed
               </span>
             )}
             {skippedCount > 0 && (
@@ -288,6 +313,9 @@ function InstallItemRow({ item }: { item: InstallItem }) {
           )}
           {item.state === "Failed" && (
             <span className="text-xs px-2 py-0.5 rounded-full bg-red-200 text-red-700 font-medium">Failed</span>
+          )}
+          {item.state === "Postponed" && (
+            <span className="text-xs px-2 py-0.5 rounded-full bg-amber-200 text-amber-700 font-medium">Postponed</span>
           )}
         </div>
         <div className="flex items-center space-x-3 text-xs text-gray-500 flex-shrink-0 ml-2">

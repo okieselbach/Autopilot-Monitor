@@ -295,12 +295,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 { "installing", this.Count(x => x.InstallationState == AppInstallationState.Installing) },
                 { "installed", this.Count(x => x.InstallationState == AppInstallationState.Installed) },
                 { "skipped", this.Count(x => x.InstallationState == AppInstallationState.Skipped) },
-                { "failed", this.Count(x => x.InstallationState == AppInstallationState.Error || x.InstallationState == AppInstallationState.Postponed) },
+                { "failed", this.Count(x => x.InstallationState == AppInstallationState.Error) },
+                { "postponed", this.Count(x => x.InstallationState == AppInstallationState.Postponed) },
                 { "pending", this.Count(x => x.InstallationState < AppInstallationState.Downloading) },
                 // App names per status category for diagnostics (typically few entries per category,
                 // well within Azure Table Storage's 64KB/30K-char limit even with 150+ apps)
                 { "pendingNames", this.Where(x => x.InstallationState < AppInstallationState.Downloading).Select(x => x.Name).ToList() },
-                { "failedNames", this.Where(x => x.InstallationState == AppInstallationState.Error || x.InstallationState == AppInstallationState.Postponed).Select(x => x.Name).ToList() },
+                { "failedNames", this.Where(x => x.InstallationState == AppInstallationState.Error).Select(x => x.Name).ToList() },
+                { "postponedNames", this.Where(x => x.InstallationState == AppInstallationState.Postponed).Select(x => x.Name).ToList() },
                 { "installedNames", this.Where(x => x.InstallationState == AppInstallationState.Installed).Select(x => x.Name).ToList() },
                 { "skippedNames", this.Where(x => x.InstallationState == AppInstallationState.Skipped).Select(x => x.Name).ToList() }
             };

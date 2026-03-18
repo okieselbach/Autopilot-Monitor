@@ -340,7 +340,7 @@ export default function ProgressPortalPage() {
 
   // Derive current app install state from app_install_* events
   const currentInstall = useMemo(() => {
-    const installTypes = new Set(["app_install_started", "app_install_completed", "app_install_failed", "app_install_skipped"]);
+    const installTypes = new Set(["app_install_started", "app_install_completed", "app_install_failed", "app_install_postponed", "app_install_skipped"]);
     const installEvents = events.filter((e) => installTypes.has(e.eventType));
     if (installEvents.length === 0) return null;
 
@@ -365,8 +365,11 @@ export default function ProgressPortalPage() {
       } else if (evt.eventType === "app_install_failed") {
         if (existing?.state === "Installed") continue;
         appState.set(appName, { state: "Failed" });
+      } else if (evt.eventType === "app_install_postponed") {
+        if (existing?.state === "Installed") continue;
+        appState.set(appName, { state: "Postponed" });
       } else if (evt.eventType === "app_install_skipped") {
-        if (existing?.state === "Installed" || existing?.state === "Failed") continue;
+        if (existing?.state === "Installed" || existing?.state === "Failed" || existing?.state === "Postponed") continue;
         appState.set(appName, { state: "Skipped" });
       }
     }
