@@ -20,6 +20,15 @@ interface UnifiedSidebarProps {
   children: React.ReactNode;
 }
 
+// Sidebar pixel widths
+const SIDEBAR_PX: Record<CollapseState, number> = {
+  full: 208,   // w-52
+  icons: 56,   // w-14
+  hidden: 0,
+};
+
+const CHEVRON_PX = 16; // w-4
+
 export function UnifiedSidebar({
   items,
   mode,
@@ -32,6 +41,16 @@ export function UnifiedSidebar({
   const observerRef = useRef<IntersectionObserver | null>(null);
   const visibleSections = useRef<Set<string>>(new Set());
   const pathname = usePathname();
+
+  // Track desktop breakpoint (md = 768px) for margin calculation
+  const [isDesktop, setIsDesktop] = useState(false);
+  useEffect(() => {
+    const mql = window.matchMedia("(min-width: 768px)");
+    setIsDesktop(mql.matches);
+    const handler = (e: MediaQueryListEvent) => setIsDesktop(e.matches);
+    mql.addEventListener("change", handler);
+    return () => mql.removeEventListener("change", handler);
+  }, []);
 
   // --- Scroll-spy mode: IntersectionObserver ---
   useEffect(() => {
@@ -49,7 +68,6 @@ export function UnifiedSidebar({
             visibleSections.current.delete(entry.target.id);
           }
         }
-        // Pick first visible section in DOM order
         for (const item of items) {
           if (visibleSections.current.has(item.id)) {
             setActiveId(item.id);
@@ -101,7 +119,6 @@ export function UnifiedSidebar({
 
   const activeLabel = items.find((i) => i.id === activeId)?.label ?? title;
 
-  // Width classes for each collapse state
   const sidebarWidthClass: Record<CollapseState, string> = {
     full: "w-52",
     icons: "w-14",
@@ -123,7 +140,7 @@ export function UnifiedSidebar({
         : "text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
     }`;
 
-    // Icons-only mode: centered icon with tooltip
+    // Icons-only mode
     if (collapseState === "icons") {
       const content = (
         <span className="flex items-center justify-center w-full">
@@ -194,7 +211,6 @@ export function UnifiedSidebar({
     );
   };
 
-  // Shared nav items for both desktop and mobile
   const navItems = items.map(renderNavItem);
 
   return (
@@ -227,7 +243,6 @@ export function UnifiedSidebar({
           </button>
         </div>
         <ul className="p-3 space-y-0.5 overflow-y-auto max-h-[calc(100%-4rem)]">
-          {/* In mobile drawer, always show full items (icon + label) */}
           {items.map((item) => {
             const isActive = activeId === item.id;
             const cls = `flex items-center gap-2.5 w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
@@ -275,59 +290,64 @@ export function UnifiedSidebar({
         </button>
       </div>
 
-      {/* ===== Desktop: two-column flex layout ===== */}
-      <div className="flex gap-0 items-start">
-        {/* Desktop sidebar */}
-        <aside
-          className={`shrink-0 hidden md:block transition-all duration-200 ease-in-out overflow-hidden ${sidebarWidthClass[collapseState]}`}
-        >
-          {collapseState !== "hidden" && (
-            <nav className="sticky top-24 bg-white rounded-lg shadow-sm border border-gray-200 dark:bg-gray-800 dark:border-gray-700">
-              {/* Title (full mode only) */}
-              {collapseState === "full" && (
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider px-4 pt-4 pb-1 dark:text-gray-500">
-                  {title}
-                </p>
-              )}
+      {/* ===== Desktop: fixed sidebar pinned left, below navbar ===== */}
+      <aside
+        className={`hidden md:flex fixed left-0 top-14 bottom-0 z-20 flex-col transition-all duration-200 ease-in-out overflow-hidden ${sidebarWidthClass[collapseState]}`}
+      >
+        {collapseState !== "hidden" && (
+          <nav className="flex flex-col h-full bg-white border-r border-gray-200 dark:bg-gray-800 dark:border-gray-700">
+            {/* Title (full mode only) */}
+            {collapseState === "full" && (
+              <p className="shrink-0 text-xs font-semibold text-gray-400 uppercase tracking-wider px-4 pt-4 pb-1 dark:text-gray-500">
+                {title}
+              </p>
+            )}
 
-              {/* Nav items */}
-              <ul className={`space-y-0.5 overflow-y-auto max-h-[calc(100vh-8rem)] ${
-                collapseState === "full" ? "p-3 pt-2" : "p-1.5"
-              }`}>
-                {navItems}
-              </ul>
-            </nav>
-          )}
-        </aside>
-
-        {/* Edge-chevron toggle (desktop only) */}
-        <div className="hidden md:flex items-start shrink-0">
-          <button
-            onClick={collapseState === "hidden" ? () => setCollapseState("full") : cycleCollapseState}
-            className="sticky top-24 mt-1 flex h-8 w-4 items-center justify-center rounded-r-md bg-gray-200/60 text-gray-400 transition-colors hover:bg-gray-300 hover:text-gray-600 dark:bg-gray-700/60 dark:text-gray-500 dark:hover:bg-gray-600 dark:hover:text-gray-300"
-            aria-label={collapseState === "hidden" ? "Show sidebar" : "Collapse sidebar"}
-            title={
-              collapseState === "full"
-                ? "Show icons only"
-                : collapseState === "icons"
-                  ? "Hide sidebar"
-                  : "Show sidebar"
-            }
-          >
-            <svg
-              className={`w-3 h-3 transition-transform duration-200 ${collapseState === "hidden" ? "" : "rotate-180"}`}
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
+            {/* Nav items */}
+            <ul className={`flex-1 space-y-0.5 overflow-y-auto overscroll-contain ${
+              collapseState === "full" ? "p-3 pt-2" : "p-1.5"
+            }`}
+              style={{ scrollbarWidth: "none" }}
             >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-            </svg>
-          </button>
-        </div>
+              {navItems}
+            </ul>
+          </nav>
+        )}
+      </aside>
 
-        {/* Content */}
-        <div className={`flex-1 min-w-0 ${collapseState !== "hidden" ? "md:ml-2" : ""}`}>{children}</div>
+      {/* ===== Desktop: chevron toggle — vertically centered at sidebar edge ===== */}
+      <button
+        onClick={collapseState === "hidden" ? () => setCollapseState("full") : cycleCollapseState}
+        className="hidden md:flex fixed z-20 top-1/2 -translate-y-1/2 items-center justify-center w-4 h-8 rounded-r-md text-gray-300 transition-all duration-200 hover:text-gray-500 dark:text-gray-600 dark:hover:text-gray-400"
+        style={{ left: SIDEBAR_PX[collapseState] }}
+        aria-label={collapseState === "hidden" ? "Show sidebar" : "Collapse sidebar"}
+        title={
+          collapseState === "full"
+            ? "Show icons only"
+            : collapseState === "icons"
+              ? "Hide sidebar"
+              : "Show sidebar"
+        }
+      >
+        <svg
+          className={`w-2.5 h-2.5 transition-transform duration-200 ${collapseState === "hidden" ? "" : "rotate-180"}`}
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2.5}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+        </svg>
+      </button>
+
+      {/* ===== Content — pushed right by sidebar width on desktop ===== */}
+      <div
+        style={{
+          marginLeft: isDesktop ? SIDEBAR_PX[collapseState] + CHEVRON_PX : 0,
+          transition: "margin-left 200ms ease-in-out",
+        }}
+      >
+        {children}
       </div>
     </>
   );
