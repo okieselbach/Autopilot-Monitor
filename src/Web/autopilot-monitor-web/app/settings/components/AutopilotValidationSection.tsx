@@ -81,11 +81,11 @@ export default function AutopilotValidationSection({
       </div>
       <div className="p-6 space-y-5">
         {/* Windows Autopilot (v1) */}
-        <div className="space-y-2">
-          <p className="text-xs font-semibold tracking-wider text-gray-400">Windows Autopilot</p>
+        <div className="space-y-3">
+          <p className="text-sm font-semibold text-gray-700 tracking-wide">Windows Autopilot</p>
           <label className="flex items-start justify-between gap-4">
             <div>
-              <p className="font-medium text-gray-900">Enable Autopilot Device Validation</p>
+              <p className="text-sm font-medium text-gray-900">Enable Autopilot Device Validation</p>
               <p className="text-sm text-gray-500">
                 Enabling starts Microsoft Entra admin consent for the <strong>DeviceManagementServiceConfig.Read.All</strong> permission. After consent, the setting is saved automatically.
               </p>
@@ -101,11 +101,11 @@ export default function AutopilotValidationSection({
         </div>
 
         {/* Windows Autopilot Device Preparation (v2) */}
-        <div className="space-y-2">
-          <p className="text-xs font-semibold tracking-wider text-gray-400">Windows Autopilot Device Preparation</p>
+        <div className="border-t border-gray-100 pt-5 space-y-3">
+          <p className="text-sm font-semibold text-gray-700 tracking-wide">Windows Autopilot Device Preparation</p>
           <label className="flex items-start justify-between gap-4">
             <div>
-              <p className="font-medium text-gray-900">Enable Corporate Identifier Validation</p>
+              <p className="text-sm font-medium text-gray-900">Enable Corporate Identifier Validation</p>
               <p className="text-sm text-gray-500">
                 Validates devices against Intune Corporate Device Identifiers (manufacturer + model + serial number).
                 Uses the <strong>DeviceManagementServiceConfig.Read.All</strong> permission.
