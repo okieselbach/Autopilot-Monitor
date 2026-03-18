@@ -241,6 +241,7 @@ namespace AutopilotMonitor.Functions.Services
                 { "EnableLocalAdminAnalyzer", config.EnableLocalAdminAnalyzer },
                 { "LocalAdminAllowedAccountsJson", config.LocalAdminAllowedAccountsJson },
                 { "BootstrapTokenEnabled", config.BootstrapTokenEnabled },
+                { "UnrestrictedModeEnabled", config.UnrestrictedModeEnabled },
                 { "UnrestrictedMode", config.UnrestrictedMode }
             };
 
@@ -301,6 +302,7 @@ namespace AutopilotMonitor.Functions.Services
                 EnableLocalAdminAnalyzer = entity.GetBoolean("EnableLocalAdminAnalyzer"),
                 LocalAdminAllowedAccountsJson = entity.GetString("LocalAdminAllowedAccountsJson"),
                 BootstrapTokenEnabled = entity.GetBoolean("BootstrapTokenEnabled") ?? false,
+                UnrestrictedModeEnabled = entity.GetBoolean("UnrestrictedModeEnabled") ?? false,
                 UnrestrictedMode = entity.GetBoolean("UnrestrictedMode") ?? false
             };
         }

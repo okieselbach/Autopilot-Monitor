@@ -19,6 +19,7 @@ export interface TenantConfiguration {
   validateAutopilotDevice: boolean;
   allowInsecureAgentRequests?: boolean;
   bootstrapTokenEnabled?: boolean;
+  unrestrictedModeEnabled?: boolean;
   dataRetentionDays: number;
   sessionTimeoutHours: number;
 }
@@ -556,6 +557,16 @@ export function TenantManagementSection({
                   className="w-4 h-4 text-teal-600 border-gray-300 rounded focus:ring-teal-500"
                 />
                 <span className="text-sm font-medium text-gray-700">Enable Bootstrap Token</span>
+              </label>
+
+              <label className="flex items-center space-x-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={editingTenant.unrestrictedModeEnabled ?? false}
+                  onChange={(e) => setEditingTenant({ ...editingTenant, unrestrictedModeEnabled: e.target.checked })}
+                  className="w-4 h-4 text-teal-600 border-gray-300 rounded focus:ring-teal-500"
+                />
+                <span className="text-sm font-medium text-gray-700">Enable Unrestricted Mode</span>
               </label>
 
               {/* Data Management */}

@@ -162,7 +162,7 @@ namespace AutopilotMonitor.Functions.Functions.Config
                     LocalAdminAllowedAccounts = tenantConfig.GetLocalAdminAllowedAccounts()
                 },
                 SendTraceEvents = tenantConfig.SendTraceEvents,
-                UnrestrictedMode = tenantConfig.UnrestrictedMode,
+                UnrestrictedMode = tenantConfig.UnrestrictedModeEnabled && tenantConfig.UnrestrictedMode,
                 GatherRules = gatherRules,
                 ImeLogPatterns = imeLogPatterns
             });

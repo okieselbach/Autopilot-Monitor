@@ -54,6 +54,7 @@ export interface TenantConfiguration {
   // Bootstrap token
   bootstrapTokenEnabled?: boolean;
   // Unrestricted mode
+  unrestrictedModeEnabled?: boolean;
   unrestrictedMode?: boolean;
 }
 

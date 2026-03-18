@@ -34,8 +34,34 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         public static readonly IReadOnlyList<string> AllowedWmiQueryPrefixes;
         public static readonly IReadOnlyCollection<string> AllowedCommands;
 
-        // Hard block: C:\Users is never allowed, even in unrestricted mode
+        // Hard blocks: never allowed, even in unrestricted mode
         private static readonly string BlockedUsersPrefix = Path.GetFullPath(@"C:\Users");
+        private static readonly string[] AdditionalHardBlockedPathPrefixes = new[]
+        {
+            Path.GetFullPath(@"C:\Windows\System32\config"),  // SAM, SECURITY, SYSTEM hives
+        };
+
+        // Hard limit: maximum command length (even in unrestricted mode)
+        private const int MaxCommandLength = 2000;
+
+        // Hard-blocked command patterns: never allowed, even in unrestricted mode.
+        // These prevent privilege escalation, persistence, and data exfiltration.
+        private static readonly string[] HardBlockedCommandPatterns = new[]
+        {
+            // Download / exfiltration
+            "Invoke-WebRequest", "Invoke-RestMethod", "Start-BitsTransfer",
+            "wget", "curl", "certutil -urlcache",
+            // User / group manipulation
+            "New-LocalUser", "Add-LocalGroupMember", "net user", "net localgroup",
+            // Boot configuration
+            "bcdedit", "bcdboot",
+            // Persistence mechanisms
+            "schtasks /create", "Register-ScheduledTask",
+            // Destructive operations
+            "Remove-Item -Recurse", "Format-Volume",
+            // Execution policy bypass
+            "Set-ExecutionPolicy",
+        };
 
         static GatherRuleGuards()
         {
@@ -169,6 +195,17 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                 return false;
             }
 
+            // Additional hard-blocked paths (even in unrestricted mode)
+            foreach (var blocked in AdditionalHardBlockedPathPrefixes)
+            {
+                if (normalizedPath.StartsWith(blocked, StringComparison.OrdinalIgnoreCase) &&
+                    (normalizedPath.Length == blocked.Length ||
+                     normalizedPath[blocked.Length] == Path.DirectorySeparatorChar))
+                {
+                    return false;
+                }
+            }
+
             if (unrestrictedMode)
                 return true;
 
@@ -217,6 +254,16 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         {
             if (string.IsNullOrEmpty(command))
                 return false;
+
+            // Hard guards apply even in unrestricted mode
+            if (command.Length > MaxCommandLength)
+                return false;
+
+            foreach (var blocked in HardBlockedCommandPatterns)
+            {
+                if (command.IndexOf(blocked, StringComparison.OrdinalIgnoreCase) >= 0)
+                    return false;
+            }
 
             if (unrestrictedMode)
                 return true;

@@ -304,9 +304,17 @@ namespace AutopilotMonitor.Shared.Models
         // ===== UNRESTRICTED MODE =====
 
         /// <summary>
+        /// Whether the Unrestricted Mode feature is available for this tenant.
+        /// When false (default), the Unrestricted Mode section is hidden in the tenant settings UI
+        /// and UnrestrictedMode cannot be activated by tenant admins.
+        /// Only configurable by Galactic Admins.
+        /// </summary>
+        public bool UnrestrictedModeEnabled { get; set; } = false;
+
+        /// <summary>
         /// When enabled, agent guardrails are relaxed: all registry paths, WMI queries, and commands
         /// are allowed via GatherRules. File paths and diagnostics paths are allowed except C:\Users.
-        /// Default: false. Enabling this is at the tenant admin's own risk and responsibility.
+        /// Default: false. Can only be toggled by tenant admins when UnrestrictedModeEnabled is true.
         /// </summary>
         public bool UnrestrictedMode { get; set; } = false;
 

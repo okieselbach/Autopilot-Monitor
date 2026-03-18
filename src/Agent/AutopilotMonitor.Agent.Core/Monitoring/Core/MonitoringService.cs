@@ -87,6 +87,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         private int _consecutiveUploadFailures = 0;
         private EmergencyReporter _emergencyReporter;
 
+        // UnrestrictedMode audit: tracks whether the first config apply has happened
+        private bool _isFirstConfigApply = true;
+
         public MonitoringService(AgentConfiguration configuration, AgentLogger logger, string agentVersion)
         {
             _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
@@ -380,7 +383,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             _configuration.EnrollmentSummaryBrandingImageUrl = config.EnrollmentSummaryBrandingImageUrl;
             _configuration.EnrollmentSummaryLaunchRetrySeconds = config.EnrollmentSummaryLaunchRetrySeconds;
             _configuration.SendTraceEvents = config.SendTraceEvents;
-            _configuration.UnrestrictedMode = config.UnrestrictedMode;
+            AuditUnrestrictedModeChange(config);
             _enrollmentTracker?.UpdateSendTraceEvents(config.SendTraceEvents);
 
             _logger.Info("Applied runtime settings from remote config");
@@ -389,6 +392,77 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             _logger.Info($"  maxAuthFailures={_configuration.MaxAuthFailures}, authFailureTimeoutMinutes={_configuration.AuthFailureTimeoutMinutes}");
             _logger.Info($"  logLevel={_configuration.LogLevel}, rebootOnComplete={_configuration.RebootOnComplete}, maxBatchSize={_configuration.MaxBatchSize}");
             _logger.Info($"  showEnrollmentSummary={_configuration.ShowEnrollmentSummary}, summaryTimeoutSeconds={_configuration.EnrollmentSummaryTimeoutSeconds}");
+        }
+
+        private void AuditUnrestrictedModeChange(AgentConfigResponse config)
+        {
+            var previous = _configuration.UnrestrictedMode;
+            _configuration.UnrestrictedMode = config.UnrestrictedMode;
+
+            if (_isFirstConfigApply)
+            {
+                _isFirstConfigApply = false;
+                if (config.UnrestrictedMode)
+                {
+                    _logger.Info("UnrestrictedMode enabled via tenant configuration (initial config)");
+                    EmitEvent(new EnrollmentEvent
+                    {
+                        SessionId = _configuration.SessionId,
+                        EventType = "security_audit",
+                        Severity = EventSeverity.Info,
+                        Source = "MonitoringService",
+                        Message = "UnrestrictedMode enabled (initial config)",
+                        Data = new Dictionary<string, object>
+                        {
+                            ["unrestrictedMode"] = true,
+                            ["source"] = "initial_config",
+                            ["configVersion"] = config.ConfigVersion
+                        }
+                    });
+                }
+            }
+            else if (config.UnrestrictedMode != previous)
+            {
+                if (config.UnrestrictedMode)
+                {
+                    // Runtime activation — potential manipulation, emit Critical
+                    _logger.Warning($"SECURITY: UnrestrictedMode changed to TRUE during runtime (configVersion={config.ConfigVersion})");
+                    EmitEvent(new EnrollmentEvent
+                    {
+                        SessionId = _configuration.SessionId,
+                        EventType = "security_audit",
+                        Severity = EventSeverity.Critical,
+                        Source = "MonitoringService",
+                        Message = "UnrestrictedMode activated during runtime — potential config manipulation",
+                        Data = new Dictionary<string, object>
+                        {
+                            ["unrestrictedMode"] = true,
+                            ["previousValue"] = false,
+                            ["source"] = "config_refresh",
+                            ["configVersion"] = config.ConfigVersion
+                        }
+                    });
+                }
+                else
+                {
+                    _logger.Info("UnrestrictedMode disabled during runtime");
+                    EmitEvent(new EnrollmentEvent
+                    {
+                        SessionId = _configuration.SessionId,
+                        EventType = "security_audit",
+                        Severity = EventSeverity.Info,
+                        Source = "MonitoringService",
+                        Message = "UnrestrictedMode deactivated during runtime",
+                        Data = new Dictionary<string, object>
+                        {
+                            ["unrestrictedMode"] = false,
+                            ["previousValue"] = true,
+                            ["source"] = "config_refresh",
+                            ["configVersion"] = config.ConfigVersion
+                        }
+                    });
+                }
+            }
         }
 
         /// <summary>

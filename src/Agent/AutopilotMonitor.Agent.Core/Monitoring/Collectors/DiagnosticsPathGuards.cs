@@ -60,8 +60,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             @"C:\Windows\Logs\CBS",
         };
 
-        // Hard block: C:\Users is never allowed, even in unrestricted mode
+        // Hard blocks: never allowed, even in unrestricted mode
         private static readonly string BlockedUsersPrefix = Path.GetFullPath(@"C:\Users");
+        private static readonly string[] AdditionalHardBlockedPrefixes = new[]
+        {
+            @"C:\Windows\System32\config",  // SAM, SECURITY, SYSTEM hives
+        };
 
         /// <summary>
         /// Returns true if the given path is allowed for diagnostics collection.
@@ -110,7 +114,19 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     return false;
                 }
 
-                // In unrestricted mode, everything except C:\Users is allowed
+                // Additional hard-blocked paths (even in unrestricted mode)
+                foreach (var blocked in AdditionalHardBlockedPrefixes)
+                {
+                    var normalizedBlocked = Path.GetFullPath(blocked);
+                    if (normalizedDir.StartsWith(normalizedBlocked, StringComparison.OrdinalIgnoreCase) &&
+                        (normalizedDir.Length == normalizedBlocked.Length ||
+                         normalizedDir[normalizedBlocked.Length] == Path.DirectorySeparatorChar))
+                    {
+                        return false;
+                    }
+                }
+
+                // In unrestricted mode, everything except hard-blocked paths is allowed
                 if (unrestrictedMode)
                     return true;
 

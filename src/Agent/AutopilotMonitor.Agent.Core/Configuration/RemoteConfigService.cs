@@ -126,7 +126,12 @@ namespace AutopilotMonitor.Agent.Core.Configuration
                 if (!Directory.Exists(dir))
                     Directory.CreateDirectory(dir);
 
+                // SECURITY: Never persist UnrestrictedMode to disk — require live backend auth
+                var liveValue = config.UnrestrictedMode;
+                config.UnrestrictedMode = false;
                 var json = JsonConvert.SerializeObject(config, Formatting.Indented);
+                config.UnrestrictedMode = liveValue;
+
                 File.WriteAllText(_cacheFilePath, json);
                 _logger.Debug("Remote config cached to disk");
             }
@@ -143,7 +148,13 @@ namespace AutopilotMonitor.Agent.Core.Configuration
                 if (File.Exists(_cacheFilePath))
                 {
                     var json = File.ReadAllText(_cacheFilePath);
-                    return JsonConvert.DeserializeObject<AgentConfigResponse>(json);
+                    var config = JsonConvert.DeserializeObject<AgentConfigResponse>(json);
+                    if (config != null)
+                    {
+                        // SECURITY: Never trust cached UnrestrictedMode — always require live backend auth
+                        config.UnrestrictedMode = false;
+                    }
+                    return config;
                 }
             }
             catch (Exception ex)

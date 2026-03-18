@@ -89,6 +89,7 @@ namespace AutopilotMonitor.Functions.Functions.Config
                 {
                     if (config.AllowInsecureAgentRequests != existingConfig.AllowInsecureAgentRequests ||
                         config.BootstrapTokenEnabled != existingConfig.BootstrapTokenEnabled ||
+                        config.UnrestrictedModeEnabled != existingConfig.UnrestrictedModeEnabled ||
                         config.CustomRateLimitRequestsPerMinute != existingConfig.CustomRateLimitRequestsPerMinute ||
                         config.RateLimitRequestsPerMinute != existingConfig.RateLimitRequestsPerMinute ||
                         config.Disabled != existingConfig.Disabled)
@@ -100,11 +101,18 @@ namespace AutopilotMonitor.Functions.Functions.Config
 
                     config.AllowInsecureAgentRequests = existingConfig.AllowInsecureAgentRequests;
                     config.BootstrapTokenEnabled = existingConfig.BootstrapTokenEnabled;
+                    config.UnrestrictedModeEnabled = existingConfig.UnrestrictedModeEnabled;
                     config.CustomRateLimitRequestsPerMinute = existingConfig.CustomRateLimitRequestsPerMinute;
                     config.RateLimitRequestsPerMinute = existingConfig.RateLimitRequestsPerMinute;
                     config.Disabled = existingConfig.Disabled;
                     config.DisabledReason = existingConfig.DisabledReason;
                     config.DisabledUntil = existingConfig.DisabledUntil;
+                }
+
+                // Safety: if GA gate is off, force UnrestrictedMode to false
+                if (!config.UnrestrictedModeEnabled)
+                {
+                    config.UnrestrictedMode = false;
                 }
 
                 // MaxNdjsonPayloadSizeMB is table-only — always preserve existing value

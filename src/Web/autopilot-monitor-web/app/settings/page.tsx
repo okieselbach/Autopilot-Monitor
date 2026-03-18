@@ -909,7 +909,15 @@ export default function SettingsPage() {
         { id: "hardware-whitelist", label: "Hardware Whitelist", icon: <CpuChipIcon /> },
         { id: "agent-settings", label: "Agent Settings", icon: <GearIcon /> },
         { id: "agent-analyzers", label: "Agent Analyzers", icon: <MagnifyingGlassIcon /> },
+      );
+    }
+    if (config?.unrestrictedModeEnabled && user?.isTenantAdmin) {
+      sections.push(
         { id: "unrestricted-mode", label: "Unrestricted Mode", icon: <LockClosedIcon /> },
+      );
+    }
+    if (user?.isTenantAdmin) {
+      sections.push(
         { id: "notifications", label: "Notifications", icon: <BellIcon /> },
         { id: "diagnostics", label: "Diagnostics", icon: <CloudArrowUpIcon /> },
       );
@@ -924,7 +932,7 @@ export default function SettingsPage() {
       );
     }
     return sections;
-  }, [user, config?.bootstrapTokenEnabled]);
+  }, [user, config?.bootstrapTokenEnabled, config?.unrestrictedModeEnabled]);
 
   usePageSections(settingsSections, "Settings", "scroll-spy");
 
@@ -1109,7 +1117,7 @@ export default function SettingsPage() {
             </div>
             )}
 
-            {user?.isTenantAdmin && (
+            {config?.unrestrictedModeEnabled && user?.isTenantAdmin && (
             <div id="unrestricted-mode">
             <UnrestrictedModeSection
               unrestrictedMode={unrestrictedMode}

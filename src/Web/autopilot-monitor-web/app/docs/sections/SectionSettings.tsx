@@ -318,6 +318,30 @@ export function SectionSettings() {
         </SettingsRow>
       </SettingsGroup>
 
+      {/* Unrestricted Mode */}
+      <div className="mb-2 flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-4 py-2.5 text-sm text-amber-900">
+        <svg className="mt-0.5 h-5 w-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M12 2a10 10 0 100 20 10 10 0 000-20z" />
+        </svg>
+        <span>
+          Unrestricted Mode is an optional feature that is enabled on request only.
+          To get access, open a{" "}
+          <a href="https://github.com/okieselbach/Autopilot-Monitor/issues" target="_blank" rel="noopener noreferrer" className="font-medium underline hover:text-amber-700">
+            GitHub issue
+          </a>{" "}
+          to request activation for your tenant.
+        </span>
+      </div>
+      <SettingsGroup title="Unrestricted Mode" color="bg-amber-50 text-amber-900" borderColor="border-amber-200">
+        <SettingsRow name="Unrestricted Mode">
+          When enabled, agent guardrails are relaxed: GatherRules can access any registry path, WMI query,
+          and PowerShell/system command. File and diagnostics paths are allowed except C:\Users (always blocked
+          for privacy). Certain dangerous operations (downloads, user creation, boot manipulation, persistence
+          mechanisms) remain hard-blocked even in Unrestricted Mode. This feature requires explicit activation
+          by the platform administrator before it becomes visible in tenant settings.
+        </SettingsRow>
+      </SettingsGroup>
+
       {/* Danger Zone */}
       <div className="border border-red-200 rounded-lg overflow-hidden">
         <div className="px-4 py-2.5 bg-red-50 text-red-900">
