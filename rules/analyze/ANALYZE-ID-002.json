@@ -16,8 +16,8 @@
       "source": "event_type",
       "eventType": "local_admin_analysis",
       "dataField": "finding",
-      "operator": "contains",
-      "value": "unexpected",
+      "operator": "equals",
+      "value": "unexpected_local_admins_detected",
       "required": true
     },
     {
@@ -52,7 +52,7 @@
     }
   ],
   "confidenceThreshold": 50,
-  "explanation": "The agent detected **unexpected local user accounts or profile directories** on this device that are not in the built-in or tenant-configured allowed list.\n\nThis is a security-relevant finding. Creating local admin accounts before or during Autopilot enrollment is a known bypass technique (e.g. via BypassNRO or Shift+F10 during OOBE) that grants persistent local administrator access.\n\nCheck the `local_admin_analysis` event details to see:\n- **unexpected_accounts** — local user accounts not on the allowed list\n- **unexpected_profiles** — C:\\Users profile directories not on the allowed list\n- **bypass_nro** — whether the BypassNRO registry flag was set\n- **confidence_score** — the agent's confidence in the finding (0–100)\n\nIf these accounts are expected for your environment (e.g. a service account or helpdesk account), add them to the allowed list in Tenant Settings.",
+  "explanation": "The agent detected unexpected local user accounts or profile directories on this device that are not in the built-in or tenant-configured allowed list.\n\nThis is a security-relevant finding. Creating local admin accounts before or during Autopilot enrollment is a known bypass technique (e.g. via BypassNRO or Shift+F10 during OOBE) that grants persistent local administrator access.\n\nClick the event link below to jump to the local_admin_analysis event and check: unexpected_accounts (local user accounts not on the allowed list), unexpected_profiles (C:\\Users profile directories not on the allowed list), bypass_nro (whether the BypassNRO registry flag was set), and confidence_score (the agent's confidence in the finding, 0-100).\n\nIf these accounts are expected for your environment (e.g. a service account or helpdesk account), add them to the allowed list in Tenant Settings.",
   "remediation": [
     {
       "title": "Review the unexpected accounts",
