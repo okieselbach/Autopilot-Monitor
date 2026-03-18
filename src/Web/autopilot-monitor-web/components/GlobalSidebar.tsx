@@ -307,6 +307,11 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
         </>
       )}
 
+      {/* Public (unauthenticated): show Home link to landing page */}
+      {!isAuthenticated && (
+        renderGlobalItem({ id: "home", label: "Home", href: "/", icon: DASHBOARD_ITEM.icon })
+      )}
+
       {/* Divider (only when both global nav and page sections exist) + page sections */}
       {hasPageSections && (
         <>

@@ -275,12 +275,6 @@ export default function AdminConfigurationPage() {
           <div className="py-6 px-4 sm:px-6 lg:px-8">
             <div className="flex items-center justify-between">
               <div>
-                <button
-                  onClick={() => router.push("/dashboard")}
-                  className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 mb-2 flex items-center"
-                >
-                  &larr; Back to Dashboard
-                </button>
                 <div>
                   <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Admin Configuration</h1>
                   <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Galactic Admin Operations</p>

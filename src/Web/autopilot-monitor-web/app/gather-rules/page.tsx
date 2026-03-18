@@ -397,12 +397,6 @@ export default function GatherRulesPage() {
           <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
             <div className="flex items-center justify-between">
               <div>
-                <button
-                  onClick={() => router.push("/dashboard")}
-                  className="text-sm text-gray-600 hover:text-gray-900 mb-2 flex items-center"
-                >
-                  &larr; Back to Dashboard
-                </button>
                 <div>
                   <div className="flex items-center gap-4">
                     <h1 className="text-3xl font-bold text-gray-900">Gather Rules</h1>

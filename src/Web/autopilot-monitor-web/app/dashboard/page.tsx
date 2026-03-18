@@ -661,8 +661,8 @@ export default function Home() {
     <ProtectedRoute>
       <div className="min-h-screen bg-gray-50">
       {/* Main content */}
-      <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
-        <div className="px-4 py-6 sm:px-0">
+      <main className="max-w-7xl mx-auto py-4 sm:px-6 lg:px-8">
+        <div className="px-4 sm:px-0">
           {/* Temporary banner: Analyze Rules are being actively refined */}
           <div className="mb-4 bg-amber-50 border border-amber-300 rounded-lg px-4 py-3 flex items-start gap-3 dark:bg-amber-950/30 dark:border-amber-700/50">
             <svg className="w-4 h-4 text-amber-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">

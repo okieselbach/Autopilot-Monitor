@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { usePageSections } from "../../hooks/usePageSections";
 import { PageSectionItem } from "../../contexts/SidebarContext";
+import { useAuth } from "../../contexts/AuthContext";
 import { NAV_SECTIONS } from "./docsNavSections";
 import {
   KeyIcon,
@@ -37,13 +38,14 @@ const docsItems: PageSectionItem[] = NAV_SECTIONS.map((s) => ({
 
 export function DocsSidebar({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const { isAuthenticated } = useAuth();
 
   usePageSections(docsItems, "Contents", "route");
 
   return (
     <>
-      {/* Page header */}
-      <header className="bg-white shadow-sm border-b border-gray-200 sticky top-14 z-10">
+      {/* Page header — top-14 when navbar present (authenticated), top-0 when public */}
+      <header className={`bg-white shadow-sm border-b border-gray-200 sticky ${isAuthenticated ? "top-14" : "top-0"} z-10`}>
         <div className="px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center justify-between">
             <button

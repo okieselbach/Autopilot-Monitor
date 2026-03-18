@@ -951,12 +951,6 @@ export default function SettingsPage() {
           <div className="py-6 px-4 sm:px-6 lg:px-8">
             <div className="flex items-center justify-between">
               <div>
-                <button
-                  onClick={() => handleNavigate("/dashboard")}
-                  className="text-sm text-gray-600 hover:text-gray-900 mb-2 flex items-center"
-                >
-                  &larr; Back to Dashboard
-                </button>
                 <div>
                   <h1 className="text-3xl font-bold text-gray-900">Tenant Configuration</h1>
                   <p className="text-sm text-gray-600 mt-1">Tenant: {tenantId}</p>

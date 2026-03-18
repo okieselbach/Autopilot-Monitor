@@ -255,12 +255,6 @@ export default function PlatformMetricsPage() {
           <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
             <div className="flex items-center justify-between">
               <div>
-                <button
-                  onClick={() => router.push('/dashboard')}
-                  className="text-sm text-gray-600 hover:text-gray-900 mb-2 flex items-center"
-                >
-                  &larr; Back to Dashboard
-                </button>
                 <h1 className="text-3xl font-bold text-gray-900">Platform Metrics</h1>
                 {cacheInfo && (
                   <p className="text-xs text-gray-400 mt-1">
