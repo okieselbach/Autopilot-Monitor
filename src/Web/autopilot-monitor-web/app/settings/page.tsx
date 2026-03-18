@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo, useRef } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { ProtectedRoute } from "../../components/ProtectedRoute";
 import { useTenant } from "../../contexts/TenantContext";
@@ -8,7 +8,6 @@ import { useAuth } from "../../contexts/AuthContext";
 import { useNotifications } from "../../contexts/NotificationContext";
 import { API_BASE_URL } from "@/lib/config";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
-import UnsavedChangesModal from "../../components/UnsavedChangesModal";
 import { usePageSections } from "../../hooks/usePageSections";
 import { PageSectionItem } from "../../contexts/SidebarContext";
 import { ShieldCheckIcon, UsersIcon, CpuChipIcon, GearIcon, MagnifyingGlassIcon, LockClosedIcon, BellIcon, CloudArrowUpIcon, KeyIcon, CircleStackIcon, ArrowRightOnRectangleIcon } from "../../lib/sidebarIcons";
@@ -34,7 +33,7 @@ export default function SettingsPage() {
   const [admins, setAdmins] = useState<TenantAdmin[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingAdmins, setLoadingAdmins] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [savingSection, setSavingSection] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [newAdminEmail, setNewAdminEmail] = useState("");
@@ -54,10 +53,6 @@ export default function SettingsPage() {
   // Bootstrap sessions
   const [bootstrapSessions, setBootstrapSessions] = useState<BootstrapSessionItem[]>([]);
   const [bootstrapLoading, setBootstrapLoading] = useState(false);
-
-  // Unsaved changes guard
-  const [showUnsavedModal, setShowUnsavedModal] = useState(false);
-  const pendingNavigationRef = useRef<string | null>(null);
 
   // Form state
   const [manufacturerWhitelist, setManufacturerWhitelist] = useState("Dell*,HP*,Lenovo*,Microsoft Corporation");
@@ -111,59 +106,6 @@ export default function SettingsPage() {
 
   // Unrestricted mode state
   const [unrestrictedMode, setUnrestrictedMode] = useState(false);
-
-  // Derived: true when form differs from last-saved config
-  const hasUnsavedChanges = useMemo(() => {
-    if (!config) return false;
-    return (
-      manufacturerWhitelist !== config.manufacturerWhitelist ||
-      modelWhitelist !== config.modelWhitelist ||
-      validateAutopilotDevice !== config.validateAutopilotDevice ||
-      validateCorporateIdentifier !== (config.validateCorporateIdentifier ?? false) ||
-      dataRetentionDays !== config.dataRetentionDays ||
-      sessionTimeoutHours !== config.sessionTimeoutHours ||
-      enablePerformanceCollector !== config.enablePerformanceCollector ||
-      performanceCollectorInterval !== config.performanceCollectorIntervalSeconds ||
-      helloWaitTimeoutSeconds !== (config.helloWaitTimeoutSeconds ?? 30) ||
-      selfDestructOnComplete !== (config.selfDestructOnComplete ?? true) ||
-      keepLogFile !== (config.keepLogFile ?? false) ||
-      rebootOnComplete !== (config.rebootOnComplete ?? false) ||
-      rebootDelaySeconds !== (config.rebootDelaySeconds ?? 10) ||
-      enableGeoLocation !== (config.enableGeoLocation ?? true) ||
-      enableImeMatchLog !== (config.enableImeMatchLog ?? false) ||
-      logLevel !== (config.logLevel ?? "Info") ||
-      showScriptOutput !== (config.showScriptOutput ?? true) ||
-      showEnrollmentSummary !== (config.showEnrollmentSummary ?? false) ||
-      enrollmentSummaryTimeoutSeconds !== (config.enrollmentSummaryTimeoutSeconds ?? 60) ||
-      enrollmentSummaryBrandingImageUrl !== (config.enrollmentSummaryBrandingImageUrl ?? "") ||
-      enrollmentSummaryLaunchRetrySeconds !== (config.enrollmentSummaryLaunchRetrySeconds ?? 120) ||
-      webhookProviderType !== (config.webhookProviderType ?? (config.teamsWebhookUrl ? 1 : 0)) ||
-      webhookUrl !== (config.webhookUrl ?? config.teamsWebhookUrl ?? "") ||
-      webhookNotifyOnSuccess !== (config.webhookNotifyOnSuccess ?? config.teamsNotifyOnSuccess ?? true) ||
-      webhookNotifyOnFailure !== (config.webhookNotifyOnFailure ?? config.teamsNotifyOnFailure ?? true) ||
-      diagnosticsBlobSasUrl !== (config.diagnosticsBlobSasUrl ?? "") ||
-      diagnosticsUploadMode !== (config.diagnosticsUploadMode ?? "Off") ||
-      JSON.stringify(tenantDiagPaths) !== JSON.stringify(
-        config.diagnosticsLogPathsJson ? (() => { try { return JSON.parse(config.diagnosticsLogPathsJson!); } catch { return []; } })() : []
-      ) ||
-      enableLocalAdminAnalyzer !== (config.enableLocalAdminAnalyzer ?? true) ||
-      JSON.stringify(localAdminAllowedAccounts) !== JSON.stringify(
-        config.localAdminAllowedAccountsJson ? (() => { try { return JSON.parse(config.localAdminAllowedAccountsJson!); } catch { return []; } })() : []
-      ) ||
-      unrestrictedMode !== (config.unrestrictedMode ?? false)
-    );
-  }, [
-    config,
-    manufacturerWhitelist, modelWhitelist, validateAutopilotDevice, validateCorporateIdentifier,
-    dataRetentionDays, sessionTimeoutHours, enablePerformanceCollector,
-    performanceCollectorInterval, helloWaitTimeoutSeconds, selfDestructOnComplete, keepLogFile,
-    rebootOnComplete, rebootDelaySeconds, enableGeoLocation, enableImeMatchLog,
-    logLevel, showScriptOutput, showEnrollmentSummary, enrollmentSummaryTimeoutSeconds,
-    enrollmentSummaryBrandingImageUrl, enrollmentSummaryLaunchRetrySeconds,
-    webhookProviderType, webhookUrl, webhookNotifyOnSuccess, webhookNotifyOnFailure,
-    diagnosticsBlobSasUrl, diagnosticsUploadMode, tenantDiagPaths,
-    enableLocalAdminAnalyzer, localAdminAllowedAccounts, unrestrictedMode,
-  ]);
 
   // Fetch configuration
   useEffect(() => {
@@ -336,58 +278,6 @@ export default function SettingsPage() {
     fetchGlobalDiagPaths();
   }, [user?.isGalacticAdmin]);
 
-  // Intercept <Link> clicks from Navbar and any other anchor navigations
-  useEffect(() => {
-    const handleLinkClick = (e: MouseEvent) => {
-      if (!hasUnsavedChanges) return;
-      if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
-      const target = (e.target as Element).closest('a[href]');
-      if (!target) return;
-      const href = target.getAttribute('href');
-      if (!href || href.startsWith('#') || href.startsWith('http://') || href.startsWith('https://')) return;
-      if (href === '/settings' || href.startsWith('/settings?') || href.startsWith('/settings#')) return;
-      e.preventDefault();
-      e.stopPropagation();
-      pendingNavigationRef.current = href;
-      setShowUnsavedModal(true);
-    };
-    document.addEventListener('click', handleLinkClick, true);
-    return () => document.removeEventListener('click', handleLinkClick, true);
-  }, [hasUnsavedChanges]);
-
-  // Intercept browser back/forward button
-  useEffect(() => {
-    const handlePopState = () => {
-      if (!hasUnsavedChanges) return;
-      window.history.pushState(null, '', window.location.href);
-      pendingNavigationRef.current = null;
-      setShowUnsavedModal(true);
-    };
-    window.history.pushState(null, '', window.location.href);
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
-  }, [hasUnsavedChanges]);
-
-  // Intercept tab close / page refresh
-  useEffect(() => {
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (!hasUnsavedChanges) return;
-      e.preventDefault();
-      e.returnValue = '';
-    };
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [hasUnsavedChanges]);
-
-  const handleNavigate = (url: string) => {
-    if (hasUnsavedChanges) {
-      pendingNavigationRef.current = url;
-      setShowUnsavedModal(true);
-    } else {
-      router.push(url);
-    }
-  };
-
   const handleTestWebhook = async () => {
     if (!tenantId) return;
     setTestingWebhook(true);
@@ -405,42 +295,16 @@ export default function SettingsPage() {
     }
   };
 
-  const handleSaveAndNavigate = async () => {
-    setShowUnsavedModal(false);
-    const destination = pendingNavigationRef.current;
-    pendingNavigationRef.current = null;
-    try {
-      await saveConfiguration();
-      if (destination) router.push(destination);
-      else router.back();
-    } catch {
-      // saveConfiguration already calls setError; stay on page
-    }
-  };
-
-  const handleDiscardAndNavigate = () => {
-    setShowUnsavedModal(false);
-    const destination = pendingNavigationRef.current;
-    pendingNavigationRef.current = null;
-    if (destination) router.push(destination);
-    else router.back();
-  };
-
-  const handleCancelNavigation = () => {
-    setShowUnsavedModal(false);
-    pendingNavigationRef.current = null;
-  };
-
-  const saveConfiguration = async (validateAutopilotDeviceOverride?: boolean, validateCorporateIdentifierOverride?: boolean) => {
+  const saveConfiguration = async (sectionName: string, overrides?: { validateAutopilotDevice?: boolean; validateCorporateIdentifier?: boolean }) => {
     if (!tenantId || !config) return;
 
     try {
-      setSaving(true);
+      setSavingSection(sectionName);
       setError(null);
       setSuccessMessage(null);
 
-      const autopilotDeviceValidationValue = validateAutopilotDeviceOverride ?? validateAutopilotDevice;
-      const corporateIdentifierValidationValue = validateCorporateIdentifierOverride ?? validateCorporateIdentifier;
+      const autopilotDeviceValidationValue = overrides?.validateAutopilotDevice ?? validateAutopilotDevice;
+      const corporateIdentifierValidationValue = overrides?.validateCorporateIdentifier ?? validateCorporateIdentifier;
 
       const updatedConfig: TenantConfiguration = {
         ...config,
@@ -503,8 +367,14 @@ export default function SettingsPage() {
       setUnrestrictedMode(result.config.unrestrictedMode ?? false);
       setSuccessMessage("Configuration saved successfully!");
       setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err) {
+      if (err instanceof TokenExpiredError) {
+        addNotification('error', 'Session Expired', err.message, 'session-expired-error');
+      } else {
+        setError(err instanceof Error ? err.message : "Failed to save configuration");
+      }
     } finally {
-      setSaving(false);
+      setSavingSection(null);
     }
   };
 
@@ -597,10 +467,10 @@ export default function SettingsPage() {
         }
 
         if (trigger === "corporate") {
-          await saveConfiguration(undefined, true);
+          await saveConfiguration("autopilotValidation", { validateCorporateIdentifier: true });
           setSuccessMessage("Corporate Identifier Validation enabled. Backend agent endpoints are now unlocked for this tenant.");
         } else {
-          await saveConfiguration(true);
+          await saveConfiguration("autopilotValidation", { validateAutopilotDevice: true });
           setSuccessMessage("Autopilot Device Validation enabled. Backend agent endpoints are now unlocked for this tenant.");
         }
         router.replace("/settings");
@@ -618,21 +488,83 @@ export default function SettingsPage() {
     handleConsentCallback();
   }, [tenantId, config, router]);
 
-  const handleSave = async () => {
-    if (!tenantId || !config) return;
+  // Per-section save/reset handlers
+  const handleSaveHardwareWhitelist = () => saveConfiguration("hardwareWhitelist");
+  const handleResetHardwareWhitelist = () => {
+    if (!config) return;
+    setManufacturerWhitelist(config.manufacturerWhitelist);
+    setModelWhitelist(config.modelWhitelist);
+  };
 
+  const handleSaveAgentSettings = () => saveConfiguration("agentSettings");
+  const handleResetAgentSettings = () => {
+    if (!config) return;
+    setEnablePerformanceCollector(config.enablePerformanceCollector ?? true);
+    setPerformanceCollectorInterval(config.performanceCollectorIntervalSeconds ?? 30);
+    setHelloWaitTimeoutSeconds(config.helloWaitTimeoutSeconds ?? 30);
+    setSelfDestructOnComplete(config.selfDestructOnComplete ?? true);
+    setKeepLogFile(config.keepLogFile ?? false);
+    setRebootOnComplete(config.rebootOnComplete ?? false);
+    setRebootDelaySeconds(config.rebootDelaySeconds ?? 10);
+    setEnableGeoLocation(config.enableGeoLocation ?? true);
+    setEnableImeMatchLog(config.enableImeMatchLog ?? false);
+    setLogLevel(config.logLevel ?? "Info");
+    setShowScriptOutput(config.showScriptOutput ?? true);
+    setShowEnrollmentSummary(config.showEnrollmentSummary ?? false);
+    setEnrollmentSummaryTimeoutSeconds(config.enrollmentSummaryTimeoutSeconds ?? 60);
+    setEnrollmentSummaryBrandingImageUrl(config.enrollmentSummaryBrandingImageUrl ?? "");
+    setEnrollmentSummaryLaunchRetrySeconds(config.enrollmentSummaryLaunchRetrySeconds ?? 120);
+  };
+
+  const handleSaveAgentAnalyzers = () => saveConfiguration("agentAnalyzers");
+  const handleResetAgentAnalyzers = () => {
+    if (!config) return;
+    setEnableLocalAdminAnalyzer(config.enableLocalAdminAnalyzer ?? true);
     try {
-      await saveConfiguration();
-    } catch (err) {
-      if (err instanceof TokenExpiredError) {
-        addNotification('error', 'Session Expired', err.message, 'session-expired-error');
-      } else {
-        console.error("Error saving configuration:", err);
-        setError(err instanceof Error ? err.message : "Failed to save configuration");
-      }
+      setLocalAdminAllowedAccounts(config.localAdminAllowedAccountsJson ? JSON.parse(config.localAdminAllowedAccountsJson) : []);
+    } catch { setLocalAdminAllowedAccounts([]); }
+    setNewAllowedAccount("");
+  };
+
+  const handleSaveNotifications = () => saveConfiguration("notifications");
+  const handleResetNotifications = () => {
+    if (!config) return;
+    if (config.webhookUrl && config.webhookProviderType) {
+      setWebhookProviderType(config.webhookProviderType);
+      setWebhookUrl(config.webhookUrl);
+      setWebhookNotifyOnSuccess(config.webhookNotifyOnSuccess ?? true);
+      setWebhookNotifyOnFailure(config.webhookNotifyOnFailure ?? true);
+    } else if (config.teamsWebhookUrl) {
+      setWebhookProviderType(1);
+      setWebhookUrl(config.teamsWebhookUrl);
+      setWebhookNotifyOnSuccess(config.teamsNotifyOnSuccess ?? true);
+      setWebhookNotifyOnFailure(config.teamsNotifyOnFailure ?? true);
+    } else {
+      setWebhookProviderType(0);
+      setWebhookUrl("");
+      setWebhookNotifyOnSuccess(true);
+      setWebhookNotifyOnFailure(true);
     }
   };
 
+  const handleSaveDiagnostics = () => saveConfiguration("diagnostics");
+  const handleResetDiagnostics = () => {
+    if (!config) return;
+    setDiagnosticsBlobSasUrl(config.diagnosticsBlobSasUrl ?? "");
+    setDiagnosticsUploadMode(config.diagnosticsUploadMode ?? "Off");
+    try {
+      setTenantDiagPaths(config.diagnosticsLogPathsJson ? JSON.parse(config.diagnosticsLogPathsJson) : []);
+    } catch { setTenantDiagPaths([]); }
+  };
+
+  const handleSaveDataManagement = () => saveConfiguration("dataManagement");
+  const handleResetDataManagement = () => {
+    if (!config) return;
+    setDataRetentionDays(config.dataRetentionDays ?? 90);
+    setSessionTimeoutHours(config.sessionTimeoutHours ?? 5);
+  };
+
+  const handleSaveUnrestrictedMode = () => saveConfiguration("unrestrictedMode");
 
   const handleAddAdmin = async () => {
     if (!tenantId || !newAdminEmail.trim()) return;
@@ -957,31 +889,9 @@ export default function SettingsPage() {
         {/* Header */}
         <header className="bg-white shadow">
           <div className="py-6 px-4 sm:px-6 lg:px-8">
-            <div className="flex items-center justify-between">
-              <div>
-                <div>
-                  <h1 className="text-2xl font-normal text-gray-900">Tenant Configuration</h1>
-                  <p className="text-sm text-gray-600 mt-1">Tenant: {tenantId}</p>
-                </div>
-              </div>
-              {!loading && user?.isTenantAdmin && (
-                <div className="flex items-center space-x-3">
-                  <button
-                    onClick={handleSave}
-                    disabled={saving}
-                    className="px-4 py-2 bg-indigo-600 text-white rounded-md text-sm hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-2"
-                  >
-                    {saving ? (
-                      <>
-                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                        <span>Saving...</span>
-                      </>
-                    ) : (
-                      <span>Save Configuration</span>
-                    )}
-                  </button>
-                </div>
-              )}
+            <div>
+              <h1 className="text-2xl font-normal text-gray-900">Tenant Configuration</h1>
+              <p className="text-sm text-gray-600 mt-1">Tenant: {tenantId}</p>
             </div>
           </div>
         </header>
@@ -1025,7 +935,7 @@ export default function SettingsPage() {
                 validateCorporateIdentifier={validateCorporateIdentifier}
                 setValidateCorporateIdentifier={setValidateCorporateIdentifier}
                 autopilotConsentInProgress={autopilotConsentInProgress}
-                saving={saving}
+                saving={savingSection === "autopilotValidation"}
                 onBeginConsent={beginDeviceValidationConsentFlow}
               />
               </div>
@@ -1063,6 +973,9 @@ export default function SettingsPage() {
                 setManufacturerWhitelist={setManufacturerWhitelist}
                 modelWhitelist={modelWhitelist}
                 setModelWhitelist={setModelWhitelist}
+                onSave={handleSaveHardwareWhitelist}
+                onReset={handleResetHardwareWhitelist}
+                saving={savingSection === "hardwareWhitelist"}
               />
               </div>
             )}
@@ -1100,6 +1013,9 @@ export default function SettingsPage() {
               setEnrollmentSummaryBrandingImageUrl={setEnrollmentSummaryBrandingImageUrl}
               enrollmentSummaryLaunchRetrySeconds={enrollmentSummaryLaunchRetrySeconds}
               setEnrollmentSummaryLaunchRetrySeconds={setEnrollmentSummaryLaunchRetrySeconds}
+              onSave={handleSaveAgentSettings}
+              onReset={handleResetAgentSettings}
+              saving={savingSection === "agentSettings"}
             />
             </div>
             )}
@@ -1113,6 +1029,9 @@ export default function SettingsPage() {
               setLocalAdminAllowedAccounts={setLocalAdminAllowedAccounts}
               newAllowedAccount={newAllowedAccount}
               setNewAllowedAccount={setNewAllowedAccount}
+              onSave={handleSaveAgentAnalyzers}
+              onReset={handleResetAgentAnalyzers}
+              saving={savingSection === "agentAnalyzers"}
             />
             </div>
             )}
@@ -1122,6 +1041,8 @@ export default function SettingsPage() {
             <UnrestrictedModeSection
               unrestrictedMode={unrestrictedMode}
               setUnrestrictedMode={setUnrestrictedMode}
+              onSave={handleSaveUnrestrictedMode}
+              saving={savingSection === "unrestrictedMode"}
             />
             </div>
             )}
@@ -1140,6 +1061,9 @@ export default function SettingsPage() {
               onTestWebhook={handleTestWebhook}
               testingWebhook={testingWebhook}
               testWebhookResult={testWebhookResult}
+              onSave={handleSaveNotifications}
+              onReset={handleResetNotifications}
+              saving={savingSection === "notifications"}
             />
             </div>
             )}
@@ -1160,6 +1084,9 @@ export default function SettingsPage() {
               newDiagDesc={newDiagDesc}
               setNewDiagDesc={setNewDiagDesc}
               unrestrictedMode={unrestrictedMode}
+              onSave={handleSaveDiagnostics}
+              onReset={handleResetDiagnostics}
+              saving={savingSection === "diagnostics"}
             />
             </div>
             )}
@@ -1185,6 +1112,9 @@ export default function SettingsPage() {
               sessionTimeoutHours={sessionTimeoutHours}
               setSessionTimeoutHours={setSessionTimeoutHours}
               isGalacticAdmin={user?.isGalacticAdmin}
+              onSave={handleSaveDataManagement}
+              onReset={handleResetDataManagement}
+              saving={savingSection === "dataManagement"}
             />
             </div>
             )}
@@ -1204,34 +1134,12 @@ export default function SettingsPage() {
               </div>
             )}
 
-            {/* Configuration Info — Admin only */}
-            {config && user?.isTenantAdmin && (
-              <div id="config-info" className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <div className="flex items-start space-x-3">
-                  <svg className="w-5 h-5 text-blue-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  <div className="text-sm text-blue-800">
-                    <p className="font-medium">Configuration Info</p>
-                    <p className="mt-1">Last updated: {new Date(config.lastUpdated).toLocaleString()}</p>
-                    <p>Updated by: {config.updatedBy}</p>
-                  </div>
-                </div>
-              </div>
-            )}
 
           </div>
         )}
       </main>
       </div>
 
-      <UnsavedChangesModal
-        isOpen={showUnsavedModal}
-        isSaving={saving}
-        onSaveAndNavigate={handleSaveAndNavigate}
-        onDiscardAndNavigate={handleDiscardAndNavigate}
-        onCancel={handleCancelNavigation}
-      />
     </ProtectedRoute>
   );
 }

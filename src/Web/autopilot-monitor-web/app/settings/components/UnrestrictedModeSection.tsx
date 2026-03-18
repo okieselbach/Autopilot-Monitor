@@ -5,11 +5,15 @@ import { useState } from "react";
 interface UnrestrictedModeSectionProps {
   unrestrictedMode: boolean;
   setUnrestrictedMode: (value: boolean) => void;
+  onSave: () => void;
+  saving: boolean;
 }
 
 export default function UnrestrictedModeSection({
   unrestrictedMode,
   setUnrestrictedMode,
+  onSave,
+  saving,
 }: UnrestrictedModeSectionProps) {
   const [acknowledged, setAcknowledged] = useState(false);
 
@@ -18,9 +22,13 @@ export default function UnrestrictedModeSection({
       // Turning OFF — no confirmation needed
       setUnrestrictedMode(false);
       setAcknowledged(false);
+      // Auto-save after state update
+      setTimeout(() => onSave(), 0);
     } else if (acknowledged) {
       // Turning ON with acknowledgment
       setUnrestrictedMode(true);
+      // Auto-save after state update
+      setTimeout(() => onSave(), 0);
     }
   };
 
@@ -67,10 +75,10 @@ export default function UnrestrictedModeSection({
           <button
             type="button"
             onClick={handleToggle}
-            disabled={!unrestrictedMode && !acknowledged}
+            disabled={saving || (!unrestrictedMode && !acknowledged)}
             className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 ${
               unrestrictedMode ? "bg-amber-500" : "bg-gray-200"
-            } ${!unrestrictedMode && !acknowledged ? "opacity-50 cursor-not-allowed" : ""}`}
+            } ${saving || (!unrestrictedMode && !acknowledged) ? "opacity-50 cursor-not-allowed" : ""}`}
           >
             <span
               className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${

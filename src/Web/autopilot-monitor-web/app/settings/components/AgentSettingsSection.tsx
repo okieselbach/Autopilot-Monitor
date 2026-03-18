@@ -31,6 +31,9 @@ interface AgentSettingsSectionProps {
   setEnrollmentSummaryBrandingImageUrl: (value: string) => void;
   enrollmentSummaryLaunchRetrySeconds: number;
   setEnrollmentSummaryLaunchRetrySeconds: (value: number) => void;
+  onSave: () => void;
+  onReset: () => void;
+  saving: boolean;
 }
 
 export default function AgentSettingsSection({
@@ -64,6 +67,9 @@ export default function AgentSettingsSection({
   setEnrollmentSummaryBrandingImageUrl,
   enrollmentSummaryLaunchRetrySeconds,
   setEnrollmentSummaryLaunchRetrySeconds,
+  onSave,
+  onReset,
+  saving,
 }: AgentSettingsSectionProps) {
   return (
     <>
@@ -344,6 +350,31 @@ export default function AgentSettingsSection({
           )}
 
         </div>
+      </div>
+
+      {/* Save / Reset */}
+      <div className="flex items-center justify-end space-x-3">
+        <button
+          onClick={onReset}
+          disabled={saving}
+          className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm"
+        >
+          Reset
+        </button>
+        <button
+          onClick={onSave}
+          disabled={saving}
+          className="px-4 py-2 bg-indigo-600 text-white rounded-md text-sm hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-2"
+        >
+          {saving ? (
+            <>
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+              <span>Saving...</span>
+            </>
+          ) : (
+            <span>Save</span>
+          )}
+        </button>
       </div>
     </>
   );
