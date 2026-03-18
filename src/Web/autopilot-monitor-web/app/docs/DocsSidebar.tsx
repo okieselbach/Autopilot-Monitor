@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { UnifiedSidebar, SidebarItem } from "../../components/UnifiedSidebar";
 import { NAV_SECTIONS } from "./docsNavSections";
 import {
@@ -34,16 +35,35 @@ const docsItems: SidebarItem[] = NAV_SECTIONS.map((s) => ({
 }));
 
 export function DocsSidebar({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
+
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <UnifiedSidebar items={docsItems} mode="route" title="Contents">
-        <div className="space-y-8">
-          {children}
-          <div className="text-center text-sm text-gray-500 pb-4">
-            <p>Autopilot Monitor v1.0.0</p>
+    <UnifiedSidebar items={docsItems} mode="route" title="Contents">
+      {/* Page header */}
+      <header className="bg-white shadow-sm border-b border-gray-200 sticky top-14 z-10">
+        <div className="px-4 sm:px-6 lg:px-8 py-4">
+          <div className="flex items-center justify-between">
+            <button
+              onClick={() => router.back()}
+              className="flex items-center space-x-2 text-gray-600 hover:text-gray-900 transition-colors"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+              </svg>
+              <span>Back</span>
+            </button>
+            <h1 className="text-2xl font-bold text-blue-600">Documentation</h1>
           </div>
         </div>
-      </UnifiedSidebar>
-    </div>
+      </header>
+
+      {/* Content */}
+      <div className="px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+        {children}
+        <div className="text-center text-sm text-gray-500 pb-4">
+          <p>Autopilot Monitor v1.0.0</p>
+        </div>
+      </div>
+    </UnifiedSidebar>
   );
 }

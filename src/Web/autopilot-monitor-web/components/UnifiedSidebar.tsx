@@ -22,7 +22,7 @@ interface UnifiedSidebarProps {
 
 // Sidebar pixel widths
 const SIDEBAR_PX: Record<CollapseState, number> = {
-  full: 208,   // w-52
+  full: 224,   // w-56
   icons: 56,   // w-14
   hidden: 0,
 };
@@ -120,7 +120,7 @@ export function UnifiedSidebar({
   const activeLabel = items.find((i) => i.id === activeId)?.label ?? title;
 
   const sidebarWidthClass: Record<CollapseState, string> = {
-    full: "w-52",
+    full: "w-56",
     icons: "w-14",
     hidden: "w-0",
   };
@@ -318,7 +318,7 @@ export function UnifiedSidebar({
       {/* ===== Desktop: chevron toggle — vertically centered at sidebar edge ===== */}
       <button
         onClick={collapseState === "hidden" ? () => setCollapseState("full") : cycleCollapseState}
-        className="hidden md:flex fixed z-20 top-1/2 -translate-y-1/2 items-center justify-center w-4 h-8 rounded-r-md text-gray-300 transition-all duration-200 hover:text-gray-500 dark:text-gray-600 dark:hover:text-gray-400"
+        className="hidden md:flex fixed z-20 top-1/2 -translate-y-1/2 items-center justify-center w-4 h-8 rounded-r-md bg-gray-100/80 text-gray-400 transition-all duration-200 hover:bg-gray-200 hover:text-gray-600 dark:bg-gray-700/60 dark:text-gray-500 dark:hover:bg-gray-600 dark:hover:text-gray-300"
         style={{ left: SIDEBAR_PX[collapseState] }}
         aria-label={collapseState === "hidden" ? "Show sidebar" : "Collapse sidebar"}
         title={

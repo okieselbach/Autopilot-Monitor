@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { PublicSiteNavbar } from "../../components/PublicSiteNavbar";
-import { PublicPageHeader } from "../../components/PublicPageHeader";
 import { DocsSidebar } from "./DocsSidebar";
 
 export const metadata: Metadata = {
@@ -38,7 +37,6 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
   return (
     <div className="min-h-screen bg-gray-50">
       <PublicSiteNavbar showSectionLinks={false} />
-      <PublicPageHeader title="Documentation" />
       <DocsSidebar>{children}</DocsSidebar>
     </div>
   );

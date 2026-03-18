@@ -943,9 +943,10 @@ export default function SettingsPage() {
   return (
     <ProtectedRoute>
       <div className="min-h-screen bg-gray-50">
+      <UnifiedSidebar items={settingsSections} mode="scroll-spy" title="Settings">
         {/* Header */}
         <header className="bg-white shadow">
-          <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+          <div className="py-6 px-4 sm:px-6 lg:px-8">
             <div className="flex items-center justify-between">
               <div>
                 <button
@@ -982,14 +983,13 @@ export default function SettingsPage() {
         </header>
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="px-4 sm:px-6 lg:px-8 py-8">
         {loading ? (
           <div className="bg-white rounded-lg shadow p-8 text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto"></div>
             <p className="mt-4 text-gray-600">Loading configuration...</p>
           </div>
         ) : (
-          <UnifiedSidebar items={settingsSections} mode="scroll-spy" title="Settings">
           <div className="space-y-6">
             {/* Success Message */}
             {successMessage && (
@@ -1217,9 +1217,9 @@ export default function SettingsPage() {
             )}
 
           </div>
-          </UnifiedSidebar>
         )}
       </main>
+      </UnifiedSidebar>
       </div>
 
       <UnsavedChangesModal

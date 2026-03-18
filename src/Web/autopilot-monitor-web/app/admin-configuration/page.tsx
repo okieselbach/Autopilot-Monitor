@@ -267,9 +267,10 @@ export default function AdminConfigurationPage() {
   return (
     <ProtectedRoute requireGalacticAdmin>
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+      <UnifiedSidebar items={adminSections} mode="scroll-spy" title="Admin">
         {/* Header */}
         <header className="bg-white dark:bg-gray-800 shadow dark:shadow-gray-700">
-          <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+          <div className="py-6 px-4 sm:px-6 lg:px-8">
             <div className="flex items-center justify-between">
               <div>
                 <button
@@ -288,8 +289,7 @@ export default function AdminConfigurationPage() {
         </header>
 
         {/* Main Content */}
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <UnifiedSidebar items={adminSections} mode="scroll-spy" title="Admin">
+        <main className="px-4 sm:px-6 lg:px-8 py-8">
           <div className="space-y-6">
             {/* Success Message */}
             {successMessage && (
@@ -406,8 +406,8 @@ export default function AdminConfigurationPage() {
             />
             </div>
           </div>
-          </UnifiedSidebar>
         </main>
+      </UnifiedSidebar>
       </div>
     </ProtectedRoute>
   );

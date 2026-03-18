@@ -737,9 +737,22 @@ export default function SessionDetailPage() {
   return (
 <ProtectedRoute>
     <div className="min-h-screen bg-gray-50">
+      <UnifiedSidebar items={(() => {
+        const s: SidebarItem[] = [];
+        if (session) s.push({ id: "section-session-info", label: "Session Info", icon: <InformationCircleIcon /> });
+        if (!isGatherRulesSession) s.push({ id: "section-device-details", label: "Device Details", icon: <ComputerDesktopIcon /> });
+        if (!isGatherRulesSession && session) s.push({ id: "section-enrollment-progress", label: "Enrollment Progress", icon: <PlayCircleIcon /> });
+        if (!isGatherRulesSession) s.push({ id: "section-analysis", label: "Analysis", icon: <SparklesIcon /> });
+        if (!isGatherRulesSession) s.push({ id: "section-performance", label: "Performance", icon: <ChartBarIcon /> });
+        if (!isGatherRulesSession) s.push({ id: "section-scripts", label: "Script Executions", icon: <CodeBracketIcon /> });
+        if (!isGatherRulesSession) s.push({ id: "section-downloads", label: "Downloads", icon: <ArrowDownTrayIcon /> });
+        if (!isGatherRulesSession) s.push({ id: "section-install-progress", label: "Install Progress", icon: <ListBulletIcon /> });
+        s.push({ id: "section-event-timeline", label: "Event Timeline", icon: <ClockIcon /> });
+        return s;
+      })()} mode="scroll-spy" title="Sections">
       {/* Header */}
       <header className="bg-white shadow">
-        <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8 flex items-center justify-between">
+        <div className="py-6 px-4 sm:px-6 lg:px-8 flex items-center justify-between">
           <div>
             <button
               onClick={() => router.push('/dashboard')}
@@ -814,20 +827,7 @@ export default function SessionDetailPage() {
         </div>
       </header>
 
-      <UnifiedSidebar items={(() => {
-        const s: SidebarItem[] = [];
-        if (session) s.push({ id: "section-session-info", label: "Session Info", icon: <InformationCircleIcon /> });
-        if (!isGatherRulesSession) s.push({ id: "section-device-details", label: "Device Details", icon: <ComputerDesktopIcon /> });
-        if (!isGatherRulesSession && session) s.push({ id: "section-enrollment-progress", label: "Enrollment Progress", icon: <PlayCircleIcon /> });
-        if (!isGatherRulesSession) s.push({ id: "section-analysis", label: "Analysis", icon: <SparklesIcon /> });
-        if (!isGatherRulesSession) s.push({ id: "section-performance", label: "Performance", icon: <ChartBarIcon /> });
-        if (!isGatherRulesSession) s.push({ id: "section-scripts", label: "Script Executions", icon: <CodeBracketIcon /> });
-        if (!isGatherRulesSession) s.push({ id: "section-downloads", label: "Downloads", icon: <ArrowDownTrayIcon /> });
-        if (!isGatherRulesSession) s.push({ id: "section-install-progress", label: "Install Progress", icon: <ListBulletIcon /> });
-        s.push({ id: "section-event-timeline", label: "Event Timeline", icon: <ClockIcon /> });
-        return s;
-      })()} mode="scroll-spy" title="Sections">
-      <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+      <main className="py-6 px-4 sm:px-6 lg:px-8">
         <div className="px-4 py-6 sm:px-0">
           {/* Session Info Card */}
           {session && (
