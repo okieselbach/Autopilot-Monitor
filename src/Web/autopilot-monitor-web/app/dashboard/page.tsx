@@ -79,6 +79,8 @@ export default function Home() {
   tenantIdFilterRef.current = tenantIdFilter;
   const galacticAdminModeRef = useRef(galacticAdminMode);
   galacticAdminModeRef.current = galacticAdminMode;
+  const tenantIdRef = useRef(tenantId);
+  tenantIdRef.current = tenantId;
 
   // Track if we've joined the tenant group to prevent duplicate joins
   const hasJoinedGroup = useRef(false);
@@ -290,6 +292,12 @@ export default function Home() {
     const handleNewSession = (data: { sessionId: string; tenantId: string; session: Session }) => {
       console.log('New session registered', data);
 
+      // In non-galactic mode, only accept sessions from the user's own tenant
+      if (!galacticAdminModeRef.current && tenantIdRef.current && data.tenantId !== tenantIdRef.current) {
+        console.log(`Ignoring newSession from tenant ${data.tenantId} (not in galactic mode, own tenant: ${tenantIdRef.current})`);
+        return;
+      }
+
       // In galactic admin mode with an active tenant filter, ignore sessions from other tenants
       const activeFilter = tenantIdFilterRef.current.trim();
       if (galacticAdminModeRef.current && activeFilter && data.tenantId !== activeFilter) {
@@ -410,6 +418,10 @@ export default function Home() {
       setTenantIdFilter("");
     }
 
+    // Clear sessions immediately to prevent showing stale cross-tenant data
+    setSessions([]);
+    setCursor(null);
+    setCurrentPage(1);
     setLoading(true);
     fetchSessions();
   }, [galacticAdminMode]);
@@ -535,9 +547,13 @@ export default function Home() {
 
   // Client-side tenant filter: ensures sessions from other tenants are never displayed,
   // regardless of how they entered the sessions state (SignalR, race conditions, etc.)
-  const effectiveSessions = galacticAdminMode && tenantIdFilter.trim()
-    ? sessions.filter(s => s.tenantId === tenantIdFilter.trim())
-    : sessions;
+  const effectiveSessions = galacticAdminMode
+    ? (tenantIdFilter.trim()
+        ? sessions.filter(s => s.tenantId === tenantIdFilter.trim())
+        : sessions)
+    : (tenantId
+        ? sessions.filter(s => s.tenantId === tenantId)
+        : sessions);
 
   const activeSessions = effectiveSessions.filter(s => s.status === "InProgress");
   const successRate = effectiveSessions.length > 0
