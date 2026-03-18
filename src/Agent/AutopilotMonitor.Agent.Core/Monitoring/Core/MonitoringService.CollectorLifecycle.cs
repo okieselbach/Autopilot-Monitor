@@ -589,17 +589,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             // Run shutdown analyzers before final event (captures end-state for delta detection)
             RunShutdownAnalyzers();
 
-            // Emit final event
-            EmitEvent(new EnrollmentEvent
-            {
-                SessionId = _configuration.SessionId,
-                TenantId = _configuration.TenantId,
-                EventType = "agent_stopped",
-                Severity = EventSeverity.Info,
-                Source = "Agent",
-                Phase = _lastPhase ?? EnrollmentPhase.Unknown,
-                Message = "Autopilot Monitor Agent stopped"
-            });
+            // Emit agent_shutdown as counterpart to agent_started
+            EmitShutdownEvent("manual_stop", "Autopilot Monitor Agent stopped");
 
             // Final upload attempt
             UploadEventsAsync().Wait(TimeSpan.FromSeconds(10));

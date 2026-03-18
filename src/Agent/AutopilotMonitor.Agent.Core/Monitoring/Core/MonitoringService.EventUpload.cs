@@ -192,6 +192,38 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         }
 
         /// <summary>
+        /// Emits an agent_shutdown event as the counterpart to agent_started.
+        /// Called at every controlled exit point so the timeline shows why and how the agent terminated.
+        /// </summary>
+        private void EmitShutdownEvent(string reason, string message, Dictionary<string, object> extraData = null)
+        {
+            var data = new Dictionary<string, object>
+            {
+                { "reason", reason },
+                { "agentVersion", _agentVersion },
+                { "uptimeMinutes", Math.Round((DateTime.UtcNow - _agentStartTimeUtc).TotalMinutes, 1) }
+            };
+            if (extraData != null)
+            {
+                foreach (var kvp in extraData)
+                    data[kvp.Key] = kvp.Value;
+            }
+
+            EmitEvent(new EnrollmentEvent
+            {
+                SessionId = _configuration.SessionId,
+                TenantId = _configuration.TenantId,
+                Timestamp = DateTime.UtcNow,
+                EventType = "agent_shutdown",
+                Severity = EventSeverity.Info,
+                Source = "Agent",
+                Phase = _lastPhase ?? EnrollmentPhase.Unknown,
+                Message = message,
+                Data = data
+            });
+        }
+
+        /// <summary>
         /// Called when new events are available in the spool (FileSystemWatcher detected new files)
         /// Uses debouncing to batch events before uploading
         /// </summary>
@@ -263,6 +295,34 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     // Stop all timers — no further uploads
                     _uploadTimer?.Change(Timeout.Infinite, Timeout.Infinite);
                     _debounceTimer?.Change(Timeout.Infinite, Timeout.Infinite);
+
+                    // Emit agent_shutdown event and try to upload it directly (we hold the upload
+                    // semaphore so a normal UploadEventsAsync would skip — send inline instead)
+                    EmitShutdownEvent(
+                        "remote_kill_signal",
+                        "Agent terminated by remote kill signal from administrator",
+                        new Dictionary<string, object>
+                        {
+                            { "pendingEvents", _spool.GetCount() },
+                            { "selfDestruct", true }
+                        });
+                    try
+                    {
+                        var shutdownEvents = _spool.GetBatch(_configuration.MaxBatchSize);
+                        if (shutdownEvents.Count > 0)
+                        {
+                            await _apiClient.IngestEventsAsync(new IngestEventsRequest
+                            {
+                                SessionId = _configuration.SessionId,
+                                TenantId = _configuration.TenantId,
+                                Events = shutdownEvents
+                            });
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Warning($"Failed to upload shutdown event before kill: {ex.Message}");
+                    }
 
                     // Force self-destruct regardless of current config, respecting KeepLogFile from tenant config
                     _configuration.SelfDestructOnComplete = true;
@@ -376,6 +436,17 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 _logger.Error($"=== AGENT SHUTDOWN: {_consecutiveAuthFailures} consecutive authentication failures (401/403). " +
                     "The device is not authorized to send data to Autopilot Monitor. " +
                     "Check client certificate and Autopilot device validation in your tenant configuration. ===");
+
+                // Emit shutdown event (stays in spool for diagnostics — upload not possible due to auth failure)
+                EmitShutdownEvent(
+                    "auth_failure",
+                    $"Agent terminated: {_consecutiveAuthFailures} consecutive authentication failures exceeded threshold ({_configuration.MaxAuthFailures})",
+                    new Dictionary<string, object>
+                    {
+                        { "consecutiveFailures", _consecutiveAuthFailures },
+                        { "shutdownTrigger", "max_attempts" },
+                        { "maxAuthFailures", _configuration.MaxAuthFailures }
+                    });
                 Environment.Exit(1);
             }
 
@@ -389,6 +460,18 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                         $"(timeout: {_configuration.AuthFailureTimeoutMinutes} min). " +
                         "The device is not authorized to send data to Autopilot Monitor. " +
                         "Check client certificate and Autopilot device validation in your tenant configuration. ===");
+
+                    // Emit shutdown event (stays in spool for diagnostics — upload not possible due to auth failure)
+                    EmitShutdownEvent(
+                        "auth_failure",
+                        $"Agent terminated: authentication failures persisted for {elapsed.TotalMinutes:F0} minutes (timeout: {_configuration.AuthFailureTimeoutMinutes} min)",
+                        new Dictionary<string, object>
+                        {
+                            { "consecutiveFailures", _consecutiveAuthFailures },
+                            { "shutdownTrigger", "timeout" },
+                            { "authFailureTimeoutMinutes", _configuration.AuthFailureTimeoutMinutes },
+                            { "elapsedMinutes", Math.Round(elapsed.TotalMinutes, 1) }
+                        });
                     Environment.Exit(1);
                 }
             }
@@ -547,6 +630,18 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     Process.Start(psi);
                 }
 
+                // Emit agent_shutdown as counterpart to agent_started
+                EmitShutdownEvent(
+                    enrollmentSucceeded ? "enrollment_complete" : "enrollment_failed",
+                    $"Agent shutting down after enrollment {(enrollmentSucceeded ? "completion" : "failure")}",
+                    new Dictionary<string, object>
+                    {
+                        { "enrollmentSucceeded", enrollmentSucceeded },
+                        { "selfDestruct", _configuration.SelfDestructOnComplete },
+                        { "reboot", _configuration.RebootOnComplete }
+                    });
+                await UploadEventsAsync();
+
                 _logger.Info("Shutdown sequence complete. Agent will now exit.");
 
                 // Exit the application
@@ -603,6 +698,20 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 //         No DeleteSessionId, no WriteEnrollmentCompleteMarker, no self-destruct.
                 //         The Windows Autopilot shutdown will power off the device;
                 //         the Scheduled Task restarts the agent on the user's first boot.
+                // Emit agent_shutdown as counterpart to agent_started
+                EmitShutdownEvent(
+                    "whiteglove_complete",
+                    "Agent shutting down after WhiteGlove Part 1 — no cleanup, session preserved for Part 2 on next boot",
+                    new Dictionary<string, object>
+                    {
+                        { "sessionPreserved", true },
+                        { "selfDestruct", false },
+                        { "reboot", false },
+                        { "cleanup", false },
+                        { "willResumeOnNextBoot", true }
+                    });
+                await UploadEventsAsync();
+
                 _logger.Info("WhiteGlove graceful shutdown complete. Agent exiting.");
                 Environment.Exit(0);
             }
