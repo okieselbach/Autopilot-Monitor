@@ -49,9 +49,6 @@ export function DocsSidebar({ children }: { children: React.ReactNode }) {
       {/* Content */}
       <div className="px-4 sm:px-6 lg:px-8 py-8 space-y-8">
         {children}
-        <div className="text-center text-sm text-gray-500 pb-4">
-          <p>Autopilot Monitor v1.0.0</p>
-        </div>
       </div>
     </>
   );

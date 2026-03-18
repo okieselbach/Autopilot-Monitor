@@ -9,7 +9,7 @@ export default function AboutPage() {
     <div className="min-h-screen bg-gray-50">
       <PublicSiteNavbar showSectionLinks={false} />
       <PublicPageHeader title="About" />
-      <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12 space-y-6">
+      <main className="px-4 sm:px-6 lg:px-8 py-8 space-y-6">
         <div className="bg-white rounded-lg shadow p-6">
           <p className="mt-3 text-gray-700 leading-relaxed">
             <strong>Autopilot Monitor</strong> is a real-time monitoring and troubleshooting platform for Windows Autopilot enrollments.
