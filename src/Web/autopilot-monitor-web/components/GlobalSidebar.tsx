@@ -372,6 +372,17 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
         </div>
       </div>
 
+      {/* ===== Mobile: chevron toggle (fixed, left edge, vertically centered) ===== */}
+      <button
+        onClick={() => setMobileDrawerOpen(true)}
+        className="md:hidden fixed left-0 top-1/2 -translate-y-1/2 z-30 flex items-center justify-center w-4 h-8 rounded-r-full bg-gray-100 text-gray-400 shadow-sm border border-l-0 border-gray-200 hover:bg-gray-200 hover:text-gray-600 transition-colors dark:bg-gray-700 dark:text-gray-500 dark:border-gray-600 dark:hover:bg-gray-600 dark:hover:text-gray-300"
+        aria-label="Open navigation"
+      >
+        <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+        </svg>
+      </button>
+
       {/* ===== Desktop: fixed sidebar ===== */}
       <aside
         className={`hidden md:flex fixed left-0 ${hasNavbar ? "top-14" : "top-0"} bottom-0 z-20 flex-col transition-all duration-200 ease-in-out overflow-hidden ${sidebarWidthClass[collapseState]}`}

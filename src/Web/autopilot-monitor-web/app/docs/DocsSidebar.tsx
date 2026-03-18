@@ -13,6 +13,7 @@ import {
   GearIcon,
   ListBulletIcon,
   SparklesIcon,
+  CodeBracketIcon,
 } from "../../lib/sidebarIcons";
 
 const SECTION_ICONS: Record<string, React.ReactNode> = {
@@ -25,6 +26,7 @@ const SECTION_ICONS: Record<string, React.ReactNode> = {
   "settings": <GearIcon />,
   "gather-rules": <ListBulletIcon />,
   "analyze-rules": <SparklesIcon />,
+  "ime-log-patterns": <CodeBracketIcon />,
 };
 
 const docsItems: PageSectionItem[] = NAV_SECTIONS.map((s) => ({

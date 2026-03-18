@@ -10,6 +10,7 @@ import { SectionAgentSetup } from "../sections/SectionAgentSetup";
 import { SectionSettings } from "../sections/SectionSettings";
 import { SectionGatherRules } from "../sections/SectionGatherRules";
 import { SectionAnalyzeRules } from "../sections/SectionAnalyzeRules";
+import { SectionImeLogPatterns } from "../sections/SectionImeLogPatterns";
 
 const SECTION_COMPONENTS: Record<SectionId, React.ComponentType> = {
   "private-preview": SectionPrivatePreview,
@@ -21,6 +22,7 @@ const SECTION_COMPONENTS: Record<SectionId, React.ComponentType> = {
   "settings":        SectionSettings,
   "gather-rules":    SectionGatherRules,
   "analyze-rules":   SectionAnalyzeRules,
+  "ime-log-patterns": SectionImeLogPatterns,
 };
 
 export function generateStaticParams() {

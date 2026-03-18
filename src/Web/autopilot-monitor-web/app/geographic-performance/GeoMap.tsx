@@ -58,6 +58,19 @@ function formatThroughput(bytesPerSec: number): string {
   return `${bytesPerSec.toFixed(0)} B/s`;
 }
 
+// Clean up Leaflet map instance on unmount to prevent _leaflet_pos errors during client-side navigation
+function MapCleanup() {
+  const map = useMap();
+
+  useEffect(() => {
+    return () => {
+      map.remove();
+    };
+  }, [map]);
+
+  return null;
+}
+
 // Component to auto-fit bounds when locations change
 function FitBounds({ locations }: { locations: { coords: [number, number] }[] }) {
   const map = useMap();
@@ -100,6 +113,7 @@ export default function GeoMap({ locations, globalAvgDuration, selectedLocation,
       style={{ height: "100%", width: "100%", borderRadius: "0.5rem", zIndex: 0 }}
       scrollWheelZoom={true}
     >
+      <MapCleanup />
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"

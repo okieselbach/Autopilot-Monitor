@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ProtectedRoute } from "../../components/ProtectedRoute";
 import { useAuth } from "../../contexts/AuthContext";
@@ -250,7 +250,7 @@ export default function AdminConfigurationPage() {
     setError(null);
   };
 
-  const adminSections: PageSectionItem[] = [
+  const adminSections: PageSectionItem[] = useMemo(() => [
     { id: "tenant-management", label: "Tenant Management", icon: <BuildingOfficeIcon /> },
     { id: "session-reports", label: "Session Reports", icon: <DocumentTextIcon /> },
     { id: "session-export", label: "Session Export", icon: <ArrowDownTrayIcon /> },
@@ -260,7 +260,7 @@ export default function AdminConfigurationPage() {
     { id: "fetch-and-reseed", label: "Fetch & Reseed", icon: <ArrowPathIcon /> },
     { id: "device-block", label: "Device Block", icon: <NoSymbolIcon /> },
     { id: "version-block", label: "Version Block", icon: <NoSymbolIcon /> },
-  ];
+  ], []);
 
   usePageSections(adminSections, "Admin", "scroll-spy");
 
