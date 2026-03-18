@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { PublicSiteNavbar } from "../../components/PublicSiteNavbar";
 import { DocsSidebar } from "./DocsSidebar";
 
 export const metadata: Metadata = {
@@ -36,7 +35,6 @@ export const metadata: Metadata = {
 export default function DocsLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-gray-50">
-      <PublicSiteNavbar showSectionLinks={false} />
       <DocsSidebar>{children}</DocsSidebar>
     </div>
   );

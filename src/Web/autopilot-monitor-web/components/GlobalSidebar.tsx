@@ -131,10 +131,21 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
     }
   };
 
-  // Don't render sidebar on landing page or when not authenticated
-  if (!isAuthenticated || pathname === "/") {
+  // Docs pages are always accessible (public + authenticated)
+  const isDocsPage = pathname.startsWith("/docs");
+
+  // Landing page: never show sidebar
+  if (pathname === "/") {
     return <>{children}</>;
   }
+
+  // Not authenticated and not docs: no sidebar
+  if (!isAuthenticated && !isDocsPage) {
+    return <>{children}</>;
+  }
+
+  // Whether the main Navbar is present (determines sidebar top offset)
+  const hasNavbar = isAuthenticated;
 
   // --- Render helpers ---
 
@@ -258,48 +269,56 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
 
   const renderNavContent = (isMobile = false) => (
     <>
-      {/* Dashboard */}
-      {renderGlobalItem(DASHBOARD_ITEM)}
+      {/* Global nav — only when authenticated */}
+      {isAuthenticated && (
+        <>
+          {/* Dashboard */}
+          {renderGlobalItem(DASHBOARD_ITEM)}
 
-      {/* Regular user: only show Progress Portal */}
-      {isRegularUser && (
-        <div className={`${collapseState === "full" || isMobile ? "mt-3" : "mt-1"}`}>
-          {REGULAR_USER_ITEMS.map((item) => renderGlobalItem(item))}
-        </div>
+          {/* Regular user: only show Progress Portal */}
+          {isRegularUser && (
+            <div className={`${collapseState === "full" || isMobile ? "mt-3" : "mt-1"}`}>
+              {REGULAR_USER_ITEMS.map((item) => renderGlobalItem(item))}
+            </div>
+          )}
+
+          {/* Admin/Operator groups */}
+          {!isRegularUser && visibleGroups.map((group) => (
+            <div key={group.id} className={`${collapseState === "full" || isMobile ? "mt-4" : "mt-1"}`}>
+              {/* Group header (full mode only) */}
+              {(collapseState === "full" || isMobile) && (
+                <p className={`text-[11px] font-semibold uppercase tracking-wider mb-1 px-3 ${
+                  group.style === "galactic"
+                    ? "text-purple-500 dark:text-purple-400"
+                    : "text-gray-400 dark:text-gray-500"
+                }`}>
+                  {group.label}
+                </p>
+              )}
+              {/* Divider in icons mode */}
+              {collapseState === "icons" && !isMobile && (
+                <hr className="mx-2 my-1.5 border-gray-200 dark:border-gray-700" />
+              )}
+              <ul className="space-y-0.5">
+                {group.items.map((item) => renderGlobalItem(item, group.style === "galactic"))}
+              </ul>
+            </div>
+          ))}
+        </>
       )}
 
-      {/* Admin/Operator groups */}
-      {!isRegularUser && visibleGroups.map((group) => (
-        <div key={group.id} className={`${collapseState === "full" || isMobile ? "mt-4" : "mt-1"}`}>
-          {/* Group header (full mode only) */}
-          {(collapseState === "full" || isMobile) && (
-            <p className={`text-[11px] font-semibold uppercase tracking-wider mb-1 px-3 ${
-              group.style === "galactic"
-                ? "text-purple-500 dark:text-purple-400"
-                : "text-gray-400 dark:text-gray-500"
-            }`}>
-              {group.label}
-            </p>
-          )}
-          {/* Divider in icons mode */}
-          {collapseState === "icons" && !isMobile && (
-            <hr className="mx-2 my-1.5 border-gray-200 dark:border-gray-700" />
-          )}
-          <ul className="space-y-0.5">
-            {group.items.map((item) => renderGlobalItem(item, group.style === "galactic"))}
-          </ul>
-        </div>
-      ))}
-
-      {/* Divider + page sections */}
+      {/* Divider (only when both global nav and page sections exist) + page sections */}
       {hasPageSections && (
         <>
-          {collapseState === "icons" && !isMobile ? (
-            <hr className="mx-2 my-2 border-blue-200 dark:border-blue-800" />
-          ) : (
-            <div className="mt-4 mb-2 mx-3">
-              <hr className="border-gray-200 dark:border-gray-700" />
-            </div>
+          {/* Divider only when global nav is also shown */}
+          {isAuthenticated && (
+            collapseState === "icons" && !isMobile ? (
+              <hr className="mx-2 my-2 border-blue-200 dark:border-blue-800" />
+            ) : (
+              <div className="mt-4 mb-2 mx-3">
+                <hr className="border-gray-200 dark:border-gray-700" />
+              </div>
+            )
           )}
           {(collapseState === "full" || isMobile) && (
             <p className="text-[11px] font-semibold uppercase tracking-wider mb-1 px-3 text-blue-500 dark:text-blue-400">
@@ -350,7 +369,7 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
 
       {/* ===== Desktop: fixed sidebar ===== */}
       <aside
-        className={`hidden md:flex fixed left-0 top-14 bottom-0 z-20 flex-col transition-all duration-200 ease-in-out overflow-hidden ${sidebarWidthClass[collapseState]}`}
+        className={`hidden md:flex fixed left-0 ${hasNavbar ? "top-14" : "top-0"} bottom-0 z-20 flex-col transition-all duration-200 ease-in-out overflow-hidden ${sidebarWidthClass[collapseState]}`}
       >
         {collapseState !== "hidden" && (
           <nav className="flex flex-col h-full bg-white border-r border-gray-200 dark:bg-gray-800 dark:border-gray-700">
