@@ -674,17 +674,20 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             RecordSignal("desktop_arrived");
             _logger.Info("EnrollmentTracker: Desktop arrival notified");
 
-            // Phase correction: If ESP was seen but AccountSetup was never detected by IME log,
-            // correct the phase and emit an event for the timeline
-            if (_espEverSeen && !string.Equals(_lastEspPhase, "AccountSetup", StringComparison.OrdinalIgnoreCase))
+            // Phase correction and SkipUserStatusPage handling when ESP was seen.
+            // SkipUserStatusPage check is prioritized over phase correction because in WhiteGlove Part 2,
+            // _lastEspPhase may already be "AccountSetup" (persisted from Part 1) which would otherwise
+            // skip the SkipUser block and leave _espFinalExitSeen=false, blocking the desktop-arrival gate.
+            if (_espEverSeen)
             {
                 var previousPhase = _lastEspPhase ?? "unknown";
 
-                if (_skipUserStatusPage == true)
+                if (_skipUserStatusPage == true && !_espFinalExitSeen)
                 {
                     // SkipUserStatusPage=true: ESP skips Account Setup entirely.
                     // Desktop arrival means device setup is done → transition directly to FinalizingSetup.
                     // User apps will install in background (tracked as AppsUser phase later).
+                    // This also handles WhiteGlove Part 2 where _lastEspPhase="AccountSetup" from Part 1 state.
                     _lastEspPhase = "FinalizingSetup";
                     _stateData.LastEspPhase = "FinalizingSetup";
                     _espFinalExitSeen = true;
@@ -716,7 +719,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     try { CollectDeviceInfoAtFinalizingSetup("desktop_arrived_skip_user"); }
                     catch (Exception ex) { _logger.Warning($"EnrollmentTracker: final device info collection failed (desktop_arrived_skip_user): {ex.Message}"); }
                 }
-                else
+                else if (!string.Equals(_lastEspPhase, "AccountSetup", StringComparison.OrdinalIgnoreCase))
                 {
                     // Normal flow: desktop arrival confirms AccountSetup phase
                     _lastEspPhase = "AccountSetup";
