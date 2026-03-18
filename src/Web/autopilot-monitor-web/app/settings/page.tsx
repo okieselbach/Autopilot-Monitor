@@ -9,7 +9,8 @@ import { useNotifications } from "../../contexts/NotificationContext";
 import { API_BASE_URL } from "@/lib/config";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 import UnsavedChangesModal from "../../components/UnsavedChangesModal";
-import { ScrollSpySidebar, SidebarSection } from "../../components/ScrollSpySidebar";
+import { UnifiedSidebar, SidebarItem } from "../../components/UnifiedSidebar";
+import { ShieldCheckIcon, UsersIcon, CpuChipIcon, GearIcon, MagnifyingGlassIcon, LockClosedIcon, BellIcon, CloudArrowUpIcon, KeyIcon, CircleStackIcon, ArrowRightOnRectangleIcon } from "../../lib/sidebarIcons";
 import AutopilotValidationSection from "./components/AutopilotValidationSection";
 import AdminManagementSection from "./components/AdminManagementSection";
 import HardwareWhitelistSection from "./components/HardwareWhitelistSection";
@@ -898,27 +899,27 @@ export default function SettingsPage() {
   };
 
   // Build sidebar sections based on user role
-  const settingsSections: SidebarSection[] = useMemo(() => {
-    const sections: SidebarSection[] = [];
+  const settingsSections: SidebarItem[] = useMemo(() => {
+    const sections: SidebarItem[] = [];
     if (user?.isTenantAdmin) {
       sections.push(
-        { id: "autopilot-validation", label: "Autopilot Validation" },
-        { id: "admin-management", label: "Admin Management" },
-        { id: "hardware-whitelist", label: "Hardware Whitelist" },
-        { id: "agent-settings", label: "Agent Settings" },
-        { id: "agent-analyzers", label: "Agent Analyzers" },
-        { id: "unrestricted-mode", label: "Unrestricted Mode" },
-        { id: "notifications", label: "Notifications" },
-        { id: "diagnostics", label: "Diagnostics" },
+        { id: "autopilot-validation", label: "Autopilot Validation", icon: <ShieldCheckIcon /> },
+        { id: "admin-management", label: "Admin Management", icon: <UsersIcon /> },
+        { id: "hardware-whitelist", label: "Hardware Whitelist", icon: <CpuChipIcon /> },
+        { id: "agent-settings", label: "Agent Settings", icon: <GearIcon /> },
+        { id: "agent-analyzers", label: "Agent Analyzers", icon: <MagnifyingGlassIcon /> },
+        { id: "unrestricted-mode", label: "Unrestricted Mode", icon: <LockClosedIcon /> },
+        { id: "notifications", label: "Notifications", icon: <BellIcon /> },
+        { id: "diagnostics", label: "Diagnostics", icon: <CloudArrowUpIcon /> },
       );
     }
     if (config?.bootstrapTokenEnabled && (user?.isTenantAdmin || user?.canManageBootstrapTokens)) {
-      sections.push({ id: "bootstrap-sessions", label: "Bootstrap Sessions" });
+      sections.push({ id: "bootstrap-sessions", label: "Bootstrap Sessions", icon: <KeyIcon /> });
     }
     if (user?.isTenantAdmin) {
       sections.push(
-        { id: "data-management", label: "Data Management" },
-        { id: "offboarding", label: "Offboarding" },
+        { id: "data-management", label: "Data Management", icon: <CircleStackIcon /> },
+        { id: "offboarding", label: "Offboarding", icon: <ArrowRightOnRectangleIcon /> },
       );
     }
     return sections;
@@ -988,7 +989,7 @@ export default function SettingsPage() {
             <p className="mt-4 text-gray-600">Loading configuration...</p>
           </div>
         ) : (
-          <ScrollSpySidebar sections={settingsSections} title="Settings">
+          <UnifiedSidebar items={settingsSections} mode="scroll-spy" title="Settings">
           <div className="space-y-6">
             {/* Success Message */}
             {successMessage && (
@@ -1216,7 +1217,7 @@ export default function SettingsPage() {
             )}
 
           </div>
-          </ScrollSpySidebar>
+          </UnifiedSidebar>
         )}
       </main>
       </div>

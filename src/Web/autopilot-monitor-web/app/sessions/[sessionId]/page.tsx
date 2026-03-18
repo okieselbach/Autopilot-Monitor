@@ -22,7 +22,8 @@ import EventTimeline from "./components/EventTimeline";
 import AnalysisResultsSection from "./components/AnalysisResultsSection";
 import MarkFailedModal from "./components/MarkFailedModal";
 import ReportSessionModal from "./components/ReportSessionModal";
-import SectionNav, { SectionEntry } from "./components/SectionNav";
+import { UnifiedSidebar, SidebarItem } from "../../../components/UnifiedSidebar";
+import { InformationCircleIcon, ComputerDesktopIcon, PlayCircleIcon, SparklesIcon, ChartBarIcon, CodeBracketIcon, ArrowDownTrayIcon, ListBulletIcon, ClockIcon } from "../../../lib/sidebarIcons";
 import DeviceDetailsCard from "./components/DeviceDetailsCard";
 import { generateUiExport, generateCsvExport, generateSessionCsvExport, generateRuleResultsCsvExport, SessionExportEvent } from "@/lib/sessionExportUtils";
 import { Session, EnrollmentEvent, RuleResult } from "@/types";
@@ -813,20 +814,19 @@ export default function SessionDetailPage() {
         </div>
       </header>
 
-      <SectionNav sections={(() => {
-        const s: SectionEntry[] = [];
-        if (session) s.push({ id: "section-session-info", label: "Session Info" });
-        if (!isGatherRulesSession) s.push({ id: "section-device-details", label: "Device Details" });
-        if (!isGatherRulesSession && session) s.push({ id: "section-enrollment-progress", label: "Enrollment Progress" });
-        if (!isGatherRulesSession) s.push({ id: "section-analysis", label: "Analysis" });
-        if (!isGatherRulesSession) s.push({ id: "section-performance", label: "Performance" });
-        if (!isGatherRulesSession) s.push({ id: "section-scripts", label: "Script Executions" });
-        if (!isGatherRulesSession) s.push({ id: "section-downloads", label: "Downloads" });
-        if (!isGatherRulesSession) s.push({ id: "section-install-progress", label: "Install Progress" });
-        s.push({ id: "section-event-timeline", label: "Event Timeline" });
+      <UnifiedSidebar items={(() => {
+        const s: SidebarItem[] = [];
+        if (session) s.push({ id: "section-session-info", label: "Session Info", icon: <InformationCircleIcon /> });
+        if (!isGatherRulesSession) s.push({ id: "section-device-details", label: "Device Details", icon: <ComputerDesktopIcon /> });
+        if (!isGatherRulesSession && session) s.push({ id: "section-enrollment-progress", label: "Enrollment Progress", icon: <PlayCircleIcon /> });
+        if (!isGatherRulesSession) s.push({ id: "section-analysis", label: "Analysis", icon: <SparklesIcon /> });
+        if (!isGatherRulesSession) s.push({ id: "section-performance", label: "Performance", icon: <ChartBarIcon /> });
+        if (!isGatherRulesSession) s.push({ id: "section-scripts", label: "Script Executions", icon: <CodeBracketIcon /> });
+        if (!isGatherRulesSession) s.push({ id: "section-downloads", label: "Downloads", icon: <ArrowDownTrayIcon /> });
+        if (!isGatherRulesSession) s.push({ id: "section-install-progress", label: "Install Progress", icon: <ListBulletIcon /> });
+        s.push({ id: "section-event-timeline", label: "Event Timeline", icon: <ClockIcon /> });
         return s;
-      })()} />
-
+      })()} mode="scroll-spy" title="Sections">
       <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
         <div className="px-4 py-6 sm:px-0">
           {/* Session Info Card */}
@@ -980,6 +980,7 @@ export default function SessionDetailPage() {
         />
 
       </main>
+      </UnifiedSidebar>
     </div>
   </ProtectedRoute>
   );

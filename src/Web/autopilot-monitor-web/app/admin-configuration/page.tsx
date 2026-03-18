@@ -14,7 +14,8 @@ import { VersionBlockSection } from "./components/VersionBlockSection";
 import { SessionExportSection } from "./components/SessionExportSection";
 import { AdminConfigSettingsSection } from "./components/AdminConfigSettingsSection";
 import { SessionReportsSection } from "./components/SessionReportsSection";
-import { ScrollSpySidebar, SidebarSection } from "../../components/ScrollSpySidebar";
+import { UnifiedSidebar, SidebarItem } from "../../components/UnifiedSidebar";
+import { BuildingOfficeIcon, DocumentTextIcon, ArrowDownTrayIcon, GearIcon, FolderIcon, WrenchScrewdriverIcon, NoSymbolIcon } from "../../lib/sidebarIcons";
 
 interface AdminConfiguration {
   partitionKey: string;
@@ -248,15 +249,15 @@ export default function AdminConfigurationPage() {
     setError(null);
   };
 
-  const adminSections: SidebarSection[] = [
-    { id: "tenant-management", label: "Tenant Management" },
-    { id: "session-reports", label: "Session Reports" },
-    { id: "session-export", label: "Session Export" },
-    { id: "global-settings", label: "Global Settings" },
-    { id: "diagnostics-log-paths", label: "Diagnostics Log Paths" },
-    { id: "maintenance", label: "Maintenance" },
-    { id: "device-block", label: "Device Block" },
-    { id: "version-block", label: "Version Block" },
+  const adminSections: SidebarItem[] = [
+    { id: "tenant-management", label: "Tenant Management", icon: <BuildingOfficeIcon /> },
+    { id: "session-reports", label: "Session Reports", icon: <DocumentTextIcon /> },
+    { id: "session-export", label: "Session Export", icon: <ArrowDownTrayIcon /> },
+    { id: "global-settings", label: "Global Settings", icon: <GearIcon /> },
+    { id: "diagnostics-log-paths", label: "Diagnostics Log Paths", icon: <FolderIcon /> },
+    { id: "maintenance", label: "Maintenance", icon: <WrenchScrewdriverIcon /> },
+    { id: "device-block", label: "Device Block", icon: <NoSymbolIcon /> },
+    { id: "version-block", label: "Version Block", icon: <NoSymbolIcon /> },
   ];
 
   if (!galacticAdminMode) {
@@ -288,7 +289,7 @@ export default function AdminConfigurationPage() {
 
         {/* Main Content */}
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <ScrollSpySidebar sections={adminSections} title="Admin">
+          <UnifiedSidebar items={adminSections} mode="scroll-spy" title="Admin">
           <div className="space-y-6">
             {/* Success Message */}
             {successMessage && (
@@ -405,7 +406,7 @@ export default function AdminConfigurationPage() {
             />
             </div>
           </div>
-          </ScrollSpySidebar>
+          </UnifiedSidebar>
         </main>
       </div>
     </ProtectedRoute>
