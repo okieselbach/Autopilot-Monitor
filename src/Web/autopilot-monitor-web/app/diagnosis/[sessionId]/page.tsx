@@ -517,14 +517,17 @@ export default function DiagnosisPage() {
 
                     {/* Evidence Detail */}
                     {showEvidence === primaryResult.ruleId && (
-                      <div className="mt-4 p-4 bg-gray-900 rounded-lg">
-                        <pre className="text-xs text-gray-100 font-mono overflow-x-auto whitespace-pre-wrap">
-                          {JSON.stringify(
-                            primaryResult.matchedConditions,
-                            null,
-                            2
-                          )}
-                        </pre>
+                      <div className="mt-4">
+                        <EvidenceEventLinks matchedConditions={primaryResult.matchedConditions} sessionId={sessionId} />
+                        <div className="p-4 bg-gray-900 rounded-lg">
+                          <pre className="text-xs text-gray-100 font-mono overflow-x-auto whitespace-pre-wrap">
+                            {JSON.stringify(
+                              primaryResult.matchedConditions,
+                              null,
+                              2
+                            )}
+                          </pre>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -637,14 +640,17 @@ export default function DiagnosisPage() {
                                       : "Show Evidence"}
                                   </button>
                                   {showEvidence === result.ruleId && (
-                                    <div className="mt-2 p-3 bg-gray-900 rounded text-xs text-gray-100 font-mono overflow-x-auto">
-                                      <pre>
-                                        {JSON.stringify(
-                                          result.matchedConditions,
-                                          null,
-                                          2
-                                        )}
-                                      </pre>
+                                    <div className="mt-2">
+                                      <EvidenceEventLinks matchedConditions={result.matchedConditions} sessionId={sessionId} />
+                                      <div className="p-3 bg-gray-900 rounded text-xs text-gray-100 font-mono overflow-x-auto">
+                                        <pre>
+                                          {JSON.stringify(
+                                            result.matchedConditions,
+                                            null,
+                                            2
+                                          )}
+                                        </pre>
+                                      </div>
                                     </div>
                                   )}
                                 </div>
@@ -738,6 +744,37 @@ export default function DiagnosisPage() {
         </main>
       </div>
     </ProtectedRoute>
+  );
+}
+
+function EvidenceEventLinks({ matchedConditions, sessionId }: { matchedConditions: Record<string, any>; sessionId: string }) {
+  const eventLinks: { signal: string; eventId: string; eventType?: string }[] = [];
+
+  for (const [signal, evidence] of Object.entries(matchedConditions)) {
+    if (signal.startsWith("factor_")) continue;
+    if (evidence && typeof evidence === "object" && evidence.eventId) {
+      eventLinks.push({ signal, eventId: evidence.eventId, eventType: evidence.eventType });
+    }
+  }
+
+  if (eventLinks.length === 0) return null;
+
+  return (
+    <div className="flex flex-wrap gap-2 mb-2">
+      {eventLinks.map(({ signal, eventId, eventType }) => (
+        <a
+          key={signal}
+          href={`/sessions/${sessionId}#event-${eventId}`}
+          className="inline-flex items-center space-x-1 px-2 py-1 text-xs font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded transition-colors"
+          title={`View event in timeline: ${eventId}`}
+        >
+          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+          </svg>
+          <span>{eventType || signal}</span>
+        </a>
+      ))}
+    </div>
   );
 }
 

@@ -740,6 +740,25 @@ export default function SessionDetailPage() {
     }
   };
 
+  // Handle #event-{eventId} hash fragment (e.g. from diagnosis page links)
+  useEffect(() => {
+    if (loading || events.length === 0) return;
+    const hash = window.location.hash;
+    if (!hash.startsWith("#event-")) return;
+    // Expand all phases so the event element is in the DOM
+    expandAll();
+    setTimeout(() => {
+      const el = document.getElementById(hash.slice(1));
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.classList.add("ring-2", "ring-amber-400", "ring-offset-1");
+        setTimeout(() => el.classList.remove("ring-2", "ring-amber-400", "ring-offset-1"), 3000);
+      }
+    }, 100);
+    // Clear hash so it doesn't re-trigger
+    window.history.replaceState(null, "", window.location.pathname + window.location.search);
+  }, [loading, events.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const togglePhase = (phaseName: string) => {
     setExpandedPhases(prev => {
       const newExpanded = new Set(prev);

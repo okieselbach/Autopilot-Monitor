@@ -123,6 +123,7 @@ export const COMMAND_CATEGORIES: readonly GuardrailCategory[] = [
     category: "Certificate",
     items: [
       "certutil -store My",
+      "$c = Get-ChildItem Cert:\\LocalMachine\\My; if ($c) { $c | Select-Object Subject, Thumbprint, Issuer, NotBefore, NotAfter, HasPrivateKey | ConvertTo-Json } else { '{\"CertificateCount\": 0}' }",
     ],
   },
   {
@@ -200,6 +201,7 @@ export const ALLOWED_COMMANDS_LIST: readonly string[] = [
   "nltest /dsgetdc:",
   "dsregcmd /status",
   "certutil -store My",
+  "$c = Get-ChildItem Cert:\\LocalMachine\\My; if ($c) { $c | Select-Object Subject, Thumbprint, Issuer, NotBefore, NotAfter, HasPrivateKey | ConvertTo-Json } else { '{\"CertificateCount\": 0}' }",
   "Get-HotFix | Select-Object -First 10 HotFixID, InstalledOn, Description",
 ];
 

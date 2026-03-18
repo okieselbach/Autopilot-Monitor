@@ -1021,6 +1021,100 @@
         "machine-store",
         "subject-check"
       ]
+    },
+    {
+      "ruleId": "ANALYZE-ID-002",
+      "title": "Unexpected Local Admin Accounts Detected",
+      "description": "Detects when the LocalAdminAnalyzer flags unexpected local user accounts or profile directories on the device. This is a known Autopilot bypass technique where admin accounts are created before or during enrollment to gain persistent local admin access.",
+      "severity": "high",
+      "category": "identity",
+      "version": "1.0.0",
+      "author": "Autopilot Monitor",
+      "enabled": true,
+      "trigger": "single",
+      "baseConfidence": 60,
+      "conditions": [
+        {
+          "signal": "unexpected_admins_found",
+          "source": "event_type",
+          "eventType": "local_admin_analysis",
+          "dataField": "finding",
+          "operator": "contains",
+          "value": "unexpected",
+          "required": true
+        },
+        {
+          "signal": "high_confidence",
+          "source": "event_data",
+          "eventType": "local_admin_analysis",
+          "dataField": "confidence_score",
+          "operator": "gte",
+          "value": "60",
+          "required": false
+        },
+        {
+          "signal": "error_severity",
+          "source": "event_data",
+          "eventType": "local_admin_analysis",
+          "dataField": "severity",
+          "operator": "equals",
+          "value": "error",
+          "required": false
+        }
+      ],
+      "confidenceFactors": [
+        {
+          "signal": "high_confidence",
+          "condition": "exists",
+          "weight": 15
+        },
+        {
+          "signal": "error_severity",
+          "condition": "exists",
+          "weight": 15
+        }
+      ],
+      "confidenceThreshold": 50,
+      "explanation": "The agent detected **unexpected local user accounts or profile directories** on this device that are not in the built-in or tenant-configured allowed list.\n\nThis is a security-relevant finding. Creating local admin accounts before or during Autopilot enrollment is a known bypass technique (e.g. via BypassNRO or Shift+F10 during OOBE) that grants persistent local administrator access.\n\nCheck the `local_admin_analysis` event details to see:\n- **unexpected_accounts** — local user accounts not on the allowed list\n- **unexpected_profiles** — C:\\Users profile directories not on the allowed list\n- **bypass_nro** — whether the BypassNRO registry flag was set\n- **confidence_score** — the agent's confidence in the finding (0–100)\n\nIf these accounts are expected for your environment (e.g. a service account or helpdesk account), add them to the allowed list in Tenant Settings.",
+      "remediation": [
+        {
+          "title": "Review the unexpected accounts",
+          "steps": [
+            "Open the session timeline and locate the local_admin_analysis event",
+            "Check the 'unexpected_accounts' and 'unexpected_profiles' lists in the event data",
+            "Verify whether these accounts are legitimate for your environment"
+          ]
+        },
+        {
+          "title": "Add expected accounts to the allowed list (false positive)",
+          "steps": [
+            "Go to Settings → Agent Analyzers section",
+            "Under 'Allowed Admin Accounts', add the account names that are expected in your environment",
+            "Save the settings — future enrollments will no longer flag these accounts"
+          ]
+        },
+        {
+          "title": "Investigate a potential security issue",
+          "steps": [
+            "Check if the BypassNRO registry flag was set (indicates OOBE was bypassed)",
+            "Review the enrollment timeline for Shift+F10 or other OOBE escape indicators",
+            "Check whether the unexpected account has admin group membership",
+            "Consider re-imaging the device if unauthorized admin access is confirmed"
+          ]
+        }
+      ],
+      "relatedDocs": [
+        {
+          "title": "Windows Autopilot known issues",
+          "url": "https://learn.microsoft.com/en-us/autopilot/known-issues"
+        }
+      ],
+      "tags": [
+        "identity",
+        "security",
+        "local-admin",
+        "bypass-detection"
+      ]
     }
   ]
 }

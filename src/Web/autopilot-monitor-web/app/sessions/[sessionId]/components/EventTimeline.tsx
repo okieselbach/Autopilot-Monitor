@@ -389,7 +389,7 @@ function EventRow({ event, isGalacticAdmin, showScriptOutput }: { event: Enrollm
   const hasDetails = isTruncated || (detailData && Object.keys(detailData).length > 0);
 
   return (
-    <div className="bg-gray-50 rounded-lg p-3 hover:bg-gray-100 transition-colors">
+    <div id={`event-${event.eventId}`} className="bg-gray-50 rounded-lg p-3 hover:bg-gray-100 transition-colors">
       <div className="flex items-start justify-between">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-3">
@@ -547,7 +547,7 @@ function RawEventRow({ event }: { event: EnrollmentEvent }) {
   };
 
   return (
-    <div className="py-1.5 text-xs font-mono">
+    <div id={`event-${event.eventId}`} className="py-1.5 text-xs font-mono">
       <div className="flex items-start gap-2">
         <span className="text-gray-400 w-8 text-right flex-shrink-0">{event.sequence}</span>
         <span className="text-gray-500 flex-shrink-0">{new Date(event.timestamp).toLocaleTimeString()}</span>

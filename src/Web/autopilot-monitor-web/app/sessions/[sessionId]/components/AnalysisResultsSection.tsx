@@ -204,6 +204,7 @@ function AnalysisResultCard({ result }: { result: RuleResult }) {
           {result.matchedConditions && Object.keys(result.matchedConditions).length > 0 && (
             <div>
               <h4 className="text-sm font-medium text-gray-700 mb-1">Evidence</h4>
+              <EvidenceEventLinks matchedConditions={result.matchedConditions} />
               <div className="p-2 bg-gray-900 rounded text-xs text-gray-100 font-mono overflow-x-auto">
                 <pre>{JSON.stringify(result.matchedConditions, null, 2)}</pre>
               </div>
@@ -211,6 +212,46 @@ function AnalysisResultCard({ result }: { result: RuleResult }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function scrollToEvent(eventId: string) {
+  const el = document.getElementById(`event-${eventId}`);
+  if (el) {
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.classList.add("ring-2", "ring-amber-400", "ring-offset-1");
+    setTimeout(() => el.classList.remove("ring-2", "ring-amber-400", "ring-offset-1"), 3000);
+  }
+}
+
+function EvidenceEventLinks({ matchedConditions }: { matchedConditions: Record<string, any> }) {
+  const eventLinks: { signal: string; eventId: string; eventType?: string }[] = [];
+
+  for (const [signal, evidence] of Object.entries(matchedConditions)) {
+    if (signal.startsWith("factor_")) continue;
+    if (evidence && typeof evidence === "object" && evidence.eventId) {
+      eventLinks.push({ signal, eventId: evidence.eventId, eventType: evidence.eventType });
+    }
+  }
+
+  if (eventLinks.length === 0) return null;
+
+  return (
+    <div className="flex flex-wrap gap-2 mb-2">
+      {eventLinks.map(({ signal, eventId, eventType }) => (
+        <button
+          key={signal}
+          onClick={() => scrollToEvent(eventId)}
+          className="inline-flex items-center space-x-1 px-2 py-1 text-xs font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded transition-colors"
+          title={`Jump to event ${eventId}`}
+        >
+          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+          </svg>
+          <span>{eventType || signal}</span>
+        </button>
+      ))}
     </div>
   );
 }
