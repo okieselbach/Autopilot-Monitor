@@ -258,8 +258,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         {
             try
             {
-                var location = GeoLocationService.GetLocationAsync(_logger).Result;
-                if (location != null)
+                var attempt = GeoLocationService.GetLocationAsync(_logger).Result;
+                if (attempt.Location != null)
                 {
                     EmitEvent(new EnrollmentEvent
                     {
@@ -269,8 +269,32 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                         Severity = EventSeverity.Info,
                         Source = "Network",
                         Phase = EnrollmentPhase.Unknown,
-                        Message = $"Device location: {location.City}, {location.Region}, {location.Country} (via {location.Source})",
-                        Data = location.ToDictionary()
+                        Message = $"Device location: {attempt.Location.City}, {attempt.Location.Region}, {attempt.Location.Country} (via {attempt.Location.Source})",
+                        Data = attempt.Location.ToDictionary()
+                    });
+                }
+                else
+                {
+                    // All providers failed — send trace event with error details for analysis
+                    EmitEvent(new EnrollmentEvent
+                    {
+                        SessionId = _configuration.SessionId,
+                        TenantId = _configuration.TenantId,
+                        EventType = "agent_trace",
+                        Severity = EventSeverity.Warning,
+                        Source = "Network",
+                        Phase = EnrollmentPhase.Unknown,
+                        Message = "Geo-location lookup failed: all providers unreachable",
+                        Data = new Dictionary<string, object>
+                        {
+                            { "decision", "geo_location_failed" },
+                            { "reason", "All geo-location providers failed after retry" },
+                            { "primaryError", attempt.PrimaryError ?? "unknown" },
+                            { "primaryRetryError", attempt.PrimaryRetryError ?? "unknown" },
+                            { "fallbackError", attempt.FallbackError ?? "unknown" },
+                            { "primaryProvider", "ipinfo.io" },
+                            { "fallbackProvider", "ifconfig.co" }
+                        }
                     });
                 }
             }

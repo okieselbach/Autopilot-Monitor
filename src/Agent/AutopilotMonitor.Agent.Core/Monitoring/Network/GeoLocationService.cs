@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Net.Http;
+using System.Threading;
 using System.Threading.Tasks;
 using AutopilotMonitor.Agent.Core.Logging;
 using Newtonsoft.Json.Linq;
@@ -30,25 +31,58 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
         }
     }
 
+    public class GeoLocationAttemptResult
+    {
+        public GeoLocationResult Location { get; set; }
+        public string PrimaryError { get; set; }
+        public string PrimaryRetryError { get; set; }
+        public string FallbackError { get; set; }
+    }
+
     public static class GeoLocationService
     {
         private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(5);
+        private static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(2);
 
-        public static async Task<GeoLocationResult> GetLocationAsync(AgentLogger logger)
+        public static async Task<GeoLocationAttemptResult> GetLocationAsync(AgentLogger logger)
         {
+            var attempt = new GeoLocationAttemptResult();
+
             // Try ipinfo.io first
-            var result = await TryIpInfo(logger);
-            if (result != null) return result;
+            var (result, error) = await TryIpInfo(logger);
+            if (result != null)
+            {
+                attempt.Location = result;
+                return attempt;
+            }
+            attempt.PrimaryError = error;
+
+            // Retry ipinfo.io once after a short delay (network may still be initializing during Autopilot)
+            logger?.Info($"GeoLocation: Retrying ipinfo.io after {RetryDelay.TotalSeconds}s...");
+            await Task.Delay(RetryDelay);
+
+            (result, error) = await TryIpInfo(logger);
+            if (result != null)
+            {
+                attempt.Location = result;
+                return attempt;
+            }
+            attempt.PrimaryRetryError = error;
 
             // Fallback to ifconfig.co
-            result = await TryIfConfigCo(logger);
-            if (result != null) return result;
+            (result, error) = await TryIfConfigCo(logger);
+            if (result != null)
+            {
+                attempt.Location = result;
+                return attempt;
+            }
+            attempt.FallbackError = error;
 
             logger?.Warning("GeoLocation: All providers failed, skipping location event");
-            return null;
+            return attempt;
         }
 
-        private static async Task<GeoLocationResult> TryIpInfo(AgentLogger logger)
+        private static async Task<(GeoLocationResult result, string error)> TryIpInfo(AgentLogger logger)
         {
             try
             {
@@ -57,7 +91,15 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
                 using (var client = new HttpClient { Timeout = RequestTimeout })
                 {
                     client.DefaultRequestHeaders.Add("Accept", "application/json");
-                    var response = await client.GetStringAsync("https://ipinfo.io/json");
+                    var httpResponse = await client.GetAsync("https://ipinfo.io/json");
+                    if (!httpResponse.IsSuccessStatusCode)
+                    {
+                        var error = $"HTTP {(int)httpResponse.StatusCode} ({httpResponse.ReasonPhrase})";
+                        logger?.Warning($"GeoLocation: ipinfo.io failed: {error}");
+                        return (null, error);
+                    }
+
+                    var response = await httpResponse.Content.ReadAsStringAsync();
                     var json = JObject.Parse(response);
 
                     var result = new GeoLocationResult
@@ -71,17 +113,24 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
                     };
 
                     logger?.Info($"GeoLocation: ipinfo.io returned {result.City}, {result.Region}, {result.Country}");
-                    return result;
+                    return (result, null);
                 }
+            }
+            catch (TaskCanceledException)
+            {
+                var error = "Timeout (5s)";
+                logger?.Warning($"GeoLocation: ipinfo.io failed: {error}");
+                return (null, error);
             }
             catch (Exception ex)
             {
-                logger?.Warning($"GeoLocation: ipinfo.io failed: {ex.Message}");
-                return null;
+                var error = ex.Message;
+                logger?.Warning($"GeoLocation: ipinfo.io failed: {error}");
+                return (null, error);
             }
         }
 
-        private static async Task<GeoLocationResult> TryIfConfigCo(AgentLogger logger)
+        private static async Task<(GeoLocationResult result, string error)> TryIfConfigCo(AgentLogger logger)
         {
             try
             {
@@ -90,7 +139,15 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
                 using (var client = new HttpClient { Timeout = RequestTimeout })
                 {
                     client.DefaultRequestHeaders.Add("Accept", "application/json");
-                    var response = await client.GetStringAsync("https://ifconfig.co/json");
+                    var httpResponse = await client.GetAsync("https://ifconfig.co/json");
+                    if (!httpResponse.IsSuccessStatusCode)
+                    {
+                        var error = $"HTTP {(int)httpResponse.StatusCode} ({httpResponse.ReasonPhrase})";
+                        logger?.Warning($"GeoLocation: ifconfig.co failed: {error}");
+                        return (null, error);
+                    }
+
+                    var response = await httpResponse.Content.ReadAsStringAsync();
                     var json = JObject.Parse(response);
 
                     var latitude = json.Value<string>("latitude") ?? "";
@@ -110,13 +167,20 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
                     };
 
                     logger?.Info($"GeoLocation: ifconfig.co returned {result.City}, {result.Region}, {result.Country}");
-                    return result;
+                    return (result, null);
                 }
+            }
+            catch (TaskCanceledException)
+            {
+                var error = "Timeout (5s)";
+                logger?.Warning($"GeoLocation: ifconfig.co failed: {error}");
+                return (null, error);
             }
             catch (Exception ex)
             {
-                logger?.Warning($"GeoLocation: ifconfig.co failed: {ex.Message}");
-                return null;
+                var error = ex.Message;
+                logger?.Warning($"GeoLocation: ifconfig.co failed: {error}");
+                return (null, error);
             }
         }
     }

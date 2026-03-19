@@ -455,8 +455,14 @@ function EventRow({ event, showScriptOutput }: { event: EnrollmentEvent; showScr
                 {event.receivedAt
                   ? new Date(event.receivedAt).toISOString().replace('T', ' ').replace('Z', '')
                   : '—'}
-                {receivedDelta !== null && receivedDelta >= 0 && (
-                  <span className="text-gray-400 ml-1">(+{receivedDelta}s)</span>
+                {receivedDelta !== null && (
+                  receivedDelta < -5 ? (
+                    <span className="text-amber-500 ml-1" title="Device clock is ahead of server clock">(clock skew)</span>
+                  ) : receivedDelta < 0 ? (
+                    <span className="text-gray-400 ml-1" title="Minor clock skew between device and server">(+0s)</span>
+                  ) : (
+                    <span className="text-gray-400 ml-1">(+{receivedDelta}s)</span>
+                  )
                 )}
               </span>
             </div>
