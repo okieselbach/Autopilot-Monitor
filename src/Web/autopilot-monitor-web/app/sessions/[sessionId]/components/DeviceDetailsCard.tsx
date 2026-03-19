@@ -150,9 +150,10 @@ export default function DeviceDetailsCard({ events }: { events: EnrollmentEvent[
   const secureBootStatus = getEventData("secureboot_status");
   const tpmStatus = getEventData("tpm_status");
   const deviceLocation = getEventData("device_location");
+  const hwSpec = getEventData("hardware_spec");
 
   const hasData = agentStarted || bootTime || osInfo || networkAdapters || dnsConfig || proxyConfig || networkInterfaceInfo || wifiSignalInfo ||
-                  autopilotProfile || aadJoinStatus || imeVersion || bitLockerStatus || secureBootStatus || deviceLocation;
+                  autopilotProfile || aadJoinStatus || imeVersion || bitLockerStatus || secureBootStatus || deviceLocation || hwSpec;
 
   if (!hasData) return null;
 
@@ -174,198 +175,252 @@ export default function DeviceDetailsCard({ events }: { events: EnrollmentEvent[
       </button>
 
       {expanded && (
-        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* OS Information */}
-          {osInfo && (
-            <DetailSection title="Operating System">
-              {osInfo.osVersion && <DetailRow label="Version" value={osInfo.osVersion} />}
-              {osInfo.displayVersion && <DetailRow label="Display Version" value={osInfo.displayVersion} />}
-              {osInfo.currentBuild && osInfo.buildRevision && (
-                <DetailRow label="Build" value={`${osInfo.currentBuild}.${osInfo.buildRevision}`} />
-              )}
-              {osInfo.currentBuild && !osInfo.buildRevision && (
-                <DetailRow label="Build" value={osInfo.currentBuild} />
-              )}
-              {osInfo.edition && <DetailRow label="Edition" value={osInfo.edition} />}
-              {osInfo.compositionEdition && <DetailRow label="Composition Edition" value={osInfo.compositionEdition} />}
-              {osInfo.buildBranch && <DetailRow label="Build Branch" value={osInfo.buildBranch} />}
-            </DetailSection>
-          )}
+        <div className="mt-4 flex flex-col md:flex-row gap-6">
+          {/* Left Column: OS, Network, Security */}
+          <div className="flex-1 flex flex-col gap-6">
+            {/* OS Information */}
+            {osInfo && (
+              <DetailSection title="Operating System">
+                {osInfo.osVersion && <DetailRow label="Version" value={osInfo.osVersion} />}
+                {osInfo.displayVersion && <DetailRow label="Display Version" value={osInfo.displayVersion} />}
+                {osInfo.currentBuild && osInfo.buildRevision && (
+                  <DetailRow label="Build" value={`${osInfo.currentBuild}.${osInfo.buildRevision}`} />
+                )}
+                {osInfo.currentBuild && !osInfo.buildRevision && (
+                  <DetailRow label="Build" value={osInfo.currentBuild} />
+                )}
+                {osInfo.edition && <DetailRow label="Edition" value={osInfo.edition} />}
+                {osInfo.compositionEdition && <DetailRow label="Composition Edition" value={osInfo.compositionEdition} />}
+                {osInfo.buildBranch && <DetailRow label="Build Branch" value={osInfo.buildBranch} />}
+              </DetailSection>
+            )}
 
-          {/* System */}
-          {(estimatedBootTime || agentStarted?.agentVersion || imeVersion || aadJoinStatus?.joinType || deviceLocation?.country || deviceLocation?.Country || deviceLocation?.timezone || deviceLocation?.Timezone) && (
-            <DetailSection title="System">
-              {estimatedBootTime && (
-                <DetailRow label="Boot Time" value={estimatedBootTime.toLocaleString([], { dateStyle: "short", timeStyle: "medium" })} />
-              )}
-              {uptimeUntilEnrollment && <DetailRow label="Uptime until enrollment starts" value={uptimeUntilEnrollment} />}
-              {agentStarted?.agentVersion && <DetailRow label="Monitor Agent Version" value={agentStarted.agentVersion.replace(/\+([0-9a-f]{7})[0-9a-f]+$/, '+$1')} />}
-              {imeVersion && <DetailRow label="IME Agent Version" value={imeVersion.version ?? imeVersion.agentVersion ?? "Unknown"} />}
-              {(deviceLocation?.country || deviceLocation?.Country) && (
-                <DetailRow label="Country" value={deviceLocation.country ?? deviceLocation.Country} />
-              )}
-              {(deviceLocation?.timezone || deviceLocation?.Timezone) && (
-                <DetailRow label="Timezone" value={deviceLocation.timezone ?? deviceLocation.Timezone} />
-              )}
-            </DetailSection>
-          )}
+            {/* Network */}
+            {(networkAdapters || dnsConfig || proxyConfig || networkInterfaceInfo || wifiSignalInfo) && (
+              <DetailSection title="Network">
+                {networkAdapters && networkAdapters.adapters && (
+                  (networkAdapters.adapters as any[]).map((adapter: any, i: number) => {
+                    const { ipv4, ipv6 } = adapter.ipAddresses ? splitIpAddresses(adapter.ipAddresses) : { ipv4: [], ipv6: [] };
+                    const hasIpv6 = ipv6.length > 0;
+                    const isIpv6Shown = showIpv6[i] ?? false;
 
-          {/* Network */}
-          {(networkAdapters || dnsConfig || proxyConfig || networkInterfaceInfo || wifiSignalInfo) && (
-            <DetailSection title="Network">
-              {networkAdapters && networkAdapters.adapters && (
-                (networkAdapters.adapters as any[]).map((adapter: any, i: number) => {
-                  const { ipv4, ipv6 } = adapter.ipAddresses ? splitIpAddresses(adapter.ipAddresses) : { ipv4: [], ipv6: [] };
-                  const hasIpv6 = ipv6.length > 0;
-                  const isIpv6Shown = showIpv6[i] ?? false;
+                    return (
+                      <div key={i} className="mb-3 pb-3 border-b border-gray-100 last:border-b-0 last:mb-0 last:pb-0">
+                        <div className="text-sm font-medium text-gray-700 mb-1">{adapter.description || adapter.name || `Adapter ${i + 1}`}</div>
+                        {adapter.dhcpEnabled !== undefined && <DetailRow label="DHCP" value={adapter.dhcpEnabled ? "Enabled" : "Disabled"} />}
+                        {adapter.macAddress && <DetailRow label="MAC" value={adapter.macAddress} />}
+                        {ipv4.length > 0 && <DetailRow label="IPv4" value={ipv4.join(", ")} />}
+                        {hasIpv6 && (
+                          <div className="mt-1">
+                            <button
+                              onClick={() => setShowIpv6(prev => ({ ...prev, [i]: !isIpv6Shown }))}
+                              className="text-xs text-blue-600 hover:text-blue-800 flex items-center space-x-1"
+                            >
+                              <svg className={`w-3 h-3 transition-transform duration-200 ${isIpv6Shown ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
+                              </svg>
+                              <span>IPv6 ({ipv6.length})</span>
+                            </button>
+                            {isIpv6Shown && (
+                              <div className="mt-1 pl-4 text-xs text-gray-600 space-y-0.5">
+                                {ipv6.map((ip, idx) => (
+                                  <div key={idx} className="font-mono">{ip}</div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        {dnsConfig?.dnsEntries && Array.isArray(dnsConfig.dnsEntries) && (
+                          (dnsConfig.dnsEntries as any[])
+                            .filter((entry: any) => entry.adapter === adapter.description || entry.adapter === adapter.name)
+                            .map((entry: any, dnsIdx: number) => (
+                              <DetailRow key={`dns-${dnsIdx}`} label="DNS" value={entry.servers || "N/A"} />
+                            ))
+                        )}
+                      </div>
+                    );
+                  })
+                )}
 
-                  return (
-                    <div key={i} className="mb-3 pb-3 border-b border-gray-100 last:border-b-0 last:mb-0 last:pb-0">
-                      <div className="text-sm font-medium text-gray-700 mb-1">{adapter.description || adapter.name || `Adapter ${i + 1}`}</div>
-                      {adapter.dhcpEnabled !== undefined && <DetailRow label="DHCP" value={adapter.dhcpEnabled ? "Enabled" : "Disabled"} />}
-                      {adapter.macAddress && <DetailRow label="MAC" value={adapter.macAddress} />}
-                      {ipv4.length > 0 && <DetailRow label="IPv4" value={ipv4.join(", ")} />}
-                      {hasIpv6 && (
-                        <div className="mt-1">
-                          <button
-                            onClick={() => setShowIpv6(prev => ({ ...prev, [i]: !isIpv6Shown }))}
-                            className="text-xs text-blue-600 hover:text-blue-800 flex items-center space-x-1"
-                          >
-                            <svg className={`w-3 h-3 transition-transform duration-200 ${isIpv6Shown ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
-                            </svg>
-                            <span>IPv6 ({ipv6.length})</span>
-                          </button>
-                          {isIpv6Shown && (
-                            <div className="mt-1 pl-4 text-xs text-gray-600 space-y-0.5">
-                              {ipv6.map((ip, idx) => (
-                                <div key={idx} className="font-mono">{ip}</div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                      {dnsConfig?.dnsEntries && Array.isArray(dnsConfig.dnsEntries) && (
-                        (dnsConfig.dnsEntries as any[])
-                          .filter((entry: any) => entry.adapter === adapter.description || entry.adapter === adapter.name)
-                          .map((entry: any, dnsIdx: number) => (
-                            <DetailRow key={`dns-${dnsIdx}`} label="DNS" value={entry.servers || "N/A"} />
-                          ))
-                      )}
-                    </div>
-                  );
-                })
-              )}
+                {networkInterfaceInfo && networkInterfaceInfo.status !== "no_active_interface" && (
+                  <div className="mt-3 pt-3 border-t border-gray-200">
+                    <div className="text-sm font-medium text-gray-700 mb-1">Active Interface</div>
+                    <DetailRow label="Connection" value={networkInterfaceInfo.connectionType === "WiFi" ? "WiFi" : "Ethernet"} />
+                    {networkInterfaceInfo.adapterDescription && <DetailRow label="Adapter" value={networkInterfaceInfo.adapterDescription} />}
+                    {networkInterfaceInfo.linkSpeedMbps !== undefined && (
+                      <DetailRow label="Link Speed" value={
+                        networkInterfaceInfo.linkSpeedMbps >= 1000
+                          ? `${(networkInterfaceInfo.linkSpeedMbps / 1000).toFixed(1)} Gbps`
+                          : `${networkInterfaceInfo.linkSpeedMbps} Mbps`
+                      } />
+                    )}
+                    {networkInterfaceInfo.gateways && <DetailRow label="Gateway" value={networkInterfaceInfo.gateways} />}
+                  </div>
+                )}
 
-              {networkInterfaceInfo && networkInterfaceInfo.status !== "no_active_interface" && (
-                <div className="mt-3 pt-3 border-t border-gray-200">
-                  <div className="text-sm font-medium text-gray-700 mb-1">Active Interface</div>
-                  <DetailRow label="Connection" value={networkInterfaceInfo.connectionType === "WiFi" ? "WiFi" : "Ethernet"} />
-                  {networkInterfaceInfo.adapterDescription && <DetailRow label="Adapter" value={networkInterfaceInfo.adapterDescription} />}
-                  {networkInterfaceInfo.linkSpeedMbps !== undefined && (
-                    <DetailRow label="Link Speed" value={
-                      networkInterfaceInfo.linkSpeedMbps >= 1000
-                        ? `${(networkInterfaceInfo.linkSpeedMbps / 1000).toFixed(1)} Gbps`
-                        : `${networkInterfaceInfo.linkSpeedMbps} Mbps`
-                    } />
-                  )}
-                  {networkInterfaceInfo.gateways && <DetailRow label="Gateway" value={networkInterfaceInfo.gateways} />}
-                </div>
-              )}
+                {wifiSignalInfo && (
+                  <div className="mt-3 pt-3 border-t border-gray-200">
+                    <div className="text-sm font-medium text-gray-700 mb-1">WiFi</div>
+                    {wifiSignalInfo.wifiSsid && <DetailRow label="SSID" value={wifiSignalInfo.wifiSsid} />}
+                    {wifiSignalInfo.wifiSignalPercent !== undefined && (
+                      <DetailRow label="Signal" value={`${wifiSignalInfo.wifiSignalPercent}%`} />
+                    )}
+                    {wifiSignalInfo.wifiRadioType && <DetailRow label="Radio" value={wifiSignalInfo.wifiRadioType} />}
+                    {wifiSignalInfo.wifiChannel !== undefined && <DetailRow label="Channel" value={`${wifiSignalInfo.wifiChannel}`} />}
+                  </div>
+                )}
 
-              {wifiSignalInfo && (
-                <div className="mt-3 pt-3 border-t border-gray-200">
-                  <div className="text-sm font-medium text-gray-700 mb-1">WiFi</div>
-                  {wifiSignalInfo.wifiSsid && <DetailRow label="SSID" value={wifiSignalInfo.wifiSsid} />}
-                  {wifiSignalInfo.wifiSignalPercent !== undefined && (
-                    <DetailRow label="Signal" value={`${wifiSignalInfo.wifiSignalPercent}%`} />
-                  )}
-                  {wifiSignalInfo.wifiRadioType && <DetailRow label="Radio" value={wifiSignalInfo.wifiRadioType} />}
-                  {wifiSignalInfo.wifiChannel !== undefined && <DetailRow label="Channel" value={`${wifiSignalInfo.wifiChannel}`} />}
-                </div>
-              )}
+                {proxyConfig && (
+                  <div className="mt-3 pt-3 border-t border-gray-200">
+                    <div className="text-sm font-medium text-gray-700 mb-1">Proxy</div>
+                    <DetailRow label="Type" value={proxyConfig.proxyType ?? proxyConfig.type ?? "Direct"} />
+                    {proxyConfig.proxyServer && <DetailRow label="Server" value={proxyConfig.proxyServer} />}
+                    {proxyConfig.autoConfigUrl && <DetailRow label="PAC URL" value={proxyConfig.autoConfigUrl} />}
+                    {proxyConfig.winHttpProxy && <DetailRow label="WinHTTP" value={proxyConfig.winHttpProxy} />}
+                  </div>
+                )}
+              </DetailSection>
+            )}
 
-              {proxyConfig && (
-                <div className="mt-3 pt-3 border-t border-gray-200">
-                  <div className="text-sm font-medium text-gray-700 mb-1">Proxy</div>
-                  <DetailRow label="Type" value={proxyConfig.proxyType ?? proxyConfig.type ?? "Direct"} />
-                  {proxyConfig.proxyServer && <DetailRow label="Server" value={proxyConfig.proxyServer} />}
-                  {proxyConfig.autoConfigUrl && <DetailRow label="PAC URL" value={proxyConfig.autoConfigUrl} />}
-                  {proxyConfig.winHttpProxy && <DetailRow label="WinHTTP" value={proxyConfig.winHttpProxy} />}
-                </div>
-              )}
-            </DetailSection>
-          )}
+            {/* Security */}
+            {(bitLockerStatus || secureBootStatus || tpmStatus) && (
+              <DetailSection title="Security">
+                {secureBootStatus && (
+                  <DetailRow label="SecureBoot" value={secureBootStatus.uefiSecureBootEnabled ? "Enabled" : "Disabled"} />
+                )}
+                {tpmStatus && (
+                  <>
+                    <DetailRow label="TPM" value={tpmStatus.available === false ? "Not Available" : `${tpmStatus.manufacturerName ?? "Unknown"} (${tpmStatus.manufacturerVersion ?? "?"})`} />
+                    {tpmStatus.specVersion && (
+                      <DetailRow label="TPM Spec Version" value={tpmStatus.specVersion} />
+                    )}
+                  </>
+                )}
+                {bitLockerStatus && (
+                  <>
+                    <DetailRow label="BitLocker" value={bitLockerStatus.systemDriveProtected ? "Protected" : "Not Protected"} />
+                    {bitLockerStatus.volumes && Array.isArray(bitLockerStatus.volumes) && bitLockerStatus.volumes.length > 0 && (
+                      <div className="mt-1 text-xs text-gray-500">
+                        {(bitLockerStatus.volumes as any[]).map((vol: any, i: number) => (
+                          <div key={i}>
+                            {vol.driveLetter} {vol.protectionStatus === "1" ? "Protected" : "Not Protected"}
+                            {vol.encryptionMethod !== undefined && vol.encryptionMethod !== null && vol.encryptionMethod !== "" && (
+                              ` (Method: ${getBitLockerEncryptionMethodLabel(vol.encryptionMethod)})`
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </DetailSection>
+            )}
+          </div>
 
-          {/* Autopilot Profile */}
-          {autopilotProfile && (
-            <DetailSection title="Autopilot Profile">
-              {hasValue(autopilotProfile.CloudAssignedTenantDomain) && <DetailRow label="Tenant Domain" value={`${autopilotProfile.CloudAssignedTenantDomain}`} />}
-              {hasValue(autopilotProfile.DeploymentProfileName) && <DetailRow label="Profile Name" value={`${autopilotProfile.DeploymentProfileName}`} />}
-              {hasValue(autopilotProfile.CloudAssignedTenantId) && <DetailRow label="Tenant ID" value={`${autopilotProfile.CloudAssignedTenantId}`} />}
-              {hasValue(autopilotProfile.PolicyDownloadDate) && <DetailRow label="Policy Downloaded" value={new Date(autopilotProfile.PolicyDownloadDate).toLocaleString()} />}
-              {hasValue(autopilotProfile.CloudAssignedOobeConfig) && <DetailRow label="OOBE Config" value={`${autopilotProfile.CloudAssignedOobeConfig}`} />}
-              {hasValue(autopilotProfile.ZtdRegistrationId) && <DetailRow label="ZTD Registration ID" value={`${autopilotProfile.ZtdRegistrationId}`} />}
-              {hasValue(autopilotProfile.AadDeviceId) && <DetailRow label="AAD Device ID" value={`${autopilotProfile.AadDeviceId}`} />}
-              {autopilotProfile.AutopilotMode !== undefined && (
-                <DetailRow label="Autopilot Mode" value={autopilotProfile.autopilotModeLabel ?? (
-                  `${autopilotProfile.AutopilotMode}` === "0" ? "User Driven (0)" :
-                  `${autopilotProfile.AutopilotMode}`
-                )} />
-              )}
-              {autopilotProfile.CloudAssignedDomainJoinMethod !== undefined && (
-                <DetailRow label="Domain Join Method" value={autopilotProfile.domainJoinMethodLabel ?? (
-                  `${autopilotProfile.CloudAssignedDomainJoinMethod}` === "0" ? "Entra Join" :
-                  `${autopilotProfile.CloudAssignedDomainJoinMethod}` === "1" ? "Hybrid Azure AD Join" :
-                  `${autopilotProfile.CloudAssignedDomainJoinMethod}`
-                )} />
-              )}
-              {autopilotProfile.HybridJoinSkipDCConnectivityCheck !== undefined && (
-                <DetailRow label="Skip DC Connectivity Check" value={`${autopilotProfile.HybridJoinSkipDCConnectivityCheck}` === "1" ? "Yes" : "No"} />
-              )}
-              {autopilotProfile.CloudAssignedForcedEnrollment !== undefined && (
-                <DetailRow label="Forced Enrollment" value={`${autopilotProfile.CloudAssignedForcedEnrollment}` === "1" ? "Yes" : "No"} />
-              )}
-              {hasValue(autopilotProfile.AutopilotCreationDate) && <DetailRow label="Autopilot Created" value={new Date(autopilotProfile.AutopilotCreationDate).toLocaleString()} />}
-              {hasValue(autopilotProfile.ProfileAvailable) && (
-                <DetailRow label="Profile Available" value={`${autopilotProfile.ProfileAvailable}` === "1" ? "Yes" : `${autopilotProfile.ProfileAvailable}`} />
-              )}
-            </DetailSection>
-          )}
+          {/* Right Column: System, Autopilot Profile, Hardware */}
+          <div className="flex-1 flex flex-col gap-6">
+            {/* System */}
+            {(estimatedBootTime || agentStarted?.agentVersion || imeVersion || aadJoinStatus?.joinType || deviceLocation?.country || deviceLocation?.Country || deviceLocation?.timezone || deviceLocation?.Timezone) && (
+              <DetailSection title="System">
+                {estimatedBootTime && (
+                  <DetailRow label="Boot Time" value={estimatedBootTime.toLocaleString([], { dateStyle: "short", timeStyle: "medium" })} />
+                )}
+                {uptimeUntilEnrollment && <DetailRow label="Uptime until enrollment starts" value={uptimeUntilEnrollment} />}
+                {agentStarted?.agentVersion && <DetailRow label="Monitor Agent Version" value={agentStarted.agentVersion.replace(/\+([0-9a-f]{7})[0-9a-f]+$/, '+$1')} />}
+                {imeVersion && <DetailRow label="IME Agent Version" value={imeVersion.version ?? imeVersion.agentVersion ?? "Unknown"} />}
+                {(deviceLocation?.country || deviceLocation?.Country) && (
+                  <DetailRow label="Country" value={deviceLocation.country ?? deviceLocation.Country} />
+                )}
+                {(deviceLocation?.timezone || deviceLocation?.Timezone) && (
+                  <DetailRow label="Timezone" value={deviceLocation.timezone ?? deviceLocation.Timezone} />
+                )}
+              </DetailSection>
+            )}
 
-          {/* Security */}
-          {(bitLockerStatus || secureBootStatus || tpmStatus) && (
-            <DetailSection title="Security">
-              {secureBootStatus && (
-                <DetailRow label="SecureBoot" value={secureBootStatus.uefiSecureBootEnabled ? "Enabled" : "Disabled"} />
-              )}
-              {tpmStatus && (
-                <>
-                  <DetailRow label="TPM" value={tpmStatus.available === false ? "Not Available" : `${tpmStatus.manufacturerName ?? "Unknown"} (${tpmStatus.manufacturerVersion ?? "?"})`} />
-                  {tpmStatus.specVersion && (
-                    <DetailRow label="TPM Spec Version" value={tpmStatus.specVersion} />
-                  )}
-                </>
-              )}
-              {bitLockerStatus && (
-                <>
-                  <DetailRow label="BitLocker" value={bitLockerStatus.systemDriveProtected ? "Protected" : "Not Protected"} />
-                  {bitLockerStatus.volumes && Array.isArray(bitLockerStatus.volumes) && bitLockerStatus.volumes.length > 0 && (
-                    <div className="mt-1 text-xs text-gray-500">
-                      {(bitLockerStatus.volumes as any[]).map((vol: any, i: number) => (
-                        <div key={i}>
-                          {vol.driveLetter} {vol.protectionStatus === "1" ? "Protected" : "Not Protected"}
-                          {vol.encryptionMethod !== undefined && vol.encryptionMethod !== null && vol.encryptionMethod !== "" && (
-                            ` (Method: ${getBitLockerEncryptionMethodLabel(vol.encryptionMethod)})`
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </>
-              )}
-            </DetailSection>
-          )}
+            {/* Autopilot Profile */}
+            {autopilotProfile && (
+              <DetailSection title="Autopilot Profile">
+                {hasValue(autopilotProfile.CloudAssignedTenantDomain) && <DetailRow label="Tenant Domain" value={`${autopilotProfile.CloudAssignedTenantDomain}`} />}
+                {hasValue(autopilotProfile.DeploymentProfileName) && <DetailRow label="Profile Name" value={`${autopilotProfile.DeploymentProfileName}`} />}
+                {hasValue(autopilotProfile.CloudAssignedTenantId) && <DetailRow label="Tenant ID" value={`${autopilotProfile.CloudAssignedTenantId}`} />}
+                {hasValue(autopilotProfile.PolicyDownloadDate) && <DetailRow label="Policy Downloaded" value={new Date(autopilotProfile.PolicyDownloadDate).toLocaleString()} />}
+                {hasValue(autopilotProfile.CloudAssignedOobeConfig) && <DetailRow label="OOBE Config" value={`${autopilotProfile.CloudAssignedOobeConfig}`} />}
+                {hasValue(autopilotProfile.ZtdRegistrationId) && <DetailRow label="ZTD Registration ID" value={`${autopilotProfile.ZtdRegistrationId}`} />}
+                {hasValue(autopilotProfile.AadDeviceId) && <DetailRow label="AAD Device ID" value={`${autopilotProfile.AadDeviceId}`} />}
+                {autopilotProfile.AutopilotMode !== undefined && (
+                  <DetailRow label="Autopilot Mode" value={autopilotProfile.autopilotModeLabel ?? (
+                    `${autopilotProfile.AutopilotMode}` === "0" ? "User Driven (0)" :
+                    `${autopilotProfile.AutopilotMode}`
+                  )} />
+                )}
+                {autopilotProfile.CloudAssignedDomainJoinMethod !== undefined && (
+                  <DetailRow label="Domain Join Method" value={autopilotProfile.domainJoinMethodLabel ?? (
+                    `${autopilotProfile.CloudAssignedDomainJoinMethod}` === "0" ? "Entra Join" :
+                    `${autopilotProfile.CloudAssignedDomainJoinMethod}` === "1" ? "Hybrid Azure AD Join" :
+                    `${autopilotProfile.CloudAssignedDomainJoinMethod}`
+                  )} />
+                )}
+                {autopilotProfile.HybridJoinSkipDCConnectivityCheck !== undefined && (
+                  <DetailRow label="Skip DC Connectivity Check" value={`${autopilotProfile.HybridJoinSkipDCConnectivityCheck}` === "1" ? "Yes" : "No"} />
+                )}
+                {autopilotProfile.CloudAssignedForcedEnrollment !== undefined && (
+                  <DetailRow label="Forced Enrollment" value={`${autopilotProfile.CloudAssignedForcedEnrollment}` === "1" ? "Yes" : "No"} />
+                )}
+                {hasValue(autopilotProfile.AutopilotCreationDate) && <DetailRow label="Autopilot Created" value={new Date(autopilotProfile.AutopilotCreationDate).toLocaleString()} />}
+                {hasValue(autopilotProfile.ProfileAvailable) && (
+                  <DetailRow label="Profile Available" value={`${autopilotProfile.ProfileAvailable}` === "1" ? "Yes" : `${autopilotProfile.ProfileAvailable}`} />
+                )}
+              </DetailSection>
+            )}
+
+            {/* Hardware */}
+            {hwSpec && (
+              <DetailSection title="Hardware">
+                {hwSpec.cpuName && <DetailRow label="CPU" value={hwSpec.cpuName} />}
+                {(hwSpec.cpuCores || hwSpec.cpuLogicalProcessors) && (
+                  <DetailRow label="CPU Cores" value={`${hwSpec.cpuCores ?? '?'} cores / ${hwSpec.cpuLogicalProcessors ?? '?'} threads`} />
+                )}
+                {hwSpec.cpuMaxClockSpeedGHz && <DetailRow label="Max Clock" value={`${hwSpec.cpuMaxClockSpeedGHz} GHz`} />}
+
+                {hwSpec.ramTotalGB && (
+                  <DetailRow label="RAM" value={`${hwSpec.ramTotalGB} GB${hwSpec.ramType ? ` ${hwSpec.ramType}` : ''}${hwSpec.ramSpeed ? ` @ ${hwSpec.ramSpeed} MHz` : ''}`} />
+                )}
+                {hwSpec.ramDimmCount !== undefined && (
+                  <DetailRow label="DIMMs" value={`${hwSpec.ramDimmCount}${hwSpec.ramFormFactor ? ` (${hwSpec.ramFormFactor})` : ''}`} />
+                )}
+
+                {hwSpec.disks && Array.isArray(hwSpec.disks) && (hwSpec.disks as any[]).map((disk: any, i: number) => (
+                  <DetailRow key={`disk-${i}`} label={hwSpec.disks.length > 1 ? `Disk ${i + 1}` : 'Disk'} value={`${disk.model || 'Unknown'}${disk.sizeGB ? ` (${disk.sizeGB} GB)` : ''}${disk.mediaType && disk.mediaType !== 'Unknown' ? ` — ${disk.mediaType}` : ''}`} />
+                ))}
+                {hwSpec.systemDriveFreeGB !== undefined && hwSpec.systemDriveTotalGB !== undefined && (
+                  <DetailRow label="C: Free Space" value={`${hwSpec.systemDriveFreeGB} / ${hwSpec.systemDriveTotalGB} GB`} />
+                )}
+
+                {hwSpec.biosVersion && <DetailRow label="BIOS" value={hwSpec.biosVersion} />}
+                {hwSpec.biosReleaseDate && <DetailRow label="BIOS Date" value={hwSpec.biosReleaseDate} />}
+                {hwSpec.smbiosVersion && <DetailRow label="SMBIOS" value={hwSpec.smbiosVersion} />}
+
+                {hwSpec.batteryPresent === true && (
+                  <>
+                    {hwSpec.batteryHealthPercent !== undefined && (
+                      <DetailRow label="Battery Health" value={`${hwSpec.batteryHealthPercent}%`} />
+                    )}
+                    {hwSpec.batteryDesignCapacityMWh && hwSpec.batteryFullChargeCapacityMWh && (
+                      <DetailRow label="Battery Capacity" value={`${hwSpec.batteryFullChargeCapacityMWh} / ${hwSpec.batteryDesignCapacityMWh} mWh`} />
+                    )}
+                    {hwSpec.batteryChargePercent !== undefined && (
+                      <DetailRow label="Battery Charge" value={`${hwSpec.batteryChargePercent}%`} />
+                    )}
+                  </>
+                )}
+                {hwSpec.batteryPresent === false && <DetailRow label="Battery" value="Not present (Desktop)" />}
+
+                {hwSpec.gpus && Array.isArray(hwSpec.gpus) && (hwSpec.gpus as any[]).map((gpu: any, i: number) => (
+                  <DetailRow key={`gpu-${i}`} label={hwSpec.gpus.length > 1 ? `GPU ${i + 1}` : 'GPU'} value={`${gpu.name || 'Unknown'}${gpu.adapterRAMGB ? ` (${gpu.adapterRAMGB} GB)` : ''}`} />
+                ))}
+              </DetailSection>
+            )}
+          </div>
         </div>
       )}
     </div>

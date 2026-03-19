@@ -1,6 +1,6 @@
 #!/bin/bash
 # Helper script to query Azure Table Storage via REST API
-# Usage: query-table.sh <table_name> <odata_filter> [select_fields]
+# Usage: query-table.sh <table_name> <odata_filter> [select_fields] [top_count]
 #
 # Requires AUTOPILOT_MONITOR_TABLE_CS environment variable with format:
 # TableEndpoint=https://....table.core.windows.net/;SharedAccessSignature=sv=...
@@ -43,6 +43,10 @@ if [ -n "$SELECT" ]; then
     ENCODED_SELECT="$SELECT"
   fi
   QUERY_URL="${QUERY_URL}&\$select=${ENCODED_SELECT}"
+fi
+TOP="$4"
+if [ -n "$TOP" ]; then
+  QUERY_URL="${QUERY_URL}&\$top=${TOP}"
 fi
 
 # Execute query

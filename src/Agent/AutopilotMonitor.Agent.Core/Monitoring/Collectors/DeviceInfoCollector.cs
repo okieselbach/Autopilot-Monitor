@@ -58,6 +58,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             CollectTpmStatus();
             CollectAadJoinStatus();
             CollectActiveNetworkInterfaceInfo();
+            CollectHardwareSpec();
 
             return (profileResult.enrollmentType, profileResult.isHybridJoin, espConfig.skipUserStatusPage, espConfig.skipDeviceStatusPage, profileResult.autopilotMode, HasAadJoinedUser);
         }
