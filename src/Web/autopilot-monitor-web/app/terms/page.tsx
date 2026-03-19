@@ -5,10 +5,6 @@ export default function TermsPage() {
     <div className="min-h-screen bg-gray-50">
       <PublicPageHeader title="Terms of Use" />
       <main className="px-4 sm:px-6 lg:px-8 py-8 space-y-6">
-        <div className="bg-white rounded-lg shadow p-6">
-          <p className="mt-2 text-gray-600">Conditions and legal disclaimers for using Autopilot Monitor.</p>
-        </div>
-
         <div className="bg-white rounded-lg shadow p-6 space-y-4">
           <p className="text-gray-700">
             By using this service, you agree to the following terms:

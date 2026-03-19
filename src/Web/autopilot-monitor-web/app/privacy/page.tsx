@@ -5,10 +5,6 @@ export default function PrivacyPage() {
     <div className="min-h-screen bg-gray-50">
       <PublicPageHeader title="Privacy Policy" />
       <main className="px-4 sm:px-6 lg:px-8 py-8 space-y-6">
-        <div className="bg-white rounded-lg shadow p-6">
-          <p className="mt-2 text-gray-600">How Autopilot Monitor handles data.</p>
-        </div>
-
         <div className="bg-white rounded-lg shadow p-6 space-y-4">
           <h2 className="text-xl font-semibold text-gray-900">Data Collection</h2>
           <p className="text-gray-700">
