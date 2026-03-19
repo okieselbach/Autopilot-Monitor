@@ -19,17 +19,20 @@ namespace AutopilotMonitor.Functions.Functions.Bootstrap
         private readonly BootstrapSessionService _bootstrapService;
         private readonly GalacticAdminService _galacticAdminService;
         private readonly TenantConfigurationService _configService;
+        private readonly TableStorageService _storageService;
 
         public RevokeBootstrapSessionFunction(
             ILogger<RevokeBootstrapSessionFunction> logger,
             BootstrapSessionService bootstrapService,
             GalacticAdminService galacticAdminService,
-            TenantConfigurationService configService)
+            TenantConfigurationService configService,
+            TableStorageService storageService)
         {
             _logger = logger;
             _bootstrapService = bootstrapService;
             _galacticAdminService = galacticAdminService;
             _configService = configService;
+            _storageService = storageService;
         }
 
         [Function("RevokeBootstrapSession")]
@@ -74,6 +77,14 @@ namespace AutopilotMonitor.Functions.Functions.Bootstrap
                     await notFound.WriteAsJsonAsync(new { success = false, message = "Bootstrap session not found" });
                     return notFound;
                 }
+
+                await _storageService.LogAuditEntryAsync(
+                    tenantId,
+                    "DELETE",
+                    "BootstrapSession",
+                    code,
+                    userIdentifier
+                );
 
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(new { success = true, message = "Bootstrap session revoked" });

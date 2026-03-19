@@ -15,13 +15,16 @@ namespace AutopilotMonitor.Functions.Functions.Admin
     {
         private readonly ILogger<DeviceBlockFunction> _logger;
         private readonly BlockedDeviceService _blockedDeviceService;
+        private readonly TableStorageService _storageService;
 
         public DeviceBlockFunction(
             ILogger<DeviceBlockFunction> logger,
-            BlockedDeviceService blockedDeviceService)
+            BlockedDeviceService blockedDeviceService,
+            TableStorageService storageService)
         {
             _logger = logger;
             _blockedDeviceService = blockedDeviceService;
+            _storageService = storageService;
         }
 
         /// <summary>GET /api/devices/blocked?tenantId={tenantId} — list all active blocks for a tenant</summary>
@@ -91,6 +94,20 @@ namespace AutopilotMonitor.Functions.Functions.Admin
 
                 await _blockedDeviceService.BlockDeviceAsync(tenantId, serialNumber, durationHours, userIdentifier, reason, action);
 
+                await _storageService.LogAuditEntryAsync(
+                    tenantId,
+                    "CREATE",
+                    "DeviceBlock",
+                    serialNumber,
+                    userIdentifier,
+                    new Dictionary<string, string>
+                    {
+                        { "Action", action },
+                        { "DurationHours", durationHours.ToString() },
+                        { "Reason", reason ?? string.Empty }
+                    }
+                );
+
                 var isKill = action == "Kill";
                 _logger.LogWarning(
                     "Galactic Admin {User} {Action} device {SerialNumber} in tenant {TenantId} for {Hours}h. Reason: {Reason}",
@@ -137,6 +154,14 @@ namespace AutopilotMonitor.Functions.Functions.Admin
                     return await BadRequestAsync(req, "serialNumber is required");
 
                 await _blockedDeviceService.UnblockDeviceAsync(tenantId, serialNumber);
+
+                await _storageService.LogAuditEntryAsync(
+                    tenantId,
+                    "DELETE",
+                    "DeviceBlock",
+                    serialNumber,
+                    userIdentifier
+                );
 
                 _logger.LogInformation(
                     "Galactic Admin {User} unblocked device {SerialNumber} in tenant {TenantId}",

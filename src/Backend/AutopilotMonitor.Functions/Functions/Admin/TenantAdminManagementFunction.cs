@@ -18,15 +18,18 @@ public class TenantAdminManagementFunction
     private readonly ILogger<TenantAdminManagementFunction> _logger;
     private readonly TenantAdminsService _tenantAdminsService;
     private readonly GalacticAdminService _galacticAdminService;
+    private readonly TableStorageService _storageService;
 
     public TenantAdminManagementFunction(
         ILogger<TenantAdminManagementFunction> logger,
         TenantAdminsService tenantAdminsService,
-        GalacticAdminService galacticAdminService)
+        GalacticAdminService galacticAdminService,
+        TableStorageService storageService)
     {
         _logger = logger;
         _tenantAdminsService = tenantAdminsService;
         _galacticAdminService = galacticAdminService;
+        _storageService = storageService;
     }
 
     /// <summary>
@@ -113,6 +116,19 @@ public class TenantAdminManagementFunction
         var role = !string.IsNullOrWhiteSpace(body.Role) ? body.Role : AutopilotMonitor.Shared.Constants.TenantRoles.Admin;
         var newAdmin = await _tenantAdminsService.AddTenantMemberAsync(tenantId, body.Upn, upn!, role, body.CanManageBootstrapTokens);
 
+        await _storageService.LogAuditEntryAsync(
+            tenantId,
+            "CREATE",
+            "TenantAdmin",
+            body.Upn,
+            upn!,
+            new Dictionary<string, string>
+            {
+                { "Role", role },
+                { "CanManageBootstrapTokens", body.CanManageBootstrapTokens.ToString() }
+            }
+        );
+
         _logger.LogInformation($"Tenant member added: {body.Upn} with role {role} to tenant {tenantId} by {upn}");
 
         var response = req.CreateResponse(HttpStatusCode.Created);
@@ -173,6 +189,14 @@ public class TenantAdminManagementFunction
         // Remove the admin
         await _tenantAdminsService.RemoveTenantAdminAsync(tenantId, adminUpn);
 
+        await _storageService.LogAuditEntryAsync(
+            tenantId,
+            "DELETE",
+            "TenantAdmin",
+            adminUpn,
+            upn!
+        );
+
         _logger.LogInformation($"Tenant Admin removed: {adminUpn} from tenant {tenantId} by {upn}");
 
         var response = req.CreateResponse(HttpStatusCode.OK);
@@ -215,6 +239,15 @@ public class TenantAdminManagementFunction
         // Disable the admin
         await _tenantAdminsService.DisableTenantAdminAsync(tenantId, adminUpn);
 
+        await _storageService.LogAuditEntryAsync(
+            tenantId,
+            "UPDATE",
+            "TenantAdmin",
+            adminUpn,
+            upn!,
+            new Dictionary<string, string> { { "Action", "Disable" } }
+        );
+
         _logger.LogInformation($"Tenant Admin disabled: {adminUpn} for tenant {tenantId} by {upn}");
 
         var response = req.CreateResponse(HttpStatusCode.OK);
@@ -256,6 +289,15 @@ public class TenantAdminManagementFunction
 
         // Enable the admin
         await _tenantAdminsService.EnableTenantAdminAsync(tenantId, adminUpn);
+
+        await _storageService.LogAuditEntryAsync(
+            tenantId,
+            "UPDATE",
+            "TenantAdmin",
+            adminUpn,
+            upn!,
+            new Dictionary<string, string> { { "Action", "Enable" } }
+        );
 
         _logger.LogInformation($"Tenant Admin enabled: {adminUpn} for tenant {tenantId} by {upn}");
 
@@ -326,6 +368,20 @@ public class TenantAdminManagementFunction
             await notFoundResponse.WriteAsJsonAsync(new { error = "Member not found" });
             return notFoundResponse;
         }
+
+        await _storageService.LogAuditEntryAsync(
+            tenantId,
+            "UPDATE",
+            "TenantAdmin",
+            adminUpn,
+            upn!,
+            new Dictionary<string, string>
+            {
+                { "Action", "UpdatePermissions" },
+                { "Role", body.Role },
+                { "CanManageBootstrapTokens", body.CanManageBootstrapTokens.ToString() }
+            }
+        );
 
         _logger.LogInformation("Member permissions updated: {AdminUpn} -> role={Role} in tenant {TenantId} by {Upn}", adminUpn, body.Role, tenantId, upn);
 

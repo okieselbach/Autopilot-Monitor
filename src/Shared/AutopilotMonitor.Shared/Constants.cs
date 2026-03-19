@@ -185,6 +185,17 @@ namespace AutopilotMonitor.Shared
         }
 
         // -----------------------------------------------------------------------
+        // Audit logging
+        // -----------------------------------------------------------------------
+
+        /// <summary>
+        /// Partition key used for audit log entries that have no tenant context
+        /// (e.g. AdminConfiguration updates, VersionBlock rules).
+        /// Uses a null-GUID so it passes EnsureValidGuid validation.
+        /// </summary>
+        public const string AuditGlobalTenantId = "00000000-0000-0000-0000-000000000000";
+
+        // -----------------------------------------------------------------------
         // Azure Table Storage table names
         // All table names are defined here centrally and initialized at application startup
         // -----------------------------------------------------------------------

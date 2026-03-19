@@ -17,15 +17,18 @@ namespace AutopilotMonitor.Functions.Functions.Config
         private readonly ILogger<UpdateTenantConfigurationFunction> _logger;
         private readonly TenantConfigurationService _configService;
         private readonly GalacticAdminService _galacticAdminService;
+        private readonly TableStorageService _storageService;
 
         public UpdateTenantConfigurationFunction(
             ILogger<UpdateTenantConfigurationFunction> logger,
             TenantConfigurationService configService,
-            GalacticAdminService galacticAdminService)
+            GalacticAdminService galacticAdminService,
+            TableStorageService storageService)
         {
             _logger = logger;
             _configService = configService;
             _galacticAdminService = galacticAdminService;
+            _storageService = storageService;
         }
 
         [Function("UpdateTenantConfiguration")]
@@ -120,6 +123,14 @@ namespace AutopilotMonitor.Functions.Functions.Config
 
                 // Save configuration
                 await _configService.SaveConfigurationAsync(config);
+
+                await _storageService.LogAuditEntryAsync(
+                    tenantId,
+                    "UPDATE",
+                    "TenantConfiguration",
+                    tenantId,
+                    userIdentifier
+                );
 
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(new

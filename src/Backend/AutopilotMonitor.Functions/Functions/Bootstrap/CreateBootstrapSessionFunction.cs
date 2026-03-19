@@ -22,17 +22,20 @@ namespace AutopilotMonitor.Functions.Functions.Bootstrap
         private readonly BootstrapSessionService _bootstrapService;
         private readonly GalacticAdminService _galacticAdminService;
         private readonly TenantConfigurationService _configService;
+        private readonly TableStorageService _storageService;
 
         public CreateBootstrapSessionFunction(
             ILogger<CreateBootstrapSessionFunction> logger,
             BootstrapSessionService bootstrapService,
             GalacticAdminService galacticAdminService,
-            TenantConfigurationService configService)
+            TenantConfigurationService configService,
+            TableStorageService storageService)
         {
             _logger = logger;
             _bootstrapService = bootstrapService;
             _galacticAdminService = galacticAdminService;
             _configService = configService;
+            _storageService = storageService;
         }
 
         [Function("CreateBootstrapSession")]
@@ -86,6 +89,19 @@ namespace AutopilotMonitor.Functions.Functions.Bootstrap
                 var validityHours = request.ValidityHours > 0 ? request.ValidityHours : 8;
 
                 var session = await _bootstrapService.CreateAsync(tenantId, validityHours, userIdentifier, request.Label);
+
+                await _storageService.LogAuditEntryAsync(
+                    tenantId,
+                    "CREATE",
+                    "BootstrapSession",
+                    session.ShortCode,
+                    userIdentifier,
+                    new Dictionary<string, string>
+                    {
+                        { "ValidityHours", validityHours.ToString() },
+                        { "Label", request.Label ?? string.Empty }
+                    }
+                );
 
                 var responseData = new CreateBootstrapSessionResponse
                 {

@@ -15,13 +15,16 @@ namespace AutopilotMonitor.Functions.Functions.Admin
     {
         private readonly ILogger<VersionBlockFunction> _logger;
         private readonly BlockedVersionService _blockedVersionService;
+        private readonly TableStorageService _storageService;
 
         public VersionBlockFunction(
             ILogger<VersionBlockFunction> logger,
-            BlockedVersionService blockedVersionService)
+            BlockedVersionService blockedVersionService,
+            TableStorageService storageService)
         {
             _logger = logger;
             _blockedVersionService = blockedVersionService;
+            _storageService = storageService;
         }
 
         /// <summary>GET /api/versions/blocked — list all active version block rules</summary>
@@ -87,6 +90,20 @@ namespace AutopilotMonitor.Functions.Functions.Admin
                 }
 
                 var normalizedAction = string.Equals(action, "Kill", StringComparison.OrdinalIgnoreCase) ? "Kill" : "Block";
+
+                await _storageService.LogAuditEntryAsync(
+                    AutopilotMonitor.Shared.Constants.AuditGlobalTenantId,
+                    "CREATE",
+                    "VersionBlock",
+                    versionPattern,
+                    userIdentifier,
+                    new Dictionary<string, string>
+                    {
+                        { "Action", normalizedAction },
+                        { "Reason", reason ?? string.Empty }
+                    }
+                );
+
                 _logger.LogWarning(
                     "Galactic Admin {User} added version {Action} rule: Pattern={Pattern}, Reason={Reason}",
                     userIdentifier, normalizedAction, versionPattern, reason);
@@ -126,6 +143,14 @@ namespace AutopilotMonitor.Functions.Functions.Admin
                     return await BadRequestAsync(req, "versionPattern is required");
 
                 await _blockedVersionService.UnblockVersionAsync(versionPattern);
+
+                await _storageService.LogAuditEntryAsync(
+                    AutopilotMonitor.Shared.Constants.AuditGlobalTenantId,
+                    "DELETE",
+                    "VersionBlock",
+                    versionPattern,
+                    userIdentifier
+                );
 
                 _logger.LogInformation(
                     "Galactic Admin {User} removed version block rule: Pattern={Pattern}",

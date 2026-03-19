@@ -16,13 +16,16 @@ namespace AutopilotMonitor.Functions.Functions.Config
     {
         private readonly ILogger<UpdateAdminConfigurationFunction> _logger;
         private readonly AdminConfigurationService _adminConfigService;
+        private readonly TableStorageService _storageService;
 
         public UpdateAdminConfigurationFunction(
             ILogger<UpdateAdminConfigurationFunction> logger,
-            AdminConfigurationService adminConfigService)
+            AdminConfigurationService adminConfigService,
+            TableStorageService storageService)
         {
             _logger = logger;
             _adminConfigService = adminConfigService;
+            _storageService = storageService;
         }
 
         [Function("UpdateAdminConfiguration")]
@@ -64,6 +67,14 @@ namespace AutopilotMonitor.Functions.Functions.Config
 
                 // Save configuration
                 await _adminConfigService.SaveConfigurationAsync(config);
+
+                await _storageService.LogAuditEntryAsync(
+                    AutopilotMonitor.Shared.Constants.AuditGlobalTenantId,
+                    "UPDATE",
+                    "AdminConfiguration",
+                    "GlobalConfig",
+                    userIdentifier
+                );
 
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(new

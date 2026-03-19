@@ -86,15 +86,19 @@ public class TenantOffboardFunction
             var tenantPartitionTables = new[]
             {
                 Constants.TableNames.Sessions,
+                Constants.TableNames.SessionsIndex,
                 Constants.TableNames.AuditLogs,
                 Constants.TableNames.UsageMetrics,
                 Constants.TableNames.UserActivity,
-                Constants.TableNames.RuleResults,
                 Constants.TableNames.GatherRules,
                 Constants.TableNames.AnalyzeRules,
                 Constants.TableNames.AppInstallSummaries,
                 Constants.TableNames.TenantConfiguration,
                 Constants.TableNames.TenantAdmins,
+                Constants.TableNames.BootstrapSessions,
+                Constants.TableNames.BlockedDevices,
+                Constants.TableNames.ImeLogPatterns,
+                Constants.TableNames.RuleStates,
             };
 
             var normalizedTenantId = tenantId.ToLowerInvariant();
@@ -106,10 +110,19 @@ public class TenantOffboardFunction
                 _logger.LogInformation($"Offboard [{tenantId}] {tableName}: deleted {deleted} rows");
             }
 
-            // Events table uses PartitionKey = "{tenantId}_{sessionId}" – query by prefix
-            var eventsDeleted = await DeleteEventsByTenantPrefixAsync(normalizedTenantId);
+            // Tables with composite PartitionKey = "{tenantId}_{sessionId}" – query by prefix
+            var eventsDeleted = await DeleteByTenantPrefixAsync(Constants.TableNames.Events, normalizedTenantId);
             result.DeletedCounts[Constants.TableNames.Events] = eventsDeleted;
             _logger.LogInformation($"Offboard [{tenantId}] Events: deleted {eventsDeleted} rows");
+
+            var ruleResultsDeleted = await DeleteByTenantPrefixAsync(Constants.TableNames.RuleResults, normalizedTenantId);
+            result.DeletedCounts[Constants.TableNames.RuleResults] = ruleResultsDeleted;
+            _logger.LogInformation($"Offboard [{tenantId}] RuleResults: deleted {ruleResultsDeleted} rows");
+
+            // BootstrapSessions CodeLookup entries (PartitionKey = "CodeLookup", TenantId property = tenantId)
+            var codeLookupDeleted = await DeleteCodeLookupEntriesAsync(normalizedTenantId);
+            result.DeletedCounts["BootstrapSessions_CodeLookup"] = codeLookupDeleted;
+            _logger.LogInformation($"Offboard [{tenantId}] BootstrapSessions CodeLookup: deleted {codeLookupDeleted} rows");
 
             result.Success = true;
             _logger.LogWarning($"TENANT OFFBOARD completed for tenant {tenantId} by {upn}. " +
@@ -173,14 +186,14 @@ public class TenantOffboardFunction
     }
 
     /// <summary>
-    /// Deletes all events for a tenant. Events use PartitionKey = "{tenantId}_{sessionId}",
-    /// so we query with a starts-with filter.
+    /// Deletes all rows for a tenant from a table that uses composite PartitionKey = "{tenantId}_{sessionId}".
+    /// Used for Events and RuleResults tables.
     /// </summary>
-    private async Task<int> DeleteEventsByTenantPrefixAsync(string normalizedTenantId)
+    private async Task<int> DeleteByTenantPrefixAsync(string tableName, string normalizedTenantId)
     {
         try
         {
-            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Events);
+            var tableClient = _tableServiceClient.GetTableClient(tableName);
             // OData startsWith: PartitionKey ge 'prefix' and PartitionKey lt 'prefix~'
             var prefix = normalizedTenantId + "_";
             var filter = $"PartitionKey ge '{prefix}' and PartitionKey lt '{prefix}~'";
@@ -212,7 +225,48 @@ public class TenantOffboardFunction
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Failed to delete events for tenant {normalizedTenantId}");
+            _logger.LogError(ex, $"Failed to delete {tableName} for tenant {normalizedTenantId}");
+            return 0;
+        }
+    }
+
+    /// <summary>
+    /// Deletes BootstrapSessions CodeLookup entries for a tenant.
+    /// These use PartitionKey = "CodeLookup" with a TenantId property matching the tenant.
+    /// </summary>
+    private async Task<int> DeleteCodeLookupEntriesAsync(string normalizedTenantId)
+    {
+        try
+        {
+            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.BootstrapSessions);
+            var filter = $"PartitionKey eq 'CodeLookup' and TenantId eq '{normalizedTenantId}'";
+            var entities = tableClient.QueryAsync<TableEntity>(filter, select: new[] { "PartitionKey", "RowKey" });
+
+            int deleted = 0;
+            var batch = new List<TableTransactionAction>();
+
+            await foreach (var entity in entities)
+            {
+                batch.Add(new TableTransactionAction(TableTransactionActionType.Delete, entity));
+                deleted++;
+
+                if (batch.Count >= 100)
+                {
+                    await tableClient.SubmitTransactionAsync(batch);
+                    batch.Clear();
+                }
+            }
+
+            if (batch.Count > 0)
+            {
+                await tableClient.SubmitTransactionAsync(batch);
+            }
+
+            return deleted;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"Failed to delete CodeLookup entries for tenant {normalizedTenantId}");
             return 0;
         }
     }
