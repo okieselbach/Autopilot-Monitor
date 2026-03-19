@@ -684,16 +684,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 //         distinguishable from the later full-enrollment package.
                 await UploadDiagnosticsWithTimelineEvents(enrollmentSucceeded: true, fileNameSuffix: "preprov");
 
-                // Step 4: Persist final sequence for Boot 2 continuation
-                _sessionPersistence.SaveSequence(Interlocked.Read(ref _eventSequence));
-                _logger.Info($"Sequence counter persisted at {Interlocked.Read(ref _eventSequence)} for next boot");
-
-                // Step 5: Mark WhiteGlove Part 1 as complete so the next boot (Part 2)
+                // Step 4: Mark WhiteGlove Part 1 as complete so the next boot (Part 2)
                 // can signal the backend to transition Pending → InProgress.
                 _sessionPersistence.SaveWhiteGloveComplete();
                 _logger.Info("WhiteGlove marker persisted for Part 2 detection");
 
-                // Step 6: Exit — session.id + session.seq + whiteglove.complete survive so
+                // Step 5: Exit — session.id + session.seq + whiteglove.complete survive so
                 // the agent resumes on next boot.
                 //         No DeleteSessionId, no WriteEnrollmentCompleteMarker, no self-destruct.
                 //         The Windows Autopilot shutdown will power off the device;
@@ -711,6 +707,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                         { "willResumeOnNextBoot", true }
                     });
                 await UploadEventsAsync();
+
+                // Step 6: Persist final sequence AFTER all events have been emitted and uploaded.
+                // Must be the last mutation before exit so Part 2's LoadSequence() returns
+                // the true final value — prevents duplicate sequence numbers across reboots.
+                _sessionPersistence.SaveSequence(Interlocked.Read(ref _eventSequence));
+                _logger.Info($"Sequence counter persisted at {Interlocked.Read(ref _eventSequence)} for next boot");
 
                 _logger.Info("WhiteGlove graceful shutdown complete. Agent exiting.");
                 Environment.Exit(0);

@@ -9,6 +9,7 @@ export interface EnrollmentEvent {
   phaseName?: string;
   message: string;
   sequence: number;
+  receivedAt?: string;
   data?: Record<string, any>;
 }
 

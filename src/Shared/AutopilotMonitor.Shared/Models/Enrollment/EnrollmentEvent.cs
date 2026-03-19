@@ -33,6 +33,12 @@ namespace AutopilotMonitor.Shared.Models
         public DateTime Timestamp { get; set; }
 
         /// <summary>
+        /// Server-side UTC timestamp set when the backend receives and stores this event.
+        /// Null for events that pre-date this feature. Never set by the agent.
+        /// </summary>
+        public DateTime? ReceivedAt { get; set; }
+
+        /// <summary>
         /// Type of event (e.g., "phase_transition", "app_install_start", "error")
         /// </summary>
         public string EventType { get; set; }

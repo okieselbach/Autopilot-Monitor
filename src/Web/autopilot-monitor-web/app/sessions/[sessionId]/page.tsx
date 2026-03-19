@@ -1007,7 +1007,6 @@ export default function SessionDetailPage() {
             preProvGrouped={preProvGrouped}
             userEnrollGrouped={userEnrollGrouped}
             userEnrollEvents={userEnrollEvents}
-            isGalacticAdmin={user?.isGalacticAdmin}
             preProvDuration={whiteGloveDurations.preProvDuration}
             userEnrollDuration={whiteGloveDurations.userEnrollDuration}
             showScriptOutput={showScriptOutput}

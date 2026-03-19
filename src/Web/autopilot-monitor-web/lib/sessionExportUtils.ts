@@ -16,6 +16,7 @@ export interface SessionExportEvent {
   message: string;
   sequence: number;
   rowKey?: string;
+  receivedAt?: string;
   data?: Record<string, unknown>;
 }
 
@@ -51,7 +52,7 @@ export function generateCsvExport(events: SessionExportEvent[]) {
   // Columns match the Events Azure Table Storage schema exactly
   // PartitionKey = TenantId_SessionId, RowKey = Timestamp_Sequence
   // PhaseName is a derived extra column appended after DataJson for convenience
-  const header = "PartitionKey,RowKey,EventId,SessionId,TenantId,Timestamp,EventType,Severity,Source,Phase,Message,Sequence,DataJson,PhaseName";
+  const header = "PartitionKey,RowKey,EventId,SessionId,TenantId,Timestamp,ReceivedAt,EventType,Severity,Source,Phase,Message,Sequence,DataJson,PhaseName";
   const rows = sorted.map(e => {
     const sev = e.severity ?? "";
     const sevInt = SEVERITY_INT[sev] ?? SEVERITY_INT[sev.charAt(0).toUpperCase() + sev.slice(1).toLowerCase()];
@@ -63,6 +64,7 @@ export function generateCsvExport(events: SessionExportEvent[]) {
       esc(e.sessionId ?? ""),
       esc(e.tenantId ?? ""),
       esc(e.timestamp ?? ""),
+      esc(e.receivedAt ?? ""),
       esc(e.eventType ?? ""),
       esc(severityCell),
       esc(e.source ?? ""),

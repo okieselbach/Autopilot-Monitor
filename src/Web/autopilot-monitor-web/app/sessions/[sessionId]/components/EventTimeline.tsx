@@ -23,7 +23,6 @@ interface EventTimelineProps {
   preProvGrouped: { eventsByPhase: Record<string, EnrollmentEvent[]>; orderedPhases: string[] };
   userEnrollGrouped: { eventsByPhase: Record<string, EnrollmentEvent[]>; orderedPhases: string[] };
   userEnrollEvents: EnrollmentEvent[];
-  isGalacticAdmin?: boolean;
   preProvDuration?: string | null;
   userEnrollDuration?: string | null;
   showScriptOutput?: boolean;
@@ -48,7 +47,6 @@ export default function EventTimeline({
   preProvGrouped,
   userEnrollGrouped,
   userEnrollEvents,
-  isGalacticAdmin,
   preProvDuration,
   userEnrollDuration,
   showScriptOutput,
@@ -188,7 +186,6 @@ export default function EventTimeline({
                     events={filterPhaseEvents(preProvGrouped.eventsByPhase[phaseName])}
                     isExpanded={expandedPhases.has(`pre-${phaseName}`)}
                     onToggle={() => togglePhase(`pre-${phaseName}`)}
-                    isGalacticAdmin={isGalacticAdmin}
                     showScriptOutput={showScriptOutput}
                   />
                 ))}
@@ -226,7 +223,6 @@ export default function EventTimeline({
                       events={filterPhaseEvents(userEnrollGrouped.eventsByPhase[phaseName])}
                       isExpanded={expandedPhases.has(`user-${phaseName}`)}
                       onToggle={() => togglePhase(`user-${phaseName}`)}
-                      isGalacticAdmin={isGalacticAdmin}
                       showScriptOutput={showScriptOutput}
                     />
                   ))}
@@ -267,7 +263,6 @@ export default function EventTimeline({
                       events={filterPhaseEvents(eventsByPhase[phaseName])}
                       isExpanded={expandedPhases.has(phaseName)}
                       onToggle={() => togglePhase(phaseName)}
-                      isGalacticAdmin={isGalacticAdmin}
                       showScriptOutput={showScriptOutput}
                     />
                   ))}
@@ -286,14 +281,12 @@ function PhaseSection({
   events,
   isExpanded,
   onToggle,
-  isGalacticAdmin,
   showScriptOutput
 }: {
   phaseName: string;
   events: EnrollmentEvent[];
   isExpanded: boolean;
   onToggle: () => void;
-  isGalacticAdmin?: boolean;
   showScriptOutput?: boolean;
 }) {
   return (
@@ -316,7 +309,6 @@ function PhaseSection({
             <EventRow
               key={event.eventId || `${event.sessionId}-${event.sequence}`}
               event={event}
-              isGalacticAdmin={isGalacticAdmin}
               showScriptOutput={showScriptOutput}
             />
           ))}
@@ -326,7 +318,7 @@ function PhaseSection({
   );
 }
 
-function EventRow({ event, isGalacticAdmin, showScriptOutput }: { event: EnrollmentEvent; isGalacticAdmin?: boolean; showScriptOutput?: boolean }) {
+function EventRow({ event, showScriptOutput }: { event: EnrollmentEvent; showScriptOutput?: boolean }) {
   const [showDetails, setShowDetails] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -386,7 +378,8 @@ function EventRow({ event, isGalacticAdmin, showScriptOutput }: { event: Enrollm
     }
   };
 
-  const hasDetails = isTruncated || (detailData && Object.keys(detailData).length > 0);
+  const hasData = isTruncated || (detailData && Object.keys(detailData).length > 0);
+  const hasDetails = true; // Every event has at least the metadata block
 
   return (
     <div id={`event-${event.eventId}`} className="bg-gray-50 rounded-lg p-3 hover:bg-gray-100 transition-colors">
@@ -403,15 +396,6 @@ function EventRow({ event, isGalacticAdmin, showScriptOutput }: { event: Enrollm
           <div className="mt-1 flex items-center gap-3 text-xs text-gray-500">
             <span>Source: {event.source}</span>
             <span>Seq: {event.sequence}</span>
-            {isGalacticAdmin && (
-              <button
-                onClick={copyEventId}
-                className="font-mono hover:text-blue-600 cursor-pointer transition-colors"
-                title={copied ? 'Copied!' : `Click to copy full EventId: ${event.eventId}`}
-              >
-                EventId: {event.eventId.substring(0, 8)}... {copied && '✓'}
-              </button>
-            )}
           </div>
         </div>
         {hasDetails && (
@@ -423,6 +407,43 @@ function EventRow({ event, isGalacticAdmin, showScriptOutput }: { event: Enrollm
           </button>
         )}
       </div>
+
+      {/* Event metadata block — always shown when details are expanded */}
+      {showDetails && (() => {
+        const receivedDelta = event.receivedAt
+          ? Math.round((new Date(event.receivedAt).getTime() - new Date(event.timestamp).getTime()) / 1000 * 10) / 10
+          : null;
+        return (
+          <div className="mt-2 border border-gray-200 rounded-md px-3 py-2 text-xs text-gray-600">
+            <div className="flex">
+              <span className="w-20 flex-shrink-0 text-gray-400">EventId</span>
+              <span className="flex-1 min-w-0 font-mono truncate">{event.eventId}</span>
+              <button
+                onClick={copyEventId}
+                className="ml-2 flex-shrink-0 text-gray-400 hover:text-blue-600 transition-colors"
+                title={copied ? 'Copied!' : 'Copy EventId'}
+              >
+                {copied ? '✓' : 'copy'}
+              </button>
+              <span className="w-20 flex-shrink-0 text-gray-400 ml-4">Phase</span>
+              <span className="flex-shrink-0">{event.phaseName || 'Unknown'}</span>
+            </div>
+            <div className="flex mt-0.5">
+              <span className="w-20 flex-shrink-0 text-gray-400">Created</span>
+              <span className="flex-1 min-w-0 font-mono">{event.timestamp}</span>
+              <span className="w-20 flex-shrink-0 text-gray-400 ml-6">Received</span>
+              <span className="flex-shrink-0 font-mono">
+                {event.receivedAt
+                  ? new Date(event.receivedAt).toISOString().replace('T', ' ').replace('Z', '')
+                  : '—'}
+                {receivedDelta !== null && receivedDelta >= 0 && (
+                  <span className="text-gray-400 ml-1">(+{receivedDelta}s)</span>
+                )}
+              </span>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Gather rule: terminal-style output block */}
       {showDetails && hasGatherOutput && (

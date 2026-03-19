@@ -121,6 +121,11 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                 var sessionPrefix = $"[Session: {request.SessionId.Substring(0, Math.Min(8, request.SessionId.Length))}]";
                 _logger.LogInformation($"{sessionPrefix} IngestEvents: Processing {request.Events.Count} events (Device: {validation.CertificateThumbprint}, Hardware: {validation.Manufacturer} {validation.Model}, Rate: {validation.RateLimitResult?.RequestsInWindow}/{validation.RateLimitResult?.MaxRequests})");
 
+                // Stamp server-side receive time on all events in this batch
+                var receivedAt = DateTime.UtcNow;
+                foreach (var evt in request.Events)
+                    evt.ReceivedAt = receivedAt;
+
                 // Store events in Azure Table Storage (batch write for efficiency)
                 var storedEvents = await _storageService.StoreEventsBatchAsync(request.Events);
                 int processedCount = storedEvents.Count;

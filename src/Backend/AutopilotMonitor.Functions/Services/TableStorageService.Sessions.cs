@@ -448,7 +448,8 @@ namespace AutopilotMonitor.Functions.Services
                         evt.Data != null && evt.Data.Count > 0
                             ? JsonConvert.SerializeObject(evt.Data)
                             : string.Empty,
-                        "DataJson", evt.EventId)
+                        "DataJson", evt.EventId),
+                    ["ReceivedAt"] = evt.ReceivedAt
                 };
 
                 await tableClient.UpsertEntityAsync(entity);
@@ -520,7 +521,8 @@ namespace AutopilotMonitor.Functions.Services
                                     evt.Data != null && evt.Data.Count > 0
                                         ? JsonConvert.SerializeObject(evt.Data)
                                         : string.Empty,
-                                    "DataJson", evt.EventId)
+                                    "DataJson", evt.EventId),
+                                ["ReceivedAt"] = evt.ReceivedAt
                             };
 
                             return new TableTransactionAction(TableTransactionActionType.UpsertReplace, entity);
@@ -1176,8 +1178,9 @@ namespace AutopilotMonitor.Functions.Services
                     events.Add(MapToEnrollmentEvent(entity));
                 }
 
-                // Sort by Timestamp ascending (chronological order)
-                return events.OrderBy(e => e.Timestamp).ThenBy(e => e.Sequence).ToList();
+                // Sort by Sequence ascending — the authoritative event order
+                // (assigned atomically via Interlocked.Increment on the agent)
+                return events.OrderBy(e => e.Sequence).ToList();
             }
             catch (Exception ex)
             {
@@ -1379,7 +1382,8 @@ namespace AutopilotMonitor.Functions.Services
                 Message = entity.GetString("Message") ?? string.Empty,
                 Sequence = entity.GetInt64("Sequence") ?? 0,
                 Data = DeserializeEventData(entity.GetString("DataJson")),
-                RowKey = entity.RowKey
+                RowKey = entity.RowKey,
+                ReceivedAt = entity.GetDateTimeOffset("ReceivedAt")?.UtcDateTime
             };
         }
 
