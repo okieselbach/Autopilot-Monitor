@@ -18,6 +18,7 @@ export function initAppInsights(connectionString: string) {
       disableCookiesUsage: true,
       enableAutoRouteTracking: true,
       disableFetchTracking: false,
+      disablePageUnloadEvents: ["unload"],
     },
   });
 
