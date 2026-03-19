@@ -75,6 +75,15 @@ export function SectionGeneral() {
                   Useful when a session is stuck and will never complete on its own.
                 </td>
               </tr>
+              <tr>
+                <td className="px-4 py-2.5 font-medium text-gray-900">Mark as Succeeded</td>
+                <td className="px-4 py-2.5 text-gray-600">Session Detail page</td>
+                <td className="px-4 py-2.5 text-gray-600">
+                  Manually marks a session that is currently <em>In Progress</em> or <em>Pending</em> as succeeded.
+                  Triggers the agent to stop monitoring and perform cleanup on the device (final data upload,
+                  diagnostics collection, and optionally self-destruct based on tenant configuration).
+                </td>
+              </tr>
             </tbody>
           </table>
         </div>
@@ -112,12 +121,12 @@ export function SectionGeneral() {
                 <td className="px-4 py-2.5 text-gray-600">The session has been registered but is waiting for the user enrollment phase. This typically occurs after a White Glove (pre-provisioning) enrollment, where the device phase is complete and the device is waiting for the user to sign in and continue enrollment.</td>
               </tr>
               <tr>
-                <td className="px-4 py-2.5"><span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">Complete</span></td>
-                <td className="px-4 py-2.5 text-gray-600">The enrollment finished successfully. The device passed through all expected phases.</td>
+                <td className="px-4 py-2.5"><span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">Succeeded</span></td>
+                <td className="px-4 py-2.5 text-gray-600">The enrollment finished successfully. The device passed through all expected phases, or was manually marked as succeeded via Admin Mode.</td>
               </tr>
               <tr>
                 <td className="px-4 py-2.5"><span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">Failed</span></td>
-                <td className="px-4 py-2.5 text-gray-600">The enrollment ended in failure — either detected automatically by the agent or marked manually via Admin Mode.</td>
+                <td className="px-4 py-2.5 text-gray-600">The enrollment ended in failure — either detected automatically by the agent or manually marked as failed via Admin Mode.</td>
               </tr>
             </tbody>
           </table>

@@ -50,6 +50,70 @@ export default function ChangelogPage() {
             <div>
               <div className="flex items-center gap-3 mb-3">
                 <span className="text-xs font-mono font-semibold text-gray-400 uppercase tracking-wider">
+                  2026-03-19 - 12:00 CET
+                </span>
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                  Platform Update
+                </span>
+              </div>
+              <h2 className="text-base font-semibold text-gray-900 mb-2">
+                Navigation overhaul, session architecture, new agent signals, and community rules
+              </h2>
+              <ul className="space-y-2 text-sm text-gray-600 leading-relaxed list-none">
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Unified sidebar</span> — The entire navigation has been redesigned with a global sidebar. The old top nav is gone; settings and admin areas now have their own sidebar sections. Mobile layout also reworked.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Session index table</span> — Session storage has been fundamentally re-architected for better scalability and reliability.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">New agent signals</span> — The agent now reports <code>agent_shutdown</code> (clean shutdown), <code>hardware_spec</code> (hardware inventory at enrollment), network interface changes, and clock skew deviations for better diagnostics.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Self-deploying mode detection</span> — The agent now automatically detects self-deploying scenarios and tracks the enrollment finalization process with dedicated events.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Notification providers</span> — The webhook notification system now supports three providers: Teams Legacy, Teams Workflow, and Slack — selectable per tenant.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Community rules</span> — A community rule set for gather and analyze rules has been added. Rules now have a JSON view, severity override, and centralized guardrails. New local admin analyze rule included.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Geographic drill-down</span> — The geographic performance view now supports drill-down to region and country level.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Mark as success</span> — Sessions can now be manually marked as successful, e.g. after manually resolved enrollments.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Feedback system</span> — An integrated feedback system with admin management allows direct feedback from within the portal.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Tenant settings UX</span> — The central save button in tenant settings has been replaced with individual section save buttons. A new Unrestricted Mode option disables most guardrails per tenant request.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Docs expanded</span> — New general documentation section, IME pattern explanation, and a public sites sidebar added.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Backend reliability</span> — Improved cache invalidation and retry logic for transient errors.</span>
+                </li>
+              </ul>
+            </div>
+
+            <div>
+              <div className="flex items-center gap-3 mb-3">
+                <span className="text-xs font-mono font-semibold text-gray-400 uppercase tracking-wider">
                   2026-03-10 - 12:00 CET
                 </span>
                 <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
