@@ -1,8 +1,6 @@
 import Link from "next/link";
 import { PublicPageHeader } from "../../components/PublicPageHeader";
 
-const VERSION = "1.0.0";
-
 const FEATURES = [
   {
     title: "Real-Time Enrollment Monitoring",
@@ -84,11 +82,10 @@ export default function AboutPage() {
           </p>
           <p className="text-gray-700 leading-relaxed">
             Deployed by assigning a bootstrapper script in Intune, the platform requires no infrastructure
-            changes and no additional certificates on end user devices. It integrates natively with
-            <strong> Azure</strong>, authenticates via <strong>Microsoft Entra ID</strong>, and supports
-            multi-tenant deployments out of the box.
+            changes and no additional certificates on end user devices. It runs entirely on
+            <strong> Azure</strong>, authenticates via <strong>Microsoft Entra ID</strong>, and provides
+            multi-tenant support with strict per-tenant data isolation.
           </p>
-          <p className="mt-4 text-sm text-gray-400">Version {VERSION}</p>
         </section>
 
         {/* Key Features */}
