@@ -54,6 +54,7 @@ export default function SessionDetailPage() {
   const [phaseTimelineExpanded, setPhaseTimelineExpanded] = useState(true);
   const [perfExpanded, setPerfExpanded] = useState(true);
   const [timelineExpanded, setTimelineExpanded] = useState(true);
+  const [autoScroll, setAutoScroll] = useState(false);
   const [adminMode, setAdminMode] = useState(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('adminMode') === 'true';
@@ -84,6 +85,9 @@ export default function SessionDetailPage() {
   const fetchEventsInFlight = useRef(false);
   const fetchEventsQueued = useRef(false);
 
+  // Auto-scroll: tracks whether the user is near the bottom of the page
+  const isNearBottomRef = useRef(false);
+
   // Use global contexts
   const { on, off, isConnected, joinGroup, leaveGroup } = useSignalR();
   const { tenantId } = useTenant();
@@ -105,6 +109,39 @@ export default function SessionDetailPage() {
   useEffect(() => {
     galacticAdminModeRef.current = galacticAdminMode;
   }, [galacticAdminMode]);
+
+  // Auto-scroll: track whether user is near the bottom (only while feature is enabled).
+  // Uses a ref so scroll events don't cause re-renders.
+  useEffect(() => {
+    if (!autoScroll) return;
+    const handleScroll = () => {
+      const distanceFromBottom = document.body.scrollHeight - window.scrollY - window.innerHeight;
+      isNearBottomRef.current = distanceFromBottom <= 150;
+    };
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, [autoScroll]);
+
+  // Auto-scroll: when new events arrive, scroll to bottom only if user is already near the bottom.
+  useEffect(() => {
+    if (!autoScroll || events.length === 0 || !isNearBottomRef.current) return;
+    const timer = setTimeout(() => {
+      window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [events, autoScroll]);
+
+  const handleAutoScrollToggle = () => {
+    setAutoScroll(prev => {
+      const next = !prev;
+      if (next) {
+        // Enabling: immediately scroll to bottom and mark as near-bottom
+        isNearBottomRef.current = true;
+        setTimeout(() => window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }), 50);
+      }
+      return next;
+    });
+  };
 
   const resolveEffectiveTenantId = () => {
     const knownSessionTenant = sessionTenantIdRef.current || sessionRef.current?.tenantId || null;
@@ -1029,6 +1066,8 @@ export default function SessionDetailPage() {
             preProvDuration={whiteGloveDurations.preProvDuration}
             userEnrollDuration={whiteGloveDurations.userEnrollDuration}
             showScriptOutput={showScriptOutput}
+            autoScroll={autoScroll}
+            onAutoScrollToggle={handleAutoScrollToggle}
           />
           </div>
         </div>

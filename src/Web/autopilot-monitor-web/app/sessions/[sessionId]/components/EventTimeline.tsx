@@ -26,6 +26,8 @@ interface EventTimelineProps {
   preProvDuration?: string | null;
   userEnrollDuration?: string | null;
   showScriptOutput?: boolean;
+  autoScroll?: boolean;
+  onAutoScrollToggle?: () => void;
 }
 
 export default function EventTimeline({
@@ -50,6 +52,8 @@ export default function EventTimeline({
   preProvDuration,
   userEnrollDuration,
   showScriptOutput,
+  autoScroll,
+  onAutoScrollToggle,
 }: EventTimelineProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [rawMode, setRawMode] = useState(false);
@@ -150,6 +154,23 @@ export default function EventTimeline({
               </svg>
               <span className="hidden sm:inline">Collapse All</span>
             </button>
+            {onAutoScrollToggle && (
+              <button
+                onClick={onAutoScrollToggle}
+                title={autoScroll ? "Disable auto-scroll" : "Enable auto-scroll — keeps you at the bottom as new events arrive"}
+                className={`flex items-center gap-1 px-2 py-1 text-xs rounded transition-colors ${
+                  autoScroll
+                    ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                    : 'bg-gray-50 text-gray-500 hover:bg-gray-100'
+                }`}
+              >
+                {autoScroll && <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse flex-shrink-0" />}
+                <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                </svg>
+                <span className="hidden sm:inline">Live</span>
+              </button>
+            )}
           </div>
         </div>
       </div>
