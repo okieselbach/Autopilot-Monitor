@@ -38,7 +38,7 @@ export default function ChangelogPage() {
               <li className="flex gap-2 text-sm text-gray-600 leading-relaxed">
                 <span className="mt-0.5 text-yellow-500 flex-shrink-0">⚠</span>
                 <span>
-                  <span className="font-medium text-gray-800">Event Timeline</span> — only tested with Entra-only, Pre-Provisioning (still testing) and user-driven Autopilot (ESP with &ldquo;wait for all apps&rdquo; only). No Device Preparation, no hybrid scenario tests. There is code to handle some of these scenarios but they are untested. If you&apos;d like to share logs for any of these scenarios, that would be greatly appreciated.
+                  <span className="font-medium text-gray-800">Device Preparation scenario</span> — not actively tested yet. Other enrollment scenarios (Entra-only, Pre-Provisioning, user-driven, hybrid) have been seen in the wild and are continuously being fine-tuned. If you&apos;d like to share logs for any scenario, that would be greatly appreciated.
                 </span>
               </li>
             </ul>
