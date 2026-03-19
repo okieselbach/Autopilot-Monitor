@@ -101,6 +101,13 @@ tmp/
 # Claude Code temporary files
 tmpclaude-*-cwd
 
+# Claude skills and diagnostic scripts (local only)
+.claude/commands/event-query.md
+.claude/commands/backend-logs.md
+.claude/commands/session-debug.md
+.claude/scripts/query-appinsights.sh
+.claude/scripts/query-table.sh
+
 # Deployment scripts (local only)
 scripts/Deployment/build_and_upload_debug_agent_build.ps1
 scripts/Deployment/build_and_upload_release_agent_build.ps1
