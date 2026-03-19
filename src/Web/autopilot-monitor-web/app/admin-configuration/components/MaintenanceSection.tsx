@@ -195,22 +195,48 @@ export function MaintenanceSection({
         </div>
         <div className="p-6 space-y-4">
           <p className="text-sm text-purple-900 dark:text-gray-200">
-            Manually trigger the daily maintenance job which includes:
+            Runs all timer-triggered tasks plus additional backfill &amp; repair operations that only run on manual trigger.
           </p>
-          <ul className="text-sm text-purple-900 dark:text-gray-200 space-y-1 ml-4">
-            <li className="flex items-start">
-              <span className="text-purple-500 dark:text-purple-400 mr-2">&bull;</span>
-              <span>Mark stalled sessions as timed out</span>
-            </li>
-            <li className="flex items-start">
-              <span className="text-purple-500 dark:text-purple-400 mr-2">&bull;</span>
-              <span>Aggregate metrics into historical snapshots (with automatic catch-up for missed days)</span>
-            </li>
-            <li className="flex items-start">
-              <span className="text-purple-500 dark:text-purple-400 mr-2">&bull;</span>
-              <span>Clean up old data based on retention policies</span>
-            </li>
-          </ul>
+          <div className="space-y-3">
+            <div>
+              <p className="text-xs font-semibold text-purple-700 dark:text-purple-300 uppercase tracking-wide mb-1">Standard tasks (also run by 2h timer)</p>
+              <ul className="text-sm text-purple-900 dark:text-gray-200 space-y-1 ml-4">
+                <li className="flex items-start">
+                  <span className="text-purple-500 dark:text-purple-400 mr-2">&bull;</span>
+                  <span>Mark stalled sessions as timed out</span>
+                </li>
+                <li className="flex items-start">
+                  <span className="text-purple-500 dark:text-purple-400 mr-2">&bull;</span>
+                  <span>Aggregate metrics into historical snapshots</span>
+                </li>
+                <li className="flex items-start">
+                  <span className="text-purple-500 dark:text-purple-400 mr-2">&bull;</span>
+                  <span>Clean up old data based on retention policies</span>
+                </li>
+                <li className="flex items-start">
+                  <span className="text-purple-500 dark:text-purple-400 mr-2">&bull;</span>
+                  <span>Recompute platform-wide statistics</span>
+                </li>
+              </ul>
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-amber-700 dark:text-amber-300 uppercase tracking-wide mb-1">Manual-only tasks (backfill &amp; repair)</p>
+              <ul className="text-sm text-purple-900 dark:text-gray-200 space-y-1 ml-4">
+                <li className="flex items-start">
+                  <span className="text-amber-500 dark:text-amber-400 mr-2">&bull;</span>
+                  <span>Backfill sessions missing from SessionsIndex</span>
+                </li>
+                <li className="flex items-start">
+                  <span className="text-amber-500 dark:text-amber-400 mr-2">&bull;</span>
+                  <span>Clean up ghost SessionsIndex entries <span className="text-xs text-gray-500 dark:text-gray-400">(remove after 2026-06)</span></span>
+                </li>
+                <li className="flex items-start">
+                  <span className="text-amber-500 dark:text-amber-400 mr-2">&bull;</span>
+                  <span>Backfill tenant OnboardedAt dates <span className="text-xs text-gray-500 dark:text-gray-400">(remove when complete)</span></span>
+                </li>
+              </ul>
+            </div>
+          </div>
           <div className="bg-purple-50 dark:bg-gray-700 border border-purple-200 dark:border-purple-600 rounded-lg p-4">
             <label className="block text-sm font-medium text-purple-800 dark:text-purple-200 mb-1">
               Target Date (optional)

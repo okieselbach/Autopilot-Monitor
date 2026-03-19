@@ -86,16 +86,11 @@ namespace AutopilotMonitor.Functions.Services
                 await CleanupOldDataAsync();
                 await RecomputePlatformStatsAsync();
 
-                // Safety net: backfill any sessions missing from SessionsIndex
-                await _storageService.BackfillSessionIndexAsync();
-
-                // One-time cleanup: remove ghost SessionsIndex entries caused by the
-                // StoreSessionAsync Replace-mode IndexRowKey bug (now fixed).
-                // TODO: Remove after 2026-06-01
-                await _storageService.CleanupGhostSessionIndexEntriesAsync();
-
-                // Backfill OnboardedAt for tenants that don't have it yet
-                await BackfillTenantOnboardedAtAsync();
+                // Backfill and one-time repair tasks run only via manual trigger (RunManualAsync)
+                // to keep the timer-triggered path lightweight. See RunManualAsync for:
+                // - BackfillSessionIndexAsync (safety net for missing index entries)
+                // - CleanupGhostSessionIndexEntriesAsync (one-time ghost cleanup)
+                // - BackfillTenantOnboardedAtAsync (backfill missing OnboardedAt)
 
                 maintenanceStart.Stop();
                 _logger.LogInformation($"Daily maintenance completed in {maintenanceStart.ElapsedMilliseconds}ms");
@@ -132,6 +127,20 @@ namespace AutopilotMonitor.Functions.Services
                 {
                     await CleanupOldDataAsync();
                     result.DataCleanupExecuted = true;
+
+                    // --- Backfill & repair tasks (manual-only, not in timer path) ---
+
+                    // Safety net: backfill any sessions missing from SessionsIndex
+                    await _storageService.BackfillSessionIndexAsync();
+
+                    // One-time cleanup: remove ghost SessionsIndex entries caused by the
+                    // StoreSessionAsync Replace-mode IndexRowKey bug (now fixed).
+                    // TODO: Remove after 2026-06-01
+                    await _storageService.CleanupGhostSessionIndexEntriesAsync();
+
+                    // Backfill OnboardedAt for tenants that don't have it yet
+                    // TODO: Remove once all tenants have been backfilled
+                    await BackfillTenantOnboardedAtAsync();
                 }
 
                 await RecomputePlatformStatsAsync();
