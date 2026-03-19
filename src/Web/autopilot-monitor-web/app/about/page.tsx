@@ -141,7 +141,7 @@ export default function AboutPage() {
               {
                 title: "MSPs & Enterprise Teams",
                 description:
-                  "Manage multiple Intune tenants from one platform. Multi-tenant support lets MSPs monitor enrollment health across all managed customers from a single portal.",
+                  "Autopilot Monitor supports multi-tenant deployments — each customer tenant runs its own isolated instance. MSPs with login access to a customer environment can use the portal for that tenant independently.",
               },
             ].map((item) => (
               <div key={item.title} className="rounded-lg bg-blue-50 border border-blue-100 p-4">
@@ -210,8 +210,9 @@ export default function AboutPage() {
               {
                 title: "Agent",
                 items: [
-                  ".NET Windows service — lightweight, low-overhead monitoring",
-                  "Deployed via Intune Win32 app bootstrapper",
+                  ".NET binary — lightweight, low-overhead monitoring",
+                  "Runs via scheduled task (no Windows service — easy, residue-free removal)",
+                  "Deployed via Intune bootstrapper script (Win32 app)",
                   "Client certificate authentication",
                   "Optional self-destruct on enrollment completion",
                 ],
@@ -221,7 +222,7 @@ export default function AboutPage() {
                 items: [
                   "Microsoft Intune — agent deployment target",
                   "Microsoft Teams — enrollment failure notifications",
-                  "Windows Event Log — event source for IME log patterns",
+                  "Intune Management Extension (IME) log — event source for log pattern detection",
                   "WMI & Registry — extended data gather rules",
                 ],
               },
