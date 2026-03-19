@@ -70,10 +70,16 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         private int? _autopilotMode;
         private bool IsSelfDeploying => _autopilotMode == 1;
 
-        // True when no user ESP session is expected — either Self-Deploying (AutopilotMode=1)
-        // or SkipUserStatusPage=true in registry. Hello provisioning is irrelevant in both cases
-        // because there is no interactive user session during which Hello could complete.
-        private bool IsDeviceOnlyDeployment => IsSelfDeploying || _skipUserStatusPage == true;
+        // True when AAD join status shows a joined device with a real user email.
+        // Detected via CollectAadJoinStatus() in DeviceInfoCollector.
+        private bool _aadJoinedWithUser;
+
+        // True when no interactive user session is expected.
+        // Self-Deploying (AutopilotMode=1) is always device-only.
+        // SkipUserStatusPage=true alone does NOT mean device-only — admins commonly skip
+        // the user ESP page in user-driven enrollments. Only classify as device-only when
+        // SkipUserStatusPage=true AND no user has AAD-joined (no aad_join_status with userEmail).
+        private bool IsDeviceOnlyDeployment => IsSelfDeploying || (_skipUserStatusPage == true && !_aadJoinedWithUser);
 
         // Safety-net timer for waiting_for_hello state
         private Timer _waitingForHelloSafetyTimer;
@@ -308,19 +314,36 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
 
         private void CollectDeviceInfo()
         {
+            var wasDeviceOnly = IsDeviceOnlyDeployment;
             var result = _deviceInfoCollector.CollectAll();
             _enrollmentType = result.enrollmentType;
             _skipUserStatusPage = result.skipUserStatusPage;
             _skipDeviceStatusPage = result.skipDeviceStatusPage;
             _autopilotMode = result.autopilotMode;
+            _aadJoinedWithUser = result.hasAadJoinedUser;
             _stateData.EnrollmentType = _enrollmentType;
             _stateData.SkipUserStatusPage = _skipUserStatusPage;
             _stateData.SkipDeviceStatusPage = _skipDeviceStatusPage;
             _stateData.AutopilotMode = _autopilotMode;
+            _stateData.AadJoinedWithUser = _aadJoinedWithUser;
             _stateDirty = true;
 
             _logger.Info($"EnrollmentTracker: enrollment type detected: {_enrollmentType ?? "unknown"} " +
-                         $"(autopilotMode={_autopilotMode}, skipUserStatusPage={_skipUserStatusPage}, skipDeviceStatusPage={_skipDeviceStatusPage})");
+                         $"(autopilotMode={_autopilotMode}, skipUserStatusPage={_skipUserStatusPage}, skipDeviceStatusPage={_skipDeviceStatusPage}, aadJoinedWithUser={_aadJoinedWithUser})");
+
+            // Emit trace when AAD join with user is detected and reclassifies away from device-only
+            if (_aadJoinedWithUser && wasDeviceOnly && !IsDeviceOnlyDeployment)
+            {
+                EmitTraceEvent("user_session_detected_via_aad_join",
+                    "AAD join with user detected — user session active, using standard completion paths",
+                    new Dictionary<string, object>
+                    {
+                        { "autopilotMode", _autopilotMode },
+                        { "skipUserStatusPage", _skipUserStatusPage },
+                        { "aadJoinedWithUser", true },
+                        { "isDeviceOnlyDeployment", false }
+                    });
+            }
 
             if (IsDeviceOnlyDeployment)
             {
@@ -334,6 +357,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                         { "autopilotMode", _autopilotMode },
                         { "skipUserStatusPage", _skipUserStatusPage },
                         { "enrollmentType", _enrollmentType },
+                        { "aadJoinedWithUser", _aadJoinedWithUser },
                         { "isSelfDeploying", IsSelfDeploying },
                         { "isDeviceOnlyDeployment", true }
                     });

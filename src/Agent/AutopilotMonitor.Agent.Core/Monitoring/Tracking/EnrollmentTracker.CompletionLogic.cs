@@ -466,6 +466,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             _skipUserStatusPage = loaded.SkipUserStatusPage;
             _skipDeviceStatusPage = loaded.SkipDeviceStatusPage;
             _autopilotMode = loaded.AutopilotMode;
+            _aadJoinedWithUser = loaded.AadJoinedWithUser;
             _stateData = loaded;
 
             _logger.Info($"EnrollmentTracker: state restored — espEverSeen={_espEverSeen}, espFinalExitSeen={_espFinalExitSeen}, desktopArrived={_desktopArrived}, lastEspPhase={_lastEspPhase}, enrollmentCompleteEmitted={_enrollmentCompleteEmitted}");

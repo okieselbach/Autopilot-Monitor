@@ -114,6 +114,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         // Autopilot deployment mode: 0=UserDriven, 1=SelfDeploying, 2=PreProvisioning, null=unknown
         public int? AutopilotMode { get; set; }
 
+        // True when AAD join status shows a joined device with a real user email
+        public bool AadJoinedWithUser { get; set; }
+
         // Signal timestamps for audit trail
         public DateTime? EspFirstSeenUtc { get; set; }
         public DateTime? EspFinalExitUtc { get; set; }

@@ -18,6 +18,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
     /// </summary>
     public partial class DeviceInfoCollector
     {
+        /// <summary>
+        /// True when AAD join status shows "Azure AD Joined" with a non-empty userEmail.
+        /// Used by EnrollmentTracker to distinguish user-driven from device-only deployments
+        /// when SkipUserStatusPage=true (which admins commonly set for user-driven enrollments too).
+        /// </summary>
+        public bool HasAadJoinedUser { get; private set; }
+
         private void CollectNetworkAndDnsConfiguration()
         {
             try
@@ -398,10 +405,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                             {
                                 if (subKey != null)
                                 {
+                                    var userEmail = subKey.GetValue("UserEmail")?.ToString();
                                     data["tenantId"] = subKey.GetValue("TenantId")?.ToString();
-                                    data["userEmail"] = subKey.GetValue("UserEmail")?.ToString();
+                                    data["userEmail"] = userEmail;
                                     data["joinType"] = "Azure AD Joined";
                                     data["thumbprint"] = subKeyNames[0]; // Certificate thumbprint
+
+                                    if (!string.IsNullOrWhiteSpace(userEmail))
+                                        HasAadJoinedUser = true;
                                 }
                             }
                         }
