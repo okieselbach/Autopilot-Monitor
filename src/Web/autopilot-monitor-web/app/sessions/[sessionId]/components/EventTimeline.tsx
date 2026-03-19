@@ -363,7 +363,9 @@ function EventRow({ event, showScriptOutput }: { event: EnrollmentEvent; showScr
     : null;
   const hasGatherOutput = gatherOutput != null && gatherOutput !== "";
   const formattedOutput = hasGatherOutput
-    ? gatherOutput.replace(/\r\n/g, "\n").replace(/\r/g, "\n")
+    ? (typeof gatherOutput === 'string'
+        ? gatherOutput.replace(/\r\n/g, "\n").replace(/\r/g, "\n")
+        : (console.error('[EventTimeline] gatherOutput is not a string:', typeof gatherOutput, gatherOutput), null))
     : null;
 
   const copyDetailContent = async (text: string) => {
