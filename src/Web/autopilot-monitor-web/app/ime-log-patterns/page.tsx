@@ -14,9 +14,12 @@ import { EmptyState } from "@/components/rules/EmptyState";
 
 import { ImeLogPattern, PatternForm, EMPTY_FORM, ACTION_LABELS } from "./types";
 import ImePatternCard from "./components/ImePatternCard";
+import { trackEvent } from "@/lib/appInsights";
 
 export default function ImeLogPatternsPage() {
   const router = useRouter();
+
+  useEffect(() => { trackEvent("ime_patterns_viewed"); }, []);
   const { tenantId } = useTenant();
   const { user } = useAuth();
   const isGalacticAdmin = user?.isGalacticAdmin ?? false;
@@ -152,6 +155,7 @@ export default function ImeLogPatternsPage() {
             : p
         )
       );
+      trackEvent("ime_pattern_modified");
       setEditingPatternId(null);
       showSuccess(`Pattern "${patternId}" updated successfully!`);
     }

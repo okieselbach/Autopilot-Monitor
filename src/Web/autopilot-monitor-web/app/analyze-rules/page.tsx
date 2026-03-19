@@ -8,6 +8,7 @@ import { useTenant } from "../../contexts/TenantContext";
 import { useAuth } from "../../contexts/AuthContext";
 import { API_BASE_URL } from "@/lib/config";
 import { authenticatedFetch } from "@/lib/authenticatedFetch";
+import { trackEvent } from "@/lib/appInsights";
 import { downloadAsJson, stripInternalFields, bumpVersion } from "@/lib/rulePageHelpers";
 import { StatCard } from "@/components/rules/StatCard";
 import { RuleFilterBar } from "@/components/rules/RuleFilterBar";
@@ -26,6 +27,8 @@ interface TenantInfo {
 
 export default function AnalyzeRulesPage() {
   const router = useRouter();
+
+  useEffect(() => { trackEvent("analyze_rules_viewed"); }, []);
   const { tenantId } = useTenant();
   const { user, getAccessToken } = useAuth();
 
@@ -161,6 +164,7 @@ export default function AnalyzeRulesPage() {
       { method: "DELETE" }
     );
     if (result !== null) {
+      trackEvent("rule_deleted", { ruleType: "analyze" });
       setRules((prev) => (prev || []).filter((r) => r.ruleId !== rule.ruleId));
       if (expandedRuleId === rule.ruleId) setExpandedRuleId(null);
       showSuccess(`Rule "${rule.title}" deleted successfully!`);
@@ -202,6 +206,7 @@ export default function AnalyzeRulesPage() {
       }
     );
     if (result !== null) {
+      trackEvent("rule_created", { ruleType: "analyze" });
       showSuccess(`Rule "${form.title}" created successfully!`);
       setNewRule({ ...EMPTY_FORM, conditions: [{ ...EMPTY_CONDITION }] });
       setShowCreateForm(false);
@@ -252,6 +257,7 @@ export default function AnalyzeRulesPage() {
       }
     );
     if (result !== null) {
+      trackEvent("rule_modified", { ruleType: "analyze" });
       setEditingRuleId(null);
       showSuccess(`Rule "${editForm.title}" updated successfully!`);
       await fetchRules();

@@ -12,6 +12,7 @@ import ScrollToTopButton from "../components/ScrollToTopButton";
 import FeedbackBubble from "../components/FeedbackBubble";
 import { SidebarProvider } from "../contexts/SidebarContext";
 import { GlobalSidebar } from "../components/GlobalSidebar";
+import AppInsightsInit from "../components/AppInsightsInit";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -121,6 +122,7 @@ export default function RootLayout({
                 <TenantProvider>
                   <SignalRProvider>
                     <SidebarProvider>
+                      <AppInsightsInit />
                       <Navbar />
                       <GlobalSidebar>
                         {children}

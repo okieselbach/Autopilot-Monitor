@@ -7,6 +7,7 @@ import { ProtectedRoute } from '../../components/ProtectedRoute';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNotifications } from '../../contexts/NotificationContext';
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
+import { trackEvent } from "@/lib/appInsights";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -94,6 +95,8 @@ function pN(values: number[], percentile: number): number {
 
 export default function PlatformMetricsPage() {
   const router = useRouter();
+
+  useEffect(() => { trackEvent("platform_metrics_viewed"); }, []);
   const { getAccessToken, user } = useAuth();
   const { addNotification } = useNotifications();
 

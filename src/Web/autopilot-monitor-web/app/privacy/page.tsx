@@ -16,6 +16,7 @@ export default function PrivacyPage() {
             <li>Azure AD/Entra ID tenant information</li>
             <li>User authentication information (UPN, display name, tenant ID)</li>
             <li>Operational telemetry and audit logs</li>
+            <li>Anonymized usage telemetry (via Azure Application Insights, no cookies) — used to understand which features are used and improve the service. No personal data is transmitted.</li>
           </ul>
 
           <h2 className="text-xl font-semibold text-gray-900 mt-6">Data Processing Context</h2>

@@ -106,6 +106,7 @@ tmpclaude-*-cwd
 .claude/commands/backend-logs.md
 .claude/commands/session-debug.md
 .claude/commands/table-query.md
+.claude/commands/ux-insights.md
 .claude/scripts/query-appinsights.sh
 .claude/scripts/query-table.sh
 

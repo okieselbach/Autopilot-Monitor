@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState, useEffect, useRef } from "react";
 import { Session } from "../types";
+import { trackEvent } from "@/lib/appInsights";
 
 // Column definition for the session table
 interface ColumnDef {
@@ -353,7 +354,7 @@ export function SessionTable({
           return (
             <button
               key={status}
-              onClick={() => onStatusFilterChange(isActive ? null : status)}
+              onClick={() => { if (!isActive) trackEvent("session_filter_applied", { filterType: "status", value: status }); onStatusFilterChange(isActive ? null : status); }}
               className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border transition-colors cursor-pointer ${isActive ? c.bgActive : c.bg}`}
             >
               {c.label}
@@ -449,7 +450,7 @@ export function SessionTable({
               paginatedSessions.map((session) => (
               <tr
                 key={session.sessionId}
-                onClick={() => router.push(`/sessions/${session.sessionId}`)}
+                onClick={() => { trackEvent("session_opened", { sessionId: session.sessionId, status: session.status ?? "" }); router.push(`/sessions/${session.sessionId}`); }}
                 className="hover:bg-gray-50 cursor-pointer transition-colors"
               >
                 {activeColumns.map((col) => (

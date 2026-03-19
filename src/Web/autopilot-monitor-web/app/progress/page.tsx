@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { API_BASE_URL } from "@/lib/config";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
+import { trackEvent } from "@/lib/appInsights";
 import { useTenant } from "../../contexts/TenantContext";
 import { useAuth } from "../../contexts/AuthContext";
 import { useNotifications } from "../../contexts/NotificationContext";
@@ -32,6 +33,8 @@ const phaseSteps = [
 ];
 
 export default function ProgressPortalPage() {
+  useEffect(() => { trackEvent("progress_portal_viewed"); }, []);
+
   const [serialInput, setSerialInput] = useState("");
   const [session, setSession] = useState<Session | null>(null);
   const [allSessions, setAllSessions] = useState<Session[]>([]);
@@ -194,6 +197,7 @@ export default function ProgressPortalPage() {
   const searchBySerial = async () => {
     if (!serialInput.trim()) return;
 
+    trackEvent("progress_serial_submitted");
     setSearching(true);
     setSearched(true);
     setNotFound(false);

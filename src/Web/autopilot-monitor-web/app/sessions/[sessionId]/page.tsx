@@ -28,6 +28,7 @@ import { InformationCircleIcon, ComputerDesktopIcon, PlayCircleIcon, SparklesIco
 import DeviceDetailsCard from "./components/DeviceDetailsCard";
 import { generateUiExport, generateCsvExport, generateSessionCsvExport, generateRuleResultsCsvExport, SessionExportEvent } from "@/lib/sessionExportUtils";
 import { Session, EnrollmentEvent, RuleResult } from "@/types";
+import { trackEvent } from "@/lib/appInsights";
 
 const GUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -35,6 +36,8 @@ export default function SessionDetailPage() {
   const params = useParams();
   const router = useRouter();
   const sessionId = params?.sessionId as string;
+
+  useEffect(() => { trackEvent("session_detail_viewed", { sessionId: sessionId ?? "" }); }, [sessionId]);
   const [events, setEvents] = useState<EnrollmentEvent[]>([]);
   const [session, setSession] = useState<Session | null>(null);
   const [sessionTenantId, setSessionTenantId] = useState<string | null>(null);
@@ -950,7 +953,7 @@ export default function SessionDetailPage() {
               loadingAnalysis={loadingAnalysis}
               analysisExpanded={analysisExpanded}
               setAnalysisExpanded={setAnalysisExpanded}
-              onReanalyze={() => fetchAnalysisResults(true)}
+              onReanalyze={() => { trackEvent("analyze_now_clicked", { sessionId: sessionId ?? "" }); fetchAnalysisResults(true); }}
             />
             </div>
           )}

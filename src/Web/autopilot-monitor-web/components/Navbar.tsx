@@ -8,6 +8,7 @@ import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { API_BASE_URL } from '@/lib/config';
 import { usePathname } from 'next/navigation';
+import { trackEvent } from '@/lib/appInsights';
 
 export default function Navbar() {
   const { isAuthenticated, user, logout } = useAuth();
@@ -409,7 +410,7 @@ export default function Navbar() {
                         <span className="text-sm text-gray-700">Admin Mode</span>
                         {adminMode && <span className="text-[10px] text-amber-600 font-semibold">ON</span>}
                       </div>
-                      <button onClick={() => setAdminMode(!adminMode)} className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${adminMode ? 'bg-amber-500' : 'bg-gray-300'}`}>
+                      <button onClick={() => { trackEvent("admin_mode_toggled", { enabled: !adminMode }); setAdminMode(!adminMode); }} className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${adminMode ? 'bg-amber-500' : 'bg-gray-300'}`}>
                         <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${adminMode ? 'translate-x-[18px]' : 'translate-x-[3px]'}`} />
                       </button>
                     </div>
@@ -427,7 +428,7 @@ export default function Navbar() {
                             <span className="text-sm text-gray-700">Galactic Admin</span>
                             {galacticAdminMode && <span className="text-[10px] text-purple-700 font-semibold">ON</span>}
                           </div>
-                          <button onClick={() => setGalacticAdminMode(!galacticAdminMode)} className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${galacticAdminMode ? 'bg-purple-600' : 'bg-gray-300'}`}>
+                          <button onClick={() => { trackEvent("admin_mode_toggled", { enabled: !galacticAdminMode, isGalactic: true }); setGalacticAdminMode(!galacticAdminMode); }} className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${galacticAdminMode ? 'bg-purple-600' : 'bg-gray-300'}`}>
                             <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${galacticAdminMode ? 'translate-x-[18px]' : 'translate-x-[3px]'}`} />
                           </button>
                         </div>

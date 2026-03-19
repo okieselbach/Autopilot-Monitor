@@ -8,6 +8,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { useNotifications } from "../../contexts/NotificationContext";
 import { API_BASE_URL } from "@/lib/config";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
+import { trackEvent } from "@/lib/appInsights";
 import { usePageSections } from "../../hooks/usePageSections";
 import { PageSectionItem } from "../../contexts/SidebarContext";
 import { ShieldCheckIcon, UsersIcon, CpuChipIcon, GearIcon, MagnifyingGlassIcon, LockClosedIcon, BellIcon, CloudArrowUpIcon, KeyIcon, CircleStackIcon, ArrowRightOnRectangleIcon } from "../../lib/sidebarIcons";
@@ -26,6 +27,8 @@ import { TenantConfiguration, TenantAdmin, DiagnosticsLogPath } from "./types";
 
 export default function SettingsPage() {
   const router = useRouter();
+
+  useEffect(() => { trackEvent("settings_viewed"); }, []);
   const { tenantId } = useTenant();
   const { getAccessToken, user, logout } = useAuth();
   const { addNotification } = useNotifications();

@@ -10,6 +10,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { useNotifications } from "../../contexts/NotificationContext";
 import { API_BASE_URL } from "@/lib/config";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
+import { trackEvent } from "@/lib/appInsights";
 import { Session } from "./types";
 import { StatsCard } from "./components/StatsCards";
 import { WelcomeMessage } from "./components/WelcomeMessage";
@@ -349,6 +350,14 @@ export default function Home() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isConnected]);
 
+  // Track search usage (debounced — fires 1s after user stops typing)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      trackEvent("session_searched", { hasQuery: searchQuery.length > 0 });
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
   // Save admin mode to localStorage when it changes
   useEffect(() => {
     localStorage.setItem('adminMode', adminMode.toString());
@@ -469,6 +478,7 @@ export default function Home() {
       });
 
       if (response.ok) {
+        trackEvent("session_deleted", { inAdminMode: adminMode });
         setSessions(prevSessions => prevSessions.filter(s => s.sessionId !== sessionToDelete.sessionId));
         console.log(`Session ${sessionToDelete.sessionId} deleted successfully`);
         setShowDeleteConfirm(false);

@@ -8,6 +8,7 @@ import { useNotifications } from '../../contexts/NotificationContext';
 import { ProtectedRoute } from '../../components/ProtectedRoute';
 import { API_BASE_URL } from '@/lib/config';
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
+import { trackEvent } from "@/lib/appInsights";
 
 interface AuditLogEntry {
   id: string;
@@ -25,6 +26,8 @@ type EntityTypeFilter = string;
 
 export default function AuditPage() {
   const router = useRouter();
+
+  useEffect(() => { trackEvent("audit_log_viewed"); }, []);
   const { tenantId } = useTenant();
   const { getAccessToken } = useAuth();
   const { addNotification } = useNotifications();

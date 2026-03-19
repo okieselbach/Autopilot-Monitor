@@ -8,6 +8,7 @@ import { useTenant } from "../../contexts/TenantContext";
 import { useAuth } from "../../contexts/AuthContext";
 import { API_BASE_URL } from "@/lib/config";
 import { authenticatedFetch } from "@/lib/authenticatedFetch";
+import { trackEvent } from "@/lib/appInsights";
 import { downloadAsJson, stripInternalFields, bumpVersion } from "@/lib/rulePageHelpers";
 import { StatCard } from "@/components/rules/StatCard";
 import { RuleFilterBar } from "@/components/rules/RuleFilterBar";
@@ -25,6 +26,8 @@ interface TenantInfo {
 
 export default function GatherRulesPage() {
   const router = useRouter();
+
+  useEffect(() => { trackEvent("gather_rules_viewed"); }, []);
   const { tenantId } = useTenant();
   const { user, getAccessToken } = useAuth();
 
@@ -182,6 +185,7 @@ export default function GatherRulesPage() {
       { method: "DELETE" }
     );
     if (result !== null) {
+      trackEvent("rule_deleted", { ruleType: "gather" });
       setRules(prev => (prev || []).filter(r => r.ruleId !== rule.ruleId));
       if (expandedRuleId === rule.ruleId) setExpandedRuleId(null);
       showSuccess(`Rule "${rule.title}" deleted`);
@@ -255,6 +259,7 @@ export default function GatherRulesPage() {
       }
     );
     if (result !== null) {
+      trackEvent("rule_created", { ruleType: "gather" });
       showSuccess(`Rule "${form.title}" created`);
       setShowCreateForm(false);
       setNewRule({ ...EMPTY_FORM });
@@ -338,6 +343,7 @@ export default function GatherRulesPage() {
       }
     );
     if (result !== null) {
+      trackEvent("rule_modified", { ruleType: "gather" });
       showSuccess(`Rule "${form.title}" saved`);
       setEditingRuleId(null);
       setJsonModeEdit(false);
