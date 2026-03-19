@@ -376,7 +376,7 @@ export default function DeviceDetailsCard({ events }: { events: EnrollmentEvent[
             {/* Hardware */}
             {hwSpec && (
               <DetailSection title="Hardware">
-                {hwSpec.cpuName && <DetailRow label="CPU" value={hwSpec.cpuName} />}
+                {hwSpec.cpuName && <DetailRow label="CPU" value={String(hwSpec.cpuName)} />}
                 {(hwSpec.cpuCores || hwSpec.cpuLogicalProcessors) && (
                   <DetailRow label="CPU Cores" value={`${hwSpec.cpuCores ?? '?'} cores / ${hwSpec.cpuLogicalProcessors ?? '?'} threads`} />
                 )}
@@ -396,9 +396,9 @@ export default function DeviceDetailsCard({ events }: { events: EnrollmentEvent[
                   <DetailRow label="C: Free Space" value={`${hwSpec.systemDriveFreeGB} / ${hwSpec.systemDriveTotalGB} GB`} />
                 )}
 
-                {hwSpec.biosVersion && <DetailRow label="BIOS" value={hwSpec.biosVersion} />}
-                {hwSpec.biosReleaseDate && <DetailRow label="BIOS Date" value={hwSpec.biosReleaseDate} />}
-                {hwSpec.smbiosVersion && <DetailRow label="SMBIOS" value={hwSpec.smbiosVersion} />}
+                {hwSpec.biosVersion && <DetailRow label="BIOS" value={String(hwSpec.biosVersion)} />}
+                {hwSpec.biosReleaseDate && <DetailRow label="BIOS Date" value={String(hwSpec.biosReleaseDate)} />}
+                {hwSpec.smbiosVersion && <DetailRow label="SMBIOS" value={String(hwSpec.smbiosVersion)} />}
 
                 {hwSpec.batteryPresent === true && (
                   <>
