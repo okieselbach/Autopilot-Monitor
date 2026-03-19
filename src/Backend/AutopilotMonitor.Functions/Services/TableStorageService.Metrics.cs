@@ -153,10 +153,11 @@ namespace AutopilotMonitor.Functions.Services
                 var rowKey = $"{summary.SessionId}_{summary.AppName}";
 
                 // Merge with existing record to preserve StartedAt from a prior batch
-                try
+                var existingResult = await tableClient.GetEntityIfExistsAsync<TableEntity>(summary.TenantId, rowKey);
+                if (existingResult.HasValue)
                 {
-                    var existing = await tableClient.GetEntityAsync<TableEntity>(summary.TenantId, rowKey);
-                    var existingStartedAt = existing.Value.GetDateTimeOffset("StartedAt")?.UtcDateTime;
+                    var existing = existingResult.Value!;
+                    var existingStartedAt = existing.GetDateTimeOffset("StartedAt")?.UtcDateTime;
                     if (existingStartedAt.HasValue && existingStartedAt.Value != DateTime.MinValue)
                     {
                         // Keep the earlier StartedAt; recalculate duration if CompletedAt is now known
@@ -173,20 +174,16 @@ namespace AutopilotMonitor.Functions.Services
                     // Preserve DownloadDurationSeconds and DownloadBytes from prior batch if current batch has no value
                     if (summary.DownloadDurationSeconds == 0)
                     {
-                        var existingDlDuration = existing.Value.GetInt32("DownloadDurationSeconds");
+                        var existingDlDuration = existing.GetInt32("DownloadDurationSeconds");
                         if (existingDlDuration.HasValue && existingDlDuration.Value > 0)
                             summary.DownloadDurationSeconds = existingDlDuration.Value;
                     }
                     if (summary.DownloadBytes == 0)
                     {
-                        var existingDlBytes = existing.Value.GetInt64("DownloadBytes");
+                        var existingDlBytes = existing.GetInt64("DownloadBytes");
                         if (existingDlBytes.HasValue && existingDlBytes.Value > 0)
                             summary.DownloadBytes = existingDlBytes.Value;
                     }
-                }
-                catch (Azure.RequestFailedException ex) when (ex.Status == 404)
-                {
-                    // No existing record – nothing to merge
                 }
 
                 var entity = new TableEntity(summary.TenantId, rowKey)
