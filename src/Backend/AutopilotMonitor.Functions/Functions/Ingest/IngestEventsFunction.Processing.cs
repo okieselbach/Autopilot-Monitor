@@ -121,14 +121,10 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                 var sessionPrefix = $"[Session: {request.SessionId.Substring(0, Math.Min(8, request.SessionId.Length))}]";
                 _logger.LogInformation($"{sessionPrefix} IngestEvents: Processing {request.Events.Count} events (Device: {validation.CertificateThumbprint}, Hardware: {validation.Manufacturer} {validation.Model}, Rate: {validation.RateLimitResult?.RequestsInWindow}/{validation.RateLimitResult?.MaxRequests})");
 
-                // Stamp server-side receive time, and authoritative TenantId/SessionId on all events
+                // Stamp server-side receive time, and authoritative TenantId/SessionId on all events.
+                // TenantId/SessionId come from the validated request metadata — never trust per-event agent values.
                 var receivedAt = DateTime.UtcNow;
-                foreach (var evt in request.Events)
-                {
-                    evt.ReceivedAt = receivedAt;
-                    evt.TenantId = request.TenantId;
-                    evt.SessionId = request.SessionId;
-                }
+                StampServerFields(request.Events, request.TenantId, request.SessionId, receivedAt);
 
                 // Store events in Azure Table Storage (batch write for efficiency)
                 var storedEvents = await _storageService.StoreEventsBatchAsync(request.Events);
@@ -584,6 +580,23 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             };
 
             return new[] { summaryMessage, eventsMessage };
+        }
+
+        /// <summary>
+        /// Stamps authoritative server-side fields onto all events before storage.
+        /// TenantId and SessionId always come from the validated request metadata,
+        /// overriding any values the agent may have sent per-event.
+        /// Exposed as internal for unit testing.
+        /// </summary>
+        internal static void StampServerFields(
+            List<EnrollmentEvent> events, string tenantId, string sessionId, DateTime receivedAt)
+        {
+            foreach (var evt in events)
+            {
+                evt.ReceivedAt = receivedAt;
+                evt.TenantId = tenantId;
+                evt.SessionId = sessionId;
+            }
         }
     }
 

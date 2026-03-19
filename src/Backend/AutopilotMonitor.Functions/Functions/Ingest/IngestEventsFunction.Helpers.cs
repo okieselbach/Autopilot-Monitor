@@ -1,16 +1,12 @@
-using System.IO.Compression;
 using System.Linq;
 using System;
 using System.Net;
-using System.Text;
 using AutopilotMonitor.Functions.Services;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Azure.Functions.Worker.Extensions.SignalRService;
 using Microsoft.Extensions.Logging;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
 
 namespace AutopilotMonitor.Functions.Functions.Ingest
 {
@@ -21,107 +17,22 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
     {
         private async Task<IngestEventsRequest> ParseNdjsonGzipRequest(Stream body, string? tenantId = null)
         {
-            // Get configuration for payload size limit (use default if tenantId not available yet)
             var config = !string.IsNullOrEmpty(tenantId)
                 ? await _configService.GetConfigurationAsync(tenantId)
                 : null;
 
             var maxPayloadSizeBytes = (config?.MaxNdjsonPayloadSizeMB ?? 5) * 1024 * 1024;
 
-            // Decompress gzip with size limit protection
-            using var decompressed = new MemoryStream();
-            using (var gzip = new GZipStream(body, CompressionMode.Decompress, leaveOpen: true))
-            {
-                // Copy with size limit to prevent memory exhaustion attacks
-                var buffer = new byte[8192];
-                int bytesRead;
-                long totalBytesRead = 0;
-
-                while ((bytesRead = await gzip.ReadAsync(buffer, 0, buffer.Length)) > 0)
-                {
-                    totalBytesRead += bytesRead;
-
-                    // Check if we've exceeded the maximum payload size
-                    if (totalBytesRead > maxPayloadSizeBytes)
-                    {
-                        throw new InvalidOperationException(
-                            $"NDJSON payload size exceeds maximum allowed size of {config?.MaxNdjsonPayloadSizeMB ?? 5} MB (decompressed). " +
-                            $"Current size: {totalBytesRead / 1024.0 / 1024.0:F2} MB"
-                        );
-                    }
-
-                    await decompressed.WriteAsync(buffer, 0, bytesRead);
-                }
-
-                _logger.LogDebug($"NDJSON payload decompressed: {totalBytesRead / 1024.0:F2} KB (limit: {maxPayloadSizeBytes / 1024.0 / 1024.0} MB)");
-            }
-
-            decompressed.Position = 0;
-            var ndjson = await new StreamReader(decompressed, Encoding.UTF8).ReadToEndAsync();
-
-            // Parse NDJSON (newline-delimited JSON)
-            var lines = ndjson.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-
-            if (lines.Length < 1)
-            {
-                throw new InvalidOperationException("NDJSON must contain at least metadata line");
-            }
-
-            // First line: metadata
-            var metadata = JsonConvert.DeserializeObject<NdjsonMetadata>(lines[0]);
-            if (metadata == null)
-            {
-                throw new InvalidOperationException("Failed to parse NDJSON metadata");
-            }
-
-            // Subsequent lines: events
-            var events = new List<EnrollmentEvent>();
-            for (int i = 1; i < lines.Length; i++)
-            {
-                var evt = JsonConvert.DeserializeObject<EnrollmentEvent>(lines[i]);
-                if (evt != null)
-                {
-                    NormalizeEventData(evt);
-                    events.Add(evt);
-                }
-            }
+            var (sessionId, metaTenantId, events) = await NdjsonParser.ParseGzipAsync(body, maxPayloadSizeBytes);
+            _logger.LogDebug("NDJSON payload parsed: {EventCount} events (limit: {LimitMB} MB)",
+                events.Count, config?.MaxNdjsonPayloadSizeMB ?? 5);
 
             return new IngestEventsRequest
             {
-                SessionId = metadata.SessionId,
-                TenantId = metadata.TenantId,
+                SessionId = sessionId,
+                TenantId = metaTenantId,
                 Events = events
             };
-        }
-
-        /// <summary>
-        /// Normalizes event Data dictionary by converting Newtonsoft JToken objects to native .NET types.
-        /// Required because Newtonsoft.Json deserializes nested objects as JObject/JArray, which
-        /// System.Text.Json (used by SignalR) cannot serialize correctly - producing [[[]]] instead of real values.
-        /// </summary>
-        private static void NormalizeEventData(EnrollmentEvent evt)
-        {
-            if (evt.Data == null || evt.Data.Count == 0) return;
-            var normalized = new Dictionary<string, object>();
-            foreach (var kvp in evt.Data)
-                normalized[kvp.Key] = ConvertJTokenToNative(kvp.Value);
-            evt.Data = normalized;
-        }
-
-        private static object ConvertJTokenToNative(object value)
-        {
-            if (value is JArray jArray)
-                return jArray.Select(item => ConvertJTokenToNative(item)).ToList<object>();
-            if (value is JObject jObject)
-            {
-                var dict = new Dictionary<string, object>();
-                foreach (var prop in jObject.Properties())
-                    dict[prop.Name] = ConvertJTokenToNative(prop.Value);
-                return dict;
-            }
-            if (value is JValue jValue)
-                return jValue.Value ?? string.Empty;
-            return value;
         }
 
         /// <summary>
