@@ -352,9 +352,15 @@ function EventRow({ event, showScriptOutput }: { event: EnrollmentEvent; showScr
   // Gather rule console output detection — use source, not eventType,
   // because users can name gather rule event types freely.
   const isGatherEvent = event.source === "GatherRuleExecutor";
-  const gatherOutput = isGatherEvent
-    ? ((detailData?.output ?? detailData?.Output) as string | null | undefined) ?? null
+  const gatherOutputRaw = isGatherEvent
+    ? (detailData?.output ?? detailData?.Output) ?? null
     : null;
+  // normalizeEventDataForDisplay may parse a JSON-like output string into an object/array — handle both
+  const gatherOutput: string | null = gatherOutputRaw == null
+    ? null
+    : typeof gatherOutputRaw === 'string'
+      ? gatherOutputRaw
+      : JSON.stringify(gatherOutputRaw, null, 2);
   const gatherCommand = isGatherEvent
     ? ((detailData?.command ?? detailData?.Command) as string | null | undefined) ?? null
     : null;
@@ -363,9 +369,7 @@ function EventRow({ event, showScriptOutput }: { event: EnrollmentEvent; showScr
     : null;
   const hasGatherOutput = gatherOutput != null && gatherOutput !== "";
   const formattedOutput = hasGatherOutput
-    ? (typeof gatherOutput === 'string'
-        ? gatherOutput.replace(/\r\n/g, "\n").replace(/\r/g, "\n")
-        : (console.error('[EventTimeline] gatherOutput is not a string:', typeof gatherOutput, gatherOutput), null))
+    ? gatherOutput.replace(/\r\n/g, "\n").replace(/\r/g, "\n")
     : null;
 
   const copyDetailContent = async (text: string) => {
