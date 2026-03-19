@@ -40,6 +40,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         private bool _enrollmentStartDeviceInfoCollected = false; // Re-collect enrollment-dependent info once at first ESP phase
         private bool _finalDeviceInfoCollected = false; // Ensure final device info is emitted only once
         private string _lastEmittedSummaryHash; // Track last emitted state-breakdown to avoid redundant summary events
+        private string _lastEmittedSummaryCompactHash; // Track completed+error counts only — changes here elevate severity to Info
 
         // ESP failure handling (Phase 1)
         private Timer _espFailureTimer;

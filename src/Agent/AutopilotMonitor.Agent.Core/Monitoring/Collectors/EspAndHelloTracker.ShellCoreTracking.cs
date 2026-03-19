@@ -214,7 +214,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     Source = "EspAndHelloTracker",
                     Phase = EnrollmentPhase.Unknown, // Let EnrollmentTracker decide phase
                     Message = message,
-                    Data = eventData
+                    Data = eventData,
+                    ImmediateUpload = true
                 });
 
                 _logger.Info($"Shell-Core event detected: {eventType} (EventID {eventId})");

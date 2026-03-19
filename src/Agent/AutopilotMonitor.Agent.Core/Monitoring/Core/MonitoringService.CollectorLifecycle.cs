@@ -210,7 +210,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     { "failureType", "agent_timeout" },
                     { "failureSource", "max_lifetime_timer" },
                     { "agentUptimeMinutes", Math.Round(uptimeMinutes, 1) }
-                }
+                },
+                ImmediateUpload = true
             });
         }
 
@@ -235,7 +236,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 Severity = EventSeverity.Info,
                 Source = "DesktopArrivalDetector",
                 Phase = EnrollmentPhase.Unknown,
-                Message = "User desktop detected (explorer.exe under real user)"
+                Message = "User desktop detected (explorer.exe under real user)",
+                ImmediateUpload = true
             });
 
             // Notify EnrollmentTracker — it decides whether this triggers completion

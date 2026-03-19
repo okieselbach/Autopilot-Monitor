@@ -107,8 +107,11 @@ tmpclaude-*-cwd
 .claude/commands/session-debug.md
 .claude/commands/table-query.md
 .claude/commands/ux-insights.md
+.claude/commands/diag-agent-log.md
+.claude/commands/diag-ime-log.md
 .claude/scripts/query-appinsights.sh
 .claude/scripts/query-table.sh
+.claude/scripts/fetch-diag-zip.sh
 
 # Deployment scripts (local only)
 scripts/Deployment/build_and_upload_debug_agent_build.ps1

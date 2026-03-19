@@ -210,7 +210,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 Source = "Agent",
                 Phase = EnrollmentPhase.Start,
                 Message = "Autopilot Monitor Agent started",
-                Data = startupData
+                Data = startupData,
+                ImmediateUpload = true
             });
 
             // WhiteGlove Part 2 detection: if the previous boot completed pre-provisioning,
@@ -226,7 +227,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     Severity = EventSeverity.Info,
                     Source = "Agent",
                     Phase = EnrollmentPhase.Start,
-                    Message = "WhiteGlove Part 2 — user enrollment started after pre-provisioning"
+                    Message = "WhiteGlove Part 2 — user enrollment started after pre-provisioning",
+                    ImmediateUpload = true
                 });
                 _sessionPersistence.ClearWhiteGloveComplete();
                 _sessionPersistence.ResetSessionCreatedAt();
@@ -270,7 +272,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                         Source = "Network",
                         Phase = EnrollmentPhase.Unknown,
                         Message = $"Device location: {attempt.Location.City}, {attempt.Location.Region}, {attempt.Location.Country} (via {attempt.Location.Source})",
-                        Data = attempt.Location.ToDictionary()
+                        Data = attempt.Location.ToDictionary(),
+                        ImmediateUpload = true
                     });
                 }
                 else
@@ -441,7 +444,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                             ["unrestrictedMode"] = true,
                             ["source"] = "initial_config",
                             ["configVersion"] = config.ConfigVersion
-                        }
+                        },
+                        ImmediateUpload = true
                     });
                 }
             }
@@ -464,7 +468,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                             ["previousValue"] = false,
                             ["source"] = "config_refresh",
                             ["configVersion"] = config.ConfigVersion
-                        }
+                        },
+                        ImmediateUpload = true
                     });
                 }
                 else
@@ -483,7 +488,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                             ["previousValue"] = true,
                             ["source"] = "config_refresh",
                             ["configVersion"] = config.ConfigVersion
-                        }
+                        },
+                        ImmediateUpload = true
                     });
                 }
             }

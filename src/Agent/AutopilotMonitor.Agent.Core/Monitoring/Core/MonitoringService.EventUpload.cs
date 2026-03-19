@@ -27,7 +27,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         {
             evt.Sequence = Interlocked.Increment(ref _eventSequence);
             _spool.Add(evt);
-            _logger.Info($"Event emitted: {evt.EventType} - {evt.Message}");
+            if (evt.Severity <= EventSeverity.Debug)
+                _logger.Verbose($"Event emitted: {evt.EventType} - {evt.Message}");
+            else
+                _logger.Info($"Event emitted: {evt.EventType} - {evt.Message}");
 
             // Track real enrollment activity for idle timeout
             if (!string.IsNullOrEmpty(evt.EventType) && !IsPeriodicEvent(evt.EventType))
@@ -59,13 +62,16 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 _maxLifetimeTimer?.Change(Timeout.Infinite, Timeout.Infinite);
             }
 
-            // Check if this is a phase transition
-            bool isPhaseTransition = false;
+            // Track phase transitions for logging and gather rule notifications
             if (evt.Phase != _lastPhase)
             {
-                _logger.Info($"Phase transition: {_lastPhase?.ToString() ?? "null"} -> {evt.Phase}");
+                // Unknown is an intermediate/reset state — log at Debug to reduce noise.
+                // Real phase boundaries (DeviceSetup, AccountSetup, etc.) stay at Info.
+                if (evt.Phase == EnrollmentPhase.Unknown)
+                    _logger.Debug($"Phase transition: {_lastPhase?.ToString() ?? "null"} -> {evt.Phase}");
+                else
+                    _logger.Info($"Phase transition: {_lastPhase?.ToString() ?? "null"} -> {evt.Phase}");
                 _lastPhase = evt.Phase;
-                isPhaseTransition = true;
 
                 // Notify gather rule executor of phase change
                 try { _gatherRuleExecutor?.OnPhaseChanged(evt.Phase); }
@@ -139,17 +145,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 return; // Don't continue with normal event processing
             }
 
-            // Immediate upload for:
-            // 1. Critical events (errors) - for troubleshooting
-            // 2. Phase transitions (start/end) - for real-time phase tracking in UI
-            // 3. Events with "phase" in EventType - explicit phase-related events
-            // 4. App download/install events - for real-time download progress UI updates
-            var isAppEvent = evt.EventType?.StartsWith("app_", StringComparison.OrdinalIgnoreCase) == true;
-
-            if (evt.Severity >= EventSeverity.Error ||
-                isPhaseTransition ||
-                evt.EventType?.Contains("phase", StringComparison.OrdinalIgnoreCase) == true ||
-                isAppEvent)
+            // Immediate upload when explicitly requested by the emitter, or as a safety net for
+            // unhandled errors. All other events batch via the debounce timer.
+            if (evt.ImmediateUpload || evt.Severity >= EventSeverity.Error)
             {
                 _logger.Info($"Triggering immediate upload for {evt.EventType} (bypassing debounce)");
                 Task.Run(() => UploadEventsAsync());
@@ -614,7 +612,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                         Data = new Dictionary<string, object>
                         {
                             { "rebootDelaySeconds", _configuration.RebootDelaySeconds }
-                        }
+                        },
+                        ImmediateUpload = true
                     });
 
                     // Final upload to ensure the reboot event is sent

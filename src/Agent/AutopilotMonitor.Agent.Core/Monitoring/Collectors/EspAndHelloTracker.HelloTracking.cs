@@ -263,7 +263,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                 Source = "EspAndHelloTracker",
                 Phase = EnrollmentPhase.Unknown,
                 Message = message,
-                Data = data
+                Data = data,
+                ImmediateUpload = shouldTriggerHelloCompleted || eventType == "hello_provisioning_failed"
             });
 
             _logger.Info($"Hello event detected: {eventType} (EventID {eventId}{(isBackfill ? ", backfill" : "")})");
@@ -340,7 +341,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                             { "espExitDetected", _espExitDetected },
                             { "helloPolicyEnabled", true },
                             { "action", "extended_wait" }
-                        }
+                        },
+                        ImmediateUpload = true
                     });
 
                     // Arm the long completion timer so we don't wait forever
@@ -372,7 +374,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                         { "espExitDetected", _espExitDetected },
                         { "helloPolicyEnabled", false },
                         { "action", "enrollment_complete" }
-                    }
+                    },
+                    ImmediateUpload = true
                 });
 
                 // Trigger HelloCompleted so enrollment can proceed
@@ -486,7 +489,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     {
                         { "timeoutSeconds", HelloCompletionTimeoutSeconds },
                         { "helloWizardStarted", _helloWizardStarted }
-                    }
+                    },
+                    ImmediateUpload = true
                 });
 
                 try

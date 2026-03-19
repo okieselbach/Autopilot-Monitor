@@ -106,7 +106,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     { "triggeredBy", "self_deploying_provisioning_complete" },
                     { "autopilotMode", _autopilotMode },
                     { "skipUserStatusPage", _skipUserStatusPage }
-                }
+                },
+                ImmediateUpload = true
             });
 
             try { CollectDeviceInfoAtFinalizingSetup("self_deploying_provisioning_complete"); }
@@ -137,7 +138,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 Severity = EventSeverity.Info,
                 Source = "EnrollmentTracker",
                 Phase = EnrollmentPhase.Complete,
-                Message = "WhiteGlove (Pre-Provisioning) completed \u2014 device entering pending state"
+                Message = "WhiteGlove (Pre-Provisioning) completed \u2014 device entering pending state",
+                ImmediateUpload = true
             });
 
             // WICHTIG: Kein WriteEnrollmentCompleteMarker()!
@@ -287,7 +289,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     { "failureSource", failureSource },
                     { "signalsSeen", _stateData.SignalsSeen },
                     { "agentUptimeSeconds", (DateTime.UtcNow - _agentStartTimeUtc).TotalSeconds }
-                }
+                },
+                ImmediateUpload = true
             });
 
             // Write final status dump before cleanup
@@ -341,7 +344,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                             { "triggeredBy", reason },
                             { "previousPhase", _lastEspPhase ?? "unknown" },
                             { "desktopArrivedBackup", _desktopArrived && !string.Equals(_lastEspPhase, "AccountSetup", StringComparison.OrdinalIgnoreCase) }
-                        }
+                        },
+                        ImmediateUpload = true
                     });
 
                     try { CollectDeviceInfoAtFinalizingSetup(reason); }
@@ -380,7 +384,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                             { "triggeredBy", "device_only_esp_registry" },
                             { "previousPhase", _lastEspPhase ?? "unknown" },
                             { "skipUserStatusPage", true }
-                        }
+                        },
+                        ImmediateUpload = true
                     });
 
                     try { CollectDeviceInfoAtFinalizingSetup("device_only_esp_registry"); }
@@ -437,7 +442,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                         { "espPhase", "FinalizingSetup" },
                         { "autoDetected", true },
                         { "triggeredBy", reason }
-                    }
+                    },
+                    ImmediateUpload = true
                 });
 
                 try { CollectDeviceInfoAtFinalizingSetup(reason); }
@@ -603,7 +609,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     { "signalsSeen", _stateData.SignalsSeen },
                     { "signalTimestamps", signalTimestamps },
                     { "agentUptimeSeconds", (DateTime.UtcNow - _agentStartTimeUtc).TotalSeconds }
-                }
+                },
+                ImmediateUpload = true
             });
 
             // Write final status dump and enrollment complete marker
@@ -636,6 +643,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 Source = "EnrollmentTracker",
                 Phase = EnrollmentPhase.Unknown,
                 Message = $"Completion source '{source}' evaluated — {result}",
+                ImmediateUpload = true,
                 Data = new Dictionary<string, object>
                 {
                     { "source", source },
@@ -714,7 +722,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                             { "correctedBy", "desktop_arrival" },
                             { "previousPhase", previousPhase },
                             { "skipUserStatusPage", true }
-                        }
+                        },
+                        ImmediateUpload = true
                     });
 
                     try { CollectDeviceInfoAtFinalizingSetup("desktop_arrived_skip_user"); }
@@ -741,7 +750,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                             { "autoDetected", true },
                             { "correctedBy", "desktop_arrival" },
                             { "previousPhase", previousPhase }
-                        }
+                        },
+                        ImmediateUpload = true
                     });
                 }
             }

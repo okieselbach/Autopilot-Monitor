@@ -103,7 +103,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 Source = "ImeLogTracker",
                 Phase = enrollmentPhase,
                 Message = $"ESP phase: {phase}",
-                Data = new Dictionary<string, object> { { "espPhase", phase } }
+                Data = new Dictionary<string, object> { { "espPhase", phase } },
+                ImmediateUpload = true
             });
 
             // Re-collect enrollment-dependent device info (AAD join, profile, ESP config)
@@ -170,7 +171,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                             Source = "EnrollmentTracker",
                             Phase = EnrollmentPhase.AppsDevice,
                             Message = "ESP phase: AppsDevice (auto-detected from app activity)",
-                            Data = new Dictionary<string, object> { { "espPhase", "AppsDevice" }, { "autoDetected", true } }
+                            Data = new Dictionary<string, object> { { "espPhase", "AppsDevice" }, { "autoDetected", true } },
+                            ImmediateUpload = true
                         });
                     }
                     else if (string.Equals(_lastEspPhase, "AccountSetup", StringComparison.OrdinalIgnoreCase))
@@ -187,7 +189,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                             Source = "EnrollmentTracker",
                             Phase = EnrollmentPhase.AppsUser,
                             Message = "ESP phase: AppsUser (auto-detected from app activity)",
-                            Data = new Dictionary<string, object> { { "espPhase", "AppsUser" }, { "autoDetected", true } }
+                            Data = new Dictionary<string, object> { { "espPhase", "AppsUser" }, { "autoDetected", true } },
+                            ImmediateUpload = true
                         });
                     }
                     else if (string.Equals(_lastEspPhase, "FinalizingSetup", StringComparison.OrdinalIgnoreCase))
@@ -204,7 +207,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                             Source = "EnrollmentTracker",
                             Phase = EnrollmentPhase.AppsUser,
                             Message = "ESP phase: AppsUser (auto-detected from app activity)",
-                            Data = new Dictionary<string, object> { { "espPhase", "AppsUser" }, { "autoDetected", true } }
+                            Data = new Dictionary<string, object> { { "espPhase", "AppsUser" }, { "autoDetected", true } },
+                            ImmediateUpload = true
                         });
                     }
                 }
@@ -320,7 +324,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 Source = "ImeLogTracker",
                 Phase = phase,
                 Message = message,
-                Data = app.ToEventData()
+                Data = app.ToEventData(),
+                ImmediateUpload = true
             });
 
             // Emit summary immediately if state-breakdown counters changed (instant UI updates)
@@ -530,7 +535,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                         Severity = EventSeverity.Info,
                         Source = "EnrollmentTracker",
                         Phase = EnrollmentPhase.FinalizingSetup,
-                        Message = "User apps completed - waiting for Windows Hello provisioning to finish"
+                        Message = "User apps completed - waiting for Windows Hello provisioning to finish",
+                        ImmediateUpload = true
                     });
 
                     // Set flag so we know we're waiting

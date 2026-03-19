@@ -110,17 +110,26 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
 
             _lastEmittedSummaryHash = hash;
 
+            // Elevate to Info only when completed/error counts change — mere downloading/installing
+            // state changes (same completed count) are Verbose to reduce log noise.
+            var compactHash = $"{states.CountCompleted}_{states.ErrorCount}";
+            var severity = (compactHash != _lastEmittedSummaryCompactHash)
+                ? (states.HasError ? EventSeverity.Warning : EventSeverity.Info)
+                : EventSeverity.Debug;
+            _lastEmittedSummaryCompactHash = compactHash;
+
             _emitEvent(new EnrollmentEvent
             {
                 SessionId = _sessionId,
                 TenantId = _tenantId,
                 EventType = "app_tracking_summary",
-                Severity = states.HasError ? EventSeverity.Warning : EventSeverity.Info,
+                Severity = severity,
                 Source = "EnrollmentTracker",
                 Phase = EnrollmentPhase.Unknown,
                 Message = $"App tracking: {states.CountCompleted}/{states.CountAll} completed" +
                           (states.HasError ? $" ({states.ErrorCount} errors)" : ""),
-                Data = states.GetSummaryData()
+                Data = states.GetSummaryData(),
+                ImmediateUpload = (severity != EventSeverity.Debug)
             });
         }
 
@@ -144,7 +153,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 Phase = EnrollmentPhase.Unknown,
                 Message = $"App tracking: {states.CountCompleted}/{states.CountAll} completed" +
                           (states.HasError ? $" ({states.ErrorCount} errors)" : ""),
-                Data = states.GetSummaryData()
+                Data = states.GetSummaryData(),
+                ImmediateUpload = true
             });
         }
 

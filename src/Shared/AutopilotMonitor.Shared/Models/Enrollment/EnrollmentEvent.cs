@@ -79,6 +79,14 @@ namespace AutopilotMonitor.Shared.Models
         [JsonPropertyName("phaseName")]
         public string PhaseName => GetPhaseName(Phase);
 
+        /// <summary>
+        /// When true, the event bypasses the debounce timer and triggers an immediate upload.
+        /// Set by the emitter when real-time delivery is required (phase changes, app installs,
+        /// terminal events). Not serialized — upload transport only.
+        /// </summary>
+        [JsonIgnore]
+        public bool ImmediateUpload { get; set; }
+
         private static string GetPhaseName(EnrollmentPhase phase)
         {
             return phase switch
