@@ -89,6 +89,11 @@ namespace AutopilotMonitor.Functions.Services
                 // Safety net: backfill any sessions missing from SessionsIndex
                 await _storageService.BackfillSessionIndexAsync();
 
+                // One-time cleanup: remove ghost SessionsIndex entries caused by the
+                // StoreSessionAsync Replace-mode IndexRowKey bug (now fixed).
+                // TODO: Remove after 2026-06-01
+                await _storageService.CleanupGhostSessionIndexEntriesAsync();
+
                 // Backfill OnboardedAt for tenants that don't have it yet
                 await BackfillTenantOnboardedAtAsync();
 

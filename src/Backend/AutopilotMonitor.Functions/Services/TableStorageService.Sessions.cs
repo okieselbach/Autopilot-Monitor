@@ -294,6 +294,7 @@ namespace AutopilotMonitor.Functions.Services
                 string geoRegion = string.Empty;
                 string geoCity = string.Empty;
                 string geoLoc = string.Empty;
+                string? existingIndexRowKey = null;
 
                 try
                 {
@@ -323,6 +324,7 @@ namespace AutopilotMonitor.Functions.Services
                     geoRegion = existingEntity.GetString("GeoRegion") ?? string.Empty;
                     geoCity = existingEntity.GetString("GeoCity") ?? string.Empty;
                     geoLoc = existingEntity.GetString("GeoLoc") ?? string.Empty;
+                    existingIndexRowKey = existingEntity.GetString("IndexRowKey");
 
                     // Guard: never regress a terminal status (Succeeded/Failed) back to InProgress.
                     // StoreSessionAsync uses UpsertEntity (Replace mode) which overwrites all fields.
@@ -406,6 +408,12 @@ namespace AutopilotMonitor.Functions.Services
                     entity["GeoCity"] = geoCity;
                 if (!string.IsNullOrEmpty(geoLoc))
                     entity["GeoLoc"] = geoLoc;
+
+                // Preserve IndexRowKey through the Replace so that:
+                // 1. Concurrent UpdateSessionStatusAsync calls can find it (prevents index stale-status)
+                // 2. UpsertSessionIndexAsync can detect and delete old index entries when startedAt shifts
+                if (!string.IsNullOrEmpty(existingIndexRowKey))
+                    entity["IndexRowKey"] = existingIndexRowKey;
 
                 await tableClient.UpsertEntityAsync(entity);
 
@@ -933,6 +941,19 @@ namespace AutopilotMonitor.Functions.Services
 
                     // Dual-write: merge the same fields into SessionsIndex
                     var indexRowKey = session.GetString("IndexRowKey");
+
+                    // Fallback: if IndexRowKey was lost (e.g. StoreSessionAsync Replace race),
+                    // compute it from StartedAt + SessionId so the index still gets updated.
+                    if (string.IsNullOrEmpty(indexRowKey))
+                    {
+                        var sessionStartedAt = session.GetDateTimeOffset("StartedAt")?.UtcDateTime;
+                        if (sessionStartedAt.HasValue)
+                        {
+                            indexRowKey = ComputeIndexRowKey(sessionStartedAt.Value, sessionId);
+                            _logger.LogWarning("Session {SessionId}: IndexRowKey was null, computed fallback from StartedAt", sessionId);
+                        }
+                    }
+
                     await MergeSessionIndexAsync(tenantId, indexRowKey, update);
 
                     _logger.LogInformation($"Updated session {sessionId} status to {status}");
@@ -1041,6 +1062,15 @@ namespace AutopilotMonitor.Functions.Services
 
                             // Dual-write: merge the same fields into SessionsIndex
                             var forceIndexRowKey = freshSession.GetString("IndexRowKey");
+                            if (string.IsNullOrEmpty(forceIndexRowKey))
+                            {
+                                var forceStartedAt = freshSession.GetDateTimeOffset("StartedAt")?.UtcDateTime;
+                                if (forceStartedAt.HasValue)
+                                {
+                                    forceIndexRowKey = ComputeIndexRowKey(forceStartedAt.Value, sessionId);
+                                    _logger.LogWarning("Session {SessionId}: IndexRowKey was null in force-write path, computed fallback from StartedAt", sessionId);
+                                }
+                            }
                             await MergeSessionIndexAsync(tenantId, forceIndexRowKey, forceUpdate);
 
                             _logger.LogInformation($"Force-updated session {sessionId} status to {status} (unconditional merge after ETag exhaustion)");
@@ -1137,6 +1167,12 @@ namespace AutopilotMonitor.Functions.Services
 
                     // Dual-write: merge the same fields into SessionsIndex
                     var indexRowKey = entity.Value.GetString("IndexRowKey");
+                    if (string.IsNullOrEmpty(indexRowKey))
+                    {
+                        var incStartedAt = entity.Value.GetDateTimeOffset("StartedAt")?.UtcDateTime;
+                        if (incStartedAt.HasValue)
+                            indexRowKey = ComputeIndexRowKey(incStartedAt.Value, sessionId);
+                    }
                     await MergeSessionIndexAsync(tenantId, indexRowKey, update);
 
                     return;

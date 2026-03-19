@@ -467,6 +467,83 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
+        /// One-time cleanup: removes ghost entries from SessionsIndex where a SessionId has
+        /// multiple index rows (caused by a bug where StoreSessionAsync's Replace mode deleted
+        /// IndexRowKey, preventing old index entries from being cleaned up when StartedAt shifted).
+        /// Fixed in the same release — this cleanup can be removed once all environments have run it.
+        /// TODO: Remove after 2026-06-01 (3 months grace period).
+        /// </summary>
+        public async Task<int> CleanupGhostSessionIndexEntriesAsync()
+        {
+            try
+            {
+                var indexTable = _tableServiceClient.GetTableClient(Constants.TableNames.SessionsIndex);
+                var sessionsTable = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
+
+                // Build a map of SessionId → list of index RowKeys (across all tenants)
+                var sessionIndexEntries = new Dictionary<string, List<(string PartitionKey, string RowKey, int EventCount)>>();
+
+                var query = indexTable.QueryAsync<TableEntity>(
+                    select: new[] { "PartitionKey", "RowKey", "SessionId", "EventCount" });
+
+                await foreach (var entity in query)
+                {
+                    var sessionId = entity.GetString("SessionId") ?? ExtractSessionIdFromIndexRowKey(entity.RowKey);
+                    var key = $"{entity.PartitionKey}_{sessionId}";
+                    var eventCount = entity.GetInt32("EventCount") ?? 0;
+
+                    if (!sessionIndexEntries.ContainsKey(key))
+                        sessionIndexEntries[key] = new List<(string, string, int)>();
+
+                    sessionIndexEntries[key].Add((entity.PartitionKey, entity.RowKey, eventCount));
+                }
+
+                int deletedCount = 0;
+
+                foreach (var (key, entries) in sessionIndexEntries)
+                {
+                    if (entries.Count <= 1)
+                        continue; // No duplicates
+
+                    // Keep the entry with the highest EventCount (most up-to-date);
+                    // delete all others as ghosts.
+                    var sorted = entries.OrderByDescending(e => e.EventCount).ToList();
+                    var keep = sorted[0];
+
+                    for (int i = 1; i < sorted.Count; i++)
+                    {
+                        var ghost = sorted[i];
+                        try
+                        {
+                            await indexTable.DeleteEntityAsync(ghost.PartitionKey, ghost.RowKey);
+                            deletedCount++;
+                            _logger.LogInformation(
+                                "Deleted ghost SessionsIndex entry: {PartitionKey}/{RowKey} (EventCount={GhostCount}, kept entry has EventCount={KeptCount})",
+                                ghost.PartitionKey, ghost.RowKey, ghost.EventCount, keep.EventCount);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to delete ghost index entry {PartitionKey}/{RowKey}",
+                                ghost.PartitionKey, ghost.RowKey);
+                        }
+                    }
+                }
+
+                if (deletedCount > 0)
+                {
+                    _logger.LogInformation("Ghost SessionsIndex cleanup completed: {Count} ghost entries removed", deletedCount);
+                }
+
+                return deletedCount;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Ghost SessionsIndex cleanup failed");
+                return 0;
+            }
+        }
+
+        /// <summary>
         /// Checks if the SessionsIndex table is empty.
         /// Used by startup backfill to determine if a full migration is needed.
         /// </summary>
