@@ -174,6 +174,11 @@ export default function EventTimeline({
               {preProvDuration && (
                 <span className="text-sm text-gray-500">{preProvDuration}</span>
               )}
+              {userEnrollEvents.length > 0 && (
+                <a href="#user-enrollment-part" className="text-sm text-blue-500 hover:text-blue-700 ml-auto">
+                  Jump to User Enrollment
+                </a>
+              )}
             </div>
             {preProvGrouped.orderedPhases.length === 0 ? (
               <div className="text-gray-500 text-center py-8">No events found.</div>
@@ -187,6 +192,7 @@ export default function EventTimeline({
                     isExpanded={expandedPhases.has(`pre-${phaseName}`)}
                     onToggle={() => togglePhase(`pre-${phaseName}`)}
                     showScriptOutput={showScriptOutput}
+                    borderColor="border-amber-400"
                   />
                 ))}
               </div>
@@ -204,7 +210,7 @@ export default function EventTimeline({
 
           {/* User Enrollment Part */}
           {userEnrollEvents.length > 0 ? (
-            <div className="bg-white shadow rounded-lg p-6">
+            <div id="user-enrollment-part" className="bg-white shadow rounded-lg p-6 scroll-mt-4">
               <div className="flex items-center gap-3 mb-6">
                 <h2 className="text-xl font-semibold text-gray-900">User Enrollment Part</h2>
                 <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">Resumed</span>
@@ -281,16 +287,18 @@ function PhaseSection({
   events,
   isExpanded,
   onToggle,
-  showScriptOutput
+  showScriptOutput,
+  borderColor = 'border-blue-500'
 }: {
   phaseName: string;
   events: EnrollmentEvent[];
   isExpanded: boolean;
   onToggle: () => void;
   showScriptOutput?: boolean;
+  borderColor?: string;
 }) {
   return (
-    <div id={`phase-${phaseName.replace(/[^a-zA-Z0-9]/g, '-')}`} className="border-l-4 border-blue-500 pl-4">
+    <div id={`phase-${phaseName.replace(/[^a-zA-Z0-9]/g, '-')}`} className={`border-l-4 ${borderColor} pl-4`}>
       <button
         onClick={onToggle}
         className="flex items-center justify-between w-full text-left mb-3 group"
