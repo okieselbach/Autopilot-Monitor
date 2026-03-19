@@ -1134,8 +1134,14 @@ namespace AutopilotMonitor.Functions.Services
                 try
                 {
                     var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
-                    var entity = await tableClient.GetEntityAsync<TableEntity>(tenantId, sessionId);
-                    var currentCount = entity.Value.GetInt32("EventCount") ?? 0;
+                    var entityResponse = await tableClient.GetEntityIfExistsAsync<TableEntity>(tenantId, sessionId);
+                    if (!entityResponse.HasValue)
+                    {
+                        _logger.LogWarning("Session {SessionId} not found when incrementing event count — session may have been cleaned up or not yet registered", sessionId);
+                        return;
+                    }
+                    var entity = entityResponse.Value!;
+                    var currentCount = entity.GetInt32("EventCount") ?? 0;
 
                     var update = new TableEntity(tenantId, sessionId)
                     {
@@ -1149,7 +1155,7 @@ namespace AutopilotMonitor.Functions.Services
                     }
 
                     // Align StartedAt with the earliest event timestamp provided by the caller
-                    var currentStartedAt = entity.Value.GetDateTimeOffset("StartedAt")?.UtcDateTime ?? DateTime.MaxValue;
+                    var currentStartedAt = entity.GetDateTimeOffset("StartedAt")?.UtcDateTime ?? DateTime.MaxValue;
                     if (earliestEventTimestamp.HasValue && earliestEventTimestamp.Value < currentStartedAt)
                     {
                         update["StartedAt"] = EnsureUtc(earliestEventTimestamp.Value);
@@ -1158,18 +1164,18 @@ namespace AutopilotMonitor.Functions.Services
                     // Track the most recent event timestamp for excessive data sender detection
                     if (latestEventTimestamp.HasValue)
                     {
-                        var currentLastEventAt = entity.Value.GetDateTimeOffset("LastEventAt")?.UtcDateTime;
+                        var currentLastEventAt = entity.GetDateTimeOffset("LastEventAt")?.UtcDateTime;
                         if (!currentLastEventAt.HasValue || latestEventTimestamp.Value > currentLastEventAt.Value)
                             update["LastEventAt"] = EnsureUtc(latestEventTimestamp.Value);
                     }
 
-                    await tableClient.UpdateEntityAsync(update, entity.Value.ETag, TableUpdateMode.Merge);
+                    await tableClient.UpdateEntityAsync(update, entity.ETag, TableUpdateMode.Merge);
 
                     // Dual-write: merge the same fields into SessionsIndex
-                    var indexRowKey = entity.Value.GetString("IndexRowKey");
+                    var indexRowKey = entity.GetString("IndexRowKey");
                     if (string.IsNullOrEmpty(indexRowKey))
                     {
-                        var incStartedAt = entity.Value.GetDateTimeOffset("StartedAt")?.UtcDateTime;
+                        var incStartedAt = entity.GetDateTimeOffset("StartedAt")?.UtcDateTime;
                         if (incStartedAt.HasValue)
                             indexRowKey = ComputeIndexRowKey(incStartedAt.Value, sessionId);
                     }
