@@ -331,6 +331,22 @@ export default function SessionDetailPage() {
           }
           return fetchedEvents;
         });
+
+        // Surgical status-stale detection: if events contain a terminal event but session
+        // status is still InProgress, the SignalR status delta was likely lost. Refetch
+        // session details from the DB (single read, only when truly needed).
+        const currentStatus = sessionRef.current?.status;
+        if (currentStatus && currentStatus !== "Succeeded" && currentStatus !== "Failed") {
+          const hasTerminalEvent = fetchedEvents.some(
+            (e: EnrollmentEvent) => e.eventType === "enrollment_complete" || e.eventType === "enrollment_failed"
+          );
+          if (hasTerminalEvent) {
+            console.info(
+              `[SessionDetail] Terminal event detected but session status is '${currentStatus}' — refetching session details`
+            );
+            fetchSessionDetails();
+          }
+        }
       } else {
         addNotification('error', 'Backend Error', `Failed to load session events: ${response.statusText}`, 'session-events-fetch-error');
       }

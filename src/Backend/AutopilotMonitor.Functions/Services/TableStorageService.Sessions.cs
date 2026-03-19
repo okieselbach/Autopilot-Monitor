@@ -324,10 +324,19 @@ namespace AutopilotMonitor.Functions.Services
                     geoCity = existingEntity.GetString("GeoCity") ?? string.Empty;
                     geoLoc = existingEntity.GetString("GeoLoc") ?? string.Empty;
 
+                    // Guard: never regress a terminal status (Succeeded/Failed) back to InProgress.
+                    // StoreSessionAsync uses UpsertEntity (Replace mode) which overwrites all fields.
+                    // If UpdateSessionStatusAsync set Status=Succeeded between this read and the write
+                    // below (TOCTOU race), the Replace would silently revert the terminal status.
+                    // Terminal states are authoritative and irreversible — preserve them unconditionally.
+                    if (status == SessionStatus.Succeeded.ToString() || status == SessionStatus.Failed.ToString())
+                    {
+                        _logger.LogInformation($"Session {registration.SessionId} already in terminal state '{status}', preserving during re-registration");
+                    }
                     // WhiteGlove resumption: if the existing session was in Pending state,
                     // this re-registration means the user has received the device and booted it.
                     // Transition back to InProgress for Part 2 of enrollment.
-                    if (status == SessionStatus.Pending.ToString())
+                    else if (status == SessionStatus.Pending.ToString())
                     {
                         _logger.LogInformation($"Session {registration.SessionId} resuming from Pending (WhiteGlove Part 2)");
                         status = SessionStatus.InProgress.ToString();
