@@ -61,8 +61,11 @@ namespace AutopilotMonitor.Functions.Functions.Diagnostics
                     }
                 }
 
-                // Validate blob name (prevent path traversal)
-                if (blobName.Contains("..") || blobName.Contains("/") || blobName.Contains("\\"))
+                // Validate blob name (prevent path traversal, double-encoding, and null byte attacks)
+                var decodedBlobName = Uri.UnescapeDataString(blobName);
+                if (decodedBlobName != blobName ||
+                    blobName.Contains("..") || blobName.Contains("/") ||
+                    blobName.Contains("\\") || blobName.Contains('\0'))
                 {
                     var badRequest = req.CreateResponse(HttpStatusCode.BadRequest);
                     await badRequest.WriteAsJsonAsync(new { success = false, message = "Invalid blob name." });

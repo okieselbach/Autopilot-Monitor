@@ -133,10 +133,18 @@ builder.Services.AddSingleton<GalacticNotificationService>();
 
 var app = builder.Build();
 
+// Validate critical security configuration at startup
+var startupLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
+var entraClientId = builder.Configuration["EntraId:ClientId"];
+var entraClientSecret = builder.Configuration["EntraId:ClientSecret"];
+if (string.IsNullOrEmpty(entraClientId))
+    startupLogger.LogWarning("EntraId:ClientId is not configured — JWT audience validation and Graph API calls will fail");
+if (string.IsNullOrEmpty(entraClientSecret))
+    startupLogger.LogWarning("EntraId:ClientSecret is not configured — device validation via Graph API will fail at runtime");
+
 // Log CORS configuration at startup so misconfigured origins are immediately visible
 // in the log stream. CORS is enforced by Azure infrastructure, not by function code,
 // so a blocked preflight never reaches the function worker and leaves no trace.
-var startupLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
 var corsOrigins = builder.Configuration["Host:CORS"]                   // local.settings.json
     ?? builder.Configuration["WEBSITE_CORS_ALLOWED_ORIGINS"]           // Azure App Settings
     ?? "(not configured - all cross-origin requests will be blocked!)";
