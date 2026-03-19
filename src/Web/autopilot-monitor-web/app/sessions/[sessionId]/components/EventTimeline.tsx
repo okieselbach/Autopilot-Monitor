@@ -413,26 +413,37 @@ function EventRow({ event, showScriptOutput }: { event: EnrollmentEvent; showScr
         const receivedDelta = event.receivedAt
           ? Math.round((new Date(event.receivedAt).getTime() - new Date(event.timestamp).getTime()) / 1000 * 10) / 10
           : null;
+        const hasPhase = event.phaseName && event.phaseName !== 'Unknown';
         return (
-          <div className="mt-2 border border-gray-200 rounded-md px-3 py-2 text-xs text-gray-600">
+          <div className="mt-2 border border-gray-200 rounded-md px-3 py-2 text-xs text-gray-600 relative group/meta">
+            <button
+              type="button"
+              onClick={copyEventId}
+              title={copied ? 'Copied!' : 'Copy EventId'}
+              className="absolute top-1.5 right-1.5 inline-flex items-center justify-center w-5 h-5 rounded border border-gray-200 bg-white text-gray-400 opacity-0 group-hover/meta:opacity-100 focus:opacity-100 hover:bg-gray-50 hover:text-blue-600 transition-opacity"
+            >
+              {copied ? (
+                <svg className="w-3 h-3 text-green-500" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M16.704 5.29a1 1 0 010 1.42l-7.2 7.2a1 1 0 01-1.415 0l-3.2-3.2a1 1 0 111.414-1.42l2.493 2.494 6.493-6.494a1 1 0 011.415 0z" clipRule="evenodd" />
+                </svg>
+              ) : (
+                <svg className="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">
+                  <path d="M6 2a2 2 0 00-2 2v8a2 2 0 002 2h1v-2H6V4h7v1h2V4a2 2 0 00-2-2H6z" />
+                  <path d="M9 7a2 2 0 00-2 2v7a2 2 0 002 2h7a2 2 0 002-2V9a2 2 0 00-2-2H9z" />
+                </svg>
+              )}
+            </button>
             <div className="flex">
-              <span className="w-20 flex-shrink-0 text-gray-400">EventId</span>
-              <span className="flex-1 min-w-0 font-mono truncate">{event.eventId}</span>
-              <button
-                onClick={copyEventId}
-                className="ml-2 flex-shrink-0 text-gray-400 hover:text-blue-600 transition-colors"
-                title={copied ? 'Copied!' : 'Copy EventId'}
-              >
-                {copied ? '✓' : 'copy'}
-              </button>
-              <span className="w-20 flex-shrink-0 text-gray-400 ml-4">Phase</span>
-              <span className="flex-shrink-0">{event.phaseName || 'Unknown'}</span>
+              <span className="w-16 flex-shrink-0 text-gray-400">EventId</span>
+              <span className="font-mono">{event.eventId}</span>
             </div>
             <div className="flex mt-0.5">
-              <span className="w-20 flex-shrink-0 text-gray-400">Created</span>
-              <span className="flex-1 min-w-0 font-mono">{event.timestamp}</span>
-              <span className="w-20 flex-shrink-0 text-gray-400 ml-6">Received</span>
-              <span className="flex-shrink-0 font-mono">
+              <span className="w-16 flex-shrink-0 text-gray-400">Created</span>
+              <span className="font-mono">{event.timestamp}</span>
+            </div>
+            <div className="flex mt-0.5">
+              <span className="w-16 flex-shrink-0 text-gray-400">Received</span>
+              <span className="font-mono">
                 {event.receivedAt
                   ? new Date(event.receivedAt).toISOString().replace('T', ' ').replace('Z', '')
                   : '—'}
@@ -441,6 +452,12 @@ function EventRow({ event, showScriptOutput }: { event: EnrollmentEvent; showScr
                 )}
               </span>
             </div>
+            {hasPhase && (
+              <div className="flex mt-0.5">
+                <span className="w-16 flex-shrink-0 text-gray-400">Phase</span>
+                <span>{event.phaseName}</span>
+              </div>
+            )}
           </div>
         );
       })()}
