@@ -326,11 +326,9 @@ export default function DeviceDetailsCard({ events }: { events: EnrollmentEvent[
                   <DetailRow label="Boot Time" value={estimatedBootTime.toLocaleString([], { dateStyle: "short", timeStyle: "medium" })} />
                 )}
                 {uptimeUntilEnrollment && <DetailRow label="Uptime until enrollment starts" value={uptimeUntilEnrollment} />}
-                {agentStarted?.agentVersion && (() => {
-                  const v = agentStarted.agentVersion;
-                  if (typeof v !== 'string') { console.error('[DeviceDetailsCard] agentVersion is not a string:', typeof v, v); return null; }
-                  return <DetailRow label="Monitor Agent Version" value={v.replace(/\+([0-9a-f]{7})[0-9a-f]+$/, '+$1')} />;
-                })()}
+                {agentStarted?.agentVersion && typeof agentStarted.agentVersion === 'string' && (
+                  <DetailRow label="Monitor Agent Version" value={agentStarted.agentVersion.replace(/\+([0-9a-f]{7})[0-9a-f]+$/, '+$1')} />
+                )}
                 {imeVersion && <DetailRow label="IME Agent Version" value={imeVersion.version ?? imeVersion.agentVersion ?? "Unknown"} />}
                 {(deviceLocation?.country || deviceLocation?.Country) && (
                   <DetailRow label="Country" value={deviceLocation.country ?? deviceLocation.Country} />

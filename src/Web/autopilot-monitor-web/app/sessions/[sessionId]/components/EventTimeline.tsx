@@ -352,17 +352,18 @@ function EventRow({ event, showScriptOutput }: { event: EnrollmentEvent; showScr
   // Gather rule console output detection — use source, not eventType,
   // because users can name gather rule event types freely.
   const isGatherEvent = event.source === "GatherRuleExecutor";
+  // Read output/command from raw event.data (not normalized detailData) — these fields contain
+  // free-form console text that must not be parsed even if it happens to look like JSON.
   const gatherOutputRaw = isGatherEvent
-    ? (detailData?.output ?? detailData?.Output) ?? null
+    ? (event.data?.output ?? event.data?.Output) ?? null
     : null;
-  // normalizeEventDataForDisplay may parse a JSON-like output string into an object/array — handle both
   const gatherOutput: string | null = gatherOutputRaw == null
     ? null
     : typeof gatherOutputRaw === 'string'
       ? gatherOutputRaw
       : JSON.stringify(gatherOutputRaw, null, 2);
   const gatherCommand = isGatherEvent
-    ? ((detailData?.command ?? detailData?.Command) as string | null | undefined) ?? null
+    ? ((event.data?.command ?? event.data?.Command) as string | null | undefined) ?? null
     : null;
   const gatherExitCode = isGatherEvent
     ? ((detailData?.exit_code ?? detailData?.exitCode) as number | null | undefined) ?? null
