@@ -5,7 +5,7 @@ import { useState } from "react";
 interface UnrestrictedModeSectionProps {
   unrestrictedMode: boolean;
   setUnrestrictedMode: (value: boolean) => void;
-  onSave: () => void;
+  onSave: () => Promise<void> | void;
   saving: boolean;
 }
 
