@@ -1,5 +1,7 @@
 "use client";
 
+import { useState, useCallback } from "react";
+
 interface AgentAnalyzersSectionProps {
   enableLocalAdminAnalyzer: boolean;
   setEnableLocalAdminAnalyzer: (value: boolean) => void;
@@ -9,7 +11,7 @@ interface AgentAnalyzersSectionProps {
   setNewAllowedAccount: (value: string) => void;
   enableSoftwareInventoryAnalyzer: boolean;
   setEnableSoftwareInventoryAnalyzer: (value: boolean) => void;
-  onSave: () => void;
+  onSave: () => Promise<void> | void;
   onReset: () => void;
   saving: boolean;
 }
@@ -27,6 +29,74 @@ const BUILTIN_ACCOUNTS = [
   "Default User",
   "All Users",
 ];
+
+function SaveResetBar({ onSave, onReset, saving }: { onSave: () => Promise<void> | void; onReset: () => void; saving: boolean }) {
+  const [saveResult, setSaveResult] = useState<"idle" | "saved" | "error">("idle");
+
+  const handleSave = useCallback(async () => {
+    setSaveResult("idle");
+    try {
+      await onSave();
+      setSaveResult("saved");
+      setTimeout(() => setSaveResult("idle"), 3000);
+    } catch {
+      setSaveResult("error");
+      setTimeout(() => setSaveResult("idle"), 4000);
+    }
+  }, [onSave]);
+
+  return (
+    <div className="flex items-center justify-end space-x-3 pt-4 border-t border-gray-200">
+      {/* Inline feedback */}
+      {saveResult === "saved" && (
+        <span className="flex items-center text-sm text-emerald-600 font-medium animate-fade-in">
+          <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+          </svg>
+          Saved
+        </span>
+      )}
+      {saveResult === "error" && (
+        <span className="flex items-center text-sm text-red-600 font-medium">
+          <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+          Save failed
+        </span>
+      )}
+      <button
+        onClick={onReset}
+        disabled={saving}
+        className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm"
+      >
+        Reset
+      </button>
+      <button
+        onClick={handleSave}
+        disabled={saving}
+        className={`px-4 py-2 rounded-md text-sm text-white font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center space-x-2 ${
+          saveResult === "saved" ? "bg-emerald-600" : "bg-indigo-600 hover:bg-indigo-700"
+        }`}
+      >
+        {saving ? (
+          <>
+            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+            <span>Saving...</span>
+          </>
+        ) : saveResult === "saved" ? (
+          <>
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+            </svg>
+            <span>Saved!</span>
+          </>
+        ) : (
+          <span>Save</span>
+        )}
+      </button>
+    </div>
+  );
+}
 
 export default function AgentAnalyzersSection({
   enableLocalAdminAnalyzer,
@@ -66,27 +136,29 @@ export default function AgentAnalyzersSection({
           </div>
         </div>
       </div>
-      <div className="p-6 space-y-5">
+      <div className="p-6 space-y-6">
 
-        {/* Info */}
-        <div className="bg-rose-50 border border-rose-200 rounded-lg p-3">
-          <p className="text-sm text-rose-900">
-            The <strong>Local Admin Analyzer</strong> detects pre-enrollment local admin account creation, a known Autopilot bypass technique. It checks for unexpected local user accounts and profile directories at enrollment start and completion.
+        {/* ── Local Admin Analyzer ─────────────────────────── */}
+        <div>
+          <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-3">Local Admin Analyzer</h3>
+          <p className="text-sm text-gray-500 mb-4">
+            Detects pre-enrollment local admin account creation, a known Autopilot bypass technique.
+            Checks for unexpected local user accounts and profile directories at enrollment start and completion.
           </p>
-        </div>
 
-        {/* Enable toggle */}
-        <div className="flex items-center justify-between p-4 rounded-lg border border-gray-200 hover:border-rose-200 transition-colors">
-          <div>
-            <p className="font-medium text-gray-900">Local Admin Analyzer</p>
-            <p className="text-sm text-gray-500">Run the Local Admin Analyzer at enrollment start and completion to detect unauthorized accounts</p>
+          {/* Enable toggle */}
+          <div className="flex items-center justify-between p-4 rounded-lg border border-gray-200 hover:border-rose-200 transition-colors">
+            <div>
+              <p className="font-medium text-gray-900">Enable Local Admin Analyzer</p>
+              <p className="text-sm text-gray-500">Run at enrollment start and completion to detect unauthorized accounts</p>
+            </div>
+            <button
+              onClick={() => setEnableLocalAdminAnalyzer(!enableLocalAdminAnalyzer)}
+              className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${enableLocalAdminAnalyzer ? 'bg-rose-500' : 'bg-gray-300'}`}
+            >
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${enableLocalAdminAnalyzer ? 'translate-x-6' : 'translate-x-1'}`} />
+            </button>
           </div>
-          <button
-            onClick={() => setEnableLocalAdminAnalyzer(!enableLocalAdminAnalyzer)}
-            className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${enableLocalAdminAnalyzer ? 'bg-rose-500' : 'bg-gray-300'}`}
-          >
-            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${enableLocalAdminAnalyzer ? 'translate-x-6' : 'translate-x-1'}`} />
-          </button>
         </div>
 
         {/* Allowed Accounts */}
@@ -154,53 +226,43 @@ export default function AgentAnalyzersSection({
           )}
         </div>
 
-        {/* Software Inventory & Vulnerability Analyzer */}
-        <div className="bg-rose-50 border border-rose-200 rounded-lg p-3">
-          <p className="text-sm text-rose-900">
-            The <strong>Software Inventory & Vulnerability Analyzer</strong> collects installed software from the
-            Windows registry at enrollment start and completion. It produces a normalized inventory snapshot,
-            detects software installed during enrollment (delta detection), and correlates findings against
-            known vulnerabilities (NVD CVEs, CISA KEV, MSRC).
-          </p>
-        </div>
+        {/* ── Divider ─────────────────────────────────────── */}
+        <div className="border-t border-gray-200" />
 
-        <div className="flex items-center justify-between p-4 rounded-lg border border-gray-200 hover:border-rose-200 transition-colors">
-          <div>
-            <p className="font-medium text-gray-900">Software Inventory & Vulnerability Analyzer</p>
-            <p className="text-sm text-gray-500">Collect installed software inventory and correlate against known vulnerabilities</p>
+        {/* ── Software Inventory & Vulnerability Analyzer ── */}
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">Software Inventory & Vulnerability Analyzer</h3>
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700 border border-emerald-200">
+              Experimental
+            </span>
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-700 border border-amber-200">
+              Pre-Release
+            </span>
           </div>
-          <button
-            onClick={() => setEnableSoftwareInventoryAnalyzer(!enableSoftwareInventoryAnalyzer)}
-            className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${enableSoftwareInventoryAnalyzer ? 'bg-rose-500' : 'bg-gray-300'}`}
-          >
-            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${enableSoftwareInventoryAnalyzer ? 'translate-x-6' : 'translate-x-1'}`} />
-          </button>
+          <p className="text-sm text-gray-500 mb-4">
+            Collects installed software from the Windows registry at enrollment start and completion.
+            Produces a normalized inventory snapshot, detects software installed during enrollment (delta detection),
+            and correlates findings against known vulnerabilities (NVD CVEs, CISA KEV, MSRC).
+          </p>
+
+          {/* Enable toggle */}
+          <div className="flex items-center justify-between p-4 rounded-lg border border-gray-200 hover:border-emerald-200 transition-colors">
+            <div>
+              <p className="font-medium text-gray-900">Enable Software Inventory & Vulnerability Analyzer</p>
+              <p className="text-sm text-gray-500">Collect installed software inventory and correlate against known vulnerabilities</p>
+            </div>
+            <button
+              onClick={() => setEnableSoftwareInventoryAnalyzer(!enableSoftwareInventoryAnalyzer)}
+              className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${enableSoftwareInventoryAnalyzer ? 'bg-emerald-500' : 'bg-gray-300'}`}
+            >
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${enableSoftwareInventoryAnalyzer ? 'translate-x-6' : 'translate-x-1'}`} />
+            </button>
+          </div>
         </div>
 
         {/* Save / Reset */}
-        <div className="flex items-center justify-end space-x-3 pt-4 border-t border-gray-200">
-          <button
-            onClick={onReset}
-            disabled={saving}
-            className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm"
-          >
-            Reset
-          </button>
-          <button
-            onClick={onSave}
-            disabled={saving}
-            className="px-4 py-2 bg-indigo-600 text-white rounded-md text-sm hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-2"
-          >
-            {saving ? (
-              <>
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                <span>Saving...</span>
-              </>
-            ) : (
-              <span>Save</span>
-            )}
-          </button>
-        </div>
+        <SaveResetBar onSave={onSave} onReset={onReset} saving={saving} />
       </div>
     </div>
   );
