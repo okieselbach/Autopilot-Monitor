@@ -38,6 +38,39 @@ export default function TermsPage() {
           </div>
         </div>
 
+        <div className="bg-white rounded-lg shadow p-6 space-y-4">
+          <h2 className="text-xl font-semibold text-gray-900">Third-Party Data Sources & Attributions</h2>
+          <p className="text-gray-700">
+            The vulnerability correlation feature uses the following external data sources to identify known vulnerabilities in installed software:
+          </p>
+          <div className="space-y-3">
+            <div className="p-4 border border-gray-200 rounded-lg">
+              <h3 className="font-semibold text-gray-900 mb-1">National Vulnerability Database (NVD)</h3>
+              <p className="text-sm text-gray-700 mb-2">
+                This product uses the NVD API but is not endorsed or certified by the NVD.
+              </p>
+              <p className="text-sm text-gray-500">
+                The NVD is maintained by the National Institute of Standards and Technology (NIST). CVE and CPE data is sourced from the NVD API 2.0. For more information, visit{" "}
+                <a href="https://nvd.nist.gov/" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:text-indigo-800 underline">nvd.nist.gov</a>.
+              </p>
+            </div>
+            <div className="p-4 border border-gray-200 rounded-lg">
+              <h3 className="font-semibold text-gray-900 mb-1">CISA Known Exploited Vulnerabilities (KEV) Catalog</h3>
+              <p className="text-sm text-gray-500">
+                Actively exploited vulnerability data is sourced from the CISA KEV Catalog maintained by the Cybersecurity and Infrastructure Security Agency. For more information, visit{" "}
+                <a href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:text-indigo-800 underline">cisa.gov</a>.
+              </p>
+            </div>
+            <div className="p-4 border border-gray-200 rounded-lg">
+              <h3 className="font-semibold text-gray-900 mb-1">Microsoft Security Response Center (MSRC)</h3>
+              <p className="text-sm text-gray-500">
+                Microsoft-specific vulnerability data is sourced from the MSRC Security Update Guide API. For more information, visit{" "}
+                <a href="https://msrc.microsoft.com/" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:text-indigo-800 underline">msrc.microsoft.com</a>.
+              </p>
+            </div>
+          </div>
+        </div>
+
       </main>
     </div>
   );
