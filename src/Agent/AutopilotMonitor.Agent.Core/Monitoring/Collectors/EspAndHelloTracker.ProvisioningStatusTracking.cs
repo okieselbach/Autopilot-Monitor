@@ -62,6 +62,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         // Some Windows builds (e.g. 25H2/26200) never set the categorySucceeded boolean.
         private Timer _deviceSetupFallbackTimer;
         private const int DeviceSetupFallbackDelaySeconds = 30;
+        private const int ProvisioningDebounceMilliseconds = 1000;
 
         private void StartProvisioningStatusWatcher()
         {
@@ -111,6 +112,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                 _logger.Trace("ProvisioningWatcher: capturing initial state before watcher starts");
                 CheckProvisioningStatus();
 
+                // Debounce timer — coalesces rapid-fire registry notifications into a single check
+                _provisioningDebounceTimer = new Timer(
+                    _ => CheckProvisioningStatus(),
+                    null,
+                    Timeout.Infinite,
+                    Timeout.Infinite);
+
                 // Create and start watcher
                 _provisioningWatcher = new RegistryWatcher(
                     RegistryHive.LocalMachine,
@@ -121,8 +129,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 
                 _provisioningWatcher.Changed += (s, e) =>
                 {
-                    _logger.Trace("ProvisioningWatcher: Changed event fired — calling CheckProvisioningStatus");
-                    CheckProvisioningStatus();
+                    _logger.Trace("ProvisioningWatcher: Changed event fired — debouncing CheckProvisioningStatus");
+                    _provisioningDebounceTimer?.Change(
+                        ProvisioningDebounceMilliseconds, Timeout.Infinite);
                 };
                 _provisioningWatcher.Error += (s, ex) => _logger.Warning($"Provisioning watcher handler error: {ex.Message}");
 
@@ -143,6 +152,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             {
                 _provisioningWatcherRetryTimer?.Dispose();
                 _provisioningWatcherRetryTimer = null;
+
+                _provisioningDebounceTimer?.Dispose();
+                _provisioningDebounceTimer = null;
 
                 _deviceSetupFallbackTimer?.Dispose();
                 _deviceSetupFallbackTimer = null;

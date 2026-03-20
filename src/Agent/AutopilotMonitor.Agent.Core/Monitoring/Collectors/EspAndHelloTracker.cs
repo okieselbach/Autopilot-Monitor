@@ -39,6 +39,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         private System.Threading.Timer _helloCompletionTimer;
         private RegistryWatcher _provisioningWatcher;
         private System.Threading.Timer _provisioningWatcherRetryTimer;
+        private System.Threading.Timer _provisioningDebounceTimer;
 
         private bool _isPolicyConfigured = false;
         private bool _isHelloPolicyEnabled = false; // true when Hello policy is explicitly detected as enabled

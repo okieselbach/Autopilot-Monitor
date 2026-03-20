@@ -25,15 +25,7 @@ export default function SaveResetBar({ onSave, onReset, saving }: SaveResetBarPr
 
   return (
     <div className="flex items-center justify-end space-x-3 pt-4 border-t border-gray-200">
-      {/* Inline feedback */}
-      {saveResult === "saved" && (
-        <span className="flex items-center text-sm text-emerald-600 font-medium">
-          <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-          </svg>
-          Saved
-        </span>
-      )}
+      {/* Inline feedback (errors only — success is shown via button state) */}
       {saveResult === "error" && (
         <span className="flex items-center text-sm text-red-600 font-medium">
           <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">

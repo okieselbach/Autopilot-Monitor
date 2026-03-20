@@ -117,6 +117,11 @@ namespace AutopilotMonitor.Functions.Services
             if (!allRequiredMet)
                 return null;
 
+            // Safety net: if no conditions matched at all, the rule should not fire.
+            // This prevents rules with all-optional conditions from vacuously triggering.
+            if (matchedConditions.Count == 0)
+                return null;
+
             // Calculate confidence from factors
             foreach (var factor in rule.ConfidenceFactors)
             {

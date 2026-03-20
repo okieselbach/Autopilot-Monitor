@@ -457,19 +457,18 @@ export default function SessionDetailPage() {
     }
   };
 
-  const fetchVulnerabilityReport = async () => {
+  const fetchVulnerabilityReport = async (rescan = false) => {
     const effectiveTenantId = resolveEffectiveTenantId();
     if (!effectiveTenantId || !GUID_REGEX.test(effectiveTenantId)) return;
     try {
+      const rescanParam = rescan ? '&rescan=true' : '';
       const response = await authenticatedFetch(
-        `${API_BASE_URL}/api/sessions/${sessionId}/vulnerability-report?tenantId=${effectiveTenantId}`,
+        `${API_BASE_URL}/api/sessions/${sessionId}/vulnerability-report?tenantId=${effectiveTenantId}${rescanParam}`,
         getAccessToken
       );
       if (response.ok) {
         const data = await response.json();
-        if (data.report) {
-          setVulnerabilityReport(data.report);
-        }
+        setVulnerabilityReport(data.report ?? null);
       }
     } catch (error) {
       console.error("Failed to fetch vulnerability report:", error);
@@ -1047,6 +1046,7 @@ export default function SessionDetailPage() {
                 vulnerabilityReport={vulnerabilityReport}
                 expanded={vulnerabilityReportExpanded}
                 setExpanded={setVulnerabilityReportExpanded}
+                onRescan={() => fetchVulnerabilityReport(true)}
               />
             </div>
           )}

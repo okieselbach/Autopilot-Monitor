@@ -253,8 +253,11 @@ namespace AutopilotMonitor.Shared
             // Galactic Admin in-app notifications (persistent until dismissed)
             public const string GalacticNotifications = "GalacticNotifications";
 
-            // Vulnerability data cache (CPE mappings, CVE data, KEV catalog)
+            // Vulnerability data cache (CPE mappings, CVE data)
             public const string VulnerabilityCache = "VulnerabilityCache";
+
+            // Vulnerability reports per session (like RuleResults but for CVE correlation)
+            public const string VulnerabilityReports = "VulnerabilityReports";
 
             /// <summary>
             /// Returns all table names for initialization
@@ -285,7 +288,8 @@ namespace AutopilotMonitor.Shared
                 SessionReports,
                 BootstrapSessions,
                 GalacticNotifications,
-                VulnerabilityCache
+                VulnerabilityCache,
+                VulnerabilityReports
             };
         }
     }

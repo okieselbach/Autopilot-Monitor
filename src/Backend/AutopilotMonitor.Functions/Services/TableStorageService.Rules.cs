@@ -512,22 +512,26 @@ namespace AutopilotMonitor.Functions.Services
         // ===== VULNERABILITY REPORT METHODS =====
 
         /// <summary>
+        // ===== VULNERABILITY REPORT METHODS =====
+
+        /// <summary>
         /// Stores a vulnerability correlation report for a session.
-        /// Uses the existing VulnerabilityCache table with PK = report_{tenantId}_{sessionId}, RK = vulnerability_report.
+        /// PK = {TenantId}_{SessionId}, RK = "report" (same pattern as RuleResults).
+        /// Only called when there are actual findings — no empty reports stored.
         /// </summary>
         public async Task StoreVulnerabilityReportAsync(string tenantId, string sessionId, Dictionary<string, object> reportData)
         {
             SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
             SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
 
-            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.VulnerabilityCache);
-            var partitionKey = $"report_{tenantId}_{sessionId}";
+            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.VulnerabilityReports);
+            var partitionKey = $"{tenantId}_{sessionId}";
 
             var scanSummary = reportData.ContainsKey("scan_summary")
                 ? reportData["scan_summary"] as Dictionary<string, object>
                 : null;
 
-            var entity = new TableEntity(partitionKey, "vulnerability_report")
+            var entity = new TableEntity(partitionKey, "report")
             {
                 ["SessionId"] = sessionId,
                 ["TenantId"] = tenantId,
@@ -558,9 +562,9 @@ namespace AutopilotMonitor.Functions.Services
 
             try
             {
-                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.VulnerabilityCache);
-                var partitionKey = $"report_{tenantId}_{sessionId}";
-                var response = await tableClient.GetEntityAsync<TableEntity>(partitionKey, "vulnerability_report");
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.VulnerabilityReports);
+                var partitionKey = $"{tenantId}_{sessionId}";
+                var response = await tableClient.GetEntityAsync<TableEntity>(partitionKey, "report");
                 var entity = response?.Value;
                 if (entity == null) return null;
 

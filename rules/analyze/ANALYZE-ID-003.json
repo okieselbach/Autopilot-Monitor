@@ -18,7 +18,7 @@
       "dataField": "scan_summary.critical_cves",
       "operator": "gte",
       "value": "1",
-      "required": false
+      "required": true
     },
     {
       "signal": "kev_matches",
