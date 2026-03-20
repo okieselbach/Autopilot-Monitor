@@ -89,6 +89,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 
         // UnrestrictedMode audit: tracks whether the first config apply has happened
         private bool _isFirstConfigApply = true;
+        private int? _deferredSecurityAuditConfigVersion; // deferred until after agent_started
 
         public MonitoringService(AgentConfiguration configuration, AgentLogger logger, string agentVersion)
         {
@@ -213,6 +214,28 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 Data = startupData,
                 ImmediateUpload = true
             });
+
+            // Emit deferred security_audit (initial UnrestrictedMode) now that agent_started has its sequence
+            if (_deferredSecurityAuditConfigVersion.HasValue)
+            {
+                EmitEvent(new EnrollmentEvent
+                {
+                    SessionId = _configuration.SessionId,
+                    TenantId = _configuration.TenantId,
+                    EventType = "security_audit",
+                    Severity = EventSeverity.Info,
+                    Source = "MonitoringService",
+                    Message = "UnrestrictedMode enabled (initial config)",
+                    Data = new Dictionary<string, object>
+                    {
+                        ["unrestrictedMode"] = true,
+                        ["source"] = "initial_config",
+                        ["configVersion"] = _deferredSecurityAuditConfigVersion.Value
+                    },
+                    ImmediateUpload = true
+                });
+                _deferredSecurityAuditConfigVersion = null;
+            }
 
             // WhiteGlove Part 2 detection: if the previous boot completed pre-provisioning,
             // emit a whiteglove_resumed event so the backend transitions Pending → InProgress.
@@ -431,22 +454,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 _isFirstConfigApply = false;
                 if (config.UnrestrictedMode)
                 {
-                    _logger.Info("UnrestrictedMode enabled via tenant configuration (initial config)");
-                    EmitEvent(new EnrollmentEvent
-                    {
-                        SessionId = _configuration.SessionId,
-                        EventType = "security_audit",
-                        Severity = EventSeverity.Info,
-                        Source = "MonitoringService",
-                        Message = "UnrestrictedMode enabled (initial config)",
-                        Data = new Dictionary<string, object>
-                        {
-                            ["unrestrictedMode"] = true,
-                            ["source"] = "initial_config",
-                            ["configVersion"] = config.ConfigVersion
-                        },
-                        ImmediateUpload = true
-                    });
+                    // Defer initial security_audit until after agent_started so sequence numbers are correct
+                    _logger.Info("UnrestrictedMode enabled via tenant configuration (initial config) — audit deferred until after agent_started");
+                    _deferredSecurityAuditConfigVersion = config.ConfigVersion;
                 }
             }
             else if (config.UnrestrictedMode != previous)

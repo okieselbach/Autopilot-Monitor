@@ -152,7 +152,7 @@ export default function HealthCheckPage() {
         </div>
       </header>
 
-      <div className="py-6 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
         {/* Overall Status Bar */}
         {healthResult && overallColors && (
           <div className={`rounded-lg border mb-6 p-4 flex items-center justify-between ${overallColors.bg} ${overallColors.border}`}>

@@ -224,8 +224,8 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
 
                 // Vulnerability Correlation — fire-and-forget when shutdown inventory arrives.
                 // Runs asynchronously so it never blocks the HTTP response to the agent.
-                // The vulnerability_report event is stored in Table Storage; the UI picks it up
-                // on the next poll or page refresh (no SignalR broadcast for async results).
+                // The report is stored in the VulnerabilityCache table (not Events) because
+                // it is a server-side analysis result, not an agent event.
                 var shutdownInventoryDetected = storedEvents.Any(e =>
                     e.EventType == AutopilotMonitor.Shared.Constants.EventTypes.SoftwareInventoryAnalysis &&
                     e.Data != null &&
@@ -275,21 +275,18 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                                     return;
 
                                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-                                var vulnReport = await _vulnerabilityCorrelation.CorrelateAsync(
+                                var reportData = await _vulnerabilityCorrelation.CorrelateAsync(
                                     capturedSessionId, capturedTenantId, allInventoryItems, cts.Token);
 
-                                if (vulnReport != null)
+                                if (reportData != null)
                                 {
-                                    vulnReport.SessionId = capturedSessionId;
-                                    vulnReport.TenantId = capturedTenantId;
-                                    vulnReport.ReceivedAt = DateTime.UtcNow;
-                                    await _storageService.StoreEventsBatchAsync(new List<EnrollmentEvent> { vulnReport });
-                                    _logger.LogInformation("{Prefix} Vulnerability correlation complete (async): {Message}",
-                                        capturedPrefix, vulnReport.Message);
+                                    await _storageService.StoreVulnerabilityReportAsync(
+                                        capturedTenantId, capturedSessionId, reportData);
+                                    _logger.LogInformation("{Prefix} Vulnerability correlation complete (async)", capturedPrefix);
 
                                     // Push SignalR notification so the UI fetches the report immediately
-                                    var overallRisk = vulnReport.Data?.ContainsKey("scan_summary") == true
-                                        && vulnReport.Data["scan_summary"] is Dictionary<string, object> summary
+                                    var overallRisk = reportData.ContainsKey("scan_summary")
+                                        && reportData["scan_summary"] is Dictionary<string, object> summary
                                         && summary.ContainsKey("overall_risk")
                                         ? summary["overall_risk"]?.ToString() ?? "unknown"
                                         : "unknown";

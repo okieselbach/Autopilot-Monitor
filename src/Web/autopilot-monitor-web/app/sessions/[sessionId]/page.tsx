@@ -53,6 +53,7 @@ export default function SessionDetailPage() {
   const [analysisResults, setAnalysisResults] = useState<RuleResult[]>([]);
   const [loadingAnalysis, setLoadingAnalysis] = useState(false);
   const [analysisExpanded, setAnalysisExpanded] = useState(true);
+  const [vulnerabilityReport, setVulnerabilityReport] = useState<any>(null);
   const [vulnerabilityReportExpanded, setVulnerabilityReportExpanded] = useState(false);
   const [phaseTimelineExpanded, setPhaseTimelineExpanded] = useState(true);
   const [perfExpanded, setPerfExpanded] = useState(true);
@@ -187,11 +188,12 @@ export default function SessionDetailPage() {
     // fetchEvents will be called after sessionTenantId is set
   }, [sessionId, tenantId, galacticAdminMode, user]);
 
-  // Fetch events and analysis when we have the session's tenant ID
+  // Fetch events, analysis, and vulnerability report when we have the session's tenant ID
   useEffect(() => {
     if (sessionTenantId && sessionId) {
       fetchEvents();
       fetchAnalysisResults();
+      fetchVulnerabilityReport();
       // Fetch showScriptOutput setting (best-effort)
       (async () => {
         try {
@@ -295,7 +297,7 @@ export default function SessionDetailPage() {
     const handleVulnerabilityReportReady = (data: { sessionId: string; tenantId: string; overallRisk: string }) => {
       if (data.sessionId !== sessionIdRef.current) return;
       console.info(`[SessionDetail] vulnerabilityReportReady signal: risk=${data.overallRisk}`);
-      scheduleFetchEvents(); // vulnerability_report is stored as an event
+      fetchVulnerabilityReport();
     };
 
     on('eventStream', handleEventStream);
@@ -452,6 +454,25 @@ export default function SessionDetailPage() {
       console.error("Failed to fetch analysis results:", error);
     } finally {
       setLoadingAnalysis(false);
+    }
+  };
+
+  const fetchVulnerabilityReport = async () => {
+    const effectiveTenantId = resolveEffectiveTenantId();
+    if (!effectiveTenantId || !GUID_REGEX.test(effectiveTenantId)) return;
+    try {
+      const response = await authenticatedFetch(
+        `${API_BASE_URL}/api/sessions/${sessionId}/vulnerability-report?tenantId=${effectiveTenantId}`,
+        getAccessToken
+      );
+      if (response.ok) {
+        const data = await response.json();
+        if (data.report) {
+          setVulnerabilityReport(data.report);
+        }
+      }
+    } catch (error) {
+      console.error("Failed to fetch vulnerability report:", error);
     }
   };
 
@@ -1023,6 +1044,7 @@ export default function SessionDetailPage() {
             <div id="section-vulnerability-report">
               <VulnerabilityReportSection
                 events={events}
+                vulnerabilityReport={vulnerabilityReport}
                 expanded={vulnerabilityReportExpanded}
                 setExpanded={setVulnerabilityReportExpanded}
               />

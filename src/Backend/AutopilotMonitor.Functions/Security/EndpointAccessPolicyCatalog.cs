@@ -105,6 +105,7 @@ public static class EndpointAccessPolicyCatalog
         new("GET",    "sessions/{sessionId}",      EndpointPolicy.MemberRead),
         new("GET",    "sessions/{sessionId}/events", EndpointPolicy.MemberRead),
         new("GET",    "sessions/{sessionId}/analysis", EndpointPolicy.MemberRead),
+        new("GET",    "sessions/{sessionId}/vulnerability-report", EndpointPolicy.MemberRead),
         new("GET",    "metrics/app",               EndpointPolicy.MemberRead),
         new("GET",    "metrics/usage",             EndpointPolicy.MemberRead),
         new("GET",    "metrics/geographic",        EndpointPolicy.MemberRead),

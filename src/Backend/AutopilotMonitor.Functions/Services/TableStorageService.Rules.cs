@@ -508,5 +508,71 @@ namespace AutopilotMonitor.Functions.Services
                 IsBuiltIn = entity.GetBoolean("IsBuiltIn") ?? false
             };
         }
+
+        // ===== VULNERABILITY REPORT METHODS =====
+
+        /// <summary>
+        /// Stores a vulnerability correlation report for a session.
+        /// Uses the existing VulnerabilityCache table with PK = report_{tenantId}_{sessionId}, RK = vulnerability_report.
+        /// </summary>
+        public async Task StoreVulnerabilityReportAsync(string tenantId, string sessionId, Dictionary<string, object> reportData)
+        {
+            SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
+            SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
+
+            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.VulnerabilityCache);
+            var partitionKey = $"report_{tenantId}_{sessionId}";
+
+            var scanSummary = reportData.ContainsKey("scan_summary")
+                ? reportData["scan_summary"] as Dictionary<string, object>
+                : null;
+
+            var entity = new TableEntity(partitionKey, "vulnerability_report")
+            {
+                ["SessionId"] = sessionId,
+                ["TenantId"] = tenantId,
+                ["ReportJson"] = JsonConvert.SerializeObject(reportData),
+                ["CreatedAt"] = DateTime.UtcNow.ToString("o"),
+                ["OverallRisk"] = scanSummary?.GetValueOrDefault("overall_risk")?.ToString() ?? "none",
+                ["TotalCvesFound"] = Convert.ToInt32(scanSummary?.GetValueOrDefault("total_cves_found") ?? 0),
+                ["CriticalCves"] = Convert.ToInt32(scanSummary?.GetValueOrDefault("critical_cves") ?? 0),
+                ["HighCves"] = Convert.ToInt32(scanSummary?.GetValueOrDefault("high_cves") ?? 0),
+                ["KevMatches"] = Convert.ToInt32(scanSummary?.GetValueOrDefault("kev_matches") ?? 0),
+                ["TotalScanned"] = Convert.ToInt32(scanSummary?.GetValueOrDefault("total_software_scanned") ?? 0),
+                ["TotalMatched"] = Convert.ToInt32(scanSummary?.GetValueOrDefault("matched_to_cpe") ?? 0),
+            };
+
+            await tableClient.UpsertEntityAsync(entity);
+            _logger.LogInformation("Stored vulnerability report for session {SessionId} (risk={Risk})", sessionId,
+                scanSummary?.GetValueOrDefault("overall_risk")?.ToString() ?? "none");
+        }
+
+        /// <summary>
+        /// Gets the vulnerability correlation report for a session.
+        /// Returns the deserialized report data, or null if no report exists.
+        /// </summary>
+        public async Task<Dictionary<string, object>?> GetVulnerabilityReportAsync(string tenantId, string sessionId)
+        {
+            SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
+            SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
+
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.VulnerabilityCache);
+                var partitionKey = $"report_{tenantId}_{sessionId}";
+                var response = await tableClient.GetEntityAsync<TableEntity>(partitionKey, "vulnerability_report");
+                var entity = response?.Value;
+                if (entity == null) return null;
+
+                var reportJson = entity.GetString("ReportJson");
+                if (string.IsNullOrEmpty(reportJson)) return null;
+
+                return JsonConvert.DeserializeObject<Dictionary<string, object>>(reportJson);
+            }
+            catch (Azure.RequestFailedException ex) when (ex.Status == 404)
+            {
+                return null;
+            }
+        }
     }
 }
