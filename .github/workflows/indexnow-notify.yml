@@ -1,0 +1,27 @@
+name: IndexNow Notify (Bing/Yandex)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    name: Submit URLs to IndexNow
+    steps:
+      - name: Notify IndexNow
+        run: |
+          URLS=$(curl -s https://www.autopilotmonitor.com/sitemap.xml | grep -oP '<loc>\K[^<]+')
+          URL_JSON=$(echo "$URLS" | jq -R -s 'split("\n") | map(select(length > 0))')
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "https://api.indexnow.org/indexnow" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"host\": \"www.autopilotmonitor.com\",
+              \"key\": \"8f1710b5-f14b-477e-938b-6c01ef851661\",
+              \"keyLocation\": \"https://www.autopilotmonitor.com/IndexNow.txt\",
+              \"urlList\": $URL_JSON
+            }")
+          echo "IndexNow response: HTTP $RESPONSE"
+          echo "Submitted $(echo "$URLS" | wc -l) URLs"
+          if [ "$RESPONSE" -ne 200 ]; then
+            echo "::warning::IndexNow returned HTTP $RESPONSE"
+          fi

@@ -59,5 +59,26 @@ export default async function DocsSectionPage({ params }: Props) {
   const SectionContent = SECTION_COMPONENTS[section as SectionId];
   if (!SectionContent) notFound();
 
-  return <SectionContent />;
+  const nav = NAV_SECTIONS.find((s) => s.id === section);
+  const breadcrumbJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "Home", item: "https://www.autopilotmonitor.com" },
+      { "@type": "ListItem", position: 2, name: "Docs", item: "https://www.autopilotmonitor.com/docs" },
+      ...(nav
+        ? [{ "@type": "ListItem", position: 3, name: nav.label, item: `https://www.autopilotmonitor.com/docs/${section}` }]
+        : []),
+    ],
+  };
+
+  return (
+    <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
+      />
+      <SectionContent />
+    </>
+  );
 }

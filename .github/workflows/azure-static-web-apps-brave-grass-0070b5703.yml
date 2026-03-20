@@ -26,6 +26,7 @@ jobs:
         with:
           submodules: true
           lfs: false
+          fetch-depth: 0  # Full history needed for git-based sitemap lastmod dates
       - name: Build And Deploy
         id: builddeploy
         uses: Azure/static-web-apps-deploy@v1
