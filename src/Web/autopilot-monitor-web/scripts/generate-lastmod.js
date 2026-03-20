@@ -10,10 +10,7 @@ const { execSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
-const WEB_ROOT = path.resolve(
-  __dirname,
-  "../src/Web/autopilot-monitor-web"
-);
+const WEB_ROOT = path.resolve(__dirname, "..");
 const OUTPUT_FILE = path.join(WEB_ROOT, "lib/page-lastmod.generated.ts");
 
 // URL path -> source file(s) relative to WEB_ROOT

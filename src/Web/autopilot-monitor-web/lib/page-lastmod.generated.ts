@@ -9,7 +9,7 @@ export const PAGE_LASTMOD: Record<string, string> = {
   "/changelog": "2026-03-19T19:02:11+01:00",
   "/privacy": "2026-03-19T22:04:59+01:00",
   "/terms": "2026-03-19T19:18:49+01:00",
-  "/docs": "2026-03-18T09:00:57+01:00",
+  "/docs": "2026-03-20T08:07:17+01:00",
   "/docs/private-preview": "2026-03-11T10:48:23+01:00",
   "/docs/overview": "2026-03-19T19:18:49+01:00",
   "/docs/general": "2026-03-19T18:45:11+01:00",
