@@ -847,13 +847,19 @@ export default function SessionDetailPage() {
     });
   };
 
+  // Derive a stable boolean so that the sidebar useMemo doesn't re-run on every event update
+  const hasVulnerabilityEvents = useMemo(() =>
+    events.some(e => e.eventType === "vulnerability_report" || e.eventType === "software_inventory_analysis"),
+    [events]
+  );
+
   const sessionSections: PageSectionItem[] = useMemo(() => {
     const s: PageSectionItem[] = [];
     if (session) s.push({ id: "section-session-info", label: "Session Info", icon: <InformationCircleIcon /> });
     if (!isGatherRulesSession) s.push({ id: "section-device-details", label: "Device Details", icon: <ComputerDesktopIcon /> });
     if (!isGatherRulesSession && session) s.push({ id: "section-enrollment-progress", label: "Enrollment Progress", icon: <PlayCircleIcon /> });
     if (!isGatherRulesSession) s.push({ id: "section-analysis", label: "Analysis", icon: <SparklesIcon /> });
-    if (!isGatherRulesSession && events.some(e => e.eventType === "vulnerability_report" || e.eventType === "software_inventory_analysis")) {
+    if (!isGatherRulesSession && hasVulnerabilityEvents) {
       s.push({ id: "section-vulnerability-report", label: "Vulnerability Report", icon: <ShieldCheckIcon /> });
     }
     if (!isGatherRulesSession) s.push({ id: "section-performance", label: "Performance", icon: <ChartBarIcon /> });
@@ -862,7 +868,7 @@ export default function SessionDetailPage() {
     if (!isGatherRulesSession) s.push({ id: "section-install-progress", label: "Install Progress", icon: <ListBulletIcon /> });
     s.push({ id: "section-event-timeline", label: "Event Timeline", icon: <ClockIcon /> });
     return s;
-  }, [session, isGatherRulesSession, events]);
+  }, [session, isGatherRulesSession, hasVulnerabilityEvents]);
 
   usePageSections(sessionSections, "Sections", "scroll-spy");
 
