@@ -356,7 +356,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 
             if (data.ContainsKey("disks") && data["disks"] is List<Dictionary<string, object>> disks && disks.Count > 0)
             {
-                var d = disks[0];
+                // Prefer non-USB disk for the summary message (USB drives are often boot media, not the actual system disk)
+                var d = disks.FirstOrDefault(dk => dk.ContainsKey("busType") && !string.Equals(dk["busType"]?.ToString(), "USB", StringComparison.OrdinalIgnoreCase))
+                     ?? disks[0];
                 var diskDesc = d.ContainsKey("sizeGB") ? $"{d["sizeGB"]} GB" : "";
                 if (d.ContainsKey("mediaType"))
                     diskDesc += $" {d["mediaType"]}";
