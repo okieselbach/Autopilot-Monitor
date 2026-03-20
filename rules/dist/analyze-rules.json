@@ -1116,7 +1116,7 @@
       "title": "Critical Vulnerability Detected",
       "description": "Fires when the vulnerability correlation finds critical-severity CVEs or CISA KEV entries in installed software.",
       "severity": "critical",
-      "category": "vulnerability",
+      "category": "security",
       "version": "1.0.0",
       "author": "Autopilot Monitor",
       "enabled": true,

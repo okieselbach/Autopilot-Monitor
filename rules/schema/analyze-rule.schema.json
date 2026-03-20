@@ -47,7 +47,7 @@
         "category": {
           "type": "string",
           "description": "Rule category.",
-          "enum": ["network", "identity", "enrollment", "apps", "esp", "device"]
+          "enum": ["network", "identity", "enrollment", "apps", "esp", "device", "security"]
         },
         "version": {
           "type": "string",
