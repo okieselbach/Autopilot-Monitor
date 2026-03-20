@@ -267,7 +267,7 @@ namespace AutopilotMonitor.Functions.Services
                 {
                     try
                     {
-                        var sessions = await _storageService.GetExcessiveDataSendersAsync(tenantId, windowCutoff);
+                        var sessions = await _storageService.GetExcessiveDataSendersAsync(tenantId, windowCutoff, adminConfig.MaxSessionWindowHours);
 
                         if (sessions.Count == 0)
                         {

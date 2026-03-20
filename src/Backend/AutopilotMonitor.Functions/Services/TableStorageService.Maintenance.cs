@@ -220,14 +220,18 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
-        /// Gets sessions where the device has sent data within the last window period
-        /// AND the session started before that window cutoff – indicating a device that has been
-        /// actively sending data for longer than the allowed maximum.
+        /// Gets sessions where the device has been actively sending data for longer than
+        /// <paramref name="maxSessionWindowHours"/>.
         /// Status-independent: detects excessive data senders regardless of session status.
         /// Uses LastEventAt (written on every event batch) for the "still active" check.
         /// Sessions without LastEventAt (predating this field) are not returned.
+        ///
+        /// The OData pre-filter narrows candidates to sessions that straddle the cutoff boundary,
+        /// then a post-filter verifies the actual session duration (LastEventAt − StartedAt)
+        /// exceeds the allowed window. This prevents false positives from short sessions that
+        /// merely happen to straddle the cutoff time.
         /// </summary>
-        public async Task<List<SessionSummary>> GetExcessiveDataSendersAsync(string tenantId, DateTime windowCutoff)
+        public async Task<List<SessionSummary>> GetExcessiveDataSendersAsync(string tenantId, DateTime windowCutoff, int maxSessionWindowHours)
         {
             SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
 
@@ -235,8 +239,7 @@ namespace AutopilotMonitor.Functions.Services
             {
                 var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
 
-                // LastEventAt gt cutoff  → device sent data recently (still active)
-                // StartedAt lt cutoff    → session has been running longer than the allowed window
+                // OData pre-filter: narrow to sessions that straddle the cutoff boundary.
                 // IsPreProvisioned ne true → exclude WhiteGlove sessions: a pre-provisioned device
                 //   that resumes after weeks in storage looks like an excessive sender (StartedAt old,
                 //   LastEventAt recent) but is a legitimate resumption, not abuse.
@@ -247,10 +250,22 @@ namespace AutopilotMonitor.Functions.Services
                              $"and IsPreProvisioned ne true";
 
                 var query = tableClient.QueryAsync<TableEntity>(filter: filter);
+                var maxDuration = TimeSpan.FromHours(maxSessionWindowHours);
 
                 var sessions = new List<SessionSummary>();
                 await foreach (var entity in query)
                 {
+                    // Post-filter: verify actual session duration exceeds the window.
+                    // OData cannot compute date differences, so we check in code.
+                    var startedAt = entity.GetDateTimeOffset("StartedAt")?.UtcDateTime;
+                    var lastEventAt = entity.GetDateTimeOffset("LastEventAt")?.UtcDateTime;
+
+                    if (startedAt.HasValue && lastEventAt.HasValue
+                        && (lastEventAt.Value - startedAt.Value) < maxDuration)
+                    {
+                        continue;
+                    }
+
                     sessions.Add(MapToSessionSummary(entity));
                 }
 
