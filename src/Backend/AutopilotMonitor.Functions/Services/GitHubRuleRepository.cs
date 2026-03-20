@@ -77,6 +77,15 @@ namespace AutopilotMonitor.Functions.Services
             return json;
         }
 
+        public async Task<string> FetchCpeSeedMappingsAsync()
+        {
+            var url = $"{_baseUrl}/dist/cpe-mapping-seed.json";
+            _logger.LogInformation("Fetching CPE seed mappings from {Url}", url);
+            var json = await FetchWithRetryAsync(url);
+            _logger.LogInformation("Fetched CPE seed mappings JSON from GitHub ({Length} bytes)", json.Length);
+            return json;
+        }
+
         /// <summary>
         /// Fetches a URL with retry logic and exponential backoff.
         /// Retries on transient HTTP errors (408, 429, 5xx) and network exceptions.

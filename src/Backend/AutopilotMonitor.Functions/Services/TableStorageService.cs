@@ -83,17 +83,8 @@ namespace AutopilotMonitor.Functions.Services
             stopwatch.Stop();
             _logger.LogInformation($"Table initialization completed in {stopwatch.ElapsedMilliseconds}ms: {successCount} succeeded, {failCount} failed");
 
-            // Import CPE mapping seed data if not already present
-            try
-            {
-                var seedCount = await ImportCpeMappingSeedAsync();
-                if (seedCount > 0)
-                    _logger.LogInformation("Imported {Count} CPE mapping seed entries", seedCount);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to import CPE mapping seed (non-fatal)");
-            }
+            // CPE mapping seed is imported via Admin UI "Re-Seed Mappings" button
+            // (pulls from GitHub, not embedded resource). No auto-import at startup.
 
             lock (_initLock)
             {

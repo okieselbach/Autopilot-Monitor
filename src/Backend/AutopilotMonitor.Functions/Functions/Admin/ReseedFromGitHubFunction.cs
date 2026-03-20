@@ -92,6 +92,13 @@ namespace AutopilotMonitor.Functions.Functions.Admin
                     cpeMappingsResult = new { deleted = d, written = w };
                 }
 
+                var cpeSeedResult = new { deleted = 0, written = 0 };
+                if (typeParam == "all" || typeParam == "cpe")
+                {
+                    var (d, w) = await ReseedCpeSeedMappingsAsync();
+                    cpeSeedResult = new { deleted = d, written = w };
+                }
+
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(new
                 {
@@ -100,7 +107,8 @@ namespace AutopilotMonitor.Functions.Functions.Admin
                     gather = gatherResult,
                     analyze = analyzeResult,
                     ime = imeResult,
-                    cpeCommunityMappings = cpeMappingsResult
+                    cpeCommunityMappings = cpeMappingsResult,
+                    cpeSeedMappings = cpeSeedResult
                 });
                 return response;
             }
@@ -238,6 +246,30 @@ namespace AutopilotMonitor.Functions.Functions.Admin
             VulnerabilityCorrelationService.ResetMappingsCache();
 
             _logger.LogInformation("GitHub reseed community CPE mappings: {Deleted} deleted, {Written} written", deleted, written);
+            return (deleted, written);
+        }
+
+        private async Task<(int deleted, int written)> ReseedCpeSeedMappingsAsync()
+        {
+            // Count existing seed entries before deletion (for reporting)
+            var tableClient = _storageService.GetTableClient(AutopilotMonitor.Shared.Constants.TableNames.VulnerabilityCache);
+            var deleted = 0;
+            var existingEntities = tableClient.QueryAsync<TableEntity>(
+                filter: $"PartitionKey eq 'cpe_map_seed'",
+                select: new[] { "PartitionKey" });
+            await foreach (var _ in existingEntities)
+            {
+                deleted++;
+            }
+
+            // Fetch CPE seed mappings from GitHub and import (deletes + writes in one call)
+            var json = await _gitHubRepo.FetchCpeSeedMappingsAsync();
+            var written = await _storageService.ImportCpeMappingSeedFromJsonAsync(json);
+
+            // Reset the static seed-loaded flag so the next correlation picks up fresh data
+            VulnerabilityCorrelationService.ResetMappingsCache();
+
+            _logger.LogInformation("GitHub reseed CPE seed mappings: {Deleted} deleted, {Written} written", deleted, written);
             return (deleted, written);
         }
     }
