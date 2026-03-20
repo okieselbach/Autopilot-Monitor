@@ -3,13 +3,8 @@ const BOOTSTRAPPER_URL =
 
 export const runtime = "nodejs";
 
-export async function GET(request: Request) {
+export async function GET() {
   try {
-    const forwarded = request.headers.get("x-forwarded-for");
-    const clientIp = forwarded?.split(",")[0]?.trim() ?? "unknown";
-    const userAgent = request.headers.get("user-agent") ?? "unknown";
-    console.log(`[BootstrapperDownload] ip=${clientIp} ua=${userAgent}`);
-
     const upstream = await fetch(BOOTSTRAPPER_URL, { cache: "no-store" });
     if (!upstream.ok || !upstream.body) {
       return Response.redirect(BOOTSTRAPPER_URL, 302);
