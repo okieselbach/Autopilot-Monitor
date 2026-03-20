@@ -183,6 +183,7 @@ public static class EndpointAccessPolicyCatalog
         new("GET",    "health/detailed",            EndpointPolicy.AuthenticatedUser),
         new("POST",   "rules/reseed-from-github",   EndpointPolicy.GalacticAdminOnly),
         new("GET",    "vulnerability/unmatched-software", EndpointPolicy.GalacticAdminOnly),
+        new("GET",    "vulnerability/software-inventory", EndpointPolicy.GalacticAdminOnly),
         new("POST",   "vulnerability/sync",              EndpointPolicy.GalacticAdminOnly),
         new("POST",   "vulnerability/cpe-mapping",       EndpointPolicy.GalacticAdminOnly),
         new("POST",   "rules/ime-log-patterns/reseed", EndpointPolicy.GalacticAdminOnly),

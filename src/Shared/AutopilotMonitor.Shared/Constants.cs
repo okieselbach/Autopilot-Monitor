@@ -259,6 +259,9 @@ namespace AutopilotMonitor.Shared
             // Vulnerability reports per session (like RuleResults but for CVE correlation)
             public const string VulnerabilityReports = "VulnerabilityReports";
 
+            // Persistent software inventory per tenant (aggregated from enrollment snapshots)
+            public const string SoftwareInventory = "SoftwareInventory";
+
             /// <summary>
             /// Returns all table names for initialization
             /// </summary>
@@ -289,7 +292,8 @@ namespace AutopilotMonitor.Shared
                 BootstrapSessions,
                 GalacticNotifications,
                 VulnerabilityCache,
-                VulnerabilityReports
+                VulnerabilityReports,
+                SoftwareInventory
             };
         }
     }

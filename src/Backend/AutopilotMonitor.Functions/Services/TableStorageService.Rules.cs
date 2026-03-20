@@ -1,5 +1,9 @@
+using System.IO;
+using System.Reflection;
+using System.Text.Json;
 using Azure.Data.Tables;
 using AutopilotMonitor.Functions.Security;
+using AutopilotMonitor.Functions.Services.Vulnerability;
 using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Extensions.Logging;
@@ -577,6 +581,277 @@ namespace AutopilotMonitor.Functions.Services
             {
                 return null;
             }
+        }
+
+        // ===== SOFTWARE INVENTORY METHODS =====
+
+        /// <summary>
+        /// Upserts software inventory entries for a tenant.
+        /// PK = tenantId, RK = {normalizedVendor}:{normalizedProduct}:{normalizedVersion} (sanitized).
+        /// If an entry already exists, increments SessionCount and updates LastSeenAt/LastSessionId.
+        /// </summary>
+        public async Task UpsertSoftwareInventoryAsync(string tenantId, List<Dictionary<string, object>> inventoryItems, string sessionId, Dictionary<string, string?>? cpeMappings = null)
+        {
+            SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
+
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.SoftwareInventory);
+
+                // Read all existing entities for this tenant to merge SessionCount
+                var existingEntities = new Dictionary<string, TableEntity>(StringComparer.OrdinalIgnoreCase);
+                var existingQuery = tableClient.QueryAsync<TableEntity>(filter: $"PartitionKey eq '{tenantId}'");
+                await foreach (var entity in existingQuery)
+                {
+                    existingEntities[entity.RowKey] = entity;
+                }
+
+                // Build the batch of entities to upsert
+                var entitiesToUpsert = new List<TableEntity>();
+
+                foreach (var item in inventoryItems)
+                {
+                    var normalizedName = item.ContainsKey("normalizedName") ? item["normalizedName"]?.ToString() ?? "" : "";
+                    var normalizedVendor = item.ContainsKey("normalizedPublisher") ? item["normalizedPublisher"]?.ToString() ?? "" : "";
+                    var normalizedVersion = item.ContainsKey("normalizedVersion") ? item["normalizedVersion"]?.ToString() ?? "" : "";
+                    var displayName = item.ContainsKey("displayName") ? item["displayName"]?.ToString() ?? "" : "";
+                    var publisher = item.ContainsKey("publisher") ? item["publisher"]?.ToString() ?? "" : "";
+                    var registrySource = item.ContainsKey("registrySource") ? item["registrySource"]?.ToString() ?? "" : "";
+                    var normalizationConfidence = item.ContainsKey("normalizationConfidence") ? item["normalizationConfidence"]?.ToString() ?? "" : "";
+
+                    var rowKey = SanitizeTableKey($"{normalizedVendor}:{normalizedName}:{normalizedVersion}");
+                    if (string.IsNullOrWhiteSpace(rowKey) || rowKey == "::")
+                        continue;
+
+                    // Truncate RowKey to Table Storage limit (1KB)
+                    if (rowKey.Length > 512)
+                        rowKey = rowKey.Substring(0, 512);
+
+                    var now = DateTime.UtcNow;
+                    TableEntity entity;
+
+                    if (existingEntities.TryGetValue(rowKey, out var existing))
+                    {
+                        // Update existing: increment SessionCount, update LastSeenAt
+                        existing["SessionCount"] = (existing.GetInt32("SessionCount") ?? 0) + 1;
+                        existing["LastSeenAt"] = now.ToString("o");
+                        existing["LastSessionId"] = sessionId;
+
+                        // Update CpeUri if we have a mapping and current is empty
+                        if (cpeMappings != null && cpeMappings.TryGetValue(normalizedName, out var cpeUri) && !string.IsNullOrEmpty(cpeUri))
+                        {
+                            existing["CpeUri"] = cpeUri;
+                        }
+
+                        entity = existing;
+                    }
+                    else
+                    {
+                        // Create new entry
+                        entity = new TableEntity(tenantId, rowKey)
+                        {
+                            ["DisplayName"] = displayName,
+                            ["NormalizedName"] = normalizedName,
+                            ["NormalizedVendor"] = normalizedVendor,
+                            ["NormalizedVersion"] = normalizedVersion,
+                            ["Publisher"] = publisher,
+                            ["RegistrySource"] = registrySource,
+                            ["NormalizationConfidence"] = normalizationConfidence,
+                            ["FirstSeenAt"] = now.ToString("o"),
+                            ["LastSeenAt"] = now.ToString("o"),
+                            ["FirstSessionId"] = sessionId,
+                            ["LastSessionId"] = sessionId,
+                            ["SessionCount"] = 1,
+                            ["CpeUri"] = cpeMappings != null && cpeMappings.TryGetValue(normalizedName, out var cpeUri) && !string.IsNullOrEmpty(cpeUri) ? cpeUri : ""
+                        };
+                    }
+
+                    entitiesToUpsert.Add(entity);
+                }
+
+                // Batch write (max 100 per batch, all same PK)
+                for (int i = 0; i < entitiesToUpsert.Count; i += 100)
+                {
+                    var batch = entitiesToUpsert.Skip(i).Take(100)
+                        .Select(e => new TableTransactionAction(TableTransactionActionType.UpsertReplace, e))
+                        .ToList();
+
+                    if (batch.Count > 0)
+                    {
+                        await tableClient.SubmitTransactionAsync(batch);
+                    }
+                }
+
+                _logger.LogInformation("Upserted {Count} software inventory entries for tenant {TenantId}", entitiesToUpsert.Count, tenantId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to upsert software inventory for tenant {TenantId}", tenantId);
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Gets all software inventory entries for a tenant.
+        /// PK = tenantId. Returns all rows.
+        /// </summary>
+        public async Task<List<Dictionary<string, object>>> GetSoftwareInventoryAsync(string tenantId)
+        {
+            SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
+
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.SoftwareInventory);
+                var query = tableClient.QueryAsync<TableEntity>(filter: $"PartitionKey eq '{tenantId}'");
+
+                var results = new List<Dictionary<string, object>>();
+                await foreach (var entity in query)
+                {
+                    results.Add(new Dictionary<string, object>
+                    {
+                        { "displayName", entity.GetString("DisplayName") ?? "" },
+                        { "normalizedName", entity.GetString("NormalizedName") ?? "" },
+                        { "normalizedVendor", entity.GetString("NormalizedVendor") ?? "" },
+                        { "normalizedVersion", entity.GetString("NormalizedVersion") ?? "" },
+                        { "publisher", entity.GetString("Publisher") ?? "" },
+                        { "registrySource", entity.GetString("RegistrySource") ?? "" },
+                        { "normalizationConfidence", entity.GetString("NormalizationConfidence") ?? "" },
+                        { "cpeUri", entity.GetString("CpeUri") ?? "" },
+                        { "firstSeenAt", entity.GetString("FirstSeenAt") ?? "" },
+                        { "lastSeenAt", entity.GetString("LastSeenAt") ?? "" },
+                        { "firstSessionId", entity.GetString("FirstSessionId") ?? "" },
+                        { "lastSessionId", entity.GetString("LastSessionId") ?? "" },
+                        { "sessionCount", entity.GetInt32("SessionCount") ?? 0 }
+                    });
+                }
+
+                return results;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to get software inventory for tenant {TenantId}", tenantId);
+                return new List<Dictionary<string, object>>();
+            }
+        }
+
+        /// <summary>
+        /// Sanitize a string for use as an Azure Table Storage key.
+        /// Replaces /, \, #, ? with underscores.
+        /// </summary>
+        private static string SanitizeTableKey(string key)
+        {
+            return key
+                .Replace("/", "_")
+                .Replace("\\", "_")
+                .Replace("#", "_")
+                .Replace("?", "_");
+        }
+
+        // ===== CPE MAPPING SEED IMPORT =====
+
+        /// <summary>
+        /// Imports CPE mappings from the embedded seed JSON into the VulnerabilityCache table
+        /// with PK = "cpe_map_seed". Only imports if no seed entries exist yet (idempotent).
+        /// When force=true, deletes existing seed entries first and re-imports.
+        /// Returns the number of entries imported (0 if already seeded and force=false).
+        /// </summary>
+        public async Task<int> ImportCpeMappingSeedAsync(bool force = false)
+        {
+            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.VulnerabilityCache);
+
+            // Check if seed entries already exist
+            if (!force)
+            {
+                var existingQuery = tableClient.QueryAsync<TableEntity>(
+                    filter: "PartitionKey eq 'cpe_map_seed'",
+                    select: new[] { "PartitionKey" },
+                    maxPerPage: 1);
+
+                await foreach (var _ in existingQuery)
+                {
+                    // At least one seed entry exists — already seeded
+                    return 0;
+                }
+            }
+            else
+            {
+                // Force mode: delete all existing seed entries first
+                var existingEntities = tableClient.QueryAsync<TableEntity>(
+                    filter: "PartitionKey eq 'cpe_map_seed'",
+                    select: new[] { "PartitionKey", "RowKey" });
+
+                await foreach (var entity in existingEntities)
+                {
+                    await tableClient.DeleteEntityAsync(entity.PartitionKey, entity.RowKey);
+                }
+            }
+
+            // Load the embedded seed JSON
+            var assembly = Assembly.GetExecutingAssembly();
+            var resourceName = assembly.GetManifestResourceNames()
+                .FirstOrDefault(n => n.EndsWith("cpe-mapping-seed.json", StringComparison.OrdinalIgnoreCase));
+
+            if (resourceName == null)
+            {
+                _logger.LogWarning("CPE mapping seed resource not found in assembly");
+                return 0;
+            }
+
+            string json;
+            using (var stream = assembly.GetManifestResourceStream(resourceName))
+            {
+                if (stream == null) return 0;
+                using var reader = new StreamReader(stream);
+                json = await reader.ReadToEndAsync();
+            }
+
+            var seed = System.Text.Json.JsonSerializer.Deserialize<CpeMappingSeed>(json,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+            if (seed?.Mappings == null || seed.Mappings.Count == 0)
+                return 0;
+
+            // Build entities
+            var entities = new List<TableEntity>();
+            foreach (var mapping in seed.Mappings)
+            {
+                var rowKey = SanitizeTableKey(
+                    $"{(mapping.NormalizedVendor ?? "unknown")}:{(mapping.NormalizedProduct ?? "unknown")}".ToLowerInvariant());
+
+                // Truncate RowKey to Table Storage limit
+                if (rowKey.Length > 512)
+                    rowKey = rowKey.Substring(0, 512);
+
+                entities.Add(new TableEntity("cpe_map_seed", rowKey)
+                {
+                    { "NormalizedVendor", mapping.NormalizedVendor ?? "" },
+                    { "NormalizedProduct", mapping.NormalizedProduct ?? "" },
+                    { "CpeVendor", mapping.CpeVendor ?? "" },
+                    { "CpeProduct", mapping.CpeProduct ?? "" },
+                    { "CpeUri", mapping.CpeUri ?? "" },
+                    { "Category", mapping.Category ?? "" },
+                    { "DisplayNamePatternsJson", System.Text.Json.JsonSerializer.Serialize(mapping.DisplayNamePatterns ?? new List<string>()) },
+                    { "PublisherPatternsJson", System.Text.Json.JsonSerializer.Serialize(mapping.PublisherPatterns ?? new List<string>()) },
+                    { "Source", "seed" },
+                    { "ImportedAt", DateTime.UtcNow.ToString("o") }
+                });
+            }
+
+            // Batch write (max 100 per batch, all same PK)
+            for (int i = 0; i < entities.Count; i += 100)
+            {
+                var batch = entities.Skip(i).Take(100)
+                    .Select(e => new TableTransactionAction(TableTransactionActionType.UpsertReplace, e))
+                    .ToList();
+
+                if (batch.Count > 0)
+                {
+                    await tableClient.SubmitTransactionAsync(batch);
+                }
+            }
+
+            _logger.LogInformation("Imported {Count} CPE mapping seed entries into VulnerabilityCache table", entities.Count);
+            return entities.Count;
         }
     }
 }
