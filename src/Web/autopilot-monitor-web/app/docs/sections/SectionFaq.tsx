@@ -38,8 +38,8 @@ export function SectionFaq() {
 
         <FaqItem question="Which Autopilot scenarios are supported?">
           <p>
-            The agent supports <strong>User-Driven</strong>, <strong>Pre-Provisioned (White Glove)</strong>,
-            and <strong>Windows Autopilot and Autopilot Device Preparation (early testing)</strong> enrollment flows.
+            The agent supports <strong>Windows Autopilot and Autopilot Device Preparation (early testing)</strong>
+            enrollment flows (<strong>User-Driven</strong> and <strong>Pre-Provisioned (White Glove)</strong> is supported).
           </p>
         </FaqItem>
 
