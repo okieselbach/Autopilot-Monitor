@@ -271,8 +271,18 @@ export default function AnalyzeRulesPage() {
   const filteredRules = rulesList.filter((rule) => {
     const matchesSearch =
       searchQuery === "" ||
-      rule.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      rule.ruleId.toLowerCase().includes(searchQuery.toLowerCase());
+      (() => {
+        const q = searchQuery.toLowerCase().trim();
+        if (q.startsWith("#")) {
+          const tag = q.slice(1);
+          return tag === "" || rule.tags?.some(t => t.toLowerCase().includes(tag));
+        }
+        return (
+          rule.title.toLowerCase().includes(q) ||
+          rule.ruleId.toLowerCase().includes(q) ||
+          rule.tags?.some(t => t.toLowerCase().includes(q))
+        );
+      })();
 
     const matchesSeverity =
       severityFilter === "all" || rule.severity.toLowerCase() === severityFilter.toLowerCase();
@@ -405,7 +415,7 @@ export default function AnalyzeRulesPage() {
               <RuleFilterBar
                 searchQuery={searchQuery}
                 onSearchChange={setSearchQuery}
-                searchPlaceholder="Search by title or rule ID..."
+                searchPlaceholder="Search by title, rule ID, or #tag..."
                 filters={[
                   {
                     label: "Severity",

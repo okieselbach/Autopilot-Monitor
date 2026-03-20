@@ -357,10 +357,16 @@ export default function GatherRulesPage() {
   const rulesList = rules || [];
   const filteredRules = rulesList.filter((rule) => {
     if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      if (
+      const q = searchQuery.toLowerCase().trim();
+      if (q.startsWith("#")) {
+        const tag = q.slice(1);
+        if (tag !== "" && !rule.tags?.some(t => t.toLowerCase().includes(tag))) {
+          return false;
+        }
+      } else if (
         !rule.title.toLowerCase().includes(q) &&
-        !rule.ruleId.toLowerCase().includes(q)
+        !rule.ruleId.toLowerCase().includes(q) &&
+        !rule.tags?.some(t => t.toLowerCase().includes(q))
       ) {
         return false;
       }
@@ -484,7 +490,7 @@ export default function GatherRulesPage() {
               <RuleFilterBar
                 searchQuery={searchQuery}
                 onSearchChange={setSearchQuery}
-                searchPlaceholder="Search by title or rule ID..."
+                searchPlaceholder="Search by title, rule ID, or #tag..."
                 filters={[
                   {
                     label: "Category",
