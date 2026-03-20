@@ -49,6 +49,7 @@ export default function SessionDetailPage() {
   const [showReportModal, setShowReportModal] = useState(false);
   const [reportSubmitting, setReportSubmitting] = useState(false);
   const [showScriptOutput, setShowScriptOutput] = useState(true);
+  const [enableSoftwareInventoryAnalyzer, setEnableSoftwareInventoryAnalyzer] = useState(false);
   const [analysisResults, setAnalysisResults] = useState<RuleResult[]>([]);
   const [loadingAnalysis, setLoadingAnalysis] = useState(false);
   const [analysisExpanded, setAnalysisExpanded] = useState(true);
@@ -201,6 +202,7 @@ export default function SessionDetailPage() {
           if (res.ok) {
             const cfg = await res.json();
             setShowScriptOutput(cfg.showScriptOutput ?? true);
+            setEnableSoftwareInventoryAnalyzer(cfg.enableSoftwareInventoryAnalyzer ?? false);
           }
         } catch { /* non-fatal */ }
       })();
@@ -853,15 +855,14 @@ export default function SessionDetailPage() {
     if (!isGatherRulesSession) s.push({ id: "section-device-details", label: "Device Details", icon: <ComputerDesktopIcon /> });
     if (!isGatherRulesSession && session) s.push({ id: "section-enrollment-progress", label: "Enrollment Progress", icon: <PlayCircleIcon /> });
     if (!isGatherRulesSession) s.push({ id: "section-analysis", label: "Analysis", icon: <SparklesIcon /> });
-    // Vulnerability Report nav entry is static — the component itself returns null when no events exist
-    if (!isGatherRulesSession) s.push({ id: "section-vulnerability-report", label: "Vulnerability Report", icon: <ShieldCheckIcon /> });
+    if (!isGatherRulesSession && enableSoftwareInventoryAnalyzer) s.push({ id: "section-vulnerability-report", label: "Vulnerability Report", icon: <ShieldCheckIcon /> });
     if (!isGatherRulesSession) s.push({ id: "section-performance", label: "Performance", icon: <ChartBarIcon /> });
     if (!isGatherRulesSession) s.push({ id: "section-scripts", label: "Script Executions", icon: <CodeBracketIcon /> });
     if (!isGatherRulesSession) s.push({ id: "section-downloads", label: "Downloads", icon: <ArrowDownTrayIcon /> });
     if (!isGatherRulesSession) s.push({ id: "section-install-progress", label: "Install Progress", icon: <ListBulletIcon /> });
     s.push({ id: "section-event-timeline", label: "Event Timeline", icon: <ClockIcon /> });
     return s;
-  }, [session, isGatherRulesSession]);
+  }, [session, isGatherRulesSession, enableSoftwareInventoryAnalyzer]);
 
   usePageSections(sessionSections, "Sections", "scroll-spy");
 
@@ -1017,8 +1018,8 @@ export default function SessionDetailPage() {
             </div>
           )}
 
-          {/* Vulnerability Report */}
-          {!isGatherRulesSession && (
+          {/* Vulnerability Report — only when analyzer is enabled for this tenant */}
+          {!isGatherRulesSession && enableSoftwareInventoryAnalyzer && (
             <div id="section-vulnerability-report">
               <VulnerabilityReportSection
                 events={events}
