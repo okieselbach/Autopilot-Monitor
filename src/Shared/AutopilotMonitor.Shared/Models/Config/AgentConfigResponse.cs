@@ -248,6 +248,6 @@ namespace AutopilotMonitor.Shared.Models
         /// emits a baseline snapshot (startup) plus delta (shutdown) for vulnerability insight.
         /// Default: true
         /// </summary>
-        public bool EnableSoftwareInventoryAnalyzer { get; set; } = true;
+        public bool EnableSoftwareInventoryAnalyzer { get; set; } = false;
     }
 }

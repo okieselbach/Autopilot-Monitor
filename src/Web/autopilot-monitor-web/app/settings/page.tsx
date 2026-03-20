@@ -106,7 +106,7 @@ export default function SettingsPage() {
   const [enableLocalAdminAnalyzer, setEnableLocalAdminAnalyzer] = useState(true);
   const [localAdminAllowedAccounts, setLocalAdminAllowedAccounts] = useState<string[]>([]);
   const [newAllowedAccount, setNewAllowedAccount] = useState("");
-  const [enableSoftwareInventoryAnalyzer, setEnableSoftwareInventoryAnalyzer] = useState(true);
+  const [enableSoftwareInventoryAnalyzer, setEnableSoftwareInventoryAnalyzer] = useState(false);
 
   // Unrestricted mode state
   const [unrestrictedMode, setUnrestrictedMode] = useState(false);
@@ -183,7 +183,7 @@ export default function SettingsPage() {
         } catch {
           setLocalAdminAllowedAccounts([]);
         }
-        setEnableSoftwareInventoryAnalyzer(data.enableSoftwareInventoryAnalyzer ?? true);
+        setEnableSoftwareInventoryAnalyzer(data.enableSoftwareInventoryAnalyzer ?? false);
         setUnrestrictedMode(data.unrestrictedMode ?? false);
 
         // Parse SAS expiry and fire notification to bell if needed
@@ -530,7 +530,7 @@ export default function SettingsPage() {
       setLocalAdminAllowedAccounts(config.localAdminAllowedAccountsJson ? JSON.parse(config.localAdminAllowedAccountsJson) : []);
     } catch { setLocalAdminAllowedAccounts([]); }
     setNewAllowedAccount("");
-    setEnableSoftwareInventoryAnalyzer(config.enableSoftwareInventoryAnalyzer ?? true);
+    setEnableSoftwareInventoryAnalyzer(config.enableSoftwareInventoryAnalyzer ?? false);
   };
 
   const handleSaveNotifications = () => saveConfiguration("notifications");

@@ -160,7 +160,7 @@ namespace AutopilotMonitor.Functions.Functions.Config
                 {
                     EnableLocalAdminAnalyzer = tenantConfig.EnableLocalAdminAnalyzer ?? true,
                     LocalAdminAllowedAccounts = tenantConfig.GetLocalAdminAllowedAccounts(),
-                    EnableSoftwareInventoryAnalyzer = tenantConfig.EnableSoftwareInventoryAnalyzer ?? true
+                    EnableSoftwareInventoryAnalyzer = tenantConfig.EnableSoftwareInventoryAnalyzer ?? false
                 },
                 SendTraceEvents = tenantConfig.SendTraceEvents,
                 UnrestrictedMode = tenantConfig.UnrestrictedModeEnabled && tenantConfig.UnrestrictedMode,
