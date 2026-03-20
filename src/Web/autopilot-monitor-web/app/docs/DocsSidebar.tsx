@@ -14,6 +14,7 @@ import {
   ListBulletIcon,
   SparklesIcon,
   CodeBracketIcon,
+  QuestionMarkCircleIcon,
 } from "../../lib/sidebarIcons";
 
 const SECTION_ICONS: Record<string, React.ReactNode> = {
@@ -27,6 +28,7 @@ const SECTION_ICONS: Record<string, React.ReactNode> = {
   "gather-rules": <ListBulletIcon />,
   "analyze-rules": <SparklesIcon />,
   "ime-log-patterns": <CodeBracketIcon />,
+  "faq": <QuestionMarkCircleIcon />,
 };
 
 const docsItems: PageSectionItem[] = NAV_SECTIONS.map((s) => ({

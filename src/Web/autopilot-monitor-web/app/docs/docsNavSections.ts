@@ -9,6 +9,7 @@ export const NAV_SECTIONS = [
   { id: "gather-rules",    label: "Gather Rules",      description: "Configure data gathering rules for Autopilot Monitor diagnostics." },
   { id: "analyze-rules",   label: "Analyze Rules",     description: "Configure analysis rules for Autopilot enrollment evaluation." },
   { id: "ime-log-patterns", label: "IME Log Patterns", description: "Regex patterns for parsing the Intune Management Extension log into structured events." },
+  { id: "faq",              label: "FAQ",              description: "Frequently asked questions about Autopilot Monitor setup, agent behavior, and troubleshooting." },
 ] as const;
 
 export type SectionId = (typeof NAV_SECTIONS)[number]["id"];
