@@ -1,6 +1,9 @@
 using System.Net;
+using System.Text.Json;
 using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Services;
+using AutopilotMonitor.Functions.Services.Vulnerability;
+using Azure.Data.Tables;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
@@ -82,6 +85,13 @@ namespace AutopilotMonitor.Functions.Functions.Admin
                     imeResult = new { deleted = d, written = w };
                 }
 
+                var cpeMappingsResult = new { deleted = 0, written = 0 };
+                if (typeParam == "all" || typeParam == "cpe")
+                {
+                    var (d, w) = await ReseedCpeCommunityMappingsAsync();
+                    cpeMappingsResult = new { deleted = d, written = w };
+                }
+
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(new
                 {
@@ -89,7 +99,8 @@ namespace AutopilotMonitor.Functions.Functions.Admin
                     message = "Reseed from GitHub complete",
                     gather = gatherResult,
                     analyze = analyzeResult,
-                    ime = imeResult
+                    ime = imeResult,
+                    cpeCommunityMappings = cpeMappingsResult
                 });
                 return response;
             }
@@ -179,6 +190,55 @@ namespace AutopilotMonitor.Functions.Functions.Admin
 
             _logger.LogInformation($"GitHub reseed IME: {deleted} deleted, {patterns.Count} written");
             return (deleted, patterns.Count);
+        }
+
+        private async Task<(int deleted, int written)> ReseedCpeCommunityMappingsAsync()
+        {
+            var tableClient = _storageService.GetTableClient(AutopilotMonitor.Shared.Constants.TableNames.VulnerabilityCache);
+
+            // Delete existing community CPE mapping entries
+            var deleted = 0;
+            var existingEntities = tableClient.QueryAsync<TableEntity>(
+                filter: $"PartitionKey eq 'cpe_map_community'");
+            await foreach (var entity in existingEntities)
+            {
+                await tableClient.DeleteEntityAsync(entity.PartitionKey, entity.RowKey);
+                deleted++;
+            }
+
+            // Fetch community CPE mappings from GitHub
+            var json = await _gitHubRepo.FetchCpeCommunityMappingsAsync();
+            var seed = JsonSerializer.Deserialize<CpeMappingSeed>(json, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+
+            var written = 0;
+            if (seed?.Mappings != null)
+            {
+                foreach (var mapping in seed.Mappings)
+                {
+                    var entity = new TableEntity("cpe_map_community", $"{mapping.CpeVendor}_{mapping.CpeProduct}")
+                    {
+                        { "NormalizedVendor", mapping.NormalizedVendor ?? "" },
+                        { "NormalizedProduct", mapping.NormalizedProduct ?? "" },
+                        { "CpeVendor", mapping.CpeVendor ?? "" },
+                        { "CpeProduct", mapping.CpeProduct ?? "" },
+                        { "CpeUri", mapping.CpeUri ?? "" },
+                        { "Category", mapping.Category ?? "community" },
+                        { "DisplayNamePatternsJson", JsonSerializer.Serialize(mapping.DisplayNamePatterns ?? new List<string>()) },
+                        { "PublisherPatternsJson", JsonSerializer.Serialize(mapping.PublisherPatterns ?? new List<string>()) }
+                    };
+                    await tableClient.UpsertEntityAsync(entity, TableUpdateMode.Replace);
+                    written++;
+                }
+            }
+
+            // Reset the static seed-loaded flag so the next correlation picks up fresh data
+            VulnerabilityCorrelationService.ResetMappingsCache();
+
+            _logger.LogInformation("GitHub reseed community CPE mappings: {Deleted} deleted, {Written} written", deleted, written);
+            return (deleted, written);
         }
     }
 }

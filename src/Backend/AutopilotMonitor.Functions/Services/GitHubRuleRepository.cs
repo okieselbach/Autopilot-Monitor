@@ -68,6 +68,15 @@ namespace AutopilotMonitor.Functions.Services
             return patterns;
         }
 
+        public async Task<string> FetchCpeCommunityMappingsAsync()
+        {
+            var url = $"{_baseUrl}/dist/cpe-community-mappings.json";
+            _logger.LogInformation("Fetching community CPE mappings from {Url}", url);
+            var json = await FetchWithRetryAsync(url);
+            _logger.LogInformation("Fetched community CPE mappings JSON from GitHub ({Length} bytes)", json.Length);
+            return json;
+        }
+
         /// <summary>
         /// Fetches a URL with retry logic and exponential backoff.
         /// Retries on transient HTTP errors (408, 429, 5xx) and network exceptions.

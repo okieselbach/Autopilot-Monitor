@@ -230,6 +230,9 @@ namespace AutopilotMonitor.Functions.Services
 
         private bool EvaluateConfidenceFactor(ConfidenceFactor factor, List<EnrollmentEvent> events, Dictionary<string, object> matchedConditions)
         {
+            if (string.IsNullOrEmpty(factor.Condition))
+                return false;
+
             if (factor.Condition.StartsWith("phase_duration >"))
             {
                 if (int.TryParse(factor.Condition.Replace("phase_duration >", "").Trim(), out var threshold))

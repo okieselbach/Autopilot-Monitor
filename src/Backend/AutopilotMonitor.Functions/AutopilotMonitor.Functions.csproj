@@ -37,6 +37,7 @@
     <EmbeddedResource Include="..\..\..\rules\dist\analyze-rules.json" LogicalName="AutopilotMonitor.Functions.Rules.analyze-rules.json" />
     <EmbeddedResource Include="..\..\..\rules\dist\ime-log-patterns.json" LogicalName="AutopilotMonitor.Functions.Rules.ime-log-patterns.json" />
     <EmbeddedResource Include="Data\cpe-mapping-seed.json" LogicalName="AutopilotMonitor.Functions.Data.cpe-mapping-seed.json" />
+    <EmbeddedResource Include="..\..\..\rules\dist\cpe-community-mappings.json" LogicalName="AutopilotMonitor.Functions.Rules.cpe-community-mappings.json" />
   </ItemGroup>
 
 </Project>

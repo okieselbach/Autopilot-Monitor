@@ -1464,16 +1464,6 @@
     },
     {
       "normalizedVendor": "microsoft",
-      "normalizedProduct": "microsoft intune management extension",
-      "displayNamePatterns": ["microsoft intune management extension", "intune management extension"],
-      "publisherPatterns": ["microsoft", "microsoft corporation"],
-      "cpeVendor": "microsoft",
-      "cpeProduct": "intune_management_extension",
-      "cpeUri": "cpe:2.3:a:microsoft:intune_management_extension",
-      "category": "enterprise"
-    },
-    {
-      "normalizedVendor": "microsoft",
       "normalizedProduct": "microsoft sql server",
       "displayNamePatterns": ["microsoft sql server", "sql server 2019", "sql server 2022"],
       "publisherPatterns": ["microsoft", "microsoft corporation"],

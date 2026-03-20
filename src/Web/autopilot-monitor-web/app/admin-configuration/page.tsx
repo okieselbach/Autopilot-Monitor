@@ -15,9 +15,11 @@ import { SessionExportSection } from "./components/SessionExportSection";
 import { AdminConfigSettingsSection } from "./components/AdminConfigSettingsSection";
 import { SessionReportsSection } from "./components/SessionReportsSection";
 import { FeedbackSection } from "./components/FeedbackSection";
+import { UnmatchedSoftwareSection } from "./components/UnmatchedSoftwareSection";
+import { VulnerabilityDataSection } from "./components/VulnerabilityDataSection";
 import { usePageSections } from "../../hooks/usePageSections";
 import { PageSectionItem } from "../../contexts/SidebarContext";
-import { BuildingOfficeIcon, DocumentTextIcon, ArrowDownTrayIcon, GearIcon, FolderIcon, WrenchScrewdriverIcon, NoSymbolIcon, ArrowPathIcon, SparklesIcon } from "../../lib/sidebarIcons";
+import { BuildingOfficeIcon, DocumentTextIcon, ArrowDownTrayIcon, GearIcon, FolderIcon, WrenchScrewdriverIcon, NoSymbolIcon, ArrowPathIcon, SparklesIcon, ShieldCheckIcon, KeyIcon } from "../../lib/sidebarIcons";
 
 interface AdminConfiguration {
   partitionKey: string;
@@ -31,6 +33,9 @@ interface AdminConfiguration {
   maintenanceBlockDurationHours?: number;
   diagnosticsGlobalLogPathsJson?: string;
   customSettings?: string;
+  nvdApiKey?: string;
+  vulnerabilityCorrelationEnabled?: boolean;
+  vulnerabilityDataLastSyncUtc?: string;
 }
 
 export default function AdminConfigurationPage() {
@@ -262,6 +267,8 @@ export default function AdminConfigurationPage() {
     { id: "fetch-and-reseed", label: "Fetch & Reseed", icon: <ArrowPathIcon /> },
     { id: "device-block", label: "Device Block", icon: <NoSymbolIcon /> },
     { id: "version-block", label: "Version Block", icon: <NoSymbolIcon /> },
+    { id: "unmatched-software", label: "Unmatched Software", icon: <ShieldCheckIcon /> },
+    { id: "vulnerability-data", label: "Vulnerability Data", icon: <KeyIcon /> },
   ], []);
 
   usePageSections(adminSections, "Admin", "scroll-spy");
@@ -410,6 +417,26 @@ export default function AdminConfigurationPage() {
               getAccessToken={getAccessToken}
               setError={setError}
               setSuccessMessage={setSuccessMessage}
+            />
+            </div>
+
+            {/* Unmatched Software (Vulnerability Analyzer) */}
+            <div id="unmatched-software">
+            <UnmatchedSoftwareSection
+              getAccessToken={getAccessToken}
+              setError={setError}
+            />
+            </div>
+
+            {/* Vulnerability Data Configuration */}
+            <div id="vulnerability-data">
+            <VulnerabilityDataSection
+              adminConfig={adminConfig}
+              loadingConfig={loadingConfig}
+              getAccessToken={getAccessToken}
+              setError={setError}
+              setSuccessMessage={setSuccessMessage}
+              onAdminConfigUpdated={setAdminConfig}
             />
             </div>
           </div>
