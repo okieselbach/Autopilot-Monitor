@@ -15,6 +15,7 @@
     <PackageReference Include="Microsoft.Azure.Functions.Worker.ApplicationInsights" Version="2.50.0" />
     <PackageReference Include="Microsoft.Azure.Functions.Worker.Extensions.Http.AspNetCore" Version="2.1.0" />
     <PackageReference Include="Microsoft.Azure.Functions.Worker.Extensions.SignalRService" Version="2.0.1" />
+    <PackageReference Include="Microsoft.Azure.SignalR.Management" Version="1.29.0" />
     <PackageReference Include="Microsoft.Azure.Functions.Worker.Extensions.Timer" Version="4.3.1" />
     <PackageReference Include="Microsoft.Azure.Functions.Worker.Sdk" Version="2.0.7" />
     <PackageReference Include="Azure.Data.Tables" Version="12.9.1" />
@@ -35,6 +36,7 @@
     <EmbeddedResource Include="..\..\..\rules\dist\gather-rules.json" LogicalName="AutopilotMonitor.Functions.Rules.gather-rules.json" />
     <EmbeddedResource Include="..\..\..\rules\dist\analyze-rules.json" LogicalName="AutopilotMonitor.Functions.Rules.analyze-rules.json" />
     <EmbeddedResource Include="..\..\..\rules\dist\ime-log-patterns.json" LogicalName="AutopilotMonitor.Functions.Rules.ime-log-patterns.json" />
+    <EmbeddedResource Include="Data\cpe-mapping-seed.json" LogicalName="AutopilotMonitor.Functions.Data.cpe-mapping-seed.json" />
   </ItemGroup>
 
 </Project>

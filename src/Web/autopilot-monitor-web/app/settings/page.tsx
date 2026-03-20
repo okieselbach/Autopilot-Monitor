@@ -106,6 +106,7 @@ export default function SettingsPage() {
   const [enableLocalAdminAnalyzer, setEnableLocalAdminAnalyzer] = useState(true);
   const [localAdminAllowedAccounts, setLocalAdminAllowedAccounts] = useState<string[]>([]);
   const [newAllowedAccount, setNewAllowedAccount] = useState("");
+  const [enableSoftwareInventoryAnalyzer, setEnableSoftwareInventoryAnalyzer] = useState(true);
 
   // Unrestricted mode state
   const [unrestrictedMode, setUnrestrictedMode] = useState(false);
@@ -182,6 +183,7 @@ export default function SettingsPage() {
         } catch {
           setLocalAdminAllowedAccounts([]);
         }
+        setEnableSoftwareInventoryAnalyzer(data.enableSoftwareInventoryAnalyzer ?? true);
         setUnrestrictedMode(data.unrestrictedMode ?? false);
 
         // Parse SAS expiry and fire notification to bell if needed
@@ -346,6 +348,7 @@ export default function SettingsPage() {
         diagnosticsLogPathsJson: tenantDiagPaths.length > 0 ? JSON.stringify(tenantDiagPaths) : undefined,
         enableLocalAdminAnalyzer,
         localAdminAllowedAccountsJson: localAdminAllowedAccounts.length > 0 ? JSON.stringify(localAdminAllowedAccounts) : undefined,
+        enableSoftwareInventoryAnalyzer,
         unrestrictedMode,
       };
 
@@ -527,6 +530,7 @@ export default function SettingsPage() {
       setLocalAdminAllowedAccounts(config.localAdminAllowedAccountsJson ? JSON.parse(config.localAdminAllowedAccountsJson) : []);
     } catch { setLocalAdminAllowedAccounts([]); }
     setNewAllowedAccount("");
+    setEnableSoftwareInventoryAnalyzer(config.enableSoftwareInventoryAnalyzer ?? true);
   };
 
   const handleSaveNotifications = () => saveConfiguration("notifications");
@@ -1032,6 +1036,8 @@ export default function SettingsPage() {
               setLocalAdminAllowedAccounts={setLocalAdminAllowedAccounts}
               newAllowedAccount={newAllowedAccount}
               setNewAllowedAccount={setNewAllowedAccount}
+              enableSoftwareInventoryAnalyzer={enableSoftwareInventoryAnalyzer}
+              setEnableSoftwareInventoryAnalyzer={setEnableSoftwareInventoryAnalyzer}
               onSave={handleSaveAgentAnalyzers}
               onReset={handleResetAgentAnalyzers}
               saving={savingSection === "agentAnalyzers"}

@@ -123,6 +123,28 @@ namespace AutopilotMonitor.Shared.Models
             }
         }
 
+        // ===== VULNERABILITY CORRELATION SETTINGS =====
+
+        /// <summary>
+        /// NVD API key for higher rate limits (50 req/30s vs 5 req/30s without key).
+        /// Free registration at https://nvd.nist.gov/developers/request-an-api-key
+        /// null = operate without API key (slower, still functional).
+        /// </summary>
+        public string NvdApiKey { get; set; }
+
+        /// <summary>
+        /// Whether vulnerability correlation is globally enabled.
+        /// When false, agents still collect inventory but backend skips correlation.
+        /// Default: true
+        /// </summary>
+        public bool VulnerabilityCorrelationEnabled { get; set; } = true;
+
+        /// <summary>
+        /// Last successful vulnerability data sync timestamp (UTC ISO 8601).
+        /// Updated by VulnerabilityDataSyncFunction.
+        /// </summary>
+        public string VulnerabilityDataLastSyncUtc { get; set; }
+
         /// <summary>
         /// Creates default configuration
         /// </summary>

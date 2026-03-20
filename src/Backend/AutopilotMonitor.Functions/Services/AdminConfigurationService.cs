@@ -185,7 +185,10 @@ namespace AutopilotMonitor.Functions.Services
                 { "CollectorIdleTimeoutMinutes", config.CollectorIdleTimeoutMinutes },
                 { "MaxSessionWindowHours", config.MaxSessionWindowHours },
                 { "MaintenanceBlockDurationHours", config.MaintenanceBlockDurationHours },
-                { "DiagnosticsGlobalLogPathsJson", config.DiagnosticsGlobalLogPathsJson }
+                { "DiagnosticsGlobalLogPathsJson", config.DiagnosticsGlobalLogPathsJson },
+                { "NvdApiKey", config.NvdApiKey },
+                { "VulnerabilityCorrelationEnabled", config.VulnerabilityCorrelationEnabled },
+                { "VulnerabilityDataLastSyncUtc", config.VulnerabilityDataLastSyncUtc }
             };
 
             return entity;
@@ -204,7 +207,10 @@ namespace AutopilotMonitor.Functions.Services
                 CollectorIdleTimeoutMinutes = entity.GetInt32("CollectorIdleTimeoutMinutes") ?? 15,
                 MaxSessionWindowHours = entity.GetInt32("MaxSessionWindowHours") ?? 24,
                 MaintenanceBlockDurationHours = entity.GetInt32("MaintenanceBlockDurationHours") ?? 12,
-                DiagnosticsGlobalLogPathsJson = entity.GetString("DiagnosticsGlobalLogPathsJson")
+                DiagnosticsGlobalLogPathsJson = entity.GetString("DiagnosticsGlobalLogPathsJson"),
+                NvdApiKey = entity.GetString("NvdApiKey"),
+                VulnerabilityCorrelationEnabled = entity.GetBoolean("VulnerabilityCorrelationEnabled") ?? true,
+                VulnerabilityDataLastSyncUtc = entity.GetString("VulnerabilityDataLastSyncUtc")
             };
         }
     }

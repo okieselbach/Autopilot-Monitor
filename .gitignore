@@ -109,6 +109,7 @@ tmpclaude-*-cwd
 .claude/commands/ux-insights.md
 .claude/commands/diag-agent-log.md
 .claude/commands/diag-ime-log.md
+.claude/commands/update-cpe-seed.md
 .claude/scripts/query-appinsights.sh
 .claude/scripts/query-table.sh
 .claude/scripts/fetch-diag-zip.sh

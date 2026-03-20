@@ -241,5 +241,13 @@ namespace AutopilotMonitor.Shared.Models
         /// Default: empty list (built-in defaults only)
         /// </summary>
         public List<string> LocalAdminAllowedAccounts { get; set; } = new List<string>();
+
+        /// <summary>
+        /// Whether to run the SoftwareInventoryAnalyzer at startup and shutdown.
+        /// Collects installed software registry inventory, normalizes entries, and
+        /// emits a baseline snapshot (startup) plus delta (shutdown) for vulnerability insight.
+        /// Default: true
+        /// </summary>
+        public bool EnableSoftwareInventoryAnalyzer { get; set; } = true;
     }
 }

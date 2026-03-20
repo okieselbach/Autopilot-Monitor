@@ -51,6 +51,7 @@ export interface TenantConfiguration {
   // Agent analyzer settings
   enableLocalAdminAnalyzer?: boolean;
   localAdminAllowedAccountsJson?: string;
+  enableSoftwareInventoryAnalyzer?: boolean;
   // Bootstrap token
   bootstrapTokenEnabled?: boolean;
   // Unrestricted mode

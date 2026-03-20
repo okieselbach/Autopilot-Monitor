@@ -440,6 +440,21 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 _logger.Info("LocalAdminAnalyzer disabled by remote config");
             }
 
+            if (analyzerConfig.EnableSoftwareInventoryAnalyzer)
+            {
+                _analyzers.Add(new SoftwareInventoryAnalyzer(
+                    _configuration.SessionId,
+                    _configuration.TenantId,
+                    EmitEvent,
+                    _logger
+                ));
+                _logger.Info("SoftwareInventoryAnalyzer registered");
+            }
+            else
+            {
+                _logger.Info("SoftwareInventoryAnalyzer disabled by remote config");
+            }
+
             _logger.Info($"Analyzers initialized: {_analyzers.Count} active");
         }
 

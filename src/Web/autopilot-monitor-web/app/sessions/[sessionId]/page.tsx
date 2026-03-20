@@ -20,11 +20,12 @@ import SessionInfoCard from "./components/SessionInfoCard";
 import PhaseTimeline from "./components/PhaseTimeline";
 import EventTimeline from "./components/EventTimeline";
 import AnalysisResultsSection from "./components/AnalysisResultsSection";
+import VulnerabilityReportSection from "./components/VulnerabilityReportSection";
 import AdminOverrideModal from "./components/AdminOverrideModal";
 import ReportSessionModal from "./components/ReportSessionModal";
 import { usePageSections } from "../../../hooks/usePageSections";
 import { PageSectionItem } from "../../../contexts/SidebarContext";
-import { InformationCircleIcon, ComputerDesktopIcon, PlayCircleIcon, SparklesIcon, ChartBarIcon, CodeBracketIcon, ArrowDownTrayIcon, ListBulletIcon, ClockIcon } from "../../../lib/sidebarIcons";
+import { InformationCircleIcon, ComputerDesktopIcon, PlayCircleIcon, SparklesIcon, ChartBarIcon, CodeBracketIcon, ArrowDownTrayIcon, ListBulletIcon, ClockIcon, ShieldCheckIcon } from "../../../lib/sidebarIcons";
 import DeviceDetailsCard from "./components/DeviceDetailsCard";
 import { generateUiExport, generateCsvExport, generateSessionCsvExport, generateRuleResultsCsvExport, SessionExportEvent } from "@/lib/sessionExportUtils";
 import { Session, EnrollmentEvent, RuleResult } from "@/types";
@@ -51,6 +52,7 @@ export default function SessionDetailPage() {
   const [analysisResults, setAnalysisResults] = useState<RuleResult[]>([]);
   const [loadingAnalysis, setLoadingAnalysis] = useState(false);
   const [analysisExpanded, setAnalysisExpanded] = useState(true);
+  const [vulnerabilityReportExpanded, setVulnerabilityReportExpanded] = useState(false);
   const [phaseTimelineExpanded, setPhaseTimelineExpanded] = useState(true);
   const [perfExpanded, setPerfExpanded] = useState(true);
   const [timelineExpanded, setTimelineExpanded] = useState(true);
@@ -280,12 +282,30 @@ export default function SessionDetailPage() {
       }
     };
 
+    // Listen for async rule engine results (pushed after background analysis completes)
+    const handleRuleResultsReady = (data: { sessionId: string; tenantId: string; ruleResultCount: number }) => {
+      if (data.sessionId !== sessionIdRef.current) return;
+      console.info(`[SessionDetail] ruleResultsReady signal: ${data.ruleResultCount} results`);
+      fetchAnalysisResults();
+    };
+
+    // Listen for async vulnerability correlation results
+    const handleVulnerabilityReportReady = (data: { sessionId: string; tenantId: string; overallRisk: string }) => {
+      if (data.sessionId !== sessionIdRef.current) return;
+      console.info(`[SessionDetail] vulnerabilityReportReady signal: risk=${data.overallRisk}`);
+      scheduleFetchEvents(); // vulnerability_report is stored as an event
+    };
+
     on('eventStream', handleEventStream);
     on('newevents', handleNewEvents);
+    on('ruleResultsReady', handleRuleResultsReady);
+    on('vulnerabilityReportReady', handleVulnerabilityReportReady);
 
     return () => {
       off('eventStream', handleEventStream);
       off('newevents', handleNewEvents);
+      off('ruleResultsReady', handleRuleResultsReady);
+      off('vulnerabilityReportReady', handleVulnerabilityReportReady);
       if (eventRefreshTimeoutRef.current) {
         clearTimeout(eventRefreshTimeoutRef.current);
       }
@@ -833,13 +853,16 @@ export default function SessionDetailPage() {
     if (!isGatherRulesSession) s.push({ id: "section-device-details", label: "Device Details", icon: <ComputerDesktopIcon /> });
     if (!isGatherRulesSession && session) s.push({ id: "section-enrollment-progress", label: "Enrollment Progress", icon: <PlayCircleIcon /> });
     if (!isGatherRulesSession) s.push({ id: "section-analysis", label: "Analysis", icon: <SparklesIcon /> });
+    if (!isGatherRulesSession && events.some(e => e.eventType === "vulnerability_report" || e.eventType === "software_inventory_analysis")) {
+      s.push({ id: "section-vulnerability-report", label: "Vulnerability Report", icon: <ShieldCheckIcon /> });
+    }
     if (!isGatherRulesSession) s.push({ id: "section-performance", label: "Performance", icon: <ChartBarIcon /> });
     if (!isGatherRulesSession) s.push({ id: "section-scripts", label: "Script Executions", icon: <CodeBracketIcon /> });
     if (!isGatherRulesSession) s.push({ id: "section-downloads", label: "Downloads", icon: <ArrowDownTrayIcon /> });
     if (!isGatherRulesSession) s.push({ id: "section-install-progress", label: "Install Progress", icon: <ListBulletIcon /> });
     s.push({ id: "section-event-timeline", label: "Event Timeline", icon: <ClockIcon /> });
     return s;
-  }, [session, isGatherRulesSession]);
+  }, [session, isGatherRulesSession, events]);
 
   usePageSections(sessionSections, "Sections", "scroll-spy");
 
@@ -992,6 +1015,17 @@ export default function SessionDetailPage() {
               setAnalysisExpanded={setAnalysisExpanded}
               onReanalyze={() => { trackEvent("analyze_now_clicked", { sessionId: sessionId ?? "" }); fetchAnalysisResults(true); }}
             />
+            </div>
+          )}
+
+          {/* Vulnerability Report */}
+          {!isGatherRulesSession && (
+            <div id="section-vulnerability-report">
+              <VulnerabilityReportSection
+                events={events}
+                expanded={vulnerabilityReportExpanded}
+                setExpanded={setVulnerabilityReportExpanded}
+              />
             </div>
           )}
 

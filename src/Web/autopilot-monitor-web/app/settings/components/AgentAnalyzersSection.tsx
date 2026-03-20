@@ -7,6 +7,8 @@ interface AgentAnalyzersSectionProps {
   setLocalAdminAllowedAccounts: (value: string[]) => void;
   newAllowedAccount: string;
   setNewAllowedAccount: (value: string) => void;
+  enableSoftwareInventoryAnalyzer: boolean;
+  setEnableSoftwareInventoryAnalyzer: (value: boolean) => void;
   onSave: () => void;
   onReset: () => void;
   saving: boolean;
@@ -33,6 +35,8 @@ export default function AgentAnalyzersSection({
   setLocalAdminAllowedAccounts,
   newAllowedAccount,
   setNewAllowedAccount,
+  enableSoftwareInventoryAnalyzer,
+  setEnableSoftwareInventoryAnalyzer,
   onSave,
   onReset,
   saving,
@@ -148,6 +152,29 @@ export default function AgentAnalyzersSection({
           {isDuplicate && (
             <p className="text-xs text-red-500 mt-1">This account is already in the list.</p>
           )}
+        </div>
+
+        {/* Software Inventory & Vulnerability Analyzer */}
+        <div className="bg-rose-50 border border-rose-200 rounded-lg p-3">
+          <p className="text-sm text-rose-900">
+            The <strong>Software Inventory & Vulnerability Analyzer</strong> collects installed software from the
+            Windows registry at enrollment start and completion. It produces a normalized inventory snapshot,
+            detects software installed during enrollment (delta detection), and correlates findings against
+            known vulnerabilities (NVD CVEs, CISA KEV, MSRC).
+          </p>
+        </div>
+
+        <div className="flex items-center justify-between p-4 rounded-lg border border-gray-200 hover:border-rose-200 transition-colors">
+          <div>
+            <p className="font-medium text-gray-900">Software Inventory & Vulnerability Analyzer</p>
+            <p className="text-sm text-gray-500">Collect installed software inventory and correlate against known vulnerabilities</p>
+          </div>
+          <button
+            onClick={() => setEnableSoftwareInventoryAnalyzer(!enableSoftwareInventoryAnalyzer)}
+            className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${enableSoftwareInventoryAnalyzer ? 'bg-rose-500' : 'bg-gray-300'}`}
+          >
+            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${enableSoftwareInventoryAnalyzer ? 'translate-x-6' : 'translate-x-1'}`} />
+          </button>
         </div>
 
         {/* Save / Reset */}

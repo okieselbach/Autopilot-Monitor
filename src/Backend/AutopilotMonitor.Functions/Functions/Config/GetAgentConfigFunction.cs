@@ -136,7 +136,7 @@ namespace AutopilotMonitor.Functions.Functions.Config
             var response = req.CreateResponse(HttpStatusCode.OK);
             await response.WriteAsJsonAsync(new AgentConfigResponse
             {
-                ConfigVersion = 19, // AAD join with user overrides SkipUserStatusPage device-only classification
+                ConfigVersion = 20, // Software inventory analyzer
                 UploadIntervalSeconds = 10,
                 SelfDestructOnComplete = tenantConfig.SelfDestructOnComplete ?? true,
                 KeepLogFile = tenantConfig.KeepLogFile ?? false,
@@ -159,7 +159,8 @@ namespace AutopilotMonitor.Functions.Functions.Config
                 Analyzers = new AnalyzerConfiguration
                 {
                     EnableLocalAdminAnalyzer = tenantConfig.EnableLocalAdminAnalyzer ?? true,
-                    LocalAdminAllowedAccounts = tenantConfig.GetLocalAdminAllowedAccounts()
+                    LocalAdminAllowedAccounts = tenantConfig.GetLocalAdminAllowedAccounts(),
+                    EnableSoftwareInventoryAnalyzer = tenantConfig.EnableSoftwareInventoryAnalyzer ?? true
                 },
                 SendTraceEvents = tenantConfig.SendTraceEvents,
                 UnrestrictedMode = tenantConfig.UnrestrictedModeEnabled && tenantConfig.UnrestrictedMode,

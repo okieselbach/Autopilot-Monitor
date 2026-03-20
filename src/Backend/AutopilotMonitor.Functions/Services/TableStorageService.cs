@@ -34,6 +34,15 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
+        /// Returns a TableClient for the specified table name.
+        /// Used by services that need direct table access (e.g. VulnerabilityCorrelationService).
+        /// </summary>
+        public TableClient GetTableClient(string tableName)
+        {
+            return _tableServiceClient.GetTableClient(tableName);
+        }
+
+        /// <summary>
         /// Initializes all Azure Table Storage tables.
         /// This method is idempotent and safe to call multiple times.
         /// Should be called at application startup.

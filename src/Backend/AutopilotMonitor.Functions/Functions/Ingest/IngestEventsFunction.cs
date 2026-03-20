@@ -2,6 +2,7 @@ using System.Net;
 using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Functions.Services;
 using AutopilotMonitor.Functions.Services.Notifications;
+using AutopilotMonitor.Functions.Services.Vulnerability;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -23,6 +24,9 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
         private readonly BlockedDeviceService _blockedDeviceService;
         private readonly BlockedVersionService _blockedVersionService;
         private readonly BootstrapSessionService _bootstrapSessionService;
+        private readonly VulnerabilityCorrelationService _vulnerabilityCorrelation;
+        private readonly AdminConfigurationService _adminConfigService;
+        private readonly SignalRNotificationService _signalRNotification;
 
         public IngestEventsFunction(
             ILogger<IngestEventsFunction> logger,
@@ -35,7 +39,10 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             WebhookNotificationService webhookNotificationService,
             BlockedDeviceService blockedDeviceService,
             BlockedVersionService blockedVersionService,
-            BootstrapSessionService bootstrapSessionService)
+            BootstrapSessionService bootstrapSessionService,
+            VulnerabilityCorrelationService vulnerabilityCorrelation,
+            AdminConfigurationService adminConfigService,
+            SignalRNotificationService signalRNotification)
         {
             _logger = logger;
             _storageService = storageService;
@@ -48,6 +55,9 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             _blockedDeviceService = blockedDeviceService;
             _blockedVersionService = blockedVersionService;
             _bootstrapSessionService = bootstrapSessionService;
+            _vulnerabilityCorrelation = vulnerabilityCorrelation;
+            _adminConfigService = adminConfigService;
+            _signalRNotification = signalRNotification;
         }
 
         [Function("IngestEvents")]

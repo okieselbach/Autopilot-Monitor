@@ -3,6 +3,7 @@ using System.Net;
 using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Functions.Services;
 using AutopilotMonitor.Functions.Services.Notifications;
+using AutopilotMonitor.Functions.Services.Vulnerability;
 using AutopilotMonitor.Shared.Models;
 using AutopilotMonitor.Shared.Models.Notifications;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -139,18 +140,22 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                     await _storageService.StoreAppInstallSummaryAsync(summary.Summary);
                 }
 
-                // Extract geo-location data and merge into session row
+                // Extract geo-location data and merge into session row (fire-and-forget —
+                // subsequent event batches arrive frequently so the UI sees it almost immediately)
                 if (classification.DeviceLocationEvent?.Data != null)
                 {
                     var geoData = classification.DeviceLocationEvent.Data;
-                    await _storageService.UpdateSessionGeoAsync(
-                        request.TenantId,
-                        request.SessionId,
+                    var geoTenantId = request.TenantId;
+                    var geoSessionId = request.SessionId;
+                    _ = _storageService.UpdateSessionGeoAsync(
+                        geoTenantId,
+                        geoSessionId,
                         geoData.ContainsKey("country") ? geoData["country"]?.ToString() : null,
                         geoData.ContainsKey("region") ? geoData["region"]?.ToString() : null,
                         geoData.ContainsKey("city") ? geoData["city"]?.ToString() : null,
                         geoData.ContainsKey("loc") ? geoData["loc"]?.ToString() : null
-                    );
+                    ).ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException,
+                        "Fire-and-forget UpdateSessionGeoAsync failed"), TaskContinuationOptions.OnlyOnFaulted);
                 }
 
                 // Update session status based on events
@@ -170,37 +175,140 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                     );
                 }
 
-                // Run full analysis when enrollment ends (cost-efficient: one pass over all events)
+                // Run full analysis when enrollment ends — fire-and-forget so the agent
+                // gets its HTTP 200 immediately. Rule results are stored in Table Storage and
+                // the UI picks them up on the next poll or via the existing "Re-Analyze" button.
+                // This avoids 500ms-10s+ blocking on the critical ingest path.
                 var newRuleResults = new List<AutopilotMonitor.Shared.Models.RuleResult>();
                 if (classification.CompletionEvent != null || classification.FailureEvent != null)
                 {
-                    try
+                    var ruleSessionId = request.SessionId;
+                    var ruleTenantId = request.TenantId;
+                    var rulePrefix = sessionPrefix;
+                    _ = Task.Run(async () =>
                     {
-                        var ruleEngine = new RuleEngine(_analyzeRuleService, _storageService, _logger);
-                        newRuleResults = await ruleEngine.AnalyzeSessionAsync(request.TenantId, request.SessionId);
-
-                        foreach (var result in newRuleResults)
+                        try
                         {
-                            await _storageService.StoreRuleResultAsync(result);
+                            var ruleEngine = new RuleEngine(_analyzeRuleService, _storageService, _logger);
+                            var results = await ruleEngine.AnalyzeSessionAsync(ruleTenantId, ruleSessionId);
+
+                            foreach (var result in results)
+                            {
+                                await _storageService.StoreRuleResultAsync(result);
+                            }
+
+                            if (results.Count > 0)
+                            {
+                                _logger.LogInformation("{Prefix} Enrollment-end analysis (async): {Count} issue(s) detected",
+                                    rulePrefix, results.Count);
+
+                                // Push SignalR notification so the UI fetches results immediately
+                                await _signalRNotification.NotifyRuleResultsAvailableAsync(
+                                    ruleTenantId, ruleSessionId, results.Count);
+                            }
+
+                            // Increment platform stats for detected issues
+                            if (results.Count > 0)
+                            {
+                                _ = _storageService.IncrementPlatformStatAsync("IssuesDetected", results.Count)
+                                    .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException,
+                                        "Fire-and-forget IncrementPlatformStatAsync failed"), TaskContinuationOptions.OnlyOnFaulted);
+                            }
                         }
-
-                        if (newRuleResults.Count > 0)
+                        catch (Exception ruleEx)
                         {
-                            _logger.LogInformation($"{sessionPrefix} Enrollment-end analysis: {newRuleResults.Count} issue(s) detected");
+                            _logger.LogWarning(ruleEx, "{Prefix} Enrollment-end analysis failed (async, non-fatal)", rulePrefix);
+                        }
+                    });
+                }
+
+                // Vulnerability Correlation — fire-and-forget when shutdown inventory arrives.
+                // Runs asynchronously so it never blocks the HTTP response to the agent.
+                // The vulnerability_report event is stored in Table Storage; the UI picks it up
+                // on the next poll or page refresh (no SignalR broadcast for async results).
+                var shutdownInventoryDetected = storedEvents.Any(e =>
+                    e.EventType == AutopilotMonitor.Shared.Constants.EventTypes.SoftwareInventoryAnalysis &&
+                    e.Data != null &&
+                    e.Data.ContainsKey("triggered_at") &&
+                    e.Data["triggered_at"]?.ToString() == "shutdown" &&
+                    e.Data.ContainsKey("chunk_index") &&
+                    Convert.ToInt32(e.Data["chunk_index"]) == 0);
+
+                if (shutdownInventoryDetected)
+                {
+                    // Capture everything we need before going async (request object may be disposed)
+                    var capturedSessionId = request.SessionId;
+                    var capturedTenantId = request.TenantId;
+                    var capturedPrefix = sessionPrefix;
+
+                    // Merge all inventory chunks from this batch into a self-contained list
+                    var allInventoryItems = new List<Dictionary<string, object>>();
+                    var inventoryChunks = storedEvents
+                        .Where(e => e.EventType == AutopilotMonitor.Shared.Constants.EventTypes.SoftwareInventoryAnalysis &&
+                            e.Data != null &&
+                            e.Data.ContainsKey("triggered_at") &&
+                            e.Data["triggered_at"]?.ToString() == "shutdown" &&
+                            e.Data.ContainsKey("inventory"))
+                        .OrderBy(e => Convert.ToInt32(e.Data.GetValueOrDefault("chunk_index", 0)))
+                        .ToList();
+
+                    foreach (var chunk in inventoryChunks)
+                    {
+                        if (chunk.Data["inventory"] is System.Collections.IEnumerable items)
+                        {
+                            foreach (var item in items)
+                            {
+                                if (item is Dictionary<string, object> dict)
+                                    allInventoryItems.Add(dict);
+                            }
                         }
                     }
-                    catch (Exception ruleEx)
+
+                    if (allInventoryItems.Count > 0)
                     {
-                        _logger.LogWarning(ruleEx, $"{sessionPrefix} Enrollment-end analysis failed (non-fatal)");
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                var adminConfig = await _adminConfigService.GetConfigurationAsync();
+                                if (adminConfig?.VulnerabilityCorrelationEnabled != true)
+                                    return;
+
+                                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+                                var vulnReport = await _vulnerabilityCorrelation.CorrelateAsync(
+                                    capturedSessionId, capturedTenantId, allInventoryItems, cts.Token);
+
+                                if (vulnReport != null)
+                                {
+                                    vulnReport.SessionId = capturedSessionId;
+                                    vulnReport.TenantId = capturedTenantId;
+                                    vulnReport.ReceivedAt = DateTime.UtcNow;
+                                    await _storageService.StoreEventsBatchAsync(new List<EnrollmentEvent> { vulnReport });
+                                    _logger.LogInformation("{Prefix} Vulnerability correlation complete (async): {Message}",
+                                        capturedPrefix, vulnReport.Message);
+
+                                    // Push SignalR notification so the UI fetches the report immediately
+                                    var overallRisk = vulnReport.Data?.ContainsKey("scan_summary") == true
+                                        && vulnReport.Data["scan_summary"] is Dictionary<string, object> summary
+                                        && summary.ContainsKey("overall_risk")
+                                        ? summary["overall_risk"]?.ToString() ?? "unknown"
+                                        : "unknown";
+                                    await _signalRNotification.NotifyVulnerabilityReportAvailableAsync(
+                                        capturedTenantId, capturedSessionId, overallRisk);
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "{Prefix} Vulnerability correlation failed (async, non-fatal)", capturedPrefix);
+                            }
+                        });
                     }
                 }
 
                 // Increment platform stats (fire-and-forget, non-blocking)
+                // Note: IssuesDetected is now incremented inside the async rule engine task above.
                 _ = _storageService.IncrementPlatformStatAsync("TotalEventsProcessed", processedCount)
                     .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException, "Fire-and-forget IncrementPlatformStatAsync failed"), TaskContinuationOptions.OnlyOnFaulted);
-                if (newRuleResults.Count > 0)
-                    _ = _storageService.IncrementPlatformStatAsync("IssuesDetected", newRuleResults.Count)
-                        .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException, "Fire-and-forget IncrementPlatformStatAsync failed"), TaskContinuationOptions.OnlyOnFaulted);
                 if (classification.CompletionEvent != null)
                     _ = _storageService.IncrementPlatformStatAsync("SuccessfulEnrollments")
                         .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException, "Fire-and-forget IncrementPlatformStatAsync failed"), TaskContinuationOptions.OnlyOnFaulted);

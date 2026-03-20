@@ -1110,6 +1110,87 @@
         "local-admin",
         "bypass-detection"
       ]
+    },
+    {
+      "ruleId": "ANALYZE-ID-003",
+      "title": "Critical Vulnerability Detected",
+      "description": "Fires when the vulnerability correlation finds critical-severity CVEs or CISA KEV entries in installed software.",
+      "severity": "critical",
+      "category": "vulnerability",
+      "version": "1.0.0",
+      "author": "Autopilot Monitor",
+      "enabled": true,
+      "trigger": "single",
+      "baseConfidence": 90,
+      "conditions": [
+        {
+          "signal": "critical_vulnerabilities",
+          "source": "event_type",
+          "eventType": "vulnerability_report",
+          "dataField": "scan_summary.critical_cves",
+          "operator": "gte",
+          "value": "1",
+          "required": false
+        },
+        {
+          "signal": "kev_matches",
+          "source": "event_type",
+          "eventType": "vulnerability_report",
+          "dataField": "scan_summary.kev_matches",
+          "operator": "gte",
+          "value": "1",
+          "required": false
+        }
+      ],
+      "confidenceFactors": [
+        {
+          "signal": "kev_confirmed",
+          "source": "event_data",
+          "eventType": "vulnerability_report",
+          "dataField": "scan_summary.kev_matches",
+          "operator": "gte",
+          "value": "1",
+          "weight": 10
+        }
+      ],
+      "confidenceThreshold": 80,
+      "explanation": "The device has installed software with critical vulnerabilities. Software with CVEs rated CRITICAL (CVSS >= 9.0) or listed in the CISA Known Exploited Vulnerabilities catalog was detected. These vulnerabilities are actively targeted by attackers and should be remediated immediately.",
+      "remediation": [
+        {
+          "title": "Review vulnerability findings",
+          "steps": [
+            "Open the Vulnerability Report section in the session detail",
+            "Identify all software with critical or KEV-flagged vulnerabilities",
+            "Check if newer versions are available that address these CVEs",
+            "Update the affected software in your Intune app deployment"
+          ]
+        },
+        {
+          "title": "Update deployment packages",
+          "steps": [
+            "Check Intune for outdated app package versions",
+            "Update the deployment package to the latest patched version",
+            "Re-deploy to affected devices"
+          ]
+        }
+      ],
+      "relatedDocs": [
+        {
+          "title": "CISA KEV Catalog",
+          "url": "https://www.cisa.gov/known-exploited-vulnerabilities-catalog"
+        },
+        {
+          "title": "NVD - National Vulnerability Database",
+          "url": "https://nvd.nist.gov/"
+        }
+      ],
+      "tags": [
+        "vulnerability",
+        "cve",
+        "kev",
+        "critical",
+        "security"
+      ]
     }
   ]
 }

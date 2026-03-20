@@ -118,6 +118,15 @@ builder.Services.AddSingleton<BlockedVersionService>();
 builder.Services.AddSingleton<SessionReportService>();
 builder.Services.AddSingleton<BootstrapSessionService>();
 
+// Programmatic SignalR push for background tasks (rule engine, vulnerability correlation)
+builder.Services.AddSingleton<SignalRNotificationService>();
+
+// Vulnerability correlation services
+builder.Services.AddHttpClient<AutopilotMonitor.Functions.Services.Vulnerability.NvdApiClient>();
+builder.Services.AddHttpClient<AutopilotMonitor.Functions.Services.Vulnerability.KevDataService>();
+builder.Services.AddHttpClient<AutopilotMonitor.Functions.Services.Vulnerability.MsrcApiClient>();
+builder.Services.AddSingleton<AutopilotMonitor.Functions.Services.Vulnerability.VulnerabilityCorrelationService>();
+
 // Register agent Function classes so bootstrap wrappers can inject them for code reuse
 builder.Services.AddSingleton<IngestEventsFunction>();
 builder.Services.AddSingleton<RegisterSessionFunction>();

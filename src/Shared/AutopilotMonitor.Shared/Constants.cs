@@ -151,6 +151,8 @@ namespace AutopilotMonitor.Shared
             public const string ScriptCompleted     = "script_completed";
             public const string ScriptFailed        = "script_failed";
             public const string EspProvisioningStatus = "esp_provisioning_status";
+            public const string SoftwareInventoryAnalysis = "software_inventory_analysis";
+            public const string VulnerabilityReport       = "vulnerability_report";
         }
 
         // -----------------------------------------------------------------------
@@ -251,6 +253,9 @@ namespace AutopilotMonitor.Shared
             // Galactic Admin in-app notifications (persistent until dismissed)
             public const string GalacticNotifications = "GalacticNotifications";
 
+            // Vulnerability data cache (CPE mappings, CVE data, KEV catalog)
+            public const string VulnerabilityCache = "VulnerabilityCache";
+
             /// <summary>
             /// Returns all table names for initialization
             /// </summary>
@@ -279,7 +284,8 @@ namespace AutopilotMonitor.Shared
                 BlockedVersions,
                 SessionReports,
                 BootstrapSessions,
-                GalacticNotifications
+                GalacticNotifications,
+                VulnerabilityCache
             };
         }
     }
