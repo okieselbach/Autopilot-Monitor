@@ -154,7 +154,11 @@ export default function SessionDetailPage() {
       if (next) {
         // Enabling: immediately scroll to bottom and mark as near-bottom
         isNearBottomRef.current = true;
-        setTimeout(() => window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }), 50);
+        isProgrammaticScrollRef.current = true;
+        setTimeout(() => {
+          window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+          setTimeout(() => { isProgrammaticScrollRef.current = false; }, 600);
+        }, 50);
       }
       return next;
     });
