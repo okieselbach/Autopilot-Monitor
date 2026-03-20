@@ -91,6 +91,10 @@ export default function SessionDetailPage() {
 
   // Auto-scroll: tracks whether the user is near the bottom of the page
   const isNearBottomRef = useRef(false);
+  // Auto-scroll: guards against race condition where content growth during
+  // a programmatic smooth-scroll temporarily moves the viewport away from
+  // the bottom, causing isNearBottomRef to flip false prematurely.
+  const isProgrammaticScrollRef = useRef(false);
 
   // Use global contexts
   const { on, off, isConnected, joinGroup, leaveGroup } = useSignalR();
@@ -120,7 +124,13 @@ export default function SessionDetailPage() {
     if (!autoScroll) return;
     const handleScroll = () => {
       const distanceFromBottom = document.body.scrollHeight - window.scrollY - window.innerHeight;
-      isNearBottomRef.current = distanceFromBottom <= 150;
+      if (isProgrammaticScrollRef.current) {
+        // During a programmatic scroll animation, only allow flipping to true
+        // (we reached the bottom) — never flip to false (content grew mid-animation).
+        if (distanceFromBottom <= 150) isNearBottomRef.current = true;
+      } else {
+        isNearBottomRef.current = distanceFromBottom <= 150;
+      }
     };
     window.addEventListener('scroll', handleScroll, { passive: true });
     return () => window.removeEventListener('scroll', handleScroll);
@@ -129,10 +139,13 @@ export default function SessionDetailPage() {
   // Auto-scroll: when new events arrive, scroll to bottom only if user is already near the bottom.
   useEffect(() => {
     if (!autoScroll || events.length === 0 || !isNearBottomRef.current) return;
+    isProgrammaticScrollRef.current = true;
     const timer = setTimeout(() => {
       window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+      // Keep the guard up long enough for the smooth scroll animation to finish.
+      setTimeout(() => { isProgrammaticScrollRef.current = false; }, 600);
     }, 150);
-    return () => clearTimeout(timer);
+    return () => { clearTimeout(timer); isProgrammaticScrollRef.current = false; };
   }, [events, autoScroll]);
 
   const handleAutoScrollToggle = () => {
