@@ -82,49 +82,36 @@ export default function OobeConfigModal({ show, value, onClose }: OobeConfigModa
             ))}
           </div>
 
-          {/* Bit table */}
-          <div className="border rounded-lg overflow-hidden">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-gray-50 text-left text-xs text-gray-500 uppercase tracking-wider">
-                  <th className="px-3 py-2 w-8"></th>
-                  <th className="px-3 py-2">Flag</th>
-                  <th className="px-3 py-2 text-right">Source</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {OOBE_CONFIG_BITS.map((bit) => {
-                  const isSet = (value & bit.value) !== 0;
-                  const conf = CONFIDENCE_CONFIG[bit.confidence];
-                  return (
-                    <tr key={bit.bit} className={isSet ? "bg-blue-50" : "text-gray-400"}>
-                      <td className="px-3 py-2 text-center">
-                        {isSet ? (
-                          <svg className="w-4 h-4 text-blue-600 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                          </svg>
-                        ) : (
-                          <span className="text-gray-300">&mdash;</span>
-                        )}
-                      </td>
-                      <td className="px-3 py-2">
-                        <div className={`font-medium ${isSet ? "text-gray-900" : ""}`}>{bit.name}</div>
-                        <div className={`text-xs ${isSet ? "text-gray-600" : "text-gray-400"}`}>
-                          {bit.description}
-                          <span className="ml-1 text-gray-400">({bit.hex})</span>
-                        </div>
-                      </td>
-                      <td className="px-3 py-2 text-right align-top">
-                        <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] whitespace-nowrap ${conf.bg} ${conf.text}`}>
-                          <span className={`w-1 h-1 rounded-full ${conf.dot}`} />
-                          {bit.source}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          {/* Flag list */}
+          <div className="space-y-1.5">
+            {OOBE_CONFIG_BITS.map((bit) => {
+              const isSet = (value & bit.value) !== 0;
+              const conf = CONFIDENCE_CONFIG[bit.confidence];
+              return (
+                <div key={bit.bit} className={`flex items-start gap-2.5 px-3 py-2 rounded-lg ${isSet ? "bg-blue-50 border border-blue-200" : "bg-gray-50 border border-transparent"}`}>
+                  <div className="flex-shrink-0 mt-0.5">
+                    {isSet ? (
+                      <svg className="w-4 h-4 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                      </svg>
+                    ) : (
+                      <span className="w-4 h-4 block text-center text-gray-300 leading-4">&mdash;</span>
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className={`font-medium text-sm ${isSet ? "text-gray-900" : "text-gray-400"}`}>{bit.name}</span>
+                      <span className="text-[10px] text-gray-400 font-mono">{bit.hex}</span>
+                      <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] ${conf.bg} ${conf.text}`}>
+                        <span className={`w-1 h-1 rounded-full ${conf.dot}`} />
+                        {bit.source}
+                      </span>
+                    </div>
+                    <p className={`text-xs mt-0.5 ${isSet ? "text-gray-600" : "text-gray-400"}`}>{bit.description}</p>
+                  </div>
+                </div>
+              );
+            })}
           </div>
 
           {/* Unknown bits warning */}
