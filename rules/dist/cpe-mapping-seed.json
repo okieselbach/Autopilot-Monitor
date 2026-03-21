@@ -2471,6 +2471,146 @@
       "cpeProduct": "webex_teams",
       "cpeUri": "cpe:2.3:a:cisco:webex_teams",
       "category": "communication"
+    },
+    {
+      "normalizedVendor": "intel",
+      "normalizedProduct": "intel graphics driver",
+      "displayNamePatterns": ["intel graphics driver", "intel uhd graphics", "intel hd graphics", "intel iris"],
+      "publisherPatterns": ["intel", "intel corporation", "intel(r) corporation"],
+      "cpeVendor": "intel",
+      "cpeProduct": "graphics_driver",
+      "cpeUri": "cpe:2.3:a:intel:graphics_driver",
+      "category": "utility"
+    },
+    {
+      "normalizedVendor": "amd",
+      "normalizedProduct": "amd radeon software",
+      "displayNamePatterns": ["amd radeon software", "amd software", "radeon software adrenalin", "amd chipset software"],
+      "publisherPatterns": ["amd", "advanced micro devices", "advanced micro devices, inc."],
+      "cpeVendor": "amd",
+      "cpeProduct": "radeon_software",
+      "cpeUri": "cpe:2.3:a:amd:radeon_software",
+      "category": "utility"
+    },
+    {
+      "normalizedVendor": "realtek",
+      "normalizedProduct": "realtek hd audio driver",
+      "displayNamePatterns": ["realtek high definition audio", "realtek hd audio", "realtek audio driver"],
+      "publisherPatterns": ["realtek", "realtek semiconductor"],
+      "cpeVendor": "realtek",
+      "cpeProduct": "hd_audio_drivers",
+      "cpeUri": "cpe:2.3:a:realtek:hd_audio_drivers",
+      "category": "utility"
+    },
+    {
+      "normalizedVendor": "nvidia",
+      "normalizedProduct": "nvidia geforce experience",
+      "displayNamePatterns": ["nvidia geforce experience", "nvidia app", "geforce experience"],
+      "publisherPatterns": ["nvidia", "nvidia corporation"],
+      "cpeVendor": "nvidia",
+      "cpeProduct": "geforce_experience",
+      "cpeUri": "cpe:2.3:a:nvidia:geforce_experience",
+      "category": "utility"
+    },
+    {
+      "normalizedVendor": "lenovo",
+      "normalizedProduct": "lenovo vantage",
+      "displayNamePatterns": ["lenovo vantage", "lenovo companion"],
+      "publisherPatterns": ["lenovo", "lenovo group"],
+      "cpeVendor": "lenovo",
+      "cpeProduct": "vantage",
+      "cpeUri": "cpe:2.3:a:lenovo:vantage",
+      "category": "enterprise"
+    },
+    {
+      "normalizedVendor": "adobe",
+      "normalizedProduct": "adobe media encoder",
+      "displayNamePatterns": ["adobe media encoder", "media encoder"],
+      "publisherPatterns": ["adobe", "adobe systems", "adobe systems incorporated", "adobe inc."],
+      "cpeVendor": "adobe",
+      "cpeProduct": "media_encoder",
+      "cpeUri": "cpe:2.3:a:adobe:media_encoder",
+      "category": "utility"
+    },
+    {
+      "normalizedVendor": "autodesk",
+      "normalizedProduct": "autodesk autocad",
+      "displayNamePatterns": ["autocad", "autodesk autocad"],
+      "publisherPatterns": ["autodesk", "autodesk, inc."],
+      "cpeVendor": "autodesk",
+      "cpeProduct": "autocad",
+      "cpeUri": "cpe:2.3:a:autodesk:autocad",
+      "category": "enterprise"
+    },
+    {
+      "normalizedVendor": "autodesk",
+      "normalizedProduct": "autodesk revit",
+      "displayNamePatterns": ["autodesk revit", "revit"],
+      "publisherPatterns": ["autodesk", "autodesk, inc."],
+      "cpeVendor": "autodesk",
+      "cpeProduct": "revit",
+      "cpeUri": "cpe:2.3:a:autodesk:revit",
+      "category": "enterprise"
+    },
+    {
+      "normalizedVendor": "siemens",
+      "normalizedProduct": "siemens teamcenter",
+      "displayNamePatterns": ["teamcenter", "siemens teamcenter"],
+      "publisherPatterns": ["siemens", "siemens ag", "siemens plm software"],
+      "cpeVendor": "siemens",
+      "cpeProduct": "teamcenter",
+      "cpeUri": "cpe:2.3:a:siemens:teamcenter",
+      "category": "enterprise"
+    },
+    {
+      "normalizedVendor": "solidworks",
+      "normalizedProduct": "solidworks",
+      "displayNamePatterns": ["solidworks", "dassault solidworks"],
+      "publisherPatterns": ["dassault systemes", "dassault systemes solidworks", "solidworks"],
+      "cpeVendor": "solidworks",
+      "cpeProduct": "solidworks",
+      "cpeUri": "cpe:2.3:a:solidworks:solidworks",
+      "category": "enterprise"
+    },
+    {
+      "normalizedVendor": "mathworks",
+      "normalizedProduct": "matlab",
+      "displayNamePatterns": ["matlab", "mathworks matlab"],
+      "publisherPatterns": ["the mathworks", "the mathworks, inc.", "mathworks"],
+      "cpeVendor": "mathworks",
+      "cpeProduct": "matlab",
+      "cpeUri": "cpe:2.3:a:mathworks:matlab",
+      "category": "enterprise"
+    },
+    {
+      "normalizedVendor": "canon",
+      "normalizedProduct": "canon printer driver",
+      "displayNamePatterns": ["canon ij printer driver", "canon printer driver", "canon generic plus"],
+      "publisherPatterns": ["canon", "canon inc.", "canon inc"],
+      "cpeVendor": "canon",
+      "cpeProduct": "ij_network_tool",
+      "cpeUri": "cpe:2.3:a:canon:ij_network_tool",
+      "category": "utility"
+    },
+    {
+      "normalizedVendor": "intel",
+      "normalizedProduct": "intel chipset device software",
+      "displayNamePatterns": ["intel chipset device software", "intel chipset inf utility", "intel management engine"],
+      "publisherPatterns": ["intel", "intel corporation", "intel(r) corporation"],
+      "cpeVendor": "intel",
+      "cpeProduct": "chipset_device_software",
+      "cpeUri": "cpe:2.3:a:intel:chipset_device_software",
+      "category": "utility"
+    },
+    {
+      "normalizedVendor": "grammarly",
+      "normalizedProduct": "grammarly",
+      "displayNamePatterns": ["grammarly", "grammarly for windows"],
+      "publisherPatterns": ["grammarly", "grammarly, inc."],
+      "cpeVendor": "grammarly",
+      "cpeProduct": "grammarly",
+      "cpeUri": "cpe:2.3:a:grammarly:grammarly",
+      "category": "utility"
     }
   ]
 }
