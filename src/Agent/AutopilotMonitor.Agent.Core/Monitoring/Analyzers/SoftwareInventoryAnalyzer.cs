@@ -304,6 +304,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Analyzers
         {
             // Intune / device management
             "Microsoft.CompanyPortal",
+            "Microsoft.ManagementApp",
 
             // Communication & productivity (CVE-relevant, enterprise-deployed)
             "Microsoft.Teams",
