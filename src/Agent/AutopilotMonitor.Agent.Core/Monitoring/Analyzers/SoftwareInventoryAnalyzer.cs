@@ -294,30 +294,51 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Analyzers
         };
 
         // -----------------------------------------------------------------------
-        // AppX package filtering — exclude frameworks, runtimes, and OS components
+        // AppX package filtering — whitelist approach to avoid inbox app noise
+        // Only Microsoft packages on this list pass through; all non-Microsoft
+        // publisher packages are allowed (they are rare and usually relevant).
         // -----------------------------------------------------------------------
 
-        private static readonly string[] AppxExcludePrefixes = new[]
+        private static readonly HashSet<string> AppxMicrosoftWhitelist = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "Microsoft.Windows.",       // OS shell components
-            "Microsoft.NET.Native.",    // .NET Native runtime
-            "Microsoft.VCLibs.",        // VC++ runtime
-            "Microsoft.UI.Xaml.",       // WinUI framework
-            "Microsoft.Services.",      // OS services
-            "Microsoft.DirectX.",       // DirectX runtime
-            "Microsoft.Advertising.",   // Ad SDK
-            "windows.immersivecontrolpanel",  // Settings app
-            "Microsoft.LockApp",        // Lock screen
-            "Microsoft.Windows",        // Catch-all for remaining OS apps
-            "InputApp",                 // Touch keyboard
-            "NcsiUwpApp",               // Network connectivity
+            // Intune / device management
+            "Microsoft.CompanyPortal",
+            "Microsoft.ManagementApp",
+
+            // Communication & productivity (CVE-relevant, enterprise-deployed)
+            "Microsoft.Teams",
+            "MSTeams",
+            "MicrosoftTeams",
+            "Microsoft.Office.Desktop",
+            "Microsoft.MicrosoftOfficeHub",
+            "Microsoft.OutlookForWindows",
+
+            // Remote access (security surface)
+            "Microsoft.RemoteDesktop",
+            "MicrosoftCorporationII.WindowsSubsystemForLinux",
+
+            // Developer tools (CVE-relevant)
+            "Microsoft.WindowsTerminal",
+            "Microsoft.VisualStudioCode",
+
+            // Power Platform (enterprise)
+            "Microsoft.PowerAutomateDesktop",
+            "Microsoft.PowerBIDesktop",
+
+            // Security-relevant Microsoft apps
+            "Microsoft.SecHealthUI",                // Windows Security app
+            "Microsoft.OneDriveSync",
         };
 
-        private static readonly string[] AppxExcludeContains = new[]
+        // Prefixes that always indicate noise (frameworks, runtimes, OS plumbing)
+        private static readonly string[] AppxAlwaysExcludePrefixes = new[]
         {
-            ".NET.Native.",
-            "VCLibs",
-            "Framework",
+            "Microsoft.NET.",           // .NET runtimes
+            "Microsoft.VCLibs.",        // VC++ runtime
+            "Microsoft.UI.Xaml.",       // WinUI framework
+            "Microsoft.DirectX.",       // DirectX runtime
+            "Microsoft.Services.",      // OS services
+            "Microsoft.Advertising.",   // Ad SDK
         };
 
         // Pattern: {Publisher.PackageName}_{Version}_{Arch}__{PublisherHash}
@@ -590,19 +611,30 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Analyzers
 
         private static bool ShouldExcludeAppx(string packageFullName)
         {
-            foreach (var prefix in AppxExcludePrefixes)
+            // Always exclude frameworks/runtimes regardless of publisher
+            foreach (var prefix in AppxAlwaysExcludePrefixes)
             {
                 if (packageFullName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
                     return true;
             }
 
-            foreach (var pattern in AppxExcludeContains)
-            {
-                if (packageFullName.IndexOf(pattern, StringComparison.OrdinalIgnoreCase) >= 0)
-                    return true;
-            }
+            // Extract the package identity (everything before the first underscore)
+            var underscoreIndex = packageFullName.IndexOf('_');
+            var packageId = underscoreIndex > 0
+                ? packageFullName.Substring(0, underscoreIndex)
+                : packageFullName;
 
-            return false;
+            // Non-Microsoft publishers: allow through (rare, usually relevant 3rd-party apps)
+            bool isMicrosoft = packageId.StartsWith("Microsoft", StringComparison.OrdinalIgnoreCase)
+                            || packageId.StartsWith("MSTeams", StringComparison.OrdinalIgnoreCase)
+                            || packageId.StartsWith("Windows.", StringComparison.OrdinalIgnoreCase)
+                            || packageId.StartsWith("Clipchamp.", StringComparison.OrdinalIgnoreCase);
+
+            if (!isMicrosoft)
+                return false; // 3rd-party → keep
+
+            // Microsoft publisher: only allow whitelisted packages
+            return !AppxMicrosoftWhitelist.Contains(packageId);
         }
 
         private static SoftwareEntry ParseAppxPackageName(string packageFullName)
