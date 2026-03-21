@@ -2,10 +2,12 @@
 
 import { useState, useMemo } from "react";
 import { EnrollmentEvent } from "@/types";
+import OobeConfigModal from "./OobeConfigModal";
 
 export default function DeviceDetailsCard({ events }: { events: EnrollmentEvent[] }) {
   const [expanded, setExpanded] = useState(false);
   const [showIpv6, setShowIpv6] = useState<Record<number, boolean>>({});
+  const [showOobeModal, setShowOobeModal] = useState(false);
 
   const getEventData = (eventType: string): Record<string, any> | null => {
     const matchingEvents = events.filter(e => e.eventType === eventType);
@@ -346,7 +348,28 @@ export default function DeviceDetailsCard({ events }: { events: EnrollmentEvent[
                 {hasValue(autopilotProfile.DeploymentProfileName) && <DetailRow label="Profile Name" value={`${autopilotProfile.DeploymentProfileName}`} />}
                 {hasValue(autopilotProfile.CloudAssignedTenantId) && <DetailRow label="Tenant ID" value={`${autopilotProfile.CloudAssignedTenantId}`} />}
                 {hasValue(autopilotProfile.PolicyDownloadDate) && <DetailRow label="Policy Downloaded" value={new Date(autopilotProfile.PolicyDownloadDate).toLocaleString()} />}
-                {hasValue(autopilotProfile.CloudAssignedOobeConfig) && <DetailRow label="OOBE Config" value={`${autopilotProfile.CloudAssignedOobeConfig}`} />}
+                {hasValue(autopilotProfile.CloudAssignedOobeConfig) && (
+                  <>
+                    <div className="flex items-center justify-between py-1">
+                      <span className="text-xs text-gray-500 min-w-[120px]">OOBE Config</span>
+                      <button
+                        onClick={() => setShowOobeModal(true)}
+                        className="text-xs text-right text-blue-600 hover:text-blue-800 hover:underline cursor-pointer font-mono transition-colors"
+                        title="Click to decode bitmask"
+                      >
+                        {`${autopilotProfile.CloudAssignedOobeConfig}`}
+                        <svg className="w-3 h-3 inline ml-1 -mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                      </button>
+                    </div>
+                    <OobeConfigModal
+                      show={showOobeModal}
+                      value={Number(autopilotProfile.CloudAssignedOobeConfig)}
+                      onClose={() => setShowOobeModal(false)}
+                    />
+                  </>
+                )}
                 {hasValue(autopilotProfile.ZtdRegistrationId) && <DetailRow label="ZTD Registration ID" value={`${autopilotProfile.ZtdRegistrationId}`} />}
                 {hasValue(autopilotProfile.AadDeviceId) && <DetailRow label="AAD Device ID" value={`${autopilotProfile.AadDeviceId}`} />}
                 {autopilotProfile.AutopilotMode !== undefined && (
