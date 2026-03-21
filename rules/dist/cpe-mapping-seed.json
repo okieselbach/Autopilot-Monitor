@@ -618,8 +618,8 @@
       "displayNamePatterns": ["docker desktop"],
       "publisherPatterns": ["docker", "docker inc.", "docker inc"],
       "cpeVendor": "docker",
-      "cpeProduct": "docker_desktop",
-      "cpeUri": "cpe:2.3:a:docker:docker_desktop",
+      "cpeProduct": "desktop",
+      "cpeUri": "cpe:2.3:a:docker:desktop",
       "category": "development"
     },
     {
@@ -1317,9 +1317,9 @@
       "normalizedProduct": "protonvpn",
       "displayNamePatterns": ["protonvpn", "proton vpn"],
       "publisherPatterns": ["proton ag", "proton technologies"],
-      "cpeVendor": "protonvpn",
+      "cpeVendor": "proton",
       "cpeProduct": "protonvpn",
-      "cpeUri": "cpe:2.3:a:protonvpn:protonvpn",
+      "cpeUri": "cpe:2.3:a:proton:protonvpn",
       "category": "vpn"
     },
     {
@@ -1698,8 +1698,8 @@
       "displayNamePatterns": ["cylanceprotect", "cylance protect", "blackberry protect"],
       "publisherPatterns": ["blackberry", "cylance"],
       "cpeVendor": "blackberry",
-      "cpeProduct": "cylanceprotect",
-      "cpeUri": "cpe:2.3:a:blackberry:cylanceprotect",
+      "cpeProduct": "protect",
+      "cpeUri": "cpe:2.3:a:blackberry:protect",
       "category": "security"
     },
     {
@@ -1737,9 +1737,9 @@
       "normalizedProduct": "f-secure elements",
       "displayNamePatterns": ["f-secure elements", "f-secure client security", "withsecure elements"],
       "publisherPatterns": ["f-secure", "f-secure corporation", "withsecure"],
-      "cpeVendor": "f-secure",
+      "cpeVendor": "withsecure",
       "cpeProduct": "elements_endpoint_protection",
-      "cpeUri": "cpe:2.3:a:f-secure:elements_endpoint_protection",
+      "cpeUri": "cpe:2.3:a:withsecure:elements_endpoint_protection",
       "category": "security"
     },
     {
