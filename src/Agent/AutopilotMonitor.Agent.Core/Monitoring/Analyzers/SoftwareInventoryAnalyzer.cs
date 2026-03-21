@@ -304,14 +304,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Analyzers
         {
             // Intune / device management
             "Microsoft.CompanyPortal",
-            "Microsoft.ManagementApp",
 
             // Communication & productivity (CVE-relevant, enterprise-deployed)
             "Microsoft.Teams",
             "MSTeams",
             "MicrosoftTeams",
             "Microsoft.Office.Desktop",
-            "Microsoft.MicrosoftOfficeHub",
             "Microsoft.OutlookForWindows",
 
             // Remote access (security surface)
@@ -324,11 +322,6 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Analyzers
 
             // Power Platform (enterprise)
             "Microsoft.PowerAutomateDesktop",
-            "Microsoft.PowerBIDesktop",
-
-            // Security-relevant Microsoft apps
-            "Microsoft.SecHealthUI",                // Windows Security app
-            "Microsoft.OneDriveSync",
         };
 
         // Pattern: {Publisher.PackageName}_{Version}_{Arch}__{PublisherHash}
