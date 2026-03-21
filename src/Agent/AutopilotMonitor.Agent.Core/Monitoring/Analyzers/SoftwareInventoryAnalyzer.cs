@@ -294,12 +294,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Analyzers
         };
 
         // -----------------------------------------------------------------------
-        // AppX package filtering — whitelist approach to avoid inbox app noise
-        // Only Microsoft packages on this list pass through; all non-Microsoft
-        // publisher packages are allowed (they are rare and usually relevant).
+        // AppX package filtering — strict whitelist for all publishers
+        // Sandboxed AppX/MSIX apps rarely have CVEs and the sandbox limits
+        // blast radius, so we only surface packages with known security or
+        // enterprise relevance to keep the report clean.
         // -----------------------------------------------------------------------
 
-        private static readonly HashSet<string> AppxMicrosoftWhitelist = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        private static readonly HashSet<string> AppxWhitelist = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             // Intune / device management
             "Microsoft.CompanyPortal",
@@ -328,17 +329,6 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Analyzers
             // Security-relevant Microsoft apps
             "Microsoft.SecHealthUI",                // Windows Security app
             "Microsoft.OneDriveSync",
-        };
-
-        // Prefixes that always indicate noise (frameworks, runtimes, OS plumbing)
-        private static readonly string[] AppxAlwaysExcludePrefixes = new[]
-        {
-            "Microsoft.NET.",           // .NET runtimes
-            "Microsoft.VCLibs.",        // VC++ runtime
-            "Microsoft.UI.Xaml.",       // WinUI framework
-            "Microsoft.DirectX.",       // DirectX runtime
-            "Microsoft.Services.",      // OS services
-            "Microsoft.Advertising.",   // Ad SDK
         };
 
         // Pattern: {Publisher.PackageName}_{Version}_{Arch}__{PublisherHash}
@@ -611,30 +601,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Analyzers
 
         private static bool ShouldExcludeAppx(string packageFullName)
         {
-            // Always exclude frameworks/runtimes regardless of publisher
-            foreach (var prefix in AppxAlwaysExcludePrefixes)
-            {
-                if (packageFullName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                    return true;
-            }
-
             // Extract the package identity (everything before the first underscore)
             var underscoreIndex = packageFullName.IndexOf('_');
             var packageId = underscoreIndex > 0
                 ? packageFullName.Substring(0, underscoreIndex)
                 : packageFullName;
 
-            // Non-Microsoft publishers: allow through (rare, usually relevant 3rd-party apps)
-            bool isMicrosoft = packageId.StartsWith("Microsoft", StringComparison.OrdinalIgnoreCase)
-                            || packageId.StartsWith("MSTeams", StringComparison.OrdinalIgnoreCase)
-                            || packageId.StartsWith("Windows.", StringComparison.OrdinalIgnoreCase)
-                            || packageId.StartsWith("Clipchamp.", StringComparison.OrdinalIgnoreCase);
-
-            if (!isMicrosoft)
-                return false; // 3rd-party → keep
-
-            // Microsoft publisher: only allow whitelisted packages
-            return !AppxMicrosoftWhitelist.Contains(packageId);
+            // Strict whitelist — only explicitly listed packages pass through
+            return !AppxWhitelist.Contains(packageId);
         }
 
         private static SoftwareEntry ParseAppxPackageName(string packageFullName)
