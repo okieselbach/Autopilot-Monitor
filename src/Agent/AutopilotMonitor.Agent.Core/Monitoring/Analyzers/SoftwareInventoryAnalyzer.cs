@@ -313,7 +313,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Analyzers
             "Microsoft.OutlookForWindows",
 
             // Remote access (security surface)
-            "Microsoft.RemoteDesktop",
+            "MicrosoftCorporationII.WindowsApp",
             "MicrosoftCorporationII.WindowsSubsystemForLinux",
 
             // Developer tools (CVE-relevant)
