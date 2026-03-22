@@ -14,8 +14,8 @@ function TrendingUpIcon({ className = "w-5 h-5" }: { className?: string }) {
 }
 
 const SECTION_ICONS: Record<string, React.ReactNode> = {
-  "platform-metrics": <ChartBarIcon />,
-  "platform-usage": <TrendingUpIcon />,
+  "agent-metrics": <ChartBarIcon />,
+  "usage": <TrendingUpIcon />,
 };
 
 const metricsItems: PageSectionItem[] = METRICS_NAV_SECTIONS.map((s) => ({

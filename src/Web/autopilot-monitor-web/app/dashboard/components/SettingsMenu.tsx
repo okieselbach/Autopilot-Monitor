@@ -216,7 +216,7 @@ export function SettingsMenu({
             {galacticAdminMode && (
               <div className="border-t border-gray-200 pt-3">
                 <a
-                  href="/admin/metrics/platform-usage"
+                  href="/admin/metrics/usage"
                   className="block w-full p-3 text-left rounded-lg hover:bg-gray-50 transition-colors"
                 >
                   <div className="flex items-center justify-between">

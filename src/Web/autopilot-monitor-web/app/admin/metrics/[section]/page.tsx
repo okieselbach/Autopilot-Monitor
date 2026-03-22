@@ -2,13 +2,13 @@
 
 import { useParams } from "next/navigation";
 import { notFound } from "next/navigation";
-import { METRICS_NAV_SECTIONS, type MetricsSectionId } from "../metricsNavSections";
-import { SectionPlatformMetrics } from "../sections/SectionPlatformMetrics";
+import { type MetricsSectionId } from "../metricsNavSections";
+import { SectionAgentMetrics } from "../sections/SectionAgentMetrics";
 import { SectionPlatformUsage } from "../sections/SectionPlatformUsage";
 
 const SECTION_COMPONENTS: Record<MetricsSectionId, React.ComponentType> = {
-  "platform-metrics": SectionPlatformMetrics,
-  "platform-usage": SectionPlatformUsage,
+  "agent-metrics": SectionAgentMetrics,
+  "usage": SectionPlatformUsage,
 };
 
 export default function MetricsSectionPage() {

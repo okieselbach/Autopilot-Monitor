@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
 
 export default function MetricsPage() {
-  redirect("/admin/metrics/platform-metrics");
+  redirect("/admin/metrics/agent-metrics");
 }
