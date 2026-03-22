@@ -3,8 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { API_BASE_URL } from '@/lib/config';
-import { ProtectedRoute } from '../../components/ProtectedRoute';
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth } from '../../../../contexts/AuthContext';
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 import { trackEvent } from "@/lib/appInsights";
 
@@ -82,7 +81,7 @@ interface PlatformUsageMetrics {
   fromCache: boolean;
 }
 
-export default function PlatformUsageMetricsPage() {
+export function SectionPlatformUsage() {
   const router = useRouter();
 
   useEffect(() => { trackEvent("platform_usage_metrics_viewed"); }, []);
@@ -125,7 +124,7 @@ export default function PlatformUsageMetricsPage() {
 
   useEffect(() => {
     // Fetch metrics on mount
-    // Authorization is handled by ProtectedRoute component
+    // Authorization is handled by admin layout ProtectedRoute
     fetchMetrics();
   }, []);
 
@@ -189,7 +188,6 @@ export default function PlatformUsageMetricsPage() {
   }
 
   return (
-<ProtectedRoute requireGalacticAdmin={true}>
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white shadow">
         <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
@@ -525,6 +523,5 @@ export default function PlatformUsageMetricsPage() {
         </div>
       </div>
     </div>
-  </ProtectedRoute>
   );
 }

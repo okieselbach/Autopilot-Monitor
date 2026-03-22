@@ -1,8 +1,7 @@
-'use client';
+"use client";
 
 import { useEffect, useState, useCallback } from 'react';
-import { ProtectedRoute } from '../../components/ProtectedRoute';
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth } from '../../../../contexts/AuthContext';
 import { API_BASE_URL } from '@/lib/config';
 import { authenticatedFetch, TokenExpiredError } from '@/lib/authenticatedFetch';
 import { trackEvent } from '@/lib/appInsights';
@@ -306,9 +305,9 @@ function computeRuntime(c: TenantConfig): Record<string, unknown> {
   };
 }
 
-// ── Main page ────────────────────────────────────────────────────────────────
+// ── Main component ───────────────────────────────────────────────────────────
 
-function TenantConfigReportContent() {
+export function SectionTenantConfigReport() {
   const { user, getAccessToken } = useAuth();
 
   useEffect(() => { trackEvent('tenant_config_report_viewed'); }, []);
@@ -653,13 +652,5 @@ function TenantConfigReportContent() {
         </div>
       )}
     </div>
-  );
-}
-
-export default function TenantConfigReportPage() {
-  return (
-    <ProtectedRoute requireGalacticAdmin={true}>
-      <TenantConfigReportContent />
-    </ProtectedRoute>
   );
 }

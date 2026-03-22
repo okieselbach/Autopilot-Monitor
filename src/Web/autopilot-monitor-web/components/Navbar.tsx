@@ -474,19 +474,6 @@ export default function Navbar() {
                       </>
                     )}
 
-                    {/* GALACTIC ADMIN CONFIG — only visible when galacticAdminMode is active */}
-                    {galacticAdminMode && (
-                      <>
-                        <p className="text-[11px] font-semibold uppercase tracking-wider text-purple-400 mt-3 mb-1.5">Galactic Admin</p>
-
-                        <Link href="/admin-configuration" className="flex items-center gap-2 py-2 px-2.5 rounded-md hover:bg-purple-50 transition-colors" onClick={() => setShowSettings(false)}>
-                          <svg className="w-4 h-4 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
-                          </svg>
-                          <span className="text-sm text-purple-700">Admin Configuration</span>
-                        </Link>
-                      </>
-                    )}
                   </div>
                 </div>
               )}

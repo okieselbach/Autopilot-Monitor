@@ -119,9 +119,12 @@ export const NAV_GROUPS: NavGroup[] = [
     visibility: "galacticAdmin",
     style: "galactic",
     items: [
-      { id: "platform-usage-metrics", label: "Platform Usage", href: "/platform-usage-metrics", icon: <GlobeAltIcon /> },
-      { id: "platform-metrics", label: "Platform Metrics", href: "/platform-metrics", icon: <ChartBarIcon /> },
-      { id: "tenant-config-report", label: "Tenant Config", href: "/tenant-config-report", icon: <DocumentMagnifyingGlassIcon /> },
+      { id: "admin-metrics", label: "Metrics", href: "/admin/metrics", icon: <ChartBarIcon /> },
+      { id: "admin-tenants", label: "Tenants", href: "/admin/tenants", icon: <DocumentMagnifyingGlassIcon /> },
+      { id: "admin-reports", label: "Reports", href: "/admin/reports", icon: <ClipboardDocumentIcon /> },
+      { id: "admin-settings", label: "Settings", href: "/admin/settings", icon: <GearIcon /> },
+      { id: "admin-security", label: "Security", href: "/admin/security", icon: <ShieldCheckIcon /> },
+      { id: "admin-software", label: "Software Mapping", href: "/admin/software", icon: <GlobeAltIcon /> },
     ],
   },
 ];
