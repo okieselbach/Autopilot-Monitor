@@ -15,7 +15,7 @@ import { SessionExportSection } from "./components/SessionExportSection";
 import { AdminConfigSettingsSection } from "./components/AdminConfigSettingsSection";
 import { SessionReportsSection } from "./components/SessionReportsSection";
 import { FeedbackSection } from "./components/FeedbackSection";
-import { UnmatchedSoftwareSection } from "./components/UnmatchedSoftwareSection";
+import { SoftwareMappingSection } from "./components/SoftwareMappingSection";
 import { VulnerabilityDataSection } from "./components/VulnerabilityDataSection";
 import { usePageSections } from "../../hooks/usePageSections";
 import { PageSectionItem } from "../../contexts/SidebarContext";
@@ -267,7 +267,7 @@ export default function AdminConfigurationPage() {
     { id: "fetch-and-reseed", label: "Fetch & Reseed", icon: <ArrowPathIcon /> },
     { id: "device-block", label: "Device Block", icon: <NoSymbolIcon /> },
     { id: "version-block", label: "Version Block", icon: <NoSymbolIcon /> },
-    { id: "unmatched-software", label: "Unmatched Software", icon: <ShieldCheckIcon /> },
+    { id: "software-mapping", label: "Software Mapping", icon: <ShieldCheckIcon /> },
     { id: "vulnerability-data", label: "Vulnerability Data", icon: <KeyIcon /> },
   ], []);
 
@@ -420,9 +420,9 @@ export default function AdminConfigurationPage() {
             />
             </div>
 
-            {/* Unmatched Software (Vulnerability Analyzer) */}
-            <div id="unmatched-software">
-            <UnmatchedSoftwareSection
+            {/* Software Mapping (Vulnerability Analyzer) */}
+            <div id="software-mapping">
+            <SoftwareMappingSection
               getAccessToken={getAccessToken}
               setError={setError}
             />

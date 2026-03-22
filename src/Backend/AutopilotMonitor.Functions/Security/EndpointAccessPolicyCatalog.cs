@@ -186,6 +186,7 @@ public static class EndpointAccessPolicyCatalog
         new("GET",    "vulnerability/software-inventory", EndpointPolicy.GalacticAdminOnly),
         new("POST",   "vulnerability/sync",              EndpointPolicy.GalacticAdminOnly),
         new("POST",   "vulnerability/cpe-mapping",       EndpointPolicy.GalacticAdminOnly),
+        new("GET",    "vulnerability/cpe-mappings",      EndpointPolicy.GalacticAdminOnly),
         new("POST",   "rules/ime-log-patterns/reseed", EndpointPolicy.GalacticAdminOnly),
         new("GET",    "feedback/all",                                     EndpointPolicy.GalacticAdminOnly),
         new("GET",    "galactic/notifications",                          EndpointPolicy.GalacticAdminOnly),
