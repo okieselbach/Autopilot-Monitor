@@ -38,7 +38,6 @@ export function SoftwareMappingSection({
   getAccessToken,
   setError,
 }: SoftwareMappingSectionProps) {
-  const [expanded, setExpanded] = useState(false);
   const [activeTab, setActiveTab] = useState<"unmapped" | "mapped">("unmapped");
 
   // Unmapped state
@@ -140,18 +139,18 @@ export function SoftwareMappingSection({
     }
   }, [getAccessToken, setError]);
 
-  // Lazy load on expand / tab switch
+  // Load on mount / tab switch
   useEffect(() => {
-    if (expanded && activeTab === "unmapped" && entries.length === 0 && !loading) {
+    if (activeTab === "unmapped" && entries.length === 0 && !loading) {
       fetchUnmatchedSoftware();
     }
-  }, [expanded, activeTab, entries.length, loading, fetchUnmatchedSoftware]);
+  }, [activeTab, entries.length, loading, fetchUnmatchedSoftware]);
 
   useEffect(() => {
-    if (expanded && activeTab === "mapped" && !mappedLoaded && !mappedLoading) {
+    if (activeTab === "mapped" && !mappedLoaded && !mappedLoading) {
       fetchCpeMappings();
     }
-  }, [expanded, activeTab, mappedLoaded, mappedLoading, fetchCpeMappings]);
+  }, [activeTab, mappedLoaded, mappedLoading, fetchCpeMappings]);
 
   // --- Unmapped helpers ---
 
@@ -385,38 +384,24 @@ export function SoftwareMappingSection({
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden border border-amber-200 dark:border-amber-800">
       {/* Header */}
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors"
-      >
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-gradient-to-br from-amber-100 to-orange-100 dark:from-amber-900 dark:to-orange-900 rounded-lg flex items-center justify-center">
-            <svg className="w-4 h-4 text-amber-600 dark:text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
-            </svg>
-          </div>
-          <div className="text-left">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-              Software Mapping (Vulnerability Analyzer)
-            </h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              Manage CPE mappings for software vulnerability correlation. View unmapped software or browse and edit existing mappings.
-            </p>
-          </div>
+      <div className="px-6 py-4 flex items-center gap-3">
+        <div className="w-8 h-8 bg-gradient-to-br from-amber-100 to-orange-100 dark:from-amber-900 dark:to-orange-900 rounded-lg flex items-center justify-center">
+          <svg className="w-4 h-4 text-amber-600 dark:text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
+          </svg>
         </div>
-        <svg
-          className={`w-5 h-5 text-gray-400 transition-transform shrink-0 ml-4 ${expanded ? "rotate-180" : ""}`}
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
-      </button>
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+            Software Mapping (Vulnerability Analyzer)
+          </h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            Manage CPE mappings for software vulnerability correlation. View unmapped software or browse and edit existing mappings.
+          </p>
+        </div>
+      </div>
 
       {/* Content */}
-      {expanded && (
-        <div className="px-6 pb-6 border-t border-gray-200 dark:border-gray-700">
+      <div className="px-6 pb-6 border-t border-gray-200 dark:border-gray-700">
           {/* Tab Toggle */}
           <div className="flex items-center gap-1 mt-4 mb-2 bg-gray-100 dark:bg-gray-700/50 rounded-lg p-1 w-fit">
             <button
@@ -939,7 +924,6 @@ export function SoftwareMappingSection({
             </>
           )}
         </div>
-      )}
     </div>
   );
 }
