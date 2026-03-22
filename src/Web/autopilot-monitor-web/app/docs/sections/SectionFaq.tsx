@@ -54,9 +54,9 @@ export function SectionFaq() {
 
         <FaqItem question="Where is my data stored?">
           <p>
-            All session data is stored in our Azure environment — the backend runs as Azure Functions
-            with Azure Table Storage. The agent communicates securely with our backend endpoint 
-            and all data remains under your control.
+            All session data is stored in our Azure environment in the <strong>West Europe</strong> region.
+            The backend runs as Azure Functions with Azure Table Storage. The agent communicates
+            securely with our backend endpoint and all data remains under your control.
           </p>
         </FaqItem>
 
