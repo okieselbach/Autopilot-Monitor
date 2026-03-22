@@ -46,6 +46,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Analyzers
         private const string UninstallRegistryPathHkcu =
             @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall";
 
+        private const string ProfileListPath =
+            @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList";
+
+        private const string AppxAllUserStorePath =
+            @"SOFTWARE\Microsoft\Windows\CurrentVersion\Appx\AppxAllUserStore\Applications";
+
         // -----------------------------------------------------------------------
         // Publisher normalization map
         // -----------------------------------------------------------------------
@@ -288,6 +294,43 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Analyzers
         };
 
         // -----------------------------------------------------------------------
+        // AppX package filtering — strict whitelist for all publishers
+        // Sandboxed AppX/MSIX apps rarely have CVEs and the sandbox limits
+        // blast radius, so we only surface packages with known security or
+        // enterprise relevance to keep the report clean.
+        // -----------------------------------------------------------------------
+
+        private static readonly HashSet<string> AppxWhitelist = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            // Intune / device management
+            "Microsoft.CompanyPortal",
+            "Microsoft.ManagementApp",
+
+            // Communication & productivity (CVE-relevant, enterprise-deployed)
+            "Microsoft.Teams",
+            "MSTeams",
+            "MicrosoftTeams",
+            "Microsoft.Office.Desktop",
+            "Microsoft.OutlookForWindows",
+
+            // Remote access (security surface)
+            "MicrosoftCorporationII.WindowsApp",
+            "MicrosoftCorporationII.WindowsSubsystemForLinux",
+
+            // Developer tools (CVE-relevant)
+            "Microsoft.WindowsTerminal",
+            "Microsoft.VisualStudioCode",
+
+            // Power Platform (enterprise)
+            "Microsoft.PowerAutomateDesktop",
+        };
+
+        // Pattern: {Publisher.PackageName}_{Version}_{Arch}__{PublisherHash}
+        private static readonly Regex AppxPackagePattern = new Regex(
+            @"^(.+?)_(\d+(?:\.\d+)*)_([^_]*)__([a-z0-9]+)$",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        // -----------------------------------------------------------------------
         // Regex patterns for normalization
         // -----------------------------------------------------------------------
 
@@ -369,6 +412,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Analyzers
                 _logger.Debug($"{Name}: HKCU read skipped (expected during OOBE): {ex.Message}");
             }
 
+            // HKU per-user Uninstall keys — catches per-user installs (VS Code user, Teams Classic, Spotify, etc.)
+            CollectFromAllUserProfiles(entries);
+
+            // AppX/MSIX packages — catches modern packaged apps (Company Portal, new Teams, etc.)
+            CollectAppxPackages(entries);
+
             // Normalize all entries
             foreach (var entry in entries)
             {
@@ -432,6 +481,185 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Analyzers
             {
                 _logger.Warning($"{Name}: Failed to read {source}\\{subKeyPath}: {ex.Message}");
             }
+        }
+
+        // -----------------------------------------------------------------------
+        // HKU per-user profile enumeration
+        // -----------------------------------------------------------------------
+
+        private void CollectFromAllUserProfiles(List<SoftwareEntry> results)
+        {
+            try
+            {
+                using (var profileList = Registry.LocalMachine.OpenSubKey(ProfileListPath, writable: false))
+                {
+                    if (profileList == null)
+                    {
+                        _logger.Debug($"{Name}: ProfileList key not found");
+                        return;
+                    }
+
+                    // Track SIDs we already read via HKCU to avoid duplicates
+                    var currentUserSid = GetCurrentUserSid();
+
+                    foreach (var sid in profileList.GetSubKeyNames())
+                    {
+                        // Only real user profiles (S-1-5-21-*), skip well-known SIDs
+                        if (!sid.StartsWith("S-1-5-21-", StringComparison.OrdinalIgnoreCase))
+                            continue;
+
+                        // Skip current user SID — already covered by HKCU read above
+                        if (string.Equals(sid, currentUserSid, StringComparison.OrdinalIgnoreCase))
+                            continue;
+
+                        try
+                        {
+                            // HKU\<SID> is only available if the user's hive is loaded
+                            var hkuPath = $@"{sid}\{UninstallRegistryPathHkcu}";
+                            CollectFromKey(Registry.Users, hkuPath, $"HKU_{sid.Substring(sid.LastIndexOf('-') + 1)}", results);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.Debug($"{Name}: HKU read skipped for {sid}: {ex.Message}");
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug($"{Name}: Per-user profile enumeration failed: {ex.Message}");
+            }
+        }
+
+        private static string GetCurrentUserSid()
+        {
+            try
+            {
+                using (var identity = System.Security.Principal.WindowsIdentity.GetCurrent())
+                {
+                    return identity.User?.Value;
+                }
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        // -----------------------------------------------------------------------
+        // AppX/MSIX package enumeration
+        // -----------------------------------------------------------------------
+
+        private void CollectAppxPackages(List<SoftwareEntry> results)
+        {
+            try
+            {
+                using (var appxKey = Registry.LocalMachine.OpenSubKey(AppxAllUserStorePath, writable: false))
+                {
+                    if (appxKey == null)
+                    {
+                        _logger.Debug($"{Name}: AppX AllUserStore key not found");
+                        return;
+                    }
+
+                    int appxCount = 0;
+
+                    foreach (var subKeyName in appxKey.GetSubKeyNames())
+                    {
+                        try
+                        {
+                            if (ShouldExcludeAppx(subKeyName))
+                                continue;
+
+                            var parsed = ParseAppxPackageName(subKeyName);
+                            if (parsed == null)
+                                continue;
+
+                            results.Add(parsed);
+                            appxCount++;
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.Debug($"{Name}: Error parsing AppX entry {subKeyName}: {ex.Message}");
+                        }
+                    }
+
+                    _logger.Info($"{Name}: Collected {appxCount} AppX packages");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug($"{Name}: AppX enumeration failed: {ex.Message}");
+            }
+        }
+
+        private static bool ShouldExcludeAppx(string packageFullName)
+        {
+            // Extract the package identity (everything before the first underscore)
+            var underscoreIndex = packageFullName.IndexOf('_');
+            var packageId = underscoreIndex > 0
+                ? packageFullName.Substring(0, underscoreIndex)
+                : packageFullName;
+
+            // Strict whitelist — only explicitly listed packages pass through
+            return !AppxWhitelist.Contains(packageId);
+        }
+
+        private static SoftwareEntry ParseAppxPackageName(string packageFullName)
+        {
+            // Format: {Publisher.PackageName}_{Version}_{Arch}__{PublisherHash}
+            // Example: Microsoft.CompanyPortal_5.0.6155.0_x64__8wekyb3d8bbwe
+            var match = AppxPackagePattern.Match(packageFullName);
+            if (!match.Success)
+                return null;
+
+            var packageId = match.Groups[1].Value;   // e.g. "Microsoft.CompanyPortal"
+            var version = match.Groups[2].Value;     // e.g. "5.0.6155.0"
+
+            // Split publisher from product: "Microsoft.CompanyPortal" → ("Microsoft", "CompanyPortal")
+            var dotIndex = packageId.IndexOf('.');
+            string publisher;
+            string productName;
+            if (dotIndex > 0)
+            {
+                publisher = packageId.Substring(0, dotIndex);
+                productName = packageId.Substring(dotIndex + 1);
+            }
+            else
+            {
+                publisher = packageId;
+                productName = packageId;
+            }
+
+            // Make display name human-readable: "CompanyPortal" → "Company Portal"
+            var displayName = SpacePascalCase(productName);
+
+            return new SoftwareEntry
+            {
+                DisplayName = displayName,
+                DisplayVersion = version,
+                Publisher = publisher,
+                RegistrySource = "AppX",
+                IsWindowsInstaller = false
+            };
+        }
+
+        private static string SpacePascalCase(string input)
+        {
+            if (string.IsNullOrEmpty(input))
+                return input;
+
+            // Insert space before uppercase letters that follow lowercase letters
+            // "CompanyPortal" → "Company Portal", but "MSTeams" → "MS Teams"
+            var result = new System.Text.StringBuilder(input.Length + 4);
+            result.Append(input[0]);
+            for (int i = 1; i < input.Length; i++)
+            {
+                if (char.IsUpper(input[i]) && char.IsLower(input[i - 1]))
+                    result.Append(' ');
+                result.Append(input[i]);
+            }
+            return result.ToString();
         }
 
         // -----------------------------------------------------------------------
