@@ -3,12 +3,12 @@
 import { usePageSections } from "../../../hooks/usePageSections";
 import { PageSectionItem } from "../../../contexts/SidebarContext";
 import { SETTINGS_NAV_SECTIONS } from "./settingsNavSections";
-import { GearIcon, FolderIcon, WrenchScrewdriverIcon } from "../../../lib/sidebarIcons";
+import { GearIcon, FolderIcon, ArrowPathIcon } from "../../../lib/sidebarIcons";
 
 const SECTION_ICONS: Record<string, React.ReactNode> = {
   "global": <GearIcon />,
   "diagnostics-log-paths": <FolderIcon />,
-  "maintenance": <WrenchScrewdriverIcon />,
+  "config-reseed": <ArrowPathIcon />,
 };
 
 const settingsItems: PageSectionItem[] = SETTINGS_NAV_SECTIONS.map((s) => ({

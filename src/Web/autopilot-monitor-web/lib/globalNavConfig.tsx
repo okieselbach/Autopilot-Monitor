@@ -124,7 +124,8 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: "admin-reports", label: "Reports", href: "/admin/reports", icon: <ClipboardDocumentIcon /> },
       { id: "admin-settings", label: "Settings", href: "/admin/settings", icon: <GearIcon /> },
       { id: "admin-security", label: "Security", href: "/admin/security", icon: <ShieldCheckIcon /> },
-      { id: "admin-software", label: "Software Mapping", href: "/admin/software", icon: <GlobeAltIcon /> },
+      { id: "admin-ops", label: "Ops", href: "/admin/ops", icon: <HeartIcon /> },
+      { id: "admin-software", label: "Software", href: "/admin/software", icon: <GlobeAltIcon /> },
     ],
   },
 ];

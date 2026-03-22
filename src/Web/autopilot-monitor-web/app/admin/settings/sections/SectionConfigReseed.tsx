@@ -1,16 +1,16 @@
 "use client";
 
 import { useAdminConfig } from "../../AdminConfigContext";
-import { MaintenanceSection } from "../../components/MaintenanceSection";
+import { ConfigReseedSection } from "../../components/ConfigReseedSection";
 import { AdminNotifications } from "../../AdminNotifications";
 
-export function SectionMaintenance() {
+export function SectionConfigReseed() {
   const { getAccessToken, setError, setSuccessMessage } = useAdminConfig();
 
   return (
     <>
       <AdminNotifications />
-      <MaintenanceSection
+      <ConfigReseedSection
         getAccessToken={getAccessToken}
         setError={setError}
         setSuccessMessage={setSuccessMessage}

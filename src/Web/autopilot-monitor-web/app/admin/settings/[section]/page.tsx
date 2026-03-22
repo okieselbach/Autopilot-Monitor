@@ -2,15 +2,15 @@
 
 import { useParams } from "next/navigation";
 import { notFound } from "next/navigation";
-import { SETTINGS_NAV_SECTIONS, type SettingsSectionId } from "../settingsNavSections";
+import { type SettingsSectionId } from "../settingsNavSections";
 import { SectionGlobalSettings } from "../sections/SectionGlobalSettings";
 import { SectionDiagnosticsLogPaths } from "../sections/SectionDiagnosticsLogPaths";
-import { SectionMaintenance } from "../sections/SectionMaintenance";
+import { SectionConfigReseed } from "../sections/SectionConfigReseed";
 
 const SECTION_COMPONENTS: Record<SettingsSectionId, React.ComponentType> = {
   "global": SectionGlobalSettings,
   "diagnostics-log-paths": SectionDiagnosticsLogPaths,
-  "maintenance": SectionMaintenance,
+  "config-reseed": SectionConfigReseed,
 };
 
 export default function SettingsSectionPage() {
