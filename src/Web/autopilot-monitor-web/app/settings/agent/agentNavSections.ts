@@ -1,0 +1,7 @@
+export const AGENT_NAV_SECTIONS = [
+  { id: "settings", label: "Agent Settings", description: "Agent collector and behavior configuration" },
+  { id: "analyzers", label: "Agent Analyzers", description: "Local admin and software inventory analyzers" },
+  { id: "unrestricted-mode", label: "Unrestricted Mode", description: "Unrestricted mode configuration" },
+] as const;
+
+export type AgentSectionId = (typeof AGENT_NAV_SECTIONS)[number]["id"];
