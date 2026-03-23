@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation';
 import { API_BASE_URL } from '@/lib/config';
 import { useAuth } from '../../../../contexts/AuthContext';
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
-import { trackEvent } from "@/lib/appInsights";
 
 interface SessionMetrics {
   total: number;
@@ -84,7 +83,6 @@ interface PlatformUsageMetrics {
 export function SectionPlatformUsage() {
   const router = useRouter();
 
-  useEffect(() => { trackEvent("platform_usage_metrics_viewed"); }, []);
   const { getAccessToken } = useAuth();
   const [metrics, setMetrics] = useState<PlatformUsageMetrics | null>(null);
   const [loading, setLoading] = useState(true);

@@ -9,7 +9,6 @@ import { useAuth } from "../../contexts/AuthContext";
 import { useNotifications } from "../../contexts/NotificationContext";
 import { API_BASE_URL } from "@/lib/config";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
-import { trackEvent } from "@/lib/appInsights";
 import FleetStatCard from "./components/FleetStatCard";
 import { Session } from "@/types";
 
@@ -36,7 +35,6 @@ interface AppMetricsResponse {
 export default function FleetHealthPage() {
   const router = useRouter();
 
-  useEffect(() => { trackEvent("fleet_health_viewed"); }, []);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [appMetrics, setAppMetrics] = useState<AppMetricsResponse | null>(null);
   const [loading, setLoading] = useState(true);

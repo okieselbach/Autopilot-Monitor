@@ -8,7 +8,6 @@ import { useTenant } from "../../contexts/TenantContext";
 import { useAuth } from "../../contexts/AuthContext";
 import { API_BASE_URL } from "@/lib/config";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
-import { trackEvent } from "@/lib/appInsights";
 
 // Dynamically import the map component (Leaflet requires window/document)
 const GeoMap = dynamic(() => import("./GeoMap"), { ssr: false });
@@ -93,7 +92,6 @@ const formatBytes = (bytes: number) => {
 export default function GeographicPerformancePage() {
   const router = useRouter();
 
-  useEffect(() => { trackEvent("geographic_performance_viewed"); }, []);
   const [geoMetrics, setGeoMetrics] = useState<GeographicMetricsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [timeRange, setTimeRange] = useState<TimeRange>("30d");

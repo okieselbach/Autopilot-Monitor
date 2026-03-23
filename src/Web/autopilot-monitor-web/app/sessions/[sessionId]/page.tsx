@@ -38,7 +38,6 @@ export default function SessionDetailPage() {
   const router = useRouter();
   const sessionId = params?.sessionId as string;
 
-  useEffect(() => { trackEvent("session_detail_viewed", { sessionId: sessionId ?? "" }); }, [sessionId]);
   const [events, setEvents] = useState<EnrollmentEvent[]>([]);
   const [session, setSession] = useState<Session | null>(null);
   const [sessionTenantId, setSessionTenantId] = useState<string | null>(null);
@@ -597,6 +596,7 @@ export default function SessionDetailPage() {
       );
 
       if (response.ok) {
+        trackEvent("session_report_submitted", { sessionId });
         addNotification('success', 'Report Submitted', 'Session report has been submitted for analysis.', 'report-success');
       } else {
         const data = await response.json().catch(() => null);

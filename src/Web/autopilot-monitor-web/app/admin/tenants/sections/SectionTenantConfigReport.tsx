@@ -4,7 +4,6 @@ import { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '../../../../contexts/AuthContext';
 import { API_BASE_URL } from '@/lib/config';
 import { authenticatedFetch, TokenExpiredError } from '@/lib/authenticatedFetch';
-import { trackEvent } from '@/lib/appInsights';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -309,8 +308,6 @@ function computeRuntime(c: TenantConfig): Record<string, unknown> {
 
 export function SectionTenantConfigReport() {
   const { user, getAccessToken } = useAuth();
-
-  useEffect(() => { trackEvent('tenant_config_report_viewed'); }, []);
 
   const [tenants, setTenants] = useState<TenantInfo[]>([]);
   const [selectedTenantId, setSelectedTenantId] = useState('');

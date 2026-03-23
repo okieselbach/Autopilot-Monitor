@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { API_BASE_URL } from "@/lib/config";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
+import { trackEvent } from "@/lib/appInsights";
 import { TenantConfiguration } from "./TenantManagementSection";
 import { TenantSearchSelect } from "./TenantSearchSelect";
 
@@ -116,6 +117,7 @@ export function DeviceBlockSection({
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.message || response.statusText);
+      trackEvent("device_blocked", { action: blockAction, durationHours: blockDurationHours });
       setSuccessMessage(
         blockAction === "Kill"
           ? `Device ${blockSerialNumber.trim()} issued remote kill signal for ${blockDurationHours}h.`
@@ -147,6 +149,7 @@ export function DeviceBlockSection({
       );
       const result = await response.json();
       if (!response.ok) throw new Error(result.message || response.statusText);
+      trackEvent("device_unblocked");
       setSuccessMessage(`Device ${serialNumber} unblocked.`);
       setTimeout(() => setSuccessMessage(null), 3000);
       setBlockedDevices((prev) => prev.filter((d) => d.serialNumber !== serialNumber || d.tenantId !== tenantId));
@@ -182,6 +185,7 @@ export function DeviceBlockSection({
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.message || response.statusText);
+      trackEvent("device_killed");
       setSuccessMessage(`Device ${device.serialNumber} upgraded to kill signal.`);
       setTimeout(() => setSuccessMessage(null), 4000);
       await fetchBlockedDevices(device.tenantId);

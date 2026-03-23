@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { API_BASE_URL } from "@/lib/config";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
+import { trackEvent } from "@/lib/appInsights";
 
 interface SessionReport {
   reportId: string;
@@ -87,6 +88,7 @@ export function SessionReportsSection({
       const data = await res.json();
       if (!data.downloadUrl) throw new Error("No download URL returned");
 
+      trackEvent("session_report_downloaded");
       const a = document.createElement("a");
       a.href = data.downloadUrl;
       a.download = blobName;

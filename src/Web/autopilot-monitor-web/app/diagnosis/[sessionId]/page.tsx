@@ -9,7 +9,6 @@ import { useNotifications } from "../../../contexts/NotificationContext";
 import { ProtectedRoute } from "../../../components/ProtectedRoute";
 import { API_BASE_URL } from "@/lib/config";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
-import { trackEvent } from "@/lib/appInsights";
 import { ConfidenceBadge, SeverityBadge } from "./components/DiagnosisBadges";
 import { Session, EnrollmentEvent, RuleResult } from "@/types";
 
@@ -18,7 +17,6 @@ export default function DiagnosisPage() {
   const router = useRouter();
   const sessionId = params?.sessionId as string;
 
-  useEffect(() => { trackEvent("diagnosis_viewed", { sessionId: sessionId ?? "" }); }, [sessionId]);
   const [session, setSession] = useState<Session | null>(null);
   const [sessionTenantId, setSessionTenantId] = useState<string | null>(null);
   const [events, setEvents] = useState<EnrollmentEvent[]>([]);

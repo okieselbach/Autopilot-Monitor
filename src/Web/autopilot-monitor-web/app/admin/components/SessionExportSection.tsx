@@ -6,6 +6,7 @@ import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch"
 import { TenantConfiguration } from "./TenantManagementSection";
 import { TenantSearchSelect } from "./TenantSearchSelect";
 import { SessionExportEvent, generateCsvExport, generateUiExport } from "@/lib/sessionExportUtils";
+import { trackEvent } from "@/lib/appInsights";
 
 function downloadFile(content: string, filename: string, mimeType: string) {
   const blob = new Blob([content], { type: mimeType });
@@ -155,6 +156,7 @@ export function SessionExportSection({
                       `session-${sid.slice(0, 8)}-timeline.txt`,
                       "text/plain;charset=utf-8"
                     );
+                    trackEvent("session_exported", { format: "txt" });
                   }}
                   className="flex items-center justify-center space-x-2 px-4 py-2.5 bg-white dark:bg-gray-700 border-2 border-teal-400 dark:border-teal-600 text-teal-800 dark:text-teal-200 rounded-lg hover:bg-teal-50 dark:hover:bg-teal-900/20 transition-colors text-sm font-medium"
                 >
@@ -171,6 +173,7 @@ export function SessionExportSection({
                       `session-${sid.slice(0, 8)}-events.csv`,
                       "text/csv;charset=utf-8"
                     );
+                    trackEvent("session_exported", { format: "csv" });
                   }}
                   className="flex items-center justify-center space-x-2 px-4 py-2.5 bg-white dark:bg-gray-700 border-2 border-teal-400 dark:border-teal-600 text-teal-800 dark:text-teal-200 rounded-lg hover:bg-teal-50 dark:hover:bg-teal-900/20 transition-colors text-sm font-medium"
                 >

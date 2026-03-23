@@ -8,7 +8,6 @@ import { useNotifications } from '../../contexts/NotificationContext';
 import { ProtectedRoute } from '../../components/ProtectedRoute';
 import { API_BASE_URL } from '@/lib/config';
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
-import { trackEvent } from "@/lib/appInsights";
 
 interface TenantInfo {
   tenantId: string;
@@ -80,7 +79,6 @@ interface PlatformUsageMetrics {
 export default function UsageMetricsPage() {
   const router = useRouter();
 
-  useEffect(() => { trackEvent("usage_metrics_viewed"); }, []);
   const { tenantId } = useTenant();
   const { getAccessToken, user } = useAuth();
   const { addNotification } = useNotifications();

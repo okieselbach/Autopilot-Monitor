@@ -28,7 +28,6 @@ interface TenantInfo {
 export default function AnalyzeRulesPage() {
   const router = useRouter();
 
-  useEffect(() => { trackEvent("analyze_rules_viewed"); }, []);
   const { tenantId } = useTenant();
   const { user, getAccessToken } = useAuth();
 
@@ -312,11 +311,13 @@ export default function AnalyzeRulesPage() {
   const handleExportSingle = (rule: AnalyzeRule) => {
     const cleaned = stripInternalFields(rule);
     downloadAsJson({ "$schema": "../schema/analyze-rule.schema.json", ...cleaned }, `${rule.ruleId}.json`);
+    trackEvent("rules_exported", { ruleType: "analyze", scope: "single" });
   };
 
   const handleExportAll = () => {
     const cleaned = filteredRules.map(stripInternalFields);
     downloadAsJson(cleaned, "analyze-rules-export.json");
+    trackEvent("rules_exported", { ruleType: "analyze", scope: "all" });
   };
 
   return (

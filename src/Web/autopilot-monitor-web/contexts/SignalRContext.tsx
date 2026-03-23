@@ -4,6 +4,7 @@ import React, { createContext, useContext, useEffect, useRef, useState, useCallb
 import * as signalR from '@microsoft/signalr';
 import { API_BASE_URL } from '@/lib/config';
 import { authenticatedFetch } from '@/lib/authenticatedFetch';
+import { trackEvent } from '@/lib/appInsights';
 import { useAuth } from './AuthContext';
 
 interface SignalRContextType {
@@ -71,6 +72,7 @@ export function SignalRProvider({ children }: { children: React.ReactNode }) {
     // Setup connection state change handlers
     newConnection.onclose((error) => {
       setConnectionState(signalR.HubConnectionState.Disconnected);
+      trackEvent("signalr_disconnected", { hasError: !!error });
       joinedGroupsRef.current.clear(); // Clear joined groups on disconnect
       syncJoinedGroups();
     });
@@ -115,6 +117,7 @@ export function SignalRProvider({ children }: { children: React.ReactNode }) {
       if (previousGroups.length > 0) {
         console.log(`[SignalR] Rejoined ${joinedGroupsRef.current.size}/${previousGroups.length} groups after reconnect`);
       }
+      trackEvent("signalr_reconnected", { rejoinedGroups: joinedGroupsRef.current.size });
     });
 
     // Start connection
@@ -135,6 +138,7 @@ export function SignalRProvider({ children }: { children: React.ReactNode }) {
           setTimeout(startConnection, delay);
         } else {
           console.error('[SignalR] Max retries reached. Connection failed.');
+          trackEvent("signalr_connection_failed");
         }
       }
     };

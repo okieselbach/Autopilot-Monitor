@@ -383,9 +383,6 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
     fetchConfiguration();
   }, [tenantId]);
 
-  // Track page view
-  useEffect(() => { trackEvent("settings_viewed"); }, []);
-
   // -----------------------------------------------------------------------
   // Fetch admins
   // -----------------------------------------------------------------------
@@ -536,13 +533,16 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
       setValidateAutopilotDevice(result.config.validateAutopilotDevice);
       setValidateCorporateIdentifier(result.config.validateCorporateIdentifier ?? false);
       setUnrestrictedMode(result.config.unrestrictedMode ?? false);
+      trackEvent("settings_saved", { section: sectionName });
       setSuccessMessage("Configuration saved successfully!");
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch (err) {
       if (err instanceof TokenExpiredError) {
         addNotification('error', 'Session Expired', err.message, 'session-expired-error');
       } else {
-        setError(err instanceof Error ? err.message : "Failed to save configuration");
+        const msg = err instanceof Error ? err.message : "Failed to save configuration";
+        trackEvent("settings_error", { action: "save", section: sectionName, error: msg });
+        setError(msg);
       }
     } finally {
       setSavingSection(null);
@@ -791,6 +791,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
         throw new Error(errorData.error || `Failed to add member: ${response.statusText}`);
       }
 
+      trackEvent("admin_member_added", { role: newMemberRole });
       setSuccessMessage(`${newMemberRole} ${newAdminEmail} added successfully!`);
       setNewAdminEmail("");
       setNewMemberRole("Admin");
@@ -801,7 +802,9 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
         addNotification('error', 'Session Expired', err.message, 'session-expired-error');
       } else {
         console.error("Error adding admin:", err);
-        setError(err instanceof Error ? err.message : "Failed to add admin");
+        const msg = err instanceof Error ? err.message : "Failed to add admin";
+        trackEvent("settings_error", { action: "add_admin", error: msg });
+        setError(msg);
       }
     } finally {
       setAddingAdmin(false);
@@ -826,6 +829,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
         throw new Error(errorData.error || `Failed to remove admin: ${response.statusText}`);
       }
 
+      trackEvent("admin_member_removed");
       setSuccessMessage(`Admin ${adminUpn} removed successfully!`);
       await fetchAdmins();
       setTimeout(() => setSuccessMessage(null), 3000);
@@ -834,7 +838,9 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
         addNotification('error', 'Session Expired', err.message, 'session-expired-error');
       } else {
         console.error("Error removing admin:", err);
-        setError(err instanceof Error ? err.message : "Failed to remove admin");
+        const msg = err instanceof Error ? err.message : "Failed to remove admin";
+        trackEvent("settings_error", { action: "remove_admin", error: msg });
+        setError(msg);
       }
     } finally {
       setRemovingAdmin(null);
@@ -862,6 +868,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
         throw new Error(errorData.error || `Failed to ${action} admin: ${response.statusText}`);
       }
 
+      trackEvent("admin_member_toggled", { action });
       setSuccessMessage(`Admin ${adminUpn} ${action}d successfully!`);
       await fetchAdmins();
       setTimeout(() => setSuccessMessage(null), 3000);
@@ -870,7 +877,9 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
         addNotification('error', 'Session Expired', err.message, 'session-expired-error');
       } else {
         console.error(`Error ${action}ing admin:`, err);
-        setError(err instanceof Error ? err.message : `Failed to ${action} admin`);
+        const msg = err instanceof Error ? err.message : `Failed to ${action} admin`;
+        trackEvent("settings_error", { action: `${action}_admin`, error: msg });
+        setError(msg);
       }
     } finally {
       setTogglingAdmin(null);
@@ -899,6 +908,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
         throw new Error(errorData.error || `Failed to update permissions: ${response.statusText}`);
       }
 
+      trackEvent("admin_permissions_updated", { role });
       setSuccessMessage(`Permissions for ${adminUpn} updated successfully!`);
       await fetchAdmins();
       setTimeout(() => setSuccessMessage(null), 3000);
@@ -907,7 +917,9 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
         addNotification('error', 'Session Expired', err.message, 'session-expired-error');
       } else {
         console.error("Error updating permissions:", err);
-        setError(err instanceof Error ? err.message : "Failed to update permissions");
+        const msg = err instanceof Error ? err.message : "Failed to update permissions";
+        trackEvent("settings_error", { action: "update_permissions", error: msg });
+        setError(msg);
       }
     } finally {
       setTogglingAdmin(null);
@@ -930,13 +942,16 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
         throw new Error((data as Record<string, string>).error || "Failed to create session");
       }
       const data = await response.json();
+      trackEvent("bootstrap_session_created", { validityHours });
       await fetchBootstrapSessions();
       return data.bootstrapUrl || null;
     } catch (err) {
       if (err instanceof TokenExpiredError) {
         addNotification('error', 'Session Expired', err.message, 'session-expired-error');
       } else {
-        setError(err instanceof Error ? err.message : "Failed to create bootstrap session");
+        const msg = err instanceof Error ? err.message : "Failed to create bootstrap session";
+        trackEvent("settings_error", { action: "create_bootstrap", error: msg });
+        setError(msg);
       }
       return null;
     }
@@ -954,12 +969,15 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
         const data = await response.json().catch(() => ({}));
         throw new Error((data as Record<string, string>).error || "Failed to revoke session");
       }
+      trackEvent("bootstrap_session_revoked");
       await fetchBootstrapSessions();
     } catch (err) {
       if (err instanceof TokenExpiredError) {
         addNotification('error', 'Session Expired', err.message, 'session-expired-error');
       } else {
-        setError(err instanceof Error ? err.message : "Failed to revoke bootstrap session");
+        const msg = err instanceof Error ? err.message : "Failed to revoke bootstrap session";
+        trackEvent("settings_error", { action: "revoke_bootstrap", error: msg });
+        setError(msg);
       }
     }
   }, [tenantId, getAccessToken, addNotification, fetchBootstrapSessions]);
@@ -983,6 +1001,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
       }
 
       // Offboard successful – sign out the user as their admin access is gone
+      trackEvent("tenant_offboarded");
       logout();
     } catch (err) {
       if (err instanceof TokenExpiredError) {

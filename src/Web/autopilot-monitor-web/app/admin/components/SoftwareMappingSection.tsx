@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { API_BASE_URL } from "@/lib/config";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
+import { trackEvent } from "@/lib/appInsights";
 
 // --- Interfaces ---
 
@@ -377,6 +378,7 @@ export function SoftwareMappingSection({
     a.download = `cpe-mapping-export-${exportData.lastUpdated}.json`;
     a.click();
     URL.revokeObjectURL(url);
+    trackEvent("software_mapping_exported");
   };
 
   // --- Render ---

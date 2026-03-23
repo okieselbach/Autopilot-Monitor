@@ -27,7 +27,6 @@ interface TenantInfo {
 export default function GatherRulesPage() {
   const router = useRouter();
 
-  useEffect(() => { trackEvent("gather_rules_viewed"); }, []);
   const { tenantId } = useTenant();
   const { user, getAccessToken } = useAuth();
 
@@ -386,10 +385,12 @@ export default function GatherRulesPage() {
 
   const handleExportSingle = (rule: GatherRule) => {
     downloadAsJson(stripInternalFields(rule), `gather-rule-${rule.ruleId}.json`);
+    trackEvent("rules_exported", { ruleType: "gather", scope: "single" });
   };
 
   const handleExportAll = () => {
     downloadAsJson(filteredRules.map(stripInternalFields), "gather-rules-export.json");
+    trackEvent("rules_exported", { ruleType: "gather", scope: "all" });
   };
 
   return (

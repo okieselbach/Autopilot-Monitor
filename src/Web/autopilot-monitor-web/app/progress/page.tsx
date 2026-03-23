@@ -33,8 +33,6 @@ const phaseSteps = [
 ];
 
 export default function ProgressPortalPage() {
-  useEffect(() => { trackEvent("progress_portal_viewed"); }, []);
-
   const [serialInput, setSerialInput] = useState("");
   const [session, setSession] = useState<Session | null>(null);
   const [allSessions, setAllSessions] = useState<Session[]>([]);

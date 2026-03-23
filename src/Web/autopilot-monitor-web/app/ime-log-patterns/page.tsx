@@ -19,7 +19,6 @@ import { trackEvent } from "@/lib/appInsights";
 export default function ImeLogPatternsPage() {
   const router = useRouter();
 
-  useEffect(() => { trackEvent("ime_patterns_viewed"); }, []);
   const { tenantId } = useTenant();
   const { user } = useAuth();
   const isGlobalAdmin = user?.isGlobalAdmin ?? false;
@@ -166,11 +165,13 @@ export default function ImeLogPatternsPage() {
   const handleExportSingle = (pattern: ImeLogPattern) => {
     const cleaned = stripInternalFields(pattern);
     downloadAsJson({ "$schema": "../schema/ime-log-pattern.schema.json", ...cleaned }, `${pattern.patternId}.json`);
+    trackEvent("rules_exported", { ruleType: "ime_pattern", scope: "single" });
   };
 
   const handleExportAll = () => {
     const cleaned = filteredPatterns.map(stripInternalFields);
     downloadAsJson(cleaned, "ime-log-patterns-export.json");
+    trackEvent("rules_exported", { ruleType: "ime_pattern", scope: "all" });
   };
 
   const patternsList = patterns || [];

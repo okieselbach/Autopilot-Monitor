@@ -6,7 +6,6 @@ import { API_BASE_URL } from '@/lib/config';
 import { useAuth } from '../../../../contexts/AuthContext';
 import { useNotifications } from '../../../../contexts/NotificationContext';
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
-import { trackEvent } from "@/lib/appInsights";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -95,7 +94,6 @@ function pN(values: number[], percentile: number): number {
 export function SectionAgentMetrics() {
   const router = useRouter();
 
-  useEffect(() => { trackEvent("platform_metrics_viewed"); }, []);
   const { getAccessToken, user } = useAuth();
   const { addNotification } = useNotifications();
 
