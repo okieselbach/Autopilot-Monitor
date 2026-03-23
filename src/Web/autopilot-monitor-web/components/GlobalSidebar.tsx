@@ -7,7 +7,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { useSidebar, PageSectionItem } from "../contexts/SidebarContext";
 import { CollapseState } from "../hooks/useSidebarState";
 import { DefaultSectionIcon, BookOpenIcon, RocketLaunchIcon, InformationCircleIcon, DocumentTextIcon, ShieldCheckIcon } from "../lib/sidebarIcons";
-import { DASHBOARD_ITEM, NAV_GROUPS, REGULAR_USER_ITEMS, NavItem, NavGroup } from "../lib/globalNavConfig";
+import { DASHBOARD_ITEM, NAV_GROUPS, EXPANDABLE_NAV_GROUPS, REGULAR_USER_ITEMS, NavItem, NavGroup, ExpandableNavGroup, ExpandableNavItem } from "../lib/globalNavConfig";
 import { PublicSiteNavbar } from "./PublicSiteNavbar";
 
 // Sidebar pixel widths
@@ -176,7 +176,7 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
   const isAdminOrOperator = isTenantAdmin || isOperator;
   const isGalacticAdmin = user?.isGalacticAdmin ?? false;
 
-  const isGroupVisible = (group: NavGroup): boolean => {
+  const isGroupVisible = (group: NavGroup | ExpandableNavGroup): boolean => {
     switch (group.visibility) {
       case "all": return true;
       case "adminOrOperator": return isAdminOrOperator;
@@ -184,6 +184,26 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
       default: return false;
     }
   };
+
+  // Visible expandable groups
+  const visibleExpandableGroups = EXPANDABLE_NAV_GROUPS.filter(isGroupVisible);
+
+  // Auto-expand the group containing the current pathname
+  useEffect(() => {
+    for (const group of visibleExpandableGroups) {
+      for (const item of group.items) {
+        if (item.items.some((sub) => pathname === sub.href || pathname.startsWith(sub.href + "/"))) {
+          setExpandedGroups((prev) => {
+            if (prev.has(item.id)) return prev;
+            const next = new Set(prev);
+            next.add(item.id);
+            return next;
+          });
+          return;
+        }
+      }
+    }
+  }, [pathname]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Docs pages are always accessible (public + authenticated)
   const isDocsPage = pathname.startsWith("/docs");
@@ -343,10 +363,9 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
             </div>
           )}
 
-          {/* Admin/Operator groups */}
+          {/* Admin/Operator flat groups */}
           {!isRegularUser && visibleGroups.map((group) => (
             <div key={group.id} className={`${collapseState === "full" || isMobile ? "mt-4" : "mt-1"}`}>
-              {/* Group header (full mode only) */}
               {(collapseState === "full" || isMobile) && (
                 <p className={`text-[11px] font-semibold uppercase tracking-wider mb-1 px-3 ${
                   group.style === "galactic"
@@ -356,12 +375,120 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
                   {group.label}
                 </p>
               )}
-              {/* Divider in icons mode */}
               {collapseState === "icons" && !isMobile && (
                 <hr className="mx-2 my-1.5 border-gray-200 dark:border-gray-700" />
               )}
               <ul className="space-y-0.5">
                 {group.items.map((item) => renderGlobalItem(item, group.style === "galactic"))}
+              </ul>
+            </div>
+          ))}
+
+          {/* Expandable groups (GitHub-style) — Configuration, Galactic Admin */}
+          {!isRegularUser && visibleExpandableGroups.map((group) => (
+            <div key={group.id} className={`${collapseState === "full" || isMobile ? "mt-4" : "mt-1"}`}>
+              {/* Group label */}
+              {(collapseState === "full" || isMobile) && (
+                <p className={`text-[11px] font-semibold uppercase tracking-wider mb-1 px-3 ${
+                  group.style === "galactic"
+                    ? "text-purple-500 dark:text-purple-400"
+                    : "text-gray-400 dark:text-gray-500"
+                }`}>
+                  {group.label}
+                </p>
+              )}
+              {collapseState === "icons" && !isMobile && (
+                <hr className={`mx-2 my-1.5 ${
+                  group.style === "galactic"
+                    ? "border-purple-200 dark:border-purple-800"
+                    : "border-gray-200 dark:border-gray-700"
+                }`} />
+              )}
+              <ul className="space-y-0.5">
+                {group.items.map((expandItem) => {
+                  const isExpanded = expandedGroups.has(expandItem.id);
+                  const itemHasActive = expandItem.items.some((sub) => pathname === sub.href || pathname.startsWith(sub.href + "/"));
+                  const firstHref = expandItem.items[0]?.href ?? "#";
+                  const isGalactic = group.style === "galactic";
+
+                  if (collapseState === "icons" && !isMobile) {
+                    // Icons mode: show group icon as link
+                    return (
+                      <li key={expandItem.id}>
+                        <Link
+                          href={firstHref}
+                          onClick={() => setMobileDrawerOpen(false)}
+                          className={`flex items-center justify-center px-2 py-2 rounded-md text-sm transition-colors relative group ${
+                            itemHasActive
+                              ? isGalactic
+                                ? "bg-purple-50 text-purple-700 font-semibold dark:bg-purple-900/30 dark:text-purple-300"
+                                : "bg-blue-50 text-blue-700 font-semibold dark:bg-blue-900/30 dark:text-blue-300"
+                              : isGalactic
+                                ? "text-purple-600 hover:bg-purple-50 hover:text-purple-800 dark:text-purple-400 dark:hover:bg-purple-900/20"
+                                : "text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                          }`}
+                          title={expandItem.label}
+                        >
+                          <span className="shrink-0 w-4.5 h-4.5">{expandItem.icon}</span>
+                          <span className="absolute left-full ml-2 px-2 py-1 rounded bg-gray-900 text-white text-xs whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-50 dark:bg-gray-700">
+                            {expandItem.label}
+                          </span>
+                        </Link>
+                      </li>
+                    );
+                  }
+
+                  // Full mode: GitHub-style expandable item
+                  return (
+                    <li key={expandItem.id}>
+                      <button
+                        onClick={() => toggleGroup(expandItem.id)}
+                        className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-md text-sm transition-colors ${
+                          itemHasActive
+                            ? isGalactic
+                              ? "text-purple-700 font-semibold dark:text-purple-300"
+                              : "text-blue-700 font-semibold dark:text-blue-300"
+                            : isGalactic
+                              ? "text-purple-600 hover:bg-purple-50 hover:text-purple-800 dark:text-purple-400 dark:hover:bg-purple-900/20"
+                              : "text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                        }`}
+                      >
+                        <span className="shrink-0 w-4 h-4">{expandItem.icon}</span>
+                        <span className="truncate flex-1 text-left">{expandItem.label}</span>
+                        <svg
+                          className={`w-3.5 h-3.5 shrink-0 text-gray-400 transition-transform duration-150 ${isExpanded ? "rotate-90" : ""}`}
+                          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                        </svg>
+                      </button>
+                      {isExpanded && (
+                        <ul className="mt-0.5 space-y-px">
+                          {expandItem.items.map((sub) => {
+                            const subActive = pathname === sub.href || pathname.startsWith(sub.href + "/");
+                            return (
+                              <li key={sub.id}>
+                                <Link
+                                  href={sub.href}
+                                  onClick={() => setMobileDrawerOpen(false)}
+                                  className={`block pl-10 pr-3 py-1 rounded-md text-[13px] transition-colors ${
+                                    subActive
+                                      ? isGalactic
+                                        ? "bg-purple-50 text-purple-700 font-medium dark:bg-purple-900/30 dark:text-purple-300"
+                                        : "bg-blue-50 text-blue-700 font-medium dark:bg-blue-900/30 dark:text-blue-300"
+                                      : "text-gray-500 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                                  }`}
+                                >
+                                  {sub.label}
+                                </Link>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           ))}

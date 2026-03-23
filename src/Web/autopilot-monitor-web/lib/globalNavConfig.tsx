@@ -1,12 +1,21 @@
 import {
   ChartBarIcon,
   GearIcon,
-  ComputerDesktopIcon,
   DocumentTextIcon,
   ShieldCheckIcon,
+  UsersIcon,
+  BellIcon,
+  CircleStackIcon,
+  BuildingOfficeIcon,
+  NoSymbolIcon,
+  KeyIcon,
+  SparklesIcon,
+  ArrowDownTrayIcon,
+  ArrowPathIcon,
+  FolderIcon,
 } from "./sidebarIcons";
 
-// --- New icons for global nav (added inline here, monochrome outline style) ---
+// --- Icons defined inline (not in sidebarIcons) ---
 
 function HomeIcon({ className = "w-5 h-5" }: { className?: string }) {
   return (
@@ -40,14 +49,6 @@ function MonitorIcon({ className = "w-5 h-5" }: { className?: string }) {
   );
 }
 
-function DocumentMagnifyingGlassIcon({ className = "w-5 h-5" }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m5.231 13.481L15 17.25m-4.5-15H5.625c-.621 0-1.125.504-1.125 1.125v16.5c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9zm3.75 11.625a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
-    </svg>
-  );
-}
-
 function ClipboardDocumentIcon({ className = "w-5 h-5" }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -64,6 +65,14 @@ function HeartIcon({ className = "w-5 h-5" }: { className?: string }) {
   );
 }
 
+function WrenchIcon({ className = "w-5 h-5" }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M11.42 15.17L17.25 21A2.652 2.652 0 0021 17.25l-5.877-5.877M11.42 15.17l2.496-3.03c.317-.384.74-.626 1.208-.766M11.42 15.17l-4.655 5.653a2.548 2.548 0 11-3.586-3.586l6.837-5.63m5.108-.233c.55-.164 1.163-.188 1.743-.14a4.5 4.5 0 004.486-6.336l-3.276 3.277a3.004 3.004 0 01-2.25-2.25l3.276-3.276a4.5 4.5 0 00-6.336 4.486c.091 1.076-.071 2.264-.904 2.95l-.102.085m-1.745 1.437L5.909 7.5H4.5L2.25 3.75l1.5-1.5L7.5 4.5v1.409l4.26 4.26m-1.745 1.437l1.745-1.437" />
+    </svg>
+  );
+}
+
 // --- Types ---
 
 export interface NavItem {
@@ -73,10 +82,34 @@ export interface NavItem {
   icon: React.ReactNode;
 }
 
+/** A sub-item inside an expandable group (GitHub-style, no icon) */
+export interface ExpandableSubItem {
+  id: string;
+  label: string;
+  href: string;
+}
+
+/** An expandable group with icon + chevron, containing sub-items */
+export interface ExpandableNavItem {
+  id: string;
+  label: string;
+  icon: React.ReactNode;
+  items: ExpandableSubItem[];
+}
+
 export interface NavGroup {
   id: string;
   label: string;
   items: NavItem[];
+  visibility: "all" | "adminOrOperator" | "galacticAdmin";
+  style?: "galactic";
+}
+
+/** A group rendered as expandable GitHub-style items */
+export interface ExpandableNavGroup {
+  id: string;
+  label: string;
+  items: ExpandableNavItem[];
   visibility: "all" | "adminOrOperator" | "galacticAdmin";
   style?: "galactic";
 }
@@ -90,7 +123,7 @@ export const DASHBOARD_ITEM: NavItem = {
   icon: <HomeIcon />,
 };
 
-// --- Global navigation groups ---
+// --- Global navigation groups (flat items) ---
 
 export const NAV_GROUPS: NavGroup[] = [
   {
@@ -105,6 +138,16 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    id: "rules",
+    label: "Rules",
+    visibility: "adminOrOperator",
+    items: [
+      { id: "gather-rules", label: "Gather Rules", href: "/gather-rules", icon: <FolderIcon /> },
+      { id: "analyze-rules", label: "Analyze Rules", href: "/analyze-rules", icon: <SparklesIcon /> },
+      { id: "ime-log-patterns", label: "IME Log Patterns", href: "/ime-log-patterns", icon: <DocumentTextIcon /> },
+    ],
+  },
+  {
     id: "operations",
     label: "Operations",
     visibility: "adminOrOperator",
@@ -113,8 +156,110 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: "health-check", label: "System Health", href: "/health-check", icon: <HeartIcon /> },
     ],
   },
-  // Galactic Admin items are registered dynamically via AdminPageSections
-  // when the user navigates to /admin/* routes.
+];
+
+// --- Expandable navigation groups (GitHub-style with sub-items) ---
+
+export const EXPANDABLE_NAV_GROUPS: ExpandableNavGroup[] = [
+  {
+    id: "configuration",
+    label: "Configuration",
+    visibility: "adminOrOperator",
+    items: [
+      {
+        id: "cfg-validation", label: "Validation", icon: <ShieldCheckIcon />,
+        items: [
+          { id: "cfg-autopilot", label: "Autopilot Validation", href: "/settings/validation/autopilot" },
+          { id: "cfg-hardware", label: "Hardware Whitelist", href: "/settings/validation/hardware-whitelist" },
+        ],
+      },
+      {
+        id: "cfg-agent", label: "Agent", icon: <GearIcon />,
+        items: [
+          { id: "cfg-agent-settings", label: "Agent Settings", href: "/settings/agent/settings" },
+          { id: "cfg-agent-analyzers", label: "Agent Analyzers", href: "/settings/agent/analyzers" },
+        ],
+      },
+      {
+        id: "cfg-access", label: "Access", icon: <UsersIcon />,
+        items: [
+          { id: "cfg-admin-mgmt", label: "Admin Management", href: "/settings/access/admin-management" },
+        ],
+      },
+      {
+        id: "cfg-integrations", label: "Integrations", icon: <BellIcon />,
+        items: [
+          { id: "cfg-notifications", label: "Notifications", href: "/settings/integrations/notifications" },
+          { id: "cfg-diagnostics", label: "Diagnostics", href: "/settings/integrations/diagnostics" },
+        ],
+      },
+      {
+        id: "cfg-management", label: "Management", icon: <CircleStackIcon />,
+        items: [
+          { id: "cfg-data", label: "Data Management", href: "/settings/management/data" },
+          { id: "cfg-offboarding", label: "Offboarding", href: "/settings/management/offboarding" },
+        ],
+      },
+    ],
+  },
+  {
+    id: "galactic-admin",
+    label: "Galactic Admin",
+    visibility: "galacticAdmin",
+    style: "galactic",
+    items: [
+      {
+        id: "ga-tenants", label: "Tenants", icon: <BuildingOfficeIcon />,
+        items: [
+          { id: "ga-tenant-mgmt", label: "Tenant Management", href: "/admin/tenants/management" },
+          { id: "ga-config-report", label: "Config Report", href: "/admin/tenants/config-report" },
+        ],
+      },
+      {
+        id: "ga-metrics", label: "Metrics", icon: <ChartBarIcon />,
+        items: [
+          { id: "ga-agent-metrics", label: "Agent Metrics", href: "/admin/metrics/agent-metrics" },
+          { id: "ga-usage", label: "Platform Usage", href: "/admin/metrics/usage" },
+        ],
+      },
+      {
+        id: "ga-reports", label: "Reports", icon: <DocumentTextIcon />,
+        items: [
+          { id: "ga-session-reports", label: "Session Reports", href: "/admin/reports/session-reports" },
+          { id: "ga-user-feedback", label: "User Feedback", href: "/admin/reports/user-feedback" },
+          { id: "ga-session-export", label: "Session Export", href: "/admin/reports/session-export" },
+        ],
+      },
+      {
+        id: "ga-security", label: "Security", icon: <ShieldCheckIcon />,
+        items: [
+          { id: "ga-device-block", label: "Device Block", href: "/admin/security/device-block" },
+          { id: "ga-version-block", label: "Version Block", href: "/admin/security/version-block" },
+          { id: "ga-vulnerability", label: "Vulnerability Data", href: "/admin/security/vulnerability-data" },
+        ],
+      },
+      {
+        id: "ga-settings", label: "Settings", icon: <GearIcon />,
+        items: [
+          { id: "ga-global", label: "Global Settings", href: "/admin/settings/global" },
+          { id: "ga-diag-paths", label: "Diagnostics Log Paths", href: "/admin/settings/diagnostics-log-paths" },
+          { id: "ga-config-reseed", label: "Config Reseed", href: "/admin/settings/config-reseed" },
+        ],
+      },
+      {
+        id: "ga-ops", label: "Ops", icon: <WrenchIcon />,
+        items: [
+          { id: "ga-maintenance", label: "Maintenance", href: "/admin/ops" },
+        ],
+      },
+      {
+        id: "ga-software", label: "Software", icon: <GlobeAltIcon />,
+        items: [
+          { id: "ga-software-mapping", label: "Software Mapping", href: "/admin/software" },
+        ],
+      },
+    ],
+  },
 ];
 
 // --- Regular user nav (minimal) ---

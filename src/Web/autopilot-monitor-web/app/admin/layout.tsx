@@ -5,7 +5,6 @@ import { useEffect } from "react";
 import { ProtectedRoute } from "../../components/ProtectedRoute";
 import { useAuth } from "../../contexts/AuthContext";
 import { AdminConfigProvider } from "./AdminConfigContext";
-import { AdminPageSections } from "./AdminPageSections";
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
@@ -22,7 +21,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   return (
     <ProtectedRoute requireGalacticAdmin>
       <AdminConfigProvider>
-        <AdminPageSections />
         {children}
       </AdminConfigProvider>
     </ProtectedRoute>
