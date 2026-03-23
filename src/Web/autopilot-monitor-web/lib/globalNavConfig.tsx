@@ -4,9 +4,6 @@ import {
   ComputerDesktopIcon,
   DocumentTextIcon,
   ShieldCheckIcon,
-  UsersIcon,
-  BellIcon,
-  CircleStackIcon,
 } from "./sidebarIcons";
 
 // --- New icons for global nav (added inline here, monochrome outline style) ---
@@ -114,18 +111,6 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { id: "audit", label: "Audit Log", href: "/audit", icon: <ClipboardDocumentIcon /> },
       { id: "health-check", label: "System Health", href: "/health-check", icon: <HeartIcon /> },
-    ],
-  },
-  {
-    id: "configuration",
-    label: "Configuration",
-    visibility: "adminOrOperator",
-    items: [
-      { id: "cfg-validation", label: "Validation", href: "/settings/validation", icon: <ShieldCheckIcon /> },
-      { id: "cfg-agent", label: "Agent", href: "/settings/agent", icon: <GearIcon /> },
-      { id: "cfg-access", label: "Access", href: "/settings/access", icon: <UsersIcon /> },
-      { id: "cfg-integrations", label: "Integrations", href: "/settings/integrations", icon: <BellIcon /> },
-      { id: "cfg-management", label: "Management", href: "/settings/management", icon: <CircleStackIcon /> },
     ],
   },
   {

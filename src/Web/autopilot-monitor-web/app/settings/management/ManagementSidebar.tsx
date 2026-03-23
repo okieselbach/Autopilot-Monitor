@@ -1,25 +1,6 @@
 "use client";
 
-import { usePageSections } from "../../../hooks/usePageSections";
-import { PageSectionItem } from "../../../contexts/SidebarContext";
-import { MANAGEMENT_NAV_SECTIONS } from "./managementNavSections";
-import { CircleStackIcon, ArrowRightOnRectangleIcon } from "../../../lib/sidebarIcons";
-
-const SECTION_ICONS: Record<string, React.ReactNode> = {
-  "data": <CircleStackIcon />,
-  "offboarding": <ArrowRightOnRectangleIcon />,
-};
-
-const managementItems: PageSectionItem[] = MANAGEMENT_NAV_SECTIONS.map((s) => ({
-  id: s.id,
-  label: s.label,
-  icon: SECTION_ICONS[s.id],
-  href: `/settings/management/${s.id}`,
-}));
-
 export function ManagementSidebar({ children }: { children: React.ReactNode }) {
-  usePageSections(managementItems, "Management", "route");
-
   return (
     <>
       <header className="bg-white shadow">

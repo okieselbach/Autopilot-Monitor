@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback, ReactNode } from "react";
+import { useEffect, useRef, useState, useMemo, useCallback, ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "../contexts/AuthContext";
@@ -116,6 +116,53 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
     setActiveSectionId(id);
     setMobileDrawerOpen(false);
   }, [setMobileDrawerOpen]);
+
+  // --- Grouped page sections (expandable) ---
+  const hasGroups = pageSections.some((item) => item.group);
+
+  // Group items by their group name (preserving order of first appearance)
+  const groupedSections = useMemo(() => {
+    if (!hasGroups) return null;
+    const groups: { name: string; items: PageSectionItem[] }[] = [];
+    const seen = new Map<string, number>();
+    for (const item of pageSections) {
+      const g = item.group ?? "";
+      if (!seen.has(g)) {
+        seen.set(g, groups.length);
+        groups.push({ name: g, items: [] });
+      }
+      groups[seen.get(g)!].items.push(item);
+    }
+    return groups;
+  }, [pageSections, hasGroups]);
+
+  // Track which groups are expanded — default: group containing active item
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+
+  // Auto-expand the group of the active section
+  useEffect(() => {
+    if (!groupedSections || !activeSectionId) return;
+    for (const group of groupedSections) {
+      if (group.items.some((item) => item.id === activeSectionId)) {
+        setExpandedGroups((prev) => {
+          if (prev.has(group.name)) return prev;
+          const next = new Set(prev);
+          next.add(group.name);
+          return next;
+        });
+        break;
+      }
+    }
+  }, [activeSectionId, groupedSections]);
+
+  const toggleGroup = useCallback((groupName: string) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupName)) next.delete(groupName);
+      else next.add(groupName);
+      return next;
+    });
+  }, []);
 
   // --- Visibility filtering ---
   const isTenantAdmin = user?.isTenantAdmin ?? false;
@@ -335,32 +382,71 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
       {hasPageSections && (
         <>
           {/* Divider / spacing between nav and page sections */}
-          {!isAuthenticated && (
-            collapseState === "icons" && !isMobile ? (
-              <hr className="mx-2 my-2 border-blue-200 dark:border-blue-800" />
-            ) : (
-              <div className="mt-4 mb-2 mx-3">
-                <hr className="border-gray-200 dark:border-gray-700" />
-              </div>
-            )
-          )}
-          {isAuthenticated && (
-            collapseState === "icons" && !isMobile ? (
-              <hr className="mx-2 my-2 border-blue-200 dark:border-blue-800" />
-            ) : (
-              <div className="mt-4 mb-2 mx-3">
-                <hr className="border-gray-200 dark:border-gray-700" />
-              </div>
-            )
+          {collapseState === "icons" && !isMobile ? (
+            <hr className="mx-2 my-2 border-blue-200 dark:border-blue-800" />
+          ) : (
+            <div className="mt-4 mb-2 mx-3">
+              <hr className="border-gray-200 dark:border-gray-700" />
+            </div>
           )}
           {(collapseState === "full" || isMobile) && (
             <p className="text-[11px] font-semibold uppercase tracking-wider mb-1 px-3 text-blue-500 dark:text-blue-400">
               {pageSectionsTitle}
             </p>
           )}
-          <ul className="space-y-0.5">
-            {pageSections.map(renderSectionItem)}
-          </ul>
+
+          {/* Grouped sections with expand/collapse */}
+          {groupedSections ? (
+            groupedSections.map((group) => {
+              const isExpanded = expandedGroups.has(group.name);
+              const groupHasActive = group.items.some((item) => item.id === activeSectionId);
+
+              if (collapseState === "icons" && !isMobile) {
+                // In icons mode, show all items flat (no headers)
+                return (
+                  <ul key={group.name} className="space-y-0.5">
+                    {group.items.map(renderSectionItem)}
+                  </ul>
+                );
+              }
+
+              return (
+                <div key={group.name} className="mt-1">
+                  {/* Group header — clickable to expand/collapse */}
+                  <button
+                    onClick={() => toggleGroup(group.name)}
+                    className={`w-full flex items-center gap-1.5 px-3 py-1 text-[11px] font-semibold uppercase tracking-wider transition-colors rounded-md ${
+                      groupHasActive
+                        ? "text-blue-600 dark:text-blue-400"
+                        : "text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
+                    }`}
+                  >
+                    <svg
+                      className={`w-3 h-3 transition-transform duration-150 ${isExpanded ? "rotate-90" : ""}`}
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={2.5}
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                    </svg>
+                    <span>{group.name}</span>
+                  </button>
+                  {/* Group items — shown when expanded */}
+                  {isExpanded && (
+                    <ul className="space-y-0.5 mt-0.5">
+                      {group.items.map(renderSectionItem)}
+                    </ul>
+                  )}
+                </div>
+              );
+            })
+          ) : (
+            /* Flat (ungrouped) sections — existing behavior */
+            <ul className="space-y-0.5">
+              {pageSections.map(renderSectionItem)}
+            </ul>
+          )}
         </>
       )}
     </>

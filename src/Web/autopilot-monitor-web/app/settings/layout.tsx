@@ -5,6 +5,7 @@ import { useEffect } from "react";
 import { ProtectedRoute } from "../../components/ProtectedRoute";
 import { useAuth } from "../../contexts/AuthContext";
 import { TenantConfigProvider } from "./TenantConfigContext";
+import { SettingsPageSections } from "./SettingsPageSections";
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
@@ -33,6 +34,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
   return (
     <ProtectedRoute>
       <TenantConfigProvider>
+        <SettingsPageSections />
         <div className="min-h-screen bg-gray-50">
           {children}
         </div>

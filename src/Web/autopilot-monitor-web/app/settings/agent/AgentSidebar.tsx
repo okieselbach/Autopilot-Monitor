@@ -1,34 +1,6 @@
 "use client";
 
-import { usePageSections } from "../../../hooks/usePageSections";
-import { PageSectionItem } from "../../../contexts/SidebarContext";
-import { AGENT_NAV_SECTIONS } from "./agentNavSections";
-import { GearIcon, MagnifyingGlassIcon, LockClosedIcon } from "../../../lib/sidebarIcons";
-import { useTenantConfig } from "../TenantConfigContext";
-
-const SECTION_ICONS: Record<string, React.ReactNode> = {
-  "settings": <GearIcon />,
-  "analyzers": <MagnifyingGlassIcon />,
-  "unrestricted-mode": <LockClosedIcon />,
-};
-
 export function AgentSidebar({ children }: { children: React.ReactNode }) {
-  const { config } = useTenantConfig();
-
-  // Filter out unrestricted-mode if not enabled
-  const visibleSections = AGENT_NAV_SECTIONS.filter(
-    (s) => s.id !== "unrestricted-mode" || config?.unrestrictedModeEnabled
-  );
-
-  const agentItems: PageSectionItem[] = visibleSections.map((s) => ({
-    id: s.id,
-    label: s.label,
-    icon: SECTION_ICONS[s.id],
-    href: `/settings/agent/${s.id}`,
-  }));
-
-  usePageSections(agentItems, "Agent", "route");
-
   return (
     <>
       <header className="bg-white shadow">

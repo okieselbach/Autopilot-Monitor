@@ -1,25 +1,6 @@
 "use client";
 
-import { usePageSections } from "../../../hooks/usePageSections";
-import { PageSectionItem } from "../../../contexts/SidebarContext";
-import { VALIDATION_NAV_SECTIONS } from "./validationNavSections";
-import { ShieldCheckIcon, CpuChipIcon } from "../../../lib/sidebarIcons";
-
-const SECTION_ICONS: Record<string, React.ReactNode> = {
-  "autopilot": <ShieldCheckIcon />,
-  "hardware-whitelist": <CpuChipIcon />,
-};
-
-const validationItems: PageSectionItem[] = VALIDATION_NAV_SECTIONS.map((s) => ({
-  id: s.id,
-  label: s.label,
-  icon: SECTION_ICONS[s.id],
-  href: `/settings/validation/${s.id}`,
-}));
-
 export function ValidationSidebar({ children }: { children: React.ReactNode }) {
-  usePageSections(validationItems, "Validation", "route");
-
   return (
     <>
       <header className="bg-white shadow">

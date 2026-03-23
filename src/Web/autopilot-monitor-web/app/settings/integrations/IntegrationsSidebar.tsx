@@ -1,25 +1,6 @@
 "use client";
 
-import { usePageSections } from "../../../hooks/usePageSections";
-import { PageSectionItem } from "../../../contexts/SidebarContext";
-import { INTEGRATIONS_NAV_SECTIONS } from "./integrationsNavSections";
-import { BellIcon, CloudArrowUpIcon } from "../../../lib/sidebarIcons";
-
-const SECTION_ICONS: Record<string, React.ReactNode> = {
-  "notifications": <BellIcon />,
-  "diagnostics": <CloudArrowUpIcon />,
-};
-
-const integrationsItems: PageSectionItem[] = INTEGRATIONS_NAV_SECTIONS.map((s) => ({
-  id: s.id,
-  label: s.label,
-  icon: SECTION_ICONS[s.id],
-  href: `/settings/integrations/${s.id}`,
-}));
-
 export function IntegrationsSidebar({ children }: { children: React.ReactNode }) {
-  usePageSections(integrationsItems, "Integrations", "route");
-
   return (
     <>
       <header className="bg-white shadow">

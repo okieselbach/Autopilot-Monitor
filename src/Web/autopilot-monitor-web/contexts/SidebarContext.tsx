@@ -8,6 +8,8 @@ export interface PageSectionItem {
   label: string;
   icon?: ReactNode;
   href?: string;
+  /** Optional group name — items sharing the same group are rendered under a collapsible header */
+  group?: string;
 }
 
 interface SidebarContextValue {
