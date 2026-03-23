@@ -4,11 +4,12 @@ import { useMemo } from "react";
 import { usePageSections } from "../../hooks/usePageSections";
 import { PageSectionItem } from "../../contexts/SidebarContext";
 import {
-  GearIcon, FolderIcon, ArrowPathIcon,
-  NoSymbolIcon, KeyIcon,
-  DocumentTextIcon, SparklesIcon, ArrowDownTrayIcon,
+  GearIcon,
+  NoSymbolIcon,
+  DocumentTextIcon,
   ChartBarIcon,
   BuildingOfficeIcon,
+  ShieldCheckIcon,
 } from "../../lib/sidebarIcons";
 
 // Inline icon (same as MetricsSidebar had)
@@ -46,33 +47,33 @@ function GlobeIcon({ className = "w-5 h-5" }: { className?: string }) {
 export function AdminPageSections() {
   const items: PageSectionItem[] = useMemo(() => [
     // Tenants
-    { id: "management", label: "Tenant Management", icon: <BuildingOfficeIcon />, href: "/admin/tenants/management", group: "Tenants" },
-    { id: "config-report", label: "Config Report", icon: <DocumentTextIcon />, href: "/admin/tenants/config-report", group: "Tenants" },
+    { id: "management", label: "Tenant Management", href: "/admin/tenants/management", group: "Tenants", groupIcon: <BuildingOfficeIcon /> },
+    { id: "config-report", label: "Config Report", href: "/admin/tenants/config-report", group: "Tenants" },
 
     // Metrics
-    { id: "agent-metrics", label: "Agent Metrics", icon: <ChartBarIcon />, href: "/admin/metrics/agent-metrics", group: "Metrics" },
-    { id: "usage", label: "Platform Usage", icon: <TrendingUpIcon />, href: "/admin/metrics/usage", group: "Metrics" },
+    { id: "agent-metrics", label: "Agent Metrics", href: "/admin/metrics/agent-metrics", group: "Metrics", groupIcon: <ChartBarIcon /> },
+    { id: "usage", label: "Platform Usage", href: "/admin/metrics/usage", group: "Metrics" },
 
     // Reports
-    { id: "session-reports", label: "Session Reports", icon: <DocumentTextIcon />, href: "/admin/reports/session-reports", group: "Reports" },
-    { id: "user-feedback", label: "User Feedback", icon: <SparklesIcon />, href: "/admin/reports/user-feedback", group: "Reports" },
-    { id: "session-export", label: "Session Export", icon: <ArrowDownTrayIcon />, href: "/admin/reports/session-export", group: "Reports" },
+    { id: "session-reports", label: "Session Reports", href: "/admin/reports/session-reports", group: "Reports", groupIcon: <DocumentTextIcon /> },
+    { id: "user-feedback", label: "User Feedback", href: "/admin/reports/user-feedback", group: "Reports" },
+    { id: "session-export", label: "Session Export", href: "/admin/reports/session-export", group: "Reports" },
 
     // Security
-    { id: "device-block", label: "Device Block", icon: <NoSymbolIcon />, href: "/admin/security/device-block", group: "Security" },
-    { id: "version-block", label: "Version Block", icon: <NoSymbolIcon />, href: "/admin/security/version-block", group: "Security" },
-    { id: "vulnerability-data", label: "Vulnerability Data", icon: <KeyIcon />, href: "/admin/security/vulnerability-data", group: "Security" },
+    { id: "device-block", label: "Device Block", href: "/admin/security/device-block", group: "Security", groupIcon: <ShieldCheckIcon /> },
+    { id: "version-block", label: "Version Block", href: "/admin/security/version-block", group: "Security" },
+    { id: "vulnerability-data", label: "Vulnerability Data", href: "/admin/security/vulnerability-data", group: "Security" },
 
     // Settings
-    { id: "global", label: "Global Settings", icon: <GearIcon />, href: "/admin/settings/global", group: "Settings" },
-    { id: "diagnostics-log-paths", label: "Diagnostics Log Paths", icon: <FolderIcon />, href: "/admin/settings/diagnostics-log-paths", group: "Settings" },
-    { id: "config-reseed", label: "Config Reseed", icon: <ArrowPathIcon />, href: "/admin/settings/config-reseed", group: "Settings" },
+    { id: "global", label: "Global Settings", href: "/admin/settings/global", group: "Settings", groupIcon: <GearIcon /> },
+    { id: "diagnostics-log-paths", label: "Diagnostics Log Paths", href: "/admin/settings/diagnostics-log-paths", group: "Settings" },
+    { id: "config-reseed", label: "Config Reseed", href: "/admin/settings/config-reseed", group: "Settings" },
 
-    // Ops (single page, no sub-items — still in a group for consistency)
-    { id: "ops", label: "Maintenance", icon: <WrenchIcon />, href: "/admin/ops", group: "Ops" },
+    // Ops (single page)
+    { id: "ops", label: "Maintenance", href: "/admin/ops", group: "Ops", groupIcon: <WrenchIcon /> },
 
     // Software (single page)
-    { id: "software", label: "Software Mapping", icon: <GlobeIcon />, href: "/admin/software", group: "Software" },
+    { id: "software", label: "Software Mapping", href: "/admin/software", group: "Software", groupIcon: <GlobeIcon /> },
   ], []);
 
   usePageSections(items, "Galactic Admin", "route");

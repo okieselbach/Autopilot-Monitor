@@ -10,6 +10,8 @@ export interface PageSectionItem {
   href?: string;
   /** Optional group name — items sharing the same group are rendered under a collapsible header */
   group?: string;
+  /** Icon for the group header (only needs to be set on the first item of a group) */
+  groupIcon?: ReactNode;
 }
 
 interface SidebarContextValue {

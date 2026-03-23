@@ -129,13 +129,13 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
   // Group items by their group name (preserving order of first appearance)
   const groupedSections = useMemo(() => {
     if (!hasGroups) return null;
-    const groups: { name: string; items: PageSectionItem[] }[] = [];
+    const groups: { name: string; icon?: ReactNode; items: PageSectionItem[] }[] = [];
     const seen = new Map<string, number>();
     for (const item of pageSections) {
       const g = item.group ?? "";
       if (!seen.has(g)) {
         seen.set(g, groups.length);
-        groups.push({ name: g, items: [] });
+        groups.push({ name: g, icon: item.groupIcon, items: [] });
       }
       groups[seen.get(g)!].items.push(item);
     }
@@ -401,52 +401,110 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
             </p>
           )}
 
-          {/* Grouped sections with expand/collapse */}
+          {/* Grouped sections with expand/collapse (GitHub-style) */}
           {groupedSections ? (
-            groupedSections.map((group) => {
+            <ul className="space-y-0.5">
+            {groupedSections.map((group) => {
               const isExpanded = expandedGroups.has(group.name);
               const groupHasActive = group.items.some((item) => item.id === activeSectionId);
+              const firstHref = group.items[0]?.href;
 
               if (collapseState === "icons" && !isMobile) {
-                // In icons mode, show all items flat (no headers)
+                // In icons mode: show group icon as a link to the first item
                 return (
-                  <ul key={group.name} className="space-y-0.5">
-                    {group.items.map(renderSectionItem)}
-                  </ul>
+                  <li key={group.name}>
+                    <Link
+                      href={firstHref ?? "#"}
+                      onClick={() => setMobileDrawerOpen(false)}
+                      className={`flex items-center justify-center px-2 py-2 rounded-md text-sm transition-colors relative group ${
+                        groupHasActive
+                          ? "bg-blue-50 text-blue-700 font-semibold dark:bg-blue-900/30 dark:text-blue-300"
+                          : "text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                      }`}
+                      title={group.name}
+                    >
+                      <span className="shrink-0 w-4.5 h-4.5">
+                        {group.icon ? group.icon : renderIcon(undefined, "w-4.5 h-4.5")}
+                      </span>
+                      <span className="absolute left-full ml-2 px-2 py-1 rounded bg-gray-900 text-white text-xs whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-50 dark:bg-gray-700">
+                        {group.name}
+                      </span>
+                    </Link>
+                  </li>
                 );
               }
 
+              // Full mode: GitHub-style with icon + label + chevron
               return (
-                <div key={group.name} className="mt-1">
-                  {/* Group header — clickable to expand/collapse */}
+                <li key={group.name} className="mt-0.5">
                   <button
                     onClick={() => toggleGroup(group.name)}
-                    className={`w-full flex items-center gap-1.5 px-3 py-1 text-[11px] font-semibold uppercase tracking-wider transition-colors rounded-md ${
+                    className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-md text-sm transition-colors ${
                       groupHasActive
-                        ? "text-blue-600 dark:text-blue-400"
-                        : "text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
+                        ? "text-blue-700 font-semibold dark:text-blue-300"
+                        : "text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
                     }`}
                   >
+                    {/* Group icon */}
+                    <span className="shrink-0 w-4 h-4">
+                      {group.icon ? group.icon : renderIcon(undefined, "w-4 h-4")}
+                    </span>
+                    {/* Group label */}
+                    <span className="truncate flex-1 text-left">{group.name}</span>
+                    {/* Chevron */}
                     <svg
-                      className={`w-3 h-3 transition-transform duration-150 ${isExpanded ? "rotate-90" : ""}`}
+                      className={`w-3.5 h-3.5 shrink-0 text-gray-400 transition-transform duration-150 ${isExpanded ? "rotate-90" : ""}`}
                       fill="none"
                       viewBox="0 0 24 24"
                       stroke="currentColor"
-                      strokeWidth={2.5}
+                      strokeWidth={2}
                     >
                       <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                     </svg>
-                    <span>{group.name}</span>
                   </button>
-                  {/* Group items — shown when expanded */}
+                  {/* Sub-items — smaller, indented, no icons (GitHub-style) */}
                   {isExpanded && (
-                    <ul className="space-y-0.5 mt-0.5">
-                      {group.items.map(renderSectionItem)}
+                    <ul className="mt-0.5 space-y-px">
+                      {group.items.map((item) => {
+                        const active = activeSectionId === item.id;
+                        if (pageSectionsMode === "route" && item.href) {
+                          return (
+                            <li key={item.id}>
+                              <Link
+                                href={item.href}
+                                onClick={() => setMobileDrawerOpen(false)}
+                                className={`block pl-10 pr-3 py-1 rounded-md text-[13px] transition-colors ${
+                                  active
+                                    ? "bg-blue-50 text-blue-700 font-medium dark:bg-blue-900/30 dark:text-blue-300"
+                                    : "text-gray-500 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                                }`}
+                              >
+                                {item.label}
+                              </Link>
+                            </li>
+                          );
+                        }
+                        return (
+                          <li key={item.id}>
+                            <button
+                              onClick={() => scrollTo(item.id)}
+                              className={`w-full text-left block pl-10 pr-3 py-1 rounded-md text-[13px] transition-colors ${
+                                active
+                                  ? "bg-blue-50 text-blue-700 font-medium dark:bg-blue-900/30 dark:text-blue-300"
+                                  : "text-gray-500 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                              }`}
+                            >
+                              {item.label}
+                            </button>
+                          </li>
+                        );
+                      })}
                     </ul>
                   )}
-                </div>
+                </li>
               );
-            })
+            })}
+            </ul>
           ) : (
             /* Flat (ungrouped) sections — existing behavior */
             <ul className="space-y-0.5">
