@@ -102,9 +102,15 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
   // Route mode for page sections
   useEffect(() => {
     if (pageSectionsMode !== "route" || pageSections.length === 0) return;
-    const segment = pathname.split("/").pop() ?? "";
-    const match = pageSections.find((item) => item.id === segment);
-    if (match) setActiveSectionId(match.id);
+    // Match by href first (more precise), fall back to last segment matching id
+    const hrefMatch = pageSections.find((item) => item.href && pathname === item.href);
+    if (hrefMatch) {
+      setActiveSectionId(hrefMatch.id);
+    } else {
+      const segment = pathname.split("/").pop() ?? "";
+      const match = pageSections.find((item) => item.id === segment);
+      if (match) setActiveSectionId(match.id);
+    }
   }, [pathname, pageSections, pageSectionsMode]);
 
   const scrollTo = useCallback((id: string) => {
