@@ -395,7 +395,8 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
               <hr className="border-gray-200 dark:border-gray-700" />
             </div>
           )}
-          {(collapseState === "full" || isMobile) && (
+          {/* Title only for ungrouped sections (grouped sections have their own headers) */}
+          {!groupedSections && (collapseState === "full" || isMobile) && (
             <p className="text-[11px] font-semibold uppercase tracking-wider mb-1 px-3 text-blue-500 dark:text-blue-400">
               {pageSectionsTitle}
             </p>

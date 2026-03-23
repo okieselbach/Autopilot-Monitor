@@ -113,21 +113,8 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: "health-check", label: "System Health", href: "/health-check", icon: <HeartIcon /> },
     ],
   },
-  {
-    id: "galactic-admin",
-    label: "Galactic Admin",
-    visibility: "galacticAdmin",
-    style: "galactic",
-    items: [
-      { id: "admin-tenants", label: "Tenants", href: "/admin/tenants", icon: <DocumentMagnifyingGlassIcon /> },
-      { id: "admin-metrics", label: "Metrics", href: "/admin/metrics", icon: <ChartBarIcon /> },
-      { id: "admin-reports", label: "Reports", href: "/admin/reports", icon: <ClipboardDocumentIcon /> },
-      { id: "admin-security", label: "Security", href: "/admin/security", icon: <ShieldCheckIcon /> },
-      { id: "admin-ops", label: "Ops", href: "/admin/ops", icon: <HeartIcon /> },
-      { id: "admin-settings", label: "Settings", href: "/admin/settings", icon: <GearIcon /> },
-      { id: "admin-software", label: "Software", href: "/admin/software", icon: <GlobeAltIcon /> },
-    ],
-  },
+  // Galactic Admin items are registered dynamically via AdminPageSections
+  // when the user navigates to /admin/* routes.
 ];
 
 // --- Regular user nav (minimal) ---
