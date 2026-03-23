@@ -172,7 +172,7 @@ namespace AutopilotMonitor.Functions.Security
 
             // Security validation is always enforced (no longer configurable per tenant)
             // Hard gate: tenant must enable at least one device validation method before agent traffic is accepted.
-            // Galactic Admins can set AllowInsecureAgentRequests=true in the config row for test tenants.
+            // Global Admins can set AllowInsecureAgentRequests=true in the config row for test tenants.
             if (!config.ValidateAutopilotDevice && !config.ValidateCorporateIdentifier && !config.AllowInsecureAgentRequests)
             {
                 return new SecurityValidationResult

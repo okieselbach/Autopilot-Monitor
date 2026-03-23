@@ -113,11 +113,11 @@ export function SectionAgentMetrics() {
     setError(null);
 
     try {
-      const res = await authenticatedFetch(`${API_BASE_URL}/api/galactic/metrics/platform`, getAccessToken);
+      const res = await authenticatedFetch(`${API_BASE_URL}/api/global/metrics/platform`, getAccessToken);
 
       if (!res.ok) {
         if (res.status === 403) {
-          setError('Access denied. Galactic Admin privileges required.');
+          setError('Access denied. Global Admin privileges required.');
         } else {
           setError(`Failed to fetch platform metrics: ${res.status}`);
         }

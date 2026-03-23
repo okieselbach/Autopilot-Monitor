@@ -247,12 +247,12 @@ Monitoring/
 | **Sessions** | `GET /sessions`, `GET /sessions/{id}`, `GET /sessions/{id}/events`, `POST /sessions/{id}/analysis`, `DELETE /sessions/{id}`, `POST /sessions/{id}/mark-failed` |
 | **Rules** | CRUD for `/rules/gather`, `/rules/analyze`, `/rules/ime-log-patterns`, `POST /rules/reseed-from-github` |
 | **Config** | `GET/POST /global/config`, `GET/PUT /config/{tenantId}` |
-| **Auth** | `GET /auth/me`, `GET /auth/is-galactic-admin`, CRUD `/auth/galactic-admins` |
+| **Auth** | `GET /auth/me`, `GET /auth/is-global-admin`, CRUD `/auth/global-admins` |
 | **Tenants** | CRUD `/tenants/{id}/admins`, `POST /tenants/{id}/offboard` |
 | **Devices** | `POST /devices/block`, `DELETE /devices/block/{serial}`, `GET /devices/blocked` |
-| **Reports** | `POST /sessions/{id}/report`, `GET /galactic/session-reports` |
+| **Reports** | `POST /sessions/{id}/report`, `GET /global/session-reports` |
 | **Metrics** | `GET /metrics/usage`, `GET /metrics/app`, `GET /metrics/geographic`, `GET /stats/platform` |
-| **Galactic** | `/galactic/metrics/*`, `/galactic/audit/logs`, `/galactic/session-reports`, `/galactic/notifications` (CRUD + dismiss) |
+| **Global** | `/global/metrics/*`, `/global/audit/logs`, `/global/session-reports`, `/global/notifications` (CRUD + dismiss) |
 | **Progress** | `GET /progress/sessions`, `GET /progress/sessions/{id}/events` |
 | **SignalR** | `POST /realtime/negotiate`, `POST /realtime/groups/join`, `POST /realtime/groups/leave` |
 | **Health** | `GET /health`, `GET /health/detailed` |
@@ -276,7 +276,7 @@ Monitoring/
 | `SessionReportService` | Report ZIP generation + Blob upload |
 | `GraphTokenService` | MS Graph token acquisition for Autopilot device validation |
 | `BlockedVersionService` | Version-based block/kill rules with wildcard and ceiling patterns |
-| `GalacticNotificationService` | Persistent in-app notifications for Galactic Admins (survives page reloads) |
+| `GlobalNotificationService` | Persistent in-app notifications for Global Admins (survives page reloads) |
 | `HealthCheckService` | Health checks for Storage, Processing, and Agent binary availability |
 | `PreviewWhitelistService` | Private Preview tenant whitelist with 5-min cache |
 | `ResendEmailService` | Transactional emails via Resend.com for Preview notifications |
@@ -339,16 +339,16 @@ Agent POST /api/agent/ingest (NDJSON+gzip)
 | `/sessions/[sessionId]` | Session detail, event timeline, analysis | Yes | Any |
 | `/diagnosis/[sessionId]` | Rule analysis results | Yes | Any |
 | `/settings` | Tenant configuration (10+ sections) | Yes | Tenant Admin |
-| `/admin-configuration` | Global admin settings | Yes | Galactic Admin |
+| `/admin-configuration` | Global admin settings | Yes | Global Admin |
 | `/gather-rules` | Gather rule CRUD | Yes | Tenant Admin |
 | `/analyze-rules` | Analyze rule CRUD | Yes | Tenant Admin |
 | `/ime-log-patterns` | IME pattern management | Yes | Tenant Admin |
 | `/fleet-health` | App metrics, fleet analytics | Yes | Tenant Admin |
 | `/usage-metrics` | Tenant usage analytics | Yes | Tenant Admin |
-| `/platform-metrics` | Platform-wide metrics | Yes | Galactic Admin |
+| `/platform-metrics` | Platform-wide metrics | Yes | Global Admin |
 | `/audit` | Audit log viewer | Yes | Tenant Admin |
-| `/health-check` | Backend health status | Yes | Galactic Admin |
-| `/geographic-performance` | Geo map of deployments | Yes | Galactic Admin |
+| `/health-check` | Backend health status | Yes | Global Admin |
+| `/geographic-performance` | Geo map of deployments | Yes | Global Admin |
 | `/progress` | Real-time enrollment progress tracking | Yes | Tenant Admin |
 | `/preview` | Private Preview waitlist/approval page | Yes | Unapproved tenants |
 | `/changelog` | Platform change log & known issues | Public | — |
@@ -365,7 +365,7 @@ React Context API (no Redux/Zustand):
 
 | Context | Purpose |
 |---------|---------|
-| `AuthContext` | MSAL + user info + role detection (galactic/tenant admin) |
+| `AuthContext` | MSAL + user info + role detection (global/tenant admin) |
 | `SignalRContext` | WebSocket connection, group subscriptions, auto-reconnect |
 | `TenantContext` | Current tenant ID (persisted to localStorage) |
 | `NotificationContext` | Toast notifications with auto-dismiss + deduplication |
@@ -443,14 +443,14 @@ React Context API (no Redux/Zustand):
 | `BootstrapSessions` | TenantId / "CodeLookup" | ShortCode | OOBE bootstrap tokens |
 | `BlockedDevices` | TenantId | SerialNumber | Blocked devices |
 | `SessionReports` | TenantId | ReportId | User-submitted reports |
-| `GalacticAdmins` | "GalacticAdmins" | UPN | Platform-level admins |
+| `GlobalAdmins` | "GlobalAdmins" | UPN | Platform-level admins |
 | `TenantAdmins` | TenantId | UPN | Tenant-level admins |
 | `PreviewWhitelist` | "Preview" | TenantId | Preview access gate |
 | `UserActivity` | TenantId | UserId | User login tracking |
 | `RuleStates` | TenantId | RuleId | Rule enable/disable state |
 | `PreviewConfig` | "Preview" | "config" | Preview feature config |
 | `BlockedVersions` | "BlockedVersions" | Pattern | Version block/kill rules (wildcards, ceilings) |
-| `GalacticNotifications` | "GalacticNotifications" | InvertedTicks_Id | Persistent in-app notifications for Galactic Admins |
+| `GlobalNotifications` | "GlobalNotifications" | InvertedTicks_Id | Persistent in-app notifications for Global Admins |
 
 ### Azure Blob Storage
 
@@ -521,7 +521,7 @@ ValidateSecurityAsync()  (SecurityValidationExtensions.cs)
 
 | Role | Scope | Capabilities |
 |------|-------|-------------|
-| **Galactic Admin** | Platform-wide | Global config, all tenants, platform metrics, health checks |
+| **Global Admin** | Platform-wide | Global config, all tenants, platform metrics, health checks |
 | **Tenant Admin** | Single tenant | Tenant config, rules, admin management, device blocking |
 | **User** | Single tenant | Read-only dashboard, session detail view |
 
@@ -540,7 +540,7 @@ ValidateSecurityAsync()  (SecurityValidationExtensions.cs)
 | Group | Events | Triggered By |
 |-------|--------|-------------|
 | `tenant-{tenantId}` | `newSession`, `sessionStatusChanged`, `eventReceived`, `ruleResultReceived` | Event ingestion, session registration |
-| `galactic-admins` | `newSession` (all tenants), platform stats updates | Cross-tenant broadcasts |
+| `global-admins` | `newSession` (all tenants), platform stats updates | Cross-tenant broadcasts |
 
 ### Client-Side (SignalRContext)
 

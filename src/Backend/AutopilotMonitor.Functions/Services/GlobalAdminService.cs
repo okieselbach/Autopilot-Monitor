@@ -7,20 +7,20 @@ using Microsoft.Extensions.Logging;
 namespace AutopilotMonitor.Functions.Services;
 
 /// <summary>
-/// Service for managing Galactic Admin permissions
-/// Galactic Admins can access cross-tenant data and perform platform-wide operations
+/// Service for managing Global Admin permissions
+/// Global Admins can access cross-tenant data and perform platform-wide operations
 /// </summary>
-public class GalacticAdminService
+public class GlobalAdminService
 {
     private readonly TableServiceClient _tableServiceClient;
     private readonly IMemoryCache _cache;
-    private readonly ILogger<GalacticAdminService> _logger;
+    private readonly ILogger<GlobalAdminService> _logger;
     private readonly TimeSpan _cacheDuration = TimeSpan.FromMinutes(5);
 
-    public GalacticAdminService(
+    public GlobalAdminService(
         IConfiguration configuration,
         IMemoryCache cache,
-        ILogger<GalacticAdminService> logger)
+        ILogger<GlobalAdminService> logger)
     {
         _cache = cache;
         _logger = logger;
@@ -30,37 +30,37 @@ public class GalacticAdminService
     }
 
     /// <summary>
-    /// Checks if a UPN is a Galactic Admin
+    /// Checks if a UPN is a Global Admin
     /// Uses caching for performance
     /// </summary>
     /// <param name="upn">User Principal Name (e.g., oliver@contoso.com)</param>
-    /// <returns>True if the user is a Galactic Admin</returns>
-    public async Task<bool> IsGalacticAdminAsync(string? upn)
+    /// <returns>True if the user is a Global Admin</returns>
+    public async Task<bool> IsGlobalAdminAsync(string? upn)
     {
         if (string.IsNullOrWhiteSpace(upn))
         {
-            _logger.LogDebug("IsGalacticAdminAsync: UPN is null or empty");
+            _logger.LogDebug("IsGlobalAdminAsync: UPN is null or empty");
             return false;
         }
 
         // Normalize UPN to lowercase for case-insensitive comparison
         upn = upn.ToLowerInvariant();
-        _logger.LogInformation($"Checking if user is Galactic Admin: {upn}");
+        _logger.LogInformation($"Checking if user is Global Admin: {upn}");
 
         // Check cache first
-        var cacheKey = $"galactic-admin:{upn}";
+        var cacheKey = $"global-admin:{upn}";
         if (_cache.TryGetValue<bool>(cacheKey, out var isAdmin))
         {
-            _logger.LogInformation($"Galactic Admin check (from cache): {upn} -> {isAdmin}");
+            _logger.LogInformation($"Global Admin check (from cache): {upn} -> {isAdmin}");
             return isAdmin;
         }
 
         // Query Table Storage
-        _logger.LogInformation($"Querying Table Storage for Galactic Admin: {upn}");
-        var admin = await GetGalacticAdminAsync(upn);
+        _logger.LogInformation($"Querying Table Storage for Global Admin: {upn}");
+        var admin = await GetGlobalAdminAsync(upn);
         var result = admin != null && admin.IsEnabled;
 
-        _logger.LogInformation($"Galactic Admin check result: {upn} -> {result} (Entity found: {admin != null}, IsEnabled: {admin?.IsEnabled})");
+        _logger.LogInformation($"Global Admin check result: {upn} -> {result} (Entity found: {admin != null}, IsEnabled: {admin?.IsEnabled})");
 
         // Cache the result
         _cache.Set(cacheKey, result, _cacheDuration);
@@ -69,52 +69,52 @@ public class GalacticAdminService
     }
 
     /// <summary>
-    /// Gets a Galactic Admin entity by UPN
+    /// Gets a Global Admin entity by UPN
     /// </summary>
-    private async Task<GalacticAdminEntity?> GetGalacticAdminAsync(string upn)
+    private async Task<GlobalAdminEntity?> GetGlobalAdminAsync(string upn)
     {
         try
         {
-            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.GalacticAdmins);
+            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.GlobalAdmins);
             var normalizedUpn = upn.ToLowerInvariant();
 
-            _logger.LogDebug($"Querying Table Storage - PartitionKey: 'GalacticAdmins', RowKey: '{normalizedUpn}'");
+            _logger.LogDebug($"Querying Table Storage - PartitionKey: 'GlobalAdmins', RowKey: '{normalizedUpn}'");
 
-            // PartitionKey = "GalacticAdmins", RowKey = UPN
-            var entity = await tableClient.GetEntityAsync<GalacticAdminEntity>(
-                "GalacticAdmins",
+            // PartitionKey = "GlobalAdmins", RowKey = UPN
+            var entity = await tableClient.GetEntityAsync<GlobalAdminEntity>(
+                "GlobalAdmins",
                 normalizedUpn
             );
 
-            _logger.LogDebug($"Galactic Admin entity found for {normalizedUpn}");
+            _logger.LogDebug($"Global Admin entity found for {normalizedUpn}");
             return entity?.Value;
         }
         catch (Azure.RequestFailedException ex) when (ex.Status == 404)
         {
             // Entity not found
-            _logger.LogDebug($"Galactic Admin entity NOT found for {upn} (404)");
+            _logger.LogDebug($"Global Admin entity NOT found for {upn} (404)");
             return null;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Error querying Galactic Admin for {upn}");
+            _logger.LogError(ex, $"Error querying Global Admin for {upn}");
             return null;
         }
     }
 
     /// <summary>
-    /// Adds a user as a Galactic Admin
+    /// Adds a user as a Global Admin
     /// </summary>
     /// <param name="upn">User Principal Name</param>
     /// <param name="addedBy">UPN of the admin who is adding this user</param>
-    public async Task<GalacticAdminEntity> AddGalacticAdminAsync(string upn, string addedBy)
+    public async Task<GlobalAdminEntity> AddGlobalAdminAsync(string upn, string addedBy)
     {
         upn = upn.ToLowerInvariant();
         addedBy = addedBy.ToLowerInvariant();
 
-        var entity = new GalacticAdminEntity
+        var entity = new GlobalAdminEntity
         {
-            PartitionKey = "GalacticAdmins",
+            PartitionKey = "GlobalAdmins",
             RowKey = upn,
             Upn = upn,
             IsEnabled = true,
@@ -122,59 +122,59 @@ public class GalacticAdminService
             AddedBy = addedBy
         };
 
-        var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.GalacticAdmins);
+        var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.GlobalAdmins);
         await tableClient.UpsertEntityAsync(entity);
 
         // Invalidate cache
-        _cache.Remove($"galactic-admin:{upn}");
+        _cache.Remove($"global-admin:{upn}");
 
         return entity;
     }
 
     /// <summary>
-    /// Removes a user from Galactic Admins
+    /// Removes a user from Global Admins
     /// </summary>
-    public async Task RemoveGalacticAdminAsync(string upn)
+    public async Task RemoveGlobalAdminAsync(string upn)
     {
         upn = upn.ToLowerInvariant();
 
-        var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.GalacticAdmins);
-        await tableClient.DeleteEntityAsync("GalacticAdmins", upn);
+        var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.GlobalAdmins);
+        await tableClient.DeleteEntityAsync("GlobalAdmins", upn);
 
         // Invalidate cache
-        _cache.Remove($"galactic-admin:{upn}");
+        _cache.Remove($"global-admin:{upn}");
     }
 
     /// <summary>
-    /// Disables (but does not delete) a Galactic Admin
+    /// Disables (but does not delete) a Global Admin
     /// </summary>
-    public async Task DisableGalacticAdminAsync(string upn)
+    public async Task DisableGlobalAdminAsync(string upn)
     {
         upn = upn.ToLowerInvariant();
 
-        var admin = await GetGalacticAdminAsync(upn);
+        var admin = await GetGlobalAdminAsync(upn);
         if (admin != null)
         {
             admin.IsEnabled = false;
 
-            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.GalacticAdmins);
+            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.GlobalAdmins);
             await tableClient.UpdateEntityAsync(admin, Azure.ETag.All);
 
             // Invalidate cache
-            _cache.Remove($"galactic-admin:{upn}");
+            _cache.Remove($"global-admin:{upn}");
         }
     }
 
     /// <summary>
-    /// Gets all Galactic Admins
+    /// Gets all Global Admins
     /// </summary>
-    public async Task<List<GalacticAdminEntity>> GetAllGalacticAdminsAsync()
+    public async Task<List<GlobalAdminEntity>> GetAllGlobalAdminsAsync()
     {
-        var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.GalacticAdmins);
+        var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.GlobalAdmins);
 
-        var admins = new List<GalacticAdminEntity>();
-        await foreach (var entity in tableClient.QueryAsync<GalacticAdminEntity>(
-            filter: $"PartitionKey eq 'GalacticAdmins'"))
+        var admins = new List<GlobalAdminEntity>();
+        await foreach (var entity in tableClient.QueryAsync<GlobalAdminEntity>(
+            filter: $"PartitionKey eq 'GlobalAdmins'"))
         {
             admins.Add(entity);
         }
@@ -183,7 +183,7 @@ public class GalacticAdminService
     }
 
     /// <summary>
-    /// Clears the cache for all Galactic Admins
+    /// Clears the cache for all Global Admins
     /// Useful after bulk updates
     /// </summary>
     public void ClearCache()
@@ -195,11 +195,11 @@ public class GalacticAdminService
 }
 
 /// <summary>
-/// Entity representing a Galactic Admin in Table Storage
+/// Entity representing a Global Admin in Table Storage
 /// </summary>
-public class GalacticAdminEntity : ITableEntity
+public class GlobalAdminEntity : ITableEntity
 {
-    public string PartitionKey { get; set; } = "GalacticAdmins";
+    public string PartitionKey { get; set; } = "GlobalAdmins";
     public string RowKey { get; set; } = string.Empty; // UPN in lowercase
     public DateTimeOffset? Timestamp { get; set; }
     public Azure.ETag ETag { get; set; }

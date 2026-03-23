@@ -12,16 +12,16 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
     {
         private readonly ILogger<GetSessionEventsFunction> _logger;
         private readonly TableStorageService _storageService;
-        private readonly GalacticAdminService _galacticAdminService;
+        private readonly GlobalAdminService _globalAdminService;
 
         public GetSessionEventsFunction(
             ILogger<GetSessionEventsFunction> logger,
             TableStorageService storageService,
-            GalacticAdminService galacticAdminService)
+            GlobalAdminService globalAdminService)
         {
             _logger = logger;
             _storageService = storageService;
-            _galacticAdminService = galacticAdminService;
+            _globalAdminService = globalAdminService;
         }
 
         [Function("GetSessionEvents")]
@@ -66,12 +66,12 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
                     return badRequest;
                 }
 
-                // Validate tenant access: user must either own the tenant or be Galactic Admin
+                // Validate tenant access: user must either own the tenant or be Global Admin
                 if (requestedTenantId != userTenantId)
                 {
-                    var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userIdentifier);
+                    var isGlobalAdmin = await _globalAdminService.IsGlobalAdminAsync(userIdentifier);
 
-                    if (!isGalacticAdmin)
+                    if (!isGlobalAdmin)
                     {
                         _logger.LogWarning($"{sessionPrefix} User {userIdentifier} (tenant {userTenantId}) attempted to access session events for tenant {requestedTenantId}");
                         var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
@@ -87,7 +87,7 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
                     }
                     else
                     {
-                        _logger.LogInformation($"{sessionPrefix} Galactic Admin {userIdentifier} accessing cross-tenant session events (tenant: {requestedTenantId})");
+                        _logger.LogInformation($"{sessionPrefix} Global Admin {userIdentifier} accessing cross-tenant session events (tenant: {requestedTenantId})");
                     }
                 }
 

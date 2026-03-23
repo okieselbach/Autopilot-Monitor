@@ -80,7 +80,7 @@ export function SessionReportsSection({
       setDownloadingBlob(blobName);
 
       const res = await authenticatedFetch(
-        `${API_BASE_URL}/api/galactic/session-reports/download-url?blobName=${encodeURIComponent(blobName)}`,
+        `${API_BASE_URL}/api/global/session-reports/download-url?blobName=${encodeURIComponent(blobName)}`,
         getAccessToken
       );
       if (!res.ok) throw new Error(`Failed to get download URL: ${res.statusText}`);
@@ -108,7 +108,7 @@ export function SessionReportsSection({
       setNoteSaveResult(null);
 
       const res = await authenticatedFetch(
-        `${API_BASE_URL}/api/galactic/session-reports/${selectedReport.reportId}/note`,
+        `${API_BASE_URL}/api/global/session-reports/${selectedReport.reportId}/note`,
         getAccessToken,
         {
           method: "PATCH",
@@ -137,7 +137,7 @@ export function SessionReportsSection({
     try {
       setLoading(true);
 
-      const res = await authenticatedFetch(`${API_BASE_URL}/api/galactic/session-reports`, getAccessToken);
+      const res = await authenticatedFetch(`${API_BASE_URL}/api/global/session-reports`, getAccessToken);
 
       if (res.status === 404) {
         // Table/container doesn't exist yet — no reports submitted so far

@@ -7,10 +7,10 @@ using Microsoft.Extensions.Logging;
 namespace AutopilotMonitor.Functions.Services;
 
 /// <summary>
-/// Entity for persistent Galactic Admin notifications stored in Table Storage.
+/// Entity for persistent Global Admin notifications stored in Table Storage.
 /// All GAs share the same notification pool; dismiss is global.
 /// </summary>
-public class GalacticNotificationEntity : ITableEntity
+public class GlobalNotificationEntity : ITableEntity
 {
     public string PartitionKey { get; set; } = "notifications";
     public string RowKey { get; set; } = string.Empty; // invertedTicks_notificationId (newest-first)
@@ -27,9 +27,9 @@ public class GalacticNotificationEntity : ITableEntity
 }
 
 /// <summary>
-/// DTO returned by the API for galactic notifications.
+/// DTO returned by the API for global notifications.
 /// </summary>
-public class GalacticNotificationDto
+public class GlobalNotificationDto
 {
     public string Id { get; set; } = string.Empty;
     public string Type { get; set; } = "info";
@@ -40,17 +40,17 @@ public class GalacticNotificationDto
 }
 
 /// <summary>
-/// Service for managing persistent Galactic Admin in-app notifications.
+/// Service for managing persistent Global Admin in-app notifications.
 /// Notifications survive page reloads and persist until actively dismissed.
 /// </summary>
-public class GalacticNotificationService
+public class GlobalNotificationService
 {
     private readonly TableServiceClient _tableServiceClient;
-    private readonly ILogger<GalacticNotificationService> _logger;
+    private readonly ILogger<GlobalNotificationService> _logger;
 
-    public GalacticNotificationService(
+    public GlobalNotificationService(
         IConfiguration configuration,
-        ILogger<GalacticNotificationService> logger)
+        ILogger<GlobalNotificationService> logger)
     {
         _logger = logger;
         var connectionString = configuration["AzureTableStorageConnectionString"];
@@ -65,11 +65,11 @@ public class GalacticNotificationService
     {
         try
         {
-            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.GalacticNotifications);
+            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.GlobalNotifications);
             var notificationId = Guid.NewGuid().ToString("N")[..12];
             var invertedTicks = (DateTime.MaxValue.Ticks - DateTime.UtcNow.Ticks).ToString("D19");
 
-            var entity = new GalacticNotificationEntity
+            var entity = new GlobalNotificationEntity
             {
                 PartitionKey = "notifications",
                 RowKey = $"{invertedTicks}_{notificationId}",
@@ -83,28 +83,28 @@ public class GalacticNotificationService
             };
 
             await tableClient.UpsertEntityAsync(entity);
-            _logger.LogInformation("Galactic notification created: {NotificationId} ({Type})", notificationId, type);
+            _logger.LogInformation("Global notification created: {NotificationId} ({Type})", notificationId, type);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to create galactic notification ({Type}: {Title})", type, title);
+            _logger.LogWarning(ex, "Failed to create global notification ({Type}: {Title})", type, title);
         }
     }
 
     /// <summary>
     /// Returns all active (non-dismissed) notifications, newest first.
     /// </summary>
-    public async Task<List<GalacticNotificationDto>> GetActiveNotificationsAsync()
+    public async Task<List<GlobalNotificationDto>> GetActiveNotificationsAsync()
     {
         try
         {
-            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.GalacticNotifications);
-            var notifications = new List<GalacticNotificationDto>();
+            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.GlobalNotifications);
+            var notifications = new List<GlobalNotificationDto>();
 
-            await foreach (var entity in tableClient.QueryAsync<GalacticNotificationEntity>(
+            await foreach (var entity in tableClient.QueryAsync<GlobalNotificationEntity>(
                 e => e.PartitionKey == "notifications" && !e.Dismissed))
             {
-                notifications.Add(new GalacticNotificationDto
+                notifications.Add(new GlobalNotificationDto
                 {
                     Id = entity.NotificationId,
                     Type = entity.Type,
@@ -119,13 +119,13 @@ public class GalacticNotificationService
         }
         catch (RequestFailedException ex) when (ex.Status == 404)
         {
-            _logger.LogWarning("GalacticNotifications table not found — returning empty list");
-            return new List<GalacticNotificationDto>();
+            _logger.LogWarning("GlobalNotifications table not found — returning empty list");
+            return new List<GlobalNotificationDto>();
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to retrieve galactic notifications");
-            return new List<GalacticNotificationDto>();
+            _logger.LogError(ex, "Failed to retrieve global notifications");
+            return new List<GlobalNotificationDto>();
         }
     }
 
@@ -137,14 +137,14 @@ public class GalacticNotificationService
     {
         try
         {
-            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.GalacticNotifications);
+            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.GlobalNotifications);
 
-            await foreach (var entity in tableClient.QueryAsync<GalacticNotificationEntity>(
+            await foreach (var entity in tableClient.QueryAsync<GlobalNotificationEntity>(
                 e => e.PartitionKey == "notifications" && e.NotificationId == notificationId))
             {
                 entity.Dismissed = true;
                 await tableClient.UpdateEntityAsync(entity, entity.ETag, TableUpdateMode.Replace);
-                _logger.LogInformation("Galactic notification dismissed: {NotificationId}", notificationId);
+                _logger.LogInformation("Global notification dismissed: {NotificationId}", notificationId);
                 return true;
             }
 
@@ -152,7 +152,7 @@ public class GalacticNotificationService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to dismiss galactic notification {NotificationId}", notificationId);
+            _logger.LogError(ex, "Failed to dismiss global notification {NotificationId}", notificationId);
             return false;
         }
     }
@@ -164,10 +164,10 @@ public class GalacticNotificationService
     {
         try
         {
-            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.GalacticNotifications);
+            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.GlobalNotifications);
             var count = 0;
 
-            await foreach (var entity in tableClient.QueryAsync<GalacticNotificationEntity>(
+            await foreach (var entity in tableClient.QueryAsync<GlobalNotificationEntity>(
                 e => e.PartitionKey == "notifications" && !e.Dismissed))
             {
                 entity.Dismissed = true;
@@ -175,12 +175,12 @@ public class GalacticNotificationService
                 count++;
             }
 
-            _logger.LogInformation("Dismissed {Count} galactic notifications", count);
+            _logger.LogInformation("Dismissed {Count} global notifications", count);
             return count;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to dismiss all galactic notifications");
+            _logger.LogError(ex, "Failed to dismiss all global notifications");
             return 0;
         }
     }

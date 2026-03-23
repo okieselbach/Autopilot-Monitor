@@ -2,7 +2,7 @@ namespace AutopilotMonitor.Shared.Models
 {
     /// <summary>
     /// Represents a log file path (or wildcard pattern) to include in the diagnostics ZIP package.
-    /// Global (built-in) entries are defined by Galactic Admins; tenants may add their own.
+    /// Global (built-in) entries are defined by Global Admins; tenants may add their own.
     /// </summary>
     public class DiagnosticsLogPath
     {
@@ -19,7 +19,7 @@ namespace AutopilotMonitor.Shared.Models
         public string Description { get; set; }
 
         /// <summary>
-        /// True when defined globally by a Galactic Admin — displayed as read-only for tenants.
+        /// True when defined globally by a Global Admin — displayed as read-only for tenants.
         /// False when added by the tenant itself.
         /// </summary>
         public bool IsBuiltIn { get; set; }

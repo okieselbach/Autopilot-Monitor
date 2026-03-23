@@ -138,7 +138,7 @@ public class EndpointPolicyCatalogCompletenessTests
     [InlineData("PATCH", "/api/tenants/tid-1/admins/user@contoso.com/permissions", "tenants/{tenantId}/admins/{adminUpn}/permissions")]
     [InlineData("DELETE", "/api/devices/block/SN123456", "devices/block/{encodedSerialNumber}")]
     [InlineData("DELETE", "/api/versions/block/v1.0.*", "versions/block/{encodedPattern}")]
-    [InlineData("PATCH", "/api/galactic/session-reports/report-1/note", "galactic/session-reports/{reportId}/note")]
+    [InlineData("PATCH", "/api/global/session-reports/report-1/note", "global/session-reports/{reportId}/note")]
     public void ParameterizedRoutes_MatchCorrectly(string httpMethod, string requestPath, string expectedTemplate)
     {
         var entry = EndpointAccessPolicyCatalog.FindPolicy(httpMethod, requestPath);

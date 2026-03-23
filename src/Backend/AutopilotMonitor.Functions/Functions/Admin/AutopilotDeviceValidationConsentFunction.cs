@@ -14,20 +14,20 @@ public class AutopilotDeviceValidationConsentFunction
     private readonly ILogger<AutopilotDeviceValidationConsentFunction> _logger;
     private readonly IConfiguration _configuration;
     private readonly TenantAdminsService _tenantAdminsService;
-    private readonly GalacticAdminService _galacticAdminService;
+    private readonly GlobalAdminService _globalAdminService;
     private readonly GraphTokenService _graphTokenService;
 
     public AutopilotDeviceValidationConsentFunction(
         ILogger<AutopilotDeviceValidationConsentFunction> logger,
         IConfiguration configuration,
         TenantAdminsService tenantAdminsService,
-        GalacticAdminService galacticAdminService,
+        GlobalAdminService globalAdminService,
         GraphTokenService graphTokenService)
     {
         _logger = logger;
         _configuration = configuration;
         _tenantAdminsService = tenantAdminsService;
-        _galacticAdminService = galacticAdminService;
+        _globalAdminService = globalAdminService;
         _graphTokenService = graphTokenService;
     }
 
@@ -108,10 +108,10 @@ public class AutopilotDeviceValidationConsentFunction
             return forbidden;
         }
 
-        var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userIdentifier);
+        var isGlobalAdmin = await _globalAdminService.IsGlobalAdminAsync(userIdentifier);
         var isTenantAdmin = await _tenantAdminsService.IsTenantAdminAsync(tenantId, userIdentifier);
 
-        if (!isGalacticAdmin && !isTenantAdmin)
+        if (!isGlobalAdmin && !isTenantAdmin)
         {
             _logger.LogWarning(
                 "User {User} attempted autopilot-device-validation consent operation without admin rights for tenant {TenantId}",
@@ -121,7 +121,7 @@ public class AutopilotDeviceValidationConsentFunction
             var forbidden = req.CreateResponse(HttpStatusCode.Forbidden);
             await forbidden.WriteAsJsonAsync(new
             {
-                error = "Access denied. Tenant Admin or Galactic Admin required."
+                error = "Access denied. Tenant Admin or Global Admin required."
             });
             return forbidden;
         }

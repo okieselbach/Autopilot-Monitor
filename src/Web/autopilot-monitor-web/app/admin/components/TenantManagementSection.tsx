@@ -587,7 +587,7 @@ export function TenantManagementSection({
                 ) : (editingTenant.dataRetentionDays < 7 || editingTenant.dataRetentionDays > 180) ? (
                   <p className="text-xs text-amber-600 mt-1 font-medium">⚠ Outside tenant range (7–180) — field will be locked for tenant admins</p>
                 ) : (
-                  <p className="text-xs text-gray-400 mt-1">Tenant range: 7–180. Set 0 for infinite retention. No upper limit for Galactic.</p>
+                  <p className="text-xs text-gray-400 mt-1">Tenant range: 7–180. Set 0 for infinite retention. No upper limit for Global.</p>
                 )}
               </div>
 

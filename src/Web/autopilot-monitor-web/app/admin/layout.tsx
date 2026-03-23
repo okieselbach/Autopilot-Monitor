@@ -11,15 +11,15 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const router = useRouter();
 
   useEffect(() => {
-    if (user && !user.isGalacticAdmin) {
+    if (user && !user.isGlobalAdmin) {
       router.push("/dashboard");
     }
   }, [user, router]);
 
-  if (!user?.isGalacticAdmin) return null;
+  if (!user?.isGlobalAdmin) return null;
 
   return (
-    <ProtectedRoute requireGalacticAdmin>
+    <ProtectedRoute requireGlobalAdmin>
       <AdminConfigProvider>
         {children}
       </AdminConfigProvider>

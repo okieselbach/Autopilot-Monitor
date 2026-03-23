@@ -321,7 +321,7 @@ export function SectionTenantConfigReport() {
 
   // Fetch tenant list
   useEffect(() => {
-    if (!user?.isGalacticAdmin) return;
+    if (!user?.isGlobalAdmin) return;
     const fetchTenants = async () => {
       try {
         setLoadingTenants(true);
@@ -349,7 +349,7 @@ export function SectionTenantConfigReport() {
       }
     };
     fetchTenants();
-  }, [user?.isGalacticAdmin, getAccessToken]);
+  }, [user?.isGlobalAdmin, getAccessToken]);
 
   // Fetch config for selected tenant
   const fetchConfig = useCallback(async () => {
@@ -574,7 +574,7 @@ export function SectionTenantConfigReport() {
                 <ConfigRow label="Custom Log Paths" value={config.diagnosticsLogPathsJson} configKey="diagnosticsLogPathsJson" defaults={DEFAULTS} />
               </Section>
 
-              <Section title="Feature Flags (Galactic)">
+              <Section title="Feature Flags (Global)">
                 <ConfigRow label="Bootstrap Token Enabled" value={config.bootstrapTokenEnabled} configKey="bootstrapTokenEnabled" defaults={DEFAULTS} />
                 <ConfigRow label="Unrestricted Mode Enabled" value={config.unrestrictedModeEnabled} configKey="unrestrictedModeEnabled" defaults={DEFAULTS} />
                 <ConfigRow label="Unrestricted Mode Active" value={config.unrestrictedMode} configKey="unrestrictedMode" defaults={DEFAULTS} />

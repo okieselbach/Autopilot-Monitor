@@ -11,7 +11,7 @@ namespace AutopilotMonitor.Functions.Functions.Rules
 {
     /// <summary>
     /// API for managing IME log patterns (portal-facing, JWT auth).
-    /// Phase 1: Read-only for tenants, edit/reseed for Galactic Admins only.
+    /// Phase 1: Read-only for tenants, edit/reseed for Global Admins only.
     /// </summary>
     public class ImeLogPatternsFunction
     {
@@ -43,7 +43,7 @@ namespace AutopilotMonitor.Functions.Functions.Rules
             [HttpTrigger(AuthorizationLevel.Anonymous, "put", Route = "rules/ime-log-patterns/{patternId}")] HttpRequestData req,
             string patternId)
         {
-            // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
+            // Authentication + GlobalAdminOnly authorization enforced by PolicyEnforcementMiddleware
 
             // Phase 1: Only global edits
             var globalEdit = req.Url.Query.Contains("global=true", StringComparison.OrdinalIgnoreCase);
@@ -86,10 +86,10 @@ namespace AutopilotMonitor.Functions.Functions.Rules
         {
             try
             {
-                // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
+                // Authentication + GlobalAdminOnly authorization enforced by PolicyEnforcementMiddleware
                 var upn = TenantHelper.GetUserIdentifier(req);
 
-                _logger.LogInformation($"Reseed IME log patterns triggered by Galactic Admin {upn}");
+                _logger.LogInformation($"Reseed IME log patterns triggered by Global Admin {upn}");
 
                 var (deleted, written) = await _patternService.ReseedBuiltInPatternsAsync();
 

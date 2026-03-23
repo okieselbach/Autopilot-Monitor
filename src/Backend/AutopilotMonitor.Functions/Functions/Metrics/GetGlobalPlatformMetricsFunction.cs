@@ -7,31 +7,31 @@ using Microsoft.Extensions.Logging;
 namespace AutopilotMonitor.Functions.Functions.Metrics
 {
     /// <summary>
-    /// Function for retrieving platform agent metrics (Galactic Admin only).
+    /// Function for retrieving platform agent metrics (Global Admin only).
     /// Returns per-session CPU, memory, network metrics with 5-minute backend cache.
     /// </summary>
-    public class GetGalacticPlatformMetricsFunction
+    public class GetGlobalPlatformMetricsFunction
     {
-        private readonly ILogger<GetGalacticPlatformMetricsFunction> _logger;
+        private readonly ILogger<GetGlobalPlatformMetricsFunction> _logger;
         private readonly PlatformMetricsService _platformMetricsService;
 
-        public GetGalacticPlatformMetricsFunction(
-            ILogger<GetGalacticPlatformMetricsFunction> logger,
+        public GetGlobalPlatformMetricsFunction(
+            ILogger<GetGlobalPlatformMetricsFunction> logger,
             PlatformMetricsService platformMetricsService)
         {
             _logger = logger;
             _platformMetricsService = platformMetricsService;
         }
 
-        [Function("GetGalacticPlatformMetrics")]
+        [Function("GetGlobalPlatformMetrics")]
         public async Task<HttpResponseData> Run(
-            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "galactic/metrics/platform")] HttpRequestData req)
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "global/metrics/platform")] HttpRequestData req)
         {
             _logger.LogInformation("Platform agent metrics requested");
 
             try
             {
-                // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
+                // Authentication + GlobalAdminOnly authorization enforced by PolicyEnforcementMiddleware
 
                 var metrics = await _platformMetricsService.ComputePlatformMetricsAsync();
 

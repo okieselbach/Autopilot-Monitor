@@ -165,7 +165,7 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
-        /// Gets all tenant configurations (for Galactic Admin use)
+        /// Gets all tenant configurations (for Global Admin use)
         /// </summary>
         public async Task<List<TenantConfiguration>> GetAllConfigurationsAsync()
         {

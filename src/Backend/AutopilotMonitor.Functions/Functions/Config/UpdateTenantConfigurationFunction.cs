@@ -16,18 +16,18 @@ namespace AutopilotMonitor.Functions.Functions.Config
     {
         private readonly ILogger<UpdateTenantConfigurationFunction> _logger;
         private readonly TenantConfigurationService _configService;
-        private readonly GalacticAdminService _galacticAdminService;
+        private readonly GlobalAdminService _globalAdminService;
         private readonly TableStorageService _storageService;
 
         public UpdateTenantConfigurationFunction(
             ILogger<UpdateTenantConfigurationFunction> logger,
             TenantConfigurationService configService,
-            GalacticAdminService galacticAdminService,
+            GlobalAdminService globalAdminService,
             TableStorageService storageService)
         {
             _logger = logger;
             _configService = configService;
-            _galacticAdminService = galacticAdminService;
+            _globalAdminService = globalAdminService;
             _storageService = storageService;
         }
 
@@ -43,10 +43,10 @@ namespace AutopilotMonitor.Functions.Functions.Config
                 string userIdentifier = TenantHelper.GetUserIdentifier(req);
 
                 // GA check needed for: cross-tenant bypass + protected field filtering
-                var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userIdentifier);
+                var isGlobalAdmin = await _globalAdminService.IsGlobalAdminAsync(userIdentifier);
 
-                // Validate tenant access: cross-tenant only for Galactic Admins
-                if (!isGalacticAdmin && !string.Equals(authenticatedTenantId, tenantId, StringComparison.OrdinalIgnoreCase))
+                // Validate tenant access: cross-tenant only for Global Admins
+                if (!isGlobalAdmin && !string.Equals(authenticatedTenantId, tenantId, StringComparison.OrdinalIgnoreCase))
                 {
                     _logger.LogWarning("User {User} from tenant {AuthTenant} attempted to update configuration for tenant {TargetTenant}",
                         userIdentifier, authenticatedTenantId, tenantId);
@@ -86,9 +86,9 @@ namespace AutopilotMonitor.Functions.Functions.Config
                 // Set the actual user identifier for audit logging
                 config.UpdatedBy = userIdentifier;
 
-                // Protect GA-only fields from non-Galactic-Admin callers
+                // Protect GA-only fields from non-Global-Admin callers
                 var existingConfig = await _configService.GetConfigurationAsync(tenantId);
-                if (!isGalacticAdmin)
+                if (!isGlobalAdmin)
                 {
                     if (config.AllowInsecureAgentRequests != existingConfig.AllowInsecureAgentRequests ||
                         config.BootstrapTokenEnabled != existingConfig.BootstrapTokenEnabled ||

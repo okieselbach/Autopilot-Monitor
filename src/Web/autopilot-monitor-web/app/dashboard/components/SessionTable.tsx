@@ -11,7 +11,7 @@ interface ColumnDef {
   label: string;
   defaultVisible: boolean;
   adminOnly?: boolean;
-  galacticOnly?: boolean;
+  globalOnly?: boolean;
   sortKey?: keyof Session;
   // Session field used for column-level filtering; if set, column is filterable
   filterKey?: keyof Session;
@@ -19,7 +19,7 @@ interface ColumnDef {
 
 const ALL_COLUMNS: ColumnDef[] = [
   { key: "device", label: "Device", defaultVisible: true, sortKey: "deviceName" },
-  { key: "tenantId", label: "Tenant ID", defaultVisible: false, galacticOnly: true },
+  { key: "tenantId", label: "Tenant ID", defaultVisible: false, globalOnly: true },
   { key: "model", label: "Model", defaultVisible: true, sortKey: "model", filterKey: "manufacturer" },
   { key: "status", label: "Status", defaultVisible: true, sortKey: "status", filterKey: "status" },
   { key: "eventCount", label: "Events", defaultVisible: true, sortKey: "eventCount" },
@@ -71,14 +71,14 @@ interface SessionTableProps {
   loadingMore: boolean;
   onLoadMore: () => void;
   adminMode: boolean;
-  galacticAdminMode: boolean;
+  globalAdminMode: boolean;
   tenantIdFilter: string;
   onTenantIdFilterChange: (value: string) => void;
   onTenantIdFilterSubmit: () => void;
   onTenantIdFilterClear: () => void;
   blockedDevicesSet: Set<string>;
   isPreviewBlocked: boolean;
-  user: { isGalacticAdmin?: boolean } | null;
+  user: { isGlobalAdmin?: boolean } | null;
   columnFilters: Record<string, Set<string>>;
   onColumnFiltersChange: (filters: Record<string, Set<string>>) => void;
   onDeleteSession: (sessionId: string, tenantId: string, deviceName?: string) => void;
@@ -107,7 +107,7 @@ export function SessionTable({
   loadingMore,
   onLoadMore,
   adminMode,
-  galacticAdminMode,
+  globalAdminMode,
   tenantIdFilter,
   onTenantIdFilterChange,
   onTenantIdFilterSubmit,
@@ -181,14 +181,14 @@ export function SessionTable({
   // Filter columns based on mode and visibility
   const activeColumns = ALL_COLUMNS.filter((col) => {
     if (col.adminOnly && !adminMode) return false;
-    if (col.galacticOnly && !galacticAdminMode) return false;
+    if (col.globalOnly && !globalAdminMode) return false;
     return visibleColumns.has(col.key);
   });
 
   // Columns available for the selector (exclude mode-gated ones that aren't applicable)
   const selectableColumns = ALL_COLUMNS.filter((col) => {
     if (col.adminOnly && !adminMode) return false;
-    if (col.galacticOnly && !galacticAdminMode) return false;
+    if (col.globalOnly && !globalAdminMode) return false;
     return true;
   });
 
@@ -280,8 +280,8 @@ export function SessionTable({
         </div>
       </div>
 
-      {/* Tenant ID Filter (Galactic Admin only) */}
-      {galacticAdminMode && (
+      {/* Tenant ID Filter (Global Admin only) */}
+      {globalAdminMode && (
         <div className="mb-3 flex items-center gap-2">
           <div className="relative flex-1">
             <input
@@ -459,7 +459,7 @@ export function SessionTable({
                     columnKey={col.key}
                     session={session}
                     adminMode={adminMode}
-                    galacticAdminMode={galacticAdminMode}
+                    globalAdminMode={globalAdminMode}
                     blockedDevicesSet={blockedDevicesSet}
                     user={user}
                     onDeleteSession={onDeleteSession}
@@ -528,7 +528,7 @@ function SessionCell({
   columnKey,
   session,
   adminMode,
-  galacticAdminMode,
+  globalAdminMode,
   blockedDevicesSet,
   user,
   onDeleteSession,
@@ -537,9 +537,9 @@ function SessionCell({
   columnKey: string;
   session: Session;
   adminMode: boolean;
-  galacticAdminMode: boolean;
+  globalAdminMode: boolean;
   blockedDevicesSet: Set<string>;
-  user: { isGalacticAdmin?: boolean } | null;
+  user: { isGlobalAdmin?: boolean } | null;
   onDeleteSession: (sessionId: string, tenantId: string, deviceName?: string) => void;
   onBlockDevice: (serialNumber: string, tenantId: string, deviceName?: string) => void;
 }) {
@@ -702,7 +702,7 @@ function SessionCell({
       return (
         <td className="pl-3 pr-4 py-4 whitespace-nowrap text-right text-sm font-medium">
           <div className="flex items-center justify-end gap-2">
-            {galacticAdminMode && user?.isGalacticAdmin && (
+            {globalAdminMode && user?.isGlobalAdmin && (
               <button
                 onClick={(e) => {
                   e.stopPropagation();

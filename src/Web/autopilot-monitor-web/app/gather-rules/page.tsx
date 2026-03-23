@@ -72,10 +72,10 @@ export default function GatherRulesPage() {
   // Unrestricted mode (fetched from tenant config for validation indicators)
   const [unrestrictedMode, setUnrestrictedMode] = useState(false);
 
-  // Galactic admin mode
-  const [galacticAdminMode] = useState(() => {
+  // Global admin mode
+  const [globalAdminMode] = useState(() => {
     if (typeof window !== 'undefined') {
-      return localStorage.getItem('galacticAdminMode') === 'true';
+      return localStorage.getItem('globalAdminMode') === 'true';
     }
     return false;
   });
@@ -83,7 +83,7 @@ export default function GatherRulesPage() {
   const [selectedTenantId, setSelectedTenantId] = useState<string>('');
 
   useEffect(() => {
-    if (!galacticAdminMode || !user?.isGalacticAdmin) return;
+    if (!globalAdminMode || !user?.isGlobalAdmin) return;
     const fetchTenants = async () => {
       try {
         const response = await authenticatedFetch(`${API_BASE_URL}/api/config/all`, getAccessToken);
@@ -105,7 +105,7 @@ export default function GatherRulesPage() {
       }
     };
     fetchTenants();
-  }, [galacticAdminMode, user?.isGalacticAdmin, getAccessToken]);
+  }, [globalAdminMode, user?.isGlobalAdmin, getAccessToken]);
 
   useEffect(() => {
     if (tenantId && !selectedTenantId) {
@@ -113,21 +113,21 @@ export default function GatherRulesPage() {
     }
   }, [tenantId]);
 
-  const isGalacticOverride = galacticAdminMode && user?.isGalacticAdmin && selectedTenantId && selectedTenantId !== tenantId;
-  const effectiveTenantId = (galacticAdminMode && user?.isGalacticAdmin && selectedTenantId) ? selectedTenantId : tenantId;
-  const isReadOnly = !user?.isTenantAdmin && !user?.isGalacticAdmin;
+  const isGlobalOverride = globalAdminMode && user?.isGlobalAdmin && selectedTenantId && selectedTenantId !== tenantId;
+  const effectiveTenantId = (globalAdminMode && user?.isGlobalAdmin && selectedTenantId) ? selectedTenantId : tenantId;
+  const isReadOnly = !user?.isTenantAdmin && !user?.isGlobalAdmin;
 
   const fetchRules = useCallback(async () => {
     if (!effectiveTenantId) return;
-    const url = isGalacticOverride
-      ? `${API_BASE_URL}/api/galactic/rules/gather?tenantId=${effectiveTenantId}`
+    const url = isGlobalOverride
+      ? `${API_BASE_URL}/api/global/rules/gather?tenantId=${effectiveTenantId}`
       : `${API_BASE_URL}/api/rules/gather?tenantId=${effectiveTenantId}`;
     await fetchRulesExec(
       url,
       undefined,
       { transform: (d) => (d as { rules?: GatherRule[] }).rules || [] }
     );
-  }, [effectiveTenantId, isGalacticOverride, fetchRulesExec]);
+  }, [effectiveTenantId, isGlobalOverride, fetchRulesExec]);
 
   useEffect(() => {
     if (effectiveTenantId) {
@@ -140,8 +140,8 @@ export default function GatherRulesPage() {
     if (!effectiveTenantId) return;
     const fetchConfig = async () => {
       try {
-        const url = isGalacticOverride
-          ? `${API_BASE_URL}/api/galactic/config/${effectiveTenantId}`
+        const url = isGlobalOverride
+          ? `${API_BASE_URL}/api/global/config/${effectiveTenantId}`
           : `${API_BASE_URL}/api/config/${effectiveTenantId}`;
         const response = await authenticatedFetch(url, getAccessToken);
         if (response.ok) {
@@ -153,7 +153,7 @@ export default function GatherRulesPage() {
       }
     };
     fetchConfig();
-  }, [effectiveTenantId, isGalacticOverride, getAccessToken]);
+  }, [effectiveTenantId, isGlobalOverride, getAccessToken]);
 
   const handleToggleRule = async (rule: GatherRule) => {
     setTogglingRule(rule.ruleId);
@@ -395,12 +395,12 @@ export default function GatherRulesPage() {
   return (
     <ProtectedRoute>
       <div className="min-h-screen bg-gray-50">
-        {galacticAdminMode && user?.isGalacticAdmin && (
+        {globalAdminMode && user?.isGlobalAdmin && (
           <div className="bg-purple-700 text-white text-sm px-4 py-2 flex items-center justify-center space-x-2">
             <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            <span className="font-medium">Galactic Admin View</span>
+            <span className="font-medium">Global Admin View</span>
             <span className="text-purple-300">&mdash; access to all tenants</span>
           </div>
         )}
@@ -414,7 +414,7 @@ export default function GatherRulesPage() {
                   <p className="text-sm text-gray-600 mt-1">Manage data collection rules for device enrollment</p>
                 </div>
               </div>
-              {galacticAdminMode && user?.isGalacticAdmin && tenants.length > 0 && (
+              {globalAdminMode && user?.isGlobalAdmin && tenants.length > 0 && (
                 <div className="flex items-center gap-3">
                   <label className="text-sm text-gray-500 hidden sm:inline">Tenant:</label>
                   <select
@@ -519,9 +519,9 @@ export default function GatherRulesPage() {
                   },
                 ]}
                 onExportAll={isReadOnly ? undefined : handleExportAll}
-                onCreateNew={isReadOnly || isGalacticOverride ? undefined : () => { setShowCreateForm(!showCreateForm); if (showCreateForm) setNewRule({ ...EMPTY_FORM }); }}
+                onCreateNew={isReadOnly || isGlobalOverride ? undefined : () => { setShowCreateForm(!showCreateForm); if (showCreateForm) setNewRule({ ...EMPTY_FORM }); }}
                 createLabel="Create Custom Rule"
-                showCreateForm={showCreateForm && !isGalacticOverride && !isReadOnly}
+                showCreateForm={showCreateForm && !isGlobalOverride && !isReadOnly}
               />
 
               {/* Create Custom Rule Form */}

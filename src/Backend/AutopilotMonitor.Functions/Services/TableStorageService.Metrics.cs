@@ -239,7 +239,7 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
-        /// Gets all app install summaries across all tenants (for galactic admin mode)
+        /// Gets all app install summaries across all tenants (for global admin mode)
         /// </summary>
         public async Task<List<AppInstallSummary>> GetAllAppInstallSummariesAsync()
         {
@@ -488,7 +488,7 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
-        /// Gets user activity metrics across all tenants (for galactic admin)
+        /// Gets user activity metrics across all tenants (for global admin)
         /// </summary>
         public async Task<UserActivityMetrics> GetAllUserActivityMetricsAsync()
         {

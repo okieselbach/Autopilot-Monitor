@@ -17,7 +17,7 @@ export function SettingsPageSections() {
 
   const items: PageSectionItem[] = useMemo(() => {
     const sections: PageSectionItem[] = [];
-    const isAdmin = user?.isTenantAdmin || user?.isGalacticAdmin;
+    const isAdmin = user?.isTenantAdmin || user?.isGlobalAdmin;
 
     // 1. Validation
     if (isAdmin) {

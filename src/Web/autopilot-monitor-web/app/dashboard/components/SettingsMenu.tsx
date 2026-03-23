@@ -5,15 +5,15 @@ import { useEffect, useState, useRef } from "react";
 export function SettingsMenu({
   adminMode,
   onAdminModeChange,
-  galacticAdminMode,
-  onGalacticAdminModeChange,
+  globalAdminMode,
+  onGlobalAdminModeChange,
   user,
 }: {
   adminMode: boolean;
   onAdminModeChange: (enabled: boolean) => void;
-  galacticAdminMode: boolean;
-  onGalacticAdminModeChange: (enabled: boolean) => void;
-  user: { displayName: string; email: string; isGalacticAdmin?: boolean } | null;
+  globalAdminMode: boolean;
+  onGlobalAdminModeChange: (enabled: boolean) => void;
+  user: { displayName: string; email: string; isGlobalAdmin?: boolean } | null;
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -82,28 +82,28 @@ export function SettingsMenu({
               )}
             </div>
 
-            {/* Galactic Admin Toggle - Only visible to actual galactic admins */}
-            {user?.isGalacticAdmin && (
+            {/* Global Admin Toggle - Only visible to actual global admins */}
+            {user?.isGlobalAdmin && (
               <div className="mb-3">
                 <div className="flex items-center justify-between p-3 rounded-lg bg-purple-50">
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-gray-700">Galactic Admin</span>
-                    {galacticAdminMode && <span className="text-xs text-purple-700 font-semibold">ACTIVE</span>}
+                    <span className="text-sm font-medium text-gray-700">Global Admin</span>
+                    {globalAdminMode && <span className="text-xs text-purple-700 font-semibold">ACTIVE</span>}
                   </div>
                   <button
-                    onClick={() => onGalacticAdminModeChange(!galacticAdminMode)}
+                    onClick={() => onGlobalAdminModeChange(!globalAdminMode)}
                     className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                      galacticAdminMode ? 'bg-purple-600' : 'bg-gray-300'
+                      globalAdminMode ? 'bg-purple-600' : 'bg-gray-300'
                     }`}
                   >
                     <span
                       className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                        galacticAdminMode ? 'translate-x-6' : 'translate-x-1'
+                        globalAdminMode ? 'translate-x-6' : 'translate-x-1'
                       }`}
                     />
                   </button>
                 </div>
-                {galacticAdminMode && (
+                {globalAdminMode && (
                   <p className="mt-2 text-xs text-purple-700 px-3">
                     Shows ALL sessions across ALL tenants
                   </p>

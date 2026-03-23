@@ -12,14 +12,14 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure
     public class SignalRAddToGroupFunction
     {
         private readonly ILogger<SignalRAddToGroupFunction> _logger;
-        private readonly GalacticAdminService _galacticAdminService;
+        private readonly GlobalAdminService _globalAdminService;
 
         public SignalRAddToGroupFunction(
             ILogger<SignalRAddToGroupFunction> logger,
-            GalacticAdminService galacticAdminService)
+            GlobalAdminService globalAdminService)
         {
             _logger = logger;
-            _galacticAdminService = galacticAdminService;
+            _globalAdminService = globalAdminService;
         }
 
         [Function("AddToGroup")]
@@ -54,21 +54,21 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure
                 var userEmail = TenantHelper.GetUserIdentifier(req);
 
                 // Validate tenant access
-                // Group names are in format: "tenant-{tenantId}", "session-{tenantId}-{sessionId}", or "galactic-admins"
-                // Users can only join groups for their own tenant (unless they are Galactic Admin)
+                // Group names are in format: "tenant-{tenantId}", "session-{tenantId}-{sessionId}", or "global-admins"
+                // Users can only join groups for their own tenant (unless they are Global Admin)
 
-                // Explicit validation for the galactic-admins group
-                if (request.GroupName == "galactic-admins")
+                // Explicit validation for the global-admins group
+                if (request.GroupName == "global-admins")
                 {
-                    var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userEmail);
-                    if (!isGalacticAdmin)
+                    var isGlobalAdmin = await _globalAdminService.IsGlobalAdminAsync(userEmail);
+                    if (!isGlobalAdmin)
                     {
-                        _logger.LogWarning($"User {userEmail} (tenant {userTenantId}) attempted to join galactic-admins group without being a Galactic Admin");
+                        _logger.LogWarning($"User {userEmail} (tenant {userTenantId}) attempted to join global-admins group without being a Global Admin");
                         var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-                        await forbiddenResponse.WriteAsJsonAsync(new { success = false, message = "Access denied: Only Galactic Admins can join this group" });
+                        await forbiddenResponse.WriteAsJsonAsync(new { success = false, message = "Access denied: Only Global Admins can join this group" });
                         return new AddToGroupOutput { HttpResponse = forbiddenResponse };
                     }
-                    _logger.LogInformation($"Galactic Admin {userEmail} joining galactic-admins group");
+                    _logger.LogInformation($"Global Admin {userEmail} joining global-admins group");
                 }
                 else
                 {
@@ -84,10 +84,10 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure
                     // Check if user is allowed to join this tenant's group
                     if (requestedTenantId != userTenantId)
                     {
-                        // Check if user is Galactic Admin (they can join any tenant's group)
-                        var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userEmail);
+                        // Check if user is Global Admin (they can join any tenant's group)
+                        var isGlobalAdmin = await _globalAdminService.IsGlobalAdminAsync(userEmail);
 
-                        if (!isGalacticAdmin)
+                        if (!isGlobalAdmin)
                         {
                             _logger.LogWarning($"User {userEmail} (tenant {userTenantId}) attempted to join group for tenant {requestedTenantId}");
                             var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
@@ -96,7 +96,7 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure
                         }
                         else
                         {
-                            _logger.LogInformation($"Galactic Admin {userEmail} joining cross-tenant group: {request.GroupName}");
+                            _logger.LogInformation($"Global Admin {userEmail} joining cross-tenant group: {request.GroupName}");
                         }
                     }
                 }

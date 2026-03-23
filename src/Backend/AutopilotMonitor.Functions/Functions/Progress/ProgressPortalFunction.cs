@@ -17,16 +17,16 @@ public class ProgressPortalFunction
 {
     private readonly ILogger<ProgressPortalFunction> _logger;
     private readonly TableStorageService _storageService;
-    private readonly GalacticAdminService _galacticAdminService;
+    private readonly GlobalAdminService _globalAdminService;
 
     public ProgressPortalFunction(
         ILogger<ProgressPortalFunction> logger,
         TableStorageService storageService,
-        GalacticAdminService galacticAdminService)
+        GlobalAdminService globalAdminService)
     {
         _logger = logger;
         _storageService = storageService;
-        _galacticAdminService = galacticAdminService;
+        _globalAdminService = globalAdminService;
     }
 
     /// <summary>
@@ -75,7 +75,7 @@ public class ProgressPortalFunction
 
     /// <summary>
     /// GET /api/progress/sessions/{sessionId}/events
-    /// Returns events for a specific session. Cross-tenant access only for Galactic Admins.
+    /// Returns events for a specific session. Cross-tenant access only for Global Admins.
     /// </summary>
     [Function("ProgressGetSessionEvents")]
     public async Task<HttpResponseData> GetSessionEvents(
@@ -115,11 +115,11 @@ public class ProgressPortalFunction
                 return badRequest;
             }
 
-            // Cross-tenant access only for Galactic Admins
+            // Cross-tenant access only for Global Admins
             if (requestedTenantId != userTenantId)
             {
-                var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userIdentifier);
-                if (!isGalacticAdmin)
+                var isGlobalAdmin = await _globalAdminService.IsGlobalAdminAsync(userIdentifier);
+                if (!isGlobalAdmin)
                 {
                     var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
                     await forbiddenResponse.WriteAsJsonAsync(new
@@ -133,7 +133,7 @@ public class ProgressPortalFunction
                     return forbiddenResponse;
                 }
 
-                _logger.LogInformation("{SessionPrefix} Galactic Admin {User} accessing cross-tenant progress events (tenant: {TenantId})",
+                _logger.LogInformation("{SessionPrefix} Global Admin {User} accessing cross-tenant progress events (tenant: {TenantId})",
                     sessionPrefix, userIdentifier, requestedTenantId);
             }
 

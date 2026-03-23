@@ -68,7 +68,7 @@ export function AdminConfigSettingsSection({
                 <p className="text-sm text-indigo-800 dark:text-gray-300 mb-2">
                   Configure default DoS protection limits for all tenants. Normal enrollment generates ~10-30 requests/min.
                   <br />
-                  <strong className="text-indigo-900 dark:text-indigo-100">Note:</strong> Tenants cannot change this value. Only Galactic Admins can override per tenant in tenant management section.
+                  <strong className="text-indigo-900 dark:text-indigo-100">Note:</strong> Tenants cannot change this value. Only Global Admins can override per tenant in tenant management section.
                 </p>
                 <input
                   type="number"

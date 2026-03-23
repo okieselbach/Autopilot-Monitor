@@ -12,12 +12,12 @@ export default function SettingsPage() {
     if (!user) return;
 
     // Operators with bootstrap permission only → go directly to bootstrap sessions
-    if (user.role === "Operator" && !user.isTenantAdmin && !user.isGalacticAdmin && user.canManageBootstrapTokens) {
+    if (user.role === "Operator" && !user.isTenantAdmin && !user.isGlobalAdmin && user.canManageBootstrapTokens) {
       router.replace("/settings/access/bootstrap-sessions");
       return;
     }
 
-    // Everyone else (Tenant Admins, Galactic Admins) → validation (first in onboarding flow)
+    // Everyone else (Tenant Admins, Global Admins) → validation (first in onboarding flow)
     router.replace("/settings/validation/autopilot");
   }, [user, router]);
 

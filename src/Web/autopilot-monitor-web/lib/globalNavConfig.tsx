@@ -101,8 +101,8 @@ export interface NavGroup {
   id: string;
   label: string;
   items: NavItem[];
-  visibility: "all" | "adminOrOperator" | "galacticAdmin";
-  style?: "galactic";
+  visibility: "all" | "adminOrOperator" | "globalAdmin";
+  style?: "global";
 }
 
 /** A group rendered as expandable GitHub-style items */
@@ -110,8 +110,8 @@ export interface ExpandableNavGroup {
   id: string;
   label: string;
   items: ExpandableNavItem[];
-  visibility: "all" | "adminOrOperator" | "galacticAdmin";
-  style?: "galactic";
+  visibility: "all" | "adminOrOperator" | "globalAdmin";
+  style?: "global";
 }
 
 // --- Dashboard item (standalone, above all groups) ---
@@ -203,10 +203,10 @@ export const EXPANDABLE_NAV_GROUPS: ExpandableNavGroup[] = [
     ],
   },
   {
-    id: "galactic-admin",
-    label: "Galactic Admin",
-    visibility: "galacticAdmin",
-    style: "galactic",
+    id: "global-admin",
+    label: "Global Admin",
+    visibility: "globalAdmin",
+    style: "global",
     items: [
       {
         id: "ga-tenants", label: "Tenants", icon: <BuildingOfficeIcon />,

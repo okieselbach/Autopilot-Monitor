@@ -7,7 +7,7 @@ using Microsoft.Extensions.Logging;
 namespace AutopilotMonitor.Functions.Functions.Metrics
 {
     /// <summary>
-    /// Function for retrieving platform usage metrics (Galactic Admin only)
+    /// Function for retrieving platform usage metrics (Global Admin only)
     /// </summary>
     public class PlatformUsageMetricsFunction
     {
@@ -23,19 +23,19 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
         }
 
         /// <summary>
-        /// GET /api/galactic/metrics/usage - Compute and return platform usage metrics
-        /// On-demand computation with 5-minute cache (Galactic Admin only)
+        /// GET /api/global/metrics/usage - Compute and return platform usage metrics
+        /// On-demand computation with 5-minute cache (Global Admin only)
         /// </summary>
         [Function("GetPlatformUsageMetrics")]
         public async Task<HttpResponseData> Run(
-            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "galactic/metrics/usage")]
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "global/metrics/usage")]
             HttpRequestData req)
         {
             _logger.LogInformation("Platform usage metrics requested");
 
             try
             {
-                // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
+                // Authentication + GlobalAdminOnly authorization enforced by PolicyEnforcementMiddleware
 
                 // Optional tenantId query parameter: when provided, return tenant-specific metrics
                 var tenantId = req.Url.Query?.Contains("tenantId=") == true

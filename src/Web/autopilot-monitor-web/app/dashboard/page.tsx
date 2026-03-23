@@ -58,9 +58,9 @@ export default function Home() {
     }
     return false;
   });
-  const [galacticAdminMode, setGalacticAdminMode] = useState(() => {
+  const [globalAdminMode, setGlobalAdminMode] = useState(() => {
     if (typeof window !== 'undefined') {
-      return localStorage.getItem('galacticAdminMode') === 'true';
+      return localStorage.getItem('globalAdminMode') === 'true';
     }
     return false;
   });
@@ -72,14 +72,14 @@ export default function Home() {
   // Track if initial fetch has been done to prevent duplicate calls in React StrictMode
   const hasInitialFetch = useRef(false);
 
-  // Track if galactic admin mode has been initialized (to skip initial mount in useEffect)
-  const hasGalacticModeInitialized = useRef(false);
+  // Track if global admin mode has been initialized (to skip initial mount in useEffect)
+  const hasGlobalModeInitialized = useRef(false);
 
   // Refs for SignalR handlers to access current filter state (avoids stale closures)
   const tenantIdFilterRef = useRef(tenantIdFilter);
   tenantIdFilterRef.current = tenantIdFilter;
-  const galacticAdminModeRef = useRef(galacticAdminMode);
-  galacticAdminModeRef.current = galacticAdminMode;
+  const globalAdminModeRef = useRef(globalAdminMode);
+  globalAdminModeRef.current = globalAdminMode;
   const tenantIdRef = useRef(tenantId);
   tenantIdRef.current = tenantId;
 
@@ -89,12 +89,12 @@ export default function Home() {
   // Track whether we've been connected at least once — used to detect reconnects
   const wasConnectedRef = useRef(false);
 
-  const fetchSessions = async (loadMoreCursor?: string, galacticTenantIdOverride?: string) => {
+  const fetchSessions = async (loadMoreCursor?: string, globalTenantIdOverride?: string) => {
     try {
-      // Use different endpoint based on galactic admin mode
-      const effectiveTenantFilter = galacticTenantIdOverride !== undefined ? galacticTenantIdOverride : tenantIdFilter.trim();
-      let endpoint = galacticAdminMode
-        ? `${API_BASE_URL}/api/galactic/sessions${effectiveTenantFilter ? `?tenantId=${encodeURIComponent(effectiveTenantFilter)}` : ''}`
+      // Use different endpoint based on global admin mode
+      const effectiveTenantFilter = globalTenantIdOverride !== undefined ? globalTenantIdOverride : tenantIdFilter.trim();
+      let endpoint = globalAdminMode
+        ? `${API_BASE_URL}/api/global/sessions${effectiveTenantFilter ? `?tenantId=${encodeURIComponent(effectiveTenantFilter)}` : ''}`
         : `${API_BASE_URL}/api/sessions?tenantId=${tenantId}`;
 
       // Append cursor for "Load More" requests
@@ -143,13 +143,13 @@ export default function Home() {
   };
 
   const fetchBlockedDevices = async (currentSessions: Session[]) => {
-    if (!adminMode || !galacticAdminMode) {
+    if (!adminMode || !globalAdminMode) {
       setBlockedDevicesSet(new Set());
       return;
     }
 
     try {
-      const tenantIds = galacticAdminMode
+      const tenantIds = globalAdminMode
         ? [...new Set(currentSessions.map(s => s.tenantId))]
         : tenantId ? [tenantId] : [];
 
@@ -186,7 +186,7 @@ export default function Home() {
 
   // Redirect regular users (non-admin, non-operator) to progress portal – they must never see the session list
   useEffect(() => {
-    if (user && !user.isTenantAdmin && !user.isGalacticAdmin && user.role !== 'Operator') {
+    if (user && !user.isTenantAdmin && !user.isGlobalAdmin && user.role !== 'Operator') {
       router.replace("/progress");
     }
   }, [user, router]);
@@ -194,7 +194,7 @@ export default function Home() {
   useEffect(() => {
     const fetchTenantSecurityConfig = async () => {
       if (!tenantId) return;
-      if (user && !user.isTenantAdmin && !user.isGalacticAdmin && user.role !== 'Operator') return;
+      if (user && !user.isTenantAdmin && !user.isGlobalAdmin && user.role !== 'Operator') return;
 
       try {
         const response = await authenticatedFetch(`${API_BASE_URL}/api/config/${tenantId}`, getAccessToken);
@@ -221,10 +221,10 @@ export default function Home() {
   // Wait for a real tenantId before fetching — TenantContext initializes to '' and
   // updates asynchronously once AuthContext finishes loading the user token.
   useEffect(() => {
-    if (user && !user.isTenantAdmin && !user.isGalacticAdmin && user.role !== 'Operator') {
+    if (user && !user.isTenantAdmin && !user.isGlobalAdmin && user.role !== 'Operator') {
       return; // regular users are being redirected, don't fetch
     }
-    if (!galacticAdminMode && !tenantId) return; // wait for real tenant ID
+    if (!globalAdminMode && !tenantId) return; // wait for real tenant ID
     // Prevent duplicate fetches in React StrictMode (development double-mounting)
     if (hasInitialFetch.current) {
       return;
@@ -234,7 +234,7 @@ export default function Home() {
     // Only fetch sessions on load, no automatic health check
     fetchSessions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, tenantId, galacticAdminMode]); // re-run once user and tenantId are known
+  }, [user, tenantId, globalAdminMode]); // re-run once user and tenantId are known
 
   // Join tenant group when SignalR is connected (for multi-tenancy)
   useEffect(() => {
@@ -266,42 +266,42 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isConnected, tenantId]);
 
-  // Join/leave galactic-admins group when Galactic Admin mode changes
+  // Join/leave global-admins group when Global Admin mode changes
   useEffect(() => {
     if (!isConnected) return;
 
-    if (galacticAdminMode) {
-      console.log('[Home] Galactic Admin mode enabled: joining galactic-admins group');
-      joinGroup('galactic-admins');
+    if (globalAdminMode) {
+      console.log('[Home] Global Admin mode enabled: joining global-admins group');
+      joinGroup('global-admins');
     } else {
-      console.log('[Home] Galactic Admin mode disabled: leaving galactic-admins group');
-      leaveGroup('galactic-admins');
+      console.log('[Home] Global Admin mode disabled: leaving global-admins group');
+      leaveGroup('global-admins');
     }
 
     return () => {
-      // Clean up galactic-admins group on unmount if currently in Galactic Admin mode
-      if (galacticAdminMode) {
-        console.log('[Home] Component unmounting: leaving galactic-admins group');
-        leaveGroup('galactic-admins');
+      // Clean up global-admins group on unmount if currently in Global Admin mode
+      if (globalAdminMode) {
+        console.log('[Home] Component unmounting: leaving global-admins group');
+        leaveGroup('global-admins');
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isConnected, galacticAdminMode]);
+  }, [isConnected, globalAdminMode]);
 
   // Setup SignalR listener - re-register when connection changes
   useEffect(() => {
     const handleNewSession = (data: { sessionId: string; tenantId: string; session: Session }) => {
       console.log('New session registered', data);
 
-      // In non-galactic mode, only accept sessions from the user's own tenant
-      if (!galacticAdminModeRef.current && tenantIdRef.current && data.tenantId !== tenantIdRef.current) {
-        console.log(`Ignoring newSession from tenant ${data.tenantId} (not in galactic mode, own tenant: ${tenantIdRef.current})`);
+      // In non-global mode, only accept sessions from the user's own tenant
+      if (!globalAdminModeRef.current && tenantIdRef.current && data.tenantId !== tenantIdRef.current) {
+        console.log(`Ignoring newSession from tenant ${data.tenantId} (not in global mode, own tenant: ${tenantIdRef.current})`);
         return;
       }
 
-      // In galactic admin mode with an active tenant filter, ignore sessions from other tenants
+      // In global admin mode with an active tenant filter, ignore sessions from other tenants
       const activeFilter = tenantIdFilterRef.current.trim();
-      if (galacticAdminModeRef.current && activeFilter && data.tenantId !== activeFilter) {
+      if (globalAdminModeRef.current && activeFilter && data.tenantId !== activeFilter) {
         console.log(`Ignoring newSession from tenant ${data.tenantId} (filtered to ${activeFilter})`);
         return;
       }
@@ -363,25 +363,25 @@ export default function Home() {
     localStorage.setItem('adminMode', adminMode.toString());
   }, [adminMode]);
 
-  // Save galactic admin mode to localStorage when it changes
+  // Save global admin mode to localStorage when it changes
   useEffect(() => {
-    localStorage.setItem('galacticAdminMode', galacticAdminMode.toString());
-  }, [galacticAdminMode]);
+    localStorage.setItem('globalAdminMode', globalAdminMode.toString());
+  }, [globalAdminMode]);
 
-  // Clear blocked devices set when admin mode or galactic admin mode is turned off
+  // Clear blocked devices set when admin mode or global admin mode is turned off
   useEffect(() => {
-    if (!adminMode || !galacticAdminMode) {
+    if (!adminMode || !globalAdminMode) {
       setBlockedDevicesSet(new Set());
     }
-  }, [adminMode, galacticAdminMode]);
+  }, [adminMode, globalAdminMode]);
 
-  // Disable galactic admin mode if user is not a galactic admin
+  // Disable global admin mode if user is not a global admin
   useEffect(() => {
-    if (user && !user.isGalacticAdmin && galacticAdminMode) {
-      console.log('[Home] User is not a galactic admin, disabling galactic admin mode');
-      setGalacticAdminMode(false);
+    if (user && !user.isGlobalAdmin && globalAdminMode) {
+      console.log('[Home] User is not a global admin, disabling global admin mode');
+      setGlobalAdminMode(false);
     }
-  }, [user, galacticAdminMode]);
+  }, [user, globalAdminMode]);
 
   // Listen for localStorage changes from other components (e.g., Navbar)
   useEffect(() => {
@@ -389,20 +389,20 @@ export default function Home() {
       if (e.key === 'adminMode' && e.newValue !== null) {
         setAdminMode(e.newValue === 'true');
       }
-      if (e.key === 'galacticAdminMode' && e.newValue !== null) {
-        setGalacticAdminMode(e.newValue === 'true');
+      if (e.key === 'globalAdminMode' && e.newValue !== null) {
+        setGlobalAdminMode(e.newValue === 'true');
       }
     };
 
     const handleCustomStorageChange = () => {
       const newAdminMode = localStorage.getItem('adminMode') === 'true';
-      const newGalacticMode = localStorage.getItem('galacticAdminMode') === 'true';
+      const newGlobalMode = localStorage.getItem('globalAdminMode') === 'true';
 
       if (newAdminMode !== adminMode) {
         setAdminMode(newAdminMode);
       }
-      if (newGalacticMode !== galacticAdminMode) {
-        setGalacticAdminMode(newGalacticMode);
+      if (newGlobalMode !== globalAdminMode) {
+        setGlobalAdminMode(newGlobalMode);
       }
     };
 
@@ -413,17 +413,17 @@ export default function Home() {
       window.removeEventListener('storage', handleStorageChange);
       window.removeEventListener('localStorageChange', handleCustomStorageChange);
     };
-  }, [adminMode, galacticAdminMode]);
+  }, [adminMode, globalAdminMode]);
 
-  // Refetch sessions when galactic admin mode changes
+  // Refetch sessions when global admin mode changes
   useEffect(() => {
-    if (!hasGalacticModeInitialized.current) {
-      hasGalacticModeInitialized.current = true;
+    if (!hasGlobalModeInitialized.current) {
+      hasGlobalModeInitialized.current = true;
       return;
     }
 
-    // Clear tenant filter when leaving galactic mode
-    if (!galacticAdminMode) {
+    // Clear tenant filter when leaving global mode
+    if (!globalAdminMode) {
       setTenantIdFilter("");
     }
 
@@ -433,7 +433,7 @@ export default function Home() {
     setCurrentPage(1);
     setLoading(true);
     fetchSessions();
-  }, [galacticAdminMode]);
+  }, [globalAdminMode]);
 
   // Reset to page 1 when search query, status filter, sort, or page size changes
   useEffect(() => {
@@ -520,7 +520,7 @@ export default function Home() {
           tenantId: sessionToBlock.tenantId,
           serialNumber: sessionToBlock.serialNumber,
           durationHours: 24,
-          reason: `Blocked from dashboard by Galactic Admin`
+          reason: `Blocked from dashboard by Global Admin`
         })
       });
 
@@ -557,7 +557,7 @@ export default function Home() {
 
   // Client-side tenant filter: ensures sessions from other tenants are never displayed,
   // regardless of how they entered the sessions state (SignalR, race conditions, etc.)
-  const effectiveSessions = galacticAdminMode
+  const effectiveSessions = globalAdminMode
     ? (tenantIdFilter.trim()
         ? sessions.filter(s => s.tenantId === tenantIdFilter.trim())
         : sessions)
@@ -805,7 +805,7 @@ export default function Home() {
               loadingMore={loadingMore}
               onLoadMore={loadMore}
               adminMode={adminMode}
-              galacticAdminMode={galacticAdminMode}
+              globalAdminMode={globalAdminMode}
               tenantIdFilter={tenantIdFilter}
               onTenantIdFilterChange={applyTenantIdFilter}
               onTenantIdFilterSubmit={submitTenantIdFilter}

@@ -21,7 +21,7 @@ export function SectionDataManagement() {
         setDataRetentionDays={setDataRetentionDays}
         sessionTimeoutHours={sessionTimeoutHours}
         setSessionTimeoutHours={setSessionTimeoutHours}
-        isGalacticAdmin={user?.isGalacticAdmin}
+        isGlobalAdmin={user?.isGlobalAdmin}
         onSave={handleSaveDataManagement}
         onReset={handleResetDataManagement}
         saving={savingSection === "dataManagement"}

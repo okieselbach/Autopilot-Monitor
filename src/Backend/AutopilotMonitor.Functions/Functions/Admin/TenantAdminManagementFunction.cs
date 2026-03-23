@@ -11,31 +11,31 @@ namespace AutopilotMonitor.Functions.Functions.Admin;
 
 /// <summary>
 /// Tenant Admin Management endpoints
-/// Allows tenant admins and galactic admins to manage admin users for a tenant
+/// Allows tenant admins and global admins to manage admin users for a tenant
 /// </summary>
 public class TenantAdminManagementFunction
 {
     private readonly ILogger<TenantAdminManagementFunction> _logger;
     private readonly TenantAdminsService _tenantAdminsService;
-    private readonly GalacticAdminService _galacticAdminService;
+    private readonly GlobalAdminService _globalAdminService;
     private readonly TableStorageService _storageService;
 
     public TenantAdminManagementFunction(
         ILogger<TenantAdminManagementFunction> logger,
         TenantAdminsService tenantAdminsService,
-        GalacticAdminService galacticAdminService,
+        GlobalAdminService globalAdminService,
         TableStorageService storageService)
     {
         _logger = logger;
         _tenantAdminsService = tenantAdminsService;
-        _galacticAdminService = galacticAdminService;
+        _globalAdminService = globalAdminService;
         _storageService = storageService;
     }
 
     /// <summary>
     /// GET /api/tenants/{tenantId}/admins
     /// Gets all admins for a tenant
-    /// Accessible by: Galactic Admins OR Tenant Admins of the same tenant
+    /// Accessible by: Global Admins OR Tenant Admins of the same tenant
     /// </summary>
     [Function("GetTenantAdmins")]
     [Authorize]
@@ -50,16 +50,16 @@ public class TenantAdminManagementFunction
         var userTenantId = principal.GetTenantId();
         var upn = principal.GetUserPrincipalName();
 
-        // Check authorization: either Galactic Admin OR Tenant Admin of the same tenant
-        var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(upn);
+        // Check authorization: either Global Admin OR Tenant Admin of the same tenant
+        var isGlobalAdmin = await _globalAdminService.IsGlobalAdminAsync(upn);
         var isTenantAdmin = tenantId.Equals(userTenantId, StringComparison.OrdinalIgnoreCase) &&
                            await _tenantAdminsService.IsTenantAdminAsync(tenantId, upn);
 
-        if (!isGalacticAdmin && !isTenantAdmin)
+        if (!isGlobalAdmin && !isTenantAdmin)
         {
             _logger.LogWarning($"User {upn} attempted to access admins for tenant {tenantId} without authorization");
             var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-            await forbiddenResponse.WriteAsJsonAsync(new { error = "Access denied. You must be a Galactic Admin or a Tenant Admin for this tenant." });
+            await forbiddenResponse.WriteAsJsonAsync(new { error = "Access denied. You must be a Global Admin or a Tenant Admin for this tenant." });
             return forbiddenResponse;
         }
 
@@ -75,7 +75,7 @@ public class TenantAdminManagementFunction
     /// <summary>
     /// POST /api/tenants/{tenantId}/admins
     /// Adds a new admin to a tenant
-    /// Accessible by: Galactic Admins OR Tenant Admins of the same tenant
+    /// Accessible by: Global Admins OR Tenant Admins of the same tenant
     /// </summary>
     [Function("AddTenantAdmin")]
     [Authorize]
@@ -90,16 +90,16 @@ public class TenantAdminManagementFunction
         var userTenantId = principal.GetTenantId();
         var upn = principal.GetUserPrincipalName();
 
-        // Check authorization: either Galactic Admin OR Tenant Admin of the same tenant
-        var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(upn);
+        // Check authorization: either Global Admin OR Tenant Admin of the same tenant
+        var isGlobalAdmin = await _globalAdminService.IsGlobalAdminAsync(upn);
         var isTenantAdmin = tenantId.Equals(userTenantId, StringComparison.OrdinalIgnoreCase) &&
                            await _tenantAdminsService.IsTenantAdminAsync(tenantId, upn);
 
-        if (!isGalacticAdmin && !isTenantAdmin)
+        if (!isGlobalAdmin && !isTenantAdmin)
         {
             _logger.LogWarning($"User {upn} attempted to add admin to tenant {tenantId} without authorization");
             var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-            await forbiddenResponse.WriteAsJsonAsync(new { error = "Access denied. You must be a Galactic Admin or a Tenant Admin for this tenant." });
+            await forbiddenResponse.WriteAsJsonAsync(new { error = "Access denied. You must be a Global Admin or a Tenant Admin for this tenant." });
             return forbiddenResponse;
         }
 
@@ -139,7 +139,7 @@ public class TenantAdminManagementFunction
     /// <summary>
     /// DELETE /api/tenants/{tenantId}/admins/{adminUpn}
     /// Removes an admin from a tenant
-    /// Accessible by: Galactic Admins OR Tenant Admins of the same tenant
+    /// Accessible by: Global Admins OR Tenant Admins of the same tenant
     /// Note: Cannot remove yourself if you're the last admin
     /// </summary>
     [Function("RemoveTenantAdmin")]
@@ -156,24 +156,24 @@ public class TenantAdminManagementFunction
         var userTenantId = principal.GetTenantId();
         var upn = principal.GetUserPrincipalName();
 
-        // Check authorization: either Galactic Admin OR Tenant Admin of the same tenant
-        var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(upn);
+        // Check authorization: either Global Admin OR Tenant Admin of the same tenant
+        var isGlobalAdmin = await _globalAdminService.IsGlobalAdminAsync(upn);
         var isTenantAdmin = tenantId.Equals(userTenantId, StringComparison.OrdinalIgnoreCase) &&
                            await _tenantAdminsService.IsTenantAdminAsync(tenantId, upn);
 
-        if (!isGalacticAdmin && !isTenantAdmin)
+        if (!isGlobalAdmin && !isTenantAdmin)
         {
             _logger.LogWarning($"User {upn} attempted to remove admin from tenant {tenantId} without authorization");
             var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-            await forbiddenResponse.WriteAsJsonAsync(new { error = "Access denied. You must be a Galactic Admin or a Tenant Admin for this tenant." });
+            await forbiddenResponse.WriteAsJsonAsync(new { error = "Access denied. You must be a Global Admin or a Tenant Admin for this tenant." });
             return forbiddenResponse;
         }
 
         // Check if trying to remove self
         if (adminUpn.Equals(upn, StringComparison.OrdinalIgnoreCase))
         {
-            // Check if this is the last Admin-role member (only for non-Galactic-Admins)
-            if (!isGalacticAdmin)
+            // Check if this is the last Admin-role member (only for non-Global-Admins)
+            if (!isGlobalAdmin)
             {
                 var members = await _tenantAdminsService.GetTenantAdminsAsync(tenantId);
                 var adminCount = members.Count(m => m.IsEnabled && (m.Role == null || m.Role == AutopilotMonitor.Shared.Constants.TenantRoles.Admin));
@@ -207,7 +207,7 @@ public class TenantAdminManagementFunction
     /// <summary>
     /// PATCH /api/tenants/{tenantId}/admins/{adminUpn}/disable
     /// Disables an admin for a tenant
-    /// Accessible by: Galactic Admins OR Tenant Admins of the same tenant
+    /// Accessible by: Global Admins OR Tenant Admins of the same tenant
     /// </summary>
     [Function("DisableTenantAdmin")]
     [Authorize]
@@ -223,16 +223,16 @@ public class TenantAdminManagementFunction
         var userTenantId = principal.GetTenantId();
         var upn = principal.GetUserPrincipalName();
 
-        // Check authorization: either Galactic Admin OR Tenant Admin of the same tenant
-        var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(upn);
+        // Check authorization: either Global Admin OR Tenant Admin of the same tenant
+        var isGlobalAdmin = await _globalAdminService.IsGlobalAdminAsync(upn);
         var isTenantAdmin = tenantId.Equals(userTenantId, StringComparison.OrdinalIgnoreCase) &&
                            await _tenantAdminsService.IsTenantAdminAsync(tenantId, upn);
 
-        if (!isGalacticAdmin && !isTenantAdmin)
+        if (!isGlobalAdmin && !isTenantAdmin)
         {
             _logger.LogWarning($"User {upn} attempted to disable admin for tenant {tenantId} without authorization");
             var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-            await forbiddenResponse.WriteAsJsonAsync(new { error = "Access denied. You must be a Galactic Admin or a Tenant Admin for this tenant." });
+            await forbiddenResponse.WriteAsJsonAsync(new { error = "Access denied. You must be a Global Admin or a Tenant Admin for this tenant." });
             return forbiddenResponse;
         }
 
@@ -258,7 +258,7 @@ public class TenantAdminManagementFunction
     /// <summary>
     /// PATCH /api/tenants/{tenantId}/admins/{adminUpn}/enable
     /// Enables an admin for a tenant
-    /// Accessible by: Galactic Admins OR Tenant Admins of the same tenant
+    /// Accessible by: Global Admins OR Tenant Admins of the same tenant
     /// </summary>
     [Function("EnableTenantAdmin")]
     [Authorize]
@@ -274,16 +274,16 @@ public class TenantAdminManagementFunction
         var userTenantId = principal.GetTenantId();
         var upn = principal.GetUserPrincipalName();
 
-        // Check authorization: either Galactic Admin OR Tenant Admin of the same tenant
-        var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(upn);
+        // Check authorization: either Global Admin OR Tenant Admin of the same tenant
+        var isGlobalAdmin = await _globalAdminService.IsGlobalAdminAsync(upn);
         var isTenantAdmin = tenantId.Equals(userTenantId, StringComparison.OrdinalIgnoreCase) &&
                            await _tenantAdminsService.IsTenantAdminAsync(tenantId, upn);
 
-        if (!isGalacticAdmin && !isTenantAdmin)
+        if (!isGlobalAdmin && !isTenantAdmin)
         {
             _logger.LogWarning($"User {upn} attempted to enable admin for tenant {tenantId} without authorization");
             var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-            await forbiddenResponse.WriteAsJsonAsync(new { error = "Access denied. You must be a Galactic Admin or a Tenant Admin for this tenant." });
+            await forbiddenResponse.WriteAsJsonAsync(new { error = "Access denied. You must be a Global Admin or a Tenant Admin for this tenant." });
             return forbiddenResponse;
         }
 
@@ -308,7 +308,7 @@ public class TenantAdminManagementFunction
     /// <summary>
     /// PATCH /api/tenants/{tenantId}/admins/{adminUpn}/permissions
     /// Updates role and permissions for a tenant member
-    /// Accessible by: Galactic Admins OR Tenant Admins of the same tenant
+    /// Accessible by: Global Admins OR Tenant Admins of the same tenant
     /// </summary>
     [Function("UpdateMemberPermissions")]
     [Authorize]
@@ -324,16 +324,16 @@ public class TenantAdminManagementFunction
         var userTenantId = principal.GetTenantId();
         var upn = principal.GetUserPrincipalName();
 
-        // Check authorization: either Galactic Admin OR Tenant Admin of the same tenant
-        var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(upn);
+        // Check authorization: either Global Admin OR Tenant Admin of the same tenant
+        var isGlobalAdmin = await _globalAdminService.IsGlobalAdminAsync(upn);
         var isTenantAdmin = tenantId.Equals(userTenantId, StringComparison.OrdinalIgnoreCase) &&
                            await _tenantAdminsService.IsTenantAdminAsync(tenantId, upn);
 
-        if (!isGalacticAdmin && !isTenantAdmin)
+        if (!isGlobalAdmin && !isTenantAdmin)
         {
             _logger.LogWarning("User {Upn} attempted to update member permissions for tenant {TenantId} without authorization", upn, tenantId);
             var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-            await forbiddenResponse.WriteAsJsonAsync(new { error = "Access denied. You must be a Galactic Admin or a Tenant Admin for this tenant." });
+            await forbiddenResponse.WriteAsJsonAsync(new { error = "Access denied. You must be a Global Admin or a Tenant Admin for this tenant." });
             return forbiddenResponse;
         }
 
@@ -348,7 +348,7 @@ public class TenantAdminManagementFunction
         // Prevent demoting yourself if you're the last Admin
         if (adminUpn.Equals(upn, StringComparison.OrdinalIgnoreCase) && body.Role != AutopilotMonitor.Shared.Constants.TenantRoles.Admin)
         {
-            if (!isGalacticAdmin)
+            if (!isGlobalAdmin)
             {
                 var members = await _tenantAdminsService.GetTenantAdminsAsync(tenantId);
                 var adminCount = members.Count(m => m.IsEnabled && (m.Role == null || m.Role == AutopilotMonitor.Shared.Constants.TenantRoles.Admin));

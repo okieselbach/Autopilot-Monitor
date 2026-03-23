@@ -10,7 +10,7 @@ namespace AutopilotMonitor.Functions.Functions.Rules;
 
 /// <summary>
 /// CRUD endpoints for managing the Private Preview tenant whitelist.
-/// All endpoints are Galactic Admin only (except notification-email which is AuthenticatedUser).
+/// All endpoints are Global Admin only (except notification-email which is AuthenticatedUser).
 /// Temporary — remove after GA.
 /// </summary>
 public class PreviewWhitelistFunction
@@ -45,7 +45,7 @@ public class PreviewWhitelistFunction
         [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "preview/whitelist")] HttpRequestData req,
         FunctionContext context)
     {
-        // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
+        // Authentication + GlobalAdminOnly authorization enforced by PolicyEnforcementMiddleware
 
         var approved = await _previewWhitelistService.GetAllApprovedAsync();
 
@@ -65,7 +65,7 @@ public class PreviewWhitelistFunction
         string tenantId,
         FunctionContext context)
     {
-        // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
+        // Authentication + GlobalAdminOnly authorization enforced by PolicyEnforcementMiddleware
         var principal = context.GetUser();
         var upn = principal?.GetUserPrincipalName();
 
@@ -149,7 +149,7 @@ public class PreviewWhitelistFunction
         string tenantId,
         FunctionContext context)
     {
-        // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
+        // Authentication + GlobalAdminOnly authorization enforced by PolicyEnforcementMiddleware
         var principal = context.GetUser();
         var upn = principal?.GetUserPrincipalName();
 
@@ -164,7 +164,7 @@ public class PreviewWhitelistFunction
 
     /// <summary>
     /// GET /api/preview/notification-email/{tenantId}
-    /// Returns the notification email for a tenant. Galactic Admin only.
+    /// Returns the notification email for a tenant. Global Admin only.
     /// </summary>
     [Function("GetPreviewNotificationEmail")]
     [Authorize]
@@ -224,7 +224,7 @@ public class PreviewWhitelistFunction
 
     /// <summary>
     /// POST /api/preview/send-welcome-email/{tenantId}
-    /// Sends (or resends) the Private Preview welcome email. Galactic Admin only.
+    /// Sends (or resends) the Private Preview welcome email. Global Admin only.
     /// Accepts optional { email } in body — if provided, saves it to PreviewWhitelist table before sending.
     /// </summary>
     [Function("SendPreviewWelcomeEmail")]
@@ -234,7 +234,7 @@ public class PreviewWhitelistFunction
         string tenantId,
         FunctionContext context)
     {
-        // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
+        // Authentication + GlobalAdminOnly authorization enforced by PolicyEnforcementMiddleware
 
         // If the caller provides an email in the body, save it first
         var body = await req.ReadFromJsonAsync<SaveNotificationEmailRequest>();

@@ -5,7 +5,7 @@ using System.Text.Json;
 namespace AutopilotMonitor.Shared.Models
 {
     /// <summary>
-    /// Global platform configuration managed by Galactic Admins
+    /// Global platform configuration managed by Global Admins
     /// Stored in Azure Table Storage with single instance
     /// PartitionKey = "GlobalConfig"
     /// RowKey = "config"
@@ -28,7 +28,7 @@ namespace AutopilotMonitor.Shared.Models
         public DateTime LastUpdated { get; set; }
 
         /// <summary>
-        /// Updated by (Galactic Admin user email)
+        /// Updated by (Global Admin user email)
         /// </summary>
         public string UpdatedBy { get; set; }
 

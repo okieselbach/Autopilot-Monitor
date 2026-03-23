@@ -21,13 +21,13 @@ namespace AutopilotMonitor.Functions.Functions.Reports
 
         [Function("GetSessionReports")]
         public async Task<HttpResponseData> Run(
-            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "galactic/session-reports")] HttpRequestData req)
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "global/session-reports")] HttpRequestData req)
         {
             _logger.LogInformation("GetSessionReports function processing request");
 
             try
             {
-                // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
+                // Authentication + GlobalAdminOnly authorization enforced by PolicyEnforcementMiddleware
 
                 var reports = await _sessionReportService.GetAllReportsAsync();
 

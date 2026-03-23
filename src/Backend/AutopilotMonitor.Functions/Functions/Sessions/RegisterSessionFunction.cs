@@ -138,8 +138,8 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
             await response.WriteAsJsonAsync(responseData);
 
             // Send SignalR notification for new session registration
-            // This is sent to BOTH tenant-specific group AND galactic-admins group
-            // so Galactic Admins can see new sessions from all tenants without being
+            // This is sent to BOTH tenant-specific group AND global-admins group
+            // so Global Admins can see new sessions from all tenants without being
             // flooded with every single event update
             var messagePayload = new {
                 sessionId = registration.SessionId,
@@ -154,17 +154,17 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
                 Arguments = new[] { messagePayload }
             };
 
-            // 2. Galactic Admins notification (cross-tenant visibility)
-            var galacticAdminMessage = new SignalRMessageAction("newSession")
+            // 2. Global Admins notification (cross-tenant visibility)
+            var globalAdminMessage = new SignalRMessageAction("newSession")
             {
-                GroupName = "galactic-admins",
+                GroupName = "global-admins",
                 Arguments = new[] { messagePayload }
             };
 
             return new RegisterSessionOutput
             {
                 HttpResponse = response,
-                SignalRMessages = new[] { tenantMessage, galacticAdminMessage }
+                SignalRMessages = new[] { tenantMessage, globalAdminMessage }
             };
         }
 

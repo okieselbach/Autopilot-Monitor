@@ -13,16 +13,16 @@ namespace AutopilotMonitor.Functions.Functions.Config
     {
         private readonly ILogger<GetTenantConfigurationFunction> _logger;
         private readonly TenantConfigurationService _configService;
-        private readonly GalacticAdminService _galacticAdminService;
+        private readonly GlobalAdminService _globalAdminService;
 
         public GetTenantConfigurationFunction(
             ILogger<GetTenantConfigurationFunction> logger,
             TenantConfigurationService configService,
-            GalacticAdminService galacticAdminService)
+            GlobalAdminService globalAdminService)
         {
             _logger = logger;
             _configService = configService;
-            _galacticAdminService = galacticAdminService;
+            _globalAdminService = globalAdminService;
         }
 
         [Function("GetTenantConfiguration")]
@@ -36,11 +36,11 @@ namespace AutopilotMonitor.Functions.Functions.Config
                 string authenticatedTenantId = TenantHelper.GetTenantId(req);
                 string userIdentifier = TenantHelper.GetUserIdentifier(req);
 
-                // Validate tenant access: cross-tenant only for Galactic Admins
+                // Validate tenant access: cross-tenant only for Global Admins
                 if (!string.Equals(authenticatedTenantId, tenantId, StringComparison.OrdinalIgnoreCase))
                 {
-                    var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userIdentifier);
-                    if (!isGalacticAdmin)
+                    var isGlobalAdmin = await _globalAdminService.IsGlobalAdminAsync(userIdentifier);
+                    if (!isGlobalAdmin)
                     {
                         _logger.LogWarning("User {User} from tenant {AuthTenant} attempted to access configuration for tenant {TargetTenant}",
                             userIdentifier, authenticatedTenantId, tenantId);

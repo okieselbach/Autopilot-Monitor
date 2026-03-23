@@ -45,7 +45,7 @@ namespace AutopilotMonitor.Functions.Functions.Admin
         {
             try
             {
-                // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
+                // Authentication + GlobalAdminOnly authorization enforced by PolicyEnforcementMiddleware
                 var upn = TenantHelper.GetUserIdentifier(req);
 
                 // Parse ?type= parameter (default: all)
@@ -58,7 +58,7 @@ namespace AutopilotMonitor.Functions.Functions.Admin
                     typeParam = (typeEnd > 0 ? queryString.Substring(typeStart, typeEnd - typeStart) : queryString.Substring(typeStart)).ToLowerInvariant();
                 }
 
-                _logger.LogInformation($"Reseed from GitHub triggered by Galactic Admin {upn}, type={typeParam}");
+                _logger.LogInformation($"Reseed from GitHub triggered by Global Admin {upn}, type={typeParam}");
 
                 var gatherResult = new { deleted = 0, written = 0 };
                 var analyzeResult = new { deleted = 0, written = 0 };

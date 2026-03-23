@@ -100,8 +100,8 @@ export function SectionPlatformUsage() {
       }
       setError(null);
 
-      // Platform-wide metrics - cross-tenant (Galactic Admin only)
-      const response = await authenticatedFetch(`${API_BASE_URL}/api/galactic/metrics/usage`, getAccessToken);
+      // Platform-wide metrics - cross-tenant (Global Admin only)
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/global/metrics/usage`, getAccessToken);
 
       if (!response.ok) {
         throw new Error(`Failed to fetch platform usage metrics: ${response.statusText}`);

@@ -78,7 +78,7 @@ export function DeviceBlockSection({
   const fetchAllBlockedDevices = async () => {
     try {
       setLoadingAllBlocked(true);
-      const response = await authenticatedFetch(`${API_BASE_URL}/api/galactic/devices/blocked`, getAccessToken);
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/global/devices/blocked`, getAccessToken);
       if (!response.ok) throw new Error(`Failed to load blocked devices: ${response.statusText}`);
       const data = await response.json();
       setBlockedDevices(data.blocked ?? []);

@@ -34,7 +34,7 @@ namespace AutopilotMonitor.Functions.Functions.Admin
         {
             try
             {
-                // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
+                // Authentication + GlobalAdminOnly authorization enforced by PolicyEnforcementMiddleware
 
                 var rules = await _blockedVersionService.GetBlockedVersionsAsync();
 
@@ -58,7 +58,7 @@ namespace AutopilotMonitor.Functions.Functions.Admin
         {
             try
             {
-                // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
+                // Authentication + GlobalAdminOnly authorization enforced by PolicyEnforcementMiddleware
                 var userIdentifier = TenantHelper.GetUserIdentifier(req);
 
                 string body;
@@ -105,7 +105,7 @@ namespace AutopilotMonitor.Functions.Functions.Admin
                 );
 
                 _logger.LogWarning(
-                    "Galactic Admin {User} added version {Action} rule: Pattern={Pattern}, Reason={Reason}",
+                    "Global Admin {User} added version {Action} rule: Pattern={Pattern}, Reason={Reason}",
                     userIdentifier, normalizedAction, versionPattern, reason);
 
                 var response = req.CreateResponse(HttpStatusCode.OK);
@@ -135,7 +135,7 @@ namespace AutopilotMonitor.Functions.Functions.Admin
         {
             try
             {
-                // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
+                // Authentication + GlobalAdminOnly authorization enforced by PolicyEnforcementMiddleware
                 var userIdentifier = TenantHelper.GetUserIdentifier(req);
 
                 var versionPattern = Uri.UnescapeDataString(encodedPattern ?? string.Empty);
@@ -153,7 +153,7 @@ namespace AutopilotMonitor.Functions.Functions.Admin
                 );
 
                 _logger.LogInformation(
-                    "Galactic Admin {User} removed version block rule: Pattern={Pattern}",
+                    "Global Admin {User} removed version block rule: Pattern={Pattern}",
                     userIdentifier, versionPattern);
 
                 var response = req.CreateResponse(HttpStatusCode.OK);

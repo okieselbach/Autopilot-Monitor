@@ -661,7 +661,7 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
-        /// Gets all sessions across all tenants (galactic admin mode), ordered newest-first,
+        /// Gets all sessions across all tenants (global admin mode), ordered newest-first,
         /// with cursor-based pagination. Queries SessionsIndex cross-partition.
         /// Cross-partition queries require in-memory sort since Azure Table Storage only
         /// guarantees RowKey order within a single partition.
@@ -672,7 +672,7 @@ namespace AutopilotMonitor.Functions.Services
             {
                 var indexTableClient = _tableServiceClient.GetTableClient(Constants.TableNames.SessionsIndex);
 
-                // For galactic queries, use StartedAt filter derived from cursor for efficiency
+                // For global queries, use StartedAt filter derived from cursor for efficiency
                 string? filter = null;
                 if (!string.IsNullOrEmpty(cursor))
                 {
@@ -745,7 +745,7 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
-        /// Fallback: queries the Sessions table directly for galactic admin (pre-migration).
+        /// Fallback: queries the Sessions table directly for global admin (pre-migration).
         /// </summary>
         private async Task<SessionPage> GetAllSessionsFromPrimaryTableAsync(int maxResults)
         {

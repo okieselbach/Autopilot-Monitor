@@ -11,25 +11,25 @@ namespace AutopilotMonitor.Functions.Functions.Rules
     /// <summary>
     /// Returns analysis results (rule evaluations) for a session.
     /// Supports on-demand re-analysis via ?reanalyze=true query parameter.
-    /// Galactic admins can request analysis for any tenant by passing ?tenantId=...
+    /// Global admins can request analysis for any tenant by passing ?tenantId=...
     /// </summary>
     public class GetRuleResultsFunction
     {
         private readonly ILogger<GetRuleResultsFunction> _logger;
         private readonly TableStorageService _storageService;
         private readonly AnalyzeRuleService _analyzeRuleService;
-        private readonly GalacticAdminService _galacticAdminService;
+        private readonly GlobalAdminService _globalAdminService;
 
         public GetRuleResultsFunction(
             ILogger<GetRuleResultsFunction> logger,
             TableStorageService storageService,
             AnalyzeRuleService analyzeRuleService,
-            GalacticAdminService galacticAdminService)
+            GlobalAdminService globalAdminService)
         {
             _logger = logger;
             _storageService = storageService;
             _analyzeRuleService = analyzeRuleService;
-            _galacticAdminService = galacticAdminService;
+            _globalAdminService = globalAdminService;
         }
 
         [Function("GetRuleResults")]
@@ -46,18 +46,18 @@ namespace AutopilotMonitor.Functions.Functions.Rules
             var requestedTenantId = query["tenantId"];
             var effectiveTenantId = string.IsNullOrEmpty(requestedTenantId) ? userTenantId : requestedTenantId;
 
-            // Cross-tenant access requires Galactic Admin
+            // Cross-tenant access requires Global Admin
             if (effectiveTenantId != userTenantId)
             {
-                var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userIdentifier);
-                if (!isGalacticAdmin)
+                var isGlobalAdmin = await _globalAdminService.IsGlobalAdminAsync(userIdentifier);
+                if (!isGlobalAdmin)
                 {
                     var forbidden = req.CreateResponse(HttpStatusCode.Forbidden);
                     await forbidden.WriteAsJsonAsync(new { success = false, message = "Access denied. You can only view analysis results for your own tenant." });
                     return forbidden;
                 }
 
-                _logger.LogInformation($"Galactic Admin {userIdentifier} accessing cross-tenant analysis results (tenant: {effectiveTenantId})");
+                _logger.LogInformation($"Global Admin {userIdentifier} accessing cross-tenant analysis results (tenant: {effectiveTenantId})");
             }
 
             var reanalyze = string.Equals(query["reanalyze"], "true", StringComparison.OrdinalIgnoreCase);

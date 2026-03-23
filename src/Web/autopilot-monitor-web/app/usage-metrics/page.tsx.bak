@@ -95,7 +95,7 @@ export default function UsageMetricsPage() {
   };
 
   useEffect(() => {
-    // Tenant metrics are always accessible - no galactic admin check needed
+    // Tenant metrics are always accessible - no global admin check needed
 
     fetchMetrics();
   }, [router]);

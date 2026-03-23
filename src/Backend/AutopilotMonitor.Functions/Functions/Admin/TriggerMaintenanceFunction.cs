@@ -10,7 +10,7 @@ using Microsoft.Extensions.Logging;
 namespace AutopilotMonitor.Functions.Functions.Admin
 {
     /// <summary>
-    /// Allows Galactic Admins to manually trigger maintenance tasks
+    /// Allows Global Admins to manually trigger maintenance tasks
     /// </summary>
     public class TriggerMaintenanceFunction
     {
@@ -27,7 +27,7 @@ namespace AutopilotMonitor.Functions.Functions.Admin
 
         /// <summary>
         /// POST /api/maintenance/trigger
-        /// Manually trigger maintenance tasks (Galactic Admin only)
+        /// Manually trigger maintenance tasks (Global Admin only)
         /// Query parameters:
         /// - date: Optional date to aggregate (yyyy-MM-dd). If not provided, uses yesterday.
         /// - aggregateOnly: If true, only runs aggregation (skips timeout and cleanup)
@@ -39,10 +39,10 @@ namespace AutopilotMonitor.Functions.Functions.Admin
         {
             _logger.LogInformation("Manual maintenance trigger requested");
 
-            // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
+            // Authentication + GlobalAdminOnly authorization enforced by PolicyEnforcementMiddleware
             var userEmail = TenantHelper.GetUserIdentifier(req);
 
-            _logger.LogInformation($"Maintenance trigger initiated by Galactic Admin: {userEmail}");
+            _logger.LogInformation($"Maintenance trigger initiated by Global Admin: {userEmail}");
 
             try
             {

@@ -17,7 +17,7 @@ export function AuthGate() {
     if (isAuthenticated && !isLoading && user) {
       if (isPreviewBlocked) {
         router.push("/preview");
-      } else if (user.isTenantAdmin || user.isGalacticAdmin || user.role === 'Operator') {
+      } else if (user.isTenantAdmin || user.isGlobalAdmin || user.role === 'Operator') {
         router.push("/dashboard");
       } else {
         router.push("/progress");

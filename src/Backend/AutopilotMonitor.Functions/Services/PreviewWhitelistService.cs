@@ -98,7 +98,7 @@ public class PreviewWhitelistService
     }
 
     /// <summary>
-    /// Returns all approved tenants (for Galactic Admin overview).
+    /// Returns all approved tenants (for Global Admin overview).
     /// </summary>
     public async Task<List<PreviewWhitelistEntity>> GetAllApprovedAsync()
     {

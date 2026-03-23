@@ -74,8 +74,8 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
                     });
 
                     // Send SignalR notification to update all clients in the tenant
-                    // Only sent to tenant-specific group (not galactic-admins) to avoid flooding
-                    // Galactic Admins can refresh or view session details to see status changes
+                    // Only sent to tenant-specific group (not global-admins) to avoid flooding
+                    // Global Admins can refresh or view session details to see status changes
                     object? sessionDelta = updatedSession != null ? new {
                         updatedSession.CurrentPhase,
                         updatedSession.CurrentPhaseDetail,

@@ -413,9 +413,9 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
 
   useEffect(() => {
     if (!tenantId) return;
-    if (!user?.isTenantAdmin && !user?.isGalacticAdmin) return;
+    if (!user?.isTenantAdmin && !user?.isGlobalAdmin) return;
     fetchAdmins();
-  }, [tenantId, user?.isTenantAdmin, user?.isGalacticAdmin, fetchAdmins]);
+  }, [tenantId, user?.isTenantAdmin, user?.isGlobalAdmin, fetchAdmins]);
 
   // -----------------------------------------------------------------------
   // Fetch bootstrap sessions
@@ -445,10 +445,10 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
   }, [tenantId, config?.bootstrapTokenEnabled, fetchBootstrapSessions]);
 
   // -----------------------------------------------------------------------
-  // Fetch global diagnostics paths (galactic-admin only)
+  // Fetch global diagnostics paths (global-admin only)
   // -----------------------------------------------------------------------
   useEffect(() => {
-    if (!user?.isGalacticAdmin) return;
+    if (!user?.isGlobalAdmin) return;
     const fetchGlobalDiagPaths = async () => {
       try {
         const res = await authenticatedFetch(`${API_BASE_URL}/api/global/config`, getAccessToken);
@@ -462,7 +462,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
       }
     };
     fetchGlobalDiagPaths();
-  }, [user?.isGalacticAdmin, getAccessToken]);
+  }, [user?.isGlobalAdmin, getAccessToken]);
 
   // -----------------------------------------------------------------------
   // Save configuration (shared by all sections)

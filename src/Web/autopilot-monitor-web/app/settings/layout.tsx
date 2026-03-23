@@ -14,21 +14,21 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
     if (!user) return;
 
     // Regular users (not admin, not operator) → redirect to progress portal
-    if (!user.isTenantAdmin && !user.isGalacticAdmin && user.role !== "Operator") {
+    if (!user.isTenantAdmin && !user.isGlobalAdmin && user.role !== "Operator") {
       router.replace("/progress");
       return;
     }
 
     // Operator without bootstrap permission → no settings access
-    if (user.role === "Operator" && !user.isTenantAdmin && !user.isGalacticAdmin && !user.canManageBootstrapTokens) {
+    if (user.role === "Operator" && !user.isTenantAdmin && !user.isGlobalAdmin && !user.canManageBootstrapTokens) {
       router.replace("/dashboard");
     }
   }, [user, router]);
 
   // Don't render until we know user is allowed
   if (!user) return null;
-  if (!user.isTenantAdmin && !user.isGalacticAdmin && user.role !== "Operator") return null;
-  if (user.role === "Operator" && !user.isTenantAdmin && !user.isGalacticAdmin && !user.canManageBootstrapTokens) return null;
+  if (!user.isTenantAdmin && !user.isGlobalAdmin && user.role !== "Operator") return null;
+  if (user.role === "Operator" && !user.isTenantAdmin && !user.isGlobalAdmin && !user.canManageBootstrapTokens) return null;
 
   return (
     <ProtectedRoute>

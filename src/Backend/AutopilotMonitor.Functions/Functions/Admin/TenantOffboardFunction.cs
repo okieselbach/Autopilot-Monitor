@@ -22,18 +22,18 @@ public class TenantOffboardFunction
 {
     private readonly ILogger<TenantOffboardFunction> _logger;
     private readonly TenantAdminsService _tenantAdminsService;
-    private readonly GalacticAdminService _galacticAdminService;
+    private readonly GlobalAdminService _globalAdminService;
     private readonly TableServiceClient _tableServiceClient;
 
     public TenantOffboardFunction(
         ILogger<TenantOffboardFunction> logger,
         TenantAdminsService tenantAdminsService,
-        GalacticAdminService galacticAdminService,
+        GlobalAdminService globalAdminService,
         IConfiguration configuration)
     {
         _logger = logger;
         _tenantAdminsService = tenantAdminsService;
-        _galacticAdminService = galacticAdminService;
+        _globalAdminService = globalAdminService;
         var connectionString = configuration["AzureTableStorageConnectionString"];
         _tableServiceClient = new TableServiceClient(connectionString);
     }
@@ -41,7 +41,7 @@ public class TenantOffboardFunction
     /// <summary>
     /// DELETE /api/tenants/{tenantId}/offboard
     /// Permanently deletes ALL data for a tenant across all tables.
-    /// Accessible by: Tenant Admins of the same tenant OR Galactic Admins.
+    /// Accessible by: Tenant Admins of the same tenant OR Global Admins.
     /// This action is IRREVERSIBLE.
     /// </summary>
     [Function("OffboardTenant")]
@@ -57,12 +57,12 @@ public class TenantOffboardFunction
         var userTenantId = principal.GetTenantId();
         var upn = principal.GetUserPrincipalName();
 
-        // Only Tenant Admins of the same tenant OR Galactic Admins may offboard
-        var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(upn);
+        // Only Tenant Admins of the same tenant OR Global Admins may offboard
+        var isGlobalAdmin = await _globalAdminService.IsGlobalAdminAsync(upn);
         var isTenantAdmin = tenantId.Equals(userTenantId, StringComparison.OrdinalIgnoreCase) &&
                             await _tenantAdminsService.IsTenantAdminAsync(tenantId, upn);
 
-        if (!isGalacticAdmin && !isTenantAdmin)
+        if (!isGlobalAdmin && !isTenantAdmin)
         {
             _logger.LogWarning($"User {upn} attempted to offboard tenant {tenantId} without authorization");
             var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);

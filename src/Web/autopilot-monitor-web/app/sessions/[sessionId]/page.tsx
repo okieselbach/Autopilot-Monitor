@@ -65,9 +65,9 @@ export default function SessionDetailPage() {
     }
     return false;
   });
-  const [galacticAdminMode, setGalacticAdminMode] = useState(() => {
+  const [globalAdminMode, setGlobalAdminMode] = useState(() => {
     if (typeof window !== 'undefined') {
-      return localStorage.getItem('galacticAdminMode') === 'true';
+      return localStorage.getItem('globalAdminMode') === 'true';
     }
     return false;
   });
@@ -80,7 +80,7 @@ export default function SessionDetailPage() {
   const lastFetchedSessionId = useRef<string | null>(null);
   const tenantIdRef = useRef<string>("");
   const sessionTenantIdRef = useRef<string | null>(sessionTenantId);
-  const galacticAdminModeRef = useRef(galacticAdminMode);
+  const globalAdminModeRef = useRef(globalAdminMode);
 
   // Track if we've joined groups to prevent duplicate joins
   const hasJoinedGroups = useRef(false);
@@ -115,8 +115,8 @@ export default function SessionDetailPage() {
   }, [sessionTenantId]);
 
   useEffect(() => {
-    galacticAdminModeRef.current = galacticAdminMode;
-  }, [galacticAdminMode]);
+    globalAdminModeRef.current = globalAdminMode;
+  }, [globalAdminMode]);
 
   // Auto-scroll: track whether user is near the bottom (only while feature is enabled).
   // Uses a ref so scroll events don't cause re-renders.
@@ -167,7 +167,7 @@ export default function SessionDetailPage() {
   const resolveEffectiveTenantId = () => {
     const knownSessionTenant = sessionTenantIdRef.current || sessionRef.current?.tenantId || null;
     if (knownSessionTenant) return knownSessionTenant;
-    if (galacticAdminModeRef.current) return null;
+    if (globalAdminModeRef.current) return null;
     return tenantIdRef.current || null;
   };
 
@@ -185,7 +185,7 @@ export default function SessionDetailPage() {
   // `user` is included so that a retry fires once MSAL settles (token becomes available).
   useEffect(() => {
     if (!sessionId) return;
-    if (!galacticAdminMode && !tenantId) return; // wait for real tenant ID
+    if (!globalAdminMode && !tenantId) return; // wait for real tenant ID
 
     // Update sessionIdRef
     sessionIdRef.current = sessionId;
@@ -203,7 +203,7 @@ export default function SessionDetailPage() {
 
     fetchSessionDetails();
     // fetchEvents will be called after sessionTenantId is set
-  }, [sessionId, tenantId, galacticAdminMode, user]);
+  }, [sessionId, tenantId, globalAdminMode, user]);
 
   // Fetch events, analysis, and vulnerability report when we have the session's tenant ID
   useEffect(() => {
@@ -265,7 +265,7 @@ export default function SessionDetailPage() {
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, isConnected, sessionTenantId, tenantId, session?.tenantId, galacticAdminMode]);
+  }, [sessionId, isConnected, sessionTenantId, tenantId, session?.tenantId, globalAdminMode]);
 
   // Setup SignalR listener - re-register when connection changes
   useEffect(() => {
@@ -342,15 +342,15 @@ export default function SessionDetailPage() {
     }, 30_000);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, sessionTenantId, tenantId, session?.tenantId, galacticAdminMode, isConnected]);
+  }, [sessionId, sessionTenantId, tenantId, session?.tenantId, globalAdminMode, isConnected]);
 
   const fetchSessionDetails = async () => {
     try {
       const knownTenantId = resolveEffectiveTenantId();
       const endpoint = knownTenantId
         ? `${API_BASE_URL}/api/sessions/${sessionId}?tenantId=${knownTenantId}`
-        : galacticAdminMode
-          ? `${API_BASE_URL}/api/galactic/sessions`
+        : globalAdminMode
+          ? `${API_BASE_URL}/api/global/sessions`
           : `${API_BASE_URL}/api/sessions/${sessionId}`;
 
       const response = await authenticatedFetch(endpoint, getAccessToken);

@@ -12,16 +12,16 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
     {
         private readonly ILogger<GetSessionFunction> _logger;
         private readonly TableStorageService _storageService;
-        private readonly GalacticAdminService _galacticAdminService;
+        private readonly GlobalAdminService _globalAdminService;
 
         public GetSessionFunction(
             ILogger<GetSessionFunction> logger,
             TableStorageService storageService,
-            GalacticAdminService galacticAdminService)
+            GlobalAdminService globalAdminService)
         {
             _logger = logger;
             _storageService = storageService;
-            _galacticAdminService = galacticAdminService;
+            _globalAdminService = globalAdminService;
         }
 
         [Function("GetSession")]
@@ -64,8 +64,8 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
 
                 if (!string.Equals(effectiveTenantId, userTenantId, StringComparison.OrdinalIgnoreCase))
                 {
-                    var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userIdentifier);
-                    if (!isGalacticAdmin)
+                    var isGlobalAdmin = await _globalAdminService.IsGlobalAdminAsync(userIdentifier);
+                    if (!isGlobalAdmin)
                     {
                         _logger.LogWarning($"{sessionPrefix} User {userIdentifier} (tenant {userTenantId}) attempted to access session in tenant {effectiveTenantId}");
                         var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);

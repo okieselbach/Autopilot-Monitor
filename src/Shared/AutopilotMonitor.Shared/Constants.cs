@@ -231,7 +231,7 @@ namespace AutopilotMonitor.Shared
             public const string AdminConfiguration  = "AdminConfiguration";
 
             // Admin tables
-            public const string GalacticAdmins = "GalacticAdmins";
+            public const string GlobalAdmins = "GlobalAdmins";
             public const string TenantAdmins   = "TenantAdmins";
 
             // Preview gating (temporary — remove after GA)
@@ -250,8 +250,8 @@ namespace AutopilotMonitor.Shared
             // Bootstrap sessions (OOBE pre-enrollment agent deployment)
             public const string BootstrapSessions = "BootstrapSessions";
 
-            // Galactic Admin in-app notifications (persistent until dismissed)
-            public const string GalacticNotifications = "GalacticNotifications";
+            // Global Admin in-app notifications (persistent until dismissed)
+            public const string GlobalNotifications = "GlobalNotifications";
 
             // Vulnerability data cache (CPE mappings, CVE data)
             public const string VulnerabilityCache = "VulnerabilityCache";
@@ -282,7 +282,7 @@ namespace AutopilotMonitor.Shared
                 PlatformStats,
                 TenantConfiguration,
                 AdminConfiguration,
-                GalacticAdmins,
+                GlobalAdmins,
                 TenantAdmins,
                 PreviewWhitelist,
                 PreviewConfig,
@@ -290,7 +290,7 @@ namespace AutopilotMonitor.Shared
                 BlockedVersions,
                 SessionReports,
                 BootstrapSessions,
-                GalacticNotifications,
+                GlobalNotifications,
                 VulnerabilityCache,
                 VulnerabilityReports,
                 SoftwareInventory

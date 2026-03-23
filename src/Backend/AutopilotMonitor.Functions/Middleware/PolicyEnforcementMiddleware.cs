@@ -23,16 +23,16 @@ namespace AutopilotMonitor.Functions.Middleware;
 public class PolicyEnforcementMiddleware : IFunctionsWorkerMiddleware
 {
     private readonly ILogger<PolicyEnforcementMiddleware> _logger;
-    private readonly GalacticAdminService _galacticAdminService;
+    private readonly GlobalAdminService _globalAdminService;
     private readonly TenantAdminsService _tenantAdminsService;
 
     public PolicyEnforcementMiddleware(
         ILogger<PolicyEnforcementMiddleware> logger,
-        GalacticAdminService galacticAdminService,
+        GlobalAdminService globalAdminService,
         TenantAdminsService tenantAdminsService)
     {
         _logger = logger;
-        _galacticAdminService = galacticAdminService;
+        _globalAdminService = globalAdminService;
         _tenantAdminsService = tenantAdminsService;
     }
 
@@ -146,8 +146,8 @@ public class PolicyEnforcementMiddleware : IFunctionsWorkerMiddleware
             case EndpointPolicy.BootstrapManagerOrGA:
                 return await EvaluateBootstrapManagerOrGAAsync(tenantId, upn, userIdentifier);
 
-            case EndpointPolicy.GalacticAdminOnly:
-                return await EvaluateGalacticAdminOnlyAsync(upn, userIdentifier);
+            case EndpointPolicy.GlobalAdminOnly:
+                return await EvaluateGlobalAdminOnlyAsync(upn, userIdentifier);
 
             default:
                 return CatalogDecisionResult.Deny(userIdentifier, "N/A", $"UnknownPolicy:{entry.Policy}");
@@ -160,8 +160,8 @@ public class PolicyEnforcementMiddleware : IFunctionsWorkerMiddleware
         if (string.IsNullOrEmpty(tenantId) || string.IsNullOrEmpty(upn))
             return CatalogDecisionResult.Deny(userIdentifier, "N/A", "MissingClaims");
 
-        if (await _galacticAdminService.IsGalacticAdminAsync(upn))
-            return CatalogDecisionResult.Allow(userIdentifier, "GalacticAdmin", "GABypass");
+        if (await _globalAdminService.IsGlobalAdminAsync(upn))
+            return CatalogDecisionResult.Allow(userIdentifier, "GlobalAdmin", "GABypass");
 
         var role = await _tenantAdminsService.GetMemberRoleAsync(tenantId, upn);
         if (role == null)
@@ -177,8 +177,8 @@ public class PolicyEnforcementMiddleware : IFunctionsWorkerMiddleware
         if (string.IsNullOrEmpty(tenantId) || string.IsNullOrEmpty(upn))
             return CatalogDecisionResult.Deny(userIdentifier, "N/A", "MissingClaims");
 
-        if (await _galacticAdminService.IsGalacticAdminAsync(upn))
-            return CatalogDecisionResult.Allow(userIdentifier, "GalacticAdmin", "GABypass");
+        if (await _globalAdminService.IsGlobalAdminAsync(upn))
+            return CatalogDecisionResult.Allow(userIdentifier, "GlobalAdmin", "GABypass");
 
         if (await _tenantAdminsService.IsTenantAdminAsync(tenantId, upn))
             return CatalogDecisionResult.Allow(userIdentifier, Constants.TenantRoles.Admin, "TenantAdmin");
@@ -194,8 +194,8 @@ public class PolicyEnforcementMiddleware : IFunctionsWorkerMiddleware
         if (string.IsNullOrEmpty(tenantId) || string.IsNullOrEmpty(upn))
             return CatalogDecisionResult.Deny(userIdentifier, "N/A", "MissingClaims");
 
-        if (await _galacticAdminService.IsGalacticAdminAsync(upn))
-            return CatalogDecisionResult.Allow(userIdentifier, "GalacticAdmin", "GABypass");
+        if (await _globalAdminService.IsGlobalAdminAsync(upn))
+            return CatalogDecisionResult.Allow(userIdentifier, "GlobalAdmin", "GABypass");
 
         if (await _tenantAdminsService.CanManageBootstrapAsync(tenantId, upn))
             return CatalogDecisionResult.Allow(userIdentifier, "BootstrapManager", "CanManageBootstrap");
@@ -205,16 +205,16 @@ public class PolicyEnforcementMiddleware : IFunctionsWorkerMiddleware
         return CatalogDecisionResult.Deny(userIdentifier, roleName, "NoBootstrapPermission");
     }
 
-    private async Task<CatalogDecisionResult> EvaluateGalacticAdminOnlyAsync(
+    private async Task<CatalogDecisionResult> EvaluateGlobalAdminOnlyAsync(
         string? upn, string userIdentifier)
     {
         if (string.IsNullOrEmpty(upn))
             return CatalogDecisionResult.Deny(userIdentifier, "N/A", "MissingClaims");
 
-        if (await _galacticAdminService.IsGalacticAdminAsync(upn))
-            return CatalogDecisionResult.Allow(userIdentifier, "GalacticAdmin", "IsGA");
+        if (await _globalAdminService.IsGlobalAdminAsync(upn))
+            return CatalogDecisionResult.Allow(userIdentifier, "GlobalAdmin", "IsGA");
 
-        return CatalogDecisionResult.Deny(userIdentifier, "NonGA", "NotGalacticAdmin");
+        return CatalogDecisionResult.Deny(userIdentifier, "NonGA", "NotGlobalAdmin");
     }
 
     /// <summary>

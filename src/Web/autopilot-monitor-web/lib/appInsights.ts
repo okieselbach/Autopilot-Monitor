@@ -5,7 +5,7 @@ let appInsights: ApplicationInsights | null = null;
 const telemetryConfig = {
   tenantId: null as string | null,
   isAdmin: false,
-  isGalacticAdmin: false,
+  isGlobalAdmin: false,
   theme: "light" as "light" | "dark",
 };
 
@@ -26,7 +26,7 @@ export function initAppInsights(connectionString: string) {
     envelope.data = envelope.data ?? {};
     if (telemetryConfig.tenantId) envelope.data["tenantId"] = telemetryConfig.tenantId;
     envelope.data["isAdmin"] = telemetryConfig.isAdmin;
-    envelope.data["isGalacticAdmin"] = telemetryConfig.isGalacticAdmin;
+    envelope.data["isGlobalAdmin"] = telemetryConfig.isGlobalAdmin;
     envelope.data["theme"] = telemetryConfig.theme;
   });
 
@@ -36,12 +36,12 @@ export function initAppInsights(connectionString: string) {
 export function setTelemetryContext(
   tenantId: string | null,
   isAdmin: boolean,
-  isGalacticAdmin: boolean,
+  isGlobalAdmin: boolean,
   theme: "light" | "dark"
 ) {
   telemetryConfig.tenantId = tenantId;
   telemetryConfig.isAdmin = isAdmin;
-  telemetryConfig.isGalacticAdmin = isGalacticAdmin;
+  telemetryConfig.isGlobalAdmin = isGlobalAdmin;
   telemetryConfig.theme = theme;
 }
 

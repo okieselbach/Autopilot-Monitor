@@ -64,7 +64,7 @@ interface UserInfo {
   upn: string;
   tenantId: string;
   objectId: string;
-  isGalacticAdmin: boolean;
+  isGlobalAdmin: boolean;
   isTenantAdmin: boolean;
   role: 'Admin' | 'Operator' | 'Viewer' | null;
   canManageBootstrapTokens: boolean;
@@ -116,7 +116,7 @@ function AuthProviderInternal({ children }: { children: React.ReactNode }) {
         account: account,
       });
 
-      // Call backend API to get user info including galactic admin status.
+      // Call backend API to get user info including global admin status.
       // 8-second timeout so a cold Azure Function start does not block the
       // landing page spinner indefinitely — the catch block falls back to
       // token claims so the user can still log in.
@@ -153,7 +153,7 @@ function AuthProviderInternal({ children }: { children: React.ReactNode }) {
               upn: account.username || '',
               tenantId: account.tenantId || '',
               objectId: account.homeAccountId || '',
-              isGalacticAdmin: false,
+              isGlobalAdmin: false,
               isTenantAdmin: false,
               role: null,
               canManageBootstrapTokens: false,
@@ -170,7 +170,7 @@ function AuthProviderInternal({ children }: { children: React.ReactNode }) {
         upn: data.upn || account.username || '',
         tenantId: data.tenantId || account.tenantId || '',
         objectId: data.objectId || account.homeAccountId || '',
-        isGalacticAdmin: data.isGalacticAdmin || false,
+        isGlobalAdmin: data.isGlobalAdmin || false,
         isTenantAdmin: data.isTenantAdmin || false,
         role: data.role || null,
         canManageBootstrapTokens: data.canManageBootstrapTokens || false,
@@ -199,7 +199,7 @@ function AuthProviderInternal({ children }: { children: React.ReactNode }) {
         upn: account.username || '',
         tenantId: account.tenantId || '',
         objectId: account.homeAccountId || '',
-        isGalacticAdmin: false,
+        isGlobalAdmin: false,
         isTenantAdmin: false,
         role: null,
         canManageBootstrapTokens: false,

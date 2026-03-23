@@ -2,7 +2,7 @@
 
 import { useAuth } from '@/contexts/AuthContext';
 import { useNotifications } from '@/contexts/NotificationContext';
-import { useGalacticNotifications } from '@/contexts/GalacticNotificationContext';
+import { useGlobalNotifications } from '@/contexts/GlobalNotificationContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
@@ -13,7 +13,7 @@ import { trackEvent } from '@/lib/appInsights';
 export default function Navbar() {
   const { isAuthenticated, user, logout } = useAuth();
   const { notifications, unreadCount, markAsRead, markAllAsRead, removeNotification, clearAll } = useNotifications();
-  const { notifications: galacticNotifications, dismissNotification: dismissGalactic, dismissAll: dismissAllGalactic } = useGalacticNotifications();
+  const { notifications: globalNotifications, dismissNotification: dismissGlobal, dismissAll: dismissAllGlobal } = useGlobalNotifications();
   const { theme, toggleTheme } = useTheme();
   const pathname = usePathname();
 
@@ -27,9 +27,9 @@ export default function Navbar() {
     }
     return false;
   });
-  const [galacticAdminMode, setGalacticAdminMode] = useState(() => {
+  const [globalAdminMode, setGlobalAdminMode] = useState(() => {
     if (typeof window !== 'undefined') {
-      return localStorage.getItem('galacticAdminMode') === 'true';
+      return localStorage.getItem('globalAdminMode') === 'true';
     }
     return false;
   });
@@ -55,10 +55,10 @@ export default function Navbar() {
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      localStorage.setItem('galacticAdminMode', galacticAdminMode.toString());
+      localStorage.setItem('globalAdminMode', globalAdminMode.toString());
       window.dispatchEvent(new Event('localStorageChange'));
     }
-  }, [galacticAdminMode]);
+  }, [globalAdminMode]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -163,7 +163,7 @@ export default function Navbar() {
   const isAdminOrOperator = isTenantAdmin || isOperator;
 
   // Regular users (non-Admin, non-Operator): show minimal navbar with only Progress Portal
-  if (!isAdminOrOperator && !user?.isGalacticAdmin) {
+  if (!isAdminOrOperator && !user?.isGlobalAdmin) {
     return (
       <nav className="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-30">
         <div className="px-3">
@@ -279,8 +279,8 @@ export default function Navbar() {
                   <path d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path>
                 </svg>
                 {(() => {
-                  const galacticCount = (user?.isGalacticAdmin && galacticAdminMode) ? galacticNotifications.length : 0;
-                  const totalUnread = unreadCount + galacticCount;
+                  const globalCount = (user?.isGlobalAdmin && globalAdminMode) ? globalNotifications.length : 0;
+                  const totalUnread = unreadCount + globalCount;
                   return totalUnread > 0 ? (
                     <span className="absolute top-0.5 right-0.5 inline-flex items-center justify-center w-4 h-4 text-[10px] font-bold leading-none text-white bg-red-600 rounded-full">
                       {totalUnread > 9 ? '9+' : totalUnread}
@@ -291,9 +291,9 @@ export default function Navbar() {
 
               {/* Notification Dropdown */}
               {showNotifications && (() => {
-                const showGalactic = user?.isGalacticAdmin && galacticAdminMode;
-                const visibleGalactic = showGalactic ? galacticNotifications : [];
-                const hasAny = notifications.length > 0 || visibleGalactic.length > 0;
+                const showGlobal = user?.isGlobalAdmin && globalAdminMode;
+                const visibleGlobal = showGlobal ? globalNotifications : [];
+                const hasAny = notifications.length > 0 || visibleGlobal.length > 0;
 
                 return (
                 <div className="fixed sm:absolute top-16 sm:top-auto left-2 right-2 sm:left-auto sm:right-0 mt-0 sm:mt-2 sm:w-96 bg-white rounded-lg shadow-lg border border-gray-200 z-50 max-h-[calc(100vh-5rem)] sm:max-h-96 overflow-hidden flex flex-col">
@@ -306,7 +306,7 @@ export default function Navbar() {
                             Mark all read
                           </button>
                         )}
-                        <button onClick={() => { clearAll(); if (showGalactic) dismissAllGalactic(); }} className="text-xs text-gray-500 hover:text-gray-700">
+                        <button onClick={() => { clearAll(); if (showGlobal) dismissAllGlobal(); }} className="text-xs text-gray-500 hover:text-gray-700">
                           Clear all
                         </button>
                       </div>
@@ -322,8 +322,8 @@ export default function Navbar() {
                       </div>
                     ) : (
                       <div className="divide-y divide-gray-100">
-                        {/* Persistent Galactic Admin Notifications (top section) */}
-                        {visibleGalactic.map((gn) => (
+                        {/* Persistent Global Admin Notifications (top section) */}
+                        {visibleGlobal.map((gn) => (
                           <div key={`ga-${gn.id}`} className="px-4 py-3 hover:bg-purple-50/50 transition-colors border-l-4 border-purple-500 bg-purple-50/30">
                             <div className="flex items-start justify-between">
                               <div className="flex items-start space-x-2.5 flex-1">
@@ -337,7 +337,7 @@ export default function Navbar() {
                                   <p className="text-[10px] text-gray-400 mt-1">{formatTime(new Date(gn.createdAt))}</p>
                                 </div>
                               </div>
-                              <button onClick={(e) => { e.stopPropagation(); dismissGalactic(gn.id); }} className="ml-2 text-gray-300 hover:text-gray-500" title="Dismiss">
+                              <button onClick={(e) => { e.stopPropagation(); dismissGlobal(gn.id); }} className="ml-2 text-gray-300 hover:text-gray-500" title="Dismiss">
                                 <svg className="w-3.5 h-3.5" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
                                   <path d="M6 18L18 6M6 6l12 12"></path>
                                 </svg>
@@ -417,19 +417,19 @@ export default function Navbar() {
                       </>
                     )}
 
-                    {/* Galactic Admin Toggle */}
-                    {user?.isGalacticAdmin && (
+                    {/* Global Admin Toggle */}
+                    {user?.isGlobalAdmin && (
                       <div className="mb-1">
                         <div className="flex items-center justify-between py-2 px-2.5 rounded-md bg-purple-50">
                           <div className="flex items-center gap-1.5">
                             <svg className="w-4 h-4 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                               <path strokeLinecap="round" strokeLinejoin="round" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                             </svg>
-                            <span className="text-sm text-gray-700">Galactic Admin</span>
-                            {galacticAdminMode && <span className="text-[10px] text-purple-700 font-semibold">ON</span>}
+                            <span className="text-sm text-gray-700">Global Admin</span>
+                            {globalAdminMode && <span className="text-[10px] text-purple-700 font-semibold">ON</span>}
                           </div>
-                          <button onClick={() => { trackEvent("admin_mode_toggled", { enabled: !galacticAdminMode, isGalactic: true }); setGalacticAdminMode(!galacticAdminMode); }} className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${galacticAdminMode ? 'bg-purple-600' : 'bg-gray-300'}`}>
-                            <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${galacticAdminMode ? 'translate-x-[18px]' : 'translate-x-[3px]'}`} />
+                          <button onClick={() => { trackEvent("admin_mode_toggled", { enabled: !globalAdminMode, isGlobal: true }); setGlobalAdminMode(!globalAdminMode); }} className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${globalAdminMode ? 'bg-purple-600' : 'bg-gray-300'}`}>
+                            <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${globalAdminMode ? 'translate-x-[18px]' : 'translate-x-[3px]'}`} />
                           </button>
                         </div>
                       </div>
@@ -531,9 +531,9 @@ export default function Navbar() {
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-gray-900">{user?.displayName || 'User'}</p>
                       <p className="text-xs text-gray-500 truncate">{user?.upn}</p>
-                      {user?.isGalacticAdmin && (
+                      {user?.isGlobalAdmin && (
                         <span className="inline-block mt-1.5 px-1.5 py-0.5 text-[10px] font-semibold text-purple-800 bg-purple-100 rounded-full">
-                          Galactic Admin
+                          Global Admin
                         </span>
                       )}
                       {isOperator && (
@@ -541,7 +541,7 @@ export default function Navbar() {
                           Operator
                         </span>
                       )}
-                      {isTenantAdmin && !user?.isGalacticAdmin && (
+                      {isTenantAdmin && !user?.isGlobalAdmin && (
                         <span className="inline-block mt-1.5 px-1.5 py-0.5 text-[10px] font-semibold text-green-800 bg-green-100 rounded-full">
                           Admin
                         </span>

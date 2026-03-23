@@ -7,28 +7,28 @@ using Microsoft.Extensions.Logging;
 
 namespace AutopilotMonitor.Functions.Functions.Admin
 {
-    public class GetGalacticAuditLogsFunction
+    public class GetGlobalAuditLogsFunction
     {
-        private readonly ILogger<GetGalacticAuditLogsFunction> _logger;
+        private readonly ILogger<GetGlobalAuditLogsFunction> _logger;
         private readonly TableStorageService _storageService;
 
-        public GetGalacticAuditLogsFunction(
-            ILogger<GetGalacticAuditLogsFunction> logger,
+        public GetGlobalAuditLogsFunction(
+            ILogger<GetGlobalAuditLogsFunction> logger,
             TableStorageService storageService)
         {
             _logger = logger;
             _storageService = storageService;
         }
 
-        [Function("GetGalacticAuditLogs")]
+        [Function("GetGlobalAuditLogs")]
         public async Task<HttpResponseData> Run(
-            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "galactic/audit/logs")] HttpRequestData req)
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "global/audit/logs")] HttpRequestData req)
         {
-            _logger.LogInformation("GetGalacticAuditLogs function processing request (Galactic Admin Mode)");
+            _logger.LogInformation("GetGlobalAuditLogs function processing request (Global Admin Mode)");
 
             try
             {
-                // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
+                // Authentication + GlobalAdminOnly authorization enforced by PolicyEnforcementMiddleware
                 var userEmail = TenantHelper.GetUserIdentifier(req);
 
                 _logger.LogInformation($"Fetching all audit logs across all tenants (User: {userEmail})");
@@ -47,7 +47,7 @@ namespace AutopilotMonitor.Functions.Functions.Admin
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error getting galactic audit logs");
+                _logger.LogError(ex, "Error getting global audit logs");
 
                 var errorResponse = req.CreateResponse(HttpStatusCode.InternalServerError);
                 await errorResponse.WriteAsJsonAsync(new

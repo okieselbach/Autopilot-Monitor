@@ -11,7 +11,7 @@ namespace AutopilotMonitor.Functions.Functions.Reports
 {
     /// <summary>
     /// Returns a short-lived SAS download URL for a session report blob stored in central blob storage.
-    /// Galactic Admin only.
+    /// Global Admin only.
     /// </summary>
     public class GetSessionReportDownloadUrlFunction
     {
@@ -30,11 +30,11 @@ namespace AutopilotMonitor.Functions.Functions.Reports
 
         [Function("GetSessionReportDownloadUrl")]
         public async Task<HttpResponseData> Run(
-            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "galactic/session-reports/download-url")] HttpRequestData req)
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "global/session-reports/download-url")] HttpRequestData req)
         {
             try
             {
-                // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
+                // Authentication + GlobalAdminOnly authorization enforced by PolicyEnforcementMiddleware
 
                 var query = HttpUtility.ParseQueryString(req.Url.Query);
                 var blobName = query["blobName"];

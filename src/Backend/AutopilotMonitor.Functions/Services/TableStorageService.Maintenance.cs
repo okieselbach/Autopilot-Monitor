@@ -83,7 +83,7 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
-        /// Gets audit log entries across all tenants (Galactic Admin Mode)
+        /// Gets audit log entries across all tenants (Global Admin Mode)
         /// </summary>
         public async Task<List<AuditLogEntry>> GetAllAuditLogsAsync(int maxResults = 100)
         {

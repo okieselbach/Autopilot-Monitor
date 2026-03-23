@@ -10,7 +10,7 @@ using Newtonsoft.Json.Linq;
 namespace AutopilotMonitor.Functions.Functions.Reports
 {
     /// <summary>
-    /// Allows Galactic Admins to add or update an admin note on a submitted session report.
+    /// Allows Global Admins to add or update an admin note on a submitted session report.
     /// </summary>
     public class UpdateSessionReportNoteFunction
     {
@@ -27,12 +27,12 @@ namespace AutopilotMonitor.Functions.Functions.Reports
 
         [Function("UpdateSessionReportNote")]
         public async Task<HttpResponseData> Run(
-            [HttpTrigger(AuthorizationLevel.Anonymous, "patch", Route = "galactic/session-reports/{reportId}/note")] HttpRequestData req,
+            [HttpTrigger(AuthorizationLevel.Anonymous, "patch", Route = "global/session-reports/{reportId}/note")] HttpRequestData req,
             string reportId)
         {
             try
             {
-                // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
+                // Authentication + GlobalAdminOnly authorization enforced by PolicyEnforcementMiddleware
                 var userIdentifier = TenantHelper.GetUserIdentifier(req);
 
                 if (string.IsNullOrEmpty(reportId))

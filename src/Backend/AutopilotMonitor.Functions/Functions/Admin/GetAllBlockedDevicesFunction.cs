@@ -21,16 +21,16 @@ namespace AutopilotMonitor.Functions.Functions.Admin
             _blockedDeviceService = blockedDeviceService;
         }
 
-        /// <summary>GET /api/galactic/devices/blocked — list all active blocks across all tenants</summary>
+        /// <summary>GET /api/global/devices/blocked — list all active blocks across all tenants</summary>
         [Function("GetAllBlockedDevices")]
         public async Task<HttpResponseData> Run(
-            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "galactic/devices/blocked")] HttpRequestData req)
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "global/devices/blocked")] HttpRequestData req)
         {
-            _logger.LogInformation("GetAllBlockedDevices function processing request (Galactic Admin Mode)");
+            _logger.LogInformation("GetAllBlockedDevices function processing request (Global Admin Mode)");
 
             try
             {
-                // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
+                // Authentication + GlobalAdminOnly authorization enforced by PolicyEnforcementMiddleware
 
                 var blocked = await _blockedDeviceService.GetAllBlockedDevicesAsync();
 

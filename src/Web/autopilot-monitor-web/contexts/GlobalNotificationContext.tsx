@@ -5,7 +5,7 @@ import { useAuth } from './AuthContext';
 import { API_BASE_URL } from '@/lib/config';
 import { authenticatedFetch } from '@/lib/authenticatedFetch';
 
-export interface GalacticNotification {
+export interface GlobalNotification {
   id: string;
   type: string;
   title: string;
@@ -14,34 +14,34 @@ export interface GalacticNotification {
   createdAt: string;
 }
 
-interface GalacticNotificationContextType {
-  notifications: GalacticNotification[];
+interface GlobalNotificationContextType {
+  notifications: GlobalNotification[];
   unreadCount: number;
   dismissNotification: (id: string) => Promise<void>;
   dismissAll: () => Promise<void>;
   isLoading: boolean;
 }
 
-const GalacticNotificationContext = createContext<GalacticNotificationContextType | undefined>(undefined);
+const GlobalNotificationContext = createContext<GlobalNotificationContextType | undefined>(undefined);
 
 const POLL_INTERVAL_MS = 60_000;
 
-export function GalacticNotificationProvider({ children }: { children: React.ReactNode }) {
+export function GlobalNotificationProvider({ children }: { children: React.ReactNode }) {
   const { user, getAccessToken } = useAuth();
-  const [notifications, setNotifications] = useState<GalacticNotification[]>([]);
+  const [notifications, setNotifications] = useState<GlobalNotification[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const fetchingRef = useRef(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const isGalactic = user?.isGalacticAdmin === true;
+  const isGlobal = user?.isGlobalAdmin === true;
 
   const fetchNotifications = useCallback(async () => {
-    if (!isGalactic || fetchingRef.current) return;
+    if (!isGlobal || fetchingRef.current) return;
     fetchingRef.current = true;
 
     try {
       const response = await authenticatedFetch(
-        `${API_BASE_URL}/api/galactic/notifications`,
+        `${API_BASE_URL}/api/global/notifications`,
         getAccessToken,
       );
       if (response.ok) {
@@ -53,11 +53,11 @@ export function GalacticNotificationProvider({ children }: { children: React.Rea
     } finally {
       fetchingRef.current = false;
     }
-  }, [isGalactic, getAccessToken]);
+  }, [isGlobal, getAccessToken]);
 
   // Initial fetch + polling
   useEffect(() => {
-    if (!isGalactic) {
+    if (!isGlobal) {
       setNotifications([]);
       return;
     }
@@ -70,18 +70,18 @@ export function GalacticNotificationProvider({ children }: { children: React.Rea
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [isGalactic, fetchNotifications]);
+  }, [isGlobal, fetchNotifications]);
 
-  // Re-fetch when galacticAdminMode is toggled in localStorage
+  // Re-fetch when globalAdminMode is toggled in localStorage
   useEffect(() => {
     const handleStorageChange = () => {
-      if (isGalactic) {
+      if (isGlobal) {
         fetchNotifications();
       }
     };
     window.addEventListener('localStorageChange', handleStorageChange);
     return () => window.removeEventListener('localStorageChange', handleStorageChange);
-  }, [isGalactic, fetchNotifications]);
+  }, [isGlobal, fetchNotifications]);
 
   const dismissNotification = useCallback(async (id: string) => {
     // Optimistic removal
@@ -89,7 +89,7 @@ export function GalacticNotificationProvider({ children }: { children: React.Rea
 
     try {
       await authenticatedFetch(
-        `${API_BASE_URL}/api/galactic/notifications/${id}/dismiss`,
+        `${API_BASE_URL}/api/global/notifications/${id}/dismiss`,
         getAccessToken,
         { method: 'POST' },
       );
@@ -103,7 +103,7 @@ export function GalacticNotificationProvider({ children }: { children: React.Rea
 
     try {
       await authenticatedFetch(
-        `${API_BASE_URL}/api/galactic/notifications/dismiss-all`,
+        `${API_BASE_URL}/api/global/notifications/dismiss-all`,
         getAccessToken,
         { method: 'POST' },
       );
@@ -115,16 +115,16 @@ export function GalacticNotificationProvider({ children }: { children: React.Rea
   const unreadCount = notifications.length;
 
   return (
-    <GalacticNotificationContext.Provider value={{ notifications, unreadCount, dismissNotification, dismissAll, isLoading }}>
+    <GlobalNotificationContext.Provider value={{ notifications, unreadCount, dismissNotification, dismissAll, isLoading }}>
       {children}
-    </GalacticNotificationContext.Provider>
+    </GlobalNotificationContext.Provider>
   );
 }
 
-export function useGalacticNotifications() {
-  const context = useContext(GalacticNotificationContext);
+export function useGlobalNotifications() {
+  const context = useContext(GlobalNotificationContext);
   if (context === undefined) {
-    throw new Error('useGalacticNotifications must be used within a GalacticNotificationProvider');
+    throw new Error('useGlobalNotifications must be used within a GlobalNotificationProvider');
   }
   return context;
 }

@@ -28,10 +28,10 @@ namespace AutopilotMonitor.Functions.Functions.Config
         {
             try
             {
-                // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
+                // Authentication + GlobalAdminOnly authorization enforced by PolicyEnforcementMiddleware
                 string userIdentifier = TenantHelper.GetUserIdentifier(req);
 
-                _logger.LogInformation($"GetAllTenantConfigurations by Galactic Admin {userIdentifier}");
+                _logger.LogInformation($"GetAllTenantConfigurations by Global Admin {userIdentifier}");
 
                 var configurations = await _configService.GetAllConfigurationsAsync();
 

@@ -108,11 +108,11 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  const isGalacticAdmin = user?.isGalacticAdmin === true;
+  const isGlobalAdmin = user?.isGlobalAdmin === true;
 
   // Fetch admin configuration
   useEffect(() => {
-    if (!isGalacticAdmin) return;
+    if (!isGlobalAdmin) return;
 
     const fetchAdminConfig = async () => {
       try {
@@ -150,11 +150,11 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
     };
 
     fetchAdminConfig();
-  }, [isGalacticAdmin, getAccessToken]);
+  }, [isGlobalAdmin, getAccessToken]);
 
   // Fetch tenants + preview whitelist
   const fetchTenants = useCallback(async () => {
-    if (!isGalacticAdmin) return;
+    if (!isGlobalAdmin) return;
     try {
       setLoadingTenants(true);
 
@@ -187,7 +187,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
     } finally {
       setLoadingTenants(false);
     }
-  }, [isGalacticAdmin, getAccessToken]);
+  }, [isGlobalAdmin, getAccessToken]);
 
   useEffect(() => {
     fetchTenants();

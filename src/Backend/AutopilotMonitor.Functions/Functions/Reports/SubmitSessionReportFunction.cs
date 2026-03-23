@@ -13,24 +13,24 @@ namespace AutopilotMonitor.Functions.Functions.Reports
         private readonly ILogger<SubmitSessionReportFunction> _logger;
         private readonly SessionReportService _sessionReportService;
         private readonly TableStorageService _storageService;
-        private readonly GalacticAdminService _galacticAdminService;
+        private readonly GlobalAdminService _globalAdminService;
         private readonly TelegramNotificationService _telegramNotificationService;
-        private readonly GalacticNotificationService _galacticNotificationService;
+        private readonly GlobalNotificationService _globalNotificationService;
 
         public SubmitSessionReportFunction(
             ILogger<SubmitSessionReportFunction> logger,
             SessionReportService sessionReportService,
             TableStorageService storageService,
-            GalacticAdminService galacticAdminService,
+            GlobalAdminService globalAdminService,
             TelegramNotificationService telegramNotificationService,
-            GalacticNotificationService galacticNotificationService)
+            GlobalNotificationService globalNotificationService)
         {
             _logger = logger;
             _sessionReportService = sessionReportService;
             _storageService = storageService;
-            _galacticAdminService = galacticAdminService;
+            _globalAdminService = globalAdminService;
             _telegramNotificationService = telegramNotificationService;
-            _galacticNotificationService = galacticNotificationService;
+            _globalNotificationService = globalNotificationService;
         }
 
         [Function("SubmitSessionReport")]
@@ -47,7 +47,7 @@ namespace AutopilotMonitor.Functions.Functions.Reports
                 string userIdentifier = TenantHelper.GetUserIdentifier(req);
 
                 // Still needed: GA check for audit log skip logic
-                var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userIdentifier);
+                var isGlobalAdmin = await _globalAdminService.IsGlobalAdminAsync(userIdentifier);
 
                 // Parse request body
                 var request = await req.ReadFromJsonAsync<SubmitSessionReportRequest>();
@@ -72,8 +72,8 @@ namespace AutopilotMonitor.Functions.Functions.Reports
                 // Submit report
                 var metadata = await _sessionReportService.SubmitReportAsync(request, userIdentifier);
 
-                // Log audit entry — skip for Galactic Admins
-                if (!isGalacticAdmin)
+                // Log audit entry — skip for Global Admins
+                if (!isGlobalAdmin)
                 {
                     await _storageService.LogAuditEntryAsync(
                         request.TenantId,
@@ -98,8 +98,8 @@ namespace AutopilotMonitor.Functions.Functions.Reports
                 _ = _telegramNotificationService.SendSessionReportAsync(
                     request.TenantId, userIdentifier, sessionId, metadata.ReportId, request.Comment ?? string.Empty);
 
-                // Persistent in-app notification for Galactic Admins — best effort
-                _ = _galacticNotificationService.CreateNotificationAsync(
+                // Persistent in-app notification for Global Admins — best effort
+                _ = _globalNotificationService.CreateNotificationAsync(
                     "session_report",
                     "New Session Report",
                     $"{userIdentifier} — Session {sessionId} (Tenant: {request.TenantId})");

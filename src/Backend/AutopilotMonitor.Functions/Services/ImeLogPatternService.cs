@@ -109,7 +109,7 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
-        /// Updates a built-in IME log pattern globally (Galactic Admin only).
+        /// Updates a built-in IME log pattern globally (Global Admin only).
         /// Modifies the global definition that all tenants inherit.
         /// </summary>
         public async Task<bool> UpdateGlobalPatternAsync(ImeLogPattern pattern)
@@ -127,7 +127,7 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
-        /// Deletes a built-in IME log pattern from the global partition (Galactic Admin only).
+        /// Deletes a built-in IME log pattern from the global partition (Global Admin only).
         /// </summary>
         public async Task<bool> DeleteGlobalPatternAsync(string patternId)
         {

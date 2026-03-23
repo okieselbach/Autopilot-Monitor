@@ -7,29 +7,29 @@ using Microsoft.Extensions.Logging;
 
 namespace AutopilotMonitor.Functions.Functions.Metrics
 {
-    public class GetGalacticAppMetricsFunction
+    public class GetGlobalAppMetricsFunction
     {
-        private readonly ILogger<GetGalacticAppMetricsFunction> _logger;
+        private readonly ILogger<GetGlobalAppMetricsFunction> _logger;
         private readonly TableStorageService _storageService;
 
-        public GetGalacticAppMetricsFunction(
-            ILogger<GetGalacticAppMetricsFunction> logger,
+        public GetGlobalAppMetricsFunction(
+            ILogger<GetGlobalAppMetricsFunction> logger,
             TableStorageService storageService)
         {
             _logger = logger;
             _storageService = storageService;
         }
 
-        [Function("GetGalacticAppMetrics")]
+        [Function("GetGlobalAppMetrics")]
         public async Task<HttpResponseData> Run(
-            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "galactic/metrics/app")] HttpRequestData req)
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "global/metrics/app")] HttpRequestData req)
         {
             try
             {
-                // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
+                // Authentication + GlobalAdminOnly authorization enforced by PolicyEnforcementMiddleware
                 var userEmail = TenantHelper.GetUserIdentifier(req);
 
-                _logger.LogInformation($"Fetching galactic app metrics (User: {userEmail})");
+                _logger.LogInformation($"Fetching global app metrics (User: {userEmail})");
 
                 var query = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
                 var daysParam = query["days"];
@@ -94,7 +94,7 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error fetching galactic app metrics");
+                _logger.LogError(ex, "Error fetching global app metrics");
                 var errorResponse = req.CreateResponse(HttpStatusCode.InternalServerError);
                 await errorResponse.WriteAsJsonAsync(new { success = false, message = "Internal server error" });
                 return errorResponse;

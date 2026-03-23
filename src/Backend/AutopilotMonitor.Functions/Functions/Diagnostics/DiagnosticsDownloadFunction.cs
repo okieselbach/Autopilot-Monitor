@@ -16,16 +16,16 @@ namespace AutopilotMonitor.Functions.Functions.Diagnostics
     {
         private readonly ILogger<DiagnosticsDownloadFunction> _logger;
         private readonly TenantConfigurationService _configService;
-        private readonly GalacticAdminService _galacticAdminService;
+        private readonly GlobalAdminService _globalAdminService;
 
         public DiagnosticsDownloadFunction(
             ILogger<DiagnosticsDownloadFunction> logger,
             TenantConfigurationService configService,
-            GalacticAdminService galacticAdminService)
+            GlobalAdminService globalAdminService)
         {
             _logger = logger;
             _configService = configService;
-            _galacticAdminService = galacticAdminService;
+            _globalAdminService = globalAdminService;
         }
 
         [Function("DiagnosticsDownloadUrl")]
@@ -52,8 +52,8 @@ namespace AutopilotMonitor.Functions.Functions.Diagnostics
                 // Validate tenant access
                 if (tenantId != userTenantId)
                 {
-                    var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userIdentifier);
-                    if (!isGalacticAdmin)
+                    var isGlobalAdmin = await _globalAdminService.IsGlobalAdminAsync(userIdentifier);
+                    if (!isGlobalAdmin)
                     {
                         var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
                         await forbiddenResponse.WriteAsJsonAsync(new { success = false, message = "Access denied." });

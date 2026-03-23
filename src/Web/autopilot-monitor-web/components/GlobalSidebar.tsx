@@ -45,11 +45,11 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
     return () => mql.removeEventListener("change", handler);
   }, []);
 
-  // Galactic admin mode from localStorage (same pattern as Navbar)
-  const [galacticAdminMode, setGalacticAdminMode] = useState(false);
+  // Global admin mode from localStorage (same pattern as Navbar)
+  const [globalAdminMode, setGlobalAdminMode] = useState(false);
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const read = () => setGalacticAdminMode(localStorage.getItem("galacticAdminMode") === "true");
+    const read = () => setGlobalAdminMode(localStorage.getItem("globalAdminMode") === "true");
     read();
     window.addEventListener("localStorageChange", read);
     window.addEventListener("storage", read);
@@ -174,13 +174,13 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
   const isTenantAdmin = user?.isTenantAdmin ?? false;
   const isOperator = user?.role === "Operator";
   const isAdminOrOperator = isTenantAdmin || isOperator;
-  const isGalacticAdmin = user?.isGalacticAdmin ?? false;
+  const isGlobalAdmin = user?.isGlobalAdmin ?? false;
 
   const isGroupVisible = (group: NavGroup | ExpandableNavGroup): boolean => {
     switch (group.visibility) {
       case "all": return true;
       case "adminOrOperator": return isAdminOrOperator;
-      case "galacticAdmin": return isGalacticAdmin && galacticAdminMode;
+      case "globalAdmin": return isGlobalAdmin && globalAdminMode;
       default: return false;
     }
   };
@@ -240,21 +240,21 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
   };
 
   // Shared item classes
-  const itemClass = (active: boolean, galactic = false) => {
+  const itemClass = (active: boolean, isGlobal = false) => {
     if (active) {
-      return galactic
+      return isGlobal
         ? "bg-purple-50 text-purple-700 font-semibold dark:bg-purple-900/30 dark:text-purple-300"
         : "bg-blue-50 text-blue-700 font-semibold dark:bg-blue-900/30 dark:text-blue-300";
     }
-    return galactic
+    return isGlobal
       ? "text-purple-600 hover:bg-purple-50 hover:text-purple-800 dark:text-purple-400 dark:hover:bg-purple-900/20 dark:hover:text-purple-300"
       : "text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200";
   };
 
   // --- Render a global nav link ---
-  const renderGlobalItem = (item: NavItem, galactic = false) => {
+  const renderGlobalItem = (item: NavItem, isGlobal = false) => {
     const active = isNavActive(item.href);
-    const base = `flex items-center gap-2.5 rounded-md text-sm transition-colors ${itemClass(active, galactic)}`;
+    const base = `flex items-center gap-2.5 rounded-md text-sm transition-colors ${itemClass(active, isGlobal)}`;
 
     if (collapseState === "icons") {
       return (
@@ -346,7 +346,7 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
   const hasPageSections = pageSections.length > 0;
 
   // Regular users see minimal nav
-  const isRegularUser = !isAdminOrOperator && !isGalacticAdmin;
+  const isRegularUser = !isAdminOrOperator && !isGlobalAdmin;
 
   const renderNavContent = (isMobile = false) => (
     <>
@@ -368,7 +368,7 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
             <div key={group.id} className={`${collapseState === "full" || isMobile ? "mt-4" : "mt-1"}`}>
               {(collapseState === "full" || isMobile) && (
                 <p className={`text-[11px] font-semibold uppercase tracking-wider mb-1 px-3 ${
-                  group.style === "galactic"
+                  group.style === "global"
                     ? "text-purple-500 dark:text-purple-400"
                     : "text-gray-400 dark:text-gray-500"
                 }`}>
@@ -379,18 +379,18 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
                 <hr className="mx-2 my-1.5 border-gray-200 dark:border-gray-700" />
               )}
               <ul className="space-y-0.5">
-                {group.items.map((item) => renderGlobalItem(item, group.style === "galactic"))}
+                {group.items.map((item) => renderGlobalItem(item, group.style === "global"))}
               </ul>
             </div>
           ))}
 
-          {/* Expandable groups (GitHub-style) — Configuration, Galactic Admin */}
+          {/* Expandable groups (GitHub-style) — Configuration, Global Admin */}
           {!isRegularUser && visibleExpandableGroups.map((group) => (
             <div key={group.id} className={`${collapseState === "full" || isMobile ? "mt-4" : "mt-1"}`}>
               {/* Group label */}
               {(collapseState === "full" || isMobile) && (
                 <p className={`text-[11px] font-semibold uppercase tracking-wider mb-1 px-3 ${
-                  group.style === "galactic"
+                  group.style === "global"
                     ? "text-purple-500 dark:text-purple-400"
                     : "text-gray-400 dark:text-gray-500"
                 }`}>
@@ -399,7 +399,7 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
               )}
               {collapseState === "icons" && !isMobile && (
                 <hr className={`mx-2 my-1.5 ${
-                  group.style === "galactic"
+                  group.style === "global"
                     ? "border-purple-200 dark:border-purple-800"
                     : "border-gray-200 dark:border-gray-700"
                 }`} />
@@ -409,7 +409,7 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
                   const isExpanded = expandedGroups.has(expandItem.id);
                   const itemHasActive = expandItem.items.some((sub) => pathname === sub.href || pathname.startsWith(sub.href + "/"));
                   const firstHref = expandItem.items[0]?.href ?? "#";
-                  const isGalactic = group.style === "galactic";
+                  const isGlobalStyle = group.style === "global";
 
                   if (collapseState === "icons" && !isMobile) {
                     // Icons mode: show group icon as link
@@ -420,10 +420,10 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
                           onClick={() => setMobileDrawerOpen(false)}
                           className={`flex items-center justify-center px-2 py-2 rounded-md text-sm transition-colors relative group ${
                             itemHasActive
-                              ? isGalactic
+                              ? isGlobalStyle
                                 ? "bg-purple-50 text-purple-700 font-semibold dark:bg-purple-900/30 dark:text-purple-300"
                                 : "bg-blue-50 text-blue-700 font-semibold dark:bg-blue-900/30 dark:text-blue-300"
-                              : isGalactic
+                              : isGlobalStyle
                                 ? "text-purple-600 hover:bg-purple-50 hover:text-purple-800 dark:text-purple-400 dark:hover:bg-purple-900/20"
                                 : "text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
                           }`}
@@ -445,10 +445,10 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
                         onClick={() => toggleGroup(expandItem.id)}
                         className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-md text-sm transition-colors ${
                           itemHasActive
-                            ? isGalactic
+                            ? isGlobalStyle
                               ? "text-purple-700 font-semibold dark:text-purple-300"
                               : "text-blue-700 font-semibold dark:text-blue-300"
-                            : isGalactic
+                            : isGlobalStyle
                               ? "text-purple-600 hover:bg-purple-50 hover:text-purple-800 dark:text-purple-400 dark:hover:bg-purple-900/20"
                               : "text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
                         }`}
@@ -473,7 +473,7 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
                                   onClick={() => setMobileDrawerOpen(false)}
                                   className={`block pl-10 pr-3 py-1 rounded-md text-[13px] transition-colors ${
                                     subActive
-                                      ? isGalactic
+                                      ? isGlobalStyle
                                         ? "bg-purple-50 text-purple-700 font-medium dark:bg-purple-900/30 dark:text-purple-300"
                                         : "bg-blue-50 text-blue-700 font-medium dark:bg-blue-900/30 dark:text-blue-300"
                                       : "text-gray-500 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"

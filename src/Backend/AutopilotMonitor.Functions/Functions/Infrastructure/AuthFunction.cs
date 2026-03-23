@@ -15,32 +15,32 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure;
 public class AuthFunction
 {
     private readonly ILogger<AuthFunction> _logger;
-    private readonly GalacticAdminService _galacticAdminService;
+    private readonly GlobalAdminService _globalAdminService;
     private readonly TenantConfigurationService _tenantConfigService;
     private readonly TenantAdminsService _tenantAdminsService;
     private readonly TableStorageService _storageService;
     private readonly PreviewWhitelistService _previewWhitelistService;
     private readonly TelegramNotificationService _telegramNotificationService;
-    private readonly GalacticNotificationService _galacticNotificationService;
+    private readonly GlobalNotificationService _globalNotificationService;
 
     public AuthFunction(
         ILogger<AuthFunction> logger,
-        GalacticAdminService galacticAdminService,
+        GlobalAdminService globalAdminService,
         TenantConfigurationService tenantConfigService,
         TenantAdminsService tenantAdminsService,
         TableStorageService storageService,
         PreviewWhitelistService previewWhitelistService,
         TelegramNotificationService telegramNotificationService,
-        GalacticNotificationService galacticNotificationService)
+        GlobalNotificationService globalNotificationService)
     {
         _logger = logger;
-        _galacticAdminService = galacticAdminService;
+        _globalAdminService = globalAdminService;
         _tenantConfigService = tenantConfigService;
         _tenantAdminsService = tenantAdminsService;
         _storageService = storageService;
         _previewWhitelistService = previewWhitelistService;
         _telegramNotificationService = telegramNotificationService;
-        _galacticNotificationService = galacticNotificationService;
+        _globalNotificationService = globalNotificationService;
     }
 
     /// <summary>
@@ -95,8 +95,8 @@ public class AuthFunction
                         "Fire-and-forget Telegram notification failed for tenant {TenantId}", tenantId),
                         TaskContinuationOptions.OnlyOnFaulted);
 
-                // Persistent in-app notification for Galactic Admins — best effort
-                _ = _galacticNotificationService.CreateNotificationAsync(
+                // Persistent in-app notification for Global Admins — best effort
+                _ = _globalNotificationService.CreateNotificationAsync(
                     "preview_signup",
                     "New Preview Signup",
                     $"Tenant {tenantId} ({domain}), UPN: {upn}");
@@ -132,12 +132,12 @@ public class AuthFunction
             await _tenantConfigService.SaveConfigurationAsync(tenantConfig);
         }
 
-        // Check if user is galactic admin (must happen before preview gate)
-        var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(upn);
+        // Check if user is global admin (must happen before preview gate)
+        var isGlobalAdmin = await _globalAdminService.IsGlobalAdminAsync(upn);
 
         // Preview gate: only approved tenants get full portal access.
-        // Galactic Admins bypass the gate (they need access to manage the whitelist).
-        if (!isGalacticAdmin && !await _previewWhitelistService.IsApprovedAsync(tenantId))
+        // Global Admins bypass the gate (they need access to manage the whitelist).
+        if (!isGlobalAdmin && !await _previewWhitelistService.IsApprovedAsync(tenantId))
         {
             _logger.LogInformation("Tenant {TenantId} blocked by preview gate (user: {Upn})", tenantId, upn);
 
@@ -181,7 +181,7 @@ public class AuthFunction
             upn,
             displayName,
             objectId,
-            isGalacticAdmin,
+            isGlobalAdmin,
             isTenantAdmin,
             role,
             canManageBootstrapTokens
@@ -193,13 +193,13 @@ public class AuthFunction
     }
 
     /// <summary>
-    /// GET /api/auth/is-galactic-admin
-    /// Checks if the current user is a Galactic Admin
+    /// GET /api/auth/is-global-admin
+    /// Checks if the current user is a Global Admin
     /// </summary>
-    [Function("IsGalacticAdmin")]
+    [Function("IsGlobalAdmin")]
     [Authorize]
-    public async Task<HttpResponseData> IsGalacticAdmin(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "auth/is-galactic-admin")] HttpRequestData req,
+    public async Task<HttpResponseData> IsGlobalAdmin(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "auth/is-global-admin")] HttpRequestData req,
         FunctionContext context)
     {
         var principal = context.GetUser();
@@ -209,26 +209,26 @@ public class AuthFunction
         }
 
         var upn = principal.GetUserPrincipalName();
-        var isAdmin = await _galacticAdminService.IsGalacticAdminAsync(upn);
+        var isAdmin = await _globalAdminService.IsGlobalAdminAsync(upn);
 
         var response = req.CreateResponse(HttpStatusCode.OK);
-        await response.WriteAsJsonAsync(new { isGalacticAdmin = isAdmin, upn });
+        await response.WriteAsJsonAsync(new { isGlobalAdmin = isAdmin, upn });
         return response;
     }
 
     /// <summary>
-    /// GET /api/auth/galactic-admins
-    /// Lists all Galactic Admins (only accessible by Galactic Admins)
+    /// GET /api/auth/global-admins
+    /// Lists all Global Admins (only accessible by Global Admins)
     /// </summary>
-    [Function("GetGalacticAdmins")]
+    [Function("GetGlobalAdmins")]
     [Authorize]
-    public async Task<HttpResponseData> GetGalacticAdmins(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "auth/galactic-admins")] HttpRequestData req,
+    public async Task<HttpResponseData> GetGlobalAdmins(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "auth/global-admins")] HttpRequestData req,
         FunctionContext context)
     {
-        // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
+        // Authentication + GlobalAdminOnly authorization enforced by PolicyEnforcementMiddleware
 
-        var admins = await _galacticAdminService.GetAllGalacticAdminsAsync();
+        var admins = await _globalAdminService.GetAllGlobalAdminsAsync();
 
         var response = req.CreateResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new { admins });
@@ -236,21 +236,21 @@ public class AuthFunction
     }
 
     /// <summary>
-    /// POST /api/auth/galactic-admins
-    /// Adds a new Galactic Admin (only accessible by existing Galactic Admins)
+    /// POST /api/auth/global-admins
+    /// Adds a new Global Admin (only accessible by existing Global Admins)
     /// </summary>
-    [Function("AddGalacticAdmin")]
+    [Function("AddGlobalAdmin")]
     [Authorize]
-    public async Task<HttpResponseData> AddGalacticAdmin(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "auth/galactic-admins")] HttpRequestData req,
+    public async Task<HttpResponseData> AddGlobalAdmin(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "auth/global-admins")] HttpRequestData req,
         FunctionContext context)
     {
-        // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
+        // Authentication + GlobalAdminOnly authorization enforced by PolicyEnforcementMiddleware
         var principal = context.GetUser();
         var currentUpn = principal?.GetUserPrincipalName();
 
         // Parse request body
-        var body = await req.ReadFromJsonAsync<AddGalacticAdminRequest>();
+        var body = await req.ReadFromJsonAsync<AddGlobalAdminRequest>();
         if (body == null || string.IsNullOrWhiteSpace(body.Upn))
         {
             var badRequestResponse = req.CreateResponse(HttpStatusCode.BadRequest);
@@ -258,9 +258,9 @@ public class AuthFunction
             return badRequestResponse;
         }
 
-        var newAdmin = await _galacticAdminService.AddGalacticAdminAsync(body.Upn, currentUpn!);
+        var newAdmin = await _globalAdminService.AddGlobalAdminAsync(body.Upn, currentUpn!);
 
-        _logger.LogInformation($"Galactic Admin added: {body.Upn} by {currentUpn}");
+        _logger.LogInformation($"Global Admin added: {body.Upn} by {currentUpn}");
 
         var response = req.CreateResponse(HttpStatusCode.Created);
         await response.WriteAsJsonAsync(new { admin = newAdmin });
@@ -268,17 +268,17 @@ public class AuthFunction
     }
 
     /// <summary>
-    /// DELETE /api/auth/galactic-admins/{upn}
-    /// Removes a Galactic Admin (only accessible by existing Galactic Admins)
+    /// DELETE /api/auth/global-admins/{upn}
+    /// Removes a Global Admin (only accessible by existing Global Admins)
     /// </summary>
-    [Function("RemoveGalacticAdmin")]
+    [Function("RemoveGlobalAdmin")]
     [Authorize]
-    public async Task<HttpResponseData> RemoveGalacticAdmin(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "delete", Route = "auth/galactic-admins/{upn}")] HttpRequestData req,
+    public async Task<HttpResponseData> RemoveGlobalAdmin(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "delete", Route = "auth/global-admins/{upn}")] HttpRequestData req,
         string upn,
         FunctionContext context)
     {
-        // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
+        // Authentication + GlobalAdminOnly authorization enforced by PolicyEnforcementMiddleware
         var principal = context.GetUser();
         var currentUpn = principal?.GetUserPrincipalName();
 
@@ -286,16 +286,16 @@ public class AuthFunction
         if (upn.Equals(currentUpn, StringComparison.OrdinalIgnoreCase))
         {
             var badRequestResponse = req.CreateResponse(HttpStatusCode.BadRequest);
-            await badRequestResponse.WriteAsJsonAsync(new { error = "You cannot remove yourself as a Galactic Admin" });
+            await badRequestResponse.WriteAsJsonAsync(new { error = "You cannot remove yourself as a Global Admin" });
             return badRequestResponse;
         }
 
-        await _galacticAdminService.RemoveGalacticAdminAsync(upn);
+        await _globalAdminService.RemoveGlobalAdminAsync(upn);
 
-        _logger.LogInformation($"Galactic Admin removed: {upn} by {currentUpn}");
+        _logger.LogInformation($"Global Admin removed: {upn} by {currentUpn}");
 
         var response = req.CreateResponse(HttpStatusCode.OK);
-        await response.WriteAsJsonAsync(new { message = "Galactic Admin removed successfully" });
+        await response.WriteAsJsonAsync(new { message = "Global Admin removed successfully" });
         return response;
     }
 
@@ -317,7 +317,7 @@ public class AuthFunction
     }
 }
 
-public class AddGalacticAdminRequest
+public class AddGlobalAdminRequest
 {
     public string Upn { get; set; } = string.Empty;
 }

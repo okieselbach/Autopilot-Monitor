@@ -34,7 +34,7 @@ namespace AutopilotMonitor.Functions.Functions.Admin
         {
             try
             {
-                // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
+                // Authentication + GlobalAdminOnly authorization enforced by PolicyEnforcementMiddleware
 
                 var tenantId = req.Query["tenantId"];
                 if (string.IsNullOrEmpty(tenantId))
@@ -62,7 +62,7 @@ namespace AutopilotMonitor.Functions.Functions.Admin
         {
             try
             {
-                // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
+                // Authentication + GlobalAdminOnly authorization enforced by PolicyEnforcementMiddleware
                 var userIdentifier = TenantHelper.GetUserIdentifier(req);
 
                 string body;
@@ -110,7 +110,7 @@ namespace AutopilotMonitor.Functions.Functions.Admin
 
                 var isKill = action == "Kill";
                 _logger.LogWarning(
-                    "Galactic Admin {User} {Action} device {SerialNumber} in tenant {TenantId} for {Hours}h. Reason: {Reason}",
+                    "Global Admin {User} {Action} device {SerialNumber} in tenant {TenantId} for {Hours}h. Reason: {Reason}",
                     userIdentifier, isKill ? "issued KILL signal to" : "blocked", serialNumber, tenantId, durationHours, reason);
 
                 var response = req.CreateResponse(HttpStatusCode.OK);
@@ -142,7 +142,7 @@ namespace AutopilotMonitor.Functions.Functions.Admin
         {
             try
             {
-                // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
+                // Authentication + GlobalAdminOnly authorization enforced by PolicyEnforcementMiddleware
                 var userIdentifier = TenantHelper.GetUserIdentifier(req);
 
                 var tenantId = req.Query["tenantId"];
@@ -164,7 +164,7 @@ namespace AutopilotMonitor.Functions.Functions.Admin
                 );
 
                 _logger.LogInformation(
-                    "Galactic Admin {User} unblocked device {SerialNumber} in tenant {TenantId}",
+                    "Global Admin {User} unblocked device {SerialNumber} in tenant {TenantId}",
                     userIdentifier, serialNumber, tenantId);
 
                 var response = req.CreateResponse(HttpStatusCode.OK);

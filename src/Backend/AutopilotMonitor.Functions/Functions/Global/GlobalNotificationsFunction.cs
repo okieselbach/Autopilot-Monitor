@@ -4,32 +4,32 @@ using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
 
-namespace AutopilotMonitor.Functions.Functions.Galactic;
+namespace AutopilotMonitor.Functions.Functions.Global;
 
 /// <summary>
-/// API endpoints for managing persistent Galactic Admin notifications.
-/// All endpoints require GalacticAdminOnly authorization (enforced by PolicyEnforcementMiddleware).
+/// API endpoints for managing persistent Global Admin notifications.
+/// All endpoints require GlobalAdminOnly authorization (enforced by PolicyEnforcementMiddleware).
 /// </summary>
-public class GalacticNotificationsFunction
+public class GlobalNotificationsFunction
 {
-    private readonly ILogger<GalacticNotificationsFunction> _logger;
-    private readonly GalacticNotificationService _notificationService;
+    private readonly ILogger<GlobalNotificationsFunction> _logger;
+    private readonly GlobalNotificationService _notificationService;
 
-    public GalacticNotificationsFunction(
-        ILogger<GalacticNotificationsFunction> logger,
-        GalacticNotificationService notificationService)
+    public GlobalNotificationsFunction(
+        ILogger<GlobalNotificationsFunction> logger,
+        GlobalNotificationService notificationService)
     {
         _logger = logger;
         _notificationService = notificationService;
     }
 
     /// <summary>
-    /// GET /api/galactic/notifications
+    /// GET /api/global/notifications
     /// Returns all active (non-dismissed) notifications, newest first.
     /// </summary>
-    [Function("GetGalacticNotifications")]
+    [Function("GetGlobalNotifications")]
     public async Task<HttpResponseData> GetNotifications(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "galactic/notifications")] HttpRequestData req)
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "global/notifications")] HttpRequestData req)
     {
         var notifications = await _notificationService.GetActiveNotificationsAsync();
 
@@ -39,12 +39,12 @@ public class GalacticNotificationsFunction
     }
 
     /// <summary>
-    /// POST /api/galactic/notifications/{notificationId}/dismiss
+    /// POST /api/global/notifications/{notificationId}/dismiss
     /// Dismisses a single notification.
     /// </summary>
-    [Function("DismissGalacticNotification")]
+    [Function("DismissGlobalNotification")]
     public async Task<HttpResponseData> DismissNotification(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "galactic/notifications/{notificationId}/dismiss")] HttpRequestData req,
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "global/notifications/{notificationId}/dismiss")] HttpRequestData req,
         string notificationId)
     {
         var found = await _notificationService.DismissNotificationAsync(notificationId);
@@ -62,12 +62,12 @@ public class GalacticNotificationsFunction
     }
 
     /// <summary>
-    /// POST /api/galactic/notifications/dismiss-all
+    /// POST /api/global/notifications/dismiss-all
     /// Dismisses all active notifications.
     /// </summary>
-    [Function("DismissAllGalacticNotifications")]
+    [Function("DismissAllGlobalNotifications")]
     public async Task<HttpResponseData> DismissAll(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "galactic/notifications/dismiss-all")] HttpRequestData req)
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "global/notifications/dismiss-all")] HttpRequestData req)
     {
         var dismissedCount = await _notificationService.DismissAllNotificationsAsync();
 

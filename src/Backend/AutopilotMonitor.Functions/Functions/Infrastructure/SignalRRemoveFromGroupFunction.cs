@@ -12,14 +12,14 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure
     public class SignalRRemoveFromGroupFunction
     {
         private readonly ILogger<SignalRRemoveFromGroupFunction> _logger;
-        private readonly GalacticAdminService _galacticAdminService;
+        private readonly GlobalAdminService _globalAdminService;
 
         public SignalRRemoveFromGroupFunction(
             ILogger<SignalRRemoveFromGroupFunction> logger,
-            GalacticAdminService galacticAdminService)
+            GlobalAdminService globalAdminService)
         {
             _logger = logger;
-            _galacticAdminService = galacticAdminService;
+            _globalAdminService = globalAdminService;
         }
 
         [Function("RemoveFromGroup")]
@@ -54,21 +54,21 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure
                 var userEmail = TenantHelper.GetUserIdentifier(req);
 
                 // Validate tenant access (same logic as AddToGroup)
-                // Group names are in format: "tenant-{tenantId}", "session-{tenantId}-{sessionId}", or "galactic-admins"
-                // Users can only leave groups for their own tenant (unless they are Galactic Admin)
+                // Group names are in format: "tenant-{tenantId}", "session-{tenantId}-{sessionId}", or "global-admins"
+                // Users can only leave groups for their own tenant (unless they are Global Admin)
 
-                // Explicit validation for the galactic-admins group
-                if (request.GroupName == "galactic-admins")
+                // Explicit validation for the global-admins group
+                if (request.GroupName == "global-admins")
                 {
-                    var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userEmail);
-                    if (!isGalacticAdmin)
+                    var isGlobalAdmin = await _globalAdminService.IsGlobalAdminAsync(userEmail);
+                    if (!isGlobalAdmin)
                     {
-                        _logger.LogWarning($"User {userEmail} (tenant {userTenantId}) attempted to leave galactic-admins group without being a Galactic Admin");
+                        _logger.LogWarning($"User {userEmail} (tenant {userTenantId}) attempted to leave global-admins group without being a Global Admin");
                         var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-                        await forbiddenResponse.WriteAsJsonAsync(new { success = false, message = "Access denied: Only Galactic Admins can leave this group" });
+                        await forbiddenResponse.WriteAsJsonAsync(new { success = false, message = "Access denied: Only Global Admins can leave this group" });
                         return new RemoveFromGroupOutput { HttpResponse = forbiddenResponse };
                     }
-                    _logger.LogInformation($"Galactic Admin {userEmail} leaving galactic-admins group");
+                    _logger.LogInformation($"Global Admin {userEmail} leaving global-admins group");
                 }
                 else
                 {
@@ -84,10 +84,10 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure
                     // Check if user is allowed to leave this tenant's group
                     if (requestedTenantId != userTenantId)
                     {
-                        // Check if user is Galactic Admin (they can leave any tenant's group)
-                        var isGalacticAdmin = await _galacticAdminService.IsGalacticAdminAsync(userEmail);
+                        // Check if user is Global Admin (they can leave any tenant's group)
+                        var isGlobalAdmin = await _globalAdminService.IsGlobalAdminAsync(userEmail);
 
-                        if (!isGalacticAdmin)
+                        if (!isGlobalAdmin)
                         {
                             _logger.LogWarning($"User {userEmail} (tenant {userTenantId}) attempted to leave group for tenant {requestedTenantId}");
                             var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
@@ -96,7 +96,7 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure
                         }
                         else
                         {
-                            _logger.LogInformation($"Galactic Admin {userEmail} leaving cross-tenant group: {request.GroupName}");
+                            _logger.LogInformation($"Global Admin {userEmail} leaving cross-tenant group: {request.GroupName}");
                         }
                     }
                 }

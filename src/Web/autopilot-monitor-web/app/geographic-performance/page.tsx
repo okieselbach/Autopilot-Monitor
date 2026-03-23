@@ -108,9 +108,9 @@ export default function GeographicPerformancePage() {
   const { tenantId } = useTenant();
   const { getAccessToken } = useAuth();
 
-  const [galacticAdminMode] = useState(() => {
+  const [globalAdminMode] = useState(() => {
     if (typeof window !== "undefined") {
-      return localStorage.getItem("galacticAdminMode") === "true";
+      return localStorage.getItem("globalAdminMode") === "true";
     }
     return false;
   });
@@ -118,8 +118,8 @@ export default function GeographicPerformancePage() {
   const fetchGeoMetrics = useCallback(async (range: TimeRange = timeRange, group: GroupBy = groupBy) => {
     try {
       const days = range === "7d" ? 7 : range === "30d" ? 30 : 90;
-      const endpoint = galacticAdminMode
-        ? `${API_BASE_URL}/api/galactic/metrics/geographic?days=${days}&groupBy=${group}`
+      const endpoint = globalAdminMode
+        ? `${API_BASE_URL}/api/global/metrics/geographic?days=${days}&groupBy=${group}`
         : `${API_BASE_URL}/api/metrics/geographic?tenantId=${tenantId}&days=${days}&groupBy=${group}`;
       const response = await authenticatedFetch(endpoint, getAccessToken);
       if (response.ok) {
@@ -135,14 +135,14 @@ export default function GeographicPerformancePage() {
     } finally {
       setLoading(false);
     }
-  }, [galacticAdminMode, tenantId, getAccessToken, timeRange, groupBy]);
+  }, [globalAdminMode, tenantId, getAccessToken, timeRange, groupBy]);
 
   useEffect(() => {
-    if (!galacticAdminMode && !tenantId) return;
+    if (!globalAdminMode && !tenantId) return;
     if (hasInitialFetch.current) return;
     hasInitialFetch.current = true;
     fetchGeoMetrics();
-  }, [tenantId, galacticAdminMode, fetchGeoMetrics]);
+  }, [tenantId, globalAdminMode, fetchGeoMetrics]);
 
   useEffect(() => {
     if (isTimeRangeMount.current) {
@@ -201,12 +201,12 @@ export default function GeographicPerformancePage() {
   return (
     <ProtectedRoute>
       <div className="min-h-screen bg-gray-50">
-        {galacticAdminMode && (
+        {globalAdminMode && (
           <div className="bg-purple-700 text-white text-sm px-4 py-2 flex items-center justify-center space-x-2">
             <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            <span className="font-medium">Galactic Admin View</span>
+            <span className="font-medium">Global Admin View</span>
             <span className="text-purple-300">&mdash; aggregating data across all tenants</span>
           </div>
         )}
@@ -261,7 +261,7 @@ export default function GeographicPerformancePage() {
 
         <main className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
           {/* Geo Disabled Warning */}
-          {geoMetrics && !geoMetrics.geoLocationEnabled && !galacticAdminMode && (
+          {geoMetrics && !geoMetrics.geoLocationEnabled && !globalAdminMode && (
             <div className="mb-4 bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start space-x-3">
               <svg className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />

@@ -22,7 +22,7 @@ export default function AppInsightsInit() {
     setTelemetryContext(
       tenantId || null,
       user?.isTenantAdmin ?? false,
-      user?.isGalacticAdmin ?? false,
+      user?.isGlobalAdmin ?? false,
       theme
     );
   }, [tenantId, user, theme]);

@@ -104,7 +104,7 @@ builder.Services.AddSingleton<AdminConfigurationService>();
 builder.Services.AddSingleton<RateLimitService>();
 builder.Services.AddSingleton<UsageMetricsService>();
 builder.Services.AddSingleton<PlatformMetricsService>();
-builder.Services.AddSingleton<GalacticAdminService>();
+builder.Services.AddSingleton<GlobalAdminService>();
 builder.Services.AddSingleton<PreviewWhitelistService>();
 builder.Services.AddSingleton<TenantAdminsService>();
 builder.Services.AddSingleton<HealthCheckService>();
@@ -138,7 +138,7 @@ builder.Services.AddSingleton<AutopilotMonitor.Functions.Security.CorporateIdent
 builder.Services.AddHttpClient<AutopilotMonitor.Functions.Services.Notifications.WebhookNotificationService>();
 builder.Services.AddHttpClient<TelegramNotificationService>();
 builder.Services.AddSingleton<ResendEmailService>();
-builder.Services.AddSingleton<GalacticNotificationService>();
+builder.Services.AddSingleton<GlobalNotificationService>();
 
 var app = builder.Build();
 

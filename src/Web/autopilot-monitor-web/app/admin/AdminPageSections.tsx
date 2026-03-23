@@ -76,7 +76,7 @@ export function AdminPageSections() {
     { id: "software", label: "Software Mapping", href: "/admin/software", group: "Software", groupIcon: <GlobeIcon /> },
   ], []);
 
-  usePageSections(items, "Galactic Admin", "route");
+  usePageSections(items, "Global Admin", "route");
 
   return null;
 }

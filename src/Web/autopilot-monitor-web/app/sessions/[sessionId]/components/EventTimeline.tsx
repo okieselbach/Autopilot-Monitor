@@ -175,7 +175,7 @@ export default function EventTimeline({
         </div>
       </div>
 
-      {/* Raw mode — compact flat list by sequence (galactic only) */}
+      {/* Raw mode — compact flat list by sequence (global only) */}
       {rawMode ? (
         <div className="bg-white shadow rounded-lg p-4">
           <h2 className="text-sm font-semibold text-gray-700 mb-3">Raw Events ({sortedBySequence.length})</h2>

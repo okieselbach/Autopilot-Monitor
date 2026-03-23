@@ -195,7 +195,7 @@ namespace AutopilotMonitor.Functions.Functions.Feedback
         }
 
         /// <summary>
-        /// Returns all feedback entries for the Galactic Admin dashboard.
+        /// Returns all feedback entries for the Global Admin dashboard.
         /// </summary>
         [Function("GetAllFeedback")]
         public async Task<HttpResponseData> GetAll(

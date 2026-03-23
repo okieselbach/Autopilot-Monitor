@@ -19,18 +19,18 @@ namespace AutopilotMonitor.Functions.Functions.Bootstrap
     {
         private readonly ILogger<ListBootstrapSessionsFunction> _logger;
         private readonly BootstrapSessionService _bootstrapService;
-        private readonly GalacticAdminService _galacticAdminService;
+        private readonly GlobalAdminService _globalAdminService;
         private readonly TenantConfigurationService _configService;
 
         public ListBootstrapSessionsFunction(
             ILogger<ListBootstrapSessionsFunction> logger,
             BootstrapSessionService bootstrapService,
-            GalacticAdminService galacticAdminService,
+            GlobalAdminService globalAdminService,
             TenantConfigurationService configService)
         {
             _logger = logger;
             _bootstrapService = bootstrapService;
-            _galacticAdminService = galacticAdminService;
+            _globalAdminService = globalAdminService;
             _configService = configService;
         }
 
@@ -46,11 +46,11 @@ namespace AutopilotMonitor.Functions.Functions.Bootstrap
 
                 var tenantId = req.Query["tenantId"] ?? authenticatedTenantId;
 
-                // Cross-tenant boundary check — only Galactic Admins may operate on other tenants
+                // Cross-tenant boundary check — only Global Admins may operate on other tenants
                 if (!string.Equals(authenticatedTenantId, tenantId, StringComparison.OrdinalIgnoreCase))
                 {
-                    var isGalactic = await _galacticAdminService.IsGalacticAdminAsync(userIdentifier);
-                    if (!isGalactic)
+                    var isGlobal = await _globalAdminService.IsGlobalAdminAsync(userIdentifier);
+                    if (!isGlobal)
                     {
                         var forbidden = req.CreateResponse(HttpStatusCode.Forbidden);
                         await forbidden.WriteAsJsonAsync(new { error = "Access denied: tenant mismatch" });

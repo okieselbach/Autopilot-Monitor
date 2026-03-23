@@ -79,7 +79,7 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure
 
         /// <summary>
         /// GET /api/health/detailed
-        /// Detailed health check with comprehensive system checks (Galactic Admin only)
+        /// Detailed health check with comprehensive system checks (Global Admin only)
         /// </summary>
         [Function("DetailedHealthCheck")]
         public async Task<HttpResponseData> GetDetailedHealthCheck(
@@ -88,7 +88,7 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure
         {
             _logger.LogInformation("Detailed health check requested");
 
-            // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
+            // Authentication + GlobalAdminOnly authorization enforced by PolicyEnforcementMiddleware
 
             // Perform comprehensive health checks
             var healthCheckResult = await _healthCheckService.PerformAllChecksAsync();

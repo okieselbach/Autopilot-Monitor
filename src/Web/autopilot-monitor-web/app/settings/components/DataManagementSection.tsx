@@ -7,7 +7,7 @@ interface DataManagementSectionProps {
   setDataRetentionDays: (value: number) => void;
   sessionTimeoutHours: number;
   setSessionTimeoutHours: (value: number) => void;
-  isGalacticAdmin?: boolean;
+  isGlobalAdmin?: boolean;
   onSave: () => Promise<void> | void;
   onReset: () => void;
   saving: boolean;
@@ -18,13 +18,13 @@ export default function DataManagementSection({
   setDataRetentionDays,
   sessionTimeoutHours,
   setSessionTimeoutHours,
-  isGalacticAdmin,
+  isGlobalAdmin,
   onSave,
   onReset,
   saving,
 }: DataManagementSectionProps) {
   const isOverridden = dataRetentionDays === 0 || dataRetentionDays < 7 || dataRetentionDays > 180;
-  const isRetentionDisabled = isOverridden && !isGalacticAdmin;
+  const isRetentionDisabled = isOverridden && !isGlobalAdmin;
 
   return (
     <div className="bg-white rounded-lg shadow">
@@ -68,7 +68,7 @@ export default function DataManagementSection({
                   {dataRetentionDays === 0
                     ? "Infinite retention is active. Data will never be automatically deleted."
                     : `Retention is set to ${dataRetentionDays} days (outside the standard 7–180 day range).`}
-                  {" "}Contact your Galactic admin to change this value.
+                  {" "}Contact your Global admin to change this value.
                 </p>
               </div>
             ) : (

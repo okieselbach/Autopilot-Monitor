@@ -7,29 +7,29 @@ using Microsoft.Extensions.Logging;
 
 namespace AutopilotMonitor.Functions.Functions.Metrics
 {
-    public class GetGalacticGeographicMetricsFunction
+    public class GetGlobalGeographicMetricsFunction
     {
-        private readonly ILogger<GetGalacticGeographicMetricsFunction> _logger;
+        private readonly ILogger<GetGlobalGeographicMetricsFunction> _logger;
         private readonly TableStorageService _storageService;
 
-        public GetGalacticGeographicMetricsFunction(
-            ILogger<GetGalacticGeographicMetricsFunction> logger,
+        public GetGlobalGeographicMetricsFunction(
+            ILogger<GetGlobalGeographicMetricsFunction> logger,
             TableStorageService storageService)
         {
             _logger = logger;
             _storageService = storageService;
         }
 
-        [Function("GetGalacticGeographicMetrics")]
+        [Function("GetGlobalGeographicMetrics")]
         public async Task<HttpResponseData> Run(
-            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "galactic/metrics/geographic")] HttpRequestData req)
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "global/metrics/geographic")] HttpRequestData req)
         {
             try
             {
-                // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
+                // Authentication + GlobalAdminOnly authorization enforced by PolicyEnforcementMiddleware
                 var userEmail = TenantHelper.GetUserIdentifier(req);
 
-                _logger.LogInformation("Fetching galactic geographic metrics (User: {UserEmail})", userEmail);
+                _logger.LogInformation("Fetching global geographic metrics (User: {UserEmail})", userEmail);
 
                 var query = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
                 var daysParam = query["days"];
@@ -52,7 +52,7 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error fetching galactic geographic metrics");
+                _logger.LogError(ex, "Error fetching global geographic metrics");
                 var errorResponse = req.CreateResponse(HttpStatusCode.InternalServerError);
                 await errorResponse.WriteAsJsonAsync(new { success = false, message = "Internal server error" });
                 return errorResponse;

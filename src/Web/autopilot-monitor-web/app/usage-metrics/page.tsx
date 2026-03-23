@@ -88,19 +88,19 @@ export default function UsageMetricsPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Galactic admin mode
-  const [galacticAdminMode] = useState(() => {
+  // Global admin mode
+  const [globalAdminMode] = useState(() => {
     if (typeof window !== 'undefined') {
-      return localStorage.getItem('galacticAdminMode') === 'true';
+      return localStorage.getItem('globalAdminMode') === 'true';
     }
     return false;
   });
   const [tenants, setTenants] = useState<TenantInfo[]>([]);
   const [selectedTenantId, setSelectedTenantId] = useState<string>('');
 
-  // Fetch tenant list for galactic admin
+  // Fetch tenant list for global admin
   useEffect(() => {
-    if (!galacticAdminMode || !user?.isGalacticAdmin) return;
+    if (!globalAdminMode || !user?.isGlobalAdmin) return;
     const fetchTenants = async () => {
       try {
         const response = await authenticatedFetch(`${API_BASE_URL}/api/config/all`, getAccessToken);
@@ -122,7 +122,7 @@ export default function UsageMetricsPage() {
       }
     };
     fetchTenants();
-  }, [galacticAdminMode, user?.isGalacticAdmin]);
+  }, [globalAdminMode, user?.isGlobalAdmin]);
 
   // Set default selected tenant once tenantId is available
   useEffect(() => {
@@ -131,8 +131,8 @@ export default function UsageMetricsPage() {
     }
   }, [tenantId]);
 
-  const isGalacticOverride = galacticAdminMode && user?.isGalacticAdmin && selectedTenantId && selectedTenantId !== tenantId;
-  const effectiveTenantId = (galacticAdminMode && user?.isGalacticAdmin && selectedTenantId) ? selectedTenantId : tenantId;
+  const isGlobalOverride = globalAdminMode && user?.isGlobalAdmin && selectedTenantId && selectedTenantId !== tenantId;
+  const effectiveTenantId = (globalAdminMode && user?.isGlobalAdmin && selectedTenantId) ? selectedTenantId : tenantId;
 
   const fetchMetrics = useCallback(async (showRefreshing = false) => {
     if (!effectiveTenantId) return;
@@ -143,9 +143,9 @@ export default function UsageMetricsPage() {
         setLoading(true);
       }
 
-      // Galactic admin viewing another tenant → use galactic endpoint
-      const url = isGalacticOverride
-        ? `${API_BASE_URL}/api/galactic/metrics/usage?tenantId=${effectiveTenantId}`
+      // Global admin viewing another tenant → use global endpoint
+      const url = isGlobalOverride
+        ? `${API_BASE_URL}/api/global/metrics/usage?tenantId=${effectiveTenantId}`
         : `${API_BASE_URL}/api/metrics/usage?tenantId=${effectiveTenantId}`;
 
       const response = await authenticatedFetch(url, getAccessToken);
@@ -168,7 +168,7 @@ export default function UsageMetricsPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [effectiveTenantId, isGalacticOverride, getAccessToken, addNotification]);
+  }, [effectiveTenantId, isGlobalOverride, getAccessToken, addNotification]);
 
   useEffect(() => {
     if (!effectiveTenantId) return;
@@ -214,12 +214,12 @@ export default function UsageMetricsPage() {
   return (
 <ProtectedRoute>
     <div className="min-h-screen bg-gray-50">
-      {galacticAdminMode && user?.isGalacticAdmin && (
+      {globalAdminMode && user?.isGlobalAdmin && (
         <div className="bg-purple-700 text-white text-sm px-4 py-2 flex items-center justify-center space-x-2">
           <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
-          <span className="font-medium">Galactic Admin View</span>
+          <span className="font-medium">Global Admin View</span>
           <span className="text-purple-300">&mdash; access to all tenants</span>
         </div>
       )}
@@ -230,7 +230,7 @@ export default function UsageMetricsPage() {
               <div>
                 <h1 className="text-2xl font-normal text-gray-900">Usage Metrics</h1>
                 <p className="text-sm text-gray-600 mt-1">
-                  {isGalacticOverride && selectedTenantName
+                  {isGlobalOverride && selectedTenantName
                     ? `Tenant: ${selectedTenantName} · `
                     : ''}
                   Computed at {formatTimestamp(metrics.computedAt)} in {metrics.computeDurationMs}ms
@@ -243,7 +243,7 @@ export default function UsageMetricsPage() {
               </div>
             </div>
             <div className="flex items-center gap-3">
-              {galacticAdminMode && user?.isGalacticAdmin && tenants.length > 0 && (
+              {globalAdminMode && user?.isGlobalAdmin && tenants.length > 0 && (
                 <>
                   <label className="text-sm text-gray-500 hidden sm:inline">Tenant:</label>
                   <select

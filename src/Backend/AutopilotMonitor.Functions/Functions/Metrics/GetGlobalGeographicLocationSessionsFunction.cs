@@ -7,26 +7,26 @@ using Microsoft.Extensions.Logging;
 
 namespace AutopilotMonitor.Functions.Functions.Metrics
 {
-    public class GetGalacticGeographicLocationSessionsFunction
+    public class GetGlobalGeographicLocationSessionsFunction
     {
-        private readonly ILogger<GetGalacticGeographicLocationSessionsFunction> _logger;
+        private readonly ILogger<GetGlobalGeographicLocationSessionsFunction> _logger;
         private readonly TableStorageService _storageService;
 
-        public GetGalacticGeographicLocationSessionsFunction(
-            ILogger<GetGalacticGeographicLocationSessionsFunction> logger,
+        public GetGlobalGeographicLocationSessionsFunction(
+            ILogger<GetGlobalGeographicLocationSessionsFunction> logger,
             TableStorageService storageService)
         {
             _logger = logger;
             _storageService = storageService;
         }
 
-        [Function("GetGalacticGeographicLocationSessions")]
+        [Function("GetGlobalGeographicLocationSessions")]
         public async Task<HttpResponseData> Run(
-            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "galactic/metrics/geographic/sessions")] HttpRequestData req)
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "global/metrics/geographic/sessions")] HttpRequestData req)
         {
             try
             {
-                // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
+                // Authentication + GlobalAdminOnly authorization enforced by PolicyEnforcementMiddleware
                 var userEmail = TenantHelper.GetUserIdentifier(req);
 
                 var query = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
@@ -45,7 +45,7 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
 
                 var groupBy = query["groupBy"] ?? "city";
 
-                _logger.LogInformation("Fetching galactic sessions for location '{LocationKey}' ({Days}d, groupBy={GroupBy}) (User: {UserEmail})",
+                _logger.LogInformation("Fetching global sessions for location '{LocationKey}' ({Days}d, groupBy={GroupBy}) (User: {UserEmail})",
                     locationKey, days, groupBy, userEmail);
 
                 var cutoff = DateTime.UtcNow.AddDays(-days);
@@ -59,7 +59,7 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error fetching galactic geographic location sessions");
+                _logger.LogError(ex, "Error fetching global geographic location sessions");
                 var errorResponse = req.CreateResponse(HttpStatusCode.InternalServerError);
                 await errorResponse.WriteAsJsonAsync(new { success = false, message = "Internal server error" });
                 return errorResponse;

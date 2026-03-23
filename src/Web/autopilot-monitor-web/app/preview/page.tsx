@@ -16,7 +16,7 @@ export default function PreviewPage() {
   // If not preview-blocked (e.g. approved tenant navigates here), redirect away
   useEffect(() => {
     if (!isLoading && isAuthenticated && user && !isPreviewBlocked) {
-      if (user.isTenantAdmin || user.isGalacticAdmin) {
+      if (user.isTenantAdmin || user.isGlobalAdmin) {
         router.push("/dashboard");
       } else {
         router.push("/progress");

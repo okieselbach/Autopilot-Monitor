@@ -74,7 +74,7 @@ namespace AutopilotMonitor.Shared.Models
         /// <summary>
         /// Optional custom rate limit for this tenant (overrides RateLimitRequestsPerMinute)
         /// If set (not null), this custom value takes precedence over the global default
-        /// Note: This is only configurable by Galactic Admins directly in the database
+        /// Note: This is only configurable by Global Admins directly in the database
         /// </summary>
         public int? CustomRateLimitRequestsPerMinute { get; set; } = null;
 
@@ -105,7 +105,7 @@ namespace AutopilotMonitor.Shared.Models
         public bool ValidateCorporateIdentifier { get; set; } = false;
 
         /// <summary>
-        /// Emergency bypass for agent security gate (Galactic Admin use only).
+        /// Emergency bypass for agent security gate (Global Admin use only).
         /// If true, agent requests are accepted even when ValidateAutopilotDevice is false.
         /// Default: false
         /// </summary>
@@ -310,7 +310,7 @@ namespace AutopilotMonitor.Shared.Models
         /// Whether OOBE Bootstrap Sessions are enabled for this tenant.
         /// When false (default), the Bootstrap Sessions feature is hidden in the UI
         /// and all bootstrap API endpoints reject requests for this tenant.
-        /// Only configurable by Galactic Admins.
+        /// Only configurable by Global Admins.
         /// </summary>
         public bool BootstrapTokenEnabled { get; set; } = false;
 
@@ -320,7 +320,7 @@ namespace AutopilotMonitor.Shared.Models
         /// Whether the Unrestricted Mode feature is available for this tenant.
         /// When false (default), the Unrestricted Mode section is hidden in the tenant settings UI
         /// and UnrestrictedMode cannot be activated by tenant admins.
-        /// Only configurable by Galactic Admins.
+        /// Only configurable by Global Admins.
         /// </summary>
         public bool UnrestrictedModeEnabled { get; set; } = false;
 

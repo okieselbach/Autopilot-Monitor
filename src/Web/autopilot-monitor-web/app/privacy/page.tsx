@@ -81,7 +81,7 @@ export default function PrivacyPage() {
           </p>
           <ul className="list-disc list-inside space-y-2 text-gray-700 ml-4">
             <li>Authenticated users within your tenant</li>
-            <li>Galactic Administrators (for platform operations and support)</li>
+            <li>Global Administrators (for platform operations and support)</li>
           </ul>
 
           <h2 className="text-xl font-semibold text-gray-900 mt-6">Your Rights</h2>

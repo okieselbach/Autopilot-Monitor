@@ -227,7 +227,7 @@ export function SectionSettings() {
         <SettingsRow name="Additional Log Paths">
           <span>
             Extra log files or wildcard patterns added to the diagnostics ZIP package. Global paths are defined
-            platform-wide by the Galactic Admin and always included. Tenant Admins can add their own paths in addition
+            platform-wide by the Global Admin and always included. Tenant Admins can add their own paths in addition
             to the global ones (e.g. custom app logs or third-party agent logs).
           </span>
           <span className="block mt-2 text-xs text-gray-500">

@@ -20,14 +20,14 @@ public enum EndpointPolicy
     /// <summary>Tenant member with Admin, Operator, or Viewer role. Tenant-scoped read access.</summary>
     MemberRead,
 
-    /// <summary>Tenant Admin or Galactic Admin. Tenant-scoped write access.</summary>
+    /// <summary>Tenant Admin or Global Admin. Tenant-scoped write access.</summary>
     TenantAdminOrGA,
 
-    /// <summary>Admin (always) or Operator with CanManageBootstrapTokens permission, or Galactic Admin.</summary>
+    /// <summary>Admin (always) or Operator with CanManageBootstrapTokens permission, or Global Admin.</summary>
     BootstrapManagerOrGA,
 
-    /// <summary>Galactic Admin only. Platform-wide access.</summary>
-    GalacticAdminOnly,
+    /// <summary>Global Admin only. Platform-wide access.</summary>
+    GlobalAdminOnly,
 }
 
 /// <summary>
@@ -90,7 +90,7 @@ public static class EndpointAccessPolicyCatalog
 
         // ── AuthenticatedUser ───────────────────────────────────────────
         new("GET",    "auth/me",                   EndpointPolicy.AuthenticatedUser),
-        new("GET",    "auth/is-galactic-admin",    EndpointPolicy.AuthenticatedUser),
+        new("GET",    "auth/is-global-admin",      EndpointPolicy.AuthenticatedUser),
         new("POST",   "realtime/negotiate",        EndpointPolicy.AuthenticatedUser),
         new("POST",   "realtime/groups/join",      EndpointPolicy.AuthenticatedUser),
         new("POST",   "realtime/groups/leave",     EndpointPolicy.AuthenticatedUser),
@@ -147,51 +147,51 @@ public static class EndpointAccessPolicyCatalog
         new("POST",   "bootstrap/sessions",        EndpointPolicy.BootstrapManagerOrGA),
         new("DELETE", "bootstrap/sessions/{code}", EndpointPolicy.BootstrapManagerOrGA),
 
-        // ── GalacticAdminOnly ───────────────────────────────────────────
-        new("GET",    "global/config",             EndpointPolicy.GalacticAdminOnly),
-        new("PUT",    "global/config",             EndpointPolicy.GalacticAdminOnly),
-        new("POST",   "global/config",             EndpointPolicy.GalacticAdminOnly),
-        new("GET",    "config/all",                EndpointPolicy.GalacticAdminOnly),
-        new("GET",    "auth/galactic-admins",      EndpointPolicy.GalacticAdminOnly),
-        new("POST",   "auth/galactic-admins",      EndpointPolicy.GalacticAdminOnly),
-        new("DELETE", "auth/galactic-admins/{upn}", EndpointPolicy.GalacticAdminOnly),
-        new("GET",    "preview/whitelist",          EndpointPolicy.GalacticAdminOnly),
-        new("POST",   "preview/whitelist/{tenantId}", EndpointPolicy.GalacticAdminOnly),
-        new("DELETE", "preview/whitelist/{tenantId}", EndpointPolicy.GalacticAdminOnly),
-        new("GET",    "preview/notification-email/{tenantId}", EndpointPolicy.GalacticAdminOnly),
-        new("POST",   "preview/send-welcome-email/{tenantId}", EndpointPolicy.GalacticAdminOnly),
-        new("GET",    "galactic/sessions",          EndpointPolicy.GalacticAdminOnly),
-        new("GET",    "galactic/audit/logs",        EndpointPolicy.GalacticAdminOnly),
-        new("GET",    "galactic/metrics/platform",  EndpointPolicy.GalacticAdminOnly),
-        new("GET",    "galactic/metrics/app",       EndpointPolicy.GalacticAdminOnly),
-        new("GET",    "galactic/metrics/geographic", EndpointPolicy.GalacticAdminOnly),
-        new("GET",    "galactic/metrics/geographic/sessions", EndpointPolicy.GalacticAdminOnly),
-        new("GET",    "galactic/metrics/usage",     EndpointPolicy.GalacticAdminOnly),
-        new("GET",    "galactic/session-reports",   EndpointPolicy.GalacticAdminOnly),
-        new("GET",    "galactic/session-reports/download-url", EndpointPolicy.GalacticAdminOnly),
-        new("PATCH",  "galactic/session-reports/{reportId}/note", EndpointPolicy.GalacticAdminOnly),
-        new("GET",    "galactic/rules/gather",      EndpointPolicy.GalacticAdminOnly),
-        new("GET",    "galactic/rules/analyze",     EndpointPolicy.GalacticAdminOnly),
-        new("GET",    "galactic/devices/blocked",   EndpointPolicy.GalacticAdminOnly),
-        new("GET",    "devices/blocked",            EndpointPolicy.GalacticAdminOnly),
-        new("POST",   "devices/block",              EndpointPolicy.GalacticAdminOnly),
-        new("DELETE", "devices/block/{encodedSerialNumber}", EndpointPolicy.GalacticAdminOnly),
-        new("GET",    "versions/blocked",           EndpointPolicy.GalacticAdminOnly),
-        new("POST",   "versions/block",             EndpointPolicy.GalacticAdminOnly),
-        new("DELETE", "versions/block/{encodedPattern}", EndpointPolicy.GalacticAdminOnly),
-        new("POST",   "maintenance/trigger",        EndpointPolicy.GalacticAdminOnly),
+        // ── GlobalAdminOnly ────────────────────────────────────────────
+        new("GET",    "global/config",             EndpointPolicy.GlobalAdminOnly),
+        new("PUT",    "global/config",             EndpointPolicy.GlobalAdminOnly),
+        new("POST",   "global/config",             EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "config/all",                EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "auth/global-admins",        EndpointPolicy.GlobalAdminOnly),
+        new("POST",   "auth/global-admins",        EndpointPolicy.GlobalAdminOnly),
+        new("DELETE", "auth/global-admins/{upn}",  EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "preview/whitelist",          EndpointPolicy.GlobalAdminOnly),
+        new("POST",   "preview/whitelist/{tenantId}", EndpointPolicy.GlobalAdminOnly),
+        new("DELETE", "preview/whitelist/{tenantId}", EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "preview/notification-email/{tenantId}", EndpointPolicy.GlobalAdminOnly),
+        new("POST",   "preview/send-welcome-email/{tenantId}", EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "global/sessions",            EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "global/audit/logs",          EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "global/metrics/platform",    EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "global/metrics/app",         EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "global/metrics/geographic",  EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "global/metrics/geographic/sessions", EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "global/metrics/usage",       EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "global/session-reports",     EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "global/session-reports/download-url", EndpointPolicy.GlobalAdminOnly),
+        new("PATCH",  "global/session-reports/{reportId}/note", EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "global/rules/gather",        EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "global/rules/analyze",       EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "global/devices/blocked",     EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "devices/blocked",            EndpointPolicy.GlobalAdminOnly),
+        new("POST",   "devices/block",              EndpointPolicy.GlobalAdminOnly),
+        new("DELETE", "devices/block/{encodedSerialNumber}", EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "versions/blocked",           EndpointPolicy.GlobalAdminOnly),
+        new("POST",   "versions/block",             EndpointPolicy.GlobalAdminOnly),
+        new("DELETE", "versions/block/{encodedPattern}", EndpointPolicy.GlobalAdminOnly),
+        new("POST",   "maintenance/trigger",        EndpointPolicy.GlobalAdminOnly),
         new("GET",    "health/detailed",            EndpointPolicy.AuthenticatedUser),
-        new("POST",   "rules/reseed-from-github",   EndpointPolicy.GalacticAdminOnly),
-        new("GET",    "vulnerability/unmatched-software", EndpointPolicy.GalacticAdminOnly),
-        new("GET",    "vulnerability/software-inventory", EndpointPolicy.GalacticAdminOnly),
-        new("POST",   "vulnerability/sync",              EndpointPolicy.GalacticAdminOnly),
-        new("POST",   "vulnerability/cpe-mapping",       EndpointPolicy.GalacticAdminOnly),
-        new("GET",    "vulnerability/cpe-mappings",      EndpointPolicy.GalacticAdminOnly),
-        new("POST",   "rules/ime-log-patterns/reseed", EndpointPolicy.GalacticAdminOnly),
-        new("GET",    "feedback/all",                                     EndpointPolicy.GalacticAdminOnly),
-        new("GET",    "galactic/notifications",                          EndpointPolicy.GalacticAdminOnly),
-        new("POST",   "galactic/notifications/dismiss-all",              EndpointPolicy.GalacticAdminOnly),
-        new("POST",   "galactic/notifications/{notificationId}/dismiss", EndpointPolicy.GalacticAdminOnly),
+        new("POST",   "rules/reseed-from-github",   EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "vulnerability/unmatched-software", EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "vulnerability/software-inventory", EndpointPolicy.GlobalAdminOnly),
+        new("POST",   "vulnerability/sync",              EndpointPolicy.GlobalAdminOnly),
+        new("POST",   "vulnerability/cpe-mapping",       EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "vulnerability/cpe-mappings",      EndpointPolicy.GlobalAdminOnly),
+        new("POST",   "rules/ime-log-patterns/reseed", EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "feedback/all",                                     EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "global/notifications",                            EndpointPolicy.GlobalAdminOnly),
+        new("POST",   "global/notifications/dismiss-all",                EndpointPolicy.GlobalAdminOnly),
+        new("POST",   "global/notifications/{notificationId}/dismiss",   EndpointPolicy.GlobalAdminOnly),
     };
 
     /// <summary>

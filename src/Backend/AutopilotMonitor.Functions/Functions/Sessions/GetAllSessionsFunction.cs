@@ -23,13 +23,13 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
 
         [Function("GetAllSessions")]
         public async Task<HttpResponseData> Run(
-            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "galactic/sessions")] HttpRequestData req)
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "global/sessions")] HttpRequestData req)
         {
-            _logger.LogInformation("GetAllSessions function processing request (Galactic Admin Mode)");
+            _logger.LogInformation("GetAllSessions function processing request (Global Admin Mode)");
 
             try
             {
-                // Authentication + GalacticAdminOnly authorization enforced by PolicyEnforcementMiddleware
+                // Authentication + GlobalAdminOnly authorization enforced by PolicyEnforcementMiddleware
                 var userEmail = TenantHelper.GetUserIdentifier(req);
                 var query = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
                 var cursor = query["cursor"];

@@ -22,8 +22,8 @@ export default function ImeLogPatternsPage() {
   useEffect(() => { trackEvent("ime_patterns_viewed"); }, []);
   const { tenantId } = useTenant();
   const { user } = useAuth();
-  const isGalacticAdmin = user?.isGalacticAdmin ?? false;
-  const [galacticAdminMode, setGalacticAdminMode] = useState(false);
+  const isGlobalAdmin = user?.isGlobalAdmin ?? false;
+  const [globalAdminMode, setGlobalAdminMode] = useState(false);
 
   const { successMessage, error, showSuccess, showError } = useNotificationMessages();
 
@@ -60,11 +60,11 @@ export default function ImeLogPatternsPage() {
   const [newParamKey, setNewParamKey] = useState("");
   const [newParamValue, setNewParamValue] = useState("");
 
-  // Check galactic admin mode from localStorage
+  // Check global admin mode from localStorage
   useEffect(() => {
-    const mode = localStorage.getItem("galacticAdminMode") === "true";
-    setGalacticAdminMode(mode);
-    const handleStorage = () => setGalacticAdminMode(localStorage.getItem("galacticAdminMode") === "true");
+    const mode = localStorage.getItem("globalAdminMode") === "true";
+    setGlobalAdminMode(mode);
+    const handleStorage = () => setGlobalAdminMode(localStorage.getItem("globalAdminMode") === "true");
     window.addEventListener("storage", handleStorage);
     return () => window.removeEventListener("storage", handleStorage);
   }, []);
@@ -83,9 +83,9 @@ export default function ImeLogPatternsPage() {
     fetchPatterns();
   }, [fetchPatterns]);
 
-  // Toggle enable/disable (Galactic Admin only)
+  // Toggle enable/disable (Global Admin only)
   const handleTogglePattern = async (pattern: ImeLogPattern) => {
-    if (!isGalacticAdmin || !galacticAdminMode) return;
+    if (!isGlobalAdmin || !globalAdminMode) return;
 
     setTogglingPattern(pattern.patternId);
     const result = await mutate(
@@ -109,7 +109,7 @@ export default function ImeLogPatternsPage() {
     setTogglingPattern(null);
   };
 
-  // Start editing (Galactic Admin only)
+  // Start editing (Global Admin only)
   const startEditing = (pattern: ImeLogPattern) => {
     setEditingPatternId(pattern.patternId);
     setEditForm({
@@ -126,7 +126,7 @@ export default function ImeLogPatternsPage() {
     setNewParamValue("");
   };
 
-  // Save edit (Galactic Admin only)
+  // Save edit (Global Admin only)
   const handleSaveEdit = async (patternId: string) => {
     setSaving(true);
     const payload: Partial<ImeLogPattern> = {
@@ -208,8 +208,8 @@ export default function ImeLogPatternsPage() {
   // Unique actions in data for filter dropdown
   const uniqueActions = [...new Set(patternsList.map((p) => p.action))].sort();
 
-  const canEdit = isGalacticAdmin && galacticAdminMode;
-  const isReadOnly = !user?.isTenantAdmin && !user?.isGalacticAdmin;
+  const canEdit = isGlobalAdmin && globalAdminMode;
+  const isReadOnly = !user?.isTenantAdmin && !user?.isGlobalAdmin;
 
   return (
     <ProtectedRoute>

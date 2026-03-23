@@ -2,7 +2,7 @@ namespace AutopilotMonitor.Functions.Helpers;
 
 /// <summary>
 /// Helper class for parsing SignalR group names.
-/// Group formats: "tenant-{tenantId}", "session-{tenantId}-{sessionId}", or "galactic-admins"
+/// Group formats: "tenant-{tenantId}", "session-{tenantId}-{sessionId}", or "global-admins"
 /// </summary>
 public static class SignalRGroupHelper
 {

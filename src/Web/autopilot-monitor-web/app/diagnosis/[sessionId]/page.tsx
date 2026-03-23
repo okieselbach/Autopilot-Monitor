@@ -38,16 +38,16 @@ export default function DiagnosisPage() {
   const { getAccessToken } = useAuth();
   const { addNotification } = useNotifications();
 
-  const [galacticAdminMode] = useState(() => {
+  const [globalAdminMode] = useState(() => {
     if (typeof window !== "undefined") {
-      return localStorage.getItem("galacticAdminMode") === "true";
+      return localStorage.getItem("globalAdminMode") === "true";
     }
     return false;
   });
 
   useEffect(() => {
     if (!sessionId) return;
-    if (!galacticAdminMode && !tenantId) return; // wait for real tenant ID
+    if (!globalAdminMode && !tenantId) return; // wait for real tenant ID
     sessionIdRef.current = sessionId;
     if (lastFetchedSessionId.current !== sessionId) {
       hasInitialFetch.current = false;
@@ -57,7 +57,7 @@ export default function DiagnosisPage() {
     if (hasInitialFetch.current) return;
     hasInitialFetch.current = true;
     fetchSessionDetails();
-  }, [sessionId, tenantId, galacticAdminMode]);
+  }, [sessionId, tenantId, globalAdminMode]);
 
   useEffect(() => {
     if (sessionTenantId && sessionId) {
@@ -117,8 +117,8 @@ export default function DiagnosisPage() {
 
   const fetchSessionDetails = async () => {
     try {
-      const endpoint = galacticAdminMode
-        ? `${API_BASE_URL}/api/galactic/sessions`
+      const endpoint = globalAdminMode
+        ? `${API_BASE_URL}/api/global/sessions`
         : `${API_BASE_URL}/api/sessions?tenantId=${tenantId}`;
       const response = await authenticatedFetch(endpoint, getAccessToken);
       if (response.ok) {
