@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Net;
 using System.Threading.Tasks;
+using System.Collections.Generic;
 using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Services;
 using AutopilotMonitor.Shared.Models;
@@ -65,6 +66,10 @@ namespace AutopilotMonitor.Functions.Functions.Config
                 config.PartitionKey = "GlobalConfig";
                 config.RowKey = "config";
 
+                // Load existing config for diff before saving
+                var existingConfig = await _adminConfigService.GetConfigurationAsync();
+                var changes = ConfigDiffHelper.GetChanges(existingConfig, config);
+
                 // Save configuration
                 await _adminConfigService.SaveConfigurationAsync(config);
 
@@ -73,7 +78,8 @@ namespace AutopilotMonitor.Functions.Functions.Config
                     "UPDATE",
                     "AdminConfiguration",
                     "GlobalConfig",
-                    userIdentifier
+                    userIdentifier,
+                    changes.Count > 0 ? changes : null
                 );
 
                 var response = req.CreateResponse(HttpStatusCode.OK);

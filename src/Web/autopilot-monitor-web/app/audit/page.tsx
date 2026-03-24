@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTenant } from '../../contexts/TenantContext';
 import { useAuth } from '../../contexts/AuthContext';
@@ -286,31 +286,30 @@ export default function AuditPage() {
                       const isExpanded = expandedRow === log.id;
 
                       return (
-                        <tr
-                          key={log.id}
-                          className="hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors cursor-pointer"
-                          onClick={() => setExpandedRow(isExpanded ? null : log.id)}
-                        >
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">
-                            {formatTimestamp(log.timestamp)}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getActionBadge(log.action)}`}>
-                              {log.action}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">
-                            {log.entityType}
-                          </td>
-                          <td className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300 max-w-[200px] truncate" title={log.entityId}>
-                            {log.entityId}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">
-                            {log.performedBy}
-                          </td>
-                          <td className="px-6 py-4 text-sm text-gray-500 dark:text-gray-400">
-                            {details ? (
-                              <div>
+                        <Fragment key={log.id}>
+                          <tr
+                            className={`hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors cursor-pointer ${isExpanded ? 'bg-gray-50 dark:bg-gray-750' : ''}`}
+                            onClick={() => setExpandedRow(isExpanded ? null : log.id)}
+                          >
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">
+                              {formatTimestamp(log.timestamp)}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getActionBadge(log.action)}`}>
+                                {log.action}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">
+                              {log.entityType}
+                            </td>
+                            <td className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300 max-w-[200px] truncate" title={log.entityId}>
+                              {log.entityId}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">
+                              {log.performedBy}
+                            </td>
+                            <td className="px-6 py-4 text-sm text-gray-500 dark:text-gray-400">
+                              {details ? (
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation();
@@ -320,22 +319,26 @@ export default function AuditPage() {
                                 >
                                   {isExpanded ? 'Hide details' : 'Show details'}
                                 </button>
-                                {isExpanded && (
-                                  <div className="mt-2 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg text-xs space-y-1">
-                                    {Object.entries(details).map(([key, value]) => (
-                                      <div key={key} className="flex">
-                                        <span className="font-medium text-gray-600 dark:text-gray-300 mr-2 min-w-[100px]">{key}:</span>
-                                        <span className="text-gray-800 dark:text-gray-200 break-all">{value}</span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                            ) : (
-                              <span className="text-gray-400 dark:text-gray-500">-</span>
-                            )}
-                          </td>
-                        </tr>
+                              ) : (
+                                <span className="text-gray-400 dark:text-gray-500">-</span>
+                              )}
+                            </td>
+                          </tr>
+                          {isExpanded && details && (
+                            <tr className="bg-gray-50 dark:bg-gray-750">
+                              <td colSpan={6} className="px-6 py-4">
+                                <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm max-w-2xl">
+                                  {Object.entries(details).map(([key, value]) => (
+                                    <Fragment key={key}>
+                                      <span className="font-medium text-gray-600 dark:text-gray-300 whitespace-nowrap">{key}:</span>
+                                      <span className="text-gray-800 dark:text-gray-200 break-words">{value}</span>
+                                    </Fragment>
+                                  ))}
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
                       );
                     })}
                   </tbody>

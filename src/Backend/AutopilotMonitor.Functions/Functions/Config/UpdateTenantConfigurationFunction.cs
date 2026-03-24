@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Net;
 using System.Threading.Tasks;
+using System.Collections.Generic;
 using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Services;
 using AutopilotMonitor.Shared.Models;
@@ -124,12 +125,14 @@ namespace AutopilotMonitor.Functions.Functions.Config
                 // Save configuration
                 await _configService.SaveConfigurationAsync(config);
 
+                var changes = ConfigDiffHelper.GetChanges(existingConfig, config);
                 await _storageService.LogAuditEntryAsync(
                     tenantId,
                     "UPDATE",
                     "TenantConfiguration",
                     tenantId,
-                    userIdentifier
+                    userIdentifier,
+                    changes.Count > 0 ? changes : null
                 );
 
                 var response = req.CreateResponse(HttpStatusCode.OK);
