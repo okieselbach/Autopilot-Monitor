@@ -111,6 +111,13 @@ namespace AutopilotMonitor.Shared
             public const string ReseedFromGitHub         = "/api/rules/reseed-from-github";
             public const string ValidateBootstrapCode    = "/api/bootstrap/validate/{code}";
 
+            // MCP/Agent API search endpoints
+            public const string SearchSessions          = "/api/sessions/search";
+            public const string SearchSessionsByEvent   = "/api/sessions/search-by-event";
+            public const string SearchSessionsByCve     = "/api/sessions/search-by-cve";
+            public const string MetricsSummary          = "/api/metrics/summary";
+            public const string ApiKeysEndpoint         = "/api/api-keys";
+
             // Bootstrap agent endpoints (cert-free, token-auth for pre-enrollment agents)
             public const string BootstrapRegisterSession = "/api/bootstrap/register-session";
             public const string BootstrapIngestEvents    = "/api/bootstrap/ingest";
@@ -262,6 +269,12 @@ namespace AutopilotMonitor.Shared
             // Persistent software inventory per tenant (aggregated from enrollment snapshots)
             public const string SoftwareInventory = "SoftwareInventory";
 
+            // Agent-queryable indexes (for MCP API)
+            public const string EventTypeIndex = "EventTypeIndex";
+            public const string DeviceSnapshot = "DeviceSnapshot";
+            public const string CveIndex = "CveIndex";
+            public const string ApiKeys = "ApiKeys";
+
             /// <summary>
             /// Returns all table names for initialization
             /// </summary>
@@ -293,7 +306,11 @@ namespace AutopilotMonitor.Shared
                 GlobalNotifications,
                 VulnerabilityCache,
                 VulnerabilityReports,
-                SoftwareInventory
+                SoftwareInventory,
+                EventTypeIndex,
+                DeviceSnapshot,
+                CveIndex,
+                ApiKeys
             };
         }
     }

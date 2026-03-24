@@ -101,6 +101,13 @@ public static class EndpointAccessPolicyCatalog
         new("POST",   "feedback",                  EndpointPolicy.AuthenticatedUser),
 
         // ── MemberRead (Admin + Operator, later + Viewer) ───────────────
+        new("GET",    "sessions/search",              EndpointPolicy.MemberRead),
+        new("GET",    "sessions/search-by-event",     EndpointPolicy.MemberRead),
+        new("GET",    "sessions/search-by-cve",       EndpointPolicy.MemberRead),
+        new("GET",    "metrics/summary",              EndpointPolicy.MemberRead),
+        new("GET",    "api-keys",                     EndpointPolicy.TenantAdminOrGA),
+        new("POST",   "api-keys",                     EndpointPolicy.TenantAdminOrGA),
+        new("DELETE", "api-keys/{keyId}",             EndpointPolicy.TenantAdminOrGA),
         new("GET",    "sessions",                  EndpointPolicy.MemberRead),
         new("GET",    "sessions/{sessionId}",      EndpointPolicy.MemberRead),
         new("GET",    "sessions/{sessionId}/events", EndpointPolicy.MemberRead),
@@ -148,6 +155,11 @@ public static class EndpointAccessPolicyCatalog
         new("DELETE", "bootstrap/sessions/{code}", EndpointPolicy.BootstrapManagerOrGA),
 
         // ── GlobalAdminOnly ────────────────────────────────────────────
+        new("GET",    "global/sessions/search",           EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "global/sessions/search-by-event",  EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "global/sessions/search-by-cve",    EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "global/metrics/summary",           EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "global/api-keys",                  EndpointPolicy.GlobalAdminOnly),
         new("GET",    "global/config",             EndpointPolicy.GlobalAdminOnly),
         new("PUT",    "global/config",             EndpointPolicy.GlobalAdminOnly),
         new("POST",   "global/config",             EndpointPolicy.GlobalAdminOnly),

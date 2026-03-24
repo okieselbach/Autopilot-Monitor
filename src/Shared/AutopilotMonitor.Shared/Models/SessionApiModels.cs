@@ -205,6 +205,7 @@ namespace AutopilotMonitor.Shared.Models
         public string OsLanguage { get; set; }
         public bool IsUserDriven { get; set; }
         public string AgentVersion { get; set; }
+        public string ImeAgentVersion { get; set; }
 
         // Geographic location fields — populated from device_location event geo data
         public string GeoCountry { get; set; } = string.Empty;
