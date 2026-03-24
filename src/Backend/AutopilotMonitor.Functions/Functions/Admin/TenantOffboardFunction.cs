@@ -23,17 +23,20 @@ public class TenantOffboardFunction
     private readonly ILogger<TenantOffboardFunction> _logger;
     private readonly TenantAdminsService _tenantAdminsService;
     private readonly GlobalAdminService _globalAdminService;
+    private readonly TableStorageService _storageService;
     private readonly TableServiceClient _tableServiceClient;
 
     public TenantOffboardFunction(
         ILogger<TenantOffboardFunction> logger,
         TenantAdminsService tenantAdminsService,
         GlobalAdminService globalAdminService,
+        TableStorageService storageService,
         IConfiguration configuration)
     {
         _logger = logger;
         _tenantAdminsService = tenantAdminsService;
         _globalAdminService = globalAdminService;
+        _storageService = storageService;
         var connectionString = configuration["AzureTableStorageConnectionString"];
         _tableServiceClient = new TableServiceClient(connectionString);
     }
@@ -77,6 +80,19 @@ public class TenantOffboardFunction
         SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
 
         _logger.LogWarning($"TENANT OFFBOARD initiated for tenant {tenantId} by {upn}");
+
+        // Audit under Global TenantId so the entry survives tenant data deletion
+        await _storageService.LogAuditEntryAsync(
+            Constants.AuditGlobalTenantId,
+            "DELETE",
+            "Tenant",
+            tenantId,
+            upn!,
+            new Dictionary<string, string>
+            {
+                { "Action", "Offboard" },
+                { "Phase", "Initiated" }
+            });
 
         var result = new OffboardResult { TenantId = tenantId, InitiatedBy = upn!, InitiatedAt = DateTime.UtcNow };
 
@@ -127,6 +143,19 @@ public class TenantOffboardFunction
             result.Success = true;
             _logger.LogWarning($"TENANT OFFBOARD completed for tenant {tenantId} by {upn}. " +
                 $"Total rows deleted: {result.DeletedCounts.Values.Sum()}");
+
+            // Audit completion with deletion summary
+            var details = result.DeletedCounts.ToDictionary(kv => kv.Key, kv => kv.Value.ToString());
+            details["Action"] = "Offboard";
+            details["Phase"] = "Completed";
+            details["TotalRowsDeleted"] = result.DeletedCounts.Values.Sum().ToString();
+            await _storageService.LogAuditEntryAsync(
+                Constants.AuditGlobalTenantId,
+                "DELETE",
+                "Tenant",
+                tenantId,
+                upn!,
+                details);
 
             var okResponse = req.CreateResponse(HttpStatusCode.OK);
             await okResponse.WriteAsJsonAsync(result);
