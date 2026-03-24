@@ -186,6 +186,7 @@ public static class EndpointAccessPolicyCatalog
         new("GET",    "vulnerability/software-inventory", EndpointPolicy.GlobalAdminOnly),
         new("POST",   "vulnerability/sync",              EndpointPolicy.GlobalAdminOnly),
         new("POST",   "vulnerability/cpe-mapping",       EndpointPolicy.GlobalAdminOnly),
+        new("DELETE", "vulnerability/cpe-mapping",       EndpointPolicy.GlobalAdminOnly),
         new("GET",    "vulnerability/cpe-mappings",      EndpointPolicy.GlobalAdminOnly),
         new("POST",   "rules/ime-log-patterns/reseed", EndpointPolicy.GlobalAdminOnly),
         new("GET",    "feedback/all",                                     EndpointPolicy.GlobalAdminOnly),

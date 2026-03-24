@@ -21,7 +21,6 @@ interface FeedbackSectionProps {
 }
 
 export function FeedbackSection({ getAccessToken, setError }: FeedbackSectionProps) {
-  const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [entries, setEntries] = useState<FeedbackEntry[]>([]);
   const [currentPage, setCurrentPage] = useState(0);
@@ -59,10 +58,8 @@ export function FeedbackSection({ getAccessToken, setError }: FeedbackSectionPro
   }, [getAccessToken, setError]);
 
   useEffect(() => {
-    if (expanded && entries.length === 0) {
-      fetchFeedback();
-    }
-  }, [expanded, entries.length, fetchFeedback]);
+    fetchFeedback();
+  }, [fetchFeedback]);
 
   // Stats
   const submittedEntries = entries.filter(e => e.submitted);
@@ -112,10 +109,7 @@ export function FeedbackSection({ getAccessToken, setError }: FeedbackSectionPro
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden border border-purple-200 dark:border-purple-800">
       {/* Header */}
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors"
-      >
+      <div className="w-full px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 bg-purple-100 dark:bg-purple-900 rounded-lg flex items-center justify-center">
             <svg className="w-4 h-4 text-purple-600 dark:text-purple-400" fill="currentColor" viewBox="0 0 20 20">
@@ -127,113 +121,103 @@ export function FeedbackSection({ getAccessToken, setError }: FeedbackSectionPro
             <p className="text-sm text-gray-500 dark:text-gray-400">In-app feedback from tenant admins and operators</p>
           </div>
         </div>
-        <svg
-          className={`w-5 h-5 text-gray-400 transition-transform ${expanded ? "rotate-180" : ""}`}
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
-      </button>
+      </div>
 
       {/* Content */}
-      {expanded && (
-        <div className="px-6 pb-6 border-t border-gray-200 dark:border-gray-700">
-          {loading ? (
-            <div className="flex items-center justify-center py-8">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600" />
+      <div className="px-6 pb-6 border-t border-gray-200 dark:border-gray-700">
+        {loading ? (
+          <div className="flex items-center justify-center py-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600" />
+          </div>
+        ) : entries.length === 0 ? (
+          <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+            No feedback received yet
+          </div>
+        ) : (
+          <>
+            {/* Stats */}
+            <div className="flex flex-wrap items-center gap-4 py-4 text-sm">
+              <span className="text-gray-600 dark:text-gray-300">
+                <span className="font-semibold text-purple-600 dark:text-purple-400">{submittedEntries.length}</span> Submitted
+              </span>
+              <span className="text-gray-400">|</span>
+              <span className="text-gray-600 dark:text-gray-300">
+                <span className="font-semibold text-gray-500">{dismissedEntries.length}</span> Dismissed
+              </span>
+              <span className="text-gray-400">|</span>
+              <span className="text-gray-600 dark:text-gray-300">
+                Avg <span className="font-semibold text-yellow-500">{avgRating}</span>
+              </span>
+              <button
+                onClick={fetchFeedback}
+                className="ml-auto text-sm text-purple-600 hover:text-purple-700 dark:text-purple-400 dark:hover:text-purple-300"
+              >
+                Refresh
+              </button>
             </div>
-          ) : entries.length === 0 ? (
-            <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-              No feedback received yet
+
+            {/* Entries */}
+            <div className="space-y-2">
+              {paginatedEntries.map((entry) => (
+                <div
+                  key={entry.upn}
+                  className={`border rounded-lg p-3 transition-all ${
+                    entry.dismissed && !entry.submitted
+                      ? "bg-gray-50 dark:bg-gray-750 border-gray-200 dark:border-gray-700 opacity-60"
+                      : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700"
+                  }`}
+                >
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate max-w-[200px]">
+                        {entry.upn}
+                      </span>
+                      {entry.submitted ? renderStars(entry.rating) : (
+                        <span className="text-xs text-gray-400 dark:text-gray-500 italic">dismissed</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                      <span>{formatTimeAgo(entry.interactedAt)}</span>
+                      <span className="hidden sm:inline">·</span>
+                      <span className="hidden sm:inline truncate max-w-[120px]">
+                        {entry.tenantId.substring(0, 8)}...
+                      </span>
+                    </div>
+                  </div>
+                  {entry.comment && (
+                    <p className="mt-1 text-sm text-gray-600 dark:text-gray-300 italic">
+                      &quot;{entry.comment}&quot;
+                    </p>
+                  )}
+                </div>
+              ))}
             </div>
-          ) : (
-            <>
-              {/* Stats */}
-              <div className="flex flex-wrap items-center gap-4 py-4 text-sm">
-                <span className="text-gray-600 dark:text-gray-300">
-                  <span className="font-semibold text-purple-600 dark:text-purple-400">{submittedEntries.length}</span> Submitted
-                </span>
-                <span className="text-gray-400">|</span>
-                <span className="text-gray-600 dark:text-gray-300">
-                  <span className="font-semibold text-gray-500">{dismissedEntries.length}</span> Dismissed
-                </span>
-                <span className="text-gray-400">|</span>
-                <span className="text-gray-600 dark:text-gray-300">
-                  Avg <span className="font-semibold text-yellow-500">{avgRating}</span>
+
+            {/* Pagination */}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between pt-4 border-t border-gray-200 dark:border-gray-700 mt-4">
+                <button
+                  onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
+                  disabled={currentPage === 0}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-650 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  Previous
+                </button>
+                <span className="text-sm text-gray-600 dark:text-gray-400">
+                  Page {currentPage + 1} of {totalPages}
                 </span>
                 <button
-                  onClick={fetchFeedback}
-                  className="ml-auto text-sm text-purple-600 hover:text-purple-700 dark:text-purple-400 dark:hover:text-purple-300"
+                  onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))}
+                  disabled={currentPage >= totalPages - 1}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-650 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
-                  Refresh
+                  Next
                 </button>
               </div>
-
-              {/* Entries */}
-              <div className="space-y-2">
-                {paginatedEntries.map((entry) => (
-                  <div
-                    key={entry.upn}
-                    className={`border rounded-lg p-3 transition-all ${
-                      entry.dismissed && !entry.submitted
-                        ? "bg-gray-50 dark:bg-gray-750 border-gray-200 dark:border-gray-700 opacity-60"
-                        : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700"
-                    }`}
-                  >
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate max-w-[200px]">
-                          {entry.upn}
-                        </span>
-                        {entry.submitted ? renderStars(entry.rating) : (
-                          <span className="text-xs text-gray-400 dark:text-gray-500 italic">dismissed</span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-                        <span>{formatTimeAgo(entry.interactedAt)}</span>
-                        <span className="hidden sm:inline">·</span>
-                        <span className="hidden sm:inline truncate max-w-[120px]">
-                          {entry.tenantId.substring(0, 8)}...
-                        </span>
-                      </div>
-                    </div>
-                    {entry.comment && (
-                      <p className="mt-1 text-sm text-gray-600 dark:text-gray-300 italic">
-                        &quot;{entry.comment}&quot;
-                      </p>
-                    )}
-                  </div>
-                ))}
-              </div>
-
-              {/* Pagination */}
-              {totalPages > 1 && (
-                <div className="flex items-center justify-between pt-4 border-t border-gray-200 dark:border-gray-700 mt-4">
-                  <button
-                    onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
-                    disabled={currentPage === 0}
-                    className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-650 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                  >
-                    Previous
-                  </button>
-                  <span className="text-sm text-gray-600 dark:text-gray-400">
-                    Page {currentPage + 1} of {totalPages}
-                  </span>
-                  <button
-                    onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))}
-                    disabled={currentPage >= totalPages - 1}
-                    className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-650 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                  >
-                    Next
-                  </button>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      )}
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }

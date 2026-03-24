@@ -72,6 +72,7 @@ export function SoftwareMappingSection({
     publisherPatterns: string;
   }>({ cpeUri: "", cpeVendor: "", cpeProduct: "", category: "", displayNamePatterns: "", publisherPatterns: "" });
   const [savingEdit, setSavingEdit] = useState(false);
+  const [deletingRow, setDeletingRow] = useState<string | null>(null);
 
   // --- Unmapped fetching ---
 
@@ -350,6 +351,45 @@ export function SoftwareMappingSection({
       setError(err instanceof Error ? err.message : "Failed to save CPE mapping");
     } finally {
       setSavingEdit(false);
+    }
+  };
+
+  const handleDeleteMapping = async (entry: CpeMappingEntry) => {
+    if (!confirm(`Delete mapping for "${entry.normalizedProduct}"? This cannot be undone.`)) return;
+
+    const key = getMappedRowKey(entry);
+    try {
+      setDeletingRow(key);
+      setError(null);
+
+      const response = await authenticatedFetch(
+        `${API_BASE_URL}/api/vulnerability/cpe-mapping`,
+        getAccessToken,
+        {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            normalizedProduct: entry.normalizedProduct,
+            normalizedVendor: entry.normalizedVendor,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(data?.message || `Failed to delete mapping: ${response.statusText}`);
+      }
+
+      setMappedEntries((prev) => prev.filter((m) => getMappedRowKey(m) !== key));
+    } catch (err) {
+      if (err instanceof TokenExpiredError) {
+        console.error("Session expired while deleting CPE mapping");
+      } else {
+        console.error("Error deleting CPE mapping:", err);
+      }
+      setError(err instanceof Error ? err.message : "Failed to delete CPE mapping");
+    } finally {
+      setDeletingRow(null);
     }
   };
 
@@ -774,7 +814,7 @@ export function SoftwareMappingSection({
                                             {entry.source}
                                           </span>
                                         </div>
-                                        <div className="px-4 py-3 text-sm flex-shrink-0 w-20 flex items-center">
+                                        <div className="px-4 py-3 text-sm flex-shrink-0 w-32 flex items-center gap-2">
                                           <button
                                             onClick={() => isEditing ? setEditingRow(null) : startEditing(entry)}
                                             className={`text-xs px-2.5 py-1 rounded-md font-medium transition-colors ${
@@ -785,6 +825,15 @@ export function SoftwareMappingSection({
                                           >
                                             {isEditing ? "Close" : "Edit"}
                                           </button>
+                                          {entry.source === "custom" && (
+                                            <button
+                                              onClick={() => handleDeleteMapping(entry)}
+                                              disabled={deletingRow === key}
+                                              className="text-xs px-2.5 py-1 rounded-md font-medium transition-colors bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-900/20 dark:text-red-400 dark:hover:bg-red-900/40 disabled:opacity-40 disabled:cursor-not-allowed"
+                                            >
+                                              {deletingRow === key ? "..." : "Delete"}
+                                            </button>
+                                          )}
                                         </div>
                                       </div>
 
