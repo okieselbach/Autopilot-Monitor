@@ -56,8 +56,10 @@ namespace AutopilotMonitor.Functions.Services
         };
 
         /// <summary>
-        /// Upserts a DeviceSnapshot entry for the session, merging device property fields.
-        /// Existing fields are preserved (not overwritten) to maintain first-seen values.
+        /// Upserts a DeviceSnapshot entry for the session using one Props_{eventType} JSON column
+        /// per device event type. This stores ALL properties (including arrays) without explicit mapping.
+        /// New agent properties become searchable automatically — zero code changes required.
+        /// Existing columns are preserved (first-seen wins) via merge-on-write.
         /// </summary>
         public async Task UpsertDeviceSnapshotAsync(string tenantId, string sessionId, IEnumerable<AutopilotMonitor.Shared.Models.EnrollmentEvent> events)
         {
@@ -83,59 +85,39 @@ namespace AutopilotMonitor.Functions.Services
                     };
                 }
 
-                void SetIfMissing(string key, object? value)
-                {
-                    if (value == null) return;
-                    if (!entity.ContainsKey(key) || entity[key] == null)
-                        entity[key] = value;
-                }
-
                 foreach (var evt in relevantEvents)
                 {
-                    var data = evt.Data;
-                    if (data == null) continue;
+                    if (evt.Data == null || evt.Data.Count == 0) continue;
+
+                    var columnName = $"Props_{evt.EventType}";
+
+                    // First-seen wins: don't overwrite existing event data
+                    if (entity.ContainsKey(columnName) && entity.GetString(columnName) != null)
+                        continue;
 
                     try
                     {
-                        switch (evt.EventType.ToLowerInvariant())
+                        var data = evt.Data;
+
+                        // Compute derived values for hardware_spec
+                        if (evt.EventType.Equals("hardware_spec", StringComparison.OrdinalIgnoreCase))
                         {
-                            case "tpm_status":
-                                SetIfMissing("TpmSpecVersion", SafeGetString(data, "specVersion"));
-                                SetIfMissing("TpmManufacturer", SafeGetString(data, "manufacturerName"));
-                                SetIfMissing("TpmActivated", SafeGetBool(data, "isActivated"));
-                                SetIfMissing("TpmEnabled", SafeGetBool(data, "isEnabled"));
-                                break;
-
-                            case "autopilot_profile":
-                                SetIfMissing("AutopilotMode", SafeGetString(data, "autopilotModeLabel"));
-                                SetIfMissing("DomainJoinMethod", SafeGetString(data, "domainJoinMethodLabel"));
-                                SetIfMissing("EspEnabled", SafeGetBool(data, "CloudAssignedEspEnabled"));
-                                break;
-
-                            case "secureboot_status":
-                                SetIfMissing("SecureBootEnabled", SafeGetBool(data, "uefiSecureBootEnabled"));
-                                break;
-
-                            case "bitlocker_status":
-                                SetIfMissing("BitlockerEnabled", SafeGetBool(data, "systemDriveProtected"));
-                                break;
-
-                            case "hardware_spec":
-                                SetIfMissing("CpuName", SafeGetString(data, "cpuName"));
-                                SetIfMissing("RamTotalGB", SafeGetDouble(data, "ramTotalGB"));
-                                SetIfMissing("DiskCount", SafeGetInt(data, "diskCount"));
-                                SetIfMissing("HasSSD", DetectHasSSD(data));
-                                break;
-
-                            case "network_interface_info":
-                                SetIfMissing("ConnectionType", SafeGetString(data, "connectionType"));
-                                SetIfMissing("LinkSpeedMbps", SafeGetInt(data, "linkSpeedMbps"));
-                                break;
-
-                            case "aad_join_status":
-                                SetIfMissing("AadJoinType", SafeGetString(data, "joinType"));
-                                break;
+                            var hasSSD = DetectHasSSD(data);
+                            if (hasSSD.HasValue && !data.ContainsKey("hasSSD"))
+                                data["hasSSD"] = hasSSD.Value;
                         }
+
+                        var json = System.Text.Json.JsonSerializer.Serialize(data);
+
+                        // Size guard: warn if approaching 64 KB column limit
+                        if (json.Length > 50_000)
+                        {
+                            _logger.LogWarning(
+                                "DeviceSnapshot column {Column} for session {SessionId} is {Size} bytes (approaching 64KB limit)",
+                                columnName, sessionId, json.Length);
+                        }
+
+                        entity[columnName] = json;
                     }
                     catch (Exception evtEx)
                     {
@@ -151,32 +133,6 @@ namespace AutopilotMonitor.Functions.Services
             }
         }
 
-        private static string? SafeGetString(Dictionary<string, object> data, string key)
-        {
-            if (!data.TryGetValue(key, out var val)) return null;
-            return val?.ToString();
-        }
-
-        private static bool? SafeGetBool(Dictionary<string, object> data, string key)
-        {
-            if (!data.TryGetValue(key, out var val) || val == null) return null;
-            if (val is bool b) return b;
-            if (bool.TryParse(val.ToString(), out var parsed)) return parsed;
-            return null;
-        }
-
-        private static double? SafeGetDouble(Dictionary<string, object> data, string key)
-        {
-            if (!data.TryGetValue(key, out var val) || val == null) return null;
-            try { return Convert.ToDouble(val); } catch { return null; }
-        }
-
-        private static int? SafeGetInt(Dictionary<string, object> data, string key)
-        {
-            if (!data.TryGetValue(key, out var val) || val == null) return null;
-            try { return Convert.ToInt32(val); } catch { return null; }
-        }
-
         private static bool? DetectHasSSD(Dictionary<string, object> data)
         {
             try
@@ -186,11 +142,7 @@ namespace AutopilotMonitor.Functions.Services
 
                 foreach (var disk in diskList)
                 {
-                    Dictionary<string, object>? diskDict = null;
-                    if (disk is Dictionary<string, object> d)
-                        diskDict = d;
-
-                    if (diskDict == null) continue;
+                    if (disk is not Dictionary<string, object> diskDict) continue;
 
                     if (diskDict.TryGetValue("mediaType", out var mt))
                     {
@@ -297,24 +249,13 @@ namespace AutopilotMonitor.Functions.Services
             var sessionIds = new List<string>();
             await foreach (var entity in tableClient.QueryAsync<TableEntity>(filter: oDataFilter))
             {
-                // Apply in-memory filters for DeviceSnapshot fields
-                if (filter.TpmSpecVersion != null && entity.GetString("TpmSpecVersion") != filter.TpmSpecVersion) continue;
-                if (filter.TpmActivated.HasValue && entity.GetBoolean("TpmActivated") != filter.TpmActivated.Value) continue;
-                if (filter.SecureBootEnabled.HasValue && entity.GetBoolean("SecureBootEnabled") != filter.SecureBootEnabled.Value) continue;
-                if (filter.BitlockerEnabled.HasValue && entity.GetBoolean("BitlockerEnabled") != filter.BitlockerEnabled.Value) continue;
-                if (filter.AutopilotMode != null && entity.GetString("AutopilotMode") != filter.AutopilotMode) continue;
-                if (filter.DomainJoinMethod != null && entity.GetString("DomainJoinMethod") != filter.DomainJoinMethod) continue;
-                if (filter.ConnectionType != null && entity.GetString("ConnectionType") != filter.ConnectionType) continue;
-                if (filter.MinRamGB.HasValue)
-                {
-                    double? ram = null;
-                    if (entity.TryGetValue("RamTotalGB", out var ramObj) && ramObj != null)
-                    {
-                        try { ram = Convert.ToDouble(ramObj); } catch { }
-                    }
-                    if (ram == null || ram < filter.MinRamGB.Value) continue;
-                }
-                if (filter.HasSSD.HasValue && entity.GetBoolean("HasSSD") != filter.HasSSD.Value) continue;
+                // Reconstruct properties from Props_* columns
+                var properties = ReconstructDeviceProperties(entity);
+                if (properties == null || properties.Count == 0) continue;
+
+                // Apply all device property filters
+                if (!MatchesAllDeviceFilters(properties, filter.DeviceProperties!))
+                    continue;
 
                 sessionIds.Add(entity.RowKey); // RowKey = sessionId in DeviceSnapshot
                 if (sessionIds.Count >= filter.Limit * 3) break; // over-fetch to allow for missing sessions
@@ -329,6 +270,125 @@ namespace AutopilotMonitor.Functions.Services
             sessions = ApplyBasicFilters(sessions, filter);
 
             return sessions.Take(filter.Limit).ToList();
+        }
+
+        /// <summary>
+        /// Reconstructs a flat property dictionary from all Props_* JSON columns.
+        /// Keys use "eventType.propertyName" convention (e.g. "tpm_status.specVersion").
+        /// </summary>
+        private static Dictionary<string, object> ReconstructDeviceProperties(TableEntity entity)
+        {
+            var properties = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var key in entity.Keys)
+            {
+                if (!key.StartsWith("Props_", StringComparison.Ordinal)) continue;
+
+                var eventType = key.Substring(6); // strip "Props_"
+                var json = entity.GetString(key);
+                if (string.IsNullOrEmpty(json)) continue;
+
+                try
+                {
+                    var data = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(
+                        json, _jsonDeserializeOptions);
+                    if (data == null) continue;
+
+                    foreach (var (propKey, propValue) in data)
+                    {
+                        if (propValue != null)
+                            properties[$"{eventType}.{propKey}"] = propValue;
+                    }
+                }
+                catch
+                {
+                    // Malformed JSON — skip this column
+                }
+            }
+
+            return properties;
+        }
+
+        private static readonly System.Text.Json.JsonSerializerOptions _jsonDeserializeOptions = new()
+        {
+            PropertyNameCaseInsensitive = true,
+        };
+
+        /// <summary>
+        /// Checks whether all filter expressions match against the property dictionary.
+        /// Supports: exact string match, boolean match, numeric operators (>=, <=, >, <),
+        /// and array substring search.
+        /// </summary>
+        private static bool MatchesAllDeviceFilters(
+            Dictionary<string, object> properties,
+            Dictionary<string, string> filters)
+        {
+            foreach (var (filterKey, filterValue) in filters)
+            {
+                if (!properties.TryGetValue(filterKey, out var actual) || actual == null)
+                    return false;
+
+                if (!MatchesDevicePropertyFilter(actual, filterValue))
+                    return false;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Matches a single property value against a filter expression.
+        /// Filter syntax:
+        ///   ">=8"  → numeric greater-than-or-equal
+        ///   "<=5"  → numeric less-than-or-equal
+        ///   ">8"   → numeric greater-than
+        ///   "<5"   → numeric less-than
+        ///   "True"/"False" → boolean match
+        ///   anything else → case-insensitive string equality
+        /// For array values: checks if filterValue appears as substring in any element.
+        /// </summary>
+        private static bool MatchesDevicePropertyFilter(object actual, string filterValue)
+        {
+            var actualStr = ConvertToString(actual);
+
+            // Handle array values: check if filter matches any element
+            if (actual is System.Text.Json.JsonElement je && je.ValueKind == System.Text.Json.JsonValueKind.Array)
+            {
+                foreach (var element in je.EnumerateArray())
+                {
+                    var elemStr = element.ToString();
+                    if (elemStr != null && elemStr.Contains(filterValue, StringComparison.OrdinalIgnoreCase))
+                        return true;
+                }
+                return false;
+            }
+
+            // Numeric range operators
+            if (filterValue.StartsWith(">=") && double.TryParse(filterValue.AsSpan(2), out var geVal))
+                return double.TryParse(actualStr, out var av1) && av1 >= geVal;
+            if (filterValue.StartsWith("<=") && double.TryParse(filterValue.AsSpan(2), out var leVal))
+                return double.TryParse(actualStr, out var av2) && av2 <= leVal;
+            if (filterValue.StartsWith(">") && !filterValue.StartsWith(">=") && double.TryParse(filterValue.AsSpan(1), out var gtVal))
+                return double.TryParse(actualStr, out var av3) && av3 > gtVal;
+            if (filterValue.StartsWith("<") && !filterValue.StartsWith("<=") && double.TryParse(filterValue.AsSpan(1), out var ltVal))
+                return double.TryParse(actualStr, out var av4) && av4 < ltVal;
+
+            // Default: case-insensitive string equality (covers booleans too)
+            return string.Equals(actualStr, filterValue, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string ConvertToString(object value)
+        {
+            if (value is System.Text.Json.JsonElement jsonEl)
+            {
+                return jsonEl.ValueKind switch
+                {
+                    System.Text.Json.JsonValueKind.String => jsonEl.GetString() ?? "",
+                    System.Text.Json.JsonValueKind.True => "True",
+                    System.Text.Json.JsonValueKind.False => "False",
+                    System.Text.Json.JsonValueKind.Number => jsonEl.GetRawText(),
+                    _ => jsonEl.ToString()
+                };
+            }
+            return value?.ToString() ?? "";
         }
 
         private async Task<List<SessionSummary>> SearchSessionsByScanAsync(string? tenantId, SessionSearchFilter filter)

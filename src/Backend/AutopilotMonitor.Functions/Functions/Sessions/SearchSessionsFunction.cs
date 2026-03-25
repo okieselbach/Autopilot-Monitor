@@ -56,10 +56,6 @@ public class SearchSessionsFunction
                 OsBuild = query["osBuild"],
                 EnrollmentType = query["enrollmentType"],
                 GeoCountry = query["geoCountry"],
-                TpmSpecVersion = query["tpmSpecVersion"],
-                AutopilotMode = query["autopilotMode"],
-                DomainJoinMethod = query["domainJoinMethod"],
-                ConnectionType = query["connectionType"],
                 AgentVersion = query["agentVersion"],
                 ImeAgentVersion = query["imeAgentVersion"],
                 Limit = int.TryParse(query["limit"], out var lim) ? Math.Min(lim, 100) : 50,
@@ -67,13 +63,24 @@ public class SearchSessionsFunction
 
             if (bool.TryParse(query["isPreProvisioned"], out var ipp)) filter.IsPreProvisioned = ipp;
             if (bool.TryParse(query["isHybridJoin"], out var ihj)) filter.IsHybridJoin = ihj;
-            if (bool.TryParse(query["tpmActivated"], out var ta)) filter.TpmActivated = ta;
-            if (bool.TryParse(query["secureBootEnabled"], out var sbe)) filter.SecureBootEnabled = sbe;
-            if (bool.TryParse(query["bitlockerEnabled"], out var ble)) filter.BitlockerEnabled = ble;
-            if (bool.TryParse(query["hasSSD"], out var hs)) filter.HasSSD = hs;
-            if (double.TryParse(query["minRamGB"], out var ram)) filter.MinRamGB = ram;
             if (DateTime.TryParse(query["startedAfter"], out var sa)) filter.StartedAfter = sa;
             if (DateTime.TryParse(query["startedBefore"], out var sb)) filter.StartedBefore = sb;
+
+            // Dynamic device property filters: any query param starting with "prop."
+            // e.g. ?prop.tpm_status.specVersion=2.0&prop.hardware_spec.ramTotalGB=>=8
+            var deviceProperties = new Dictionary<string, string>();
+            foreach (string? key in query.AllKeys)
+            {
+                if (key != null && key.StartsWith("prop.", StringComparison.OrdinalIgnoreCase))
+                {
+                    var propName = key.Substring(5);
+                    var value = query[key];
+                    if (!string.IsNullOrEmpty(value))
+                        deviceProperties[propName] = value;
+                }
+            }
+            if (deviceProperties.Count > 0)
+                filter.DeviceProperties = deviceProperties;
 
             var sessions = await _storageService.SearchSessionsAsync(tenantId, filter);
 

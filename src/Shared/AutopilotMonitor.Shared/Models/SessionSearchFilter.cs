@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace AutopilotMonitor.Shared.Models
 {
@@ -21,20 +22,11 @@ namespace AutopilotMonitor.Shared.Models
         public DateTime? StartedBefore { get; set; }
         public int Limit { get; set; } = 50;
 
-        // Extended (DeviceSnapshot fields)
-        public string TpmSpecVersion { get; set; }
-        public bool? TpmActivated { get; set; }
-        public bool? SecureBootEnabled { get; set; }
-        public bool? BitlockerEnabled { get; set; }
-        public string AutopilotMode { get; set; }
-        public string DomainJoinMethod { get; set; }
-        public string ConnectionType { get; set; }
-        public double? MinRamGB { get; set; }
-        public bool? HasSSD { get; set; }
+        // Dynamic device property filters (key = "eventType.propertyName", value = filter expression)
+        // Examples: "tpm_status.specVersion" = "2.0", "hardware_spec.ramTotalGB" = ">=8"
+        public Dictionary<string, string> DeviceProperties { get; set; }
 
         public bool HasDeviceSnapshotFilters =>
-            TpmSpecVersion != null || TpmActivated.HasValue || SecureBootEnabled.HasValue ||
-            BitlockerEnabled.HasValue || AutopilotMode != null || DomainJoinMethod != null ||
-            ConnectionType != null || MinRamGB.HasValue || HasSSD.HasValue;
+            DeviceProperties != null && DeviceProperties.Count > 0;
     }
 }

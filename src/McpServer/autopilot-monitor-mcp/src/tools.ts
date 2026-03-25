@@ -6,7 +6,11 @@ export function registerTools(server: McpServer): void {
   // Tool 1: search_sessions
   server.tool(
     'search_sessions',
-    'Search enrollment sessions by device properties. Basic properties (status, serial number, OS build, manufacturer, model, enrollment type, geo) are indexed directly. Extended device properties (TPM version, Secure Boot, BitLocker, Autopilot mode, RAM, SSD, WiFi/Ethernet) use the device snapshot index. Use agentVersion to filter by Monitor Agent version, imeAgentVersion to filter by IME (Intune Management Extension) version. Examples: all Surface devices with TPM 2.0, all failed hybrid join sessions, all devices without Secure Boot enabled.',
+    'Search enrollment sessions. Basic properties (status, serial number, manufacturer, model, etc.) filter on the session index. ' +
+    'Use deviceProperties for ANY device hardware/config filter — keys use "eventType.propertyName" notation. ' +
+    'Consult the device_properties resource for available keys. ' +
+    'Examples: {"tpm_status.specVersion": "2.0"}, {"hardware_spec.ramTotalGB": ">=8"}, {"secureboot_status.uefiSecureBootEnabled": "True"}. ' +
+    'Array values are searched as substring match (e.g. disks containing "NVMe").',
     {
       tenantId: z.string().optional().describe('Tenant ID (only effective with a global-scoped API key; ignored with tenant-scoped key)'),
       status: z.enum(['InProgress', 'Succeeded', 'Failed']).optional().describe('Enrollment status filter'),
@@ -21,21 +25,26 @@ export function registerTools(server: McpServer): void {
       geoCountry: z.string().optional().describe('Country of enrollment (2-letter ISO code, e.g. "DE", "US")'),
       startedAfter: z.string().optional().describe('ISO 8601 datetime — only sessions started after this'),
       startedBefore: z.string().optional().describe('ISO 8601 datetime — only sessions started before this'),
-      agentVersion: z.string().optional().describe('Monitor Agent version (exact match, e.g. "1.4.2"). Use get_metrics to discover known versions.'),
-      imeAgentVersion: z.string().optional().describe('IME Agent version (exact match, e.g. "1.23.456.789"). Populated when IME log was detected during enrollment.'),
-      tpmSpecVersion: z.string().optional().describe('TPM specification version (e.g. "2.0", "1.2")'),
-      tpmActivated: z.boolean().optional().describe('Filter by TPM activation status'),
-      secureBootEnabled: z.boolean().optional().describe('Filter by Secure Boot status'),
-      bitlockerEnabled: z.boolean().optional().describe('Filter by BitLocker system drive protection status'),
-      autopilotMode: z.string().optional().describe('Autopilot deployment mode (e.g. "UserDriven", "SelfDeploying")'),
-      domainJoinMethod: z.string().optional().describe('Domain join method (e.g. "AzureAD", "Hybrid", "None")'),
-      connectionType: z.enum(['WiFi', 'Ethernet']).optional().describe('Network connection type during enrollment'),
-      minRamGB: z.number().optional().describe('Minimum RAM in GB'),
-      hasSSD: z.boolean().optional().describe('Filter by presence of SSD or NVMe storage'),
+      agentVersion: z.string().optional().describe('Monitor Agent version (exact match, e.g. "1.4.2")'),
+      imeAgentVersion: z.string().optional().describe('IME Agent version (exact match, e.g. "1.23.456.789")'),
+      deviceProperties: z.record(z.string(), z.string()).optional().describe(
+        'Dynamic device property filters. Keys use "eventType.propertyName" dot notation. ' +
+        'See the device_properties resource for all available keys and types. ' +
+        'Values: exact match by default. Prefix with >=, <=, >, < for numeric ranges (e.g. ">=8"). ' +
+        'Booleans: use "True" or "False". Arrays: substring match in any element.'
+      ),
       limit: z.number().min(1).max(100).optional().default(50).describe('Maximum number of results (1-100, default 50)'),
     },
     async (args) => {
-      const data = await apiFetch(`/api/sessions/search${buildQuery(args as Record<string, string | number | boolean | undefined | null>)}`);
+      const { deviceProperties, ...rest } = args;
+      const queryParams: Record<string, string | number | boolean | undefined | null> = { ...rest };
+      // Convert deviceProperties record into prop.* query parameters
+      if (deviceProperties) {
+        for (const [key, value] of Object.entries(deviceProperties)) {
+          queryParams[`prop.${key}`] = value;
+        }
+      }
+      const data = await apiFetch(`/api/sessions/search${buildQuery(queryParams)}`);
       return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
     }
   );
