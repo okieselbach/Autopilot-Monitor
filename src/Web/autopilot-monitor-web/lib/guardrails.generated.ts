@@ -67,6 +67,12 @@ export const REGISTRY_PREFIX_CATEGORIES: readonly GuardrailCategory[] = [
     ],
   },
   {
+    category: "Secure Boot",
+    items: [
+      "SYSTEM\\CurrentControlSet\\Control\\SecureBoot",
+    ],
+  },
+  {
     category: "Intune IME",
     items: [
       "SOFTWARE\\Microsoft\\IntuneManagementExtension",
@@ -157,6 +163,7 @@ export const ALLOWED_REGISTRY_PREFIXES: readonly string[] = [
   "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon",
   "SYSTEM\\CurrentControlSet\\Services\\TPM",
   "SOFTWARE\\Microsoft\\Tpm",
+  "SYSTEM\\CurrentControlSet\\Control\\SecureBoot",
   "SOFTWARE\\Microsoft\\IntuneManagementExtension",
   "SOFTWARE\\Microsoft\\SystemCertificates",
   "SOFTWARE\\Policies\\Microsoft\\SystemCertificates",

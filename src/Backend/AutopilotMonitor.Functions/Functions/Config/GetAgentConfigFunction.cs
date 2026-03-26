@@ -136,7 +136,7 @@ namespace AutopilotMonitor.Functions.Functions.Config
             var response = req.CreateResponse(HttpStatusCode.OK);
             await response.WriteAsJsonAsync(new AgentConfigResponse
             {
-                ConfigVersion = 20, // Software inventory analyzer
+                ConfigVersion = 21, // NTP time check + timezone auto-set
                 UploadIntervalSeconds = 10,
                 SelfDestructOnComplete = tenantConfig.SelfDestructOnComplete ?? true,
                 KeepLogFile = tenantConfig.KeepLogFile ?? false,
@@ -162,6 +162,8 @@ namespace AutopilotMonitor.Functions.Functions.Config
                     LocalAdminAllowedAccounts = tenantConfig.GetLocalAdminAllowedAccounts(),
                     EnableSoftwareInventoryAnalyzer = tenantConfig.EnableSoftwareInventoryAnalyzer ?? false
                 },
+                NtpServer = tenantConfig.NtpServer ?? "time.windows.com",
+                EnableTimezoneAutoSet = tenantConfig.EnableTimezoneAutoSet ?? false,
                 SendTraceEvents = tenantConfig.SendTraceEvents,
                 UnrestrictedMode = tenantConfig.UnrestrictedModeEnabled && tenantConfig.UnrestrictedMode,
                 GatherRules = gatherRules,

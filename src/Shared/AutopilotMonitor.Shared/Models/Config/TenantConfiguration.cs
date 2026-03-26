@@ -212,6 +212,19 @@ namespace AutopilotMonitor.Shared.Models
         public bool? EnableGeoLocation { get; set; }
 
         /// <summary>
+        /// NTP server address for time check during enrollment.
+        /// null = use agent default ("time.windows.com").
+        /// </summary>
+        public string NtpServer { get; set; }
+
+        /// <summary>
+        /// Whether to automatically set the device timezone based on IP geolocation.
+        /// Requires EnableGeoLocation to be true. Uses tzutil /s to apply.
+        /// null = use agent default (false).
+        /// </summary>
+        public bool? EnableTimezoneAutoSet { get; set; }
+
+        /// <summary>
         /// Whether to write a match log for every IME log line matched by a pattern.
         /// When true, the agent writes to the default path Constants.ImeMatchLogPath.
         /// null = use agent default (false).

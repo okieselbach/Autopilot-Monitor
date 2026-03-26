@@ -101,6 +101,19 @@ namespace AutopilotMonitor.Agent.Core.Configuration
         public bool EnableGeoLocation { get; set; } = true;
 
         /// <summary>
+        /// NTP server address for time check during enrollment.
+        /// Default: "time.windows.com"
+        /// </summary>
+        public string NtpServer { get; set; } = "time.windows.com";
+
+        /// <summary>
+        /// Whether to automatically set the device timezone based on IP geolocation.
+        /// Requires EnableGeoLocation to be true. Uses tzutil /s to apply.
+        /// Default: false
+        /// </summary>
+        public bool EnableTimezoneAutoSet { get; set; } = false;
+
+        /// <summary>
         /// Optional custom path to IME logs directory for testing.
         /// If set, overrides the default %ProgramData%\Microsoft\IntuneManagementExtension\Logs path.
         /// </summary>

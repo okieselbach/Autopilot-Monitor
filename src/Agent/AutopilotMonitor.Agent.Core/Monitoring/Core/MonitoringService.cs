@@ -263,6 +263,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 Task.Run(EmitGeoLocationEvent);
             }
 
+            // NTP time check — diagnostic, not critical path
+            Task.Run(EmitNtpTimeCheckEvent);
+
             // Start event collectors (HelloCollector + optional based on remote config)
             StartEventCollectors();
 
@@ -323,10 +326,99 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                         }
                     });
                 }
+
+                // Auto-set timezone if enabled and IANA timezone available from geolocation
+                if (_configuration.EnableTimezoneAutoSet && !string.IsNullOrEmpty(attempt.Location?.Timezone))
+                {
+                    try
+                    {
+                        var tzResult = TimezoneService.TrySetTimezone(attempt.Location.Timezone, _logger);
+                        EmitEvent(new EnrollmentEvent
+                        {
+                            SessionId = _configuration.SessionId,
+                            TenantId = _configuration.TenantId,
+                            EventType = "timezone_auto_set",
+                            Severity = tzResult.Success ? EventSeverity.Info : EventSeverity.Warning,
+                            Source = "Network",
+                            Phase = EnrollmentPhase.Unknown,
+                            Message = tzResult.Success
+                                ? $"Timezone set to {tzResult.WindowsTimezoneId} (from {tzResult.IanaTimezone})"
+                                : $"Timezone auto-set failed: {tzResult.Error}",
+                            Data = new Dictionary<string, object>
+                            {
+                                { "ianaTimezone", tzResult.IanaTimezone ?? "" },
+                                { "windowsTimezoneId", tzResult.WindowsTimezoneId ?? "unknown" },
+                                { "previousTimezone", tzResult.PreviousTimezone ?? "unknown" },
+                                { "success", tzResult.Success },
+                                { "error", tzResult.Error ?? "" }
+                            }
+                        });
+                    }
+                    catch (Exception tzEx)
+                    {
+                        _logger.Warning($"Timezone auto-set failed: {tzEx.Message}");
+                    }
+                }
             }
             catch (Exception ex)
             {
                 _logger.Warning($"Failed to collect geo-location: {ex.Message}");
+            }
+        }
+
+        private void EmitNtpTimeCheckEvent()
+        {
+            try
+            {
+                var ntpServer = _configuration.NtpServer ?? "time.windows.com";
+                var result = NtpTimeCheckService.CheckTime(ntpServer, _logger);
+
+                if (result.Success)
+                {
+                    var severity = Math.Abs(result.OffsetSeconds) > 60
+                        ? EventSeverity.Warning
+                        : EventSeverity.Info;
+
+                    EmitEvent(new EnrollmentEvent
+                    {
+                        SessionId = _configuration.SessionId,
+                        TenantId = _configuration.TenantId,
+                        EventType = "ntp_time_check",
+                        Severity = severity,
+                        Source = "Network",
+                        Phase = EnrollmentPhase.Unknown,
+                        Message = $"NTP time check: offset {result.OffsetSeconds:F2}s from {ntpServer}",
+                        Data = new Dictionary<string, object>
+                        {
+                            { "ntpServer", ntpServer },
+                            { "offsetSeconds", result.OffsetSeconds },
+                            { "ntpTimeUtc", result.NtpTime?.ToString("o") ?? "" },
+                            { "localTimeUtc", result.LocalTime?.ToString("o") ?? "" }
+                        }
+                    });
+                }
+                else
+                {
+                    EmitEvent(new EnrollmentEvent
+                    {
+                        SessionId = _configuration.SessionId,
+                        TenantId = _configuration.TenantId,
+                        EventType = "ntp_time_check",
+                        Severity = EventSeverity.Warning,
+                        Source = "Network",
+                        Phase = EnrollmentPhase.Unknown,
+                        Message = $"NTP time check failed: {result.Error}",
+                        Data = new Dictionary<string, object>
+                        {
+                            { "ntpServer", ntpServer },
+                            { "error", result.Error ?? "unknown" }
+                        }
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"NTP time check failed: {ex.Message}");
             }
         }
 
@@ -432,6 +524,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             _configuration.EnrollmentSummaryTimeoutSeconds = config.EnrollmentSummaryTimeoutSeconds;
             _configuration.EnrollmentSummaryBrandingImageUrl = config.EnrollmentSummaryBrandingImageUrl;
             _configuration.EnrollmentSummaryLaunchRetrySeconds = config.EnrollmentSummaryLaunchRetrySeconds;
+            _configuration.NtpServer = config.NtpServer;
+            _configuration.EnableTimezoneAutoSet = config.EnableTimezoneAutoSet;
             _configuration.SendTraceEvents = config.SendTraceEvents;
             AuditUnrestrictedModeChange(config);
             _enrollmentTracker?.UpdateSendTraceEvents(config.SendTraceEvents);
@@ -442,6 +536,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             _logger.Info($"  maxAuthFailures={_configuration.MaxAuthFailures}, authFailureTimeoutMinutes={_configuration.AuthFailureTimeoutMinutes}");
             _logger.Info($"  logLevel={_configuration.LogLevel}, rebootOnComplete={_configuration.RebootOnComplete}, maxBatchSize={_configuration.MaxBatchSize}");
             _logger.Info($"  showEnrollmentSummary={_configuration.ShowEnrollmentSummary}, summaryTimeoutSeconds={_configuration.EnrollmentSummaryTimeoutSeconds}");
+            _logger.Info($"  ntpServer={_configuration.NtpServer}, enableTimezoneAutoSet={_configuration.EnableTimezoneAutoSet}");
         }
 
         private void AuditUnrestrictedModeChange(AgentConfigResponse config)

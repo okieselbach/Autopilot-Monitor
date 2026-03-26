@@ -301,7 +301,27 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     }
                 }
 
-                EmitDeviceInfoEvent("secureboot_status", $"SecureBoot: {data["uefiSecureBootEnabled"]}", data);
+                // UEFI CA 2023 certificate deployment status (expires June 2026)
+                using (var servicingKey = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\SecureBoot\Servicing"))
+                {
+                    if (servicingKey != null)
+                    {
+                        data["uefiCA2023Status"] = servicingKey.GetValue("UEFICA2023Status")?.ToString() ?? "unknown";
+                        var capable = servicingKey.GetValue("WindowsUEFICA2023Capable");
+                        if (capable != null)
+                            data["windowsUefiCA2023Capable"] = Convert.ToInt32(capable);
+                        var error = servicingKey.GetValue("UEFICA2023Error");
+                        if (error != null && Convert.ToInt32(error) != 0)
+                            data["uefiCA2023Error"] = Convert.ToInt32(error);
+                        data["confidenceLevel"] = servicingKey.GetValue("ConfidenceLevel")?.ToString() ?? "unknown";
+                    }
+                    else
+                    {
+                        data["uefiCA2023Status"] = "notfound";
+                    }
+                }
+
+                EmitDeviceInfoEvent("secureboot_status", $"SecureBoot: {data["uefiSecureBootEnabled"]}, CA2023: {data["uefiCA2023Status"]}", data);
             }
             catch (Exception ex)
             {

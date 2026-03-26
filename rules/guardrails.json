@@ -54,6 +54,12 @@
       ]
     },
     {
+      "category": "Secure Boot",
+      "prefixes": [
+        "SYSTEM\\CurrentControlSet\\Control\\SecureBoot"
+      ]
+    },
+    {
       "category": "Intune IME",
       "prefixes": [
         "SOFTWARE\\Microsoft\\IntuneManagementExtension"
