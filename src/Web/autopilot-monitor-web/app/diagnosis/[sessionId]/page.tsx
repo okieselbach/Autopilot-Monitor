@@ -8,6 +8,7 @@ import { useAuth } from "../../../contexts/AuthContext";
 import { useNotifications } from "../../../contexts/NotificationContext";
 import { ProtectedRoute } from "../../../components/ProtectedRoute";
 import { API_BASE_URL } from "@/lib/config";
+import { formatInlineMarkdown } from "@/lib/formatInlineMarkdown";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 import { ConfidenceBadge, SeverityBadge } from "./components/DiagnosisBadges";
 import { Session, EnrollmentEvent, RuleResult } from "@/types";
@@ -586,7 +587,7 @@ export default function DiagnosisPage() {
                         {expandedResult === result.ruleId && (
                           <div className="mt-4 pl-16 space-y-3">
                             <p className="text-sm text-gray-600">
-                              {result.explanation}
+                              {formatInlineMarkdown(result.explanation)}
                             </p>
 
                             {result.remediation?.length > 0 && (

@@ -5,6 +5,7 @@ import { AnalyzeRule, RuleForm, getSeverityColor, getCategoryColor } from "../ty
 import { FormJsonToggle, JsonModeToggleButtons, ReadOnlyJsonView } from "@/components/rules/FormJsonToggle";
 import AnalyzeRuleFormFields from "./AnalyzeRuleFormFields";
 import { stripInternalFields } from "@/lib/rulePageHelpers";
+import { formatInlineMarkdown } from "@/lib/formatInlineMarkdown";
 
 interface AnalyzeRuleCardProps {
   rule: AnalyzeRule;
@@ -190,7 +191,7 @@ export default function AnalyzeRuleCard({
           {rule.explanation && (
             <div>
               <h4 className="text-sm font-semibold text-gray-700 mb-1">Explanation</h4>
-              <p className="text-sm text-gray-600 leading-relaxed bg-blue-50 border border-blue-200 rounded-lg p-3">{rule.explanation}</p>
+              <p className="text-sm text-gray-600 leading-relaxed bg-blue-50 border border-blue-200 rounded-lg p-3">{formatInlineMarkdown(rule.explanation)}</p>
             </div>
           )}
 

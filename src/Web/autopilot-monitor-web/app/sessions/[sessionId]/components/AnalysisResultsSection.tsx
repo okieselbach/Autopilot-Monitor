@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { RuleResult } from "@/types";
+import { formatInlineMarkdown } from "@/lib/formatInlineMarkdown";
 
 interface AnalysisResultsSectionProps {
   analysisResults: RuleResult[];
@@ -162,7 +163,7 @@ function AnalysisResultCard({ result }: { result: RuleResult }) {
           {result.explanation && (
             <div>
               <h4 className="text-sm font-medium text-gray-700 mb-1">Explanation</h4>
-              <p className="text-sm text-gray-600">{result.explanation}</p>
+              <p className="text-sm text-gray-600">{formatInlineMarkdown(result.explanation)}</p>
             </div>
           )}
 
