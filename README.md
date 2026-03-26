@@ -21,4 +21,9 @@ Full documentation is available at **[autopilotmonitor.com/docs](https://www.aut
 
 ## License
 
-MIT License — see [LICENSE](LICENSE) for details
+This project uses a **split licensing model**:
+
+- **MIT License** — Agent (`src/Agent/`) and Shared library (`src/Shared/`) — unrestricted use on end-user devices
+- **AGPL-3.0** — Backend (`src/Backend/`), Web Dashboard (`src/Web/`), and MCP Server (`src/McpServer/`) — server-side components remain open source
+
+See [LICENSE](LICENSE) for full details.
