@@ -101,17 +101,8 @@ tmp/
 # Claude Code temporary files
 tmpclaude-*-cwd
 
-# Claude skills and diagnostic scripts (local only)
-.claude/commands/event-query.md
-.claude/commands/backend-logs.md
-.claude/commands/session-debug.md
-.claude/commands/table-query.md
-.claude/commands/ux-insights.md
-.claude/commands/diag-agent-log.md
-.claude/commands/diag-ime-log.md
-.claude/scripts/query-appinsights.sh
-.claude/scripts/query-table.sh
-.claude/scripts/fetch-diag-zip.sh
+# Claude skills and scripts are now in a private submodule (.claude/commands/)
+# No individual file ignores needed — the submodule handles everything
 
 # Deployment scripts (local only)
 scripts/Deployment/build_and_upload_debug_agent_build.ps1
