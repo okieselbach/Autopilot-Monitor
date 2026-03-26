@@ -1,56 +1,16 @@
 /**
  * Loads analysis rules, gather rules, and IME log patterns from the rules/
- * directory, computes embeddings via a local transformer model, and populates
- * the in-memory vector store for semantic search.
+ * directory and indexes them into a SearchProvider for semantic or fuzzy search.
+ *
+ * This module is backend-agnostic — it only deals with document loading and
+ * text preparation. The actual search strategy is determined by the provider.
  */
 
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { pipeline, type FeatureExtractionPipeline } from '@xenova/transformers';
-import { VectorStore, type VectorDocument } from './vector-store.js';
+import type { SearchDocument } from './search-provider.js';
 
-const MODEL_NAME = 'Xenova/all-MiniLM-L6-v2';
-
-let embedder: FeatureExtractionPipeline | null = null;
-
-async function getEmbedder(): Promise<FeatureExtractionPipeline> {
-  if (!embedder) {
-    embedder = await pipeline('feature-extraction', MODEL_NAME, {
-      quantized: true,
-    }) as FeatureExtractionPipeline;
-  }
-  return embedder;
-}
-
-/** Compute a normalized embedding vector for a text string. */
-export async function embed(text: string): Promise<number[]> {
-  const model = await getEmbedder();
-  const output = await model(text, { pooling: 'mean', normalize: true });
-  return Array.from(output.data as Float32Array);
-}
-
-/** Batch-embed multiple texts (sequential to avoid OOM on large batches). */
-async function embedBatch(texts: string[]): Promise<number[][]> {
-  const model = await getEmbedder();
-  const results: number[][] = [];
-  // Process in small batches to balance speed and memory
-  const batchSize = 16;
-  for (let i = 0; i < texts.length; i += batchSize) {
-    const batch = texts.slice(i, i + batchSize);
-    const outputs = await Promise.all(
-      batch.map(async (t) => {
-        const out = await model(t, { pooling: 'mean', normalize: true });
-        return Array.from(out.data as Float32Array);
-      })
-    );
-    results.push(...outputs);
-  }
-  return results;
-}
-
-// ──────────────────────────────────────────────────────────────
-// Rule / pattern loading helpers
-// ──────────────────────────────────────────────────────────────
+// ── Rule / pattern types ─────────────────────────────────────
 
 interface AnalyzeRule {
   ruleId: string;
@@ -82,6 +42,8 @@ interface ImeLogPattern {
   action?: string;
 }
 
+// ── File helpers ─────────────────────────────────────────────
+
 async function loadJsonFiles<T>(dir: string): Promise<T[]> {
   let entries: string[];
   try {
@@ -102,7 +64,7 @@ async function loadJsonFiles<T>(dir: string): Promise<T[]> {
   return results;
 }
 
-/** Build the searchable text for each document type. */
+// ── Text builders ────────────────────────────────────────────
 
 function analyzeRuleText(r: AnalyzeRule): string {
   const parts = [
@@ -136,22 +98,20 @@ function imePatternText(p: ImeLogPattern): string {
   ].filter(Boolean).join('\n');
 }
 
-// ──────────────────────────────────────────────────────────────
-// Public API
-// ──────────────────────────────────────────────────────────────
+// ── Public API ───────────────────────────────────────────────
 
-export async function buildKnowledgeBase(rulesRoot: string): Promise<VectorStore> {
-  const store = new VectorStore();
-
-  console.error('Loading knowledge base documents…');
-
+/**
+ * Load all rule/pattern documents from the rules directory.
+ * Returns SearchDocument[] ready to be fed into any SearchProvider.
+ */
+export async function loadKnowledgeDocs(rulesRoot: string): Promise<SearchDocument[]> {
   const [analyzeRules, gatherRules, imePatterns] = await Promise.all([
     loadJsonFiles<AnalyzeRule>(join(rulesRoot, 'analyze')),
     loadJsonFiles<GatherRule>(join(rulesRoot, 'gather')),
     loadJsonFiles<ImeLogPattern>(join(rulesRoot, 'ime-log-patterns')),
   ]);
 
-  const docs: Array<{ id: string; text: string; metadata: Record<string, unknown> }> = [];
+  const docs: SearchDocument[] = [];
 
   for (const r of analyzeRules) {
     docs.push({
@@ -193,18 +153,5 @@ export async function buildKnowledgeBase(rulesRoot: string): Promise<VectorStore
     });
   }
 
-  console.error(`Embedding ${docs.length} documents (model: ${MODEL_NAME})…`);
-
-  const texts = docs.map((d) => d.text);
-  const embeddings = await embedBatch(texts);
-
-  const vectorDocs: VectorDocument[] = docs.map((d, i) => ({
-    ...d,
-    embedding: embeddings[i],
-  }));
-
-  store.addMany(vectorDocs);
-  console.error(`Knowledge base ready — ${store.size} documents indexed.`);
-
-  return store;
+  return docs;
 }

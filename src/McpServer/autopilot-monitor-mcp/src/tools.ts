@@ -1,10 +1,10 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { apiFetch, buildQuery } from './client.js';
-import type { VectorStore } from './vector-store.js';
-import { embed } from './knowledge-base.js';
+import type { SearchProvider } from './search-provider.js';
+import { createSearchProvider } from './search-factory.js';
 
-export function registerTools(server: McpServer, knowledgeBase?: VectorStore): void {
+export function registerTools(server: McpServer, knowledgeBase?: SearchProvider): void {
   // Tool 1: search_sessions
   server.tool(
     'search_sessions',
@@ -40,7 +40,6 @@ export function registerTools(server: McpServer, knowledgeBase?: VectorStore): v
     async (args) => {
       const { deviceProperties, ...rest } = args;
       const queryParams: Record<string, string | number | boolean | undefined | null> = { ...rest };
-      // Convert deviceProperties record into prop.* query parameters
       if (deviceProperties) {
         for (const [key, value] of Object.entries(deviceProperties)) {
           queryParams[`prop.${key}`] = value;
@@ -107,7 +106,6 @@ export function registerTools(server: McpServer, knowledgeBase?: VectorStore): v
         events?: Array<{ eventType?: string; severity?: string; source?: string }>;
         count?: number;
       };
-      // Client-side filter since backend doesn't support these filters on the events endpoint
       if (data?.events && (filters.eventType || filters.severity || filters.source)) {
         data.events = data.events.filter((e) => {
           if (filters.eventType && e.eventType !== filters.eventType) return false;
@@ -170,10 +168,10 @@ export function registerTools(server: McpServer, knowledgeBase?: VectorStore): v
     }
   );
 
-  // Tool 8: search_events_semantic (vector search over live events)
+  // Tool 8: search_events_semantic
   server.tool(
     'search_events_semantic',
-    'Semantic search over enrollment event messages within a session or across recent failed sessions. ' +
+    'Semantic/fuzzy search over enrollment event messages within a session or across recent failed sessions. ' +
     'Unlike exact filters, this finds events by MEANING — e.g. "network timeout" also matches "connection timed out", "request failed after waiting". ' +
     'Use this when you need to find events that match a symptom description rather than an exact event type. ' +
     'Provide a sessionId to search within one session, or omit it to search across recent failed sessions.',
@@ -186,19 +184,16 @@ export function registerTools(server: McpServer, knowledgeBase?: VectorStore): v
         .describe('Minimum similarity score (0-1, default 0.35)'),
     },
     async ({ query, sessionId, tenantId, topK, minScore }) => {
-      // Fetch events — either from a specific session or from recent failed sessions
       type EventEntry = { eventType?: string; severity?: string; source?: string; message?: string; timestamp?: string; phase?: string; data?: Record<string, unknown> };
       let events: EventEntry[] = [];
       let sessionIds: string[] = [];
 
       if (sessionId) {
-        // Single session mode
         const q = buildQuery({ tenantId } as Record<string, string | undefined>);
         const data = await apiFetch(`/api/sessions/${sessionId}/events${q}`) as { events?: EventEntry[] };
         events = data?.events ?? [];
         sessionIds = [sessionId];
       } else {
-        // Cross-session mode: fetch recent failed sessions, then their events
         const searchQ = buildQuery({ status: 'Failed', tenantId, limit: 5 } as Record<string, string | number | undefined>);
         const sessions = await apiFetch(`/api/sessions/search${searchQ}`) as {
           sessions?: Array<{ sessionId?: string }>;
@@ -217,7 +212,6 @@ export function registerTools(server: McpServer, knowledgeBase?: VectorStore): v
         events = allEvents.flat();
       }
 
-      // Filter to events that have a meaningful message
       const candidates = events.filter((e) => e.message && e.message.length > 5);
 
       if (candidates.length === 0) {
@@ -229,53 +223,45 @@ export function registerTools(server: McpServer, knowledgeBase?: VectorStore): v
         };
       }
 
-      // Build text representations and compute embeddings
-      const texts = candidates.map((e) => {
+      // Build searchable documents from events
+      const docs = candidates.map((e, i) => {
         const parts = [e.message];
         if (e.eventType) parts.push(`Event: ${e.eventType}`);
         if (e.severity) parts.push(`Severity: ${e.severity}`);
         if (e.source) parts.push(`Source: ${e.source}`);
-        return parts.join(' | ');
+        return {
+          id: `event-${i}`,
+          text: parts.join(' | '),
+          metadata: { index: i } as Record<string, unknown>,
+        };
       });
 
-      const queryEmbedding = await embed(query);
+      // Create a temporary search provider for this batch of events
+      const provider = await createSearchProvider();
+      await provider.index(docs);
+      const searchResults = await provider.search(query, { topK, minScore });
 
-      // Embed events in batches
-      const eventEmbeddings = await Promise.all(texts.map((t) => embed(t)));
-
-      // Score and rank
-      const scored = candidates.map((e, i) => {
-        let dot = 0, normA = 0, normB = 0;
-        for (let j = 0; j < queryEmbedding.length; j++) {
-          dot += queryEmbedding[j] * eventEmbeddings[i][j];
-          normA += queryEmbedding[j] * queryEmbedding[j];
-          normB += eventEmbeddings[i][j] * eventEmbeddings[i][j];
-        }
-        const denom = Math.sqrt(normA) * Math.sqrt(normB);
-        const score = denom === 0 ? 0 : dot / denom;
-        return { event: e, score, text: texts[i] };
-      });
-
-      const results = scored
-        .filter((r) => r.score >= minScore)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, topK)
-        .map((r) => ({
+      const results = searchResults.map((r) => {
+        const idx = r.metadata.index as number;
+        const e = candidates[idx];
+        return {
           score: Math.round(r.score * 1000) / 1000,
-          sessionId: (r.event as Record<string, unknown>)._sessionId ?? sessionId,
-          eventType: r.event.eventType,
-          severity: r.event.severity,
-          source: r.event.source,
-          phase: r.event.phase,
-          timestamp: r.event.timestamp,
-          message: r.event.message,
-        }));
+          sessionId: (e as Record<string, unknown>)._sessionId ?? sessionId,
+          eventType: e.eventType,
+          severity: e.severity,
+          source: e.source,
+          phase: e.phase,
+          timestamp: e.timestamp,
+          message: e.message,
+        };
+      });
 
       return {
         content: [{
           type: 'text' as const,
           text: JSON.stringify({
             query,
+            searchBackend: provider.name,
             sessionsSearched: sessionIds,
             eventsAnalyzed: candidates.length,
             resultCount: results.length,
@@ -286,12 +272,12 @@ export function registerTools(server: McpServer, knowledgeBase?: VectorStore): v
     }
   );
 
-  // Tool 9: search_knowledge (vector search over rules)
+  // Tool 9: search_knowledge
   server.tool(
     'search_knowledge',
-    'Semantic search over the Autopilot Monitor knowledge base: analysis rules, gather rules, and IME log patterns. ' +
+    'Semantic/fuzzy search over the Autopilot Monitor knowledge base: analysis rules, gather rules, and IME log patterns. ' +
     'Use natural language queries like "app install timeout", "BitLocker issues", "detection script failure". ' +
-    'Returns the most relevant rules and patterns ranked by semantic similarity. ' +
+    'Returns the most relevant rules and patterns ranked by similarity. ' +
     'Great for finding remediation steps, understanding error patterns, or discovering relevant diagnostic rules.',
     {
       query: z.string().describe('Natural language search query (e.g. "app download timeout", "TPM not ready", "ESP stuck")'),
@@ -306,15 +292,15 @@ export function registerTools(server: McpServer, knowledgeBase?: VectorStore): v
         return {
           content: [{
             type: 'text' as const,
-            text: JSON.stringify({ error: 'Knowledge base not initialized. The server may still be loading embeddings.' }),
+            text: JSON.stringify({ error: 'Knowledge base not initialized. The server may still be loading.' }),
           }],
         };
       }
 
-      const queryEmbedding = await embed(query);
-      let results = knowledgeBase.search(queryEmbedding, type === 'all' ? topK * 3 : topK, minScore);
+      // Over-fetch when filtering by type, then trim
+      const fetchK = type === 'all' ? topK : topK * 3;
+      let results = await knowledgeBase.search(query, { topK: fetchK, minScore });
 
-      // Filter by type if specified
       if (type !== 'all') {
         results = results.filter((r) => r.metadata.type === type);
       }
@@ -333,7 +319,12 @@ export function registerTools(server: McpServer, knowledgeBase?: VectorStore): v
       return {
         content: [{
           type: 'text' as const,
-          text: JSON.stringify({ query, resultCount: formatted.length, results: formatted }, null, 2),
+          text: JSON.stringify({
+            query,
+            searchBackend: knowledgeBase.name,
+            resultCount: formatted.length,
+            results: formatted,
+          }, null, 2),
         }],
       };
     }
