@@ -1,21 +1,39 @@
-MIT License
+Autopilot Monitor - Split License
 
 Copyright (c) 2026 Autopilot Monitor Contributors
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+This project uses a split licensing model. Different components are
+licensed under different terms:
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+## MIT License
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+The following components are licensed under the MIT License:
+
+- src/Agent/    - The Autopilot Monitor Agent (deployed to devices)
+- src/Shared/   - Shared DTOs, enums, and constants
+
+See src/Agent/LICENSE and src/Shared/LICENSE for the full MIT license text.
+
+## GNU Affero General Public License v3.0 (AGPL-3.0)
+
+The following components are licensed under the AGPL-3.0:
+
+- src/Backend/   - Azure Functions backend
+- src/Web/       - Next.js web frontend
+- src/McpServer/ - MCP Server
+
+See src/Backend/LICENSE for the full AGPL-3.0 license text.
+
+## Why Split Licensing?
+
+The Agent runs on end-user devices and is licensed under MIT to allow
+unrestricted use, modification, and distribution without copyleft
+obligations.
+
+The server-side components (Backend, Web, McpServer) are licensed under
+AGPL-3.0 to ensure that modifications to the server infrastructure
+remain open source, especially when deployed as a network service.
+
+The Shared library is MIT-licensed because it is a dependency of the
+MIT-licensed Agent. Using AGPL for Shared would effectively make the
+Agent AGPL as well.
