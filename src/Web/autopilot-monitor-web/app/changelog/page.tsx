@@ -50,6 +50,46 @@ export default function ChangelogPage() {
             <div>
               <div className="flex items-center gap-3 mb-3">
                 <span className="text-xs font-mono font-semibold text-gray-400 uppercase tracking-wider">
+                  2026-03-26 - 12:00 CET
+                </span>
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                  Platform Update
+                </span>
+              </div>
+              <h2 className="text-base font-semibold text-gray-900 mb-2">
+                Software inventory &amp; vulnerability analysis, new agent signals, and settings overhaul
+              </h2>
+              <ul className="space-y-2 text-sm text-gray-600 leading-relaxed list-none">
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Software Inventory &amp; Vulnerability Analysis</span> — The agent now discovers installed software across Registry, WMI, AppX/MSIX, and per-user sources and correlates it against NVD and CISA KEV databases. The dashboard shows a vulnerability report with CVSS scores and severity levels. Includes 240+ curated CPE mappings and strict AppX whitelist filtering.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">SecureBoot &amp; time sync</span> — The agent collects SecureBoot certificate details (with a new analyze rule), auto-detects the timezone, and checks NTP offset to catch time-related enrollment failures.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Security hardening</span> — Request size limits on all submission endpoints and symlink detection in diagnostic paths guard against DoS and path-traversal attacks.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Settings reorganization</span> — The sidebar now uses expandable sections for a cleaner navigation. Tenant settings were restructured and consolidated.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">OOBE Config viewer</span> — A modal dialog decodes the OOBE configuration bitmask, showing each bit flag with description and confidence level, and detects the enrollment profile type.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">FAQ page</span> — New Docs section covering supported scenarios, deployment, agent capabilities, and troubleshooting.</span>
+                </li>
+              </ul>
+            </div>
+
+            <div>
+              <div className="flex items-center gap-3 mb-3">
+                <span className="text-xs font-mono font-semibold text-gray-400 uppercase tracking-wider">
                   2026-03-19 - 12:00 CET
                 </span>
                 <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
