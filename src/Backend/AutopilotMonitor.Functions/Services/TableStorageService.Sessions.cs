@@ -226,6 +226,7 @@ namespace AutopilotMonitor.Functions.Services
                 OsLanguage = entity.GetString("OsLanguage") ?? string.Empty,
                 IsUserDriven = entity.GetBoolean("IsUserDriven") ?? false,
                 AgentVersion = entity.GetString("AgentVersion") ?? string.Empty,
+                ImeAgentVersion = entity.GetString("ImeAgentVersion") ?? string.Empty,
                 GeoCountry = entity.GetString("GeoCountry") ?? string.Empty,
                 GeoRegion = entity.GetString("GeoRegion") ?? string.Empty,
                 GeoCity = entity.GetString("GeoCity") ?? string.Empty,
@@ -1373,6 +1374,28 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
+        /// Stores the IME agent version on an existing session (Merge-mode, single field update).
+        /// Non-fatal: failures are logged as warnings and do not block ingest.
+        /// </summary>
+        public async Task UpdateSessionImeAgentVersionAsync(string tenantId, string sessionId, string version)
+        {
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
+                var entity = new TableEntity(tenantId, sessionId)
+                {
+                    ["ImeAgentVersion"] = version
+                };
+                await tableClient.UpsertEntityAsync(entity, TableUpdateMode.Merge);
+            }
+            catch (Exception ex)
+            {
+                // Non-fatal — don't block ingest
+                _logger.LogWarning(ex, "Failed to update ImeAgentVersion for session {SessionId}", sessionId);
+            }
+        }
+
+        /// <summary>
         /// Deletes a session from storage
         /// </summary>
         public async Task<bool> DeleteSessionAsync(string tenantId, string sessionId)
@@ -1486,6 +1509,7 @@ namespace AutopilotMonitor.Functions.Services
                 OsLanguage = entity.GetString("OsLanguage") ?? string.Empty,
                 IsUserDriven = entity.GetBoolean("IsUserDriven") ?? false,
                 AgentVersion = entity.GetString("AgentVersion") ?? string.Empty,
+                ImeAgentVersion = entity.GetString("ImeAgentVersion") ?? string.Empty,
                 GeoCountry = entity.GetString("GeoCountry") ?? string.Empty,
                 GeoRegion = entity.GetString("GeoRegion") ?? string.Empty,
                 GeoCity = entity.GetString("GeoCity") ?? string.Empty,

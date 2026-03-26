@@ -1,0 +1,635 @@
+using Azure;
+using Azure.Data.Tables;
+using AutopilotMonitor.Shared;
+using AutopilotMonitor.Shared.Models;
+using Microsoft.Extensions.Logging;
+
+namespace AutopilotMonitor.Functions.Services
+{
+    public partial class TableStorageService
+    {
+        // ===== EVENT TYPE INDEX =====
+
+        /// <summary>
+        /// Upserts entries into the EventTypeIndex table for each distinct event type in the batch.
+        /// PartitionKey = {tenantId}_{eventType}, RowKey = {invertedTicks}_{sessionId}
+        /// This enables efficient "find all sessions with event X" queries.
+        /// </summary>
+        public async Task UpsertEventTypeIndexBatchAsync(string tenantId, string sessionId, IEnumerable<string> eventTypes)
+        {
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.EventTypeIndex);
+                var rowKey = $"{(DateTime.MaxValue.Ticks - DateTime.UtcNow.Ticks):D19}_{sessionId}";
+
+                var tasks = eventTypes.Distinct().Select(eventType =>
+                {
+                    var partitionKey = $"{tenantId}_{eventType}";
+                    var entity = new TableEntity(partitionKey, rowKey)
+                    {
+                        ["SessionId"] = sessionId,
+                        ["TenantId"] = tenantId,
+                        ["EventType"] = eventType,
+                    };
+                    return tableClient.UpsertEntityAsync(entity);
+                });
+
+                await Task.WhenAll(tasks);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to upsert EventTypeIndex for session {SessionId}", sessionId);
+            }
+        }
+
+        // ===== DEVICE SNAPSHOT =====
+
+        private static readonly HashSet<string> _deviceSnapshotEventTypes = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "tpm_status",
+            "autopilot_profile",
+            "secureboot_status",
+            "bitlocker_status",
+            "hardware_spec",
+            "network_interface_info",
+            "aad_join_status"
+        };
+
+        /// <summary>
+        /// Upserts a DeviceSnapshot entry for the session using one Props_{eventType} JSON column
+        /// per device event type. This stores ALL properties (including arrays) without explicit mapping.
+        /// New agent properties become searchable automatically — zero code changes required.
+        /// Existing columns are preserved (first-seen wins) via merge-on-write.
+        /// </summary>
+        public async Task UpsertDeviceSnapshotAsync(string tenantId, string sessionId, IEnumerable<AutopilotMonitor.Shared.Models.EnrollmentEvent> events)
+        {
+            try
+            {
+                var relevantEvents = events.Where(e => _deviceSnapshotEventTypes.Contains(e.EventType)).ToList();
+                if (relevantEvents.Count == 0) return;
+
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.DeviceSnapshot);
+
+                TableEntity entity;
+                try
+                {
+                    var existing = await tableClient.GetEntityAsync<TableEntity>(tenantId, sessionId);
+                    entity = existing.Value;
+                }
+                catch (RequestFailedException ex) when (ex.Status == 404)
+                {
+                    entity = new TableEntity(tenantId, sessionId)
+                    {
+                        ["SessionId"] = sessionId,
+                        ["TenantId"] = tenantId,
+                    };
+                }
+
+                foreach (var evt in relevantEvents)
+                {
+                    if (evt.Data == null || evt.Data.Count == 0) continue;
+
+                    var columnName = $"Props_{evt.EventType}";
+
+                    // First-seen wins: don't overwrite existing event data
+                    if (entity.ContainsKey(columnName) && entity.GetString(columnName) != null)
+                        continue;
+
+                    try
+                    {
+                        var data = evt.Data;
+
+                        // Compute derived values for hardware_spec
+                        if (evt.EventType.Equals("hardware_spec", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var hasSSD = DetectHasSSD(data);
+                            if (hasSSD.HasValue && !data.ContainsKey("hasSSD"))
+                                data["hasSSD"] = hasSSD.Value;
+                        }
+
+                        var json = System.Text.Json.JsonSerializer.Serialize(data);
+
+                        // Size guard: warn if approaching 64 KB column limit
+                        if (json.Length > 50_000)
+                        {
+                            _logger.LogWarning(
+                                "DeviceSnapshot column {Column} for session {SessionId} is {Size} bytes (approaching 64KB limit)",
+                                columnName, sessionId, json.Length);
+                        }
+
+                        entity[columnName] = json;
+                    }
+                    catch (Exception evtEx)
+                    {
+                        _logger.LogDebug(evtEx, "DeviceSnapshot: error processing event type {EventType}", evt.EventType);
+                    }
+                }
+
+                await tableClient.UpsertEntityAsync(entity);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to upsert DeviceSnapshot for session {SessionId}", sessionId);
+            }
+        }
+
+        private static bool? DetectHasSSD(Dictionary<string, object> data)
+        {
+            try
+            {
+                if (!data.TryGetValue("disks", out var disksObj) || disksObj == null) return null;
+                if (disksObj is not System.Collections.IEnumerable diskList) return null;
+
+                foreach (var disk in diskList)
+                {
+                    if (disk is not Dictionary<string, object> diskDict) continue;
+
+                    if (diskDict.TryGetValue("mediaType", out var mt))
+                    {
+                        var mtStr = mt?.ToString() ?? "";
+                        if (mtStr.Equals("SSD", StringComparison.OrdinalIgnoreCase) ||
+                            mtStr.Equals("NVMe", StringComparison.OrdinalIgnoreCase))
+                            return true;
+                    }
+                }
+                return false;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        // ===== CVE INDEX =====
+
+        /// <summary>
+        /// Upserts CVE index entries so sessions can be searched by CVE identifier.
+        /// PartitionKey = {tenantId}_{cveId}, RowKey = sessionId
+        /// Uses individual parallel upserts (not batch transactions) because PK differs per CVE.
+        /// </summary>
+        public async Task UpsertCveIndexEntriesAsync(string tenantId, string sessionId, List<Dictionary<string, object>> findings)
+        {
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.CveIndex);
+                var tasks = new List<Task>();
+
+                foreach (var finding in findings)
+                {
+                    var softwareName = finding.TryGetValue("softwareName", out var sn) ? sn?.ToString() ?? "" : "";
+                    var overallRisk = finding.TryGetValue("riskLevel", out var rl) ? rl?.ToString() ?? "" : "";
+
+                    if (!finding.TryGetValue("vulnerabilities", out var vulnsObj) || vulnsObj == null) continue;
+                    if (vulnsObj is not System.Collections.IEnumerable vulnList) continue;
+
+                    foreach (var vulnObj in vulnList)
+                    {
+                        Dictionary<string, object>? vuln = null;
+                        if (vulnObj is Dictionary<string, object> vd)
+                            vuln = vd;
+
+                        if (vuln == null) continue;
+
+                        var cveId = vuln.TryGetValue("cveId", out var cid) ? cid?.ToString() : null;
+                        if (string.IsNullOrEmpty(cveId)) continue;
+
+                        var partitionKey = $"{tenantId}_{cveId}";
+                        double cvssScore = 0;
+                        try { if (vuln.TryGetValue("cvssScore", out var cs) && cs != null) cvssScore = Convert.ToDouble(cs); } catch { }
+
+                        var cvssSeverity = vuln.TryGetValue("cvssSeverity", out var csvs) ? csvs?.ToString() ?? "" : "";
+                        bool isKev = false;
+                        try { if (vuln.TryGetValue("isKev", out var ik) && ik is bool ikb) isKev = ikb; } catch { }
+
+                        var entity = new TableEntity(partitionKey, sessionId)
+                        {
+                            ["SessionId"] = sessionId,
+                            ["TenantId"] = tenantId,
+                            ["CveId"] = cveId,
+                            ["SoftwareName"] = softwareName,
+                            ["CvssScore"] = cvssScore,
+                            ["CvssSeverity"] = cvssSeverity,
+                            ["IsKev"] = isKev,
+                            ["OverallRisk"] = overallRisk,
+                            ["DetectedAt"] = DateTime.UtcNow,
+                        };
+
+                        tasks.Add(tableClient.UpsertEntityAsync(entity));
+                    }
+                }
+
+                if (tasks.Count > 0)
+                    await Task.WhenAll(tasks);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to upsert CveIndex entries for session {SessionId}", sessionId);
+            }
+        }
+
+        // ===== SEARCH METHODS =====
+
+        /// <summary>
+        /// Searches enrollment sessions by filter. Uses DeviceSnapshot index for hardware filters,
+        /// otherwise scans Sessions table with OData filtering.
+        /// </summary>
+        public async Task<List<SessionSummary>> SearchSessionsAsync(string? tenantId, SessionSearchFilter filter)
+        {
+            if (filter.HasDeviceSnapshotFilters)
+                return await SearchSessionsByDeviceSnapshotAsync(tenantId, filter);
+            else
+                return await SearchSessionsByScanAsync(tenantId, filter);
+        }
+
+        private async Task<List<SessionSummary>> SearchSessionsByDeviceSnapshotAsync(string? tenantId, SessionSearchFilter filter)
+        {
+            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.DeviceSnapshot);
+            var oDataFilter = string.IsNullOrEmpty(tenantId) ? null : $"PartitionKey eq '{tenantId}'";
+
+            var sessionIds = new List<string>();
+            await foreach (var entity in tableClient.QueryAsync<TableEntity>(filter: oDataFilter))
+            {
+                // Reconstruct properties from Props_* columns
+                var properties = ReconstructDeviceProperties(entity);
+                if (properties == null || properties.Count == 0) continue;
+
+                // Apply all device property filters
+                if (!MatchesAllDeviceFilters(properties, filter.DeviceProperties!))
+                    continue;
+
+                sessionIds.Add(entity.RowKey); // RowKey = sessionId in DeviceSnapshot
+                if (sessionIds.Count >= filter.Limit * 3) break; // over-fetch to allow for missing sessions
+            }
+
+            if (sessionIds.Count == 0) return new List<SessionSummary>();
+
+            // Batch-get SessionSummaries from Sessions table
+            var sessions = await BatchGetSessionsAsync(tenantId, sessionIds);
+
+            // Apply any additional basic filters
+            sessions = ApplyBasicFilters(sessions, filter);
+
+            return sessions.Take(filter.Limit).ToList();
+        }
+
+        /// <summary>
+        /// Reconstructs a flat property dictionary from all Props_* JSON columns.
+        /// Keys use "eventType.propertyName" convention (e.g. "tpm_status.specVersion").
+        /// </summary>
+        private static Dictionary<string, object> ReconstructDeviceProperties(TableEntity entity)
+        {
+            var properties = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var key in entity.Keys)
+            {
+                if (!key.StartsWith("Props_", StringComparison.Ordinal)) continue;
+
+                var eventType = key.Substring(6); // strip "Props_"
+                var json = entity.GetString(key);
+                if (string.IsNullOrEmpty(json)) continue;
+
+                try
+                {
+                    var data = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(
+                        json, _jsonDeserializeOptions);
+                    if (data == null) continue;
+
+                    foreach (var (propKey, propValue) in data)
+                    {
+                        if (propValue != null)
+                            properties[$"{eventType}.{propKey}"] = propValue;
+                    }
+                }
+                catch
+                {
+                    // Malformed JSON — skip this column
+                }
+            }
+
+            return properties;
+        }
+
+        private static readonly System.Text.Json.JsonSerializerOptions _jsonDeserializeOptions = new()
+        {
+            PropertyNameCaseInsensitive = true,
+        };
+
+        /// <summary>
+        /// Checks whether all filter expressions match against the property dictionary.
+        /// Supports: exact string match, boolean match, numeric operators (>=, <=, >, <),
+        /// and array substring search.
+        /// </summary>
+        private static bool MatchesAllDeviceFilters(
+            Dictionary<string, object> properties,
+            Dictionary<string, string> filters)
+        {
+            foreach (var (filterKey, filterValue) in filters)
+            {
+                if (!properties.TryGetValue(filterKey, out var actual) || actual == null)
+                    return false;
+
+                if (!MatchesDevicePropertyFilter(actual, filterValue))
+                    return false;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Matches a single property value against a filter expression.
+        /// Filter syntax:
+        ///   ">=8"  → numeric greater-than-or-equal
+        ///   "<=5"  → numeric less-than-or-equal
+        ///   ">8"   → numeric greater-than
+        ///   "<5"   → numeric less-than
+        ///   "True"/"False" → boolean match
+        ///   anything else → case-insensitive string equality
+        /// For array values: checks if filterValue appears as substring in any element.
+        /// </summary>
+        private static bool MatchesDevicePropertyFilter(object actual, string filterValue)
+        {
+            var actualStr = ConvertToString(actual);
+
+            // Handle array values: check if filter matches any element
+            if (actual is System.Text.Json.JsonElement je && je.ValueKind == System.Text.Json.JsonValueKind.Array)
+            {
+                foreach (var element in je.EnumerateArray())
+                {
+                    var elemStr = element.ToString();
+                    if (elemStr != null && elemStr.Contains(filterValue, StringComparison.OrdinalIgnoreCase))
+                        return true;
+                }
+                return false;
+            }
+
+            // Numeric range operators
+            if (filterValue.StartsWith(">=") && double.TryParse(filterValue.AsSpan(2), out var geVal))
+                return double.TryParse(actualStr, out var av1) && av1 >= geVal;
+            if (filterValue.StartsWith("<=") && double.TryParse(filterValue.AsSpan(2), out var leVal))
+                return double.TryParse(actualStr, out var av2) && av2 <= leVal;
+            if (filterValue.StartsWith(">") && !filterValue.StartsWith(">=") && double.TryParse(filterValue.AsSpan(1), out var gtVal))
+                return double.TryParse(actualStr, out var av3) && av3 > gtVal;
+            if (filterValue.StartsWith("<") && !filterValue.StartsWith("<=") && double.TryParse(filterValue.AsSpan(1), out var ltVal))
+                return double.TryParse(actualStr, out var av4) && av4 < ltVal;
+
+            // Default: case-insensitive string equality (covers booleans too)
+            return string.Equals(actualStr, filterValue, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string ConvertToString(object value)
+        {
+            if (value is System.Text.Json.JsonElement jsonEl)
+            {
+                return jsonEl.ValueKind switch
+                {
+                    System.Text.Json.JsonValueKind.String => jsonEl.GetString() ?? "",
+                    System.Text.Json.JsonValueKind.True => "True",
+                    System.Text.Json.JsonValueKind.False => "False",
+                    System.Text.Json.JsonValueKind.Number => jsonEl.GetRawText(),
+                    _ => jsonEl.ToString()
+                };
+            }
+            return value?.ToString() ?? "";
+        }
+
+        private async Task<List<SessionSummary>> SearchSessionsByScanAsync(string? tenantId, SessionSearchFilter filter)
+        {
+            var indexTableClient = _tableServiceClient.GetTableClient(Constants.TableNames.SessionsIndex);
+
+            var filterParts = new List<string>();
+            if (!string.IsNullOrEmpty(tenantId))
+                filterParts.Add($"PartitionKey eq '{tenantId}'");
+            if (!string.IsNullOrEmpty(filter.Status))
+                filterParts.Add($"Status eq '{filter.Status}'");
+            if (!string.IsNullOrEmpty(filter.Manufacturer))
+                filterParts.Add($"Manufacturer eq '{filter.Manufacturer}'");
+            if (!string.IsNullOrEmpty(filter.Model))
+                filterParts.Add($"Model eq '{filter.Model}'");
+            if (!string.IsNullOrEmpty(filter.EnrollmentType))
+                filterParts.Add($"EnrollmentType eq '{filter.EnrollmentType}'");
+            if (!string.IsNullOrEmpty(filter.DeviceName))
+                filterParts.Add($"DeviceName ge '{filter.DeviceName}' and DeviceName lt '{filter.DeviceName}~'");
+            if (!string.IsNullOrEmpty(filter.OsBuild))
+                filterParts.Add($"OsBuild ge '{filter.OsBuild}' and OsBuild lt '{filter.OsBuild}~'");
+
+            var oDataFilter = filterParts.Count > 0 ? string.Join(" and ", filterParts) : null;
+
+            var sessions = new List<SessionSummary>();
+            await foreach (var entity in indexTableClient.QueryAsync<TableEntity>(filter: oDataFilter))
+            {
+                var session = MapIndexEntityToSessionSummary(entity);
+
+                // Client-side filters
+                if (!string.IsNullOrEmpty(filter.SerialNumber) &&
+                    !string.Equals(session.SerialNumber, filter.SerialNumber, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                if (filter.IsPreProvisioned.HasValue && session.IsPreProvisioned != filter.IsPreProvisioned.Value) continue;
+                if (filter.IsHybridJoin.HasValue && session.IsHybridJoin != filter.IsHybridJoin.Value) continue;
+                if (!string.IsNullOrEmpty(filter.GeoCountry) &&
+                    !string.Equals(session.GeoCountry, filter.GeoCountry, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                if (filter.StartedAfter.HasValue && session.StartedAt < filter.StartedAfter.Value) continue;
+                if (filter.StartedBefore.HasValue && session.StartedAt > filter.StartedBefore.Value) continue;
+                if (!string.IsNullOrEmpty(filter.AgentVersion) &&
+                    !string.Equals(session.AgentVersion, filter.AgentVersion, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                if (!string.IsNullOrEmpty(filter.ImeAgentVersion) &&
+                    !string.Equals(session.ImeAgentVersion, filter.ImeAgentVersion, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                sessions.Add(session);
+                if (sessions.Count >= filter.Limit) break;
+            }
+
+            return sessions;
+        }
+
+        private List<SessionSummary> ApplyBasicFilters(List<SessionSummary> sessions, SessionSearchFilter filter)
+        {
+            return sessions.Where(s =>
+            {
+                if (!string.IsNullOrEmpty(filter.Status) && s.Status.ToString() != filter.Status) return false;
+                if (!string.IsNullOrEmpty(filter.SerialNumber) &&
+                    !string.Equals(s.SerialNumber, filter.SerialNumber, StringComparison.OrdinalIgnoreCase)) return false;
+                if (filter.IsPreProvisioned.HasValue && s.IsPreProvisioned != filter.IsPreProvisioned.Value) return false;
+                if (filter.IsHybridJoin.HasValue && s.IsHybridJoin != filter.IsHybridJoin.Value) return false;
+                if (!string.IsNullOrEmpty(filter.GeoCountry) &&
+                    !string.Equals(s.GeoCountry, filter.GeoCountry, StringComparison.OrdinalIgnoreCase)) return false;
+                if (filter.StartedAfter.HasValue && s.StartedAt < filter.StartedAfter.Value) return false;
+                if (filter.StartedBefore.HasValue && s.StartedAt > filter.StartedBefore.Value) return false;
+                if (!string.IsNullOrEmpty(filter.AgentVersion) &&
+                    !string.Equals(s.AgentVersion, filter.AgentVersion, StringComparison.OrdinalIgnoreCase)) return false;
+                if (!string.IsNullOrEmpty(filter.ImeAgentVersion) &&
+                    !string.Equals(s.ImeAgentVersion, filter.ImeAgentVersion, StringComparison.OrdinalIgnoreCase)) return false;
+                return true;
+            }).ToList();
+        }
+
+        private async Task<List<SessionSummary>> BatchGetSessionsAsync(string? tenantId, List<string> sessionIds)
+        {
+            var sessionsTableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
+            var semaphore = new System.Threading.SemaphoreSlim(20, 20);
+
+            var tasks = sessionIds.Select(async sessionId =>
+            {
+                await semaphore.WaitAsync();
+                try
+                {
+                    // Try to determine the tenantId for this session
+                    var partitionKey = tenantId ?? string.Empty;
+                    if (string.IsNullOrEmpty(partitionKey))
+                    {
+                        // Cross-tenant: scan SessionsIndex for this sessionId
+                        var indexTableClient = _tableServiceClient.GetTableClient(Constants.TableNames.SessionsIndex);
+                        await foreach (var idxEntity in indexTableClient.QueryAsync<TableEntity>(
+                            filter: $"SessionId eq '{sessionId}'",
+                            maxPerPage: 1))
+                        {
+                            return MapIndexEntityToSessionSummary(idxEntity);
+                        }
+                        return null;
+                    }
+
+                    var response = await sessionsTableClient.GetEntityAsync<TableEntity>(partitionKey, sessionId);
+                    return MapToSessionSummary(response.Value);
+                }
+                catch (RequestFailedException ex) when (ex.Status == 404)
+                {
+                    return null;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Failed to get session {SessionId}", sessionId);
+                    return null;
+                }
+                finally
+                {
+                    semaphore.Release();
+                }
+            });
+
+            var results = await Task.WhenAll(tasks);
+            return results.Where(s => s != null).Select(s => s!).ToList();
+        }
+
+        /// <summary>
+        /// Searches sessions that contain a specific event type using the EventTypeIndex.
+        /// Note: source/severity/phase filtering is not supported in v1 (too expensive).
+        /// </summary>
+        public async Task<List<SessionSummary>> SearchSessionsByEventAsync(
+            string? tenantId, string eventType, string? source, string? severity, string? phase, int limit = 50)
+        {
+            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.EventTypeIndex);
+
+            string? oDataFilter;
+            if (!string.IsNullOrEmpty(tenantId))
+                oDataFilter = $"PartitionKey eq '{tenantId}_{eventType}'";
+            else
+                oDataFilter = null; // full scan — not efficient but functional
+
+            var sessionIds = new List<string>();
+            await foreach (var entity in tableClient.QueryAsync<TableEntity>(filter: oDataFilter))
+            {
+                // For cross-tenant search, filter by eventType in the PartitionKey
+                if (string.IsNullOrEmpty(tenantId))
+                {
+                    var pk = entity.PartitionKey;
+                    var underscoreIdx = pk.LastIndexOf('_');
+                    if (underscoreIdx < 0) continue;
+                    var pkEventType = pk.Substring(underscoreIdx + 1);
+                    if (!string.Equals(pkEventType, eventType, StringComparison.OrdinalIgnoreCase)) continue;
+                }
+
+                var sessionId = entity.GetString("SessionId");
+                if (!string.IsNullOrEmpty(sessionId) && !sessionIds.Contains(sessionId))
+                    sessionIds.Add(sessionId);
+
+                if (sessionIds.Count >= limit * 2) break;
+            }
+
+            if (sessionIds.Count == 0) return new List<SessionSummary>();
+
+            var sessions = await BatchGetSessionsAsync(tenantId, sessionIds);
+            return sessions.Take(limit).ToList();
+        }
+
+        /// <summary>
+        /// Searches sessions affected by a specific CVE using the CveIndex.
+        /// </summary>
+        public async Task<List<SessionSummary>> SearchSessionsByCveAsync(
+            string? tenantId, string cveId, double? minCvssScore, string? overallRisk, int limit = 50)
+        {
+            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.CveIndex);
+
+            string oDataFilter;
+            if (!string.IsNullOrEmpty(tenantId))
+                oDataFilter = $"PartitionKey eq '{tenantId}_{cveId}'";
+            else
+                oDataFilter = $"PartitionKey ge '{cveId}' and PartitionKey lt '{cveId}~'";
+
+            var sessionIds = new List<string>();
+            await foreach (var entity in tableClient.QueryAsync<TableEntity>(filter: oDataFilter))
+            {
+                if (minCvssScore.HasValue)
+                {
+                    var score = entity.GetDouble("CvssScore");
+                    if (score == null || score < minCvssScore.Value) continue;
+                }
+                if (!string.IsNullOrEmpty(overallRisk))
+                {
+                    var risk = entity.GetString("OverallRisk");
+                    if (!string.Equals(risk, overallRisk, StringComparison.OrdinalIgnoreCase)) continue;
+                }
+
+                var sessionId = entity.GetString("SessionId") ?? entity.RowKey;
+                if (!string.IsNullOrEmpty(sessionId) && !sessionIds.Contains(sessionId))
+                    sessionIds.Add(sessionId);
+
+                if (sessionIds.Count >= limit * 2) break;
+            }
+
+            if (sessionIds.Count == 0) return new List<SessionSummary>();
+
+            // Extract tenantId from PartitionKey for cross-tenant lookup if needed
+            var sessions = await BatchGetSessionsAsync(tenantId, sessionIds);
+            return sessions.Take(limit).ToList();
+        }
+
+        /// <summary>
+        /// Returns aggregated session metrics grouped by tenant.
+        /// </summary>
+        public async Task<List<object>> GetMetricsSummaryAsync(string? tenantId)
+        {
+            var indexTableClient = _tableServiceClient.GetTableClient(Constants.TableNames.SessionsIndex);
+            var oDataFilter = string.IsNullOrEmpty(tenantId) ? null : $"PartitionKey eq '{tenantId}'";
+
+            var groups = new Dictionary<string, (int total, int succeeded, int failed, int inProgress)>(StringComparer.OrdinalIgnoreCase);
+
+            await foreach (var entity in indexTableClient.QueryAsync<TableEntity>(filter: oDataFilter))
+            {
+                var pk = entity.PartitionKey;
+                var statusStr = entity.GetString("Status") ?? "InProgress";
+
+                if (!groups.TryGetValue(pk, out var g))
+                    g = (0, 0, 0, 0);
+
+                var total = g.total + 1;
+                var succeeded = g.succeeded + (statusStr == "Succeeded" ? 1 : 0);
+                var failed = g.failed + (statusStr == "Failed" ? 1 : 0);
+                var inProg = g.inProgress + (statusStr == "InProgress" ? 1 : 0);
+                groups[pk] = (total, succeeded, failed, inProg);
+            }
+
+            return groups.Select(kvp => (object)new
+            {
+                tenantId = kvp.Key,
+                totalSessions = kvp.Value.total,
+                succeeded = kvp.Value.succeeded,
+                failed = kvp.Value.failed,
+                inProgress = kvp.Value.inProgress,
+                failureRate = kvp.Value.total > 0
+                    ? Math.Round((double)kvp.Value.failed / kvp.Value.total * 100, 1)
+                    : 0.0
+            }).ToList();
+        }
+    }
+}

@@ -131,6 +131,33 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                 var storedEvents = await _storageService.StoreEventsBatchAsync(request.Events);
                 int processedCount = storedEvents.Count;
 
+                // Update EventTypeIndex and DeviceSnapshot indexes (fire-and-forget, non-blocking)
+                var indexTenantId = request.TenantId;
+                var indexSessionId = request.SessionId;
+                var indexEvents = storedEvents.ToList();
+                _ = Task.WhenAll(
+                    _storageService.UpsertEventTypeIndexBatchAsync(
+                        indexTenantId, indexSessionId,
+                        indexEvents.Select(e => e.EventType).Distinct()),
+                    _storageService.UpsertDeviceSnapshotAsync(
+                        indexTenantId, indexSessionId, indexEvents)
+                ).ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException,
+                    "Index update failed (non-fatal)"), TaskContinuationOptions.OnlyOnFaulted);
+
+                // Store IME agent version on session if detected in this batch
+                var imeVersionEvent = request.Events.FirstOrDefault(e =>
+                    e.EventType == "ime_agent_version" && e.Data?.ContainsKey("agentVersion") == true);
+                if (imeVersionEvent != null)
+                {
+                    var imeVersion = imeVersionEvent.Data["agentVersion"]?.ToString();
+                    if (!string.IsNullOrEmpty(imeVersion))
+                    {
+                        _ = _storageService.UpdateSessionImeAgentVersionAsync(request.TenantId, request.SessionId, imeVersion)
+                            .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException,
+                                "ImeAgentVersion update failed (non-fatal)"), TaskContinuationOptions.OnlyOnFaulted);
+                    }
+                }
+
                 // Classify events for downstream processing
                 var classification = ClassifyEvents(storedEvents);
 
@@ -283,6 +310,17 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                                     await _storageService.StoreVulnerabilityReportAsync(
                                         capturedTenantId, capturedSessionId, reportData);
                                     _logger.LogInformation("{Prefix} Vulnerability correlation complete (async)", capturedPrefix);
+
+                                    // Update CveIndex for searchable CVE queries
+                                    var findings = reportData.ContainsKey("findings")
+                                        ? reportData["findings"] as List<Dictionary<string, object>>
+                                        : null;
+                                    if (findings != null && findings.Count > 0)
+                                    {
+                                        _ = _storageService.UpsertCveIndexEntriesAsync(capturedTenantId, capturedSessionId, findings)
+                                            .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException,
+                                                "CveIndex update failed (non-fatal)"), TaskContinuationOptions.OnlyOnFaulted);
+                                    }
 
                                     // Push SignalR notification so the UI fetches the report immediately
                                     var overallRisk = reportData.ContainsKey("scan_summary")
