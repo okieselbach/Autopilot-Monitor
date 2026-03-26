@@ -49,6 +49,16 @@ namespace AutopilotMonitor.Functions.Functions.Reports
                 // Still needed: GA check for audit log skip logic
                 var isGlobalAdmin = await _globalAdminService.IsGlobalAdminAsync(userIdentifier);
 
+                // Request body size limit (1 MB)
+                if (req.Headers.TryGetValues("Content-Length", out var clValues)
+                    && long.TryParse(clValues.FirstOrDefault(), out var contentLength)
+                    && contentLength > 1_048_576)
+                {
+                    var tooLarge = req.CreateResponse(HttpStatusCode.BadRequest);
+                    await tooLarge.WriteAsJsonAsync(new { success = false, message = "Request body too large" });
+                    return tooLarge;
+                }
+
                 // Parse request body
                 var request = await req.ReadFromJsonAsync<SubmitSessionReportRequest>();
                 if (request == null)

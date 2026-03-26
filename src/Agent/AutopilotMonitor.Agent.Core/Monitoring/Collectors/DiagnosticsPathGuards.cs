@@ -106,6 +106,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     normalizedDir = Path.GetFullPath(expanded);
                 }
 
+                // Symlink / junction / reparse point detection — fail-closed
+                if (IsSymlinkOrReparsePoint(normalizedDir))
+                    return false;
+
                 // C:\Users block always applies (even in unrestricted mode)
                 if (normalizedDir.StartsWith(BlockedUsersPrefix, StringComparison.OrdinalIgnoreCase) &&
                     (normalizedDir.Length == BlockedUsersPrefix.Length ||
@@ -150,6 +154,46 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             {
                 // Any path normalization failure → deny
                 return false;
+            }
+        }
+
+        /// <summary>
+        /// Checks whether any component of the path (directories or file) is a symlink,
+        /// junction, or other reparse point. Returns true if a reparse point is detected.
+        /// Fail-closed: returns true on any error.
+        /// </summary>
+        private static bool IsSymlinkOrReparsePoint(string path)
+        {
+            try
+            {
+                // Walk up the directory tree checking each component
+                var current = path;
+                while (!string.IsNullOrEmpty(current))
+                {
+                    var dirInfo = new DirectoryInfo(current);
+                    if (dirInfo.Exists && dirInfo.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                        return true;
+
+                    var parent = Path.GetDirectoryName(current);
+                    if (parent == current) // root reached
+                        break;
+                    current = parent;
+                }
+
+                // Check the target path itself (if it's a file)
+                if (File.Exists(path))
+                {
+                    var fileInfo = new FileInfo(path);
+                    if (fileInfo.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                        return true;
+                }
+
+                return false;
+            }
+            catch
+            {
+                // Fail-closed: treat errors as suspicious
+                return true;
             }
         }
     }

@@ -101,6 +101,15 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
         /// </summary>
         internal async Task<HttpResponseData> ProcessReportErrorAsync(HttpRequestData req, string tenantId)
         {
+            // Request body size limit (1 MB)
+            if (req.Headers.TryGetValues("Content-Length", out var clValues)
+                && long.TryParse(clValues.FirstOrDefault(), out var contentLength)
+                && contentLength > 1_048_576)
+            {
+                _logger.LogWarning("ReportAgentError: Request body too large ({ContentLength} bytes) from tenant {TenantId}", contentLength, tenantId);
+                return req.CreateResponse(HttpStatusCode.OK); // Still 200 — agent must not retry
+            }
+
             // Parse the report body
             AgentErrorReport? report = null;
             try

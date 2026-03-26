@@ -135,6 +135,16 @@ namespace AutopilotMonitor.Functions.Functions.Feedback
                 var principal = req.FunctionContext.GetUser();
                 string displayName = principal?.GetDisplayName() ?? upn;
 
+                // Request body size limit (1 MB)
+                if (req.Headers.TryGetValues("Content-Length", out var clValues)
+                    && long.TryParse(clValues.FirstOrDefault(), out var contentLength)
+                    && contentLength > 1_048_576)
+                {
+                    var tooLarge = req.CreateResponse(HttpStatusCode.BadRequest);
+                    await tooLarge.WriteAsJsonAsync(new { success = false, message = "Request body too large" });
+                    return tooLarge;
+                }
+
                 var body = await req.ReadFromJsonAsync<FeedbackRequest>();
                 if (body == null)
                 {
