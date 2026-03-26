@@ -1,8 +1,10 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { apiFetch, buildQuery } from './client.js';
+import type { VectorStore } from './vector-store.js';
+import { embed } from './knowledge-base.js';
 
-export function registerTools(server: McpServer): void {
+export function registerTools(server: McpServer, knowledgeBase?: VectorStore): void {
   // Tool 1: search_sessions
   server.tool(
     'search_sessions',
@@ -165,6 +167,175 @@ export function registerTools(server: McpServer): void {
       const q = buildQuery({ tenantId } as Record<string, string | undefined>);
       const data = await apiFetch(`/api/devices/blocked${q}`);
       return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  // Tool 8: search_events_semantic (vector search over live events)
+  server.tool(
+    'search_events_semantic',
+    'Semantic search over enrollment event messages within a session or across recent failed sessions. ' +
+    'Unlike exact filters, this finds events by MEANING — e.g. "network timeout" also matches "connection timed out", "request failed after waiting". ' +
+    'Use this when you need to find events that match a symptom description rather than an exact event type. ' +
+    'Provide a sessionId to search within one session, or omit it to search across recent failed sessions.',
+    {
+      query: z.string().describe('Natural language description of what to find (e.g. "app download stuck", "certificate error", "disk space low")'),
+      sessionId: z.string().optional().describe('Search within a specific session. If omitted, searches across recent failed sessions.'),
+      tenantId: z.string().optional().describe('Tenant ID (global-scoped key only)'),
+      topK: z.number().min(1).max(30).optional().default(10).describe('Number of matching events to return (1-30, default 10)'),
+      minScore: z.number().min(0).max(1).optional().default(0.35)
+        .describe('Minimum similarity score (0-1, default 0.35)'),
+    },
+    async ({ query, sessionId, tenantId, topK, minScore }) => {
+      // Fetch events — either from a specific session or from recent failed sessions
+      type EventEntry = { eventType?: string; severity?: string; source?: string; message?: string; timestamp?: string; phase?: string; data?: Record<string, unknown> };
+      let events: EventEntry[] = [];
+      let sessionIds: string[] = [];
+
+      if (sessionId) {
+        // Single session mode
+        const q = buildQuery({ tenantId } as Record<string, string | undefined>);
+        const data = await apiFetch(`/api/sessions/${sessionId}/events${q}`) as { events?: EventEntry[] };
+        events = data?.events ?? [];
+        sessionIds = [sessionId];
+      } else {
+        // Cross-session mode: fetch recent failed sessions, then their events
+        const searchQ = buildQuery({ status: 'Failed', tenantId, limit: 5 } as Record<string, string | number | undefined>);
+        const sessions = await apiFetch(`/api/sessions/search${searchQ}`) as {
+          sessions?: Array<{ sessionId?: string }>;
+        };
+        const ids = (sessions?.sessions ?? []).map((s) => s.sessionId).filter(Boolean) as string[];
+        sessionIds = ids;
+        const q = buildQuery({ tenantId } as Record<string, string | undefined>);
+        const allEvents = await Promise.all(
+          ids.map(async (sid) => {
+            try {
+              const d = await apiFetch(`/api/sessions/${sid}/events${q}`) as { events?: EventEntry[] };
+              return (d?.events ?? []).map((e) => ({ ...e, _sessionId: sid }));
+            } catch { return []; }
+          })
+        );
+        events = allEvents.flat();
+      }
+
+      // Filter to events that have a meaningful message
+      const candidates = events.filter((e) => e.message && e.message.length > 5);
+
+      if (candidates.length === 0) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({ query, resultCount: 0, results: [], note: 'No events with messages found.' }),
+          }],
+        };
+      }
+
+      // Build text representations and compute embeddings
+      const texts = candidates.map((e) => {
+        const parts = [e.message];
+        if (e.eventType) parts.push(`Event: ${e.eventType}`);
+        if (e.severity) parts.push(`Severity: ${e.severity}`);
+        if (e.source) parts.push(`Source: ${e.source}`);
+        return parts.join(' | ');
+      });
+
+      const queryEmbedding = await embed(query);
+
+      // Embed events in batches
+      const eventEmbeddings = await Promise.all(texts.map((t) => embed(t)));
+
+      // Score and rank
+      const scored = candidates.map((e, i) => {
+        let dot = 0, normA = 0, normB = 0;
+        for (let j = 0; j < queryEmbedding.length; j++) {
+          dot += queryEmbedding[j] * eventEmbeddings[i][j];
+          normA += queryEmbedding[j] * queryEmbedding[j];
+          normB += eventEmbeddings[i][j] * eventEmbeddings[i][j];
+        }
+        const denom = Math.sqrt(normA) * Math.sqrt(normB);
+        const score = denom === 0 ? 0 : dot / denom;
+        return { event: e, score, text: texts[i] };
+      });
+
+      const results = scored
+        .filter((r) => r.score >= minScore)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, topK)
+        .map((r) => ({
+          score: Math.round(r.score * 1000) / 1000,
+          sessionId: (r.event as Record<string, unknown>)._sessionId ?? sessionId,
+          eventType: r.event.eventType,
+          severity: r.event.severity,
+          source: r.event.source,
+          phase: r.event.phase,
+          timestamp: r.event.timestamp,
+          message: r.event.message,
+        }));
+
+      return {
+        content: [{
+          type: 'text' as const,
+          text: JSON.stringify({
+            query,
+            sessionsSearched: sessionIds,
+            eventsAnalyzed: candidates.length,
+            resultCount: results.length,
+            results,
+          }, null, 2),
+        }],
+      };
+    }
+  );
+
+  // Tool 9: search_knowledge (vector search over rules)
+  server.tool(
+    'search_knowledge',
+    'Semantic search over the Autopilot Monitor knowledge base: analysis rules, gather rules, and IME log patterns. ' +
+    'Use natural language queries like "app install timeout", "BitLocker issues", "detection script failure". ' +
+    'Returns the most relevant rules and patterns ranked by semantic similarity. ' +
+    'Great for finding remediation steps, understanding error patterns, or discovering relevant diagnostic rules.',
+    {
+      query: z.string().describe('Natural language search query (e.g. "app download timeout", "TPM not ready", "ESP stuck")'),
+      topK: z.number().min(1).max(20).optional().default(5).describe('Number of results to return (1-20, default 5)'),
+      type: z.enum(['all', 'analyze-rule', 'gather-rule', 'ime-log-pattern']).optional().default('all')
+        .describe('Filter by document type. Default: search all types.'),
+      minScore: z.number().min(0).max(1).optional().default(0.3)
+        .describe('Minimum similarity score threshold (0-1, default 0.3). Lower = more results, higher = stricter matching.'),
+    },
+    async ({ query, topK, type, minScore }) => {
+      if (!knowledgeBase || knowledgeBase.size === 0) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({ error: 'Knowledge base not initialized. The server may still be loading embeddings.' }),
+          }],
+        };
+      }
+
+      const queryEmbedding = await embed(query);
+      let results = knowledgeBase.search(queryEmbedding, type === 'all' ? topK * 3 : topK, minScore);
+
+      // Filter by type if specified
+      if (type !== 'all') {
+        results = results.filter((r) => r.metadata.type === type);
+      }
+
+      results = results.slice(0, topK);
+
+      const formatted = results.map((r) => ({
+        id: r.id,
+        score: Math.round(r.score * 1000) / 1000,
+        type: r.metadata.type,
+        title: r.metadata.title ?? r.metadata.description ?? r.id,
+        content: r.text,
+        metadata: r.metadata,
+      }));
+
+      return {
+        content: [{
+          type: 'text' as const,
+          text: JSON.stringify({ query, resultCount: formatted.length, results: formatted }, null, 2),
+        }],
+      };
     }
   );
 }
