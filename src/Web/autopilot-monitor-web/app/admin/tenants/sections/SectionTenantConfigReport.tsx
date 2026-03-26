@@ -55,6 +55,8 @@ interface TenantConfig {
   rebootOnComplete?: boolean | null;
   rebootDelaySeconds?: number | null;
   enableGeoLocation?: boolean | null;
+  enableTimezoneAutoSet?: boolean | null;
+  ntpServer?: string | null;
   enableImeMatchLog?: boolean | null;
   logLevel?: string | null;
   maxBatchSize?: number | null;
@@ -117,6 +119,8 @@ const DEFAULTS: Record<string, unknown> = {
   rebootOnComplete: null,
   rebootDelaySeconds: null,
   enableGeoLocation: null,
+  enableTimezoneAutoSet: null,
+  ntpServer: 'time.windows.com',
   enableImeMatchLog: null,
   logLevel: null,
   maxBatchSize: null,
@@ -150,6 +154,8 @@ const RUNTIME_DEFAULTS: Record<string, unknown> = {
   selfDestructOnComplete: true,
   keepLogFile: false,
   enableGeoLocation: true,
+  enableTimezoneAutoSet: false,
+  ntpServer: 'time.windows.com',
   enableImeMatchLog: false,
   maxAuthFailures: 5,
   authFailureTimeoutMinutes: 0,
@@ -275,6 +281,8 @@ function computeRuntime(c: TenantConfig): Record<string, unknown> {
     selfDestructOnComplete: c.selfDestructOnComplete ?? true,
     keepLogFile: c.keepLogFile ?? false,
     enableGeoLocation: c.enableGeoLocation ?? true,
+    enableTimezoneAutoSet: c.enableTimezoneAutoSet ?? false,
+    ntpServer: c.ntpServer ?? 'time.windows.com',
     enableImeMatchLog: c.enableImeMatchLog ?? false,
     maxAuthFailures: c.maxAuthFailures ?? 5,
     authFailureTimeoutMinutes: c.authFailureTimeoutMinutes ?? 0,
@@ -331,9 +339,7 @@ export function SectionTenantConfigReport() {
           }));
           mapped.sort((a, b) => (a.domainName || a.tenantId).localeCompare(b.domainName || b.tenantId));
           setTenants(mapped);
-          if (mapped.length > 0 && !selectedTenantId) {
-            setSelectedTenantId(mapped[0].tenantId);
-          }
+          // Don't auto-select — user must pick a tenant from the dropdown
         }
       } catch (err) {
         if (err instanceof TokenExpiredError) {
@@ -416,6 +422,7 @@ export function SectionTenantConfigReport() {
             disabled={loadingTenants}
           >
             {loadingTenants && <option>Loading...</option>}
+            {!loadingTenants && <option value="">— Select tenant —</option>}
             {tenants.map((t) => (
               <option key={t.tenantId} value={t.tenantId}>
                 {t.domainName
@@ -538,6 +545,8 @@ export function SectionTenantConfigReport() {
                 <ConfigRow label="Reboot On Complete" value={config.rebootOnComplete} configKey="rebootOnComplete" defaults={DEFAULTS} />
                 <ConfigRow label="Reboot Delay (sec)" value={config.rebootDelaySeconds} configKey="rebootDelaySeconds" defaults={DEFAULTS} />
                 <ConfigRow label="Geo-Location" value={config.enableGeoLocation} configKey="enableGeoLocation" defaults={DEFAULTS} />
+                <ConfigRow label="Timezone Auto-Set" value={config.enableTimezoneAutoSet} configKey="enableTimezoneAutoSet" defaults={DEFAULTS} />
+                <ConfigRow label="NTP Server" value={config.ntpServer} configKey="ntpServer" defaults={DEFAULTS} />
                 <ConfigRow label="IME Match Log" value={config.enableImeMatchLog} configKey="enableImeMatchLog" defaults={DEFAULTS} />
                 <ConfigRow label="Log Level" value={config.logLevel} configKey="logLevel" defaults={DEFAULTS} />
                 <ConfigRow label="Max Batch Size" value={config.maxBatchSize} configKey="maxBatchSize" defaults={DEFAULTS} />
@@ -598,6 +607,8 @@ export function SectionTenantConfigReport() {
                     <ConfigRow label="Reboot On Complete" value={runtime.rebootOnComplete} configKey="rebootOnComplete" defaults={RUNTIME_DEFAULTS} />
                     <ConfigRow label="Reboot Delay (sec)" value={runtime.rebootDelaySeconds} configKey="rebootDelaySeconds" defaults={RUNTIME_DEFAULTS} />
                     <ConfigRow label="Geo-Location" value={runtime.enableGeoLocation} configKey="enableGeoLocation" defaults={RUNTIME_DEFAULTS} />
+                    <ConfigRow label="Timezone Auto-Set" value={runtime.enableTimezoneAutoSet} configKey="enableTimezoneAutoSet" defaults={RUNTIME_DEFAULTS} />
+                    <ConfigRow label="NTP Server" value={runtime.ntpServer} configKey="ntpServer" defaults={RUNTIME_DEFAULTS} />
                     <ConfigRow label="IME Match Log" value={runtime.enableImeMatchLog} configKey="enableImeMatchLog" defaults={RUNTIME_DEFAULTS} />
                     <ConfigRow label="Log Level" value={runtime.logLevel} configKey="logLevel" defaults={RUNTIME_DEFAULTS} />
                     <ConfigRow label="Send Trace Events" value={runtime.sendTraceEvents} configKey="sendTraceEvents" defaults={RUNTIME_DEFAULTS} />
