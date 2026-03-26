@@ -1,0 +1,150 @@
+name: Build & Release Agent
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_number:
+        description: 'Build number override (leave empty to auto-increment from buildcounter.txt)'
+        required: false
+        type: string
+      create_release:
+        description: 'Create a GitHub Release'
+        required: true
+        type: boolean
+        default: true
+      prerelease:
+        description: 'Mark release as pre-release'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    name: Build Agent
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Determine build number
+        id: version
+        shell: pwsh
+        run: |
+          $counterFile = "src/Agent/AutopilotMonitor.Agent/buildcounter.txt"
+          $inputBuildNumber = "${{ inputs.build_number }}"
+
+          if ($inputBuildNumber -ne "") {
+            $buildNumber = [int]$inputBuildNumber
+            Write-Host "Using manual build number: $buildNumber"
+          } else {
+            $current = [int](Get-Content $counterFile).Trim()
+            $buildNumber = $current + 1
+            Write-Host "Auto-incremented build number: $current -> $buildNumber"
+          }
+
+          # Read version prefix from csproj
+          $csproj = Get-Content "src/Agent/AutopilotMonitor.Agent/AutopilotMonitor.Agent.csproj" -Raw
+          if ($csproj -match '<VersionPrefix>(\d+\.\d+)</VersionPrefix>') {
+            $versionPrefix = $Matches[1]
+          } else {
+            $versionPrefix = "1.0"
+          }
+
+          $version = "$versionPrefix.$buildNumber"
+          Write-Host "Full version: $version"
+
+          "build_number=$buildNumber" >> $env:GITHUB_OUTPUT
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=v$version" >> $env:GITHUB_OUTPUT
+
+      - name: Restore dependencies
+        run: dotnet restore src/Agent/AutopilotMonitor.Agent/AutopilotMonitor.Agent.csproj
+
+      - name: Build Agent
+        run: >
+          dotnet build src/Agent/AutopilotMonitor.Agent/AutopilotMonitor.Agent.csproj
+          --configuration Release
+          --no-restore
+        env:
+          BUILD_NUMBER: ${{ steps.version.outputs.build_number }}
+
+      - name: Update buildcounter.txt
+        if: inputs.build_number == ''
+        shell: pwsh
+        run: |
+          $buildNumber = "${{ steps.version.outputs.build_number }}"
+          Set-Content -Path "src/Agent/AutopilotMonitor.Agent/buildcounter.txt" -Value $buildNumber -NoNewline
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/Agent/AutopilotMonitor.Agent/buildcounter.txt
+          git commit -m "chore: bump build counter to $buildNumber"
+          git push
+
+      - name: Create release artifact
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $sourcePath = "src/Agent/AutopilotMonitor.Agent/bin/Release/net48"
+          $zipName = "AutopilotMonitor-Agent-v$version.zip"
+
+          # Verify build output exists
+          if (-not (Test-Path "$sourcePath/AutopilotMonitor.Agent.exe")) {
+            Write-Error "Agent build output not found at $sourcePath"
+            exit 1
+          }
+
+          # Create ZIP
+          Compress-Archive -Path "$sourcePath/*" -DestinationPath $zipName
+          Write-Host "Created artifact: $zipName"
+
+          # Copy version.json for separate upload
+          Copy-Item "$sourcePath/version.json" "version.json"
+
+          "zip_name=$zipName" >> $env:GITHUB_OUTPUT
+        id: artifact
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AutopilotMonitor-Agent-v${{ steps.version.outputs.version }}
+          path: ${{ steps.artifact.outputs.zip_name }}
+
+      - name: Upload version metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: version-metadata
+          path: version.json
+
+      - name: Create GitHub Release
+        if: inputs.create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Autopilot Monitor Agent ${{ steps.version.outputs.version }}
+          body: |
+            ## Autopilot Monitor Agent ${{ steps.version.outputs.version }}
+
+            ### Installation
+            1. Download `AutopilotMonitor-Agent-v${{ steps.version.outputs.version }}.zip`
+            2. Extract to `C:\ProgramData\AutopilotMonitor\Agent\`
+            3. Run `AutopilotMonitor.Agent.exe --install` to register the Scheduled Task
+
+            ### Version Info
+            - **Version:** ${{ steps.version.outputs.version }}
+            - **Build Number:** ${{ steps.version.outputs.build_number }}
+            - **Built from:** ${{ github.sha }}
+          draft: false
+          prerelease: ${{ inputs.prerelease }}
+          files: |
+            ${{ steps.artifact.outputs.zip_name }}
+            version.json
+          generate_release_notes: true
