@@ -1,0 +1,225 @@
+name: Build & Release Agent
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_number:
+        description: 'Build number override (leave empty to auto-increment from buildcounter.txt)'
+        required: false
+        type: string
+      upload_blob:
+        description: 'Upload ZIP + version.json to Azure Blob Storage'
+        required: true
+        type: boolean
+        default: true
+      create_release:
+        description: 'Create a GitHub Release'
+        required: true
+        type: boolean
+        default: true
+      prerelease:
+        description: 'Mark release as pre-release'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    name: Build Agent
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Determine build number
+        id: version
+        shell: pwsh
+        run: |
+          $counterFile = "src/Agent/AutopilotMonitor.Agent/buildcounter.txt"
+          $inputBuildNumber = "${{ inputs.build_number }}"
+
+          if ($inputBuildNumber -ne "") {
+            $buildNumber = [int]$inputBuildNumber
+            Write-Host "Using manual build number: $buildNumber"
+          } else {
+            $current = [int](Get-Content $counterFile).Trim()
+            $buildNumber = $current + 1
+            Write-Host "Auto-incremented build number: $current -> $buildNumber"
+          }
+
+          # Read version prefix from csproj
+          $csproj = Get-Content "src/Agent/AutopilotMonitor.Agent/AutopilotMonitor.Agent.csproj" -Raw
+          if ($csproj -match '<VersionPrefix>(\d+\.\d+)</VersionPrefix>') {
+            $versionPrefix = $Matches[1]
+          } else {
+            $versionPrefix = "1.0"
+          }
+
+          $version = "$versionPrefix.$buildNumber"
+          Write-Host "Full version: $version"
+
+          "build_number=$buildNumber" >> $env:GITHUB_OUTPUT
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=v$version" >> $env:GITHUB_OUTPUT
+
+      - name: Restore dependencies
+        run: |
+          dotnet restore src/Agent/AutopilotMonitor.Agent/AutopilotMonitor.Agent.csproj
+          dotnet restore src/Agent/AutopilotMonitor.SummaryDialog/AutopilotMonitor.SummaryDialog.csproj
+
+      - name: Build Agent
+        run: >
+          dotnet build src/Agent/AutopilotMonitor.Agent/AutopilotMonitor.Agent.csproj
+          --configuration Release
+          --no-restore
+        env:
+          BUILD_NUMBER: ${{ steps.version.outputs.build_number }}
+
+      - name: Build SummaryDialog
+        run: >
+          dotnet build src/Agent/AutopilotMonitor.SummaryDialog/AutopilotMonitor.SummaryDialog.csproj
+          --configuration Release
+          --no-restore
+
+      - name: Update buildcounter.txt
+        if: inputs.build_number == ''
+        shell: pwsh
+        run: |
+          $buildNumber = "${{ steps.version.outputs.build_number }}"
+          Set-Content -Path "src/Agent/AutopilotMonitor.Agent/buildcounter.txt" -Value $buildNumber -NoNewline
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/Agent/AutopilotMonitor.Agent/buildcounter.txt
+          git commit -m "chore: bump build counter to $buildNumber"
+          git push
+
+      - name: Create release artifact
+        id: artifact
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $agentOutput = "src/Agent/AutopilotMonitor.Agent/bin/Release/net48"
+          $dialogOutput = "src/Agent/AutopilotMonitor.SummaryDialog/bin/Release/net48"
+          $stagingDir = "staging/agent"
+
+          # Verify build outputs exist
+          if (-not (Test-Path "$agentOutput/AutopilotMonitor.Agent.exe")) {
+            Write-Error "Agent build output not found at $agentOutput"
+            exit 1
+          }
+          if (-not (Test-Path "$dialogOutput/AutopilotMonitor.SummaryDialog.exe")) {
+            Write-Error "SummaryDialog build output not found at $dialogOutput"
+            exit 1
+          }
+
+          # Create staging directory with Agent output as base
+          New-Item -Path $stagingDir -ItemType Directory -Force | Out-Null
+          Copy-Item -Path "$agentOutput/*" -Destination $stagingDir -Recurse -Force
+
+          # Copy SummaryDialog files into the same directory (Agent expects it next to itself)
+          Copy-Item -Path "$dialogOutput/AutopilotMonitor.SummaryDialog.exe" -Destination $stagingDir -Force
+          Copy-Item -Path "$dialogOutput/AutopilotMonitor.SummaryDialog.pdb" -Destination $stagingDir -Force -ErrorAction SilentlyContinue
+
+          # Create versioned ZIP for GitHub Release
+          $versionedZip = "AutopilotMonitor-Agent-v$version.zip"
+          Compress-Archive -Path "$stagingDir/*" -DestinationPath $versionedZip
+          Write-Host "Created release artifact: $versionedZip"
+
+          # Create deployment ZIP with fixed name for Blob Storage (matches bootstrap script download URL)
+          $deployZip = "AutopilotMonitor-Agent.zip"
+          Copy-Item $versionedZip $deployZip
+          Write-Host "Created deployment artifact: $deployZip"
+
+          # Copy version.json for separate upload
+          Copy-Item "$agentOutput/version.json" "version.json"
+          Write-Host "version.json content: $(Get-Content version.json)"
+
+          "versioned_zip=$versionedZip" >> $env:GITHUB_OUTPUT
+          "deploy_zip=$deployZip" >> $env:GITHUB_OUTPUT
+
+      - name: Upload to Azure Blob Storage
+        if: inputs.upload_blob
+        shell: pwsh
+        run: |
+          # Upload AutopilotMonitor-Agent.zip and version.json to blob container
+          $containerUrl = "https://autopilotmonitor.blob.core.windows.net/agent"
+          $sasToken = "${{ secrets.AZURE_BLOB_AGENT_SAS_TOKEN }}"
+
+          # Upload ZIP
+          $zipBlobUrl = "$containerUrl/AutopilotMonitor-Agent.zip?$sasToken"
+          $zipBytes = [System.IO.File]::ReadAllBytes("AutopilotMonitor-Agent.zip")
+          $zipHeaders = @{
+            "x-ms-blob-type" = "BlockBlob"
+            "Content-Type"   = "application/zip"
+          }
+          # Compute Content-MD5 for integrity validation (bootstrap script checks this header)
+          $md5 = [System.Security.Cryptography.MD5]::Create()
+          $md5Hash = [Convert]::ToBase64String($md5.ComputeHash($zipBytes))
+          $zipHeaders["Content-MD5"] = $md5Hash
+          $md5.Dispose()
+
+          Write-Host "Uploading AutopilotMonitor-Agent.zip ($([math]::Round($zipBytes.Length / 1MB, 2)) MB, MD5: $md5Hash)..."
+          Invoke-RestMethod -Uri $zipBlobUrl -Method Put -Headers $zipHeaders -Body $zipBytes
+          Write-Host "ZIP uploaded successfully"
+
+          # Upload version.json
+          $versionBlobUrl = "$containerUrl/version.json?$sasToken"
+          $versionContent = Get-Content "version.json" -Raw
+          $versionHeaders = @{
+            "x-ms-blob-type" = "BlockBlob"
+            "Content-Type"   = "application/json"
+          }
+          Write-Host "Uploading version.json: $versionContent"
+          Invoke-RestMethod -Uri $versionBlobUrl -Method Put -Headers $versionHeaders -Body $versionContent
+          Write-Host "version.json uploaded successfully"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AutopilotMonitor-Agent-v${{ steps.version.outputs.version }}
+          path: ${{ steps.artifact.outputs.versioned_zip }}
+
+      - name: Upload version metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: version-metadata
+          path: version.json
+
+      - name: Create GitHub Release
+        if: inputs.create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Autopilot Monitor Agent ${{ steps.version.outputs.version }}
+          body: |
+            ## Autopilot Monitor Agent ${{ steps.version.outputs.version }}
+
+            ### Installation
+            1. Download `AutopilotMonitor-Agent-v${{ steps.version.outputs.version }}.zip`
+            2. Extract to `C:\ProgramData\AutopilotMonitor\Agent\`
+            3. Run `AutopilotMonitor.Agent.exe --install` to register the Scheduled Task
+
+            ### Included Components
+            - **AutopilotMonitor.Agent.exe** - Monitoring agent
+            - **AutopilotMonitor.SummaryDialog.exe** - Enrollment summary dialog (WPF)
+            - **version.json** - Version metadata for self-update
+
+            ### Version Info
+            - **Version:** ${{ steps.version.outputs.version }}
+            - **Build Number:** ${{ steps.version.outputs.build_number }}
+            - **Built from:** ${{ github.sha }}
+          draft: false
+          prerelease: ${{ inputs.prerelease }}
+          files: |
+            ${{ steps.artifact.outputs.versioned_zip }}
+            version.json
+          generate_release_notes: true
