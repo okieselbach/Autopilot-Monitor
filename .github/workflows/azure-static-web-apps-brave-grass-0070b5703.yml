@@ -24,7 +24,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: true
           lfs: false
           fetch-depth: 0  # Full history needed for git-based sitemap lastmod dates
       - name: Build And Deploy

@@ -12,7 +12,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: main
-          submodules: true
           lfs: false
 
       - name: Build And Deploy
