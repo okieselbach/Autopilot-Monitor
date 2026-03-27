@@ -114,6 +114,16 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 _desktopArrivalDetector.Start();
                 _logger.Info("DesktopArrivalDetector started — monitoring for real user desktop");
 
+                // IME process watcher — detects when IntuneManagementExtension.exe exits unexpectedly
+                _imeProcessWatcher = new ImeProcessWatcher(
+                    _configuration.SessionId,
+                    _configuration.TenantId,
+                    EmitEvent,
+                    _logger
+                );
+                _imeProcessWatcher.Start();
+                _logger.Info("ImeProcessWatcher started — watching for IntuneManagementExtension.exe exit");
+
                 // Network change detector — monitors for NIC/SSID/IP changes during provisioning
                 _networkChangeDetector = new NetworkChangeDetector(
                     _configuration.SessionId,
@@ -164,6 +174,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 _desktopArrivalDetector.Dispose();
                 _desktopArrivalDetector = null;
             }
+
+            _imeProcessWatcher?.Dispose();
+            _imeProcessWatcher = null;
 
             _networkChangeDetector?.Dispose();
             _networkChangeDetector = null;

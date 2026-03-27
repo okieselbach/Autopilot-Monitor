@@ -68,6 +68,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         // Desktop arrival detection (no-ESP scenarios)
         private DesktopArrivalDetector _desktopArrivalDetector;
 
+        // IME process watcher — detects when IntuneManagementExtension.exe exits
+        private ImeProcessWatcher _imeProcessWatcher;
+
         // Network change detection (always on)
         private NetworkChangeDetector _networkChangeDetector;
 
