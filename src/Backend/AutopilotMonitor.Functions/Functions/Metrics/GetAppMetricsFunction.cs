@@ -1,6 +1,6 @@
 using System.Net;
 using AutopilotMonitor.Functions.Helpers;
-using AutopilotMonitor.Functions.Services;
+using AutopilotMonitor.Shared.DataAccess;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
@@ -10,12 +10,12 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
     public class GetAppMetricsFunction
     {
         private readonly ILogger<GetAppMetricsFunction> _logger;
-        private readonly TableStorageService _storageService;
+        private readonly IMetricsRepository _metricsRepo;
 
-        public GetAppMetricsFunction(ILogger<GetAppMetricsFunction> logger, TableStorageService storageService)
+        public GetAppMetricsFunction(ILogger<GetAppMetricsFunction> logger, IMetricsRepository metricsRepo)
         {
             _logger = logger;
-            _storageService = storageService;
+            _metricsRepo = metricsRepo;
         }
 
         [Function("GetAppMetrics")]
@@ -37,7 +37,7 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
 
                 var cutoff = DateTime.UtcNow.AddDays(-days);
 
-                var allSummaries = await _storageService.GetAppInstallSummariesByTenantAsync(tenantId);
+                var allSummaries = await _metricsRepo.GetAppInstallSummariesByTenantAsync(tenantId);
                 var summaries = allSummaries.Where(s => s.StartedAt >= cutoff).ToList();
 
                 // Aggregate: slowest apps (avg duration) and top failing apps

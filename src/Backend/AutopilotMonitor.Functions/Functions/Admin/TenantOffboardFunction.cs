@@ -37,7 +37,7 @@ public class TenantOffboardFunction
         _logger = logger;
         _tenantAdminsService = tenantAdminsService;
         _globalAdminService = globalAdminService;
-        _storageService = storageService;
+        _maintenanceRepo = maintenanceRepo;
         var connectionString = configuration["AzureTableStorageConnectionString"];
         _tableServiceClient = new TableServiceClient(connectionString);
     }
@@ -83,7 +83,7 @@ public class TenantOffboardFunction
         _logger.LogWarning($"TENANT OFFBOARD initiated for tenant {tenantId} by {upn}");
 
         // Audit under Global TenantId so the entry survives tenant data deletion
-        await _storageService.LogAuditEntryAsync(
+        await _maintenanceRepo.LogAuditEntryAsync(
             Constants.AuditGlobalTenantId,
             "DELETE",
             "Tenant",
@@ -150,7 +150,7 @@ public class TenantOffboardFunction
             details["Action"] = "Offboard";
             details["Phase"] = "Completed";
             details["TotalRowsDeleted"] = result.DeletedCounts.Values.Sum().ToString();
-            await _storageService.LogAuditEntryAsync(
+            await _maintenanceRepo.LogAuditEntryAsync(
                 Constants.AuditGlobalTenantId,
                 "DELETE",
                 "Tenant",
