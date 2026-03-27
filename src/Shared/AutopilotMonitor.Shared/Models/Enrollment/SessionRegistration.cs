@@ -15,52 +15,52 @@ namespace AutopilotMonitor.Shared.Models
         /// <summary>
         /// Tenant identifier
         /// </summary>
-        public string TenantId { get; set; }
+        public string TenantId { get; set; } = default!;
 
         /// <summary>
         /// Device serial number
         /// </summary>
-        public string SerialNumber { get; set; }
+        public string SerialNumber { get; set; } = default!;
 
         /// <summary>
         /// Device manufacturer
         /// </summary>
-        public string Manufacturer { get; set; }
+        public string Manufacturer { get; set; } = default!;
 
         /// <summary>
         /// Device model
         /// </summary>
-        public string Model { get; set; }
+        public string Model { get; set; } = default!;
 
         /// <summary>
         /// Device name
         /// </summary>
-        public string DeviceName { get; set; }
+        public string DeviceName { get; set; } = default!;
 
         /// <summary>
         /// OS product name, e.g. "Microsoft Windows 11 Pro"
         /// </summary>
-        public string OsName { get; set; }
+        public string OsName { get; set; } = default!;
 
         /// <summary>
         /// Real OS build number, e.g. "26220.7934" (CurrentBuild.UBR from registry)
         /// </summary>
-        public string OsBuild { get; set; }
+        public string OsBuild { get; set; } = default!;
 
         /// <summary>
         /// OS display version, e.g. "25H2", "24H2"
         /// </summary>
-        public string OsDisplayVersion { get; set; }
+        public string OsDisplayVersion { get; set; } = default!;
 
         /// <summary>
         /// OS edition (e.g., "Pro", "Enterprise")
         /// </summary>
-        public string OsEdition { get; set; }
+        public string OsEdition { get; set; } = default!;
 
         /// <summary>
         /// OS language
         /// </summary>
-        public string OsLanguage { get; set; }
+        public string OsLanguage { get; set; } = default!;
 
         /// <summary>
         /// Whether this is user-driven enrollment
@@ -80,7 +80,7 @@ namespace AutopilotMonitor.Shared.Models
         /// <summary>
         /// Agent version
         /// </summary>
-        public string AgentVersion { get; set; }
+        public string AgentVersion { get; set; } = default!;
 
         /// <summary>
         /// Enrollment type detected by the agent: "v1" (Autopilot Classic/ESP) or "v2" (Windows Device Preparation)

@@ -13,22 +13,22 @@ namespace AutopilotMonitor.Shared.Models
         /// <summary>
         /// Unique rule identifier (e.g., "GATHER-NET-001")
         /// </summary>
-        public string RuleId { get; set; }
+        public string RuleId { get; set; } = default!;
 
         /// <summary>
         /// Human-readable rule title (e.g., "Collect WinHTTP Proxy Settings")
         /// </summary>
-        public string Title { get; set; }
+        public string Title { get; set; } = default!;
 
         /// <summary>
         /// Detailed description of what this rule collects and why
         /// </summary>
-        public string Description { get; set; }
+        public string Description { get; set; } = default!;
 
         /// <summary>
         /// Rule category: network, identity, apps, device, esp, enrollment
         /// </summary>
-        public string Category { get; set; }
+        public string Category { get; set; } = default!;
 
         /// <summary>
         /// Semantic version of this rule (e.g., "1.0.0")
@@ -72,7 +72,7 @@ namespace AutopilotMonitor.Shared.Models
         ///   for the full list of approved commands.
         /// - "logparser": Parse a CMTrace-format log file using a regex pattern with named capture groups
         /// </summary>
-        public string CollectorType { get; set; }
+        public string CollectorType { get; set; } = default!;
 
         /// <summary>
         /// Target for collection:
@@ -83,7 +83,7 @@ namespace AutopilotMonitor.Shared.Models
         /// - command_allowlisted: Exact command string as it appears in the allowlist (e.g., "Get-Tpm", "dsregcmd /status")
         /// - logparser: Log file path with env vars (e.g., "%ProgramData%\Microsoft\IntuneManagementExtension\Logs\AppWorkload.log")
         /// </summary>
-        public string Target { get; set; }
+        public string Target { get; set; } = default!;
 
         /// <summary>
         /// Additional parameters for the collector:
@@ -101,7 +101,7 @@ namespace AutopilotMonitor.Shared.Models
         /// <summary>
         /// Trigger type: "startup", "phase_change", "interval", "on_event"
         /// </summary>
-        public string Trigger { get; set; }
+        public string Trigger { get; set; } = default!;
 
         /// <summary>
         /// Interval in seconds (only used when Trigger = "interval")
@@ -112,20 +112,20 @@ namespace AutopilotMonitor.Shared.Models
         /// Phase to trigger on (only used when Trigger = "phase_change")
         /// e.g., "Identity", "MdmEnrollment", "AppInstallation"
         /// </summary>
-        public string TriggerPhase { get; set; }
+        public string TriggerPhase { get; set; } = default!;
 
         /// <summary>
         /// Event type to trigger on (only used when Trigger = "on_event")
         /// e.g., "app_install_failed"
         /// </summary>
-        public string TriggerEventType { get; set; }
+        public string TriggerEventType { get; set; } = default!;
 
         // ===== OUTPUT =====
 
         /// <summary>
         /// EventType for the emitted event (e.g., "gather_proxy_settings")
         /// </summary>
-        public string OutputEventType { get; set; }
+        public string OutputEventType { get; set; } = default!;
 
         /// <summary>
         /// Severity for the emitted event

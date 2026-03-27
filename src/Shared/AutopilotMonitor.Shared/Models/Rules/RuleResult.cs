@@ -17,32 +17,32 @@ namespace AutopilotMonitor.Shared.Models
         /// <summary>
         /// Session this result belongs to
         /// </summary>
-        public string SessionId { get; set; }
+        public string SessionId { get; set; } = default!;
 
         /// <summary>
         /// Tenant this result belongs to
         /// </summary>
-        public string TenantId { get; set; }
+        public string TenantId { get; set; } = default!;
 
         /// <summary>
         /// The rule that produced this result
         /// </summary>
-        public string RuleId { get; set; }
+        public string RuleId { get; set; } = default!;
 
         /// <summary>
         /// Human-readable title of the rule
         /// </summary>
-        public string RuleTitle { get; set; }
+        public string RuleTitle { get; set; } = default!;
 
         /// <summary>
         /// Severity level: "info", "warning", "high", "critical"
         /// </summary>
-        public string Severity { get; set; }
+        public string Severity { get; set; } = default!;
 
         /// <summary>
         /// Rule category: network, identity, enrollment, apps, esp, device
         /// </summary>
-        public string Category { get; set; }
+        public string Category { get; set; } = default!;
 
         /// <summary>
         /// Confidence score (0-100)
@@ -53,7 +53,7 @@ namespace AutopilotMonitor.Shared.Models
         /// <summary>
         /// Detailed explanation of the detected issue
         /// </summary>
-        public string Explanation { get; set; }
+        public string Explanation { get; set; } = default!;
 
         /// <summary>
         /// Remediation steps for the detected issue

@@ -35,12 +35,12 @@ namespace AutopilotMonitor.Shared.Models
         /// The agent's current session ID (from SessionPersistence).
         /// Allows correlation with session data already in the backend.
         /// </summary>
-        public string SessionId { get; set; }
+        public string SessionId { get; set; } = default!;
 
         /// <summary>
         /// Tenant ID, from the device's MDM enrollment registry key.
         /// </summary>
-        public string TenantId { get; set; }
+        public string TenantId { get; set; } = default!;
 
         /// <summary>
         /// Classification of the error.
@@ -51,7 +51,7 @@ namespace AutopilotMonitor.Shared.Models
         /// Error message from the exception or HTTP response.
         /// Kept short — no stack traces, no sensitive data.
         /// </summary>
-        public string Message { get; set; }
+        public string Message { get; set; } = default!;
 
         /// <summary>
         /// HTTP status code returned by the backend, if applicable.
@@ -68,7 +68,7 @@ namespace AutopilotMonitor.Shared.Models
         /// <summary>
         /// Agent version string for diagnosing version-specific issues.
         /// </summary>
-        public string AgentVersion { get; set; }
+        public string AgentVersion { get; set; } = default!;
 
         /// <summary>
         /// UTC timestamp of when the error occurred on the agent.

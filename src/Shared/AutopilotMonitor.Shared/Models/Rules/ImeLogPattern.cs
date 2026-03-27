@@ -12,7 +12,7 @@ namespace AutopilotMonitor.Shared.Models
         /// <summary>
         /// Unique pattern identifier (e.g., "IME-ESP-PHASE")
         /// </summary>
-        public string PatternId { get; set; }
+        public string PatternId { get; set; } = default!;
 
         /// <summary>
         /// Pattern category controlling when the pattern is active:
@@ -20,14 +20,14 @@ namespace AutopilotMonitor.Shared.Models
         /// - "currentPhase": Only active during the current ESP phase
         /// - "otherPhases": Only active during non-current ESP phases (for history/completed apps)
         /// </summary>
-        public string Category { get; set; }
+        public string Category { get; set; } = default!;
 
         /// <summary>
         /// Regex pattern string to match against IME log message content.
         /// Supports named capture groups (e.g., (?&lt;id&gt;...)) which are passed to the action handler.
         /// Uses {GUID} as placeholder for the standard GUID capture pattern.
         /// </summary>
-        public string Pattern { get; set; }
+        public string Pattern { get; set; } = default!;
 
         /// <summary>
         /// Action to perform when the pattern matches:
@@ -48,7 +48,7 @@ namespace AutopilotMonitor.Shared.Models
         /// - "updateWin32AppState": Update from Win32 app state (uses 'id'/'state' capture groups)
         /// - "cancelStuckAndSetCurrent": Cancel stuck app and set new current (uses 'id' capture group)
         /// </summary>
-        public string Action { get; set; }
+        public string Action { get; set; } = default!;
 
         /// <summary>
         /// Optional extra parameters for the action handler.
@@ -57,7 +57,7 @@ namespace AutopilotMonitor.Shared.Models
         /// - { "useCurrentApp": "true" } to use CurrentPackageId instead of captured 'id'
         /// - { "checkTo": "true" } to check the 'to' capture group value before applying state
         /// </summary>
-        public Dictionary<string, string> Parameters { get; set; }
+        public Dictionary<string, string> Parameters { get; set; } = default!;
 
         /// <summary>
         /// Whether this pattern is enabled. Allows disabling patterns without removing them.
@@ -68,7 +68,7 @@ namespace AutopilotMonitor.Shared.Models
         /// Human-readable description of what this pattern detects and why.
         /// Not used by the agent — purely for documentation and UI display.
         /// </summary>
-        public string Description { get; set; }
+        public string Description { get; set; } = default!;
 
         /// <summary>
         /// Whether this is a built-in pattern (shipped with the system).

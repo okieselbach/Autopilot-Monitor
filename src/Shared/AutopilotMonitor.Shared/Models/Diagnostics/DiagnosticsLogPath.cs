@@ -11,12 +11,12 @@ namespace AutopilotMonitor.Shared.Models
         /// Environment variables are expanded by the agent.
         /// Wildcards are only allowed in the last path segment (e.g. "C:\Windows\Panther\*.log").
         /// </summary>
-        public string Path { get; set; }
+        public string Path { get; set; } = default!;
 
         /// <summary>
         /// Human-readable description shown in the portal.
         /// </summary>
-        public string Description { get; set; }
+        public string Description { get; set; } = default!;
 
         /// <summary>
         /// True when defined globally by a Global Admin — displayed as read-only for tenants.

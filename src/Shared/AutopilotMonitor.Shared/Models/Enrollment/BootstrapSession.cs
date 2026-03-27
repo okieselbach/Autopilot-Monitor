@@ -12,19 +12,19 @@ namespace AutopilotMonitor.Shared.Models
         /// <summary>
         /// Tenant ID (Azure AD tenant GUID). Used as PartitionKey for the main entity.
         /// </summary>
-        public string TenantId { get; set; }
+        public string TenantId { get; set; } = default!;
 
         /// <summary>
         /// Short alphanumeric code (6 chars) used in the URL path.
         /// Used as RowKey for the main entity.
         /// </summary>
-        public string ShortCode { get; set; }
+        public string ShortCode { get; set; } = default!;
 
         /// <summary>
         /// GUID token embedded in the generated bootstrap script.
         /// The agent sends this as X-Bootstrap-Token header for pre-MDM authentication.
         /// </summary>
-        public string Token { get; set; }
+        public string Token { get; set; } = default!;
 
         /// <summary>
         /// When this session was created
@@ -40,7 +40,7 @@ namespace AutopilotMonitor.Shared.Models
         /// <summary>
         /// UPN of the admin who created this session
         /// </summary>
-        public string CreatedByUpn { get; set; }
+        public string CreatedByUpn { get; set; } = default!;
 
         /// <summary>
         /// Whether this session has been manually revoked by an admin
@@ -55,6 +55,6 @@ namespace AutopilotMonitor.Shared.Models
         /// <summary>
         /// Optional human-readable label (e.g. "Lab A", "Floor 3")
         /// </summary>
-        public string Label { get; set; }
+        public string Label { get; set; } = default!;
     }
 }

@@ -41,7 +41,7 @@ namespace AutopilotMonitor.Shared.Models
         /// <summary>
         /// Type of event (e.g., "phase_transition", "app_install_start", "error")
         /// </summary>
-        public string EventType { get; set; }
+        public string EventType { get; set; } = default!;
 
         /// <summary>
         /// Severity level of the event (internal property, not serialized)
@@ -58,7 +58,7 @@ namespace AutopilotMonitor.Shared.Models
         /// <summary>
         /// Source of the event (e.g., "IME", "EventLog", "Agent")
         /// </summary>
-        public string Source { get; set; }
+        public string Source { get; set; } = default!;
 
         /// <summary>
         /// Phase during which this event occurred (internal property, not serialized)
@@ -107,7 +107,7 @@ namespace AutopilotMonitor.Shared.Models
         /// <summary>
         /// Human-readable message
         /// </summary>
-        public string Message { get; set; }
+        public string Message { get; set; } = default!;
 
         /// <summary>
         /// Additional structured data
@@ -124,7 +124,7 @@ namespace AutopilotMonitor.Shared.Models
         /// Represents the exact sort key used in storage.
         /// </summary>
         [JsonPropertyName("rowKey")]
-        public string RowKey { get; set; }
+        public string RowKey { get; set; } = default!;
 
         public EnrollmentEvent()
         {

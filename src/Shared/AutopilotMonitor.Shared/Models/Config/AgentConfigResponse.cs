@@ -40,7 +40,7 @@ namespace AutopilotMonitor.Shared.Models
         /// </summary>
         public bool EnableImeMatchLog { get; set; } = false;
 
-        public CollectorConfiguration Collectors { get; set; }
+        public CollectorConfiguration Collectors { get; set; } = default!;
 
         /// <summary>
         /// User-defined ad-hoc gather rules (minimal set, not for IME log parsing)
@@ -104,7 +104,7 @@ namespace AutopilotMonitor.Shared.Models
         /// Expected size: 540 x 80 px. Larger images will be center-cropped.
         /// null = no banner.
         /// </summary>
-        public string EnrollmentSummaryBrandingImageUrl { get; set; }
+        public string EnrollmentSummaryBrandingImageUrl { get; set; } = default!;
 
         /// <summary>
         /// Maximum time in seconds the agent retries launching the enrollment summary dialog

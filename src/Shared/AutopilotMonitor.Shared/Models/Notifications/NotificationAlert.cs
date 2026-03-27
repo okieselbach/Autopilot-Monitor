@@ -10,16 +10,16 @@ namespace AutopilotMonitor.Shared.Models.Notifications
     public class NotificationAlert
     {
         /// <summary>Main title, e.g. "Enrollment Succeeded".</summary>
-        public string Title { get; set; }
+        public string Title { get; set; } = default!;
 
         /// <summary>One-line summary for toast/preview text.</summary>
-        public string Summary { get; set; }
+        public string Summary { get; set; } = default!;
 
         /// <summary>Severity level used for color/icon mapping in renderers.</summary>
         public NotificationSeverity Severity { get; set; }
 
         /// <summary>Hex color code (without #). Used by legacy Teams renderer, mapped to styles by others.</summary>
-        public string ThemeColor { get; set; }
+        public string ThemeColor { get; set; } = default!;
 
         /// <summary>Key-value fact pairs (Device, Serial, Hardware, Duration, etc.).</summary>
         public List<NotificationFact> Facts { get; set; } = new();

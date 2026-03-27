@@ -8,7 +8,7 @@ namespace AutopilotMonitor.Shared.Models
     /// </summary>
     public class RegisterSessionRequest
     {
-        public SessionRegistration Registration { get; set; }
+        public SessionRegistration Registration { get; set; } = default!;
     }
 
     /// <summary>
@@ -16,9 +16,9 @@ namespace AutopilotMonitor.Shared.Models
     /// </summary>
     public class RegisterSessionResponse
     {
-        public string SessionId { get; set; }
+        public string SessionId { get; set; } = default!;
         public bool Success { get; set; }
-        public string Message { get; set; }
+        public string Message { get; set; } = default!;
         public DateTime RegisteredAt { get; set; }
 
         /// <summary>
@@ -33,8 +33,8 @@ namespace AutopilotMonitor.Shared.Models
     /// </summary>
     public class IngestEventsRequest
     {
-        public string SessionId { get; set; }
-        public string TenantId { get; set; }
+        public string SessionId { get; set; } = default!;
+        public string TenantId { get; set; } = default!;
         public List<EnrollmentEvent> Events { get; set; }
         public bool IsCompressed { get; set; }
 
@@ -52,7 +52,7 @@ namespace AutopilotMonitor.Shared.Models
         public bool Success { get; set; }
         public int EventsReceived { get; set; }
         public int EventsProcessed { get; set; }
-        public string Message { get; set; }
+        public string Message { get; set; } = default!;
         public DateTime ProcessedAt { get; set; }
 
         /// <summary>
@@ -120,9 +120,9 @@ namespace AutopilotMonitor.Shared.Models
     /// </summary>
     public class GetDiagnosticsUploadUrlRequest
     {
-        public string TenantId { get; set; }
-        public string SessionId { get; set; }
-        public string FileName { get; set; }
+        public string TenantId { get; set; } = default!;
+        public string SessionId { get; set; } = default!;
+        public string FileName { get; set; } = default!;
     }
 
     /// <summary>
@@ -141,20 +141,20 @@ namespace AutopilotMonitor.Shared.Models
     /// </summary>
     public class SessionSummary
     {
-        public string SessionId { get; set; }
-        public string TenantId { get; set; }
-        public string SerialNumber { get; set; }
-        public string DeviceName { get; set; }
-        public string Manufacturer { get; set; }
-        public string Model { get; set; }
+        public string SessionId { get; set; } = default!;
+        public string TenantId { get; set; } = default!;
+        public string SerialNumber { get; set; } = default!;
+        public string DeviceName { get; set; } = default!;
+        public string Manufacturer { get; set; } = default!;
+        public string Model { get; set; } = default!;
         public DateTime StartedAt { get; set; }
         public DateTime? CompletedAt { get; set; }
 
         // Serialize as integer (0-7) not string for frontend compatibility
         public int CurrentPhase { get; set; }
-        public string CurrentPhaseDetail { get; set; }
+        public string CurrentPhaseDetail { get; set; } = default!;
         public SessionStatus Status { get; set; }
-        public string FailureReason { get; set; }
+        public string FailureReason { get; set; } = default!;
         public int EventCount { get; set; }
         public int? DurationSeconds { get; set; }
 
@@ -168,7 +168,7 @@ namespace AutopilotMonitor.Shared.Models
         /// Blob name of the uploaded diagnostics archive (null if not uploaded).
         /// Used to construct a download URL via the tenant's Blob Storage SAS URL.
         /// </summary>
-        public string DiagnosticsBlobName { get; set; }
+        public string DiagnosticsBlobName { get; set; } = default!;
 
         /// <summary>
         /// Timestamp of the most recently received event for this session.
@@ -198,14 +198,14 @@ namespace AutopilotMonitor.Shared.Models
         public bool IsHybridJoin { get; set; }
 
         // Device detail fields — stored in the Sessions table but omitted from earlier versions
-        public string OsName { get; set; }
-        public string OsBuild { get; set; }
-        public string OsDisplayVersion { get; set; }
-        public string OsEdition { get; set; }
-        public string OsLanguage { get; set; }
+        public string OsName { get; set; } = default!;
+        public string OsBuild { get; set; } = default!;
+        public string OsDisplayVersion { get; set; } = default!;
+        public string OsEdition { get; set; } = default!;
+        public string OsLanguage { get; set; } = default!;
         public bool IsUserDriven { get; set; }
-        public string AgentVersion { get; set; }
-        public string ImeAgentVersion { get; set; }
+        public string AgentVersion { get; set; } = default!;
+        public string ImeAgentVersion { get; set; } = default!;
 
         // Geographic location fields — populated from device_location event geo data
         public string GeoCountry { get; set; } = string.Empty;

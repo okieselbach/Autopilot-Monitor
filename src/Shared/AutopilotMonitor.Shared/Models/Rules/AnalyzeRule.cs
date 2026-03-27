@@ -12,27 +12,27 @@ namespace AutopilotMonitor.Shared.Models
         /// <summary>
         /// Unique rule identifier (e.g., "ANALYZE-NET-001")
         /// </summary>
-        public string RuleId { get; set; }
+        public string RuleId { get; set; } = default!;
 
         /// <summary>
         /// Human-readable rule title (e.g., "Proxy Authentication Required")
         /// </summary>
-        public string Title { get; set; }
+        public string Title { get; set; } = default!;
 
         /// <summary>
         /// Detailed description of what this rule detects
         /// </summary>
-        public string Description { get; set; }
+        public string Description { get; set; } = default!;
 
         /// <summary>
         /// Severity level: "info", "warning", "high", "critical"
         /// </summary>
-        public string Severity { get; set; }
+        public string Severity { get; set; } = default!;
 
         /// <summary>
         /// Rule category: network, identity, enrollment, apps, esp, device
         /// </summary>
-        public string Category { get; set; }
+        public string Category { get; set; } = default!;
 
         /// <summary>
         /// Semantic version of this rule (e.g., "1.0.0")
@@ -100,7 +100,7 @@ namespace AutopilotMonitor.Shared.Models
         /// Detailed explanation of the detected issue
         /// Supports markdown formatting
         /// </summary>
-        public string Explanation { get; set; }
+        public string Explanation { get; set; } = default!;
 
         /// <summary>
         /// Steps to remediate the detected issue
@@ -138,19 +138,19 @@ namespace AutopilotMonitor.Shared.Models
         /// <summary>
         /// Descriptive name for this signal (e.g., "proxy_407_error")
         /// </summary>
-        public string Signal { get; set; }
+        public string Signal { get; set; } = default!;
 
         /// <summary>
         /// Source of the signal: "event_type", "event_data", "phase_duration", "event_count", "app_install_duration", "event_correlation"
         /// </summary>
-        public string Source { get; set; }
+        public string Source { get; set; } = default!;
 
         /// <summary>
         /// Event type to match on.
         /// For "event_type"/"event_data": the event type to match.
         /// For "event_correlation": the FIRST event type (Event A).
         /// </summary>
-        public string EventType { get; set; }
+        public string EventType { get; set; } = default!;
 
         /// <summary>
         /// Data field to match on.
@@ -158,19 +158,19 @@ namespace AutopilotMonitor.Shared.Models
         /// For "event_correlation": optional filter field on Event B (the second event).
         /// Uses dot notation for nested fields (e.g., "data.errorCode").
         /// </summary>
-        public string DataField { get; set; }
+        public string DataField { get; set; } = default!;
 
         /// <summary>
         /// Comparison operator: "equals", "not_equals", "contains", "not_contains", "regex", "not_regex", "gt", "lt", "gte", "lte", "exists", "not_exists", "count_gte"
         /// For "event_correlation": operator for the Event B filter (applied to DataField).
         /// </summary>
-        public string Operator { get; set; }
+        public string Operator { get; set; } = default!;
 
         /// <summary>
         /// Value to compare against.
         /// For "event_correlation": value for the Event B filter.
         /// </summary>
-        public string Value { get; set; }
+        public string Value { get; set; } = default!;
 
         /// <summary>
         /// Whether this condition must match for the rule to fire
@@ -185,13 +185,13 @@ namespace AutopilotMonitor.Shared.Models
         /// The second event type to correlate with (Event B).
         /// Example: "app_install_failed"
         /// </summary>
-        public string CorrelateEventType { get; set; }
+        public string CorrelateEventType { get; set; } = default!;
 
         /// <summary>
         /// The data field to join on — must have the same value in both Event A and Event B.
         /// Example: "appId" means both events must share the same appId value.
         /// </summary>
-        public string JoinField { get; set; }
+        public string JoinField { get; set; } = default!;
 
         /// <summary>
         /// Maximum time in seconds between Event A and Event B. Null or 0 means no time limit.
@@ -202,17 +202,17 @@ namespace AutopilotMonitor.Shared.Models
         /// Optional filter field on Event A (the first event).
         /// Combined with EventAFilterOperator and EventAFilterValue.
         /// </summary>
-        public string EventAFilterField { get; set; }
+        public string EventAFilterField { get; set; } = default!;
 
         /// <summary>
         /// Operator for the Event A filter. Uses same operators as the main Operator field.
         /// </summary>
-        public string EventAFilterOperator { get; set; }
+        public string EventAFilterOperator { get; set; } = default!;
 
         /// <summary>
         /// Value for the Event A filter.
         /// </summary>
-        public string EventAFilterValue { get; set; }
+        public string EventAFilterValue { get; set; } = default!;
     }
 
     /// <summary>
@@ -223,12 +223,12 @@ namespace AutopilotMonitor.Shared.Models
         /// <summary>
         /// Descriptive name for this factor
         /// </summary>
-        public string Signal { get; set; }
+        public string Signal { get; set; } = default!;
 
         /// <summary>
         /// Condition expression (e.g., "count >= 5", "exists", "duration > 300")
         /// </summary>
-        public string Condition { get; set; }
+        public string Condition { get; set; } = default!;
 
         /// <summary>
         /// Confidence weight to add when this factor matches (0-100)
@@ -245,7 +245,7 @@ namespace AutopilotMonitor.Shared.Models
         /// <summary>
         /// Title of the remediation approach
         /// </summary>
-        public string Title { get; set; }
+        public string Title { get; set; } = default!;
 
         /// <summary>
         /// Ordered steps to execute
@@ -261,11 +261,11 @@ namespace AutopilotMonitor.Shared.Models
         /// <summary>
         /// Display title for the link
         /// </summary>
-        public string Title { get; set; }
+        public string Title { get; set; } = default!;
 
         /// <summary>
         /// URL to the documentation
         /// </summary>
-        public string Url { get; set; }
+        public string Url { get; set; } = default!;
     }
 }

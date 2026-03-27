@@ -30,7 +30,7 @@ namespace AutopilotMonitor.Shared.Models
         /// <summary>
         /// Updated by (Global Admin user email)
         /// </summary>
-        public string UpdatedBy { get; set; }
+        public string UpdatedBy { get; set; } = default!;
 
         // ===== RATE LIMITING SETTINGS =====
 
@@ -102,7 +102,7 @@ namespace AutopilotMonitor.Shared.Models
         /// to include in the diagnostics ZIP package for all tenants.
         /// Each entry: { "path": "...", "description": "...", "isBuiltIn": true }
         /// </summary>
-        public string DiagnosticsGlobalLogPathsJson { get; set; }
+        public string DiagnosticsGlobalLogPathsJson { get; set; } = default!;
 
         /// <summary>
         /// Returns the deserialized list of global diagnostics log paths.
@@ -130,7 +130,7 @@ namespace AutopilotMonitor.Shared.Models
         /// Free registration at https://nvd.nist.gov/developers/request-an-api-key
         /// null = operate without API key (slower, still functional).
         /// </summary>
-        public string NvdApiKey { get; set; }
+        public string NvdApiKey { get; set; } = default!;
 
         /// <summary>
         /// Whether vulnerability correlation is globally enabled.
@@ -143,7 +143,7 @@ namespace AutopilotMonitor.Shared.Models
         /// Last successful vulnerability data sync timestamp (UTC ISO 8601).
         /// Updated by VulnerabilityDataSyncFunction.
         /// </summary>
-        public string VulnerabilityDataLastSyncUtc { get; set; }
+        public string VulnerabilityDataLastSyncUtc { get; set; } = default!;
 
         /// <summary>
         /// Creates default configuration

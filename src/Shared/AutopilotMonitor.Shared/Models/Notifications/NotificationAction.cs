@@ -2,8 +2,8 @@ namespace AutopilotMonitor.Shared.Models.Notifications
 {
     public class NotificationAction
     {
-        public string Type { get; set; }
-        public string Title { get; set; }
-        public string Url { get; set; }
+        public string Type { get; set; } = default!;
+        public string Title { get; set; } = default!;
+        public string Url { get; set; } = default!;
     }
 }

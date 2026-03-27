@@ -15,13 +15,13 @@ namespace AutopilotMonitor.Shared.Models
         /// <summary>
         /// Tenant ID (PartitionKey in Table Storage)
         /// </summary>
-        public string TenantId { get; set; }
+        public string TenantId { get; set; } = default!;
 
         /// <summary>
         /// Domain name extracted from the first user's UPN
         /// Used for display purposes (e.g., contoso.com)
         /// </summary>
-        public string DomainName { get; set; }
+        public string DomainName { get; set; } = default!;
 
         /// <summary>
         /// When the configuration was last updated
@@ -31,7 +31,7 @@ namespace AutopilotMonitor.Shared.Models
         /// <summary>
         /// Updated by (user email or system)
         /// </summary>
-        public string UpdatedBy { get; set; }
+        public string UpdatedBy { get; set; } = default!;
 
         // ===== TENANT STATUS =====
 
@@ -215,7 +215,7 @@ namespace AutopilotMonitor.Shared.Models
         /// NTP server address for time check during enrollment.
         /// null = use agent default ("time.windows.com").
         /// </summary>
-        public string NtpServer { get; set; }
+        public string NtpServer { get; set; } = default!;
 
         /// <summary>
         /// Whether to automatically set the device timezone based on IP geolocation.
@@ -235,7 +235,7 @@ namespace AutopilotMonitor.Shared.Models
         /// Log verbosity level override for this tenant's agents.
         /// null = use agent default ("Info"). Values: "Info", "Debug", "Verbose", "Trace".
         /// </summary>
-        public string LogLevel { get; set; }
+        public string LogLevel { get; set; } = default!;
 
         /// <summary>
         /// Maximum events per upload batch.
@@ -260,7 +260,7 @@ namespace AutopilotMonitor.Shared.Models
         /// Optional URL to a branding image displayed as a banner at the top of the enrollment summary dialog.
         /// Expected size: 540 x 80 px. Larger images will be center-cropped.
         /// </summary>
-        public string EnrollmentSummaryBrandingImageUrl { get; set; }
+        public string EnrollmentSummaryBrandingImageUrl { get; set; } = default!;
 
         /// <summary>
         /// Maximum time in seconds the agent retries launching the enrollment summary dialog
@@ -296,7 +296,7 @@ namespace AutopilotMonitor.Shared.Models
         /// on a newly enrolled device (merged with built-in defaults on the agent).
         /// Example: ["SupportAdmin", "TechDesk"]
         /// </summary>
-        public string LocalAdminAllowedAccountsJson { get; set; }
+        public string LocalAdminAllowedAccountsJson { get; set; } = default!;
 
         /// <summary>
         /// Returns the deserialized list of additional allowed local admin account names.
@@ -351,7 +351,7 @@ namespace AutopilotMonitor.Shared.Models
         /// to include in the diagnostics ZIP package (additive to global paths).
         /// Each entry: { "path": "...", "description": "...", "isBuiltIn": false }
         /// </summary>
-        public string DiagnosticsLogPathsJson { get; set; }
+        public string DiagnosticsLogPathsJson { get; set; } = default!;
 
         /// <summary>
         /// Returns the deserialized list of tenant-specific diagnostics log paths.
@@ -379,7 +379,7 @@ namespace AutopilotMonitor.Shared.Models
         /// Each tenant provides their own container — data stays in the customer's storage.
         /// If null or empty, diagnostics upload is disabled.
         /// </summary>
-        public string DiagnosticsBlobSasUrl { get; set; }
+        public string DiagnosticsBlobSasUrl { get; set; } = default!;
 
         /// <summary>
         /// When to upload diagnostics packages: "Off", "Always", "OnFailure".
@@ -402,7 +402,7 @@ namespace AutopilotMonitor.Shared.Models
         /// URL of the Teams Incoming Webhook for enrollment notifications.
         /// If null or empty, no notifications are sent.
         /// </summary>
-        public string TeamsWebhookUrl { get; set; }
+        public string TeamsWebhookUrl { get; set; } = default!;
 
         /// <summary>
         /// Send a Teams notification when an enrollment completes successfully.
@@ -429,7 +429,7 @@ namespace AutopilotMonitor.Shared.Models
         /// Generic webhook URL for enrollment notifications.
         /// Replaces TeamsWebhookUrl for new configurations.
         /// </summary>
-        public string WebhookUrl { get; set; }
+        public string WebhookUrl { get; set; } = default!;
 
         /// <summary>
         /// Send a webhook notification when enrollment succeeds. Default: true.
@@ -447,7 +447,7 @@ namespace AutopilotMonitor.Shared.Models
         /// Returns the effective webhook URL and provider type, handling legacy TeamsWebhookUrl migration.
         /// New fields take priority; falls back to TeamsWebhookUrl as TeamsLegacyConnector.
         /// </summary>
-        public (string Url, int ProviderType) GetEffectiveWebhookConfig()
+        public (string? Url, int ProviderType) GetEffectiveWebhookConfig()
         {
             // New fields take priority
             if (!string.IsNullOrEmpty(WebhookUrl) && WebhookProviderType != 0)
