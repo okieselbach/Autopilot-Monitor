@@ -18,16 +18,16 @@ namespace AutopilotMonitor.Functions.Functions.Config
     {
         private readonly ILogger<UpdateAdminConfigurationFunction> _logger;
         private readonly AdminConfigurationService _adminConfigService;
-        private readonly TableStorageService _storageService;
+        private readonly IMaintenanceRepository _maintenanceRepo;
 
         public UpdateAdminConfigurationFunction(
             ILogger<UpdateAdminConfigurationFunction> logger,
             AdminConfigurationService adminConfigService,
-            TableStorageService storageService)
+            IMaintenanceRepository maintenanceRepo)
         {
             _logger = logger;
             _adminConfigService = adminConfigService;
-            _storageService = storageService;
+            _maintenanceRepo = maintenanceRepo;
         }
 
         [Function("UpdateAdminConfiguration")]

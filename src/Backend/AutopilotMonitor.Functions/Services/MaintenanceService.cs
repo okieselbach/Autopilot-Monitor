@@ -41,7 +41,9 @@ namespace AutopilotMonitor.Functions.Services
     /// </summary>
     public partial class MaintenanceService
     {
-        private readonly TableStorageService _storageService;
+        private readonly IMaintenanceRepository _maintenanceRepo;
+        private readonly ISessionRepository _sessionRepo;
+        private readonly IMetricsRepository _metricsRepo;
         private readonly TenantConfigurationService _tenantConfigService;
         private readonly UsageMetricsService _usageMetricsService;
         private readonly AdminConfigurationService _adminConfigurationService;
@@ -54,7 +56,9 @@ namespace AutopilotMonitor.Functions.Services
         private const string PlatformStatsVersionedCacheControl = "public, max-age=31536000, immutable";
 
         public MaintenanceService(
-            TableStorageService storageService,
+            IMaintenanceRepository maintenanceRepo,
+            ISessionRepository sessionRepo,
+            IMetricsRepository metricsRepo,
             TenantConfigurationService tenantConfigService,
             UsageMetricsService usageMetricsService,
             AdminConfigurationService adminConfigurationService,
@@ -62,7 +66,9 @@ namespace AutopilotMonitor.Functions.Services
             TenantAdminsService tenantAdminsService,
             ILogger<MaintenanceService> logger)
         {
-            _storageService = storageService;
+            _maintenanceRepo = maintenanceRepo;
+            _sessionRepo = sessionRepo;
+            _metricsRepo = metricsRepo;
             _tenantConfigService = tenantConfigService;
             _usageMetricsService = usageMetricsService;
             _adminConfigurationService = adminConfigurationService;
@@ -175,7 +181,7 @@ namespace AutopilotMonitor.Functions.Services
 
             try
             {
-                var tenantIds = await _storageService.GetAllTenantIdsAsync();
+                var tenantIds = await _maintenanceRepo.GetAllTenantIdsAsync();
                 int totalSessionsTimedOut = 0;
 
                 foreach (var tenantId in tenantIds)
@@ -261,7 +267,7 @@ namespace AutopilotMonitor.Functions.Services
 
                 var windowCutoff = DateTime.UtcNow.AddHours(-adminConfig.MaxSessionWindowHours);
                 var blockDurationHours = adminConfig.MaintenanceBlockDurationHours;
-                var tenantIds = await _storageService.GetAllTenantIdsAsync();
+                var tenantIds = await _maintenanceRepo.GetAllTenantIdsAsync();
                 int totalBlocked = 0;
 
                 foreach (var tenantId in tenantIds)

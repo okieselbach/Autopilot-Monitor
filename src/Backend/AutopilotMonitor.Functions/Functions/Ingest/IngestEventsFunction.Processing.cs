@@ -175,7 +175,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                     var geoData = classification.DeviceLocationEvent.Data;
                     var geoTenantId = request.TenantId;
                     var geoSessionId = request.SessionId;
-                    _ = _storageService.UpdateSessionGeoAsync(
+                    _ = _sessionRepo.UpdateSessionGeoAsync(
                         geoTenantId,
                         geoSessionId,
                         geoData.ContainsKey("country") ? geoData["country"]?.ToString() : null,
@@ -193,7 +193,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                 // Always increment event count when events were stored
                 if (processedCount > 0)
                 {
-                    await _storageService.IncrementSessionEventCountAsync(
+                    await _sessionRepo.IncrementSessionEventCountAsync(
                         request.TenantId,
                         request.SessionId,
                         processedCount,
@@ -217,12 +217,12 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                     {
                         try
                         {
-                            var ruleEngine = new RuleEngine(_analyzeRuleService, _storageService, _logger);
+                            var ruleEngine = new RuleEngine(_analyzeRuleService, _ruleRepo, _sessionRepo, _logger);
                             var results = await ruleEngine.AnalyzeSessionAsync(ruleTenantId, ruleSessionId);
 
                             foreach (var result in results)
                             {
-                                await _storageService.StoreRuleResultAsync(result);
+                                await _ruleRepo.StoreRuleResultAsync(result);
                             }
 
                             if (results.Count > 0)
@@ -238,7 +238,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                             // Increment platform stats for detected issues
                             if (results.Count > 0)
                             {
-                                _ = _storageService.IncrementPlatformStatAsync("IssuesDetected", results.Count)
+                                _ = _metricsRepo.IncrementPlatformStatAsync("IssuesDetected", results.Count)
                                     .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException,
                                         "Fire-and-forget IncrementPlatformStatAsync failed"), TaskContinuationOptions.OnlyOnFaulted);
                             }
