@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using AutopilotMonitor.Functions.DataAccess;
 using AutopilotMonitor.Functions.Functions.Config;
 using AutopilotMonitor.Functions.Functions.Ingest;
 using AutopilotMonitor.Functions.Functions.Sessions;
@@ -100,6 +101,11 @@ builder.Services.AddMemoryCache();
 builder.Services.AddHttpClient();
 builder.Services.AddSingleton<TableStorageService>();
 builder.Services.AddHostedService<TableInitializerService>(); // Initialize all tables at startup
+
+// Data Access Layer — repository interfaces backed by Table Storage.
+// To switch to Cosmos DB: replace AddTableStorageDataAccess() with AddCosmosDataAccess().
+// To add event streaming: chain .AddEventStreaming<EventHubPublisher>() after this call.
+builder.Services.AddTableStorageDataAccess();
 builder.Services.AddSingleton<TenantConfigurationService>();
 builder.Services.AddSingleton<AdminConfigurationService>();
 builder.Services.AddSingleton<RateLimitService>();
