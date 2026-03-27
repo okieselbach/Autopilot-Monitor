@@ -3,6 +3,7 @@ using System.Net;
 using System.Threading.Tasks;
 using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Services;
+using AutopilotMonitor.Shared.DataAccess;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
@@ -19,20 +20,20 @@ namespace AutopilotMonitor.Functions.Functions.Bootstrap
         private readonly BootstrapSessionService _bootstrapService;
         private readonly GlobalAdminService _globalAdminService;
         private readonly TenantConfigurationService _configService;
-        private readonly TableStorageService _storageService;
+        private readonly IMaintenanceRepository _maintenanceRepo;
 
         public RevokeBootstrapSessionFunction(
             ILogger<RevokeBootstrapSessionFunction> logger,
             BootstrapSessionService bootstrapService,
             GlobalAdminService globalAdminService,
             TenantConfigurationService configService,
-            TableStorageService storageService)
+            IMaintenanceRepository maintenanceRepo)
         {
             _logger = logger;
             _bootstrapService = bootstrapService;
             _globalAdminService = globalAdminService;
             _configService = configService;
-            _storageService = storageService;
+            _maintenanceRepo = maintenanceRepo;
         }
 
         [Function("RevokeBootstrapSession")]
@@ -78,7 +79,7 @@ namespace AutopilotMonitor.Functions.Functions.Bootstrap
                     return notFound;
                 }
 
-                await _storageService.LogAuditEntryAsync(
+                await _maintenanceRepo.LogAuditEntryAsync(
                     tenantId,
                     "DELETE",
                     "BootstrapSession",

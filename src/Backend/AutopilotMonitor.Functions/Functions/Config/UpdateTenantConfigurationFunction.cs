@@ -30,7 +30,7 @@ namespace AutopilotMonitor.Functions.Functions.Config
             _logger = logger;
             _configService = configService;
             _globalAdminService = globalAdminService;
-            _storageService = storageService;
+            _maintenanceRepo = maintenanceRepo;
         }
 
         [Function("UpdateTenantConfiguration")]
@@ -127,7 +127,7 @@ namespace AutopilotMonitor.Functions.Functions.Config
                 await _configService.SaveConfigurationAsync(config);
 
                 var changes = ConfigDiffHelper.GetChanges(existingConfig, config);
-                await _storageService.LogAuditEntryAsync(
+                await _maintenanceRepo.LogAuditEntryAsync(
                     tenantId,
                     "UPDATE",
                     "TenantConfiguration",

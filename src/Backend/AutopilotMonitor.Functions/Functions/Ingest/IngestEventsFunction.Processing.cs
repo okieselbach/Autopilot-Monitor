@@ -490,7 +490,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
 
             if (c.CompletionEvent != null)
             {
-                statusTransitioned = await _storageService.UpdateSessionStatusAsync(
+                statusTransitioned = await _sessionRepo.UpdateSessionStatusAsync(
                     request.TenantId, request.SessionId, SessionStatus.Succeeded, c.CompletionEvent.Phase,
                     completedAt: c.CompletionEvent.Timestamp,
                     earliestEventTimestamp: c.EarliestEventTimestamp, latestEventTimestamp: c.LatestEventTimestamp);
@@ -502,7 +502,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                     ? $"{c.FailureEvent.Message} ({c.FailureEvent.Data["errorCode"]})"
                     : c.FailureEvent.Message;
 
-                statusTransitioned = await _storageService.UpdateSessionStatusAsync(
+                statusTransitioned = await _sessionRepo.UpdateSessionStatusAsync(
                     request.TenantId, request.SessionId, SessionStatus.Failed, c.FailureEvent.Phase, failureReason,
                     completedAt: c.FailureEvent.Timestamp,
                     earliestEventTimestamp: c.EarliestEventTimestamp, latestEventTimestamp: c.LatestEventTimestamp);
@@ -511,7 +511,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             else if (c.EspFailureEvent != null)
             {
                 failureReason = c.EspFailureEvent.Message ?? "ESP failure (backend fallback)";
-                statusTransitioned = await _storageService.UpdateSessionStatusAsync(
+                statusTransitioned = await _sessionRepo.UpdateSessionStatusAsync(
                     request.TenantId, request.SessionId, SessionStatus.Failed, c.EspFailureEvent.Phase, failureReason,
                     completedAt: c.EspFailureEvent.Timestamp,
                     earliestEventTimestamp: c.EarliestEventTimestamp, latestEventTimestamp: c.LatestEventTimestamp);
@@ -520,7 +520,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             }
             else if (c.GatherCompletionEvent != null)
             {
-                await _storageService.UpdateSessionStatusAsync(
+                await _sessionRepo.UpdateSessionStatusAsync(
                     request.TenantId, request.SessionId, SessionStatus.Succeeded, c.GatherCompletionEvent.Phase,
                     completedAt: c.GatherCompletionEvent.Timestamp,
                     earliestEventTimestamp: c.EarliestEventTimestamp, latestEventTimestamp: c.LatestEventTimestamp);
@@ -528,7 +528,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             }
             else if (c.WhiteGloveEvent != null)
             {
-                whiteGloveStatusTransitioned = await _storageService.UpdateSessionStatusAsync(
+                whiteGloveStatusTransitioned = await _sessionRepo.UpdateSessionStatusAsync(
                     request.TenantId, request.SessionId, SessionStatus.Pending, c.WhiteGloveEvent.Phase,
                     earliestEventTimestamp: c.EarliestEventTimestamp, latestEventTimestamp: c.LatestEventTimestamp,
                     isPreProvisioned: true, isUserDriven: false);
@@ -538,7 +538,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                     _logger.LogWarning("{SessionPrefix} WhiteGlove UpdateSessionStatusAsync failed, attempting unconditional fallback for IsPreProvisioned + Status", sessionPrefix);
                     try
                     {
-                        await _storageService.SetSessionPreProvisionedAsync(request.TenantId, request.SessionId, true, SessionStatus.Pending, isUserDriven: false);
+                        await _sessionRepo.SetSessionPreProvisionedAsync(request.TenantId, request.SessionId, true, SessionStatus.Pending, isUserDriven: false);
                         whiteGloveStatusTransitioned = true;
                         _logger.LogInformation("{SessionPrefix} WhiteGlove fallback succeeded: IsPreProvisioned + Status=Pending set via unconditional merge", sessionPrefix);
                     }
@@ -552,10 +552,10 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             }
             else if (c.WhiteGloveResumedEvent != null)
             {
-                var currentSession = await _storageService.GetSessionAsync(request.TenantId, request.SessionId);
+                var currentSession = await _sessionRepo.GetSessionAsync(request.TenantId, request.SessionId);
                 if (currentSession?.Status == SessionStatus.Pending)
                 {
-                    await _storageService.UpdateSessionStatusAsync(
+                    await _sessionRepo.UpdateSessionStatusAsync(
                         request.TenantId, request.SessionId, SessionStatus.InProgress, c.WhiteGloveResumedEvent.Phase,
                         earliestEventTimestamp: c.EarliestEventTimestamp, latestEventTimestamp: c.LatestEventTimestamp,
                         isUserDriven: true, resumedAt: c.WhiteGloveResumedEvent.Timestamp);
