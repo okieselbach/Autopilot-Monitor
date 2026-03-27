@@ -9,6 +9,7 @@ using Azure.Data.Tables;
 using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
 using AutopilotMonitor.Shared;
+using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -19,26 +20,24 @@ namespace AutopilotMonitor.Functions.Services
     /// <summary>
     /// Manages session report submissions from Tenant Admins.
     /// Creates a ZIP with session data, events, analysis results, timeline TXT, events CSV,
-    /// and optional screenshot, uploads to central blob storage, and stores metadata in Table Storage.
+    /// and optional screenshot, uploads to central blob storage, and stores metadata via INotificationRepository.
     /// </summary>
     public class SessionReportService
     {
-        private readonly TableClient _tableClient;
+        private readonly INotificationRepository _notificationRepo;
         private readonly ILogger<SessionReportService> _logger;
         private readonly string _blobConnectionString;
         private const string ContainerName = "session-reports";
 
         public SessionReportService(
+            INotificationRepository notificationRepo,
             IConfiguration configuration,
             ILogger<SessionReportService> logger)
         {
+            _notificationRepo = notificationRepo;
             _logger = logger;
             _blobConnectionString = configuration["AzureBlobStorageConnectionString"]
                 ?? throw new InvalidOperationException("AzureBlobStorageConnectionString is not configured");
-
-            var connectionString = configuration["AzureTableStorageConnectionString"];
-            var serviceClient = new TableServiceClient(connectionString);
-            _tableClient = serviceClient.GetTableClient(Constants.TableNames.SessionReports);
         }
 
         /// <summary>
@@ -144,24 +143,9 @@ namespace AutopilotMonitor.Functions.Services
                 "Session report uploaded: ReportId={ReportId}, BlobName={BlobName}, Tenant={TenantId}, Session={SessionId}",
                 reportId, blobName, request.TenantId, request.SessionId);
 
-            // 3. Store metadata in Table Storage
+            // 3. Store metadata via repository
             var now = DateTime.UtcNow;
-            var invertedTicks = (DateTime.MaxValue.Ticks - now.Ticks).ToString("D19");
-            var entity = new TableEntity("reports", $"{invertedTicks}_{reportId}")
-            {
-                ["ReportId"] = reportId,
-                ["TenantId"] = request.TenantId ?? string.Empty,
-                ["SessionId"] = request.SessionId ?? string.Empty,
-                ["Comment"] = request.Comment ?? string.Empty,
-                ["Email"] = request.Email ?? string.Empty,
-                ["BlobName"] = blobName,
-                ["SubmittedBy"] = submittedBy ?? string.Empty,
-                ["SubmittedAt"] = now
-            };
-
-            await _tableClient.UpsertEntityAsync(entity);
-
-            return new SessionReportMetadata
+            var metadata = new SessionReportMetadata
             {
                 ReportId = reportId,
                 TenantId = request.TenantId,
@@ -172,6 +156,10 @@ namespace AutopilotMonitor.Functions.Services
                 SubmittedBy = submittedBy,
                 SubmittedAt = now
             };
+
+            await _notificationRepo.StoreSessionReportMetadataAsync(metadata);
+
+            return metadata;
         }
 
         /// <summary>
@@ -179,33 +167,7 @@ namespace AutopilotMonitor.Functions.Services
         /// </summary>
         public async Task<List<SessionReportMetadata>> GetAllReportsAsync()
         {
-            var results = new List<SessionReportMetadata>();
-
-            try
-            {
-                await foreach (var entity in _tableClient.QueryAsync<TableEntity>(e => e.PartitionKey == "reports"))
-                {
-                    results.Add(new SessionReportMetadata
-                    {
-                        ReportId = entity.GetString("ReportId") ?? string.Empty,
-                        TenantId = entity.GetString("TenantId") ?? string.Empty,
-                        SessionId = entity.GetString("SessionId") ?? string.Empty,
-                        Comment = entity.GetString("Comment") ?? string.Empty,
-                        Email = entity.GetString("Email") ?? string.Empty,
-                        BlobName = entity.GetString("BlobName") ?? string.Empty,
-                        SubmittedBy = entity.GetString("SubmittedBy") ?? string.Empty,
-                        SubmittedAt = entity.GetDateTimeOffset("SubmittedAt")?.UtcDateTime ?? DateTime.MinValue,
-                        AdminNote = entity.GetString("AdminNote") ?? string.Empty
-                    });
-                }
-            }
-            catch (RequestFailedException ex) when (ex.Status == 404)
-            {
-                // Table doesn't exist yet — no reports have been submitted
-                _logger.LogDebug("SessionReports table does not exist yet, returning empty list");
-            }
-
-            return results;
+            return await _notificationRepo.GetSessionReportsAsync();
         }
 
         /// <summary>
@@ -213,28 +175,7 @@ namespace AutopilotMonitor.Functions.Services
         /// </summary>
         public async Task<bool> UpdateAdminNoteAsync(string reportId, string adminNote)
         {
-            // Find the entity by scanning for matching ReportId
-            TableEntity? found = null;
-            await foreach (var entity in _tableClient.QueryAsync<TableEntity>(e => e.PartitionKey == "reports"))
-            {
-                if (entity.GetString("ReportId") == reportId)
-                {
-                    found = entity;
-                    break;
-                }
-            }
-
-            if (found == null)
-            {
-                _logger.LogWarning("UpdateAdminNote: report {ReportId} not found", reportId);
-                return false;
-            }
-
-            found["AdminNote"] = adminNote ?? string.Empty;
-            await _tableClient.UpsertEntityAsync(found, TableUpdateMode.Merge);
-
-            _logger.LogInformation("Updated AdminNote for report {ReportId}", reportId);
-            return true;
+            return await _notificationRepo.UpdateSessionReportAdminNoteAsync(reportId, adminNote);
         }
 
         private static void AddJsonEntry(ZipArchive archive, string name, object data)

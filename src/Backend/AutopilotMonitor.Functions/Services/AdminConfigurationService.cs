@@ -2,39 +2,31 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using AutopilotMonitor.Shared;
+using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
-using Azure;
-using Azure.Data.Tables;
 using Microsoft.Extensions.Caching.Memory;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace AutopilotMonitor.Functions.Services
 {
     /// <summary>
-    /// Service for managing global admin configuration in Azure Table Storage
+    /// Service for managing global admin configuration.
+    /// Caching and business logic layer — delegates storage to IConfigRepository.
     /// </summary>
     public class AdminConfigurationService
     {
-        private readonly TableClient _adminTableClient;
-        private readonly TableClient _tenantConfigTableClient;
+        private readonly IConfigRepository _configRepo;
         private readonly ILogger<AdminConfigurationService> _logger;
         private readonly IMemoryCache _cache;
 
         private const string CacheKey = "admin-config";
         private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(5);
 
-        public AdminConfigurationService(IConfiguration configuration, ILogger<AdminConfigurationService> logger, IMemoryCache cache)
+        public AdminConfigurationService(IConfigRepository configRepo, ILogger<AdminConfigurationService> logger, IMemoryCache cache)
         {
+            _configRepo = configRepo;
             _logger = logger;
             _cache = cache;
-
-            var connectionString = configuration["AzureTableStorageConnectionString"];
-            var serviceClient = new TableServiceClient(connectionString);
-            _adminTableClient = serviceClient.GetTableClient(Constants.TableNames.AdminConfiguration);
-            _tenantConfigTableClient = serviceClient.GetTableClient(Constants.TableNames.TenantConfiguration);
-            // Tables are initialized centrally by TableInitializerService at startup
         }
 
         /// <summary>
@@ -49,25 +41,23 @@ namespace AutopilotMonitor.Functions.Services
 
             try
             {
-                // Load from Table Storage
-                var entity = await _adminTableClient.GetEntityAsync<TableEntity>("GlobalConfig", "config");
-                var config = ConvertFromTableEntity(entity.Value);
+                // Load from repository
+                var config = await _configRepo.GetAdminConfigurationAsync();
 
-                _cache.Set(CacheKey, config, CacheDuration);
+                if (config != null)
+                {
+                    _cache.Set(CacheKey, config, CacheDuration);
+                    return config;
+                }
 
-                return config;
-            }
-            catch (RequestFailedException ex) when (ex.Status == 404)
-            {
                 // Configuration not found - create and save default immediately
                 _logger.LogInformation("Admin configuration not found, creating and saving default configuration");
                 var defaultConfig = AdminConfiguration.CreateDefault();
 
                 try
                 {
-                    // Save the default configuration to Table Storage
-                    var entity = ConvertToTableEntity(defaultConfig);
-                    await _adminTableClient.UpsertEntityAsync(entity);
+                    // Save the default configuration via repository
+                    await _configRepo.SaveAdminConfigurationAsync(defaultConfig);
 
                     _cache.Set(CacheKey, defaultConfig, CacheDuration);
 
@@ -102,8 +92,7 @@ namespace AutopilotMonitor.Functions.Services
             {
                 config.LastUpdated = DateTime.UtcNow;
 
-                var entity = ConvertToTableEntity(config);
-                await _adminTableClient.UpsertEntityAsync(entity);
+                await _configRepo.SaveAdminConfigurationAsync(config);
 
                 // Invalidate cache
                 _cache.Remove(CacheKey);
@@ -132,28 +121,26 @@ namespace AutopilotMonitor.Functions.Services
                 var tenantsUpdated = 0;
                 var tenantsSkipped = 0;
 
-                // Query all tenant configurations
-                var query = _tenantConfigTableClient.QueryAsync<TableEntity>(filter: $"RowKey eq 'config'");
+                // Get all tenant configurations via repository
+                var allConfigs = await _configRepo.GetAllTenantConfigurationsAsync();
 
-                await foreach (var entity in query)
+                foreach (var tenantConfig in allConfigs)
                 {
                     // Check if tenant has a custom rate limit override
-                    var customRateLimit = entity.GetInt32("CustomRateLimitRequestsPerMinute");
-
-                    if (customRateLimit.HasValue)
+                    if (tenantConfig.CustomRateLimitRequestsPerMinute.HasValue)
                     {
                         // Skip tenants with custom rate limit
                         tenantsSkipped++;
-                        _logger.LogDebug($"Skipping tenant {entity.PartitionKey} - has custom rate limit: {customRateLimit}");
+                        _logger.LogDebug($"Skipping tenant {tenantConfig.TenantId} - has custom rate limit: {tenantConfig.CustomRateLimitRequestsPerMinute}");
                         continue;
                     }
 
                     // Update tenant's rate limit to match global default
-                    entity["RateLimitRequestsPerMinute"] = globalRateLimit;
-                    entity["LastUpdated"] = DateTime.UtcNow;
-                    entity["UpdatedBy"] = "System (Global Rate Limit Sync)";
+                    tenantConfig.RateLimitRequestsPerMinute = globalRateLimit;
+                    tenantConfig.LastUpdated = DateTime.UtcNow;
+                    tenantConfig.UpdatedBy = "System (Global Rate Limit Sync)";
 
-                    await _tenantConfigTableClient.UpdateEntityAsync(entity, ETag.All, TableUpdateMode.Replace);
+                    await _configRepo.SaveTenantConfigurationAsync(tenantConfig);
                     tenantsUpdated++;
                 }
 
@@ -172,46 +159,6 @@ namespace AutopilotMonitor.Functions.Services
         public void InvalidateCache()
         {
             _cache.Remove(CacheKey);
-        }
-
-        private TableEntity ConvertToTableEntity(AdminConfiguration config)
-        {
-            var entity = new TableEntity("GlobalConfig", "config")
-            {
-                { "LastUpdated", config.LastUpdated },
-                { "UpdatedBy", config.UpdatedBy },
-                { "GlobalRateLimitRequestsPerMinute", config.GlobalRateLimitRequestsPerMinute },
-                { "PlatformStatsBlobSasUrl", config.PlatformStatsBlobSasUrl ?? string.Empty },
-                { "CollectorIdleTimeoutMinutes", config.CollectorIdleTimeoutMinutes },
-                { "MaxSessionWindowHours", config.MaxSessionWindowHours },
-                { "MaintenanceBlockDurationHours", config.MaintenanceBlockDurationHours },
-                { "DiagnosticsGlobalLogPathsJson", config.DiagnosticsGlobalLogPathsJson },
-                { "NvdApiKey", config.NvdApiKey },
-                { "VulnerabilityCorrelationEnabled", config.VulnerabilityCorrelationEnabled },
-                { "VulnerabilityDataLastSyncUtc", config.VulnerabilityDataLastSyncUtc }
-            };
-
-            return entity;
-        }
-
-        private AdminConfiguration ConvertFromTableEntity(TableEntity entity)
-        {
-            return new AdminConfiguration
-            {
-                PartitionKey = entity.PartitionKey,
-                RowKey = entity.RowKey,
-                LastUpdated = entity.GetDateTime("LastUpdated") ?? DateTime.UtcNow,
-                UpdatedBy = entity.GetString("UpdatedBy") ?? "Unknown",
-                GlobalRateLimitRequestsPerMinute = entity.GetInt32("GlobalRateLimitRequestsPerMinute") ?? 100,
-                PlatformStatsBlobSasUrl = entity.GetString("PlatformStatsBlobSasUrl") ?? string.Empty,
-                CollectorIdleTimeoutMinutes = entity.GetInt32("CollectorIdleTimeoutMinutes") ?? 15,
-                MaxSessionWindowHours = entity.GetInt32("MaxSessionWindowHours") ?? 24,
-                MaintenanceBlockDurationHours = entity.GetInt32("MaintenanceBlockDurationHours") ?? 12,
-                DiagnosticsGlobalLogPathsJson = entity.GetString("DiagnosticsGlobalLogPathsJson"),
-                NvdApiKey = entity.GetString("NvdApiKey"),
-                VulnerabilityCorrelationEnabled = entity.GetBoolean("VulnerabilityCorrelationEnabled") ?? true,
-                VulnerabilityDataLastSyncUtc = entity.GetString("VulnerabilityDataLastSyncUtc")
-            };
         }
     }
 }

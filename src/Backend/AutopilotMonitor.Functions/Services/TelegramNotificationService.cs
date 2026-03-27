@@ -2,10 +2,7 @@ using System;
 using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
-using AutopilotMonitor.Shared;
-using Azure;
-using Azure.Data.Tables;
-using Microsoft.Extensions.Configuration;
+using AutopilotMonitor.Shared.DataAccess;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 
@@ -13,27 +10,23 @@ namespace AutopilotMonitor.Functions.Services
 {
     /// <summary>
     /// Sends Telegram notifications for Private Preview signup events.
-    /// Webhook URL is read from the PreviewConfig table (PartitionKey="TelegramBot", RowKey="config").
+    /// Webhook URL is read from the PreviewConfig table via IConfigRepository.
     /// Temporary — remove after GA.
     /// </summary>
     public class TelegramNotificationService
     {
         private readonly HttpClient _http;
-        private readonly TableClient _tableClient;
+        private readonly IConfigRepository _configRepo;
         private readonly ILogger<TelegramNotificationService> _logger;
 
         public TelegramNotificationService(
             HttpClient http,
-            IConfiguration configuration,
+            IConfigRepository configRepo,
             ILogger<TelegramNotificationService> logger)
         {
             _http = http;
+            _configRepo = configRepo;
             _logger = logger;
-
-            var connectionString = configuration["AzureTableStorageConnectionString"];
-            var serviceClient = new TableServiceClient(connectionString);
-            _tableClient = serviceClient.GetTableClient(Constants.TableNames.PreviewConfig);
-            // Table is initialized centrally by TableInitializerService at startup
         }
 
         /// <summary>
@@ -197,13 +190,9 @@ namespace AutopilotMonitor.Functions.Services
         {
             try
             {
-                var entity = await _tableClient.GetEntityAsync<TableEntity>("TelegramBot", "config");
-                entity.Value.TryGetValue("WebhookUrl", out var value);
-                return value?.ToString();
-            }
-            catch (RequestFailedException ex) when (ex.Status == 404)
-            {
-                return null;
+                var config = await _configRepo.GetPreviewConfigAsync();
+                config.TryGetValue("WebhookUrl", out var value);
+                return value;
             }
             catch (Exception ex)
             {

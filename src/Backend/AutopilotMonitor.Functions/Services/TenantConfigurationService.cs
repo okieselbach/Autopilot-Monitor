@@ -1,38 +1,30 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Threading.Tasks;
-using AutopilotMonitor.Shared;
+using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
-using Azure;
-using Azure.Data.Tables;
 using Microsoft.Extensions.Caching.Memory;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using Newtonsoft.Json;
 
 namespace AutopilotMonitor.Functions.Services
 {
     /// <summary>
-    /// Service for managing tenant-specific configuration in Azure Table Storage
+    /// Service for managing tenant-specific configuration.
+    /// Caching and business logic layer — delegates storage to IConfigRepository.
     /// </summary>
     public class TenantConfigurationService
     {
-        private readonly TableClient _tableClient;
+        private readonly IConfigRepository _configRepo;
         private readonly ILogger<TenantConfigurationService> _logger;
         private readonly IMemoryCache _cache;
 
         private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(5);
 
-        public TenantConfigurationService(IConfiguration configuration, ILogger<TenantConfigurationService> logger, IMemoryCache cache)
+        public TenantConfigurationService(IConfigRepository configRepo, ILogger<TenantConfigurationService> logger, IMemoryCache cache)
         {
+            _configRepo = configRepo;
             _logger = logger;
             _cache = cache;
-
-            var connectionString = configuration["AzureTableStorageConnectionString"];
-            var serviceClient = new TableServiceClient(connectionString);
-            _tableClient = serviceClient.GetTableClient(Constants.TableNames.TenantConfiguration);
-            // Table is initialized centrally by TableInitializerService at startup
         }
 
         /// <summary>
@@ -55,25 +47,23 @@ namespace AutopilotMonitor.Functions.Services
 
             try
             {
-                // Load from Table Storage
-                var entity = await _tableClient.GetEntityAsync<TableEntity>(tenantId, "config");
-                var config = ConvertFromTableEntity(entity.Value);
+                // Load from repository
+                var config = await _configRepo.GetTenantConfigurationAsync(tenantId);
 
-                _cache.Set(cacheKey, config, CacheDuration);
+                if (config != null)
+                {
+                    _cache.Set(cacheKey, config, CacheDuration);
+                    return config;
+                }
 
-                return config;
-            }
-            catch (RequestFailedException ex) when (ex.Status == 404)
-            {
                 // Configuration not found - create and save default immediately
                 _logger.LogInformation($"Configuration not found for tenant {tenantId}, creating and saving default configuration");
                 var defaultConfig = TenantConfiguration.CreateDefault(tenantId);
 
                 try
                 {
-                    // Save the default configuration to Table Storage
-                    var entity = ConvertToTableEntity(defaultConfig);
-                    await _tableClient.UpsertEntityAsync(entity);
+                    // Save the default configuration via repository
+                    await _configRepo.SaveTenantConfigurationAsync(defaultConfig);
 
                     _cache.Set(cacheKey, defaultConfig, CacheDuration);
 
@@ -108,8 +98,7 @@ namespace AutopilotMonitor.Functions.Services
             {
                 config.LastUpdated = DateTime.UtcNow;
 
-                var entity = ConvertToTableEntity(config);
-                await _tableClient.UpsertEntityAsync(entity);
+                await _configRepo.SaveTenantConfigurationAsync(config);
 
                 // Invalidate cache
                 _cache.Remove($"tenant-config:{config.TenantId}");
@@ -147,13 +136,13 @@ namespace AutopilotMonitor.Functions.Services
 
             try
             {
-                var entity = await _tableClient.GetEntityAsync<TableEntity>(tenantId, "config");
-                var config = ConvertFromTableEntity(entity.Value);
-                _cache.Set(cacheKey, config, CacheDuration);
-                return (config, true);
-            }
-            catch (RequestFailedException ex) when (ex.Status == 404)
-            {
+                var config = await _configRepo.GetTenantConfigurationAsync(tenantId);
+                if (config != null)
+                {
+                    _cache.Set(cacheKey, config, CacheDuration);
+                    return (config, true);
+                }
+
                 return (TenantConfiguration.CreateDefault(tenantId), false);
             }
             catch (Exception ex)
@@ -171,144 +160,13 @@ namespace AutopilotMonitor.Functions.Services
         {
             try
             {
-                var configurations = new List<TenantConfiguration>();
-
-                await foreach (var entity in _tableClient.QueryAsync<TableEntity>(filter: "RowKey eq 'config'"))
-                {
-                    var config = ConvertFromTableEntity(entity);
-                    configurations.Add(config);
-                }
-
-                return configurations.OrderBy(c => c.TenantId).ToList();
+                return await _configRepo.GetAllTenantConfigurationsAsync();
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error loading all tenant configurations");
                 throw;
             }
-        }
-
-        private TableEntity ConvertToTableEntity(TenantConfiguration config)
-        {
-            var entity = new TableEntity(config.TenantId, "config")
-            {
-                { "DomainName", config.DomainName },
-                { "LastUpdated", config.LastUpdated },
-                { "UpdatedBy", config.UpdatedBy },
-                { "Disabled", config.Disabled },
-                { "DisabledReason", config.DisabledReason },
-                { "DisabledUntil", config.DisabledUntil },
-                { "RateLimitRequestsPerMinute", config.RateLimitRequestsPerMinute },
-                { "CustomRateLimitRequestsPerMinute", config.CustomRateLimitRequestsPerMinute },
-                { "ManufacturerWhitelist", config.ManufacturerWhitelist },
-                { "ModelWhitelist", config.ModelWhitelist },
-                { "ValidateAutopilotDevice", config.ValidateAutopilotDevice },
-                { "ValidateCorporateIdentifier", config.ValidateCorporateIdentifier },
-                { "AllowInsecureAgentRequests", config.AllowInsecureAgentRequests },
-                { "DataRetentionDays", config.DataRetentionDays },
-                { "SessionTimeoutHours", config.SessionTimeoutHours },
-                { "MaxNdjsonPayloadSizeMB", config.MaxNdjsonPayloadSizeMB },
-                { "EnablePerformanceCollector", config.EnablePerformanceCollector },
-                { "PerformanceCollectorIntervalSeconds", config.PerformanceCollectorIntervalSeconds },
-                { "MaxAuthFailures", config.MaxAuthFailures },
-                { "AuthFailureTimeoutMinutes", config.AuthFailureTimeoutMinutes },
-                { "SelfDestructOnComplete", config.SelfDestructOnComplete },
-                { "KeepLogFile", config.KeepLogFile },
-                { "RebootOnComplete", config.RebootOnComplete },
-                { "RebootDelaySeconds", config.RebootDelaySeconds },
-                { "EnableGeoLocation", config.EnableGeoLocation },
-                { "EnableImeMatchLog", config.EnableImeMatchLog },
-                { "LogLevel", config.LogLevel },
-                { "MaxBatchSize", config.MaxBatchSize },
-                { "DiagnosticsBlobSasUrl", config.DiagnosticsBlobSasUrl },
-                { "DiagnosticsUploadMode", config.DiagnosticsUploadMode },
-                { "DiagnosticsLogPathsJson", config.DiagnosticsLogPathsJson },
-                { "TeamsWebhookUrl", config.TeamsWebhookUrl },
-                { "TeamsNotifyOnSuccess", config.TeamsNotifyOnSuccess },
-                { "TeamsNotifyOnFailure", config.TeamsNotifyOnFailure },
-                { "WebhookProviderType", config.WebhookProviderType },
-                { "WebhookUrl", config.WebhookUrl },
-                { "WebhookNotifyOnSuccess", config.WebhookNotifyOnSuccess },
-                { "WebhookNotifyOnFailure", config.WebhookNotifyOnFailure },
-                { "ShowScriptOutput", config.ShowScriptOutput },
-                { "ShowEnrollmentSummary", config.ShowEnrollmentSummary },
-                { "EnrollmentSummaryTimeoutSeconds", config.EnrollmentSummaryTimeoutSeconds },
-                { "EnrollmentSummaryBrandingImageUrl", config.EnrollmentSummaryBrandingImageUrl },
-                { "EnrollmentSummaryLaunchRetrySeconds", config.EnrollmentSummaryLaunchRetrySeconds },
-                { "HelloWaitTimeoutSeconds", config.HelloWaitTimeoutSeconds },
-                { "AgentMaxLifetimeMinutes", config.AgentMaxLifetimeMinutes },
-                { "SendTraceEvents", config.SendTraceEvents },
-                { "EnableLocalAdminAnalyzer", config.EnableLocalAdminAnalyzer },
-                { "EnableSoftwareInventoryAnalyzer", config.EnableSoftwareInventoryAnalyzer },
-                { "LocalAdminAllowedAccountsJson", config.LocalAdminAllowedAccountsJson },
-                { "BootstrapTokenEnabled", config.BootstrapTokenEnabled },
-                { "UnrestrictedModeEnabled", config.UnrestrictedModeEnabled },
-                { "UnrestrictedMode", config.UnrestrictedMode },
-                { "OnboardedAt", config.OnboardedAt }
-            };
-
-            return entity;
-        }
-
-        private TenantConfiguration ConvertFromTableEntity(TableEntity entity)
-        {
-            return new TenantConfiguration
-            {
-                TenantId = entity.PartitionKey,
-                DomainName = entity.GetString("DomainName") ?? "",
-                LastUpdated = entity.GetDateTime("LastUpdated") ?? DateTime.UtcNow,
-                UpdatedBy = entity.GetString("UpdatedBy") ?? "Unknown",
-                Disabled = entity.GetBoolean("Disabled") ?? false,
-                DisabledReason = entity.GetString("DisabledReason"),
-                DisabledUntil = entity.GetDateTime("DisabledUntil"),
-                RateLimitRequestsPerMinute = entity.GetInt32("RateLimitRequestsPerMinute") ?? 100,
-                CustomRateLimitRequestsPerMinute = entity.GetInt32("CustomRateLimitRequestsPerMinute"),
-                ManufacturerWhitelist = entity.GetString("ManufacturerWhitelist") ?? "Dell*,HP*,Lenovo*,Microsoft Corporation",
-                ModelWhitelist = entity.GetString("ModelWhitelist") ?? "*",
-                ValidateAutopilotDevice = entity.GetBoolean("ValidateAutopilotDevice") ?? entity.GetBoolean("ValidateSerialNumber") ?? false,
-                ValidateCorporateIdentifier = entity.GetBoolean("ValidateCorporateIdentifier") ?? false,
-                AllowInsecureAgentRequests = entity.GetBoolean("AllowInsecureAgentRequests") ?? false,
-                DataRetentionDays = entity.GetInt32("DataRetentionDays") ?? 90,
-                SessionTimeoutHours = entity.GetInt32("SessionTimeoutHours") ?? 5,
-                MaxNdjsonPayloadSizeMB = entity.GetInt32("MaxNdjsonPayloadSizeMB") ?? 5,
-                EnablePerformanceCollector = entity.GetBoolean("EnablePerformanceCollector") ?? false,
-                PerformanceCollectorIntervalSeconds = entity.GetInt32("PerformanceCollectorIntervalSeconds") ?? 30,
-                MaxAuthFailures = entity.GetInt32("MaxAuthFailures"),
-                AuthFailureTimeoutMinutes = entity.GetInt32("AuthFailureTimeoutMinutes"),
-                SelfDestructOnComplete = entity.GetBoolean("SelfDestructOnComplete"),
-                KeepLogFile = entity.GetBoolean("KeepLogFile"),
-                RebootOnComplete = entity.GetBoolean("RebootOnComplete"),
-                RebootDelaySeconds = entity.GetInt32("RebootDelaySeconds"),
-                EnableGeoLocation = entity.GetBoolean("EnableGeoLocation"),
-                EnableImeMatchLog = entity.GetBoolean("EnableImeMatchLog"),
-                LogLevel = entity.GetString("LogLevel"),
-                MaxBatchSize = entity.GetInt32("MaxBatchSize"),
-                DiagnosticsBlobSasUrl = entity.GetString("DiagnosticsBlobSasUrl"),
-                DiagnosticsUploadMode = entity.GetString("DiagnosticsUploadMode") ?? "Off",
-                DiagnosticsLogPathsJson = entity.GetString("DiagnosticsLogPathsJson"),
-                TeamsWebhookUrl = entity.GetString("TeamsWebhookUrl"),
-                TeamsNotifyOnSuccess = entity.GetBoolean("TeamsNotifyOnSuccess") ?? true,
-                TeamsNotifyOnFailure = entity.GetBoolean("TeamsNotifyOnFailure") ?? true,
-                WebhookProviderType = entity.GetInt32("WebhookProviderType") ?? 0,
-                WebhookUrl = entity.GetString("WebhookUrl"),
-                WebhookNotifyOnSuccess = entity.GetBoolean("WebhookNotifyOnSuccess") ?? true,
-                WebhookNotifyOnFailure = entity.GetBoolean("WebhookNotifyOnFailure") ?? true,
-                ShowScriptOutput = entity.GetBoolean("ShowScriptOutput") ?? true,
-                ShowEnrollmentSummary = entity.GetBoolean("ShowEnrollmentSummary"),
-                EnrollmentSummaryTimeoutSeconds = entity.GetInt32("EnrollmentSummaryTimeoutSeconds"),
-                EnrollmentSummaryBrandingImageUrl = entity.GetString("EnrollmentSummaryBrandingImageUrl"),
-                EnrollmentSummaryLaunchRetrySeconds = entity.GetInt32("EnrollmentSummaryLaunchRetrySeconds"),
-                HelloWaitTimeoutSeconds = entity.GetInt32("HelloWaitTimeoutSeconds") ?? 30,
-                AgentMaxLifetimeMinutes = entity.GetInt32("AgentMaxLifetimeMinutes"),
-                SendTraceEvents = entity.GetBoolean("SendTraceEvents") ?? true,
-                EnableLocalAdminAnalyzer = entity.GetBoolean("EnableLocalAdminAnalyzer"),
-                EnableSoftwareInventoryAnalyzer = entity.GetBoolean("EnableSoftwareInventoryAnalyzer"),
-                LocalAdminAllowedAccountsJson = entity.GetString("LocalAdminAllowedAccountsJson"),
-                BootstrapTokenEnabled = entity.GetBoolean("BootstrapTokenEnabled") ?? false,
-                UnrestrictedModeEnabled = entity.GetBoolean("UnrestrictedModeEnabled") ?? false,
-                UnrestrictedMode = entity.GetBoolean("UnrestrictedMode") ?? false,
-                OnboardedAt = entity.GetDateTime("OnboardedAt")
-            };
         }
     }
 }

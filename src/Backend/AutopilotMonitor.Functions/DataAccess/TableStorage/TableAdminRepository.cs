@@ -10,118 +10,224 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
 {
     /// <summary>
     /// Table Storage implementation of IAdminRepository.
-    /// Delegates GlobalAdmin/TenantMember operations to existing services,
-    /// and implements API Key operations directly against the ApiKeys table.
+    /// Performs direct CRUD against GlobalAdmins, TenantAdmins, and ApiKeys tables.
     /// </summary>
     public class TableAdminRepository : IAdminRepository
     {
-        private readonly GlobalAdminService _globalAdminService;
-        private readonly TenantAdminsService _tenantAdminsService;
+        private readonly TableClient _globalAdminsTableClient;
+        private readonly TableClient _tenantAdminsTableClient;
         private readonly TableClient _apiKeysTableClient;
         private readonly ILogger<TableAdminRepository> _logger;
 
         public TableAdminRepository(
-            GlobalAdminService globalAdminService,
-            TenantAdminsService tenantAdminsService,
             IConfiguration configuration,
             ILogger<TableAdminRepository> logger)
         {
-            _globalAdminService = globalAdminService;
-            _tenantAdminsService = tenantAdminsService;
             _logger = logger;
 
             var connectionString = configuration["AzureTableStorageConnectionString"];
             var serviceClient = new TableServiceClient(connectionString);
+            _globalAdminsTableClient = serviceClient.GetTableClient(Constants.TableNames.GlobalAdmins);
+            _tenantAdminsTableClient = serviceClient.GetTableClient(Constants.TableNames.TenantAdmins);
             _apiKeysTableClient = serviceClient.GetTableClient(Constants.TableNames.ApiKeys);
         }
 
-        // --- Global Admins (delegate to existing service) ---
+        // --- Global Admins ---
 
-        public Task<bool> IsGlobalAdminAsync(string upn)
-            => _globalAdminService.IsGlobalAdminAsync(upn);
+        public async Task<bool> IsGlobalAdminAsync(string upn)
+        {
+            if (string.IsNullOrWhiteSpace(upn))
+                return false;
+
+            try
+            {
+                var normalizedUpn = upn.ToLowerInvariant();
+                var entity = await _globalAdminsTableClient.GetEntityAsync<GlobalAdminEntity>(
+                    "GlobalAdmins", normalizedUpn);
+                return entity?.Value != null && entity.Value.IsEnabled;
+            }
+            catch (RequestFailedException ex) when (ex.Status == 404)
+            {
+                return false;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error checking global admin status for {Upn}", upn);
+                return false;
+            }
+        }
 
         public async Task<List<GlobalAdminEntry>> GetAllGlobalAdminsAsync()
         {
-            var entities = await _globalAdminService.GetAllGlobalAdminsAsync();
-            return entities.Select(e => new GlobalAdminEntry
+            var admins = new List<GlobalAdminEntry>();
+            await foreach (var entity in _globalAdminsTableClient.QueryAsync<GlobalAdminEntity>(
+                filter: $"PartitionKey eq 'GlobalAdmins'"))
             {
-                Upn = e.Upn,
-                IsEnabled = e.IsEnabled,
-                AddedAt = e.AddedDate,
-                AddedBy = e.AddedBy
-            }).ToList();
+                admins.Add(new GlobalAdminEntry
+                {
+                    Upn = entity.Upn,
+                    IsEnabled = entity.IsEnabled,
+                    AddedAt = entity.AddedDate,
+                    AddedBy = entity.AddedBy
+                });
+            }
+            return admins;
         }
 
         public async Task<bool> AddGlobalAdminAsync(string upn, string addedBy)
         {
-            await _globalAdminService.AddGlobalAdminAsync(upn, addedBy);
+            upn = upn.ToLowerInvariant();
+            addedBy = addedBy.ToLowerInvariant();
+
+            var entity = new GlobalAdminEntity
+            {
+                PartitionKey = "GlobalAdmins",
+                RowKey = upn,
+                Upn = upn,
+                IsEnabled = true,
+                AddedDate = DateTime.UtcNow,
+                AddedBy = addedBy
+            };
+
+            await _globalAdminsTableClient.UpsertEntityAsync(entity);
             return true;
         }
 
         public async Task<bool> RemoveGlobalAdminAsync(string upn)
         {
-            await _globalAdminService.RemoveGlobalAdminAsync(upn);
+            upn = upn.ToLowerInvariant();
+            await _globalAdminsTableClient.DeleteEntityAsync("GlobalAdmins", upn);
             return true;
         }
 
         public async Task<bool> DisableGlobalAdminAsync(string upn)
         {
-            await _globalAdminService.DisableGlobalAdminAsync(upn);
-            return true;
+            upn = upn.ToLowerInvariant();
+
+            try
+            {
+                var result = await _globalAdminsTableClient.GetEntityAsync<GlobalAdminEntity>(
+                    "GlobalAdmins", upn);
+                var entity = result.Value;
+                if (entity != null)
+                {
+                    entity.IsEnabled = false;
+                    await _globalAdminsTableClient.UpdateEntityAsync(entity, ETag.All);
+                }
+                return true;
+            }
+            catch (RequestFailedException ex) when (ex.Status == 404)
+            {
+                return false;
+            }
         }
 
-        // --- Tenant Members (delegate to existing service) ---
+        // --- Tenant Members ---
 
         public async Task<List<TenantMember>> GetTenantMembersAsync(string tenantId)
         {
-            var entities = await _tenantAdminsService.GetTenantAdminsAsync(tenantId);
-            return entities.Select(e => new TenantMember
+            tenantId = tenantId.ToLowerInvariant();
+            var members = new List<TenantMember>();
+
+            await foreach (var entity in _tenantAdminsTableClient.QueryAsync<TenantAdminEntity>(
+                filter: $"PartitionKey eq '{tenantId}'"))
             {
-                Upn = e.Upn,
-                TenantId = e.TenantId,
-                Role = e.Role ?? "Admin",
-                IsEnabled = e.IsEnabled,
-                CanManageBootstrapTokens = e.CanManageBootstrapTokens,
-                AddedAt = e.AddedDate,
-                AddedBy = e.AddedBy
-            }).ToList();
+                members.Add(MapToTenantMember(entity));
+            }
+
+            return members;
         }
 
         public async Task<bool> AddTenantMemberAsync(string tenantId, string upn, string addedBy, string role, bool canManageBootstrapTokens = false)
         {
-            await _tenantAdminsService.AddTenantMemberAsync(tenantId, upn, addedBy, role, canManageBootstrapTokens);
+            tenantId = tenantId.ToLowerInvariant();
+            upn = upn.ToLowerInvariant();
+            addedBy = addedBy.ToLowerInvariant();
+
+            var entity = new TenantAdminEntity
+            {
+                PartitionKey = tenantId,
+                RowKey = upn,
+                TenantId = tenantId,
+                Upn = upn,
+                IsEnabled = true,
+                AddedDate = DateTime.UtcNow,
+                AddedBy = addedBy,
+                Role = role,
+                CanManageBootstrapTokens = canManageBootstrapTokens
+            };
+
+            await _tenantAdminsTableClient.UpsertEntityAsync(entity);
             return true;
         }
 
         public async Task<bool> RemoveTenantMemberAsync(string tenantId, string upn)
         {
-            await _tenantAdminsService.RemoveTenantAdminAsync(tenantId, upn);
+            tenantId = tenantId.ToLowerInvariant();
+            upn = upn.ToLowerInvariant();
+            await _tenantAdminsTableClient.DeleteEntityAsync(tenantId, upn);
             return true;
         }
 
-        public Task<bool> UpdateMemberPermissionsAsync(string tenantId, string upn, string role, bool canManageBootstrapTokens)
-            => _tenantAdminsService.UpdateMemberPermissionsAsync(tenantId, upn, role, canManageBootstrapTokens);
+        public async Task<bool> UpdateMemberPermissionsAsync(string tenantId, string upn, string role, bool canManageBootstrapTokens)
+        {
+            tenantId = tenantId.ToLowerInvariant();
+            upn = upn.ToLowerInvariant();
+
+            try
+            {
+                var result = await _tenantAdminsTableClient.GetEntityAsync<TenantAdminEntity>(tenantId, upn);
+                var entity = result.Value;
+                if (entity == null) return false;
+
+                entity.Role = role;
+                entity.CanManageBootstrapTokens = canManageBootstrapTokens;
+                await _tenantAdminsTableClient.UpdateEntityAsync(entity, ETag.All);
+                return true;
+            }
+            catch (RequestFailedException ex) when (ex.Status == 404)
+            {
+                return false;
+            }
+        }
 
         public async Task<TenantMember?> GetTenantMemberAsync(string tenantId, string upn)
         {
-            var role = await _tenantAdminsService.GetMemberRoleAsync(tenantId, upn);
-            if (role == null) return null;
+            tenantId = tenantId.ToLowerInvariant();
+            upn = upn.ToLowerInvariant();
 
-            return new TenantMember
+            try
             {
-                Upn = upn.ToLowerInvariant(),
-                TenantId = tenantId.ToLowerInvariant(),
-                Role = role.Role,
-                IsEnabled = true,
-                CanManageBootstrapTokens = role.CanManageBootstrapTokens
-            };
+                var result = await _tenantAdminsTableClient.GetEntityAsync<TenantAdminEntity>(tenantId, upn);
+                var entity = result.Value;
+                if (entity == null || !entity.IsEnabled) return null;
+                return MapToTenantMember(entity);
+            }
+            catch (RequestFailedException ex) when (ex.Status == 404)
+            {
+                return null;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting tenant member {Upn} for tenant {TenantId}", upn, tenantId);
+                return null;
+            }
         }
 
-        public Task<bool> IsTenantAdminAsync(string tenantId, string upn)
-            => _tenantAdminsService.IsTenantAdminAsync(tenantId, upn);
+        public async Task<bool> IsTenantAdminAsync(string tenantId, string upn)
+        {
+            var member = await GetTenantMemberAsync(tenantId, upn);
+            if (member == null) return false;
+            // Only true for Admin role (null Role = Admin for backward compat)
+            return member.Role == null || member.Role == Constants.TenantRoles.Admin;
+        }
 
-        public Task<bool> IsTenantMemberAsync(string tenantId, string upn)
-            => _tenantAdminsService.IsTenantMemberAsync(tenantId, upn);
+        public async Task<bool> IsTenantMemberAsync(string tenantId, string upn)
+        {
+            var member = await GetTenantMemberAsync(tenantId, upn);
+            if (member == null) return false;
+            return member.Role != Constants.TenantRoles.Viewer;
+        }
 
         // --- API Keys ---
 
@@ -220,6 +326,20 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
         }
 
         // --- Helpers ---
+
+        private static TenantMember MapToTenantMember(TenantAdminEntity entity)
+        {
+            return new TenantMember
+            {
+                Upn = entity.Upn,
+                TenantId = entity.TenantId,
+                Role = entity.Role ?? Constants.TenantRoles.Admin,
+                IsEnabled = entity.IsEnabled,
+                CanManageBootstrapTokens = entity.CanManageBootstrapTokens,
+                AddedAt = entity.AddedDate,
+                AddedBy = entity.AddedBy
+            };
+        }
 
         private static ApiKeyEntry MapEntityToApiKeyEntry(TableEntity entity)
         {

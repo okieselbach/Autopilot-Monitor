@@ -3,10 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using Azure;
-using Azure.Data.Tables;
-using AutopilotMonitor.Shared;
-using Microsoft.Extensions.Configuration;
+using AutopilotMonitor.Shared.DataAccess;
 using Microsoft.Extensions.Logging;
 
 namespace AutopilotMonitor.Functions.Services
@@ -18,11 +15,11 @@ namespace AutopilotMonitor.Functions.Services
     ///   "1.0.*"    — matches all agents with major.minor 1.0
     ///   "1.0.30"   — matches all agents with version &lt;= 1.0.30
     ///   "=1.0.30"  — matches exactly version 1.0.30
-    /// Global rules (apply to all tenants). Uses Azure Table Storage + in-memory cache.
+    /// Global rules (apply to all tenants). Uses IDeviceSecurityRepository + in-memory cache.
     /// </summary>
     public class BlockedVersionService
     {
-        private readonly TableClient _tableClient;
+        private readonly IDeviceSecurityRepository _securityRepo;
         private readonly ILogger<BlockedVersionService> _logger;
 
         private static readonly TimeSpan CacheRefreshInterval = TimeSpan.FromMinutes(5);
@@ -32,12 +29,10 @@ namespace AutopilotMonitor.Functions.Services
         private volatile bool _loaded;
         private DateTime _lastLoadedUtc = DateTime.MinValue;
 
-        public BlockedVersionService(IConfiguration configuration, ILogger<BlockedVersionService> logger)
+        public BlockedVersionService(IDeviceSecurityRepository securityRepo, ILogger<BlockedVersionService> logger)
         {
+            _securityRepo = securityRepo;
             _logger = logger;
-            var connectionString = configuration["AzureTableStorageConnectionString"];
-            var serviceClient = new TableServiceClient(connectionString);
-            _tableClient = serviceClient.GetTableClient(Constants.TableNames.BlockedVersions);
         }
 
         /// <summary>
@@ -89,16 +84,7 @@ namespace AutopilotMonitor.Functions.Services
             if (!IsValidPattern(versionPattern))
                 throw new ArgumentException($"Invalid version pattern: '{versionPattern}'. Use formats like '1.*', '1.0.*', '1.0.30' (<=), or '=1.0.30' (exact).");
 
-            var entity = new TableEntity("global", EncodeRowKey(versionPattern))
-            {
-                ["VersionPattern"] = versionPattern,
-                ["Action"] = action,
-                ["CreatedByEmail"] = createdByEmail ?? string.Empty,
-                ["CreatedAt"] = DateTime.UtcNow,
-                ["Reason"] = reason ?? string.Empty
-            };
-
-            await _tableClient.UpsertEntityAsync(entity);
+            await _securityRepo.BlockVersionAsync(versionPattern, action, createdByEmail, reason);
 
             // Update cache
             _cache[versionPattern] = new VersionBlockCacheEntry { Action = action };
@@ -115,14 +101,7 @@ namespace AutopilotMonitor.Functions.Services
         {
             versionPattern = versionPattern.Trim();
 
-            try
-            {
-                await _tableClient.DeleteEntityAsync("global", EncodeRowKey(versionPattern));
-            }
-            catch (RequestFailedException ex) when (ex.Status == 404)
-            {
-                // Already removed
-            }
+            await _securityRepo.UnblockVersionAsync(versionPattern);
 
             _cache.TryRemove(versionPattern, out _);
 
@@ -132,24 +111,8 @@ namespace AutopilotMonitor.Functions.Services
         /// <summary>
         /// Returns all active version block rules.
         /// </summary>
-        public async Task<List<BlockedVersionEntry>> GetBlockedVersionsAsync()
-        {
-            var result = new List<BlockedVersionEntry>();
-
-            await foreach (var entity in _tableClient.QueryAsync<TableEntity>(e => e.PartitionKey == "global"))
-            {
-                result.Add(new BlockedVersionEntry
-                {
-                    VersionPattern = entity.GetString("VersionPattern") ?? DecodeRowKey(entity.RowKey),
-                    Action = entity.GetString("Action") ?? "Block",
-                    CreatedByEmail = entity.GetString("CreatedByEmail") ?? string.Empty,
-                    CreatedAt = entity.GetDateTimeOffset("CreatedAt")?.UtcDateTime ?? DateTime.MinValue,
-                    Reason = entity.GetString("Reason")
-                });
-            }
-
-            return result;
-        }
+        public Task<List<BlockedVersionEntry>> GetBlockedVersionsAsync()
+            => _securityRepo.GetBlockedVersionsAsync();
 
         // -----------------------------------------------------------------------
         // Version matching logic
@@ -274,14 +237,14 @@ namespace AutopilotMonitor.Functions.Services
 
             try
             {
-                var freshCache = new ConcurrentDictionary<string, VersionBlockCacheEntry>(StringComparer.OrdinalIgnoreCase);
+                var entries = await _securityRepo.GetBlockedVersionsAsync();
 
-                await foreach (var entity in _tableClient.QueryAsync<TableEntity>(e => e.PartitionKey == "global"))
+                var freshCache = new ConcurrentDictionary<string, VersionBlockCacheEntry>(StringComparer.OrdinalIgnoreCase);
+                foreach (var entry in entries)
                 {
-                    var pattern = entity.GetString("VersionPattern") ?? DecodeRowKey(entity.RowKey);
-                    freshCache[pattern] = new VersionBlockCacheEntry
+                    freshCache[entry.VersionPattern] = new VersionBlockCacheEntry
                     {
-                        Action = entity.GetString("Action") ?? "Block"
+                        Action = entry.Action
                     };
                 }
 
@@ -315,23 +278,7 @@ namespace AutopilotMonitor.Functions.Services
         {
             public string Action { get; set; } = "Block";
         }
-
-        private static string EncodeRowKey(string pattern)
-            => Uri.EscapeDataString(pattern);
-
-        private static string DecodeRowKey(string encoded)
-            => Uri.UnescapeDataString(encoded);
     }
 
-    /// <summary>
-    /// Represents a version block rule returned by the API.
-    /// </summary>
-    public class BlockedVersionEntry
-    {
-        public string VersionPattern { get; set; } = string.Empty;
-        public string Action { get; set; } = "Block";
-        public string CreatedByEmail { get; set; } = string.Empty;
-        public DateTime CreatedAt { get; set; }
-        public string? Reason { get; set; }
-    }
+    // Note: BlockedVersionEntry is now defined in AutopilotMonitor.Shared.DataAccess.IDeviceSecurityRepository
 }
