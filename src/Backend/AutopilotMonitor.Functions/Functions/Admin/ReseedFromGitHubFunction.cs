@@ -3,7 +3,7 @@ using System.Text.Json;
 using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Services;
 using AutopilotMonitor.Functions.Services.Vulnerability;
-using Azure.Data.Tables;
+using AutopilotMonitor.Shared.DataAccess;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
@@ -21,7 +21,8 @@ namespace AutopilotMonitor.Functions.Functions.Admin
         private readonly GatherRuleService _gatherRuleService;
         private readonly AnalyzeRuleService _analyzeRuleService;
         private readonly ImeLogPatternService _imeLogPatternService;
-        private readonly TableStorageService _storageService;
+        private readonly IVulnerabilityRepository _vulnRepo;
+        private readonly IRuleRepository _ruleRepo;
 
         public ReseedFromGitHubFunction(
             ILogger<ReseedFromGitHubFunction> logger,
@@ -29,14 +30,16 @@ namespace AutopilotMonitor.Functions.Functions.Admin
             GatherRuleService gatherRuleService,
             AnalyzeRuleService analyzeRuleService,
             ImeLogPatternService imeLogPatternService,
-            TableStorageService storageService)
+            IVulnerabilityRepository vulnRepo,
+            IRuleRepository ruleRepo)
         {
             _logger = logger;
             _gitHubRepo = gitHubRepo;
             _gatherRuleService = gatherRuleService;
             _analyzeRuleService = analyzeRuleService;
             _imeLogPatternService = imeLogPatternService;
-            _storageService = storageService;
+            _vulnRepo = vulnRepo;
+            _ruleRepo = ruleRepo;
         }
 
         [Function("ReseedFromGitHub")]
@@ -134,11 +137,11 @@ namespace AutopilotMonitor.Functions.Functions.Admin
 
         private async Task<(int deleted, int written)> ReseedGatherAsync(List<AutopilotMonitor.Shared.Models.GatherRule> rules)
         {
-            var existing = await _storageService.GetGatherRulesAsync("global");
+            var existing = await _ruleRepo.GetGatherRulesAsync("global");
             var deleted = 0;
             foreach (var rule in existing.Where(r => r.IsBuiltIn || r.IsCommunity))
             {
-                await _storageService.DeleteGatherRuleAsync("global", rule.RuleId);
+                await _ruleRepo.DeleteGatherRuleAsync("global", rule.RuleId);
                 deleted++;
             }
 
@@ -149,7 +152,7 @@ namespace AutopilotMonitor.Functions.Functions.Admin
                     rule.IsBuiltIn = true;
                 rule.CreatedAt = DateTime.UtcNow;
                 rule.UpdatedAt = DateTime.UtcNow;
-                await _storageService.StoreGatherRuleAsync(rule, "global");
+                await _ruleRepo.StoreGatherRuleAsync(rule, "global");
             }
 
             _logger.LogInformation($"GitHub reseed gather: {deleted} deleted, {rules.Count} written");
@@ -158,11 +161,11 @@ namespace AutopilotMonitor.Functions.Functions.Admin
 
         private async Task<(int deleted, int written)> ReseedAnalyzeAsync(List<AutopilotMonitor.Shared.Models.AnalyzeRule> rules)
         {
-            var existing = await _storageService.GetAnalyzeRulesAsync("global");
+            var existing = await _ruleRepo.GetAnalyzeRulesAsync("global");
             var deleted = 0;
             foreach (var rule in existing.Where(r => r.IsBuiltIn || r.IsCommunity))
             {
-                await _storageService.DeleteAnalyzeRuleAsync("global", rule.RuleId);
+                await _ruleRepo.DeleteAnalyzeRuleAsync("global", rule.RuleId);
                 deleted++;
             }
 
@@ -173,7 +176,7 @@ namespace AutopilotMonitor.Functions.Functions.Admin
                     rule.IsBuiltIn = true;
                 rule.CreatedAt = DateTime.UtcNow;
                 rule.UpdatedAt = DateTime.UtcNow;
-                await _storageService.StoreAnalyzeRuleAsync(rule, "global");
+                await _ruleRepo.StoreAnalyzeRuleAsync(rule, "global");
             }
 
             _logger.LogInformation($"GitHub reseed analyze: {deleted} deleted, {rules.Count} written");
@@ -182,18 +185,18 @@ namespace AutopilotMonitor.Functions.Functions.Admin
 
         private async Task<(int deleted, int written)> ReseedImeAsync(List<AutopilotMonitor.Shared.Models.ImeLogPattern> patterns)
         {
-            var existing = await _storageService.GetImeLogPatternsAsync("global");
+            var existing = await _ruleRepo.GetImeLogPatternsAsync("global");
             var deleted = 0;
             foreach (var pattern in existing.Where(p => p.IsBuiltIn))
             {
-                await _storageService.DeleteImeLogPatternAsync("global", pattern.PatternId);
+                await _ruleRepo.DeleteImeLogPatternAsync("global", pattern.PatternId);
                 deleted++;
             }
 
             foreach (var pattern in patterns)
             {
                 pattern.IsBuiltIn = true;
-                await _storageService.StoreImeLogPatternAsync(pattern, "global");
+                await _ruleRepo.StoreImeLogPatternAsync(pattern, "global");
             }
 
             _logger.LogInformation($"GitHub reseed IME: {deleted} deleted, {patterns.Count} written");
@@ -202,45 +205,12 @@ namespace AutopilotMonitor.Functions.Functions.Admin
 
         private async Task<(int deleted, int written)> ReseedCpeCommunityMappingsAsync()
         {
-            var tableClient = _storageService.GetTableClient(AutopilotMonitor.Shared.Constants.TableNames.VulnerabilityCache);
-
             // Delete existing community CPE mapping entries
-            var deleted = 0;
-            var existingEntities = tableClient.QueryAsync<TableEntity>(
-                filter: $"PartitionKey eq 'cpe_map_community'");
-            await foreach (var entity in existingEntities)
-            {
-                await tableClient.DeleteEntityAsync(entity.PartitionKey, entity.RowKey);
-                deleted++;
-            }
+            var deleted = await _vulnRepo.DeleteCpeMappingsByPartitionAsync("cpe_map_community");
 
-            // Fetch community CPE mappings from GitHub
+            // Fetch community CPE mappings from GitHub and import
             var json = await _gitHubRepo.FetchCpeCommunityMappingsAsync();
-            var seed = JsonSerializer.Deserialize<CpeMappingSeed>(json, new JsonSerializerOptions
-            {
-                PropertyNameCaseInsensitive = true
-            });
-
-            var written = 0;
-            if (seed?.Mappings != null)
-            {
-                foreach (var mapping in seed.Mappings)
-                {
-                    var entity = new TableEntity("cpe_map_community", $"{mapping.CpeVendor}_{mapping.CpeProduct}")
-                    {
-                        { "NormalizedVendor", mapping.NormalizedVendor ?? "" },
-                        { "NormalizedProduct", mapping.NormalizedProduct ?? "" },
-                        { "CpeVendor", mapping.CpeVendor ?? "" },
-                        { "CpeProduct", mapping.CpeProduct ?? "" },
-                        { "CpeUri", mapping.CpeUri ?? "" },
-                        { "Category", mapping.Category ?? "community" },
-                        { "DisplayNamePatternsJson", JsonSerializer.Serialize(mapping.DisplayNamePatterns ?? new List<string>()) },
-                        { "PublisherPatternsJson", JsonSerializer.Serialize(mapping.PublisherPatterns ?? new List<string>()) }
-                    };
-                    await tableClient.UpsertEntityAsync(entity, TableUpdateMode.Replace);
-                    written++;
-                }
-            }
+            var written = await _vulnRepo.ImportCpeCommunityMappingsFromJsonAsync(json);
 
             // Reset the static seed-loaded flag so the next correlation picks up fresh data
             VulnerabilityCorrelationService.ResetMappingsCache();
@@ -252,19 +222,12 @@ namespace AutopilotMonitor.Functions.Functions.Admin
         private async Task<(int deleted, int written)> ReseedCpeSeedMappingsAsync()
         {
             // Count existing seed entries before deletion (for reporting)
-            var tableClient = _storageService.GetTableClient(AutopilotMonitor.Shared.Constants.TableNames.VulnerabilityCache);
-            var deleted = 0;
-            var existingEntities = tableClient.QueryAsync<TableEntity>(
-                filter: $"PartitionKey eq 'cpe_map_seed'",
-                select: new[] { "PartitionKey" });
-            await foreach (var _ in existingEntities)
-            {
-                deleted++;
-            }
+            var existingEntries = await _vulnRepo.GetCpeMappingsByPartitionAsync("cpe_map_seed");
+            var deleted = existingEntries.Count;
 
             // Fetch CPE seed mappings from GitHub and import (deletes + writes in one call)
             var json = await _gitHubRepo.FetchCpeSeedMappingsAsync();
-            var written = await _storageService.ImportCpeMappingSeedFromJsonAsync(json);
+            var written = await _vulnRepo.ImportCpeMappingSeedFromJsonAsync(json);
 
             // Reset the static seed-loaded flag so the next correlation picks up fresh data
             VulnerabilityCorrelationService.ResetMappingsCache();

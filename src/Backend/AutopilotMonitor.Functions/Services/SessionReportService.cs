@@ -23,20 +23,22 @@ namespace AutopilotMonitor.Functions.Services
     /// </summary>
     public class SessionReportService
     {
-        private readonly TableStorageService _storageService;
+        private readonly TableClient _tableClient;
         private readonly ILogger<SessionReportService> _logger;
         private readonly string _blobConnectionString;
         private const string ContainerName = "session-reports";
 
         public SessionReportService(
-            TableStorageService storageService,
             IConfiguration configuration,
             ILogger<SessionReportService> logger)
         {
-            _storageService = storageService;
             _logger = logger;
             _blobConnectionString = configuration["AzureBlobStorageConnectionString"]
                 ?? throw new InvalidOperationException("AzureBlobStorageConnectionString is not configured");
+
+            var connectionString = configuration["AzureTableStorageConnectionString"];
+            var serviceClient = new TableServiceClient(connectionString);
+            _tableClient = serviceClient.GetTableClient(Constants.TableNames.SessionReports);
         }
 
         /// <summary>
@@ -157,8 +159,7 @@ namespace AutopilotMonitor.Functions.Services
                 ["SubmittedAt"] = now
             };
 
-            var tableClient = _storageService.GetTableServiceClient().GetTableClient(Constants.TableNames.SessionReports);
-            await tableClient.UpsertEntityAsync(entity);
+            await _tableClient.UpsertEntityAsync(entity);
 
             return new SessionReportMetadata
             {
@@ -178,12 +179,11 @@ namespace AutopilotMonitor.Functions.Services
         /// </summary>
         public async Task<List<SessionReportMetadata>> GetAllReportsAsync()
         {
-            var tableClient = _storageService.GetTableServiceClient().GetTableClient(Constants.TableNames.SessionReports);
             var results = new List<SessionReportMetadata>();
 
             try
             {
-                await foreach (var entity in tableClient.QueryAsync<TableEntity>(e => e.PartitionKey == "reports"))
+                await foreach (var entity in _tableClient.QueryAsync<TableEntity>(e => e.PartitionKey == "reports"))
                 {
                     results.Add(new SessionReportMetadata
                     {
@@ -213,11 +213,9 @@ namespace AutopilotMonitor.Functions.Services
         /// </summary>
         public async Task<bool> UpdateAdminNoteAsync(string reportId, string adminNote)
         {
-            var tableClient = _storageService.GetTableServiceClient().GetTableClient(Constants.TableNames.SessionReports);
-
             // Find the entity by scanning for matching ReportId
             TableEntity? found = null;
-            await foreach (var entity in tableClient.QueryAsync<TableEntity>(e => e.PartitionKey == "reports"))
+            await foreach (var entity in _tableClient.QueryAsync<TableEntity>(e => e.PartitionKey == "reports"))
             {
                 if (entity.GetString("ReportId") == reportId)
                 {
@@ -233,7 +231,7 @@ namespace AutopilotMonitor.Functions.Services
             }
 
             found["AdminNote"] = adminNote ?? string.Empty;
-            await tableClient.UpsertEntityAsync(found, TableUpdateMode.Merge);
+            await _tableClient.UpsertEntityAsync(found, TableUpdateMode.Merge);
 
             _logger.LogInformation("Updated AdminNote for report {ReportId}", reportId);
             return true;

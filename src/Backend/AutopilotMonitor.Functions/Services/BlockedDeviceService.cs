@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Azure;
 using Azure.Data.Tables;
 using AutopilotMonitor.Shared;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace AutopilotMonitor.Functions.Services
@@ -16,7 +17,7 @@ namespace AutopilotMonitor.Functions.Services
     /// </summary>
     public class BlockedDeviceService
     {
-        private readonly TableStorageService _storageService;
+        private readonly TableClient _tableClient;
         private readonly ILogger<BlockedDeviceService> _logger;
 
         // Cache key: "tenantId|serialNumber" (lower-cased serial number for case-insensitive matching)
@@ -27,10 +28,12 @@ namespace AutopilotMonitor.Functions.Services
         // Lazy loading: populated on first lookup per tenant.
         private readonly ConcurrentDictionary<string, bool> _loadedTenants = new(StringComparer.OrdinalIgnoreCase);
 
-        public BlockedDeviceService(TableStorageService storageService, ILogger<BlockedDeviceService> logger)
+        public BlockedDeviceService(IConfiguration configuration, ILogger<BlockedDeviceService> logger)
         {
-            _storageService = storageService;
             _logger = logger;
+            var connectionString = configuration["AzureTableStorageConnectionString"];
+            var serviceClient = new TableServiceClient(connectionString);
+            _tableClient = serviceClient.GetTableClient(Constants.TableNames.BlockedDevices);
         }
 
         /// <summary>
@@ -82,8 +85,7 @@ namespace AutopilotMonitor.Functions.Services
                 ["Action"] = action ?? "Block"
             };
 
-            var tableClient = _storageService.GetTableServiceClient().GetTableClient(Constants.TableNames.BlockedDevices);
-            await tableClient.UpsertEntityAsync(entity);
+            await _tableClient.UpsertEntityAsync(entity);
 
             // Update cache immediately
             var cacheKey = BuildCacheKey(tenantId, serialNumber);
@@ -99,11 +101,9 @@ namespace AutopilotMonitor.Functions.Services
         /// </summary>
         public async Task UnblockDeviceAsync(string tenantId, string serialNumber)
         {
-            var tableClient = _storageService.GetTableServiceClient().GetTableClient(Constants.TableNames.BlockedDevices);
-
             try
             {
-                await tableClient.DeleteEntityAsync(tenantId, EncodeRowKey(serialNumber));
+                await _tableClient.DeleteEntityAsync(tenantId, EncodeRowKey(serialNumber));
             }
             catch (RequestFailedException ex) when (ex.Status == 404)
             {
@@ -123,12 +123,11 @@ namespace AutopilotMonitor.Functions.Services
         /// </summary>
         public async Task<List<BlockedDeviceEntry>> GetBlockedDevicesAsync(string tenantId)
         {
-            var tableClient = _storageService.GetTableServiceClient().GetTableClient(Constants.TableNames.BlockedDevices);
             var result = new List<BlockedDeviceEntry>();
             var expiredRowKeys = new List<string>();
             var now = DateTime.UtcNow;
 
-            await foreach (var entity in tableClient.QueryAsync<TableEntity>(e => e.PartitionKey == tenantId))
+            await foreach (var entity in _tableClient.QueryAsync<TableEntity>(e => e.PartitionKey == tenantId))
             {
                 var unblockAt = entity.GetDateTimeOffset("UnblockAt")?.UtcDateTime ?? DateTime.MinValue;
 
@@ -152,7 +151,7 @@ namespace AutopilotMonitor.Functions.Services
             }
 
             // Clean up expired entries from storage (fire-and-forget, best effort)
-            _ = CleanupExpiredEntriesAsync(tableClient, tenantId, expiredRowKeys);
+            _ = CleanupExpiredEntriesAsync(tenantId, expiredRowKeys);
 
             return result;
         }
@@ -163,12 +162,11 @@ namespace AutopilotMonitor.Functions.Services
         /// </summary>
         public async Task<List<BlockedDeviceEntry>> GetAllBlockedDevicesAsync()
         {
-            var tableClient = _storageService.GetTableServiceClient().GetTableClient(Constants.TableNames.BlockedDevices);
             var result = new List<BlockedDeviceEntry>();
             var expiredKeys = new List<(string partitionKey, string rowKey)>();
             var now = DateTime.UtcNow;
 
-            await foreach (var entity in tableClient.QueryAsync<TableEntity>())
+            await foreach (var entity in _tableClient.QueryAsync<TableEntity>())
             {
                 var unblockAt = entity.GetDateTimeOffset("UnblockAt")?.UtcDateTime ?? DateTime.MinValue;
 
@@ -194,7 +192,7 @@ namespace AutopilotMonitor.Functions.Services
             // Clean up expired entries (fire-and-forget, best effort)
             foreach (var (pk, rk) in expiredKeys)
             {
-                try { await tableClient.DeleteEntityAsync(pk, rk); }
+                try { await _tableClient.DeleteEntityAsync(pk, rk); }
                 catch { /* best effort */ }
             }
 
@@ -213,10 +211,9 @@ namespace AutopilotMonitor.Functions.Services
 
             try
             {
-                var tableClient = _storageService.GetTableServiceClient().GetTableClient(Constants.TableNames.BlockedDevices);
                 var now = DateTime.UtcNow;
 
-                await foreach (var entity in tableClient.QueryAsync<TableEntity>(e => e.PartitionKey == tenantId))
+                await foreach (var entity in _tableClient.QueryAsync<TableEntity>(e => e.PartitionKey == tenantId))
                 {
                     var unblockAt = entity.GetDateTimeOffset("UnblockAt")?.UtcDateTime ?? DateTime.MinValue;
                     if (unblockAt <= now) continue; // Skip expired
@@ -239,11 +236,11 @@ namespace AutopilotMonitor.Functions.Services
             }
         }
 
-        private static async Task CleanupExpiredEntriesAsync(TableClient tableClient, string tenantId, List<string> rowKeys)
+        private async Task CleanupExpiredEntriesAsync(string tenantId, List<string> rowKeys)
         {
             foreach (var rowKey in rowKeys)
             {
-                try { await tableClient.DeleteEntityAsync(tenantId, rowKey); }
+                try { await _tableClient.DeleteEntityAsync(tenantId, rowKey); }
                 catch { /* best effort */ }
             }
         }

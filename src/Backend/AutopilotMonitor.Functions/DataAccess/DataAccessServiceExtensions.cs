@@ -28,11 +28,12 @@ namespace AutopilotMonitor.Functions.DataAccess
             services.AddSingleton<IMetricsRepository, TableMetricsRepository>();
             services.AddSingleton<IMaintenanceRepository, TableMaintenanceRepository>();
             services.AddSingleton<IVulnerabilityRepository, TableVulnerabilityRepository>();
+            services.AddSingleton<IAdminRepository, TableAdminRepository>();
 
-            // Note: IConfigRepository, IAdminRepository, IDeviceSecurityRepository,
+            // Note: IConfigRepository, IDeviceSecurityRepository,
             // IBootstrapRepository, and INotificationRepository implementations will be
             // added as existing services are migrated to use the DAL interfaces.
-            // Currently those services (TenantConfigurationService, GlobalAdminService, etc.)
+            // Currently those services (TenantConfigurationService, etc.)
             // manage their own Table Storage connections directly.
 
             return services;

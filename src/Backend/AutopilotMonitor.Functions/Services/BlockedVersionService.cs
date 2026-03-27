@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Azure;
 using Azure.Data.Tables;
 using AutopilotMonitor.Shared;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace AutopilotMonitor.Functions.Services
@@ -21,7 +22,7 @@ namespace AutopilotMonitor.Functions.Services
     /// </summary>
     public class BlockedVersionService
     {
-        private readonly TableStorageService _storageService;
+        private readonly TableClient _tableClient;
         private readonly ILogger<BlockedVersionService> _logger;
 
         private static readonly TimeSpan CacheRefreshInterval = TimeSpan.FromMinutes(5);
@@ -31,10 +32,12 @@ namespace AutopilotMonitor.Functions.Services
         private volatile bool _loaded;
         private DateTime _lastLoadedUtc = DateTime.MinValue;
 
-        public BlockedVersionService(TableStorageService storageService, ILogger<BlockedVersionService> logger)
+        public BlockedVersionService(IConfiguration configuration, ILogger<BlockedVersionService> logger)
         {
-            _storageService = storageService;
             _logger = logger;
+            var connectionString = configuration["AzureTableStorageConnectionString"];
+            var serviceClient = new TableServiceClient(connectionString);
+            _tableClient = serviceClient.GetTableClient(Constants.TableNames.BlockedVersions);
         }
 
         /// <summary>
@@ -95,8 +98,7 @@ namespace AutopilotMonitor.Functions.Services
                 ["Reason"] = reason ?? string.Empty
             };
 
-            var tableClient = _storageService.GetTableServiceClient().GetTableClient(Constants.TableNames.BlockedVersions);
-            await tableClient.UpsertEntityAsync(entity);
+            await _tableClient.UpsertEntityAsync(entity);
 
             // Update cache
             _cache[versionPattern] = new VersionBlockCacheEntry { Action = action };
@@ -112,11 +114,10 @@ namespace AutopilotMonitor.Functions.Services
         public async Task UnblockVersionAsync(string versionPattern)
         {
             versionPattern = versionPattern.Trim();
-            var tableClient = _storageService.GetTableServiceClient().GetTableClient(Constants.TableNames.BlockedVersions);
 
             try
             {
-                await tableClient.DeleteEntityAsync("global", EncodeRowKey(versionPattern));
+                await _tableClient.DeleteEntityAsync("global", EncodeRowKey(versionPattern));
             }
             catch (RequestFailedException ex) when (ex.Status == 404)
             {
@@ -133,10 +134,9 @@ namespace AutopilotMonitor.Functions.Services
         /// </summary>
         public async Task<List<BlockedVersionEntry>> GetBlockedVersionsAsync()
         {
-            var tableClient = _storageService.GetTableServiceClient().GetTableClient(Constants.TableNames.BlockedVersions);
             var result = new List<BlockedVersionEntry>();
 
-            await foreach (var entity in tableClient.QueryAsync<TableEntity>(e => e.PartitionKey == "global"))
+            await foreach (var entity in _tableClient.QueryAsync<TableEntity>(e => e.PartitionKey == "global"))
             {
                 result.Add(new BlockedVersionEntry
                 {
@@ -274,10 +274,9 @@ namespace AutopilotMonitor.Functions.Services
 
             try
             {
-                var tableClient = _storageService.GetTableServiceClient().GetTableClient(Constants.TableNames.BlockedVersions);
                 var freshCache = new ConcurrentDictionary<string, VersionBlockCacheEntry>(StringComparer.OrdinalIgnoreCase);
 
-                await foreach (var entity in tableClient.QueryAsync<TableEntity>(e => e.PartitionKey == "global"))
+                await foreach (var entity in _tableClient.QueryAsync<TableEntity>(e => e.PartitionKey == "global"))
                 {
                     var pattern = entity.GetString("VersionPattern") ?? DecodeRowKey(entity.RowKey);
                     freshCache[pattern] = new VersionBlockCacheEntry

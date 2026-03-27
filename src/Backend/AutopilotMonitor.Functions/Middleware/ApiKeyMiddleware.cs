@@ -3,9 +3,7 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using AutopilotMonitor.Functions.Services;
-using AutopilotMonitor.Shared;
-using Azure;
-using Azure.Data.Tables;
+using AutopilotMonitor.Shared.DataAccess;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Middleware;
@@ -21,7 +19,7 @@ namespace AutopilotMonitor.Functions.Middleware;
 public class ApiKeyMiddleware : IFunctionsWorkerMiddleware
 {
     private readonly ILogger<ApiKeyMiddleware> _logger;
-    private readonly TableStorageService _storageService;
+    private readonly IAdminRepository _adminRepo;
     private readonly RateLimitService _rateLimitService;
 
     // Routes that bypass ApiKey middleware (use device cert / bootstrap token auth)
@@ -35,10 +33,10 @@ public class ApiKeyMiddleware : IFunctionsWorkerMiddleware
         "/api/progress/",
     };
 
-    public ApiKeyMiddleware(ILogger<ApiKeyMiddleware> logger, TableStorageService storageService, RateLimitService rateLimitService)
+    public ApiKeyMiddleware(ILogger<ApiKeyMiddleware> logger, IAdminRepository adminRepo, RateLimitService rateLimitService)
     {
         _logger = logger;
-        _storageService = storageService;
+        _adminRepo = adminRepo;
         _rateLimitService = rateLimitService;
     }
 
@@ -78,15 +76,7 @@ public class ApiKeyMiddleware : IFunctionsWorkerMiddleware
 
         try
         {
-            var tableClient = _storageService.GetTableClient(Constants.TableNames.ApiKeys);
-
-            TableEntity? foundKey = null;
-            await foreach (var entity in tableClient.QueryAsync<TableEntity>(
-                filter: $"KeyHash eq '{keyHash}'"))
-            {
-                foundKey = entity;
-                break;
-            }
+            var foundKey = await _adminRepo.ValidateApiKeyAsync(keyHash);
 
             if (foundKey == null)
             {
@@ -97,7 +87,7 @@ public class ApiKeyMiddleware : IFunctionsWorkerMiddleware
             }
 
             // Check IsActive
-            if (foundKey.TryGetValue("IsActive", out var isActiveObj) && isActiveObj is bool isActive && !isActive)
+            if (!foundKey.IsActive)
             {
                 httpContext.Response.StatusCode = (int)HttpStatusCode.Unauthorized;
                 await httpContext.Response.WriteAsJsonAsync(new { error = "API key is revoked" });
@@ -105,25 +95,22 @@ public class ApiKeyMiddleware : IFunctionsWorkerMiddleware
             }
 
             // Check expiry
-            if (foundKey.TryGetValue("ExpiresAt", out var expiresObj) && expiresObj is DateTimeOffset expiresAt)
+            if (foundKey.ExpiresAt.HasValue && foundKey.ExpiresAt.Value < DateTime.UtcNow)
             {
-                if (expiresAt < DateTimeOffset.UtcNow)
-                {
-                    httpContext.Response.StatusCode = (int)HttpStatusCode.Unauthorized;
-                    await httpContext.Response.WriteAsJsonAsync(new { error = "API key has expired" });
-                    return;
-                }
+                httpContext.Response.StatusCode = (int)HttpStatusCode.Unauthorized;
+                await httpContext.Response.WriteAsJsonAsync(new { error = "API key has expired" });
+                return;
             }
 
-            var scope = foundKey.TryGetValue("Scope", out var scopeObj) ? scopeObj?.ToString() ?? "tenant" : "tenant";
-            var keyTenantId = foundKey.TryGetValue("TenantId", out var tidObj) ? tidObj?.ToString() : null;
+            var scope = foundKey.Scope ?? "tenant";
+            var keyTenantId = foundKey.TenantId;
 
             // Rate limit: 60 req/min for tenant-scoped, 120 req/min for global-scoped
             var maxRequests = scope == "global" ? 120 : 60;
-            var rateLimitResult = _rateLimitService.CheckRateLimit($"apikey_{foundKey.RowKey}", maxRequests);
+            var rateLimitResult = _rateLimitService.CheckRateLimit($"apikey_{foundKey.KeyId}", maxRequests);
             if (!rateLimitResult.IsAllowed)
             {
-                _logger.LogWarning("ApiKey rate limit exceeded: keyId={KeyId}", foundKey.RowKey);
+                _logger.LogWarning("ApiKey rate limit exceeded: keyId={KeyId}", foundKey.KeyId);
                 httpContext.Response.StatusCode = 429;
                 httpContext.Response.ContentType = "application/json";
                 if (rateLimitResult.RetryAfter.HasValue)
@@ -136,15 +123,18 @@ public class ApiKeyMiddleware : IFunctionsWorkerMiddleware
             var claims = new List<Claim>
             {
                 new Claim("auth_method", "api_key"),
-                new Claim("key_id", foundKey.RowKey),
+                new Claim("key_id", foundKey.KeyId),
                 new Claim("key_scope", scope),
             };
+
+            // Determine partition key for increment (matches storage layout)
+            var partitionKey = scope == "global" ? "GLOBAL" : keyTenantId;
 
             if (scope == "global")
             {
                 // Global key: mark as GlobalAdmin for policy purposes
                 claims.Add(new Claim("is_global_admin", "true"));
-                claims.Add(new Claim("upn", $"apikey-global@{foundKey.RowKey}"));
+                claims.Add(new Claim("upn", $"apikey-global@{foundKey.KeyId}"));
                 context.Items["ApiKeyScope"] = "global";
             }
             else
@@ -161,10 +151,10 @@ public class ApiKeyMiddleware : IFunctionsWorkerMiddleware
             httpContext.User = principal;
             context.Items["ClaimsPrincipal"] = principal;
 
-            _logger.LogDebug("ApiKey auth: scope={Scope}, tenantId={TenantId}, keyId={KeyId}", scope, keyTenantId, foundKey.RowKey);
+            _logger.LogDebug("ApiKey auth: scope={Scope}, tenantId={TenantId}, keyId={KeyId}", scope, keyTenantId, foundKey.KeyId);
 
             // Increment request count (fire-and-forget)
-            _ = IncrementRequestCountAsync(tableClient, foundKey.PartitionKey, foundKey.RowKey);
+            _ = IncrementRequestCountAsync(partitionKey, foundKey.KeyId);
 
             await next(context);
         }
@@ -176,15 +166,11 @@ public class ApiKeyMiddleware : IFunctionsWorkerMiddleware
         }
     }
 
-    private async Task IncrementRequestCountAsync(TableClient tableClient, string pk, string rk)
+    private async Task IncrementRequestCountAsync(string partitionKey, string keyId)
     {
         try
         {
-            var result = await tableClient.GetEntityAsync<TableEntity>(pk, rk);
-            var entity = result.Value;
-            var count = entity.TryGetValue("RequestCount", out var c) ? Convert.ToInt64(c) : 0L;
-            entity["RequestCount"] = count + 1;
-            await tableClient.UpdateEntityAsync(entity, entity.ETag);
+            await _adminRepo.IncrementApiKeyRequestCountAsync(partitionKey, keyId);
         }
         catch
         {
