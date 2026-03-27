@@ -22,7 +22,7 @@ namespace AutopilotMonitor.Functions.Functions.Feedback
         private readonly TenantAdminsService _tenantAdminsService;
         private readonly TelegramNotificationService _telegramNotificationService;
         private readonly ISessionRepository _sessionRepo;
-        private readonly TableClient _feedbackTableClient;
+        private readonly IConfigRepository _configRepo;
 
         public FeedbackFunction(
             ILogger<FeedbackFunction> logger,
@@ -31,7 +31,7 @@ namespace AutopilotMonitor.Functions.Functions.Feedback
             TenantAdminsService tenantAdminsService,
             TelegramNotificationService telegramNotificationService,
             ISessionRepository sessionRepo,
-            IConfiguration configuration)
+            IConfigRepository configRepo)
         {
             _logger = logger;
             _tenantConfigService = tenantConfigService;
@@ -39,10 +39,7 @@ namespace AutopilotMonitor.Functions.Functions.Feedback
             _tenantAdminsService = tenantAdminsService;
             _telegramNotificationService = telegramNotificationService;
             _sessionRepo = sessionRepo;
-
-            var connectionString = configuration["AzureTableStorageConnectionString"];
-            var serviceClient = new TableServiceClient(connectionString);
-            _feedbackTableClient = serviceClient.GetTableClient(Constants.TableNames.PreviewConfig);
+            _configRepo = configRepo;
         }
 
         /// <summary>
@@ -81,25 +78,16 @@ namespace AutopilotMonitor.Functions.Functions.Feedback
                     return await WriteJson(req, new { eligible = false });
 
                 // 6. Cooldown check
-                try
+                var feedbackEntry = await _configRepo.GetFeedbackEntryAsync(upn);
+                if (feedbackEntry?.InteractedAt != null)
                 {
-                    var entity = await _feedbackTableClient.GetEntityAsync<TableEntity>("Feedback", upn.ToLowerInvariant());
-                    var interactedAt = entity.Value.GetDateTime("InteractedAt");
+                    // Cooldown = 0 means single wave only
+                    if (adminConfig.FeedbackCooldownDays == 0)
+                        return await WriteJson(req, new { eligible = false });
 
-                    if (interactedAt.HasValue)
-                    {
-                        // Cooldown = 0 means single wave only
-                        if (adminConfig.FeedbackCooldownDays == 0)
-                            return await WriteJson(req, new { eligible = false });
-
-                        var daysSinceInteraction = (DateTime.UtcNow - interactedAt.Value).TotalDays;
-                        if (daysSinceInteraction < adminConfig.FeedbackCooldownDays)
-                            return await WriteJson(req, new { eligible = false });
-                    }
-                }
-                catch (RequestFailedException ex) when (ex.Status == 404)
-                {
-                    // No feedback record yet — user is eligible
+                    var daysSinceInteraction = (DateTime.UtcNow - feedbackEntry.InteractedAt.Value).TotalDays;
+                    if (daysSinceInteraction < adminConfig.FeedbackCooldownDays)
+                        return await WriteJson(req, new { eligible = false });
                 }
 
                 return await WriteJson(req, new { eligible = true });
@@ -165,18 +153,17 @@ namespace AutopilotMonitor.Functions.Functions.Feedback
                     comment = comment.Substring(0, 500);
 
                 // Upsert feedback record
-                var entity = new TableEntity("Feedback", upn.ToLowerInvariant())
+                await _configRepo.SaveFeedbackEntryAsync(new FeedbackEntry
                 {
-                    { "TenantId", tenantId },
-                    { "DisplayName", displayName },
-                    { "Rating", body.Dismissed ? null : (int?)body.Rating },
-                    { "Comment", body.Dismissed ? null : comment },
-                    { "Dismissed", body.Dismissed },
-                    { "Submitted", !body.Dismissed },
-                    { "InteractedAt", DateTime.UtcNow }
-                };
-
-                await _feedbackTableClient.UpsertEntityAsync(entity, TableUpdateMode.Replace);
+                    Upn = upn,
+                    TenantId = tenantId,
+                    DisplayName = displayName,
+                    Rating = body.Dismissed ? null : (int?)body.Rating,
+                    Comment = body.Dismissed ? null : comment,
+                    Dismissed = body.Dismissed,
+                    Submitted = !body.Dismissed,
+                    InteractedAt = DateTime.UtcNow
+                });
 
                 // Telegram notification — only for actual submissions, fire-and-forget
                 if (!body.Dismissed && body.Rating > 0)
@@ -211,23 +198,18 @@ namespace AutopilotMonitor.Functions.Functions.Feedback
         {
             try
             {
-                var entries = new System.Collections.Generic.List<object>();
-
-                await foreach (var entity in _feedbackTableClient.QueryAsync<TableEntity>(
-                    filter: "PartitionKey eq 'Feedback'"))
+                var allEntries = await _configRepo.GetAllFeedbackEntriesAsync();
+                var entries = allEntries.Select(e => new
                 {
-                    entries.Add(new
-                    {
-                        upn = entity.RowKey,
-                        tenantId = entity.GetString("TenantId"),
-                        displayName = entity.GetString("DisplayName"),
-                        rating = entity.GetInt32("Rating"),
-                        comment = entity.GetString("Comment"),
-                        dismissed = entity.GetBoolean("Dismissed") ?? false,
-                        submitted = entity.GetBoolean("Submitted") ?? false,
-                        interactedAt = entity.GetDateTime("InteractedAt")?.ToString("o")
-                    });
-                }
+                    upn = e.Upn,
+                    tenantId = e.TenantId,
+                    displayName = e.DisplayName,
+                    rating = e.Rating,
+                    comment = e.Comment,
+                    dismissed = e.Dismissed,
+                    submitted = e.Submitted,
+                    interactedAt = e.InteractedAt?.ToString("o")
+                }).ToList();
 
                 return await WriteJson(req, new { feedback = entries });
             }
