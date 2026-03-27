@@ -26,5 +26,9 @@ namespace AutopilotMonitor.Shared.DataAccess
         // --- Preview Config ---
         Task<Dictionary<string, string>> GetPreviewConfigAsync();
         Task<bool> SavePreviewConfigAsync(string key, string value);
+
+        // --- Preview Notification Email ---
+        Task<string?> GetNotificationEmailAsync(string tenantId);
+        Task SaveNotificationEmailAsync(string tenantId, string? email);
     }
 }

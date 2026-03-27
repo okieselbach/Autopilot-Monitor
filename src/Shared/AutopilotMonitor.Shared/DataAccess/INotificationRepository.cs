@@ -12,6 +12,7 @@ namespace AutopilotMonitor.Shared.DataAccess
         Task<bool> AddNotificationAsync(GlobalNotification notification);
         Task<List<GlobalNotification>> GetNotificationsAsync(int maxResults = 50);
         Task<bool> DismissNotificationAsync(string notificationId, string dismissedBy);
+        Task<int> DismissAllNotificationsAsync();
 
         // --- Session Reports ---
         Task<bool> StoreSessionReportMetadataAsync(SessionReportMetadata metadata);
@@ -25,7 +26,9 @@ namespace AutopilotMonitor.Shared.DataAccess
         public string NotificationId { get; set; } = string.Empty;
         public string Title { get; set; } = string.Empty;
         public string Message { get; set; } = string.Empty;
+        public string Type { get; set; } = "info";
         public string Severity { get; set; } = "info";
+        public string? Href { get; set; }
         public DateTime CreatedAt { get; set; }
         public string CreatedBy { get; set; } = string.Empty;
         public bool IsDismissed { get; set; }

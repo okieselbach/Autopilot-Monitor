@@ -14,5 +14,6 @@ namespace AutopilotMonitor.Shared.DataAccess
         Task<List<BootstrapSession>> GetBootstrapSessionsAsync(string tenantId);
         Task<bool> RevokeBootstrapSessionAsync(string shortCode);
         Task<bool> IncrementBootstrapUsageAsync(string shortCode);
+        Task<int> CleanupExpiredAsync();
     }
 }
