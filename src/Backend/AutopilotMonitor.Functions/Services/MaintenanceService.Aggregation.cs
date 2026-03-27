@@ -287,11 +287,11 @@ namespace AutopilotMonitor.Functions.Services
                         totalEvents += s.EventCount;
                     }
 
-                    var userMetrics = await _storageService.GetUserActivityMetricsAsync(tid);
+                    var userMetrics = await _metricsRepo.GetUserActivityMetricsAsync(tid);
                     totalUsers += userMetrics.TotalUniqueUsers;
                 }
 
-                var existingStats = await _storageService.GetPlatformStatsAsync();
+                var existingStats = await _metricsRepo.GetPlatformStatsAsync();
 
                 var stats = new PlatformStats
                 {
@@ -307,7 +307,7 @@ namespace AutopilotMonitor.Functions.Services
                     LastUpdated = DateTime.UtcNow
                 };
 
-                await _storageService.SavePlatformStatsAsync(stats);
+                await _metricsRepo.SavePlatformStatsAsync(stats);
                 await TryPublishPlatformStatsJsonAsync(stats);
 
                 sw.Stop();
