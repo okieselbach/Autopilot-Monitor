@@ -217,7 +217,7 @@ public class TenantAdminsService
             return cached;
 
         var member = await _adminRepo.GetTenantMemberAsync(tenantId, upn);
-        if (member == null)
+        if (member == null || !member.IsEnabled)
         {
             _cache.Set(cacheKey, (MemberRoleInfo?)null, _cacheDuration);
             return null;

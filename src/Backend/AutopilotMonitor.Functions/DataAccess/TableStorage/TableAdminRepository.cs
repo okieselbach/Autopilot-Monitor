@@ -200,7 +200,7 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
             {
                 var result = await _tenantAdminsTableClient.GetEntityAsync<TenantAdminEntity>(tenantId, upn);
                 var entity = result.Value;
-                if (entity == null || !entity.IsEnabled) return null;
+                if (entity == null) return null;
                 return MapToTenantMember(entity);
             }
             catch (RequestFailedException ex) when (ex.Status == 404)
@@ -217,7 +217,7 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
         public async Task<bool> IsTenantAdminAsync(string tenantId, string upn)
         {
             var member = await GetTenantMemberAsync(tenantId, upn);
-            if (member == null) return false;
+            if (member == null || !member.IsEnabled) return false;
             // Only true for Admin role (null Role = Admin for backward compat)
             return member.Role == null || member.Role == Constants.TenantRoles.Admin;
         }
@@ -225,7 +225,7 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
         public async Task<bool> IsTenantMemberAsync(string tenantId, string upn)
         {
             var member = await GetTenantMemberAsync(tenantId, upn);
-            if (member == null) return false;
+            if (member == null || !member.IsEnabled) return false;
             return member.Role != Constants.TenantRoles.Viewer;
         }
 
