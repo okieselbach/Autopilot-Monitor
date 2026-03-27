@@ -3,6 +3,7 @@ using AutopilotMonitor.Functions.Extensions;
 using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Functions.Services;
+using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared;
 using Azure.Data.Tables;
 using Microsoft.AspNetCore.Authorization;
@@ -23,14 +24,14 @@ public class TenantOffboardFunction
     private readonly ILogger<TenantOffboardFunction> _logger;
     private readonly TenantAdminsService _tenantAdminsService;
     private readonly GlobalAdminService _globalAdminService;
-    private readonly TableStorageService _storageService;
+    private readonly IMaintenanceRepository _maintenanceRepo;
     private readonly TableServiceClient _tableServiceClient;
 
     public TenantOffboardFunction(
         ILogger<TenantOffboardFunction> logger,
         TenantAdminsService tenantAdminsService,
         GlobalAdminService globalAdminService,
-        TableStorageService storageService,
+        IMaintenanceRepository maintenanceRepo,
         IConfiguration configuration)
     {
         _logger = logger;
