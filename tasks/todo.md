@@ -13,46 +13,43 @@
 - [x] All Metrics Functions → `IMetricsRepository` / `IMaintenanceRepository`
 - [x] All Admin/Audit Functions → `IMaintenanceRepository`
 - [x] All Rules Functions → `IRuleRepository`
-- [x] IngestEventsFunction → `ISessionRepository` + `IMetricsRepository` + `IMaintenanceRepository` + `IRuleRepository` + `IVulnerabilityRepository`
+- [x] IngestEventsFunction → 5 repositories
 - [x] Auth, Progress, Feedback Functions → appropriate repos
 
 ## Phase 2b: Migrate Domain Services ✅
-- [x] `RuleEngine` → `IRuleRepository` + `ISessionRepository`
-- [x] `AnalyzeRuleService` → `IRuleRepository`
-- [x] `GatherRuleService` → `IRuleRepository`
-- [x] `ImeLogPatternService` → `IRuleRepository`
+- [x] `RuleEngine`, `AnalyzeRuleService`, `GatherRuleService`, `ImeLogPatternService` → `IRuleRepository`
 - [x] `UsageMetricsService` → `IMetricsRepository` + `IMaintenanceRepository`
 - [x] `PlatformMetricsService` → `ISessionRepository`
-- [x] `MaintenanceService` + `.Aggregation` → `IMaintenanceRepository` + `ISessionRepository` + `IMetricsRepository`
+- [x] `MaintenanceService` → `IMaintenanceRepository` + `ISessionRepository` + `IMetricsRepository`
 
-## Phase 3: Migrate Remaining Files ✅
+## Phase 3: Migrate GetTableClient Users ✅
 - [x] All 8 Vulnerability Functions → `IVulnerabilityRepository`
 - [x] `ReseedFromGitHubFunction` → `IVulnerabilityRepository` + `IRuleRepository`
-- [x] `ApiKeyManagementFunction` → `IAdminRepository`
-- [x] `ApiKeyMiddleware` → `IAdminRepository`
-- [x] `BlockedDeviceService` → own TableClient (removed TableStorageService dep)
-- [x] `BlockedVersionService` → own TableClient (removed TableStorageService dep)
-- [x] `SessionReportService` → own TableClient (removed TableStorageService dep)
+- [x] `ApiKeyManagementFunction` + `ApiKeyMiddleware` → `IAdminRepository`
 
-## Current State
-**Zero** functions or services inject `TableStorageService` directly.
-`TableStorageService` is only referenced by:
-- Its own 6 partial class files (the implementation)
-- 6 `DataAccess/TableStorage/` repository implementations (wrap it)
-- `Program.cs` (DI registration)
-- `TableInitializerService` (startup)
-- `VulnerabilityCorrelationService` (uses `GetTableClient()` — future migration)
+## Phase 4: Migrate Bypass Services ✅
+All services that created their own `TableServiceClient` now use repository interfaces:
+- [x] `TenantConfigurationService` → `IConfigRepository`
+- [x] `AdminConfigurationService` → `IConfigRepository`
+- [x] `PreviewWhitelistService` → `IConfigRepository`
+- [x] `TelegramNotificationService` → `IConfigRepository`
+- [x] `GlobalAdminService` → `IAdminRepository`
+- [x] `TenantAdminsService` → `IAdminRepository`
+- [x] `BootstrapSessionService` → `IBootstrapRepository`
+- [x] `GlobalNotificationService` → `INotificationRepository`
+- [x] `SessionReportService` → `INotificationRepository`
+- [x] `BlockedDeviceService` → `IDeviceSecurityRepository`
+- [x] `BlockedVersionService` → `IDeviceSecurityRepository`
+- [x] `VulnerabilityCorrelationService` → `IVulnerabilityRepository`
 
-## Phase 4: Future — Config/Admin Services to Repos
-These services manage their own `TableServiceClient`. Migrate to repository interfaces when needed:
-- [ ] `TenantConfigurationService` → `IConfigRepository`
-- [ ] `AdminConfigurationService` → `IConfigRepository`
-- [ ] `PreviewWhitelistService` → `IConfigRepository`
-- [ ] `GlobalAdminService` → `IAdminRepository`
-- [ ] `TenantAdminsService` → `IAdminRepository`
-- [ ] `BootstrapSessionService` → `IBootstrapRepository`
-- [ ] `GlobalNotificationService` → `INotificationRepository`
-- [ ] `VulnerabilityCorrelationService` → `IVulnerabilityRepository`
+## Current State ✅
+`new TableServiceClient()` only exists in:
+- 5 Repository implementations (DataAccess/TableStorage/) — correct, they ARE the storage layer
+- `TableStorageService.cs` — the core implementation used by repos
+- `FeedbackFunction.cs` — domain-specific feedback CRUD (PreviewConfig table)
+- `TenantOffboardFunction.cs` — bulk tenant data deletion across all tables
+
+All 10 repository interfaces have Table Storage implementations registered in DI.
 
 ## Phase 5: Event Streaming (When Ready)
 - [ ] Implement `EventHubPublisher` (or `ServiceBusPublisher`)
