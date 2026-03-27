@@ -1,10 +1,10 @@
 using System.Security.Cryptography;
+using AutopilotMonitor.Functions.Services;
 using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
 using Azure;
 using Azure.Data.Tables;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace AutopilotMonitor.Functions.DataAccess.TableStorage
@@ -23,14 +23,11 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
         private const string CodeLookupPartition = "CodeLookup";
 
         public TableBootstrapRepository(
-            IConfiguration configuration,
+            TableStorageService storage,
             ILogger<TableBootstrapRepository> logger)
         {
             _logger = logger;
-
-            var connectionString = configuration["AzureTableStorageConnectionString"];
-            var serviceClient = new TableServiceClient(connectionString);
-            _tableClient = serviceClient.GetTableClient(Constants.TableNames.BootstrapSessions);
+            _tableClient = storage.GetTableClient(Constants.TableNames.BootstrapSessions);
         }
 
         /// <summary>

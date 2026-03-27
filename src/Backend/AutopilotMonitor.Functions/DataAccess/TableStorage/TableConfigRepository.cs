@@ -2,12 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using AutopilotMonitor.Functions.Services;
 using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
 using Azure;
 using Azure.Data.Tables;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace AutopilotMonitor.Functions.DataAccess.TableStorage
@@ -25,16 +25,13 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
         private readonly TableClient _previewConfigTableClient;
         private readonly ILogger<TableConfigRepository> _logger;
 
-        public TableConfigRepository(IConfiguration configuration, ILogger<TableConfigRepository> logger)
+        public TableConfigRepository(TableStorageService storage, ILogger<TableConfigRepository> logger)
         {
             _logger = logger;
-
-            var connectionString = configuration["AzureTableStorageConnectionString"];
-            var serviceClient = new TableServiceClient(connectionString);
-            _tenantConfigTableClient = serviceClient.GetTableClient(Constants.TableNames.TenantConfiguration);
-            _adminConfigTableClient = serviceClient.GetTableClient(Constants.TableNames.AdminConfiguration);
-            _previewWhitelistTableClient = serviceClient.GetTableClient(Constants.TableNames.PreviewWhitelist);
-            _previewConfigTableClient = serviceClient.GetTableClient(Constants.TableNames.PreviewConfig);
+            _tenantConfigTableClient = storage.GetTableClient(Constants.TableNames.TenantConfiguration);
+            _adminConfigTableClient = storage.GetTableClient(Constants.TableNames.AdminConfiguration);
+            _previewWhitelistTableClient = storage.GetTableClient(Constants.TableNames.PreviewWhitelist);
+            _previewConfigTableClient = storage.GetTableClient(Constants.TableNames.PreviewConfig);
         }
 
         // --- Tenant Configuration ---

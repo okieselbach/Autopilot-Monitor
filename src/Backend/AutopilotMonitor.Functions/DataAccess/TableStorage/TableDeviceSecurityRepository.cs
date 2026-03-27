@@ -4,9 +4,9 @@ using System.Linq;
 using System.Threading.Tasks;
 using Azure;
 using Azure.Data.Tables;
+using AutopilotMonitor.Functions.Services;
 using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.DataAccess;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace AutopilotMonitor.Functions.DataAccess.TableStorage
@@ -24,17 +24,14 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
         private readonly ILogger<TableDeviceSecurityRepository> _logger;
 
         public TableDeviceSecurityRepository(
-            IConfiguration configuration,
+            TableStorageService storage,
             IDataEventPublisher publisher,
             ILogger<TableDeviceSecurityRepository> logger)
         {
             _publisher = publisher;
             _logger = logger;
-
-            var connectionString = configuration["AzureTableStorageConnectionString"];
-            var serviceClient = new TableServiceClient(connectionString);
-            _blockedDevicesTable = serviceClient.GetTableClient(Constants.TableNames.BlockedDevices);
-            _blockedVersionsTable = serviceClient.GetTableClient(Constants.TableNames.BlockedVersions);
+            _blockedDevicesTable = storage.GetTableClient(Constants.TableNames.BlockedDevices);
+            _blockedVersionsTable = storage.GetTableClient(Constants.TableNames.BlockedVersions);
         }
 
         // -----------------------------------------------------------------------

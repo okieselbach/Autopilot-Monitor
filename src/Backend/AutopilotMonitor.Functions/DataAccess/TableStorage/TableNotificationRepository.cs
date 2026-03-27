@@ -1,9 +1,9 @@
+using AutopilotMonitor.Functions.Services;
 using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
 using Azure;
 using Azure.Data.Tables;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace AutopilotMonitor.Functions.DataAccess.TableStorage
@@ -20,15 +20,12 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
         private readonly ILogger<TableNotificationRepository> _logger;
 
         public TableNotificationRepository(
-            IConfiguration configuration,
+            TableStorageService storage,
             ILogger<TableNotificationRepository> logger)
         {
             _logger = logger;
-
-            var connectionString = configuration["AzureTableStorageConnectionString"];
-            var serviceClient = new TableServiceClient(connectionString);
-            _notificationsTableClient = serviceClient.GetTableClient(Constants.TableNames.GlobalNotifications);
-            _reportsTableClient = serviceClient.GetTableClient(Constants.TableNames.SessionReports);
+            _notificationsTableClient = storage.GetTableClient(Constants.TableNames.GlobalNotifications);
+            _reportsTableClient = storage.GetTableClient(Constants.TableNames.SessionReports);
         }
 
         // --- Global Notifications ---

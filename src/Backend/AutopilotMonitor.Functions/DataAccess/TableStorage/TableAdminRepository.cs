@@ -3,7 +3,6 @@ using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.DataAccess;
 using Azure;
 using Azure.Data.Tables;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace AutopilotMonitor.Functions.DataAccess.TableStorage
@@ -20,16 +19,13 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
         private readonly ILogger<TableAdminRepository> _logger;
 
         public TableAdminRepository(
-            IConfiguration configuration,
+            TableStorageService storage,
             ILogger<TableAdminRepository> logger)
         {
             _logger = logger;
-
-            var connectionString = configuration["AzureTableStorageConnectionString"];
-            var serviceClient = new TableServiceClient(connectionString);
-            _globalAdminsTableClient = serviceClient.GetTableClient(Constants.TableNames.GlobalAdmins);
-            _tenantAdminsTableClient = serviceClient.GetTableClient(Constants.TableNames.TenantAdmins);
-            _apiKeysTableClient = serviceClient.GetTableClient(Constants.TableNames.ApiKeys);
+            _globalAdminsTableClient = storage.GetTableClient(Constants.TableNames.GlobalAdmins);
+            _tenantAdminsTableClient = storage.GetTableClient(Constants.TableNames.TenantAdmins);
+            _apiKeysTableClient = storage.GetTableClient(Constants.TableNames.ApiKeys);
         }
 
         // --- Global Admins ---
