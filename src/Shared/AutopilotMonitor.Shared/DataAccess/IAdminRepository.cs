@@ -26,7 +26,10 @@ namespace AutopilotMonitor.Shared.DataAccess
         Task<ApiKeyEntry?> ValidateApiKeyAsync(string apiKeyHash);
         Task<bool> StoreApiKeyAsync(string tenantId, ApiKeyEntry entry);
         Task<List<ApiKeyEntry>> GetApiKeysAsync(string tenantId);
+        Task<List<ApiKeyEntry>> GetAllApiKeysAsync();
+        Task<ApiKeyEntry?> GetApiKeyAsync(string partitionKey, string keyId);
         Task<bool> RevokeApiKeyAsync(string tenantId, string keyId);
+        Task IncrementApiKeyRequestCountAsync(string partitionKey, string keyId);
     }
 
     public class GlobalAdminEntry
@@ -55,6 +58,7 @@ namespace AutopilotMonitor.Shared.DataAccess
         public string KeyHash { get; set; } = string.Empty;
         public string Name { get; set; } = string.Empty;
         public string Scope { get; set; } = "tenant";
+        public string Upn { get; set; } = string.Empty;
         public string CreatedBy { get; set; } = string.Empty;
         public DateTime CreatedAt { get; set; }
         public DateTime? ExpiresAt { get; set; }

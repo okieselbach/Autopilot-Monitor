@@ -17,6 +17,7 @@ namespace AutopilotMonitor.Shared.DataAccess
         Task<bool> StoreSessionReportMetadataAsync(SessionReportMetadata metadata);
         Task<List<SessionReportMetadata>> GetSessionReportsAsync(string? tenantId = null, int maxResults = 50);
         Task<SessionReportMetadata?> GetSessionReportAsync(string reportId);
+        Task<bool> UpdateSessionReportAdminNoteAsync(string reportId, string adminNote);
     }
 
     public class GlobalNotification
