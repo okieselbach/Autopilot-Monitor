@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
+using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Extensions.Logging;
 
@@ -13,7 +14,8 @@ namespace AutopilotMonitor.Functions.Services
     /// </summary>
     public class UsageMetricsService
     {
-        private readonly TableStorageService _storageService;
+        private readonly IMetricsRepository _metricsRepo;
+        private readonly IMaintenanceRepository _maintenanceRepo;
         private readonly ILogger<UsageMetricsService> _logger;
 
         // In-memory cache
@@ -23,10 +25,12 @@ namespace AutopilotMonitor.Functions.Services
         private static readonly object _cacheLock = new object();
 
         public UsageMetricsService(
-            TableStorageService storageService,
+            IMetricsRepository metricsRepo,
+            IMaintenanceRepository maintenanceRepo,
             ILogger<UsageMetricsService> logger)
         {
-            _storageService = storageService;
+            _metricsRepo = metricsRepo;
+            _maintenanceRepo = maintenanceRepo;
             _logger = logger;
         }
 
@@ -95,7 +99,7 @@ namespace AutopilotMonitor.Functions.Services
             // Query sessions from the last 90 days only — covers all displayed metrics (today/7d/30d)
             // with a generous margin. Avoids loading the entire table into memory.
             // "Total" counters use PlatformStats (cumulative, already tracked separately).
-            var allSessions = await _storageService.GetSessionsByDateRangeAsync(DateTime.UtcNow.AddDays(-90), DateTime.UtcNow.AddDays(1));
+            var allSessions = await _maintenanceRepo.GetSessionsByDateRangeAsync(DateTime.UtcNow.AddDays(-90), DateTime.UtcNow.AddDays(1));
 
             var now = DateTime.UtcNow;
             var today = now.Date;
@@ -132,7 +136,7 @@ namespace AutopilotMonitor.Functions.Services
             };
 
             // User Metrics (from UserActivity table)
-            var userActivity = await _storageService.GetAllUserActivityMetricsAsync();
+            var userActivity = await _metricsRepo.GetAllUserActivityMetricsAsync();
             var userMetrics = new UserMetrics
             {
                 Total = userActivity.TotalUniqueUsers,
@@ -196,7 +200,7 @@ namespace AutopilotMonitor.Functions.Services
             };
 
             // Platform Stats (cumulative since release)
-            var platformStats = await _storageService.GetPlatformStatsAsync();
+            var platformStats = await _metricsRepo.GetPlatformStatsAsync();
 
             return new PlatformUsageMetrics
             {
@@ -223,7 +227,7 @@ namespace AutopilotMonitor.Functions.Services
         private async Task<PlatformUsageMetrics> ComputeTenantUsageMetricsInternalAsync(string tenantId)
         {
             // Query sessions for specific tenant only — last 90 days
-            var tenantSessions = await _storageService.GetSessionsByDateRangeAsync(DateTime.UtcNow.AddDays(-90), DateTime.UtcNow.AddDays(1), tenantId);
+            var tenantSessions = await _maintenanceRepo.GetSessionsByDateRangeAsync(DateTime.UtcNow.AddDays(-90), DateTime.UtcNow.AddDays(1), tenantId);
 
             var now = DateTime.UtcNow;
             var today = now.Date;
@@ -252,7 +256,7 @@ namespace AutopilotMonitor.Functions.Services
             };
 
             // User Metrics (from UserActivity table)
-            var userActivity = await _storageService.GetUserActivityMetricsAsync(tenantId);
+            var userActivity = await _metricsRepo.GetUserActivityMetricsAsync(tenantId);
             var userMetrics = new UserMetrics
             {
                 Total = userActivity.TotalUniqueUsers,

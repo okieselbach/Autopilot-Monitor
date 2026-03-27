@@ -2,6 +2,7 @@ using System.Net;
 using System.Web;
 using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Services;
+using AutopilotMonitor.Shared.DataAccess;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
@@ -11,16 +12,16 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
     public class GetSessionFunction
     {
         private readonly ILogger<GetSessionFunction> _logger;
-        private readonly TableStorageService _storageService;
+        private readonly ISessionRepository _sessionRepo;
         private readonly GlobalAdminService _globalAdminService;
 
         public GetSessionFunction(
             ILogger<GetSessionFunction> logger,
-            TableStorageService storageService,
+            ISessionRepository sessionRepo,
             GlobalAdminService globalAdminService)
         {
             _logger = logger;
-            _storageService = storageService;
+            _sessionRepo = sessionRepo;
             _globalAdminService = globalAdminService;
         }
 
@@ -78,7 +79,7 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
                     }
                 }
 
-                var session = await _storageService.GetSessionAsync(effectiveTenantId, sessionId);
+                var session = await _sessionRepo.GetSessionAsync(effectiveTenantId, sessionId);
                 if (session == null)
                 {
                     var notFound = req.CreateResponse(HttpStatusCode.NotFound);

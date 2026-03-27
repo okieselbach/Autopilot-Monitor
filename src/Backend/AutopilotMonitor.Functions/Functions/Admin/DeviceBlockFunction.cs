@@ -3,6 +3,7 @@ using System.Net;
 using System.Threading.Tasks;
 using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Services;
+using AutopilotMonitor.Shared.DataAccess;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
@@ -15,16 +16,16 @@ namespace AutopilotMonitor.Functions.Functions.Admin
     {
         private readonly ILogger<DeviceBlockFunction> _logger;
         private readonly BlockedDeviceService _blockedDeviceService;
-        private readonly TableStorageService _storageService;
+        private readonly IMaintenanceRepository _maintenanceRepo;
 
         public DeviceBlockFunction(
             ILogger<DeviceBlockFunction> logger,
             BlockedDeviceService blockedDeviceService,
-            TableStorageService storageService)
+            IMaintenanceRepository maintenanceRepo)
         {
             _logger = logger;
             _blockedDeviceService = blockedDeviceService;
-            _storageService = storageService;
+            _maintenanceRepo = maintenanceRepo;
         }
 
         /// <summary>GET /api/devices/blocked?tenantId={tenantId} — list all active blocks for a tenant</summary>
@@ -94,7 +95,7 @@ namespace AutopilotMonitor.Functions.Functions.Admin
 
                 await _blockedDeviceService.BlockDeviceAsync(tenantId, serialNumber, durationHours, userIdentifier, reason, action);
 
-                await _storageService.LogAuditEntryAsync(
+                await _maintenanceRepo.LogAuditEntryAsync(
                     tenantId,
                     "CREATE",
                     "DeviceBlock",
@@ -155,7 +156,7 @@ namespace AutopilotMonitor.Functions.Functions.Admin
 
                 await _blockedDeviceService.UnblockDeviceAsync(tenantId, serialNumber);
 
-                await _storageService.LogAuditEntryAsync(
+                await _maintenanceRepo.LogAuditEntryAsync(
                     tenantId,
                     "DELETE",
                     "DeviceBlock",

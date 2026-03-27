@@ -3,6 +3,7 @@ using System.Net;
 using System.Threading.Tasks;
 using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Services;
+using AutopilotMonitor.Shared.DataAccess;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
@@ -15,16 +16,16 @@ namespace AutopilotMonitor.Functions.Functions.Admin
     {
         private readonly ILogger<VersionBlockFunction> _logger;
         private readonly BlockedVersionService _blockedVersionService;
-        private readonly TableStorageService _storageService;
+        private readonly IMaintenanceRepository _maintenanceRepo;
 
         public VersionBlockFunction(
             ILogger<VersionBlockFunction> logger,
             BlockedVersionService blockedVersionService,
-            TableStorageService storageService)
+            IMaintenanceRepository maintenanceRepo)
         {
             _logger = logger;
             _blockedVersionService = blockedVersionService;
-            _storageService = storageService;
+            _maintenanceRepo = maintenanceRepo;
         }
 
         /// <summary>GET /api/versions/blocked — list all active version block rules</summary>
@@ -91,7 +92,7 @@ namespace AutopilotMonitor.Functions.Functions.Admin
 
                 var normalizedAction = string.Equals(action, "Kill", StringComparison.OrdinalIgnoreCase) ? "Kill" : "Block";
 
-                await _storageService.LogAuditEntryAsync(
+                await _maintenanceRepo.LogAuditEntryAsync(
                     AutopilotMonitor.Shared.Constants.AuditGlobalTenantId,
                     "CREATE",
                     "VersionBlock",
@@ -144,7 +145,7 @@ namespace AutopilotMonitor.Functions.Functions.Admin
 
                 await _blockedVersionService.UnblockVersionAsync(versionPattern);
 
-                await _storageService.LogAuditEntryAsync(
+                await _maintenanceRepo.LogAuditEntryAsync(
                     AutopilotMonitor.Shared.Constants.AuditGlobalTenantId,
                     "DELETE",
                     "VersionBlock",

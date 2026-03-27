@@ -1,7 +1,6 @@
-using AutopilotMonitor.Shared;
+using AutopilotMonitor.Shared.DataAccess;
 using Azure;
 using Azure.Data.Tables;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace AutopilotMonitor.Functions.Services;
@@ -42,19 +41,19 @@ public class GlobalNotificationDto
 /// <summary>
 /// Service for managing persistent Global Admin in-app notifications.
 /// Notifications survive page reloads and persist until actively dismissed.
+/// Delegates storage to INotificationRepository; keeps business logic (fire-and-forget, DTO conversion).
 /// </summary>
 public class GlobalNotificationService
 {
-    private readonly TableServiceClient _tableServiceClient;
+    private readonly INotificationRepository _notificationRepo;
     private readonly ILogger<GlobalNotificationService> _logger;
 
     public GlobalNotificationService(
-        IConfiguration configuration,
+        INotificationRepository notificationRepo,
         ILogger<GlobalNotificationService> logger)
     {
+        _notificationRepo = notificationRepo;
         _logger = logger;
-        var connectionString = configuration["AzureTableStorageConnectionString"];
-        _tableServiceClient = new TableServiceClient(connectionString);
     }
 
     /// <summary>
@@ -65,24 +64,20 @@ public class GlobalNotificationService
     {
         try
         {
-            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.GlobalNotifications);
             var notificationId = Guid.NewGuid().ToString("N")[..12];
-            var invertedTicks = (DateTime.MaxValue.Ticks - DateTime.UtcNow.Ticks).ToString("D19");
 
-            var entity = new GlobalNotificationEntity
+            var notification = new GlobalNotification
             {
-                PartitionKey = "notifications",
-                RowKey = $"{invertedTicks}_{notificationId}",
                 NotificationId = notificationId,
                 Type = type,
                 Title = title,
                 Message = message,
                 Href = href,
                 CreatedAt = DateTime.UtcNow,
-                Dismissed = false
+                IsDismissed = false
             };
 
-            await tableClient.UpsertEntityAsync(entity);
+            await _notificationRepo.AddNotificationAsync(notification);
             _logger.LogInformation("Global notification created: {NotificationId} ({Type})", notificationId, type);
         }
         catch (Exception ex)
@@ -98,29 +93,17 @@ public class GlobalNotificationService
     {
         try
         {
-            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.GlobalNotifications);
-            var notifications = new List<GlobalNotificationDto>();
+            var notifications = await _notificationRepo.GetNotificationsAsync();
 
-            await foreach (var entity in tableClient.QueryAsync<GlobalNotificationEntity>(
-                e => e.PartitionKey == "notifications" && !e.Dismissed))
+            return notifications.Select(n => new GlobalNotificationDto
             {
-                notifications.Add(new GlobalNotificationDto
-                {
-                    Id = entity.NotificationId,
-                    Type = entity.Type,
-                    Title = entity.Title,
-                    Message = entity.Message,
-                    Href = entity.Href,
-                    CreatedAt = entity.CreatedAt
-                });
-            }
-
-            return notifications;
-        }
-        catch (RequestFailedException ex) when (ex.Status == 404)
-        {
-            _logger.LogWarning("GlobalNotifications table not found — returning empty list");
-            return new List<GlobalNotificationDto>();
+                Id = n.NotificationId,
+                Type = n.Type,
+                Title = n.Title,
+                Message = n.Message,
+                Href = n.Href,
+                CreatedAt = n.CreatedAt
+            }).ToList();
         }
         catch (Exception ex)
         {
@@ -137,18 +120,7 @@ public class GlobalNotificationService
     {
         try
         {
-            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.GlobalNotifications);
-
-            await foreach (var entity in tableClient.QueryAsync<GlobalNotificationEntity>(
-                e => e.PartitionKey == "notifications" && e.NotificationId == notificationId))
-            {
-                entity.Dismissed = true;
-                await tableClient.UpdateEntityAsync(entity, entity.ETag, TableUpdateMode.Replace);
-                _logger.LogInformation("Global notification dismissed: {NotificationId}", notificationId);
-                return true;
-            }
-
-            return false;
+            return await _notificationRepo.DismissNotificationAsync(notificationId, string.Empty);
         }
         catch (Exception ex)
         {
@@ -164,19 +136,7 @@ public class GlobalNotificationService
     {
         try
         {
-            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.GlobalNotifications);
-            var count = 0;
-
-            await foreach (var entity in tableClient.QueryAsync<GlobalNotificationEntity>(
-                e => e.PartitionKey == "notifications" && !e.Dismissed))
-            {
-                entity.Dismissed = true;
-                await tableClient.UpdateEntityAsync(entity, entity.ETag, TableUpdateMode.Replace);
-                count++;
-            }
-
-            _logger.LogInformation("Dismissed {Count} global notifications", count);
-            return count;
+            return await _notificationRepo.DismissAllNotificationsAsync();
         }
         catch (Exception ex)
         {

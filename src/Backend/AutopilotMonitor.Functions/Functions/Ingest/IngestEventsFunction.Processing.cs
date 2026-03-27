@@ -4,6 +4,7 @@ using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Functions.Services;
 using AutopilotMonitor.Functions.Services.Notifications;
 using AutopilotMonitor.Functions.Services.Vulnerability;
+using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
 using AutopilotMonitor.Shared.Models.Notifications;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -128,7 +129,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                 StampServerFields(request.Events, request.TenantId, request.SessionId, receivedAt);
 
                 // Store events in Azure Table Storage (batch write for efficiency)
-                var storedEvents = await _storageService.StoreEventsBatchAsync(request.Events);
+                var storedEvents = await _sessionRepo.StoreEventsBatchAsync(request.Events);
                 int processedCount = storedEvents.Count;
 
                 // Update EventTypeIndex and DeviceSnapshot indexes (fire-and-forget, non-blocking)
@@ -136,10 +137,10 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                 var indexSessionId = request.SessionId;
                 var indexEvents = storedEvents.ToList();
                 _ = Task.WhenAll(
-                    _storageService.UpsertEventTypeIndexBatchAsync(
+                    _sessionRepo.UpsertEventTypeIndexBatchAsync(
                         indexTenantId, indexSessionId,
                         indexEvents.Select(e => e.EventType).Distinct()),
-                    _storageService.UpsertDeviceSnapshotAsync(
+                    _sessionRepo.UpsertDeviceSnapshotAsync(
                         indexTenantId, indexSessionId, indexEvents)
                 ).ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException,
                     "Index update failed (non-fatal)"), TaskContinuationOptions.OnlyOnFaulted);
@@ -152,7 +153,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                     var imeVersion = imeVersionEvent.Data["agentVersion"]?.ToString();
                     if (!string.IsNullOrEmpty(imeVersion))
                     {
-                        _ = _storageService.UpdateSessionImeAgentVersionAsync(request.TenantId, request.SessionId, imeVersion)
+                        _ = _sessionRepo.UpdateSessionImeAgentVersionAsync(request.TenantId, request.SessionId, imeVersion)
                             .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException,
                                 "ImeAgentVersion update failed (non-fatal)"), TaskContinuationOptions.OnlyOnFaulted);
                     }
@@ -164,7 +165,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                 // Store app install summaries
                 foreach (var summary in classification.AppInstallUpdates.Values)
                 {
-                    await _storageService.StoreAppInstallSummaryAsync(summary.Summary);
+                    await _metricsRepo.StoreAppInstallSummaryAsync(summary.Summary);
                 }
 
                 // Extract geo-location data and merge into session row (fire-and-forget —
@@ -174,7 +175,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                     var geoData = classification.DeviceLocationEvent.Data;
                     var geoTenantId = request.TenantId;
                     var geoSessionId = request.SessionId;
-                    _ = _storageService.UpdateSessionGeoAsync(
+                    _ = _sessionRepo.UpdateSessionGeoAsync(
                         geoTenantId,
                         geoSessionId,
                         geoData.ContainsKey("country") ? geoData["country"]?.ToString() : null,
@@ -192,7 +193,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                 // Always increment event count when events were stored
                 if (processedCount > 0)
                 {
-                    await _storageService.IncrementSessionEventCountAsync(
+                    await _sessionRepo.IncrementSessionEventCountAsync(
                         request.TenantId,
                         request.SessionId,
                         processedCount,
@@ -216,12 +217,12 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                     {
                         try
                         {
-                            var ruleEngine = new RuleEngine(_analyzeRuleService, _storageService, _logger);
+                            var ruleEngine = new RuleEngine(_analyzeRuleService, _ruleRepo, _sessionRepo, _logger);
                             var results = await ruleEngine.AnalyzeSessionAsync(ruleTenantId, ruleSessionId);
 
                             foreach (var result in results)
                             {
-                                await _storageService.StoreRuleResultAsync(result);
+                                await _ruleRepo.StoreRuleResultAsync(result);
                             }
 
                             if (results.Count > 0)
@@ -237,7 +238,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                             // Increment platform stats for detected issues
                             if (results.Count > 0)
                             {
-                                _ = _storageService.IncrementPlatformStatAsync("IssuesDetected", results.Count)
+                                _ = _metricsRepo.IncrementPlatformStatAsync("IssuesDetected", results.Count)
                                     .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException,
                                         "Fire-and-forget IncrementPlatformStatAsync failed"), TaskContinuationOptions.OnlyOnFaulted);
                             }
@@ -307,7 +308,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
 
                                 if (reportData != null)
                                 {
-                                    await _storageService.StoreVulnerabilityReportAsync(
+                                    await _vulnRepo.StoreVulnerabilityReportAsync(
                                         capturedTenantId, capturedSessionId, reportData);
                                     _logger.LogInformation("{Prefix} Vulnerability correlation complete (async)", capturedPrefix);
 
@@ -317,7 +318,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                                         : null;
                                     if (findings != null && findings.Count > 0)
                                     {
-                                        _ = _storageService.UpsertCveIndexEntriesAsync(capturedTenantId, capturedSessionId, findings)
+                                        _ = _sessionRepo.UpsertCveIndexEntriesAsync(capturedTenantId, capturedSessionId, findings)
                                             .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException,
                                                 "CveIndex update failed (non-fatal)"), TaskContinuationOptions.OnlyOnFaulted);
                                     }
@@ -342,10 +343,10 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
 
                 // Increment platform stats (fire-and-forget, non-blocking)
                 // Note: IssuesDetected is now incremented inside the async rule engine task above.
-                _ = _storageService.IncrementPlatformStatAsync("TotalEventsProcessed", processedCount)
+                _ = _metricsRepo.IncrementPlatformStatAsync("TotalEventsProcessed", processedCount)
                     .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException, "Fire-and-forget IncrementPlatformStatAsync failed"), TaskContinuationOptions.OnlyOnFaulted);
                 if (classification.CompletionEvent != null)
-                    _ = _storageService.IncrementPlatformStatAsync("SuccessfulEnrollments")
+                    _ = _metricsRepo.IncrementPlatformStatAsync("SuccessfulEnrollments")
                         .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException, "Fire-and-forget IncrementPlatformStatAsync failed"), TaskContinuationOptions.OnlyOnFaulted);
 
                 // Store diagnostics blob name on session (if agent uploaded a diagnostics package)
@@ -356,13 +357,13 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                         : null;
                     if (!string.IsNullOrEmpty(blobName))
                     {
-                        await _storageService.UpdateSessionDiagnosticsBlobAsync(
+                        await _sessionRepo.UpdateSessionDiagnosticsBlobAsync(
                             request.TenantId, request.SessionId, blobName);
                     }
                 }
 
                 // Retrieve updated session data to include in SignalR messages
-                var updatedSession = await _storageService.GetSessionAsync(request.TenantId, request.SessionId);
+                var updatedSession = await _sessionRepo.GetSessionAsync(request.TenantId, request.SessionId);
 
                 // Session age warning: log if session >4h old and still InProgress (observability only)
                 if (updatedSession != null && updatedSession.Status == SessionStatus.InProgress)
@@ -489,7 +490,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
 
             if (c.CompletionEvent != null)
             {
-                statusTransitioned = await _storageService.UpdateSessionStatusAsync(
+                statusTransitioned = await _sessionRepo.UpdateSessionStatusAsync(
                     request.TenantId, request.SessionId, SessionStatus.Succeeded, c.CompletionEvent.Phase,
                     completedAt: c.CompletionEvent.Timestamp,
                     earliestEventTimestamp: c.EarliestEventTimestamp, latestEventTimestamp: c.LatestEventTimestamp);
@@ -501,7 +502,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                     ? $"{c.FailureEvent.Message} ({c.FailureEvent.Data["errorCode"]})"
                     : c.FailureEvent.Message;
 
-                statusTransitioned = await _storageService.UpdateSessionStatusAsync(
+                statusTransitioned = await _sessionRepo.UpdateSessionStatusAsync(
                     request.TenantId, request.SessionId, SessionStatus.Failed, c.FailureEvent.Phase, failureReason,
                     completedAt: c.FailureEvent.Timestamp,
                     earliestEventTimestamp: c.EarliestEventTimestamp, latestEventTimestamp: c.LatestEventTimestamp);
@@ -510,7 +511,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             else if (c.EspFailureEvent != null)
             {
                 failureReason = c.EspFailureEvent.Message ?? "ESP failure (backend fallback)";
-                statusTransitioned = await _storageService.UpdateSessionStatusAsync(
+                statusTransitioned = await _sessionRepo.UpdateSessionStatusAsync(
                     request.TenantId, request.SessionId, SessionStatus.Failed, c.EspFailureEvent.Phase, failureReason,
                     completedAt: c.EspFailureEvent.Timestamp,
                     earliestEventTimestamp: c.EarliestEventTimestamp, latestEventTimestamp: c.LatestEventTimestamp);
@@ -519,7 +520,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             }
             else if (c.GatherCompletionEvent != null)
             {
-                await _storageService.UpdateSessionStatusAsync(
+                await _sessionRepo.UpdateSessionStatusAsync(
                     request.TenantId, request.SessionId, SessionStatus.Succeeded, c.GatherCompletionEvent.Phase,
                     completedAt: c.GatherCompletionEvent.Timestamp,
                     earliestEventTimestamp: c.EarliestEventTimestamp, latestEventTimestamp: c.LatestEventTimestamp);
@@ -527,7 +528,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             }
             else if (c.WhiteGloveEvent != null)
             {
-                whiteGloveStatusTransitioned = await _storageService.UpdateSessionStatusAsync(
+                whiteGloveStatusTransitioned = await _sessionRepo.UpdateSessionStatusAsync(
                     request.TenantId, request.SessionId, SessionStatus.Pending, c.WhiteGloveEvent.Phase,
                     earliestEventTimestamp: c.EarliestEventTimestamp, latestEventTimestamp: c.LatestEventTimestamp,
                     isPreProvisioned: true, isUserDriven: false);
@@ -537,7 +538,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                     _logger.LogWarning("{SessionPrefix} WhiteGlove UpdateSessionStatusAsync failed, attempting unconditional fallback for IsPreProvisioned + Status", sessionPrefix);
                     try
                     {
-                        await _storageService.SetSessionPreProvisionedAsync(request.TenantId, request.SessionId, true, SessionStatus.Pending, isUserDriven: false);
+                        await _sessionRepo.SetSessionPreProvisionedAsync(request.TenantId, request.SessionId, true, SessionStatus.Pending, isUserDriven: false);
                         whiteGloveStatusTransitioned = true;
                         _logger.LogInformation("{SessionPrefix} WhiteGlove fallback succeeded: IsPreProvisioned + Status=Pending set via unconditional merge", sessionPrefix);
                     }
@@ -551,10 +552,10 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             }
             else if (c.WhiteGloveResumedEvent != null)
             {
-                var currentSession = await _storageService.GetSessionAsync(request.TenantId, request.SessionId);
+                var currentSession = await _sessionRepo.GetSessionAsync(request.TenantId, request.SessionId);
                 if (currentSession?.Status == SessionStatus.Pending)
                 {
-                    await _storageService.UpdateSessionStatusAsync(
+                    await _sessionRepo.UpdateSessionStatusAsync(
                         request.TenantId, request.SessionId, SessionStatus.InProgress, c.WhiteGloveResumedEvent.Phase,
                         earliestEventTimestamp: c.EarliestEventTimestamp, latestEventTimestamp: c.LatestEventTimestamp,
                         isUserDriven: true, resumedAt: c.WhiteGloveResumedEvent.Timestamp);

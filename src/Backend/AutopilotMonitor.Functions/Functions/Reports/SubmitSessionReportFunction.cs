@@ -1,6 +1,7 @@
 using System.Net;
 using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Services;
+using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -12,7 +13,7 @@ namespace AutopilotMonitor.Functions.Functions.Reports
     {
         private readonly ILogger<SubmitSessionReportFunction> _logger;
         private readonly SessionReportService _sessionReportService;
-        private readonly TableStorageService _storageService;
+        private readonly IMaintenanceRepository _maintenanceRepo;
         private readonly GlobalAdminService _globalAdminService;
         private readonly TelegramNotificationService _telegramNotificationService;
         private readonly GlobalNotificationService _globalNotificationService;
@@ -20,14 +21,14 @@ namespace AutopilotMonitor.Functions.Functions.Reports
         public SubmitSessionReportFunction(
             ILogger<SubmitSessionReportFunction> logger,
             SessionReportService sessionReportService,
-            TableStorageService storageService,
+            IMaintenanceRepository maintenanceRepo,
             GlobalAdminService globalAdminService,
             TelegramNotificationService telegramNotificationService,
             GlobalNotificationService globalNotificationService)
         {
             _logger = logger;
             _sessionReportService = sessionReportService;
-            _storageService = storageService;
+            _maintenanceRepo = maintenanceRepo;
             _globalAdminService = globalAdminService;
             _telegramNotificationService = telegramNotificationService;
             _globalNotificationService = globalNotificationService;
@@ -85,7 +86,7 @@ namespace AutopilotMonitor.Functions.Functions.Reports
                 // Log audit entry — skip for Global Admins
                 if (!isGlobalAdmin)
                 {
-                    await _storageService.LogAuditEntryAsync(
+                    await _maintenanceRepo.LogAuditEntryAsync(
                         request.TenantId,
                         "CREATE",
                         "SessionReport",

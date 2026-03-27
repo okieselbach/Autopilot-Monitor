@@ -1,6 +1,6 @@
 using System.Net;
 using AutopilotMonitor.Functions.Helpers;
-using AutopilotMonitor.Functions.Services;
+using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -11,12 +11,12 @@ namespace AutopilotMonitor.Functions.Functions.Sessions;
 public class SearchSessionsFunction
 {
     private readonly ILogger<SearchSessionsFunction> _logger;
-    private readonly TableStorageService _storageService;
+    private readonly ISessionRepository _sessionRepo;
 
-    public SearchSessionsFunction(ILogger<SearchSessionsFunction> logger, TableStorageService storageService)
+    public SearchSessionsFunction(ILogger<SearchSessionsFunction> logger, ISessionRepository sessionRepo)
     {
         _logger = logger;
-        _storageService = storageService;
+        _sessionRepo = sessionRepo;
     }
 
     [Function("SearchSessions")]
@@ -82,7 +82,7 @@ public class SearchSessionsFunction
             if (deviceProperties.Count > 0)
                 filter.DeviceProperties = deviceProperties;
 
-            var sessions = await _storageService.SearchSessionsAsync(tenantId, filter);
+            var sessions = await _sessionRepo.SearchSessionsAsync(tenantId, filter);
 
             var response = req.CreateResponse(HttpStatusCode.OK);
             await response.WriteAsJsonAsync(new

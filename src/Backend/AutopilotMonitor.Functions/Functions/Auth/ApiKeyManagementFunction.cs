@@ -3,8 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Services;
-using AutopilotMonitor.Shared;
-using Azure.Data.Tables;
+using AutopilotMonitor.Shared.DataAccess;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
@@ -15,16 +14,16 @@ namespace AutopilotMonitor.Functions.Functions.Auth;
 public class ApiKeyManagementFunction
 {
     private readonly ILogger<ApiKeyManagementFunction> _logger;
-    private readonly TableStorageService _storageService;
+    private readonly IAdminRepository _adminRepo;
     private readonly GlobalAdminService _globalAdminService;
 
     public ApiKeyManagementFunction(
         ILogger<ApiKeyManagementFunction> logger,
-        TableStorageService storageService,
+        IAdminRepository adminRepo,
         GlobalAdminService globalAdminService)
     {
         _logger = logger;
-        _storageService = storageService;
+        _adminRepo = adminRepo;
         _globalAdminService = globalAdminService;
     }
 
@@ -48,7 +47,8 @@ public class ApiKeyManagementFunction
                     targetTenantId = overrideTenant;
             }
 
-            var keys = await GetApiKeysForTenantAsync(targetTenantId);
+            var entries = await _adminRepo.GetApiKeysAsync(targetTenantId);
+            var keys = entries.Select(MapKeyEntry).ToList();
 
             var response = req.CreateResponse(HttpStatusCode.OK);
             await response.WriteAsJsonAsync(new { success = true, count = keys.Count, keys });
@@ -70,13 +70,8 @@ public class ApiKeyManagementFunction
     {
         try
         {
-            var tableClient = _storageService.GetTableClient(Constants.TableNames.ApiKeys);
-            var keys = new List<object>();
-
-            await foreach (var entity in tableClient.QueryAsync<TableEntity>())
-            {
-                keys.Add(MapKeyEntity(entity));
-            }
+            var entries = await _adminRepo.GetAllApiKeysAsync();
+            var keys = entries.Select(MapKeyEntry).ToList();
 
             var response = req.CreateResponse(HttpStatusCode.OK);
             await response.WriteAsJsonAsync(new { success = true, count = keys.Count, keys });
@@ -139,26 +134,26 @@ public class ApiKeyManagementFunction
             var keyId = Guid.NewGuid().ToString();
             var partitionKey = scope == "global" ? "GLOBAL" : tenantId;
             var createdAt = DateTime.UtcNow;
-            DateTimeOffset? expiresAt = expiresInDays.HasValue
-                ? DateTimeOffset.UtcNow.AddDays(expiresInDays.Value)
+            DateTime? expiresAt = expiresInDays.HasValue
+                ? DateTime.UtcNow.AddDays(expiresInDays.Value)
                 : null;
 
-            var entity = new TableEntity(partitionKey, keyId)
+            var entry = new ApiKeyEntry
             {
-                ["KeyHash"] = keyHash,
-                ["Label"] = label,
-                ["Scope"] = scope,
-                ["TenantId"] = tenantId,
-                ["CreatedBy"] = upn,
-                ["CreatedAt"] = createdAt,
-                ["IsActive"] = true,
-                ["RequestCount"] = 0L,
+                KeyId = keyId,
+                TenantId = tenantId,
+                KeyHash = keyHash,
+                Name = label,
+                Scope = scope,
+                Upn = upn,
+                CreatedBy = upn,
+                CreatedAt = createdAt,
+                ExpiresAt = expiresAt,
+                IsActive = true,
+                RequestCount = 0L,
             };
-            if (expiresAt.HasValue)
-                entity["ExpiresAt"] = expiresAt.Value;
 
-            var tableClient = _storageService.GetTableClient(Constants.TableNames.ApiKeys);
-            await tableClient.UpsertEntityAsync(entity);
+            await _adminRepo.StoreApiKeyAsync(partitionKey, entry);
 
             _logger.LogInformation("API key created: scope={Scope}, tenantId={TenantId}, createdBy={CreatedBy}", scope, tenantId, upn);
 
@@ -197,25 +192,21 @@ public class ApiKeyManagementFunction
             var upn = TenantHelper.GetUserIdentifier(req);
             var isGA = await _globalAdminService.IsGlobalAdminAsync(upn);
 
-            var tableClient = _storageService.GetTableClient(Constants.TableNames.ApiKeys);
-
-            // Find the key by keyId (RowKey). Try tenant PK first, then GLOBAL.
-            TableEntity? foundEntity = null;
+            // Find the key by keyId. Try tenant PK first, then GLOBAL.
+            ApiKeyEntry? foundEntry = null;
+            string? foundPartitionKey = null;
             foreach (var partitionKey in new[] { tenantId, "GLOBAL" })
             {
-                try
+                var entry = await _adminRepo.GetApiKeyAsync(partitionKey, keyId);
+                if (entry != null)
                 {
-                    var result = await tableClient.GetEntityAsync<TableEntity>(partitionKey, keyId);
-                    foundEntity = result.Value;
+                    foundEntry = entry;
+                    foundPartitionKey = partitionKey;
                     break;
-                }
-                catch (Azure.RequestFailedException ex) when (ex.Status == 404)
-                {
-                    // try next
                 }
             }
 
-            if (foundEntity == null)
+            if (foundEntry == null)
             {
                 var notFound = req.CreateResponse(HttpStatusCode.NotFound);
                 await notFound.WriteAsJsonAsync(new { success = false, message = "API key not found" });
@@ -223,15 +214,14 @@ public class ApiKeyManagementFunction
             }
 
             // Ownership check: non-GA users can only delete their own tenant's keys
-            var keyTenantId = foundEntity.GetString("TenantId");
-            if (!isGA && !string.Equals(keyTenantId, tenantId, StringComparison.OrdinalIgnoreCase))
+            if (!isGA && !string.Equals(foundEntry.TenantId, tenantId, StringComparison.OrdinalIgnoreCase))
             {
                 var forbidden = req.CreateResponse(HttpStatusCode.Forbidden);
                 await forbidden.WriteAsJsonAsync(new { success = false, message = "Access denied" });
                 return forbidden;
             }
 
-            await tableClient.DeleteEntityAsync(foundEntity.PartitionKey, keyId);
+            await _adminRepo.RevokeApiKeyAsync(foundPartitionKey!, keyId);
 
             _logger.LogInformation("API key deleted: keyId={KeyId}, deletedBy={Upn}", keyId, upn);
 
@@ -248,33 +238,19 @@ public class ApiKeyManagementFunction
         }
     }
 
-    private async Task<List<object>> GetApiKeysForTenantAsync(string tenantId)
-    {
-        var tableClient = _storageService.GetTableClient(Constants.TableNames.ApiKeys);
-        var keys = new List<object>();
-
-        await foreach (var entity in tableClient.QueryAsync<TableEntity>(
-            filter: $"PartitionKey eq '{tenantId}'"))
-        {
-            keys.Add(MapKeyEntity(entity));
-        }
-
-        return keys;
-    }
-
-    private static object MapKeyEntity(TableEntity entity)
+    private static object MapKeyEntry(ApiKeyEntry entry)
     {
         return new
         {
-            keyId = entity.RowKey,
-            scope = entity.GetString("Scope") ?? "tenant",
-            tenantId = entity.GetString("TenantId") ?? entity.PartitionKey,
-            label = entity.GetString("Label") ?? "",
-            createdBy = entity.GetString("CreatedBy") ?? "",
-            createdAt = entity.GetDateTimeOffset("CreatedAt")?.UtcDateTime,
-            expiresAt = entity.GetDateTimeOffset("ExpiresAt")?.UtcDateTime,
-            isActive = entity.GetBoolean("IsActive") ?? true,
-            requestCount = entity.TryGetValue("RequestCount", out var rc) ? Convert.ToInt64(rc) : 0L,
+            keyId = entry.KeyId,
+            scope = entry.Scope ?? "tenant",
+            tenantId = entry.TenantId,
+            label = entry.Name ?? "",
+            createdBy = entry.CreatedBy ?? "",
+            createdAt = entry.CreatedAt,
+            expiresAt = entry.ExpiresAt,
+            isActive = entry.IsActive,
+            requestCount = entry.RequestCount,
         };
     }
 }

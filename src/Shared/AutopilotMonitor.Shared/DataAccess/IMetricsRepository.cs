@@ -1,0 +1,36 @@
+using AutopilotMonitor.Shared.Models;
+
+namespace AutopilotMonitor.Shared.DataAccess
+{
+    /// <summary>
+    /// Repository for usage metrics, platform stats, and user activity tracking.
+    /// Covers: UsageMetrics, PlatformStats, UserActivity, AppInstallSummaries tables.
+    /// </summary>
+    public interface IMetricsRepository
+    {
+        // --- Usage Metrics Snapshots ---
+        Task<bool> SaveUsageMetricsSnapshotAsync(UsageMetricsSnapshot metrics);
+        Task<List<UsageMetricsSnapshot>> GetUsageMetricsSnapshotAsync(
+            string? tenantId = null, string? startDate = null, string? endDate = null, int maxResults = 100);
+        Task<bool> HasUsageMetricsSnapshotAsync(string date);
+
+        // --- App Install Summaries ---
+        Task<bool> StoreAppInstallSummaryAsync(AppInstallSummary summary);
+        Task<List<AppInstallSummary>> GetAppInstallSummariesByTenantAsync(string tenantId);
+        Task<List<AppInstallSummary>> GetAllAppInstallSummariesAsync();
+
+        // --- Platform Stats ---
+        Task<PlatformStats?> GetPlatformStatsAsync();
+        Task<bool> SavePlatformStatsAsync(PlatformStats stats);
+        Task IncrementPlatformStatAsync(string field, long amount = 1);
+
+        // --- User Activity ---
+        Task RecordUserLoginAsync(string tenantId, string upn, string? displayName, string? objectId);
+        Task<UserActivityMetrics> GetUserActivityMetricsAsync(string tenantId);
+        Task<UserActivityMetrics> GetAllUserActivityMetricsAsync();
+        Task<(int uniqueUsers, int loginCount)> GetUserActivityForDateAsync(string? tenantId, DateTime date);
+
+        // --- Metrics Summary (Agent API) ---
+        Task<List<object>> GetMetricsSummaryAsync(string? tenantId);
+    }
+}

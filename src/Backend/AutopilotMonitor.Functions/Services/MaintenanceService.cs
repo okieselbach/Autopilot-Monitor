@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
 using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
@@ -40,7 +41,9 @@ namespace AutopilotMonitor.Functions.Services
     /// </summary>
     public partial class MaintenanceService
     {
-        private readonly TableStorageService _storageService;
+        private readonly IMaintenanceRepository _maintenanceRepo;
+        private readonly ISessionRepository _sessionRepo;
+        private readonly IMetricsRepository _metricsRepo;
         private readonly TenantConfigurationService _tenantConfigService;
         private readonly UsageMetricsService _usageMetricsService;
         private readonly AdminConfigurationService _adminConfigurationService;
@@ -53,7 +56,9 @@ namespace AutopilotMonitor.Functions.Services
         private const string PlatformStatsVersionedCacheControl = "public, max-age=31536000, immutable";
 
         public MaintenanceService(
-            TableStorageService storageService,
+            IMaintenanceRepository maintenanceRepo,
+            ISessionRepository sessionRepo,
+            IMetricsRepository metricsRepo,
             TenantConfigurationService tenantConfigService,
             UsageMetricsService usageMetricsService,
             AdminConfigurationService adminConfigurationService,
@@ -61,7 +66,9 @@ namespace AutopilotMonitor.Functions.Services
             TenantAdminsService tenantAdminsService,
             ILogger<MaintenanceService> logger)
         {
-            _storageService = storageService;
+            _maintenanceRepo = maintenanceRepo;
+            _sessionRepo = sessionRepo;
+            _metricsRepo = metricsRepo;
             _tenantConfigService = tenantConfigService;
             _usageMetricsService = usageMetricsService;
             _adminConfigurationService = adminConfigurationService;
@@ -131,12 +138,12 @@ namespace AutopilotMonitor.Functions.Services
                     // --- Backfill & repair tasks (manual-only, not in timer path) ---
 
                     // Safety net: backfill any sessions missing from SessionsIndex
-                    await _storageService.BackfillSessionIndexAsync();
+                    await _maintenanceRepo.BackfillSessionIndexAsync();
 
                     // One-time cleanup: remove ghost SessionsIndex entries caused by the
                     // StoreSessionAsync Replace-mode IndexRowKey bug (now fixed).
                     // TODO: Remove after 2026-06-01
-                    await _storageService.CleanupGhostSessionIndexEntriesAsync();
+                    await _maintenanceRepo.CleanupGhostSessionIndexEntriesAsync();
 
                     // Backfill OnboardedAt for tenants that don't have it yet
                     // TODO: Remove once all tenants have been backfilled
@@ -174,7 +181,7 @@ namespace AutopilotMonitor.Functions.Services
 
             try
             {
-                var tenantIds = await _storageService.GetAllTenantIdsAsync();
+                var tenantIds = await _maintenanceRepo.GetAllTenantIdsAsync();
                 int totalSessionsTimedOut = 0;
 
                 foreach (var tenantId in tenantIds)
@@ -185,7 +192,7 @@ namespace AutopilotMonitor.Functions.Services
                         var timeoutHours = config?.SessionTimeoutHours ?? 5;
                         var cutoffTime = DateTime.UtcNow.AddHours(-timeoutHours);
 
-                        var stalledSessions = await _storageService.GetStalledSessionsAsync(tenantId, cutoffTime);
+                        var stalledSessions = await _maintenanceRepo.GetStalledSessionsAsync(tenantId, cutoffTime);
 
                         if (stalledSessions.Count == 0)
                         {
@@ -197,7 +204,7 @@ namespace AutopilotMonitor.Functions.Services
 
                         foreach (var session in stalledSessions)
                         {
-                            await _storageService.UpdateSessionStatusAsync(
+                            await _sessionRepo.UpdateSessionStatusAsync(
                                 session.TenantId,
                                 session.SessionId,
                                 SessionStatus.Failed,
@@ -208,7 +215,7 @@ namespace AutopilotMonitor.Functions.Services
 
                         totalSessionsTimedOut += sessionCount;
 
-                        await _storageService.LogAuditEntryAsync(
+                        await _maintenanceRepo.LogAuditEntryAsync(
                             tenantId,
                             "SessionTimeout",
                             "Session",
@@ -260,14 +267,14 @@ namespace AutopilotMonitor.Functions.Services
 
                 var windowCutoff = DateTime.UtcNow.AddHours(-adminConfig.MaxSessionWindowHours);
                 var blockDurationHours = adminConfig.MaintenanceBlockDurationHours;
-                var tenantIds = await _storageService.GetAllTenantIdsAsync();
+                var tenantIds = await _maintenanceRepo.GetAllTenantIdsAsync();
                 int totalBlocked = 0;
 
                 foreach (var tenantId in tenantIds)
                 {
                     try
                     {
-                        var sessions = await _storageService.GetExcessiveDataSendersAsync(tenantId, windowCutoff, adminConfig.MaxSessionWindowHours);
+                        var sessions = await _maintenanceRepo.GetExcessiveDataSendersAsync(tenantId, windowCutoff, adminConfig.MaxSessionWindowHours);
 
                         if (sessions.Count == 0)
                         {
@@ -302,7 +309,7 @@ namespace AutopilotMonitor.Functions.Services
 
                         if (blockedCount > 0)
                         {
-                            await _storageService.LogAuditEntryAsync(
+                            await _maintenanceRepo.LogAuditEntryAsync(
                                 tenantId,
                                 "ExcessiveDataBlock",
                                 "Device",

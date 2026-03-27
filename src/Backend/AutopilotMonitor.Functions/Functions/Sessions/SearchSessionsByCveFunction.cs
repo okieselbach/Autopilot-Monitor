@@ -1,6 +1,6 @@
 using System.Net;
 using AutopilotMonitor.Functions.Helpers;
-using AutopilotMonitor.Functions.Services;
+using AutopilotMonitor.Shared.DataAccess;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
@@ -10,12 +10,12 @@ namespace AutopilotMonitor.Functions.Functions.Sessions;
 public class SearchSessionsByCveFunction
 {
     private readonly ILogger<SearchSessionsByCveFunction> _logger;
-    private readonly TableStorageService _storageService;
+    private readonly ISessionRepository _sessionRepo;
 
-    public SearchSessionsByCveFunction(ILogger<SearchSessionsByCveFunction> logger, TableStorageService storageService)
+    public SearchSessionsByCveFunction(ILogger<SearchSessionsByCveFunction> logger, ISessionRepository sessionRepo)
     {
         _logger = logger;
-        _storageService = storageService;
+        _sessionRepo = sessionRepo;
     }
 
     [Function("SearchSessionsByCve")]
@@ -56,7 +56,7 @@ public class SearchSessionsByCveFunction
             var overallRisk = query["overallRisk"];
             var limit = int.TryParse(query["limit"], out var lim) ? Math.Min(lim, 100) : 50;
 
-            var sessions = await _storageService.SearchSessionsByCveAsync(tenantId, cveId, minCvssScore, overallRisk, limit);
+            var sessions = await _sessionRepo.SearchSessionsByCveAsync(tenantId, cveId, minCvssScore, overallRisk, limit);
 
             var response = req.CreateResponse(HttpStatusCode.OK);
             await response.WriteAsJsonAsync(new

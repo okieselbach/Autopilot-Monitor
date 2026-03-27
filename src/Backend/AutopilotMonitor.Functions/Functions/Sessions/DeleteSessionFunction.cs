@@ -1,6 +1,6 @@
 using System.Net;
 using AutopilotMonitor.Functions.Helpers;
-using AutopilotMonitor.Functions.Services;
+using AutopilotMonitor.Shared.DataAccess;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
@@ -10,14 +10,17 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
     public class DeleteSessionFunction
     {
         private readonly ILogger<DeleteSessionFunction> _logger;
-        private readonly TableStorageService _storageService;
+        private readonly ISessionRepository _sessionRepo;
+        private readonly IMaintenanceRepository _maintenanceRepo;
 
         public DeleteSessionFunction(
             ILogger<DeleteSessionFunction> logger,
-            TableStorageService storageService)
+            ISessionRepository sessionRepo,
+            IMaintenanceRepository maintenanceRepo)
         {
             _logger = logger;
-            _storageService = storageService;
+            _sessionRepo = sessionRepo;
+            _maintenanceRepo = maintenanceRepo;
         }
 
         [Function("DeleteSession")]
@@ -36,22 +39,22 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
                 _logger.LogInformation($"Deleting session {sessionId} for tenant {tenantId} by user {userIdentifier}");
 
                 // Delete all related data for this session
-                var eventsDeleted = await _storageService.DeleteSessionEventsAsync(tenantId, sessionId);
+                var eventsDeleted = await _maintenanceRepo.DeleteSessionEventsAsync(tenantId, sessionId);
                 _logger.LogInformation($"Deleted {eventsDeleted} events for session {sessionId}");
 
-                var ruleResultsDeleted = await _storageService.DeleteSessionRuleResultsAsync(tenantId, sessionId);
+                var ruleResultsDeleted = await _maintenanceRepo.DeleteSessionRuleResultsAsync(tenantId, sessionId);
                 _logger.LogInformation($"Deleted {ruleResultsDeleted} rule results for session {sessionId}");
 
-                var appSummariesDeleted = await _storageService.DeleteSessionAppInstallSummariesAsync(tenantId, sessionId);
+                var appSummariesDeleted = await _maintenanceRepo.DeleteSessionAppInstallSummariesAsync(tenantId, sessionId);
                 _logger.LogInformation($"Deleted {appSummariesDeleted} app install summaries for session {sessionId}");
 
                 // Delete the session itself
-                var sessionDeleted = await _storageService.DeleteSessionAsync(tenantId, sessionId);
+                var sessionDeleted = await _sessionRepo.DeleteSessionAsync(tenantId, sessionId);
 
                 if (sessionDeleted)
                 {
                     // Log audit entry with actual user identifier
-                    await _storageService.LogAuditEntryAsync(
+                    await _maintenanceRepo.LogAuditEntryAsync(
                         tenantId,
                         "DELETE",
                         "Session",

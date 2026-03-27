@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using System.Collections.Generic;
 using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Services;
+using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -18,18 +19,18 @@ namespace AutopilotMonitor.Functions.Functions.Config
         private readonly ILogger<UpdateTenantConfigurationFunction> _logger;
         private readonly TenantConfigurationService _configService;
         private readonly GlobalAdminService _globalAdminService;
-        private readonly TableStorageService _storageService;
+        private readonly IMaintenanceRepository _maintenanceRepo;
 
         public UpdateTenantConfigurationFunction(
             ILogger<UpdateTenantConfigurationFunction> logger,
             TenantConfigurationService configService,
             GlobalAdminService globalAdminService,
-            TableStorageService storageService)
+            IMaintenanceRepository maintenanceRepo)
         {
             _logger = logger;
             _configService = configService;
             _globalAdminService = globalAdminService;
-            _storageService = storageService;
+            _maintenanceRepo = maintenanceRepo;
         }
 
         [Function("UpdateTenantConfiguration")]
@@ -126,7 +127,7 @@ namespace AutopilotMonitor.Functions.Functions.Config
                 await _configService.SaveConfigurationAsync(config);
 
                 var changes = ConfigDiffHelper.GetChanges(existingConfig, config);
-                await _storageService.LogAuditEntryAsync(
+                await _maintenanceRepo.LogAuditEntryAsync(
                     tenantId,
                     "UPDATE",
                     "TenantConfiguration",

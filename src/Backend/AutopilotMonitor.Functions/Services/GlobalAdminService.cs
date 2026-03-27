@@ -1,7 +1,6 @@
-using AutopilotMonitor.Shared;
+using AutopilotMonitor.Shared.DataAccess;
 using Azure.Data.Tables;
 using Microsoft.Extensions.Caching.Memory;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace AutopilotMonitor.Functions.Services;
@@ -12,21 +11,19 @@ namespace AutopilotMonitor.Functions.Services;
 /// </summary>
 public class GlobalAdminService
 {
-    private readonly TableServiceClient _tableServiceClient;
+    private readonly IAdminRepository _adminRepo;
     private readonly IMemoryCache _cache;
     private readonly ILogger<GlobalAdminService> _logger;
     private readonly TimeSpan _cacheDuration = TimeSpan.FromMinutes(5);
 
     public GlobalAdminService(
-        IConfiguration configuration,
+        IAdminRepository adminRepo,
         IMemoryCache cache,
         ILogger<GlobalAdminService> logger)
     {
+        _adminRepo = adminRepo;
         _cache = cache;
         _logger = logger;
-        var connectionString = configuration["AzureTableStorageConnectionString"];
-        _tableServiceClient = new TableServiceClient(connectionString);
-        // Table is initialized centrally by TableInitializerService at startup
     }
 
     /// <summary>
@@ -55,51 +52,16 @@ public class GlobalAdminService
             return isAdmin;
         }
 
-        // Query Table Storage
-        _logger.LogInformation($"Querying Table Storage for Global Admin: {upn}");
-        var admin = await GetGlobalAdminAsync(upn);
-        var result = admin != null && admin.IsEnabled;
+        // Query via repository
+        _logger.LogInformation($"Querying repository for Global Admin: {upn}");
+        var result = await _adminRepo.IsGlobalAdminAsync(upn);
 
-        _logger.LogInformation($"Global Admin check result: {upn} -> {result} (Entity found: {admin != null}, IsEnabled: {admin?.IsEnabled})");
+        _logger.LogInformation($"Global Admin check result: {upn} -> {result}");
 
         // Cache the result
         _cache.Set(cacheKey, result, _cacheDuration);
 
         return result;
-    }
-
-    /// <summary>
-    /// Gets a Global Admin entity by UPN
-    /// </summary>
-    private async Task<GlobalAdminEntity?> GetGlobalAdminAsync(string upn)
-    {
-        try
-        {
-            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.GlobalAdmins);
-            var normalizedUpn = upn.ToLowerInvariant();
-
-            _logger.LogDebug($"Querying Table Storage - PartitionKey: 'GlobalAdmins', RowKey: '{normalizedUpn}'");
-
-            // PartitionKey = "GlobalAdmins", RowKey = UPN
-            var entity = await tableClient.GetEntityAsync<GlobalAdminEntity>(
-                "GlobalAdmins",
-                normalizedUpn
-            );
-
-            _logger.LogDebug($"Global Admin entity found for {normalizedUpn}");
-            return entity?.Value;
-        }
-        catch (Azure.RequestFailedException ex) when (ex.Status == 404)
-        {
-            // Entity not found
-            _logger.LogDebug($"Global Admin entity NOT found for {upn} (404)");
-            return null;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, $"Error querying Global Admin for {upn}");
-            return null;
-        }
     }
 
     /// <summary>
@@ -112,7 +74,12 @@ public class GlobalAdminService
         upn = upn.ToLowerInvariant();
         addedBy = addedBy.ToLowerInvariant();
 
-        var entity = new GlobalAdminEntity
+        await _adminRepo.AddGlobalAdminAsync(upn, addedBy);
+
+        // Invalidate cache
+        _cache.Remove($"global-admin:{upn}");
+
+        return new GlobalAdminEntity
         {
             PartitionKey = "GlobalAdmins",
             RowKey = upn,
@@ -121,14 +88,6 @@ public class GlobalAdminService
             AddedDate = DateTime.UtcNow,
             AddedBy = addedBy
         };
-
-        var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.GlobalAdmins);
-        await tableClient.UpsertEntityAsync(entity);
-
-        // Invalidate cache
-        _cache.Remove($"global-admin:{upn}");
-
-        return entity;
     }
 
     /// <summary>
@@ -138,8 +97,7 @@ public class GlobalAdminService
     {
         upn = upn.ToLowerInvariant();
 
-        var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.GlobalAdmins);
-        await tableClient.DeleteEntityAsync("GlobalAdmins", upn);
+        await _adminRepo.RemoveGlobalAdminAsync(upn);
 
         // Invalidate cache
         _cache.Remove($"global-admin:{upn}");
@@ -152,17 +110,10 @@ public class GlobalAdminService
     {
         upn = upn.ToLowerInvariant();
 
-        var admin = await GetGlobalAdminAsync(upn);
-        if (admin != null)
-        {
-            admin.IsEnabled = false;
+        await _adminRepo.DisableGlobalAdminAsync(upn);
 
-            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.GlobalAdmins);
-            await tableClient.UpdateEntityAsync(admin, Azure.ETag.All);
-
-            // Invalidate cache
-            _cache.Remove($"global-admin:{upn}");
-        }
+        // Invalidate cache
+        _cache.Remove($"global-admin:{upn}");
     }
 
     /// <summary>
@@ -170,16 +121,17 @@ public class GlobalAdminService
     /// </summary>
     public async Task<List<GlobalAdminEntity>> GetAllGlobalAdminsAsync()
     {
-        var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.GlobalAdmins);
+        var entries = await _adminRepo.GetAllGlobalAdminsAsync();
 
-        var admins = new List<GlobalAdminEntity>();
-        await foreach (var entity in tableClient.QueryAsync<GlobalAdminEntity>(
-            filter: $"PartitionKey eq 'GlobalAdmins'"))
+        return entries.Select(e => new GlobalAdminEntity
         {
-            admins.Add(entity);
-        }
-
-        return admins;
+            PartitionKey = "GlobalAdmins",
+            RowKey = e.Upn,
+            Upn = e.Upn,
+            IsEnabled = e.IsEnabled,
+            AddedDate = e.AddedAt,
+            AddedBy = e.AddedBy
+        }).ToList();
     }
 
     /// <summary>

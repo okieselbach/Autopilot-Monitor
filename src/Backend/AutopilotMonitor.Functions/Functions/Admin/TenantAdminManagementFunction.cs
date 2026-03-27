@@ -2,6 +2,7 @@ using System.Net;
 using AutopilotMonitor.Functions.Extensions;
 using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Services;
+using AutopilotMonitor.Shared.DataAccess;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -18,18 +19,18 @@ public class TenantAdminManagementFunction
     private readonly ILogger<TenantAdminManagementFunction> _logger;
     private readonly TenantAdminsService _tenantAdminsService;
     private readonly GlobalAdminService _globalAdminService;
-    private readonly TableStorageService _storageService;
+    private readonly IMaintenanceRepository _maintenanceRepo;
 
     public TenantAdminManagementFunction(
         ILogger<TenantAdminManagementFunction> logger,
         TenantAdminsService tenantAdminsService,
         GlobalAdminService globalAdminService,
-        TableStorageService storageService)
+        IMaintenanceRepository maintenanceRepo)
     {
         _logger = logger;
         _tenantAdminsService = tenantAdminsService;
         _globalAdminService = globalAdminService;
-        _storageService = storageService;
+        _maintenanceRepo = maintenanceRepo;
     }
 
     /// <summary>
@@ -116,7 +117,7 @@ public class TenantAdminManagementFunction
         var role = !string.IsNullOrWhiteSpace(body.Role) ? body.Role : AutopilotMonitor.Shared.Constants.TenantRoles.Admin;
         var newAdmin = await _tenantAdminsService.AddTenantMemberAsync(tenantId, body.Upn, upn!, role, body.CanManageBootstrapTokens);
 
-        await _storageService.LogAuditEntryAsync(
+        await _maintenanceRepo.LogAuditEntryAsync(
             tenantId,
             "CREATE",
             "TenantAdmin",
@@ -189,7 +190,7 @@ public class TenantAdminManagementFunction
         // Remove the admin
         await _tenantAdminsService.RemoveTenantAdminAsync(tenantId, adminUpn);
 
-        await _storageService.LogAuditEntryAsync(
+        await _maintenanceRepo.LogAuditEntryAsync(
             tenantId,
             "DELETE",
             "TenantAdmin",
@@ -239,7 +240,7 @@ public class TenantAdminManagementFunction
         // Disable the admin
         await _tenantAdminsService.DisableTenantAdminAsync(tenantId, adminUpn);
 
-        await _storageService.LogAuditEntryAsync(
+        await _maintenanceRepo.LogAuditEntryAsync(
             tenantId,
             "UPDATE",
             "TenantAdmin",
@@ -290,7 +291,7 @@ public class TenantAdminManagementFunction
         // Enable the admin
         await _tenantAdminsService.EnableTenantAdminAsync(tenantId, adminUpn);
 
-        await _storageService.LogAuditEntryAsync(
+        await _maintenanceRepo.LogAuditEntryAsync(
             tenantId,
             "UPDATE",
             "TenantAdmin",
@@ -369,7 +370,7 @@ public class TenantAdminManagementFunction
             return notFoundResponse;
         }
 
-        await _storageService.LogAuditEntryAsync(
+        await _maintenanceRepo.LogAuditEntryAsync(
             tenantId,
             "UPDATE",
             "TenantAdmin",

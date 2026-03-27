@@ -1,6 +1,6 @@
 using System.Net;
 using AutopilotMonitor.Functions.Helpers;
-using AutopilotMonitor.Functions.Services;
+using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -12,14 +12,17 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
     public class MarkSessionFailedFunction
     {
         private readonly ILogger<MarkSessionFailedFunction> _logger;
-        private readonly TableStorageService _storageService;
+        private readonly ISessionRepository _sessionRepo;
+        private readonly IMaintenanceRepository _maintenanceRepo;
 
         public MarkSessionFailedFunction(
             ILogger<MarkSessionFailedFunction> logger,
-            TableStorageService storageService)
+            ISessionRepository sessionRepo,
+            IMaintenanceRepository maintenanceRepo)
         {
             _logger = logger;
-            _storageService = storageService;
+            _sessionRepo = sessionRepo;
+            _maintenanceRepo = maintenanceRepo;
         }
 
         [Function("MarkSessionFailed")]
@@ -38,7 +41,7 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
                 _logger.LogInformation($"Marking session {sessionId} as failed for tenant {tenantId} by user {userIdentifier}");
 
                 // Update session status to Failed with manual failure reason
-                var success = await _storageService.UpdateSessionStatusAsync(
+                var success = await _sessionRepo.UpdateSessionStatusAsync(
                     tenantId,
                     sessionId,
                     SessionStatus.Failed,
@@ -49,7 +52,7 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
                 if (success)
                 {
                     // Log audit entry with actual user identifier
-                    await _storageService.LogAuditEntryAsync(
+                    await _maintenanceRepo.LogAuditEntryAsync(
                         tenantId,
                         "UPDATE",
                         "Session",
@@ -63,7 +66,7 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
                     );
 
                     // Retrieve updated session data to include in SignalR message
-                    var updatedSession = await _storageService.GetSessionAsync(tenantId, sessionId);
+                    var updatedSession = await _sessionRepo.GetSessionAsync(tenantId, sessionId);
 
                     _logger.LogInformation($"Successfully marked session {sessionId} as failed");
                     var response = req.CreateResponse(HttpStatusCode.OK);

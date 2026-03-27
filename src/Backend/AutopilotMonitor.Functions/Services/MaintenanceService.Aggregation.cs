@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
 using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
@@ -31,7 +32,7 @@ namespace AutopilotMonitor.Functions.Services
 
                 try
                 {
-                    if (await _storageService.HasUsageMetricsSnapshotAsync(dateStr))
+                    if (await _metricsRepo.HasUsageMetricsSnapshotAsync(dateStr))
                         continue;
 
                     _logger.LogInformation($"Catch-up: Aggregating metrics for missed date {dateStr}");
@@ -62,7 +63,7 @@ namespace AutopilotMonitor.Functions.Services
             {
                 var targetDateStr = targetDate.ToString("yyyy-MM-dd");
 
-                var targetDateSessions = await _storageService.GetSessionsByDateRangeAsync(targetDate, targetDate.AddDays(1));
+                var targetDateSessions = await _maintenanceRepo.GetSessionsByDateRangeAsync(targetDate, targetDate.AddDays(1));
 
                 if (targetDateSessions.Count == 0)
                 {
@@ -71,13 +72,13 @@ namespace AutopilotMonitor.Functions.Services
                 }
 
                 var globalMetrics = await ComputeUsageMetricsSnapshotAsync(targetDateStr, "global", targetDateSessions);
-                await _storageService.SaveUsageMetricsSnapshotAsync(globalMetrics);
+                await _metricsRepo.SaveUsageMetricsSnapshotAsync(globalMetrics);
 
                 var tenantGroups = targetDateSessions.GroupBy(s => s.TenantId);
                 foreach (var tenantGroup in tenantGroups)
                 {
                     var tenantMetrics = await ComputeUsageMetricsSnapshotAsync(targetDateStr, tenantGroup.Key, tenantGroup.ToList());
-                    await _storageService.SaveUsageMetricsSnapshotAsync(tenantMetrics);
+                    await _metricsRepo.SaveUsageMetricsSnapshotAsync(tenantMetrics);
                 }
 
                 aggregateStart.Stop();
@@ -128,7 +129,7 @@ namespace AutopilotMonitor.Functions.Services
                 .ToList();
 
             var targetDate = DateTime.ParseExact(date, "yyyy-MM-dd", null);
-            var (uniqueUsers, loginCount) = await _storageService.GetUserActivityForDateAsync(
+            var (uniqueUsers, loginCount) = await _metricsRepo.GetUserActivityForDateAsync(
                 tenantId == "global" ? null : tenantId, targetDate);
 
             computeStart.Stop();
@@ -168,7 +169,7 @@ namespace AutopilotMonitor.Functions.Services
 
             try
             {
-                var tenantIds = await _storageService.GetAllTenantIdsAsync();
+                var tenantIds = await _maintenanceRepo.GetAllTenantIdsAsync();
                 int totalSessionsDeleted = 0;
                 int totalEventsDeleted = 0;
 
@@ -188,7 +189,7 @@ namespace AutopilotMonitor.Functions.Services
 
                         var cutoffDate = DateTime.UtcNow.AddDays(-retentionDays);
 
-                        var oldSessions = await _storageService.GetSessionsOlderThanAsync(tenantId, cutoffDate);
+                        var oldSessions = await _maintenanceRepo.GetSessionsOlderThanAsync(tenantId, cutoffDate);
 
                         if (oldSessions.Count == 0)
                         {
@@ -203,23 +204,23 @@ namespace AutopilotMonitor.Functions.Services
 
                         foreach (var session in oldSessions)
                         {
-                            var deletedEvents = await _storageService.DeleteSessionEventsAsync(session.TenantId, session.SessionId);
+                            var deletedEvents = await _maintenanceRepo.DeleteSessionEventsAsync(session.TenantId, session.SessionId);
                             eventCount += deletedEvents;
 
-                            var deletedRuleResults = await _storageService.DeleteSessionRuleResultsAsync(session.TenantId, session.SessionId);
+                            var deletedRuleResults = await _maintenanceRepo.DeleteSessionRuleResultsAsync(session.TenantId, session.SessionId);
                             ruleResultCount += deletedRuleResults;
 
-                            var deletedAppSummaries = await _storageService.DeleteSessionAppInstallSummariesAsync(session.TenantId, session.SessionId);
+                            var deletedAppSummaries = await _maintenanceRepo.DeleteSessionAppInstallSummariesAsync(session.TenantId, session.SessionId);
                             appSummaryCount += deletedAppSummaries;
 
-                            await _storageService.DeleteSessionAsync(session.TenantId, session.SessionId);
+                            await _sessionRepo.DeleteSessionAsync(session.TenantId, session.SessionId);
                             sessionCount++;
                         }
 
                         totalSessionsDeleted += sessionCount;
                         totalEventsDeleted += eventCount;
 
-                        await _storageService.LogAuditEntryAsync(
+                        await _maintenanceRepo.LogAuditEntryAsync(
                             tenantId,
                             "DataRetentionCleanup",
                             "Session",
@@ -263,7 +264,7 @@ namespace AutopilotMonitor.Functions.Services
 
             try
             {
-                var tenantIds = await _storageService.GetAllTenantIdsAsync();
+                var tenantIds = await _maintenanceRepo.GetAllTenantIdsAsync();
                 var allConfigs = await _tenantConfigService.GetAllConfigurationsAsync();
                 long totalEnrollments = 0;
                 long successfulEnrollments = 0;
@@ -273,7 +274,7 @@ namespace AutopilotMonitor.Functions.Services
 
                 foreach (var tid in tenantIds)
                 {
-                    var sessionsPage = await _storageService.GetSessionsAsync(tid, maxResults: 10000);
+                    var sessionsPage = await _sessionRepo.GetSessionsAsync(tid, maxResults: 10000);
                     var sessions = sessionsPage.Sessions;
                     totalEnrollments += sessions.Count;
                     successfulEnrollments += sessions.Count(s => s.Status == SessionStatus.Succeeded);
@@ -286,11 +287,11 @@ namespace AutopilotMonitor.Functions.Services
                         totalEvents += s.EventCount;
                     }
 
-                    var userMetrics = await _storageService.GetUserActivityMetricsAsync(tid);
+                    var userMetrics = await _metricsRepo.GetUserActivityMetricsAsync(tid);
                     totalUsers += userMetrics.TotalUniqueUsers;
                 }
 
-                var existingStats = await _storageService.GetPlatformStatsAsync();
+                var existingStats = await _metricsRepo.GetPlatformStatsAsync();
 
                 var stats = new PlatformStats
                 {
@@ -306,7 +307,7 @@ namespace AutopilotMonitor.Functions.Services
                     LastUpdated = DateTime.UtcNow
                 };
 
-                await _storageService.SavePlatformStatsAsync(stats);
+                await _metricsRepo.SavePlatformStatsAsync(stats);
                 await TryPublishPlatformStatsJsonAsync(stats);
 
                 sw.Stop();

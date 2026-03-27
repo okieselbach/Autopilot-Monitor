@@ -1,6 +1,6 @@
 using System.Net;
 using AutopilotMonitor.Functions.Helpers;
-using AutopilotMonitor.Functions.Services;
+using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -11,12 +11,12 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
     public class GetGeographicLocationSessionsFunction
     {
         private readonly ILogger<GetGeographicLocationSessionsFunction> _logger;
-        private readonly TableStorageService _storageService;
+        private readonly IMaintenanceRepository _maintenanceRepo;
 
-        public GetGeographicLocationSessionsFunction(ILogger<GetGeographicLocationSessionsFunction> logger, TableStorageService storageService)
+        public GetGeographicLocationSessionsFunction(ILogger<GetGeographicLocationSessionsFunction> logger, IMaintenanceRepository maintenanceRepo)
         {
             _logger = logger;
-            _storageService = storageService;
+            _maintenanceRepo = maintenanceRepo;
         }
 
         [Function("GetGeographicLocationSessions")]
@@ -48,7 +48,7 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
                     locationKey, tenantId, days, groupBy);
 
                 var cutoff = DateTime.UtcNow.AddDays(-days);
-                var sessions = await _storageService.GetSessionsByDateRangeAsync(cutoff, DateTime.UtcNow.AddDays(1), tenantId);
+                var sessions = await _maintenanceRepo.GetSessionsByDateRangeAsync(cutoff, DateTime.UtcNow.AddDays(1), tenantId);
 
                 var filtered = FilterSessionsByLocation(sessions, locationKey, groupBy);
 

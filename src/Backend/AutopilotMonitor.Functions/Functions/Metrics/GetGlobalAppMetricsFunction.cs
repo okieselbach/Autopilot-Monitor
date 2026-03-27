@@ -1,6 +1,6 @@
 using System.Net;
 using AutopilotMonitor.Functions.Helpers;
-using AutopilotMonitor.Functions.Services;
+using AutopilotMonitor.Shared.DataAccess;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
@@ -10,14 +10,14 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
     public class GetGlobalAppMetricsFunction
     {
         private readonly ILogger<GetGlobalAppMetricsFunction> _logger;
-        private readonly TableStorageService _storageService;
+        private readonly IMetricsRepository _metricsRepo;
 
         public GetGlobalAppMetricsFunction(
             ILogger<GetGlobalAppMetricsFunction> logger,
-            TableStorageService storageService)
+            IMetricsRepository metricsRepo)
         {
             _logger = logger;
-            _storageService = storageService;
+            _metricsRepo = metricsRepo;
         }
 
         [Function("GetGlobalAppMetrics")]
@@ -39,7 +39,7 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
 
                 var cutoff = DateTime.UtcNow.AddDays(-days);
 
-                var allSummaries = await _storageService.GetAllAppInstallSummariesAsync();
+                var allSummaries = await _metricsRepo.GetAllAppInstallSummariesAsync();
                 var summaries = allSummaries.Where(s => s.StartedAt >= cutoff).ToList();
 
                 var appGroups = summaries.GroupBy(s => s.AppName).Select(g =>

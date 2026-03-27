@@ -1,8 +1,8 @@
 using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Shared;
+using AutopilotMonitor.Shared.DataAccess;
 using Azure.Data.Tables;
 using Microsoft.Extensions.Caching.Memory;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace AutopilotMonitor.Functions.Services;
@@ -13,21 +13,19 @@ namespace AutopilotMonitor.Functions.Services;
 /// </summary>
 public class TenantAdminsService
 {
-    private readonly TableServiceClient _tableServiceClient;
+    private readonly IAdminRepository _adminRepo;
     private readonly IMemoryCache _cache;
     private readonly ILogger<TenantAdminsService> _logger;
     private readonly TimeSpan _cacheDuration = TimeSpan.FromMinutes(5);
 
     public TenantAdminsService(
-        IConfiguration configuration,
+        IAdminRepository adminRepo,
         IMemoryCache cache,
         ILogger<TenantAdminsService> logger)
     {
+        _adminRepo = adminRepo;
         _cache = cache;
         _logger = logger;
-        var connectionString = configuration["AzureTableStorageConnectionString"];
-        _tableServiceClient = new TableServiceClient(connectionString);
-        // Table is initialized centrally by TableInitializerService at startup
     }
 
     /// <summary>
@@ -58,53 +56,18 @@ public class TenantAdminsService
             return isAdmin;
         }
 
-        // Query Table Storage
-        _logger.LogInformation($"Querying Table Storage for Tenant Admin: {upn} @ {tenantId}");
-        var admin = await GetTenantAdminAsync(tenantId, upn);
+        // Query via repository
+        _logger.LogInformation($"Querying repository for Tenant Admin: {upn} @ {tenantId}");
+        var member = await _adminRepo.GetTenantMemberAsync(tenantId, upn);
         // Only true for Admin role (null Role = Admin for backward compat)
-        var result = admin != null && admin.IsEnabled
-                     && (admin.Role == null || admin.Role == Constants.TenantRoles.Admin);
+        var result = member != null && member.IsEnabled
+                     && (member.Role == null || member.Role == Constants.TenantRoles.Admin);
 
-        _logger.LogInformation($"Tenant Admin check result: {upn} @ {tenantId} -> {result} (Entity found: {admin != null}, IsEnabled: {admin?.IsEnabled})");
+        _logger.LogInformation($"Tenant Admin check result: {upn} @ {tenantId} -> {result} (Member found: {member != null}, IsEnabled: {member?.IsEnabled})");
 
         _cache.Set(cacheKey, result, _cacheDuration);
 
         return result;
-    }
-
-    /// <summary>
-    /// Gets a Tenant Admin entity by tenant ID and UPN
-    /// </summary>
-    private async Task<TenantAdminEntity?> GetTenantAdminAsync(string tenantId, string upn)
-    {
-        try
-        {
-            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.TenantAdmins);
-            var normalizedTenantId = tenantId.ToLowerInvariant();
-            var normalizedUpn = upn.ToLowerInvariant();
-
-            _logger.LogDebug($"Querying Table Storage - PartitionKey: '{normalizedTenantId}', RowKey: '{normalizedUpn}'");
-
-            // PartitionKey = TenantId, RowKey = UPN
-            var entity = await tableClient.GetEntityAsync<TenantAdminEntity>(
-                normalizedTenantId,
-                normalizedUpn
-            );
-
-            _logger.LogDebug($"Tenant Admin entity found for {normalizedUpn} @ {normalizedTenantId}");
-            return entity?.Value;
-        }
-        catch (Azure.RequestFailedException ex) when (ex.Status == 404)
-        {
-            // Entity not found
-            _logger.LogDebug($"Tenant Admin entity NOT found for {upn} @ {tenantId} (404)");
-            return null;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, $"Error querying Tenant Admin for {upn} @ {tenantId}");
-            return null;
-        }
     }
 
     /// <summary>
@@ -119,7 +82,13 @@ public class TenantAdminsService
         upn = upn.ToLowerInvariant();
         addedBy = addedBy.ToLowerInvariant();
 
-        var entity = new TenantAdminEntity
+        await _adminRepo.AddTenantMemberAsync(tenantId, upn, addedBy, Constants.TenantRoles.Admin);
+
+        InvalidateMemberCache(tenantId, upn);
+
+        _logger.LogInformation($"Added Tenant Admin: {upn} to tenant {tenantId} by {addedBy}");
+
+        return new TenantAdminEntity
         {
             PartitionKey = tenantId,
             RowKey = upn,
@@ -129,15 +98,6 @@ public class TenantAdminsService
             AddedDate = DateTime.UtcNow,
             AddedBy = addedBy
         };
-
-        var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.TenantAdmins);
-        await tableClient.UpsertEntityAsync(entity);
-
-        InvalidateMemberCache(tenantId, upn);
-
-        _logger.LogInformation($"Added Tenant Admin: {upn} to tenant {tenantId} by {addedBy}");
-
-        return entity;
     }
 
     /// <summary>
@@ -148,8 +108,7 @@ public class TenantAdminsService
         tenantId = tenantId.ToLowerInvariant();
         upn = upn.ToLowerInvariant();
 
-        var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.TenantAdmins);
-        await tableClient.DeleteEntityAsync(tenantId, upn);
+        await _adminRepo.RemoveTenantMemberAsync(tenantId, upn);
 
         InvalidateMemberCache(tenantId, upn);
 
@@ -164,18 +123,11 @@ public class TenantAdminsService
         tenantId = tenantId.ToLowerInvariant();
         upn = upn.ToLowerInvariant();
 
-        var admin = await GetTenantAdminAsync(tenantId, upn);
-        if (admin != null)
-        {
-            admin.IsEnabled = false;
+        await _adminRepo.SetTenantMemberEnabledAsync(tenantId, upn, false);
 
-            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.TenantAdmins);
-            await tableClient.UpdateEntityAsync(admin, Azure.ETag.All);
+        InvalidateMemberCache(tenantId, upn);
 
-            InvalidateMemberCache(tenantId, upn);
-
-            _logger.LogInformation($"Disabled Tenant Admin: {upn} for tenant {tenantId}");
-        }
+        _logger.LogInformation($"Disabled Tenant Admin: {upn} for tenant {tenantId}");
     }
 
     /// <summary>
@@ -186,18 +138,11 @@ public class TenantAdminsService
         tenantId = tenantId.ToLowerInvariant();
         upn = upn.ToLowerInvariant();
 
-        var admin = await GetTenantAdminAsync(tenantId, upn);
-        if (admin != null)
-        {
-            admin.IsEnabled = true;
+        await _adminRepo.SetTenantMemberEnabledAsync(tenantId, upn, true);
 
-            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.TenantAdmins);
-            await tableClient.UpdateEntityAsync(admin, Azure.ETag.All);
+        InvalidateMemberCache(tenantId, upn);
 
-            InvalidateMemberCache(tenantId, upn);
-
-            _logger.LogInformation($"Enabled Tenant Admin: {upn} for tenant {tenantId}");
-        }
+        _logger.LogInformation($"Enabled Tenant Admin: {upn} for tenant {tenantId}");
     }
 
     /// <summary>
@@ -208,18 +153,23 @@ public class TenantAdminsService
         SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
 
         tenantId = tenantId.ToLowerInvariant();
-        var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.TenantAdmins);
 
-        var admins = new List<TenantAdminEntity>();
-        await foreach (var entity in tableClient.QueryAsync<TenantAdminEntity>(
-            filter: $"PartitionKey eq '{tenantId}'"))
+        var members = await _adminRepo.GetTenantMembersAsync(tenantId);
+
+        _logger.LogInformation($"Retrieved {members.Count} Tenant Admins for tenant {tenantId}");
+
+        return members.Select(m => new TenantAdminEntity
         {
-            admins.Add(entity);
-        }
-
-        _logger.LogInformation($"Retrieved {admins.Count} Tenant Admins for tenant {tenantId}");
-
-        return admins;
+            PartitionKey = m.TenantId,
+            RowKey = m.Upn,
+            TenantId = m.TenantId,
+            Upn = m.Upn,
+            IsEnabled = m.IsEnabled,
+            AddedDate = m.AddedAt,
+            AddedBy = m.AddedBy,
+            Role = m.Role,
+            CanManageBootstrapTokens = m.CanManageBootstrapTokens
+        }).ToList();
     }
 
     /// <summary>
@@ -252,8 +202,8 @@ public class TenantAdminsService
         if (_cache.TryGetValue<MemberRoleInfo?>(cacheKey, out var cached))
             return cached;
 
-        var entity = await GetTenantAdminAsync(tenantId, upn);
-        if (entity == null || !entity.IsEnabled)
+        var member = await _adminRepo.GetTenantMemberAsync(tenantId, upn);
+        if (member == null || !member.IsEnabled)
         {
             _cache.Set(cacheKey, (MemberRoleInfo?)null, _cacheDuration);
             return null;
@@ -261,8 +211,8 @@ public class TenantAdminsService
 
         var role = new MemberRoleInfo
         {
-            Role = entity.Role ?? Constants.TenantRoles.Admin,
-            CanManageBootstrapTokens = entity.CanManageBootstrapTokens
+            Role = member.Role ?? Constants.TenantRoles.Admin,
+            CanManageBootstrapTokens = member.CanManageBootstrapTokens
         };
 
         _cache.Set(cacheKey, (MemberRoleInfo?)role, _cacheDuration);
@@ -298,7 +248,13 @@ public class TenantAdminsService
         upn = upn.ToLowerInvariant();
         addedBy = addedBy.ToLowerInvariant();
 
-        var entity = new TenantAdminEntity
+        await _adminRepo.AddTenantMemberAsync(tenantId, upn, addedBy, role, canManageBootstrapTokens);
+
+        InvalidateMemberCache(tenantId, upn);
+
+        _logger.LogInformation("Added tenant member: {Upn} with role {Role} to tenant {TenantId} by {AddedBy}", upn, role, tenantId, addedBy);
+
+        return new TenantAdminEntity
         {
             PartitionKey = tenantId,
             RowKey = upn,
@@ -310,15 +266,6 @@ public class TenantAdminsService
             Role = role,
             CanManageBootstrapTokens = canManageBootstrapTokens
         };
-
-        var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.TenantAdmins);
-        await tableClient.UpsertEntityAsync(entity);
-
-        InvalidateMemberCache(tenantId, upn);
-
-        _logger.LogInformation("Added tenant member: {Upn} with role {Role} to tenant {TenantId} by {AddedBy}", upn, role, tenantId, addedBy);
-
-        return entity;
     }
 
     /// <summary>
@@ -329,20 +276,15 @@ public class TenantAdminsService
         tenantId = tenantId.ToLowerInvariant();
         upn = upn.ToLowerInvariant();
 
-        var entity = await GetTenantAdminAsync(tenantId, upn);
-        if (entity == null) return false;
+        var result = await _adminRepo.UpdateMemberPermissionsAsync(tenantId, upn, role, canManageBootstrapTokens);
 
-        entity.Role = role;
-        entity.CanManageBootstrapTokens = canManageBootstrapTokens;
+        if (result)
+        {
+            InvalidateMemberCache(tenantId, upn);
+            _logger.LogInformation("Updated member permissions: {Upn} -> role={Role}, canManageBootstrap={CanManageBootstrap} in tenant {TenantId}", upn, role, canManageBootstrapTokens, tenantId);
+        }
 
-        var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.TenantAdmins);
-        await tableClient.UpdateEntityAsync(entity, Azure.ETag.All);
-
-        InvalidateMemberCache(tenantId, upn);
-
-        _logger.LogInformation("Updated member permissions: {Upn} -> role={Role}, canManageBootstrap={CanManageBootstrap} in tenant {TenantId}", upn, role, canManageBootstrapTokens, tenantId);
-
-        return true;
+        return result;
     }
 
     /// <summary>

@@ -1,5 +1,6 @@
 using System.Net;
 using AutopilotMonitor.Functions.Extensions;
+using AutopilotMonitor.Functions.DataAccess.TableStorage;
 using AutopilotMonitor.Functions.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Azure.Functions.Worker;

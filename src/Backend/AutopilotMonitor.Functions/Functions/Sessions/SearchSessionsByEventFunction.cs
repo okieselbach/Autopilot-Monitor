@@ -1,6 +1,6 @@
 using System.Net;
 using AutopilotMonitor.Functions.Helpers;
-using AutopilotMonitor.Functions.Services;
+using AutopilotMonitor.Shared.DataAccess;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
@@ -10,12 +10,12 @@ namespace AutopilotMonitor.Functions.Functions.Sessions;
 public class SearchSessionsByEventFunction
 {
     private readonly ILogger<SearchSessionsByEventFunction> _logger;
-    private readonly TableStorageService _storageService;
+    private readonly ISessionRepository _sessionRepo;
 
-    public SearchSessionsByEventFunction(ILogger<SearchSessionsByEventFunction> logger, TableStorageService storageService)
+    public SearchSessionsByEventFunction(ILogger<SearchSessionsByEventFunction> logger, ISessionRepository sessionRepo)
     {
         _logger = logger;
-        _storageService = storageService;
+        _sessionRepo = sessionRepo;
     }
 
     [Function("SearchSessionsByEvent")]
@@ -54,7 +54,7 @@ public class SearchSessionsByEventFunction
 
             var limit = int.TryParse(query["limit"], out var lim) ? Math.Min(lim, 100) : 50;
 
-            var sessions = await _storageService.SearchSessionsByEventAsync(tenantId, eventType, null, null, null, limit);
+            var sessions = await _sessionRepo.SearchSessionsByEventAsync(tenantId, eventType, null, null, null, limit);
 
             var response = req.CreateResponse(HttpStatusCode.OK);
             await response.WriteAsJsonAsync(new

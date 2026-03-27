@@ -1,3 +1,4 @@
+using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Extensions.Logging;
 using System.Linq;
@@ -13,13 +14,13 @@ namespace AutopilotMonitor.Functions.Services
     /// </summary>
     public class GatherRuleService
     {
-        private readonly TableStorageService _storageService;
+        private readonly IRuleRepository _ruleRepo;
         private readonly ILogger<GatherRuleService> _logger;
         private bool _seeded = false;
 
-        public GatherRuleService(TableStorageService storageService, ILogger<GatherRuleService> logger)
+        public GatherRuleService(IRuleRepository ruleRepo, ILogger<GatherRuleService> logger)
         {
-            _storageService = storageService;
+            _ruleRepo = ruleRepo;
             _logger = logger;
         }
 
@@ -40,14 +41,14 @@ namespace AutopilotMonitor.Functions.Services
             await EnsureBuiltInRulesSeededAsync();
 
             // Global rules: built-in + community (single source of truth for definitions)
-            var globalRules = await _storageService.GetGatherRulesAsync("global");
+            var globalRules = await _ruleRepo.GetGatherRulesAsync("global");
 
             // Tenant rules: only custom rules (IsBuiltIn=false, IsCommunity=false)
-            var tenantRules = await _storageService.GetGatherRulesAsync(tenantId);
+            var tenantRules = await _ruleRepo.GetGatherRulesAsync(tenantId);
             var customRules = tenantRules.Where(r => !r.IsBuiltIn && !r.IsCommunity).ToList();
 
             // Per-tenant enabled/disabled states for global rules
-            var ruleStates = await _storageService.GetRuleStatesAsync(tenantId);
+            var ruleStates = await _ruleRepo.GetRuleStatesAsync(tenantId);
 
             var mergedRules = new List<GatherRule>();
 
@@ -74,7 +75,7 @@ namespace AutopilotMonitor.Functions.Services
             rule.IsCommunity = false;
             rule.CreatedAt = DateTime.UtcNow;
             rule.UpdatedAt = DateTime.UtcNow;
-            return await _storageService.StoreGatherRuleAsync(rule, tenantId);
+            return await _ruleRepo.StoreGatherRuleAsync(rule, tenantId);
         }
 
         /// <summary>
@@ -89,13 +90,13 @@ namespace AutopilotMonitor.Functions.Services
         {
             // Always check global rules for type determination — the incoming payload
             // may not include isBuiltIn/isCommunity (e.g. toggle requests).
-            var globalRules = await _storageService.GetGatherRulesAsync("global");
+            var globalRules = await _ruleRepo.GetGatherRulesAsync("global");
             var globalRule = globalRules.FirstOrDefault(r => r.RuleId == rule.RuleId);
 
             if (globalRule != null && (globalRule.IsBuiltIn || globalRule.IsCommunity))
             {
                 // Built-in/community rule: only persist enabled state per tenant
-                return await _storageService.StoreRuleStateAsync(tenantId, rule.RuleId, rule.Enabled);
+                return await _ruleRepo.StoreRuleStateAsync(tenantId, rule.RuleId, rule.Enabled);
             }
 
             // Ensure custom rules keep correct flags (the incoming payload may
@@ -103,7 +104,7 @@ namespace AutopilotMonitor.Functions.Services
             rule.IsBuiltIn = false;
             rule.IsCommunity = false;
             rule.UpdatedAt = DateTime.UtcNow;
-            return await _storageService.StoreGatherRuleAsync(rule, tenantId);
+            return await _ruleRepo.StoreGatherRuleAsync(rule, tenantId);
         }
 
         /// <summary>
@@ -115,10 +116,10 @@ namespace AutopilotMonitor.Functions.Services
         {
             if (rule.IsBuiltIn || rule.IsCommunity)
             {
-                return await _storageService.DeleteRuleStateAsync(tenantId, rule.RuleId);
+                return await _ruleRepo.DeleteRuleStateAsync(tenantId, rule.RuleId);
             }
 
-            return await _storageService.DeleteGatherRuleAsync(tenantId, rule.RuleId);
+            return await _ruleRepo.DeleteGatherRuleAsync(tenantId, rule.RuleId);
         }
 
         /// <summary>
@@ -130,12 +131,12 @@ namespace AutopilotMonitor.Functions.Services
         {
             _logger.LogInformation("Reseeding built-in gather rules (full re-import)...");
 
-            var existingGlobalRules = await _storageService.GetGatherRulesAsync("global");
+            var existingGlobalRules = await _ruleRepo.GetGatherRulesAsync("global");
 
             var deleted = 0;
             foreach (var rule in existingGlobalRules.Where(r => r.IsBuiltIn))
             {
-                await _storageService.DeleteGatherRuleAsync("global", rule.RuleId);
+                await _ruleRepo.DeleteGatherRuleAsync("global", rule.RuleId);
                 deleted++;
             }
             _logger.LogInformation($"Deleted {deleted} old global built-in gather rules");
@@ -143,7 +144,7 @@ namespace AutopilotMonitor.Functions.Services
             var builtInRules = BuiltInGatherRules.GetAll();
             foreach (var rule in builtInRules)
             {
-                await _storageService.StoreGatherRuleAsync(rule, "global");
+                await _ruleRepo.StoreGatherRuleAsync(rule, "global");
             }
             _logger.LogInformation($"Written {builtInRules.Count} built-in gather rules from code");
 
@@ -160,7 +161,7 @@ namespace AutopilotMonitor.Functions.Services
         {
             if (_seeded) return;
 
-            var existingRules = await _storageService.GetGatherRulesAsync("global");
+            var existingRules = await _ruleRepo.GetGatherRulesAsync("global");
             var builtInRules = BuiltInGatherRules.GetAll();
 
             if (existingRules.Count == 0)
@@ -168,7 +169,7 @@ namespace AutopilotMonitor.Functions.Services
                 _logger.LogInformation("Seeding built-in gather rules...");
                 foreach (var rule in builtInRules)
                 {
-                    await _storageService.StoreGatherRuleAsync(rule, "global");
+                    await _ruleRepo.StoreGatherRuleAsync(rule, "global");
                 }
                 _logger.LogInformation($"Seeded {builtInRules.Count} built-in gather rules");
             }
@@ -189,14 +190,14 @@ namespace AutopilotMonitor.Functions.Services
                             || existing.Trigger != rule.Trigger
                             || existing.TriggerPhase != rule.TriggerPhase)
                         {
-                            await _storageService.StoreGatherRuleAsync(rule, "global");
+                            await _ruleRepo.StoreGatherRuleAsync(rule, "global");
                             updated++;
                         }
                     }
                     else
                     {
                         // New built-in rule added in code
-                        await _storageService.StoreGatherRuleAsync(rule, "global");
+                        await _ruleRepo.StoreGatherRuleAsync(rule, "global");
                         updated++;
                     }
                 }

@@ -1,6 +1,6 @@
 using System.Net;
 using AutopilotMonitor.Functions.Helpers;
-using AutopilotMonitor.Functions.Services;
+using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -11,14 +11,14 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
     public class GetAllSessionsFunction
     {
         private readonly ILogger<GetAllSessionsFunction> _logger;
-        private readonly TableStorageService _storageService;
+        private readonly ISessionRepository _sessionRepo;
 
         public GetAllSessionsFunction(
             ILogger<GetAllSessionsFunction> logger,
-            TableStorageService storageService)
+            ISessionRepository sessionRepo)
         {
             _logger = logger;
-            _storageService = storageService;
+            _sessionRepo = sessionRepo;
         }
 
         [Function("GetAllSessions")]
@@ -47,12 +47,12 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
                     }
 
                     _logger.LogInformation("Fetching sessions for tenant {TenantId} (User: {UserEmail}, cursor: {Cursor})", tenantIdFilter, userEmail, cursor ?? "none");
-                    page = await _storageService.GetSessionsAsync(tenantIdFilter, maxResults: 100, cursor: cursor);
+                    page = await _sessionRepo.GetSessionsAsync(tenantIdFilter, maxResults: 100, cursor: cursor);
                 }
                 else
                 {
                     _logger.LogInformation("Fetching all sessions across all tenants (User: {UserEmail}, cursor: {Cursor})", userEmail, cursor ?? "none");
-                    page = await _storageService.GetAllSessionsAsync(maxResults: 100, cursor: cursor);
+                    page = await _sessionRepo.GetAllSessionsAsync(maxResults: 100, cursor: cursor);
                 }
 
                 var response = req.CreateResponse(HttpStatusCode.OK);

@@ -1,5 +1,5 @@
 using System.Net;
-using AutopilotMonitor.Functions.Services;
+using AutopilotMonitor.Shared.DataAccess;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
@@ -13,12 +13,12 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
     public class GetPlatformStatsFunction
     {
         private readonly ILogger<GetPlatformStatsFunction> _logger;
-        private readonly TableStorageService _storageService;
+        private readonly IMetricsRepository _metricsRepo;
 
-        public GetPlatformStatsFunction(ILogger<GetPlatformStatsFunction> logger, TableStorageService storageService)
+        public GetPlatformStatsFunction(ILogger<GetPlatformStatsFunction> logger, IMetricsRepository metricsRepo)
         {
             _logger = logger;
-            _storageService = storageService;
+            _metricsRepo = metricsRepo;
         }
 
         [Function("GetPlatformStats")]
@@ -27,7 +27,7 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
         {
             try
             {
-                var stats = await _storageService.GetPlatformStatsAsync();
+                var stats = await _metricsRepo.GetPlatformStatsAsync();
 
                 var response = req.CreateResponse(HttpStatusCode.OK);
 

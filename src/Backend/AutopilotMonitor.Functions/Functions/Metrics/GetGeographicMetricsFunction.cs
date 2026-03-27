@@ -1,6 +1,7 @@
 using System.Net;
 using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Services;
+using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -11,13 +12,15 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
     public class GetGeographicMetricsFunction
     {
         private readonly ILogger<GetGeographicMetricsFunction> _logger;
-        private readonly TableStorageService _storageService;
+        private readonly IMaintenanceRepository _maintenanceRepo;
+        private readonly IMetricsRepository _metricsRepo;
         private readonly TenantConfigurationService _configService;
 
-        public GetGeographicMetricsFunction(ILogger<GetGeographicMetricsFunction> logger, TableStorageService storageService, TenantConfigurationService configService)
+        public GetGeographicMetricsFunction(ILogger<GetGeographicMetricsFunction> logger, IMaintenanceRepository maintenanceRepo, IMetricsRepository metricsRepo, TenantConfigurationService configService)
         {
             _logger = logger;
-            _storageService = storageService;
+            _maintenanceRepo = maintenanceRepo;
+            _metricsRepo = metricsRepo;
             _configService = configService;
         }
 
@@ -44,8 +47,8 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
                 var geoEnabled = tenantConfig?.EnableGeoLocation ?? true;
 
                 var cutoff = DateTime.UtcNow.AddDays(-days);
-                var sessions = await _storageService.GetSessionsByDateRangeAsync(cutoff, DateTime.UtcNow.AddDays(1), tenantId);
-                var allSummaries = await _storageService.GetAppInstallSummariesByTenantAsync(tenantId);
+                var sessions = await _maintenanceRepo.GetSessionsByDateRangeAsync(cutoff, DateTime.UtcNow.AddDays(1), tenantId);
+                var allSummaries = await _metricsRepo.GetAppInstallSummariesByTenantAsync(tenantId);
                 var summaries = allSummaries.Where(s => s.StartedAt >= cutoff).ToList();
 
                 var result = ComputeGeographicMetrics(sessions, summaries, groupBy);

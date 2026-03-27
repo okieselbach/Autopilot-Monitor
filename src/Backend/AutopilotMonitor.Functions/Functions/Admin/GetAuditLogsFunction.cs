@@ -1,6 +1,6 @@
 using System.Net;
 using AutopilotMonitor.Functions.Helpers;
-using AutopilotMonitor.Functions.Services;
+using AutopilotMonitor.Shared.DataAccess;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
@@ -10,12 +10,12 @@ namespace AutopilotMonitor.Functions.Functions.Admin
     public class GetAuditLogsFunction
     {
         private readonly ILogger<GetAuditLogsFunction> _logger;
-        private readonly TableStorageService _storageService;
+        private readonly IMaintenanceRepository _maintenanceRepo;
 
-        public GetAuditLogsFunction(ILogger<GetAuditLogsFunction> logger, TableStorageService storageService)
+        public GetAuditLogsFunction(ILogger<GetAuditLogsFunction> logger, IMaintenanceRepository maintenanceRepo)
         {
             _logger = logger;
-            _storageService = storageService;
+            _maintenanceRepo = maintenanceRepo;
         }
 
         [Function("GetAuditLogs")]
@@ -33,7 +33,7 @@ namespace AutopilotMonitor.Functions.Functions.Admin
                 _logger.LogInformation($"Fetching audit logs for tenant {tenantId} by user {userIdentifier}");
 
                 // Get audit logs from storage
-                var logs = await _storageService.GetAuditLogsAsync(tenantId, maxResults: 100);
+                var logs = await _maintenanceRepo.GetAuditLogsAsync(tenantId, maxResults: 100);
 
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(new
