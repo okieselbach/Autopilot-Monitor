@@ -4,43 +4,47 @@
 - [x] Define 10 Repository Interfaces in `Shared/DataAccess/`
 - [x] Define `IDataEventPublisher` + `NullDataEventPublisher`
 - [x] Define `IStorageInitializer`
-- [x] Create 5 core Table Storage implementations (delegate to `TableStorageService`)
+- [x] Create Table Storage implementations
 - [x] Create `DataAccessServiceExtensions` with `AddTableStorageDataAccess()`
 - [x] Register DAL in `Program.cs`
 
-## Phase 2: Migrate Core Functions to Use Interfaces
-These functions currently inject `TableStorageService` directly. Migrate to inject repository interfaces instead.
+## Phase 2: Migrate Core Functions ✅
+- [x] All 11 Session Functions → `ISessionRepository`
+- [x] All Metrics Functions → `IMetricsRepository` / `IMaintenanceRepository`
+- [x] All Admin/Audit Functions → `IMaintenanceRepository`
+- [x] All Rules Functions → `IRuleRepository`
+- [x] IngestEventsFunction → `ISessionRepository` + `IMetricsRepository` + `IMaintenanceRepository` + `IRuleRepository` + `IVulnerabilityRepository`
+- [x] Auth, Progress, Feedback Functions → appropriate repos
 
-### Session Functions
-- [ ] `GetSessionsFunction` → `ISessionRepository`
-- [ ] `GetSessionFunction` → `ISessionRepository`
-- [ ] `DeleteSessionFunction` → `ISessionRepository`
-- [ ] `RegisterSessionFunction` → `ISessionRepository`
-- [ ] `IngestEventsFunction` → `ISessionRepository`
-- [ ] `SearchSessionsFunction` → `ISessionRepository`
-- [ ] `SearchSessionsByEventFunction` → `ISessionRepository`
-- [ ] `SearchSessionsByCveFunction` → `ISessionRepository`
+## Phase 2b: Migrate Domain Services ✅
+- [x] `RuleEngine` → `IRuleRepository` + `ISessionRepository`
+- [x] `AnalyzeRuleService` → `IRuleRepository`
+- [x] `GatherRuleService` → `IRuleRepository`
+- [x] `ImeLogPatternService` → `IRuleRepository`
+- [x] `UsageMetricsService` → `IMetricsRepository` + `IMaintenanceRepository`
+- [x] `PlatformMetricsService` → `ISessionRepository`
+- [x] `MaintenanceService` + `.Aggregation` → `IMaintenanceRepository` + `ISessionRepository` + `IMetricsRepository`
 
-### Rule Functions
-- [ ] `GetRuleResultsFunction` → `IRuleRepository`
-- [ ] `RunRulesFunction` → `IRuleRepository`
-- [ ] Rule management functions → `IRuleRepository`
+## Phase 3: Migrate Remaining Files ✅
+- [x] All 8 Vulnerability Functions → `IVulnerabilityRepository`
+- [x] `ReseedFromGitHubFunction` → `IVulnerabilityRepository` + `IRuleRepository`
+- [x] `ApiKeyManagementFunction` → `IAdminRepository`
+- [x] `ApiKeyMiddleware` → `IAdminRepository`
+- [x] `BlockedDeviceService` → own TableClient (removed TableStorageService dep)
+- [x] `BlockedVersionService` → own TableClient (removed TableStorageService dep)
+- [x] `SessionReportService` → own TableClient (removed TableStorageService dep)
 
-### Metrics Functions
-- [ ] `GetMetricsFunction` → `IMetricsRepository`
-- [ ] `GetHistoricalMetricsFunction` → `IMetricsRepository`
-- [ ] `GetPlatformStatsFunction` → `IMetricsRepository`
+## Current State
+**Zero** functions or services inject `TableStorageService` directly.
+`TableStorageService` is only referenced by:
+- Its own 6 partial class files (the implementation)
+- 6 `DataAccess/TableStorage/` repository implementations (wrap it)
+- `Program.cs` (DI registration)
+- `TableInitializerService` (startup)
+- `VulnerabilityCorrelationService` (uses `GetTableClient()` — future migration)
 
-### Maintenance Functions
-- [ ] `GetAuditLogsFunction` → `IMaintenanceRepository`
-- [ ] `MaintenanceFunction` → `IMaintenanceRepository`
-
-### Vulnerability Functions
-- [ ] All vulnerability functions → `IVulnerabilityRepository`
-
-## Phase 3: Migrate "Bypass" Services
-These services create their own `TableServiceClient` instances. Create proper repository implementations and migrate.
-
+## Phase 4: Future — Config/Admin Services to Repos
+These services manage their own `TableServiceClient`. Migrate to repository interfaces when needed:
 - [ ] `TenantConfigurationService` → `IConfigRepository`
 - [ ] `AdminConfigurationService` → `IConfigRepository`
 - [ ] `PreviewWhitelistService` → `IConfigRepository`
@@ -48,27 +52,15 @@ These services create their own `TableServiceClient` instances. Create proper re
 - [ ] `TenantAdminsService` → `IAdminRepository`
 - [ ] `BootstrapSessionService` → `IBootstrapRepository`
 - [ ] `GlobalNotificationService` → `INotificationRepository`
-- [ ] `SessionReportService` → `INotificationRepository`
-- [ ] `BlockedDeviceService` → `IDeviceSecurityRepository`
-- [ ] `BlockedVersionService` → `IDeviceSecurityRepository`
-- [ ] `ApiKeyMiddleware` → `IAdminRepository`
-
-## Phase 4: Remove Legacy Code
-- [ ] Remove `GetTableClient()` and `GetTableServiceClient()` from `TableStorageService`
-- [ ] Move `TableStorageService` logic into repository implementations
-- [ ] Delete `TableStorageService` partial files once fully migrated
-- [ ] Remove direct `TableServiceClient` creation from all services
+- [ ] `VulnerabilityCorrelationService` → `IVulnerabilityRepository`
 
 ## Phase 5: Event Streaming (When Ready)
 - [ ] Implement `EventHubPublisher` (or `ServiceBusPublisher`)
 - [ ] Register via `services.AddEventStreaming<EventHubPublisher>()`
 - [ ] Define event schemas for key domain events
-- [ ] Add event consumers for downstream processing
 
 ## Phase 6: Cosmos DB Migration (When Ready)
 - [ ] Create `CosmosSessionRepository`, `CosmosRuleRepository`, etc.
 - [ ] Create `AddCosmosDataAccess()` extension method
 - [ ] Replace inverted-tick indexing with native ORDER BY DESC
-- [ ] Replace denormalized indexes with Cosmos queries
-- [ ] Handle 2MB document limit vs. 64KB Table Storage limit
 - [ ] Swap `AddTableStorageDataAccess()` → `AddCosmosDataAccess()` in Program.cs
