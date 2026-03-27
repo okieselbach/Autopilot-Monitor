@@ -225,7 +225,7 @@ namespace AutopilotMonitor.Functions.Services
                             "DataRetentionCleanup",
                             "Session",
                             $"{sessionCount} sessions",
-                            "System.DailyMaintenance",
+                            "System.Maintenance",
                             new Dictionary<string, string>
                             {
                                 { "SessionsDeleted", sessionCount.ToString() },

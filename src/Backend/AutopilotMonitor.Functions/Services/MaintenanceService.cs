@@ -220,7 +220,7 @@ namespace AutopilotMonitor.Functions.Services
                             "SessionTimeout",
                             "Session",
                             $"{sessionCount} sessions",
-                            "System.DailyMaintenance",
+                            "System.Maintenance",
                             new Dictionary<string, string>
                             {
                                 { "SessionsTimedOut", sessionCount.ToString() },
@@ -301,7 +301,7 @@ namespace AutopilotMonitor.Functions.Services
                                 tenantId,
                                 session.SerialNumber,
                                 durationHours: blockDurationHours,
-                                blockedByEmail: "System.DailyMaintenance",
+                                blockedByEmail: "System.Maintenance",
                                 reason: reason);
 
                             blockedCount++;
@@ -314,7 +314,7 @@ namespace AutopilotMonitor.Functions.Services
                                 "ExcessiveDataBlock",
                                 "Device",
                                 $"{blockedCount} devices",
-                                "System.DailyMaintenance",
+                                "System.Maintenance",
                                 new Dictionary<string, string>
                                 {
                                     { "DevicesBlocked", blockedCount.ToString() },

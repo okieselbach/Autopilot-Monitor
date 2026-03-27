@@ -6,17 +6,17 @@ using Microsoft.Extensions.Logging;
 namespace AutopilotMonitor.Functions.Functions.Admin
 {
     /// <summary>
-    /// Timer-triggered Azure Function that runs daily maintenance.
+    /// Timer-triggered Azure Function that runs periodic maintenance.
     /// Delegates all logic to MaintenanceService.
     /// </summary>
-    public class DailyMaintenanceFunction
+    public class MaintenanceFunction
     {
         private readonly MaintenanceService _maintenanceService;
-        private readonly ILogger<DailyMaintenanceFunction> _logger;
+        private readonly ILogger<MaintenanceFunction> _logger;
 
-        public DailyMaintenanceFunction(
+        public MaintenanceFunction(
             MaintenanceService maintenanceService,
-            ILogger<DailyMaintenanceFunction> logger)
+            ILogger<MaintenanceFunction> logger)
         {
             _maintenanceService = maintenanceService;
             _logger = logger;
@@ -28,10 +28,10 @@ namespace AutopilotMonitor.Functions.Functions.Admin
         /// Reduced from daily (2:00 UTC) to every 2 hours to catch stalled sessions faster.
         /// MarkStalledSessionsAsTimedOutAsync is idempotent (terminal states not overwritten).
         /// </summary>
-        [Function("DailyMaintenance")]
+        [Function("Maintenance")]
         public async Task Run([TimerTrigger("0 0 */2 * * *")] object timer)
         {
-            _logger.LogInformation("DailyMaintenance timer trigger fired");
+            _logger.LogInformation("Maintenance timer trigger fired");
             await _maintenanceService.RunAllAsync();
         }
     }

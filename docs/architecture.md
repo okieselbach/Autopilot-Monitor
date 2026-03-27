@@ -258,7 +258,7 @@ Monitoring/
 | **Health** | `GET /health`, `GET /health/detailed` |
 
 **Timer Trigger:**
-- `DailyMaintenanceFunction` – Every 2 hours (`0 0 */2 * * *`): stale session detection, metrics aggregation, data cleanup
+- `MaintenanceFunction` – Every 2 hours (`0 0 */2 * * *`): stale session detection, metrics aggregation, data cleanup
 
 ### Key Backend Services
 
