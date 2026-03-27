@@ -32,5 +32,8 @@ namespace AutopilotMonitor.Shared.DataAccess
         Task<int> BackfillSessionIndexAsync();
         Task<int> CleanupGhostSessionIndexEntriesAsync();
         Task<bool> IsSessionIndexEmptyAsync();
+
+        // --- Tenant Offboarding ---
+        Task<Dictionary<string, int>> DeleteAllTenantDataAsync(string tenantId);
     }
 }

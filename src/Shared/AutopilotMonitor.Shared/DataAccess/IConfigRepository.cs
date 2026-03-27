@@ -30,5 +30,22 @@ namespace AutopilotMonitor.Shared.DataAccess
         // --- Preview Notification Email ---
         Task<string?> GetNotificationEmailAsync(string tenantId);
         Task SaveNotificationEmailAsync(string tenantId, string? email);
+
+        // --- Feedback (stored in PreviewConfig table, PK="Feedback") ---
+        Task<FeedbackEntry?> GetFeedbackEntryAsync(string upn);
+        Task SaveFeedbackEntryAsync(FeedbackEntry entry);
+        Task<List<FeedbackEntry>> GetAllFeedbackEntriesAsync();
+    }
+
+    public class FeedbackEntry
+    {
+        public string Upn { get; set; } = string.Empty;
+        public string TenantId { get; set; } = string.Empty;
+        public string DisplayName { get; set; } = string.Empty;
+        public int? Rating { get; set; }
+        public string? Comment { get; set; }
+        public bool Dismissed { get; set; }
+        public bool Submitted { get; set; }
+        public DateTime? InteractedAt { get; set; }
     }
 }

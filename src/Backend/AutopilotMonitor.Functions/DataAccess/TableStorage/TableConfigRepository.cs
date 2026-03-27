@@ -262,6 +262,71 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
             }
         }
 
+        // --- Feedback ---
+
+        public async Task<FeedbackEntry?> GetFeedbackEntryAsync(string upn)
+        {
+            try
+            {
+                var entity = await _previewConfigTableClient.GetEntityAsync<TableEntity>("Feedback", upn.ToLowerInvariant());
+                return ConvertFromFeedbackTableEntity(entity.Value);
+            }
+            catch (RequestFailedException ex) when (ex.Status == 404)
+            {
+                return null;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error loading feedback entry for {Upn}", upn);
+                throw;
+            }
+        }
+
+        public async Task SaveFeedbackEntryAsync(FeedbackEntry entry)
+        {
+            try
+            {
+                var entity = new TableEntity("Feedback", entry.Upn.ToLowerInvariant())
+                {
+                    { "TenantId", entry.TenantId },
+                    { "DisplayName", entry.DisplayName },
+                    { "Rating", entry.Rating },
+                    { "Comment", entry.Comment },
+                    { "Dismissed", entry.Dismissed },
+                    { "Submitted", entry.Submitted },
+                    { "InteractedAt", entry.InteractedAt }
+                };
+
+                await _previewConfigTableClient.UpsertEntityAsync(entity, TableUpdateMode.Replace);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error saving feedback entry for {Upn}", entry.Upn);
+                throw;
+            }
+        }
+
+        public async Task<List<FeedbackEntry>> GetAllFeedbackEntriesAsync()
+        {
+            try
+            {
+                var entries = new List<FeedbackEntry>();
+
+                await foreach (var entity in _previewConfigTableClient.QueryAsync<TableEntity>(
+                    filter: "PartitionKey eq 'Feedback'"))
+                {
+                    entries.Add(ConvertFromFeedbackTableEntity(entity));
+                }
+
+                return entries;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error loading all feedback entries");
+                throw;
+            }
+        }
+
         // --- Preview Notification Email ---
 
         public async Task<string?> GetNotificationEmailAsync(string tenantId)
@@ -465,6 +530,23 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                 NvdApiKey = entity.GetString("NvdApiKey"),
                 VulnerabilityCorrelationEnabled = entity.GetBoolean("VulnerabilityCorrelationEnabled") ?? true,
                 VulnerabilityDataLastSyncUtc = entity.GetString("VulnerabilityDataLastSyncUtc")
+            };
+        }
+
+        // --- Feedback Entity Mapping ---
+
+        private FeedbackEntry ConvertFromFeedbackTableEntity(TableEntity entity)
+        {
+            return new FeedbackEntry
+            {
+                Upn = entity.RowKey,
+                TenantId = entity.GetString("TenantId") ?? string.Empty,
+                DisplayName = entity.GetString("DisplayName") ?? string.Empty,
+                Rating = entity.GetInt32("Rating"),
+                Comment = entity.GetString("Comment"),
+                Dismissed = entity.GetBoolean("Dismissed") ?? false,
+                Submitted = entity.GetBoolean("Submitted") ?? false,
+                InteractedAt = entity.GetDateTime("InteractedAt")
             };
         }
     }
