@@ -1,15 +1,15 @@
 export const NAV_SECTIONS = [
-  { id: "private-preview", label: "Private Preview",   description: "Private preview access and onboarding for Autopilot Monitor." },
-  { id: "overview",        label: "Overview",          description: "Overview of Autopilot Monitor architecture and capabilities." },
-  { id: "general",         label: "General",            description: "General concepts: Admin Mode, session statuses, and user roles." },
-  { id: "setup",           label: "Setup",             description: "Step-by-step setup guide for deploying Autopilot Monitor." },
-  { id: "agent",           label: "Agent",              description: "Autopilot Monitor agent overview, version, and configuration details." },
-  { id: "agent-setup",     label: "Agent Setup",       description: "Configure and deploy the Autopilot Monitor agent via Intune." },
-  { id: "settings",        label: "Settings",          description: "Autopilot Monitor settings and configuration options." },
-  { id: "gather-rules",    label: "Gather Rules",      description: "Configure data gathering rules for Autopilot Monitor diagnostics." },
-  { id: "analyze-rules",   label: "Analyze Rules",     description: "Configure analysis rules for Autopilot enrollment evaluation." },
-  { id: "ime-log-patterns", label: "IME Log Patterns", description: "Regex patterns for parsing the Intune Management Extension log into structured events." },
-  { id: "faq",              label: "FAQ",              description: "Frequently asked questions about Autopilot Monitor setup, agent behavior, and troubleshooting." },
+  { id: "private-preview", label: "Private Preview",   description: "Join the Autopilot Monitor private preview for early access. Learn about onboarding steps, requirements, and how to start monitoring Windows Autopilot enrollments." },
+  { id: "overview",        label: "Overview",          description: "Explore the Autopilot Monitor architecture and core components. Learn how the agent, backend, and web dashboard work together to monitor Windows Autopilot enrollments." },
+  { id: "general",         label: "General",            description: "Learn general Autopilot Monitor concepts including Admin Mode, session lifecycle statuses, user roles, and how enrollment data flows through the platform." },
+  { id: "setup",           label: "Setup",             description: "Step-by-step guide to setting up Autopilot Monitor. Deploy the bootstrapper package via Microsoft Intune and start monitoring Windows Autopilot enrollments." },
+  { id: "agent",           label: "Agent",              description: "Understand the Autopilot Monitor agent — how it collects enrollment data, communicates with the backend, and provides real-time visibility into Windows deployments." },
+  { id: "agent-setup",     label: "Agent Setup",       description: "Configure and deploy the Autopilot Monitor agent via Microsoft Intune. Covers bootstrapper deployment, agent configuration, and verification of installation." },
+  { id: "settings",        label: "Settings",          description: "Configure Autopilot Monitor settings including tenant options, diagnostics, notification preferences, and advanced platform options for Windows Autopilot monitoring." },
+  { id: "gather-rules",    label: "Gather Rules",      description: "Configure gather rules to control which diagnostics data the Autopilot Monitor agent collects. Define custom log paths and collection criteria for troubleshooting." },
+  { id: "analyze-rules",   label: "Analyze Rules",     description: "Set up analyze rules to automatically evaluate Windows Autopilot enrollments. Define conditions, severity levels, and custom logic to detect issues in real time." },
+  { id: "ime-log-patterns", label: "IME Log Patterns", description: "Define regex patterns for parsing the Intune Management Extension (IME) log into structured events. Customize how Autopilot Monitor extracts log entries." },
+  { id: "faq",              label: "FAQ",              description: "Frequently asked questions about Autopilot Monitor — covering setup, agent behavior, troubleshooting common issues, and tips for getting the most out of the platform." },
 ] as const;
 
 export type SectionId = (typeof NAV_SECTIONS)[number]["id"];

@@ -101,10 +101,10 @@ public static class EndpointAccessPolicyCatalog
         new("POST",   "feedback",                  EndpointPolicy.AuthenticatedUser),
 
         // ── MemberRead (Admin + Operator, later + Viewer) ───────────────
-        new("GET",    "quick-search",                  EndpointPolicy.MemberRead),
-        new("GET",    "sessions/search",              EndpointPolicy.MemberRead),
-        new("GET",    "sessions/search-by-event",     EndpointPolicy.MemberRead),
-        new("GET",    "sessions/search-by-cve",       EndpointPolicy.MemberRead),
+        new("GET",    "search/quick",                   EndpointPolicy.MemberRead),
+        new("GET",    "search/sessions",                EndpointPolicy.MemberRead),
+        new("GET",    "search/sessions-by-event",       EndpointPolicy.MemberRead),
+        new("GET",    "search/sessions-by-cve",         EndpointPolicy.MemberRead),
         new("GET",    "metrics/summary",              EndpointPolicy.MemberRead),
         new("GET",    "api-keys",                     EndpointPolicy.GlobalAdminOnly),
         new("POST",   "api-keys",                     EndpointPolicy.GlobalAdminOnly),
@@ -156,9 +156,9 @@ public static class EndpointAccessPolicyCatalog
         new("DELETE", "bootstrap/sessions/{code}", EndpointPolicy.BootstrapManagerOrGA),
 
         // ── GlobalAdminOnly ────────────────────────────────────────────
-        new("GET",    "global/sessions/search",           EndpointPolicy.GlobalAdminOnly),
-        new("GET",    "global/sessions/search-by-event",  EndpointPolicy.GlobalAdminOnly),
-        new("GET",    "global/sessions/search-by-cve",    EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "global/search/sessions",              EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "global/search/sessions-by-event",   EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "global/search/sessions-by-cve",     EndpointPolicy.GlobalAdminOnly),
         new("GET",    "global/metrics/summary",           EndpointPolicy.GlobalAdminOnly),
         new("GET",    "global/api-keys",                  EndpointPolicy.GlobalAdminOnly),
         new("GET",    "global/config",             EndpointPolicy.GlobalAdminOnly),

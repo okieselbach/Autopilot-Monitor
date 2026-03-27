@@ -112,9 +112,9 @@ namespace AutopilotMonitor.Shared
             public const string ValidateBootstrapCode    = "/api/bootstrap/validate/{code}";
 
             // MCP/Agent API search endpoints
-            public const string SearchSessions          = "/api/sessions/search";
-            public const string SearchSessionsByEvent   = "/api/sessions/search-by-event";
-            public const string SearchSessionsByCve     = "/api/sessions/search-by-cve";
+            public const string SearchSessions          = "/api/search/sessions";
+            public const string SearchSessionsByEvent   = "/api/search/sessions-by-event";
+            public const string SearchSessionsByCve     = "/api/search/sessions-by-cve";
             public const string MetricsSummary          = "/api/metrics/summary";
             public const string ApiKeysEndpoint         = "/api/api-keys";
 

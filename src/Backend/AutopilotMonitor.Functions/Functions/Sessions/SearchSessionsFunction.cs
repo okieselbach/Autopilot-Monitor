@@ -21,12 +21,12 @@ public class SearchSessionsFunction
 
     [Function("SearchSessions")]
     public async Task<HttpResponseData> Run(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "sessions/search")] HttpRequestData req)
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "search/sessions")] HttpRequestData req)
         => await HandleAsync(req, isTenantScoped: true);
 
     [Function("SearchSessionsGlobal")]
     public async Task<HttpResponseData> RunGlobal(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "global/sessions/search")] HttpRequestData req)
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "global/search/sessions")] HttpRequestData req)
         => await HandleAsync(req, isTenantScoped: false);
 
     private async Task<HttpResponseData> HandleAsync(HttpRequestData req, bool isTenantScoped)

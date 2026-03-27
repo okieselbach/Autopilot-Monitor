@@ -184,12 +184,12 @@ async function executeTool(name: string, input: Record<string, unknown>): Promis
     switch (name) {
       case 'search_sessions': {
         // Use global endpoint when tenantId not set (global API key scope)
-        const endpoint = input.tenantId ? '/api/sessions/search' : '/api/global/sessions/search';
+        const endpoint = input.tenantId ? '/api/search/sessions' : '/api/global/search/sessions';
         const data = await apiFetch(`${endpoint}${qs(input as Record<string, string | number | boolean>)}`);
         return JSON.stringify(data, null, 2);
       }
       case 'search_sessions_by_event': {
-        const endpoint = input.tenantId ? '/api/sessions/search-by-event' : '/api/global/sessions/search-by-event';
+        const endpoint = input.tenantId ? '/api/search/sessions-by-event' : '/api/global/search/sessions-by-event';
         const data = await apiFetch(`${endpoint}${qs(input as Record<string, string | number | boolean>)}`);
         return JSON.stringify(data, null, 2);
       }
@@ -231,7 +231,7 @@ async function executeTool(name: string, input: Record<string, unknown>): Promis
         return JSON.stringify({ summary, apps }, null, 2);
       }
       case 'search_sessions_by_cve': {
-        const endpoint = input.tenantId ? '/api/sessions/search-by-cve' : '/api/global/sessions/search-by-cve';
+        const endpoint = input.tenantId ? '/api/search/sessions-by-cve' : '/api/global/search/sessions-by-cve';
         const data = await apiFetch(`${endpoint}${qs(input as Record<string, string | number | boolean>)}`);
         return JSON.stringify(data, null, 2);
       }

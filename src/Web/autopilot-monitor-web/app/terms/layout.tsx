@@ -3,10 +3,10 @@ import type { Metadata } from "next";
 export const metadata: Metadata = {
   title: "Terms of Use",
   description:
-    "Terms of Use for Autopilot Monitor. Read the usage terms and conditions for the Windows Autopilot monitoring platform.",
+    "Terms of Use for Autopilot Monitor. Read the usage terms, conditions, and acceptable use policies for the Windows Autopilot monitoring and troubleshooting platform.",
   openGraph: {
     title: "Terms of Use – Autopilot Monitor",
-    description: "Terms of Use for Autopilot Monitor. Read the usage terms and conditions.",
+    description: "Terms of Use for Autopilot Monitor. Read the usage terms, conditions, and acceptable use policies for the monitoring platform.",
     url: "https://www.autopilotmonitor.com/terms",
   },
   alternates: {

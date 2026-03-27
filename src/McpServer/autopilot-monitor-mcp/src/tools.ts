@@ -45,7 +45,7 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
           queryParams[`prop.${key}`] = value;
         }
       }
-      const data = await apiFetch(`/api/sessions/search${buildQuery(queryParams)}`);
+      const data = await apiFetch(`/api/search/sessions${buildQuery(queryParams)}`);
       return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
     }
   );
@@ -60,7 +60,7 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
       limit: z.number().min(1).max(100).optional().default(50),
     },
     async (args) => {
-      const data = await apiFetch(`/api/sessions/search-by-event${buildQuery(args as Record<string, string | number | boolean | undefined | null>)}`);
+      const data = await apiFetch(`/api/search/sessions-by-event${buildQuery(args as Record<string, string | number | boolean | undefined | null>)}`);
       return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
     }
   );
@@ -149,7 +149,7 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
       limit: z.number().min(1).max(100).optional().default(50),
     },
     async (args) => {
-      const data = await apiFetch(`/api/sessions/search-by-cve${buildQuery(args as Record<string, string | number | undefined | null>)}`);
+      const data = await apiFetch(`/api/search/sessions-by-cve${buildQuery(args as Record<string, string | number | undefined | null>)}`);
       return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
     }
   );
@@ -195,7 +195,7 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
         sessionIds = [sessionId];
       } else {
         const searchQ = buildQuery({ status: 'Failed', tenantId, limit: 5 } as Record<string, string | number | undefined>);
-        const sessions = await apiFetch(`/api/sessions/search${searchQ}`) as {
+        const sessions = await apiFetch(`/api/search/sessions${searchQ}`) as {
           sessions?: Array<{ sessionId?: string }>;
         };
         const ids = (sessions?.sessions ?? []).map((s) => s.sessionId).filter(Boolean) as string[];

@@ -20,12 +20,12 @@ public class SearchSessionsByCveFunction
 
     [Function("SearchSessionsByCve")]
     public async Task<HttpResponseData> Run(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "sessions/search-by-cve")] HttpRequestData req)
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "search/sessions-by-cve")] HttpRequestData req)
         => await HandleAsync(req, isTenantScoped: true);
 
     [Function("SearchSessionsByCveGlobal")]
     public async Task<HttpResponseData> RunGlobal(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "global/sessions/search-by-cve")] HttpRequestData req)
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "global/search/sessions-by-cve")] HttpRequestData req)
         => await HandleAsync(req, isTenantScoped: false);
 
     private async Task<HttpResponseData> HandleAsync(HttpRequestData req, bool isTenantScoped)

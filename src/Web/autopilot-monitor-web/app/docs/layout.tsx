@@ -7,7 +7,7 @@ export const metadata: Metadata = {
     default: "Documentation – Autopilot Monitor",
   },
   description:
-    "Complete setup and configuration guide for Autopilot Monitor. Learn how to deploy the bootstrapper via Intune, configure the agent, and start monitoring Windows Autopilot enrollments in real time.",
+    "Complete setup and configuration guide for Autopilot Monitor. Deploy the bootstrapper via Intune, configure the agent, and monitor enrollments in real time.",
   keywords: [
     "Autopilot Monitor documentation",
     "Autopilot Monitor setup guide",
