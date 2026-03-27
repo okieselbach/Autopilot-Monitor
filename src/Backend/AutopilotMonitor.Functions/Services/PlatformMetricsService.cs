@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
+using AutopilotMonitor.Shared.DataAccess;
 using Microsoft.Extensions.Logging;
 
 namespace AutopilotMonitor.Functions.Services
@@ -13,7 +14,7 @@ namespace AutopilotMonitor.Functions.Services
     /// </summary>
     public class PlatformMetricsService
     {
-        private readonly TableStorageService _storageService;
+        private readonly ISessionRepository _sessionRepo;
         private readonly ILogger<PlatformMetricsService> _logger;
 
         // In-memory cache (same pattern as UsageMetricsService)
@@ -23,10 +24,10 @@ namespace AutopilotMonitor.Functions.Services
         private static readonly object _cacheLock = new object();
 
         public PlatformMetricsService(
-            TableStorageService storageService,
+            ISessionRepository sessionRepo,
             ILogger<PlatformMetricsService> logger)
         {
-            _storageService = storageService;
+            _sessionRepo = sessionRepo;
             _logger = logger;
         }
 
@@ -73,7 +74,7 @@ namespace AutopilotMonitor.Functions.Services
         private async Task<PlatformAgentMetricsResponse> ComputePlatformMetricsInternalAsync()
         {
             // 1. Fetch the 100 most recent sessions across all tenants
-            var page = await _storageService.GetAllSessionsAsync(maxResults: 100);
+            var page = await _sessionRepo.GetAllSessionsAsync(maxResults: 100);
             var allSessions = page.Sessions;
 
             if (allSessions.Count == 0)
@@ -88,7 +89,7 @@ namespace AutopilotMonitor.Functions.Services
             {
                 try
                 {
-                    var events = await _storageService.GetSessionEventsAsync(session.TenantId, session.SessionId);
+                    var events = await _sessionRepo.GetSessionEventsAsync(session.TenantId, session.SessionId);
                     var snapshots = events
                         .Where(e => e.EventType == "agent_metrics_snapshot" && e.Data != null)
                         .Select(e => e.Data)

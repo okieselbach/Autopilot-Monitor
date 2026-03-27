@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using System.Collections.Generic;
 using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Services;
+using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;

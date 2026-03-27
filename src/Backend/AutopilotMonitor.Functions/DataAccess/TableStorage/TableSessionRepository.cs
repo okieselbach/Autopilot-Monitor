@@ -78,6 +78,14 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
             return result;
         }
 
+        public async Task<List<EnrollmentEvent>> StoreEventsBatchAsync(List<EnrollmentEvent> events)
+        {
+            var result = await _storage.StoreEventsBatchAsync(events);
+            if (result.Count > 0 && events.Count > 0)
+                await _publisher.PublishAsync("events.ingested", new { count = result.Count }, events[0].TenantId);
+            return result;
+        }
+
         public Task<List<EnrollmentEvent>> GetSessionEventsAsync(string tenantId, string sessionId, int maxResults = 1000)
             => _storage.GetSessionEventsAsync(tenantId, sessionId, maxResults);
 

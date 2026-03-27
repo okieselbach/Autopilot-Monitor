@@ -14,7 +14,8 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
     public class RegisterSessionFunction
     {
         private readonly ILogger<RegisterSessionFunction> _logger;
-        private readonly TableStorageService _storageService;
+        private readonly ISessionRepository _sessionRepo;
+        private readonly IMetricsRepository _metricsRepo;
         private readonly TenantConfigurationService _configService;
         private readonly RateLimitService _rateLimitService;
         private readonly AutopilotDeviceValidator _autopilotDeviceValidator;
@@ -23,7 +24,8 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
 
         public RegisterSessionFunction(
             ILogger<RegisterSessionFunction> logger,
-            TableStorageService storageService,
+            ISessionRepository sessionRepo,
+            IMetricsRepository metricsRepo,
             TenantConfigurationService configService,
             RateLimitService rateLimitService,
             AutopilotDeviceValidator autopilotDeviceValidator,
@@ -31,7 +33,8 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
             BootstrapSessionService bootstrapSessionService)
         {
             _logger = logger;
-            _storageService = storageService;
+            _sessionRepo = sessionRepo;
+            _metricsRepo = metricsRepo;
             _configService = configService;
             _rateLimitService = rateLimitService;
             _autopilotDeviceValidator = autopilotDeviceValidator;
@@ -102,7 +105,7 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
             _logger.LogInformation($"Registering session {registration.SessionId} for tenant {registration.TenantId} (Device: {validation.CertificateThumbprint})");
 
             // Store session in Azure Table Storage
-            var stored = await _storageService.StoreSessionAsync(registration);
+            var stored = await _sessionRepo.StoreSessionAsync(registration);
 
             if (!stored)
             {
@@ -111,11 +114,11 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
             }
 
             // Increment platform stats (fire-and-forget, non-blocking)
-            _ = _storageService.IncrementPlatformStatAsync("TotalEnrollments")
+            _ = _metricsRepo.IncrementPlatformStatAsync("TotalEnrollments")
                 .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException, "Fire-and-forget IncrementPlatformStatAsync failed"), TaskContinuationOptions.OnlyOnFaulted);
 
             // Retrieve the stored session to include full data in SignalR message
-            var session = await _storageService.GetSessionAsync(registration.TenantId, registration.SessionId);
+            var session = await _sessionRepo.GetSessionAsync(registration.TenantId, registration.SessionId);
 
             // Check if admin has already marked this session as terminal (e.g., agent restarted after admin override)
             string? adminAction = null;

@@ -3,6 +3,7 @@ using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Functions.Services;
 using AutopilotMonitor.Functions.Services.Notifications;
 using AutopilotMonitor.Functions.Services.Vulnerability;
+using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -14,7 +15,11 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
     public partial class IngestEventsFunction
     {
         private readonly ILogger<IngestEventsFunction> _logger;
-        private readonly TableStorageService _storageService;
+        private readonly ISessionRepository _sessionRepo;
+        private readonly IMetricsRepository _metricsRepo;
+        private readonly IMaintenanceRepository _maintenanceRepo;
+        private readonly IRuleRepository _ruleRepo;
+        private readonly IVulnerabilityRepository _vulnRepo;
         private readonly TenantConfigurationService _configService;
         private readonly RateLimitService _rateLimitService;
         private readonly AutopilotDeviceValidator _autopilotDeviceValidator;
@@ -30,7 +35,11 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
 
         public IngestEventsFunction(
             ILogger<IngestEventsFunction> logger,
-            TableStorageService storageService,
+            ISessionRepository sessionRepo,
+            IMetricsRepository metricsRepo,
+            IMaintenanceRepository maintenanceRepo,
+            IRuleRepository ruleRepo,
+            IVulnerabilityRepository vulnRepo,
             TenantConfigurationService configService,
             RateLimitService rateLimitService,
             AutopilotDeviceValidator autopilotDeviceValidator,
@@ -45,7 +54,11 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             SignalRNotificationService signalRNotification)
         {
             _logger = logger;
-            _storageService = storageService;
+            _sessionRepo = sessionRepo;
+            _metricsRepo = metricsRepo;
+            _maintenanceRepo = maintenanceRepo;
+            _ruleRepo = ruleRepo;
+            _vulnRepo = vulnRepo;
             _configService = configService;
             _rateLimitService = rateLimitService;
             _autopilotDeviceValidator = autopilotDeviceValidator;

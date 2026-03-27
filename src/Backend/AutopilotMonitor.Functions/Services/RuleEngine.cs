@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Extensions.Logging;
 
@@ -12,13 +13,15 @@ namespace AutopilotMonitor.Functions.Services
     public partial class RuleEngine
     {
         private readonly AnalyzeRuleService _ruleService;
-        private readonly TableStorageService _storageService;
+        private readonly IRuleRepository _ruleRepo;
+        private readonly ISessionRepository _sessionRepo;
         private readonly ILogger _logger;
 
-        public RuleEngine(AnalyzeRuleService ruleService, TableStorageService storageService, ILogger logger)
+        public RuleEngine(AnalyzeRuleService ruleService, IRuleRepository ruleRepo, ISessionRepository sessionRepo, ILogger logger)
         {
             _ruleService = ruleService;
-            _storageService = storageService;
+            _ruleRepo = ruleRepo;
+            _sessionRepo = sessionRepo;
             _logger = logger;
         }
 
@@ -34,7 +37,7 @@ namespace AutopilotMonitor.Functions.Services
             try
             {
                 var activeRules = await _ruleService.GetActiveRulesForTenantAsync(tenantId);
-                var allEvents = await _storageService.GetSessionEventsAsync(tenantId, sessionId);
+                var allEvents = await _sessionRepo.GetSessionEventsAsync(tenantId, sessionId);
 
                 if (allEvents.Count == 0)
                 {
@@ -51,7 +54,7 @@ namespace AutopilotMonitor.Functions.Services
                 }
                 else
                 {
-                    var existingResults = await _storageService.GetRuleResultsAsync(tenantId, sessionId);
+                    var existingResults = await _ruleRepo.GetRuleResultsAsync(tenantId, sessionId);
                     existingRuleIds = new HashSet<string>(existingResults.Select(r => r.RuleId));
                 }
 

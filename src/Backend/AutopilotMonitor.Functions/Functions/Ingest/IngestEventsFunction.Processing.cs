@@ -4,6 +4,7 @@ using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Functions.Services;
 using AutopilotMonitor.Functions.Services.Notifications;
 using AutopilotMonitor.Functions.Services.Vulnerability;
+using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
 using AutopilotMonitor.Shared.Models.Notifications;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -128,7 +129,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                 StampServerFields(request.Events, request.TenantId, request.SessionId, receivedAt);
 
                 // Store events in Azure Table Storage (batch write for efficiency)
-                var storedEvents = await _storageService.StoreEventsBatchAsync(request.Events);
+                var storedEvents = await _sessionRepo.StoreEventsBatchAsync(request.Events);
                 int processedCount = storedEvents.Count;
 
                 // Update EventTypeIndex and DeviceSnapshot indexes (fire-and-forget, non-blocking)
@@ -136,10 +137,10 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                 var indexSessionId = request.SessionId;
                 var indexEvents = storedEvents.ToList();
                 _ = Task.WhenAll(
-                    _storageService.UpsertEventTypeIndexBatchAsync(
+                    _sessionRepo.UpsertEventTypeIndexBatchAsync(
                         indexTenantId, indexSessionId,
                         indexEvents.Select(e => e.EventType).Distinct()),
-                    _storageService.UpsertDeviceSnapshotAsync(
+                    _sessionRepo.UpsertDeviceSnapshotAsync(
                         indexTenantId, indexSessionId, indexEvents)
                 ).ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException,
                     "Index update failed (non-fatal)"), TaskContinuationOptions.OnlyOnFaulted);
@@ -152,7 +153,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                     var imeVersion = imeVersionEvent.Data["agentVersion"]?.ToString();
                     if (!string.IsNullOrEmpty(imeVersion))
                     {
-                        _ = _storageService.UpdateSessionImeAgentVersionAsync(request.TenantId, request.SessionId, imeVersion)
+                        _ = _sessionRepo.UpdateSessionImeAgentVersionAsync(request.TenantId, request.SessionId, imeVersion)
                             .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException,
                                 "ImeAgentVersion update failed (non-fatal)"), TaskContinuationOptions.OnlyOnFaulted);
                     }
@@ -164,7 +165,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                 // Store app install summaries
                 foreach (var summary in classification.AppInstallUpdates.Values)
                 {
-                    await _storageService.StoreAppInstallSummaryAsync(summary.Summary);
+                    await _metricsRepo.StoreAppInstallSummaryAsync(summary.Summary);
                 }
 
                 // Extract geo-location data and merge into session row (fire-and-forget —
