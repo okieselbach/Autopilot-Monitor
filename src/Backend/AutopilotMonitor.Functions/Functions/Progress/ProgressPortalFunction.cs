@@ -2,6 +2,7 @@ using System.Net;
 using System.Web;
 using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Services;
+using AutopilotMonitor.Shared.DataAccess;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
@@ -16,16 +17,16 @@ namespace AutopilotMonitor.Functions.Functions.Progress;
 public class ProgressPortalFunction
 {
     private readonly ILogger<ProgressPortalFunction> _logger;
-    private readonly TableStorageService _storageService;
+    private readonly ISessionRepository _sessionRepo;
     private readonly GlobalAdminService _globalAdminService;
 
     public ProgressPortalFunction(
         ILogger<ProgressPortalFunction> logger,
-        TableStorageService storageService,
+        ISessionRepository sessionRepo,
         GlobalAdminService globalAdminService)
     {
         _logger = logger;
-        _storageService = storageService;
+        _sessionRepo = sessionRepo;
         _globalAdminService = globalAdminService;
     }
 
@@ -46,7 +47,7 @@ public class ProgressPortalFunction
 
             _logger.LogInformation("ProgressGetSessions: Fetching sessions for tenant {TenantId}", tenantId);
 
-            var page = await _storageService.GetSessionsAsync(tenantId, maxResults: 100);
+            var page = await _sessionRepo.GetSessionsAsync(tenantId, maxResults: 100);
 
             var response = req.CreateResponse(HttpStatusCode.OK);
             await response.WriteAsJsonAsync(new
@@ -137,7 +138,7 @@ public class ProgressPortalFunction
                     sessionPrefix, userIdentifier, requestedTenantId);
             }
 
-            var events = await _storageService.GetSessionEventsAsync(requestedTenantId, sessionId);
+            var events = await _sessionRepo.GetSessionEventsAsync(requestedTenantId, sessionId);
 
             var response = req.CreateResponse(HttpStatusCode.OK);
             await response.WriteAsJsonAsync(new

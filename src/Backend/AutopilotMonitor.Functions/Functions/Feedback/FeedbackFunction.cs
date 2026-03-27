@@ -6,6 +6,7 @@ using AutopilotMonitor.Functions.Extensions;
 using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Services;
 using AutopilotMonitor.Shared;
+using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
 using Azure;
 using Azure.Data.Tables;
@@ -23,7 +24,7 @@ namespace AutopilotMonitor.Functions.Functions.Feedback
         private readonly AdminConfigurationService _adminConfigService;
         private readonly TenantAdminsService _tenantAdminsService;
         private readonly TelegramNotificationService _telegramNotificationService;
-        private readonly TableStorageService _storageService;
+        private readonly ISessionRepository _sessionRepo;
         private readonly TableClient _feedbackTableClient;
 
         public FeedbackFunction(
@@ -32,7 +33,7 @@ namespace AutopilotMonitor.Functions.Functions.Feedback
             AdminConfigurationService adminConfigService,
             TenantAdminsService tenantAdminsService,
             TelegramNotificationService telegramNotificationService,
-            TableStorageService storageService,
+            ISessionRepository sessionRepo,
             IConfiguration configuration)
         {
             _logger = logger;
@@ -40,7 +41,7 @@ namespace AutopilotMonitor.Functions.Functions.Feedback
             _adminConfigService = adminConfigService;
             _tenantAdminsService = tenantAdminsService;
             _telegramNotificationService = telegramNotificationService;
-            _storageService = storageService;
+            _sessionRepo = sessionRepo;
 
             var connectionString = configuration["AzureTableStorageConnectionString"];
             var serviceClient = new TableServiceClient(connectionString);
@@ -78,7 +79,7 @@ namespace AutopilotMonitor.Functions.Functions.Feedback
                     return await WriteJson(req, new { eligible = false });
 
                 // 5. Sessions check — at least 1 session exists
-                var sessionPage = await _storageService.GetSessionsAsync(tenantId, maxResults: 1);
+                var sessionPage = await _sessionRepo.GetSessionsAsync(tenantId, maxResults: 1);
                 if (sessionPage.Sessions.Count == 0)
                     return await WriteJson(req, new { eligible = false });
 

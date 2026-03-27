@@ -1,6 +1,7 @@
 using System.Net;
 using AutopilotMonitor.Functions.Extensions;
 using AutopilotMonitor.Functions.Services;
+using AutopilotMonitor.Shared.DataAccess;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Azure.Functions.Worker;
@@ -18,7 +19,7 @@ public class AuthFunction
     private readonly GlobalAdminService _globalAdminService;
     private readonly TenantConfigurationService _tenantConfigService;
     private readonly TenantAdminsService _tenantAdminsService;
-    private readonly TableStorageService _storageService;
+    private readonly IMetricsRepository _metricsRepo;
     private readonly PreviewWhitelistService _previewWhitelistService;
     private readonly TelegramNotificationService _telegramNotificationService;
     private readonly GlobalNotificationService _globalNotificationService;
@@ -28,7 +29,7 @@ public class AuthFunction
         GlobalAdminService globalAdminService,
         TenantConfigurationService tenantConfigService,
         TenantAdminsService tenantAdminsService,
-        TableStorageService storageService,
+        IMetricsRepository metricsRepo,
         PreviewWhitelistService previewWhitelistService,
         TelegramNotificationService telegramNotificationService,
         GlobalNotificationService globalNotificationService)
@@ -37,7 +38,7 @@ public class AuthFunction
         _globalAdminService = globalAdminService;
         _tenantConfigService = tenantConfigService;
         _tenantAdminsService = tenantAdminsService;
-        _storageService = storageService;
+        _metricsRepo = metricsRepo;
         _previewWhitelistService = previewWhitelistService;
         _telegramNotificationService = telegramNotificationService;
         _globalNotificationService = globalNotificationService;
@@ -172,7 +173,7 @@ public class AuthFunction
         bool canManageBootstrapTokens = memberRole?.CanManageBootstrapTokens ?? false;
 
         // Record user login activity for metrics tracking
-        _ = _storageService.RecordUserLoginAsync(tenantId, upn, displayName, objectId)
+        _ = _metricsRepo.RecordUserLoginAsync(tenantId, upn, displayName, objectId)
             .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException, "Fire-and-forget RecordUserLoginAsync failed"), TaskContinuationOptions.OnlyOnFaulted);
 
         var userInfo = new

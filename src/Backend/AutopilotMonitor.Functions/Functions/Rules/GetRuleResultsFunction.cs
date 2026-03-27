@@ -2,6 +2,7 @@ using System.Net;
 using System.Web;
 using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Services;
+using AutopilotMonitor.Shared.DataAccess;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
@@ -16,18 +17,24 @@ namespace AutopilotMonitor.Functions.Functions.Rules
     public class GetRuleResultsFunction
     {
         private readonly ILogger<GetRuleResultsFunction> _logger;
-        private readonly TableStorageService _storageService;
+        private readonly IRuleRepository _ruleRepo;
+        private readonly IMaintenanceRepository _maintenanceRepo;
+        private readonly ISessionRepository _sessionRepo;
         private readonly AnalyzeRuleService _analyzeRuleService;
         private readonly GlobalAdminService _globalAdminService;
 
         public GetRuleResultsFunction(
             ILogger<GetRuleResultsFunction> logger,
-            TableStorageService storageService,
+            IRuleRepository ruleRepo,
+            IMaintenanceRepository maintenanceRepo,
+            ISessionRepository sessionRepo,
             AnalyzeRuleService analyzeRuleService,
             GlobalAdminService globalAdminService)
         {
             _logger = logger;
-            _storageService = storageService;
+            _ruleRepo = ruleRepo;
+            _maintenanceRepo = maintenanceRepo;
+            _sessionRepo = sessionRepo;
             _analyzeRuleService = analyzeRuleService;
             _globalAdminService = globalAdminService;
         }
@@ -66,15 +73,15 @@ namespace AutopilotMonitor.Functions.Functions.Rules
             {
                 try
                 {
-                    var ruleEngine = new RuleEngine(_analyzeRuleService, _storageService, _logger);
+                    var ruleEngine = new RuleEngine(_analyzeRuleService, _ruleRepo, _sessionRepo, _logger);
                     var freshResults = await ruleEngine.AnalyzeSessionAsync(effectiveTenantId, sessionId, reanalyze: true);
 
                     // Delete existing results so stale entries don't persist after re-analysis
-                    await _storageService.DeleteSessionRuleResultsAsync(effectiveTenantId, sessionId);
+                    await _maintenanceRepo.DeleteSessionRuleResultsAsync(effectiveTenantId, sessionId);
 
                     foreach (var result in freshResults)
                     {
-                        await _storageService.StoreRuleResultAsync(result);
+                        await _ruleRepo.StoreRuleResultAsync(result);
                     }
 
                     _logger.LogInformation($"On-demand re-analysis for session {sessionId}: {freshResults.Count} issue(s) detected");
@@ -85,7 +92,7 @@ namespace AutopilotMonitor.Functions.Functions.Rules
                 }
             }
 
-            var results = await _storageService.GetRuleResultsAsync(effectiveTenantId, sessionId);
+            var results = await _ruleRepo.GetRuleResultsAsync(effectiveTenantId, sessionId);
 
             var response = req.CreateResponse(HttpStatusCode.OK);
             await response.WriteAsJsonAsync(new
