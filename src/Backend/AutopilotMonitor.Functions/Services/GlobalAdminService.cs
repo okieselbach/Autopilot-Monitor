@@ -1,4 +1,3 @@
-using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.DataAccess;
 using Azure.Data.Tables;
 using Microsoft.Extensions.Caching.Memory;

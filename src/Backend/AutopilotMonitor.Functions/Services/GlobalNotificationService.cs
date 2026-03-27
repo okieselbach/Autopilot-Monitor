@@ -1,8 +1,6 @@
-using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.DataAccess;
 using Azure;
 using Azure.Data.Tables;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace AutopilotMonitor.Functions.Services;
