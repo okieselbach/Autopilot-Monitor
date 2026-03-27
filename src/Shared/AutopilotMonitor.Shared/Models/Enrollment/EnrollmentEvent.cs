@@ -17,12 +17,12 @@ namespace AutopilotMonitor.Shared.Models
         /// <summary>
         /// Session identifier this event belongs to
         /// </summary>
-        public string SessionId { get; set; }
+        public string? SessionId { get; set; }
 
         /// <summary>
         /// Tenant identifier
         /// </summary>
-        public string TenantId { get; set; }
+        public string? TenantId { get; set; }
 
         /// <summary>
         /// Timestamp when the agent detected/created this event on the device (UTC).

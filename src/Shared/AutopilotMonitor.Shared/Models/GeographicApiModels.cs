@@ -56,7 +56,7 @@ namespace AutopilotMonitor.Shared.Models
 
         public bool IsOutlier { get; set; }
         /// <summary>"fast", "slow", or null</summary>
-        public string OutlierDirection { get; set; }
+        public string? OutlierDirection { get; set; }
     }
 
     /// <summary>

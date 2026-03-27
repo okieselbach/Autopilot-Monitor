@@ -471,7 +471,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                         break;
                 }
 
-                AggregateAppInstallEvent(evt, storedEvents[0].TenantId, storedEvents[0].SessionId, classification.AppInstallUpdates);
+                AggregateAppInstallEvent(evt, storedEvents[0].TenantId!, storedEvents[0].SessionId!, classification.AppInstallUpdates);
             }
 
             return classification;

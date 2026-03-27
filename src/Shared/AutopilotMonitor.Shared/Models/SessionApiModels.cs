@@ -25,7 +25,7 @@ namespace AutopilotMonitor.Shared.Models
         /// Non-null when the session was already marked as terminal by an admin before agent restart.
         /// Values: "Succeeded", "Failed". Agent should run cleanup instead of starting monitoring.
         /// </summary>
-        public string AdminAction { get; set; }
+        public string? AdminAction { get; set; }
     }
 
     /// <summary>
@@ -63,7 +63,7 @@ namespace AutopilotMonitor.Shared.Models
         /// <summary>
         /// Rate limit details (only populated if RateLimitExceeded is true)
         /// </summary>
-        public RateLimitInfo RateLimitInfo { get; set; }
+        public RateLimitInfo? RateLimitInfo { get; set; }
 
         /// <summary>
         /// Whether the device has been temporarily blocked by an admin
@@ -85,7 +85,7 @@ namespace AutopilotMonitor.Shared.Models
         /// Non-null when an admin has externally changed the session status.
         /// Values: "Succeeded", "Failed". Agent should treat as terminal signal and run cleanup.
         /// </summary>
-        public string AdminAction { get; set; }
+        public string? AdminAction { get; set; }
     }
 
     /// <summary>
@@ -131,9 +131,9 @@ namespace AutopilotMonitor.Shared.Models
     public class GetDiagnosticsUploadUrlResponse
     {
         public bool Success { get; set; }
-        public string UploadUrl { get; set; }
+        public string? UploadUrl { get; set; }
         public DateTime ExpiresAt { get; set; }
-        public string Message { get; set; }
+        public string? Message { get; set; }
     }
 
     /// <summary>
@@ -222,7 +222,7 @@ namespace AutopilotMonitor.Shared.Models
     {
         public List<SessionSummary> Sessions { get; set; } = new();
         public bool HasMore { get; set; }
-        public string Cursor { get; set; }
+        public string? Cursor { get; set; }
     }
 
     /// <summary>

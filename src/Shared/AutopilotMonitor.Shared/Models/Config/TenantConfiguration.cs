@@ -53,7 +53,7 @@ namespace AutopilotMonitor.Shared.Models
         /// Optional reason why the tenant was disabled
         /// Displayed to users attempting to log in
         /// </summary>
-        public string DisabledReason { get; set; }
+        public string? DisabledReason { get; set; }
 
         /// <summary>
         /// Optional date/time until which the tenant is disabled
