@@ -93,7 +93,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                                         if (match.Success)
                                         {
                                             WriteMatchLog(filePath, line, pattern.PatternId);
-                                            HandlePatternMatch(pattern, match, messageToMatch);
+                                            HandlePatternMatch(pattern, match, messageToMatch, entry);
                                         }
                                     }
                                     catch (RegexMatchTimeoutException)
@@ -116,9 +116,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             }
         }
 
-        private void HandlePatternMatch(CompiledPattern pattern, Match match, string message)
+        private void HandlePatternMatch(CompiledPattern pattern, Match match, string message, CmTraceLogEntry entry)
         {
             LastMatchedPatternId = pattern.PatternId;
+            LastMatchedLogTimestamp = entry?.Timestamp;
             try
             {
                 var id = match.Groups["id"]?.Value;

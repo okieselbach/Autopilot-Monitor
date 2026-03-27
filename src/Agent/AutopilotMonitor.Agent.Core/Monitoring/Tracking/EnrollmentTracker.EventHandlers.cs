@@ -20,6 +20,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         /// </summary>
         private void EmitImeTrackerEvent(EnrollmentEvent evt)
         {
+            var logTimestamp = _imeLogTracker?.LastMatchedLogTimestamp;
+            if (logTimestamp.HasValue)
+                evt.Timestamp = logTimestamp.Value;
+
             var patternId = _imeLogTracker?.LastMatchedPatternId;
             if (!string.IsNullOrEmpty(patternId))
             {

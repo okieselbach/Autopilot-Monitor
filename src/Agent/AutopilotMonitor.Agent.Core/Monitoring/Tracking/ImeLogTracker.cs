@@ -103,6 +103,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
 
         // Set synchronously during HandlePatternMatch so callbacks can read it
         public string LastMatchedPatternId { get; private set; }
+        public DateTime? LastMatchedLogTimestamp { get; private set; }
 
         // Callbacks to EnrollmentTracker
         public Action<string> OnEspPhaseChanged { get; set; }
