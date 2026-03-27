@@ -229,11 +229,11 @@ export default function Navbar() {
             </Link>
           </div>
 
-          {/* Global Search */}
-          <GlobalSearch />
+          {/* Right side — Search + Dark Mode, Notifications, Settings, Overflow, User */}
+          <div className="flex items-center justify-end flex-1 space-x-1">
+            {/* Global Search */}
+            <GlobalSearch />
 
-          {/* Right side — Tier 1: Dark Mode, Notifications, Settings, Overflow, User */}
-          <div className="flex items-center space-x-1">
             {/* Dark Mode Toggle — hidden on <sm, moved to overflow */}
             <button
               onClick={toggleTheme}

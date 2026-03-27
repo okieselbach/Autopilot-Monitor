@@ -214,7 +214,7 @@ export default function GlobalSearch() {
   return (
     <>
       {/* Desktop: inline search field (visible md+) */}
-      <div ref={containerRef} className="hidden md:flex relative flex-1 max-w-md mx-4">
+      <div ref={containerRef} className="hidden md:flex relative flex-1 max-w-md mr-1">
         <div className="relative w-full">
           <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
             <SearchIcon />

@@ -230,19 +230,21 @@ namespace AutopilotMonitor.Functions.Services
         // ===== SEARCH METHODS =====
 
         /// <summary>
-        /// Lightweight typeahead search: matches SessionId, SerialNumber, or DeviceName
-        /// using a prefix scan on the SessionsIndex table. Returns at most <paramref name="limit"/> results.
+        /// Lightweight typeahead search: matches SessionId, SerialNumber, or DeviceName.
+        /// Supports exact contains match (priority) and fuzzy match (edit distance &lt;= 2).
+        /// When tenantId is null, searches across all tenants (Global Admin).
         /// </summary>
-        public async Task<List<QuickSearchResult>> QuickSearchSessionsAsync(string tenantId, string query, int limit = 10)
+        public async Task<List<QuickSearchResult>> QuickSearchSessionsAsync(string? tenantId, string query, int limit = 10)
         {
             var indexTableClient = _tableServiceClient.GetTableClient(Constants.TableNames.SessionsIndex);
-            var results = new List<QuickSearchResult>();
+            var exactResults = new List<QuickSearchResult>();
+            var fuzzyResults = new List<QuickSearchResult>();
             var q = query.Trim();
-            var qLower = q.ToLowerInvariant();
 
-            // Scan all sessions for this tenant (newest first via index).
-            // Table Storage doesn't support substring/contains, so we do client-side matching.
-            var filter = $"PartitionKey eq '{tenantId}'";
+            // Tenant-scoped or cross-tenant scan
+            string? filter = !string.IsNullOrEmpty(tenantId)
+                ? $"PartitionKey eq '{tenantId}'"
+                : null;
 
             await foreach (var entity in indexTableClient.QueryAsync<TableEntity>(filter: filter))
             {
@@ -250,8 +252,8 @@ namespace AutopilotMonitor.Functions.Services
                 var serial = entity.GetString("SerialNumber") ?? string.Empty;
                 var deviceName = entity.GetString("DeviceName") ?? string.Empty;
 
+                // Phase 1: exact substring match (highest priority)
                 string? matchedField = null;
-
                 if (sessionId.Contains(q, StringComparison.OrdinalIgnoreCase))
                     matchedField = "sessionId";
                 else if (serial.Contains(q, StringComparison.OrdinalIgnoreCase))
@@ -259,27 +261,101 @@ namespace AutopilotMonitor.Functions.Services
                 else if (deviceName.Contains(q, StringComparison.OrdinalIgnoreCase))
                     matchedField = "deviceName";
 
-                if (matchedField == null)
+                if (matchedField != null)
+                {
+                    exactResults.Add(BuildQuickSearchResult(entity, sessionId, serial, deviceName, matchedField));
+                    if (exactResults.Count >= limit) break;
+                    continue;
+                }
+
+                // Phase 2: fuzzy match — only if we don't have enough exact results yet
+                if (exactResults.Count + fuzzyResults.Count >= limit)
                     continue;
 
-                var statusString = entity.GetString("Status") ?? "InProgress";
-                if (!Enum.TryParse<SessionStatus>(statusString, ignoreCase: true, out var status))
-                    status = SessionStatus.Unknown;
+                if (FuzzyContains(serial, q, maxDistance: 2))
+                    matchedField = "serialNumber";
+                else if (FuzzyContains(deviceName, q, maxDistance: 2))
+                    matchedField = "deviceName";
 
-                results.Add(new QuickSearchResult
+                if (matchedField != null)
                 {
-                    SessionId = sessionId,
-                    SerialNumber = serial,
-                    DeviceName = deviceName,
-                    Status = status,
-                    StartedAt = SafeGetDateTime(entity, "StartedAt") ?? DateTime.UtcNow,
-                    MatchedField = matchedField,
-                });
-
-                if (results.Count >= limit) break;
+                    fuzzyResults.Add(BuildQuickSearchResult(entity, sessionId, serial, deviceName, matchedField));
+                }
             }
 
-            return results;
+            // Exact matches first, then fuzzy, capped to limit
+            exactResults.AddRange(fuzzyResults);
+            return exactResults.Count > limit ? exactResults.GetRange(0, limit) : exactResults;
+        }
+
+        private QuickSearchResult BuildQuickSearchResult(
+            TableEntity entity, string sessionId, string serial, string deviceName, string matchedField)
+        {
+            var statusString = entity.GetString("Status") ?? "InProgress";
+            if (!Enum.TryParse<SessionStatus>(statusString, ignoreCase: true, out var status))
+                status = SessionStatus.Unknown;
+
+            return new QuickSearchResult
+            {
+                SessionId = sessionId,
+                SerialNumber = serial,
+                DeviceName = deviceName,
+                Status = status,
+                StartedAt = SafeGetDateTime(entity, "StartedAt") ?? DateTime.UtcNow,
+                MatchedField = matchedField,
+            };
+        }
+
+        /// <summary>
+        /// Checks if any substring of <paramref name="haystack"/> of length <paramref name="needle"/>.Length
+        /// is within edit distance <paramref name="maxDistance"/> of the needle (case-insensitive).
+        /// Uses a sliding-window Levenshtein approach for efficiency.
+        /// </summary>
+        private static bool FuzzyContains(string haystack, string needle, int maxDistance)
+        {
+            if (string.IsNullOrEmpty(haystack) || string.IsNullOrEmpty(needle))
+                return false;
+
+            var h = haystack.ToLowerInvariant();
+            var n = needle.ToLowerInvariant();
+            var nLen = n.Length;
+
+            if (nLen > h.Length + maxDistance)
+                return false;
+
+            // Classic Levenshtein with early-termination: compute full distance between needle
+            // and every substring of haystack, but bail out once we find a match.
+            // We use a single-row DP optimisation.
+            var prev = new int[nLen + 1];
+            var curr = new int[nLen + 1];
+
+            for (int j = 0; j <= nLen; j++)
+                prev[j] = j;
+
+            for (int i = 1; i <= h.Length; i++)
+            {
+                curr[0] = 0; // Allow matching to start at any position in haystack
+                var minInRow = int.MaxValue;
+
+                for (int j = 1; j <= nLen; j++)
+                {
+                    var cost = h[i - 1] == n[j - 1] ? 0 : 1;
+                    curr[j] = Math.Min(
+                        Math.Min(curr[j - 1] + 1, prev[j] + 1),
+                        prev[j - 1] + cost);
+                    minInRow = Math.Min(minInRow, curr[j]);
+                }
+
+                // If the best possible score in this row already exceeds threshold, this row contributes nothing
+                // but we can't prune early because curr[0]=0 resets at each position.
+
+                if (curr[nLen] <= maxDistance)
+                    return true;
+
+                (prev, curr) = (curr, prev);
+            }
+
+            return false;
         }
 
         /// <summary>
