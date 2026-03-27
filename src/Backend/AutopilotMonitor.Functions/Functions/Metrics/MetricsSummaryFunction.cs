@@ -1,6 +1,6 @@
 using System.Net;
 using AutopilotMonitor.Functions.Helpers;
-using AutopilotMonitor.Functions.Services;
+using AutopilotMonitor.Shared.DataAccess;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
@@ -10,12 +10,12 @@ namespace AutopilotMonitor.Functions.Functions.Metrics;
 public class MetricsSummaryFunction
 {
     private readonly ILogger<MetricsSummaryFunction> _logger;
-    private readonly TableStorageService _storageService;
+    private readonly IMetricsRepository _metricsRepo;
 
-    public MetricsSummaryFunction(ILogger<MetricsSummaryFunction> logger, TableStorageService storageService)
+    public MetricsSummaryFunction(ILogger<MetricsSummaryFunction> logger, IMetricsRepository metricsRepo)
     {
         _logger = logger;
-        _storageService = storageService;
+        _metricsRepo = metricsRepo;
     }
 
     [Function("MetricsSummary")]
@@ -25,7 +25,7 @@ public class MetricsSummaryFunction
         try
         {
             var tenantId = TenantHelper.GetTenantId(req);
-            var summary = await _storageService.GetMetricsSummaryAsync(tenantId);
+            var summary = await _metricsRepo.GetMetricsSummaryAsync(tenantId);
 
             var response = req.CreateResponse(HttpStatusCode.OK);
             await response.WriteAsJsonAsync(new { success = true, summary });
@@ -46,7 +46,7 @@ public class MetricsSummaryFunction
     {
         try
         {
-            var summary = await _storageService.GetMetricsSummaryAsync(null);
+            var summary = await _metricsRepo.GetMetricsSummaryAsync(null);
 
             var response = req.CreateResponse(HttpStatusCode.OK);
             await response.WriteAsJsonAsync(new { success = true, summary });

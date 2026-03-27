@@ -1,6 +1,6 @@
 using System.Net;
 using AutopilotMonitor.Functions.Helpers;
-using AutopilotMonitor.Functions.Services;
+using AutopilotMonitor.Shared.DataAccess;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
@@ -10,12 +10,12 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
     public class GetSessionsFunction
     {
         private readonly ILogger<GetSessionsFunction> _logger;
-        private readonly TableStorageService _storageService;
+        private readonly ISessionRepository _sessionRepo;
 
-        public GetSessionsFunction(ILogger<GetSessionsFunction> logger, TableStorageService storageService)
+        public GetSessionsFunction(ILogger<GetSessionsFunction> logger, ISessionRepository sessionRepo)
         {
             _logger = logger;
-            _storageService = storageService;
+            _sessionRepo = sessionRepo;
         }
 
         [Function("GetSessions")]
@@ -33,7 +33,7 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
 
                 _logger.LogInformation("Fetching sessions for tenant {TenantId} (cursor: {Cursor})", tenantId, cursor ?? "none");
 
-                var page = await _storageService.GetSessionsAsync(tenantId, maxResults: 100, cursor: cursor);
+                var page = await _sessionRepo.GetSessionsAsync(tenantId, maxResults: 100, cursor: cursor);
 
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(new

@@ -35,6 +35,7 @@ namespace AutopilotMonitor.Shared.DataAccess
 
         // --- Events ---
         Task<bool> StoreEventAsync(EnrollmentEvent evt);
+        Task<List<EnrollmentEvent>> GetSessionEventsAsync(string tenantId, string sessionId, int maxResults = 1000);
 
         // --- Search ---
         Task<List<SessionSummary>> SearchSessionsAsync(string? tenantId, SessionSearchFilter filter);

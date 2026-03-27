@@ -78,6 +78,9 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
             return result;
         }
 
+        public Task<List<EnrollmentEvent>> GetSessionEventsAsync(string tenantId, string sessionId, int maxResults = 1000)
+            => _storage.GetSessionEventsAsync(tenantId, sessionId, maxResults);
+
         public Task<List<SessionSummary>> SearchSessionsAsync(string? tenantId, SessionSearchFilter filter)
             => _storage.SearchSessionsAsync(tenantId, filter);
 

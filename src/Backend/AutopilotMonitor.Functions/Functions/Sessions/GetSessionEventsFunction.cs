@@ -2,6 +2,7 @@ using System.Net;
 using System.Web;
 using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Services;
+using AutopilotMonitor.Shared.DataAccess;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
@@ -11,16 +12,16 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
     public class GetSessionEventsFunction
     {
         private readonly ILogger<GetSessionEventsFunction> _logger;
-        private readonly TableStorageService _storageService;
+        private readonly ISessionRepository _sessionRepo;
         private readonly GlobalAdminService _globalAdminService;
 
         public GetSessionEventsFunction(
             ILogger<GetSessionEventsFunction> logger,
-            TableStorageService storageService,
+            ISessionRepository sessionRepo,
             GlobalAdminService globalAdminService)
         {
             _logger = logger;
-            _storageService = storageService;
+            _sessionRepo = sessionRepo;
             _globalAdminService = globalAdminService;
         }
 
@@ -92,7 +93,7 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
                 }
 
                 // Get events from storage using the requested tenant ID
-                var events = await _storageService.GetSessionEventsAsync(requestedTenantId, sessionId);
+                var events = await _sessionRepo.GetSessionEventsAsync(requestedTenantId, sessionId);
 
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(new
