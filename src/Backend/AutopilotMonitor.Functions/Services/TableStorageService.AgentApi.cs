@@ -230,6 +230,59 @@ namespace AutopilotMonitor.Functions.Services
         // ===== SEARCH METHODS =====
 
         /// <summary>
+        /// Lightweight typeahead search: matches SessionId, SerialNumber, or DeviceName
+        /// using a prefix scan on the SessionsIndex table. Returns at most <paramref name="limit"/> results.
+        /// </summary>
+        public async Task<List<QuickSearchResult>> QuickSearchSessionsAsync(string tenantId, string query, int limit = 10)
+        {
+            var indexTableClient = _tableServiceClient.GetTableClient(Constants.TableNames.SessionsIndex);
+            var results = new List<QuickSearchResult>();
+            var q = query.Trim();
+            var qLower = q.ToLowerInvariant();
+
+            // Scan all sessions for this tenant (newest first via index).
+            // Table Storage doesn't support substring/contains, so we do client-side matching.
+            var filter = $"PartitionKey eq '{tenantId}'";
+
+            await foreach (var entity in indexTableClient.QueryAsync<TableEntity>(filter: filter))
+            {
+                var sessionId = entity.GetString("SessionId") ?? ExtractSessionIdFromIndexRowKey(entity.RowKey);
+                var serial = entity.GetString("SerialNumber") ?? string.Empty;
+                var deviceName = entity.GetString("DeviceName") ?? string.Empty;
+
+                string? matchedField = null;
+
+                if (sessionId.Contains(q, StringComparison.OrdinalIgnoreCase))
+                    matchedField = "sessionId";
+                else if (serial.Contains(q, StringComparison.OrdinalIgnoreCase))
+                    matchedField = "serialNumber";
+                else if (deviceName.Contains(q, StringComparison.OrdinalIgnoreCase))
+                    matchedField = "deviceName";
+
+                if (matchedField == null)
+                    continue;
+
+                var statusString = entity.GetString("Status") ?? "InProgress";
+                if (!Enum.TryParse<SessionStatus>(statusString, ignoreCase: true, out var status))
+                    status = SessionStatus.Unknown;
+
+                results.Add(new QuickSearchResult
+                {
+                    SessionId = sessionId,
+                    SerialNumber = serial,
+                    DeviceName = deviceName,
+                    Status = status,
+                    StartedAt = SafeGetDateTime(entity, "StartedAt") ?? DateTime.UtcNow,
+                    MatchedField = matchedField,
+                });
+
+                if (results.Count >= limit) break;
+            }
+
+            return results;
+        }
+
+        /// <summary>
         /// Searches enrollment sessions by filter. Uses DeviceSnapshot index for hardware filters,
         /// otherwise scans Sessions table with OData filtering.
         /// </summary>

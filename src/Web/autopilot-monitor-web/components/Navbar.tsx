@@ -9,6 +9,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { trackEvent } from '@/lib/appInsights';
 import { useAdminMode } from '@/hooks/useAdminMode';
+import GlobalSearch from './GlobalSearch';
 
 export default function Navbar() {
   const { isAuthenticated, user, logout } = useAuth();
@@ -21,6 +22,7 @@ export default function Navbar() {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  const [showOverflow, setShowOverflow] = useState(false);
   const { adminMode, setAdminMode, globalAdminMode, setGlobalAdminMode } = useAdminMode();
   const [previewMode, setPreviewMode] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -33,6 +35,7 @@ export default function Navbar() {
   const userMenuRef = useRef<HTMLDivElement>(null);
   const settingsRef = useRef<HTMLDivElement>(null);
   const helpRef = useRef<HTMLDivElement>(null);
+  const overflowRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -79,6 +82,9 @@ export default function Navbar() {
       }
       if (helpRef.current && !helpRef.current.contains(event.target as Node)) {
         setShowHelp(false);
+      }
+      if (overflowRef.current && !overflowRef.current.contains(event.target as Node)) {
+        setShowOverflow(false);
       }
     }
 
@@ -216,19 +222,22 @@ export default function Navbar() {
                 </svg>
               </div>
               <span className="text-lg font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-                <span className="hidden md:inline">Autopilot Monitor</span>
-                <span className="hidden sm:inline md:hidden">AP Monitor</span>
-                <span className="sm:hidden">AP Mon</span>
+                <span className="hidden lg:inline">Autopilot Monitor</span>
+                <span className="hidden md:inline lg:hidden">AP Monitor</span>
+                <span className="md:hidden">AP Mon</span>
               </span>
             </Link>
           </div>
 
+          {/* Global Search */}
+          <GlobalSearch />
+
           {/* Right side — Tier 1: Dark Mode, Notifications, Settings, Overflow, User */}
           <div className="flex items-center space-x-1">
-            {/* Dark Mode Toggle */}
+            {/* Dark Mode Toggle — hidden on <sm, moved to overflow */}
             <button
               onClick={toggleTheme}
-              className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
+              className="hidden sm:block p-2 rounded-lg hover:bg-gray-100 transition-colors"
               title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
             >
               {theme === 'dark' ? (
@@ -242,8 +251,8 @@ export default function Navbar() {
               )}
             </button>
 
-            {/* Notification Bell */}
-            <div className="relative" ref={notificationRef}>
+            {/* Notification Bell — hidden on <sm, moved to overflow */}
+            <div className="hidden sm:block relative" ref={notificationRef}>
               <button
                 onClick={() => setShowNotifications(!showNotifications)}
                 className="relative p-2 rounded-lg hover:bg-gray-100 transition-colors"
@@ -358,8 +367,8 @@ export default function Navbar() {
               })()}
             </div>
 
-            {/* Settings Menu (Gear) — "How do I configure?" */}
-            <div className="relative" ref={settingsRef}>
+            {/* Settings Menu (Gear) — hidden on <sm, moved to overflow */}
+            <div className="hidden sm:block relative" ref={settingsRef}>
               <button onClick={() => setShowSettings(!showSettings)} className="p-2 rounded-lg hover:bg-gray-100 transition-colors" title="Settings">
                 <svg className="w-5 h-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
@@ -414,8 +423,8 @@ export default function Navbar() {
               )}
             </div>
 
-            {/* Help Menu (?) — "How do I learn?" */}
-            <div className="relative" ref={helpRef}>
+            {/* Help Menu (?) — hidden on <sm, moved to overflow */}
+            <div className="hidden sm:block relative" ref={helpRef}>
               <button onClick={() => setShowHelp(!showHelp)} className="p-2 rounded-lg hover:bg-gray-100 transition-colors" title="Help & Info">
                 <svg className="w-5 h-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -480,6 +489,90 @@ export default function Navbar() {
                     </svg>
                     <span>Terms of Use</span>
                   </Link>
+                </div>
+              )}
+            </div>
+
+            {/* Overflow Menu (...) — visible only on <sm */}
+            <div className="sm:hidden relative" ref={overflowRef}>
+              <button
+                onClick={() => setShowOverflow(!showOverflow)}
+                className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
+                title="More"
+              >
+                <svg className="w-5 h-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 12h.01M12 12h.01M19 12h.01M6 12a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0z" />
+                </svg>
+              </button>
+              {showOverflow && (
+                <div className="absolute right-0 mt-2 w-56 bg-white rounded-lg shadow-lg border border-gray-200 z-50 py-1">
+                  {/* Dark Mode Toggle */}
+                  <button
+                    onClick={() => { toggleTheme(); setShowOverflow(false); }}
+                    className="w-full flex items-center justify-between px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      {theme === 'dark' ? (
+                        <svg className="w-4 h-4 text-yellow-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+                        </svg>
+                      ) : (
+                        <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                        </svg>
+                      )}
+                      <span>{theme === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>
+                    </div>
+                  </button>
+
+                  {/* Notifications */}
+                  <button
+                    onClick={() => { setShowOverflow(false); setShowNotifications(!showNotifications); }}
+                    className="w-full flex items-center justify-between px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <svg className="w-4 h-4 text-gray-400" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
+                        <path d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path>
+                      </svg>
+                      <span>Notifications</span>
+                    </div>
+                    {(() => {
+                      const globalCount = (user?.isGlobalAdmin && globalAdminMode) ? globalNotifications.length : 0;
+                      const totalUnread = unreadCount + globalCount;
+                      return totalUnread > 0 ? (
+                        <span className="inline-flex items-center justify-center w-5 h-5 text-[10px] font-bold text-white bg-red-600 rounded-full">
+                          {totalUnread > 9 ? '9+' : totalUnread}
+                        </span>
+                      ) : null;
+                    })()}
+                  </button>
+
+                  <div className="border-t border-gray-100 my-1"></div>
+
+                  {/* Settings */}
+                  {isTenantAdmin && (
+                    <button
+                      onClick={() => { setShowOverflow(false); setShowSettings(!showSettings); }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                    >
+                      <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
+                      <span>Settings</span>
+                    </button>
+                  )}
+
+                  {/* Help */}
+                  <button
+                    onClick={() => { setShowOverflow(false); setShowHelp(!showHelp); }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span>Help</span>
+                  </button>
                 </div>
               )}
             </div>

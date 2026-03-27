@@ -39,6 +39,8 @@ export const api = {
       `${API_BASE_URL}/api/sessions/${sessionId}/mark-succeeded${qs({ tenantId })}`,
     report: (sessionId: string, tenantId?: string) =>
       `${API_BASE_URL}/api/sessions/${sessionId}/report${qs({ tenantId })}`,
+    quickSearch: (q: string) =>
+      `${API_BASE_URL}/api/sessions/quick-search${qs({ q })}`,
   },
 
   // ── Global Sessions (global admin) ────────────────────────────────────────

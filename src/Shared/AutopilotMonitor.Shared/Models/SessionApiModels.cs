@@ -226,6 +226,20 @@ namespace AutopilotMonitor.Shared.Models
     }
 
     /// <summary>
+    /// Lightweight result for the global quick-search typeahead.
+    /// </summary>
+    public class QuickSearchResult
+    {
+        public string SessionId { get; set; } = string.Empty;
+        public string SerialNumber { get; set; } = string.Empty;
+        public string DeviceName { get; set; } = string.Empty;
+        public SessionStatus Status { get; set; }
+        public DateTime StartedAt { get; set; }
+        /// <summary>Which field matched the query: "sessionId", "serialNumber", or "deviceName".</summary>
+        public string MatchedField { get; set; } = string.Empty;
+    }
+
+    /// <summary>
     /// Status of an enrollment session
     /// </summary>
     public enum SessionStatus
