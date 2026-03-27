@@ -56,14 +56,12 @@ public class SearchSessionsByEventFunction
 
             var sessions = await _sessionRepo.SearchSessionsByEventAsync(tenantId, eventType, null, null, null, limit);
 
-            var response = req.CreateResponse(HttpStatusCode.OK);
-            await response.WriteAsJsonAsync(new
+            return await req.OkAsync(new
             {
                 success = true,
                 count = sessions.Count,
                 sessions
             });
-            return response;
         }
         catch (Exception ex)
         {

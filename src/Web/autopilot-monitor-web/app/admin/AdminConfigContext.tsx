@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { useAuth } from "../../contexts/AuthContext";
-import { API_BASE_URL } from "@/lib/config";
+import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 
 // Re-export for section components
@@ -119,7 +119,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
         setLoadingConfig(true);
         setError(null);
 
-        const response = await authenticatedFetch(`${API_BASE_URL}/api/global/config`, getAccessToken);
+        const response = await authenticatedFetch(api.globalConfig.get(), getAccessToken);
 
         if (!response.ok) {
           throw new Error(`Failed to load admin configuration: ${response.statusText}`);
@@ -159,8 +159,8 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
       setLoadingTenants(true);
 
       const [tenantsRes, previewRes] = await Promise.all([
-        authenticatedFetch(`${API_BASE_URL}/api/config/all`, getAccessToken),
-        authenticatedFetch(`${API_BASE_URL}/api/preview/whitelist`, getAccessToken)
+        authenticatedFetch(api.config.all(), getAccessToken),
+        authenticatedFetch(api.preview.whitelist(), getAccessToken)
       ]);
 
       if (!tenantsRes.ok) {
@@ -211,7 +211,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
         maintenanceBlockDurationHours,
       };
 
-      const response = await authenticatedFetch(`${API_BASE_URL}/api/global/config`, getAccessToken, {
+      const response = await authenticatedFetch(api.globalConfig.get(), getAccessToken, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updatedConfig),
@@ -267,7 +267,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
         diagnosticsGlobalLogPathsJson: JSON.stringify(paths),
       };
 
-      const response = await authenticatedFetch(`${API_BASE_URL}/api/global/config`, getAccessToken, {
+      const response = await authenticatedFetch(api.globalConfig.get(), getAccessToken, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updatedConfig),

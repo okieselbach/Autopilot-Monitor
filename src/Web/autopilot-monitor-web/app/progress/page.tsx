@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useMemo } from "react";
-import { API_BASE_URL } from "@/lib/config";
+import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 import { trackEvent } from "@/lib/appInsights";
 import { useTenant } from "../../contexts/TenantContext";
@@ -162,7 +162,7 @@ export default function ProgressPortalPage() {
     const fetchEvents = async () => {
       try {
         const response = await authenticatedFetch(
-          `${API_BASE_URL}/api/progress/sessions/${session.sessionId}/events?tenantId=${tenantId}`,
+          api.progress.sessionEvents(session.sessionId, tenantId),
           getAccessToken
         );
         if (response.ok) {
@@ -205,7 +205,7 @@ export default function ProgressPortalPage() {
 
     try {
       const response = await authenticatedFetch(
-        `${API_BASE_URL}/api/progress/sessions?tenantId=${tenantId}`,
+        api.progress.sessions(tenantId),
         getAccessToken
       );
 

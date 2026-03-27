@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { ProtectedRoute } from "../../components/ProtectedRoute";
 import { useTenant } from "../../contexts/TenantContext";
 import { useAuth } from "../../contexts/AuthContext";
-import { API_BASE_URL } from "@/lib/config";
+import { api } from "@/lib/api";
 import { authenticatedFetch } from "@/lib/authenticatedFetch";
 import { trackEvent } from "@/lib/appInsights";
 import { downloadAsJson, stripInternalFields, bumpVersion } from "@/lib/rulePageHelpers";
@@ -15,6 +15,7 @@ import { RuleFilterBar } from "@/components/rules/RuleFilterBar";
 import { EmptyState } from "@/components/rules/EmptyState";
 import { FormJsonToggle, JsonModeToggleButtons } from "@/components/rules/FormJsonToggle";
 import { useAuthenticatedFetch, useNotificationMessages } from "@/hooks";
+import { useAdminMode } from "@/hooks/useAdminMode";
 import { GatherRule, NewRuleForm, EMPTY_FORM, CATEGORY_COLORS } from "./types";
 import { GatherRuleFormFields } from "./components/GatherRuleFormFields";
 import { GatherRuleCard } from "./components/GatherRuleCard";
@@ -72,12 +73,7 @@ export default function GatherRulesPage() {
   const [unrestrictedMode, setUnrestrictedMode] = useState(false);
 
   // Global admin mode
-  const [globalAdminMode] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('globalAdminMode') === 'true';
-    }
-    return false;
-  });
+  const { globalAdminMode } = useAdminMode();
   const [tenants, setTenants] = useState<TenantInfo[]>([]);
   const [selectedTenantId, setSelectedTenantId] = useState<string>('');
 
@@ -85,7 +81,7 @@ export default function GatherRulesPage() {
     if (!globalAdminMode || !user?.isGlobalAdmin) return;
     const fetchTenants = async () => {
       try {
-        const response = await authenticatedFetch(`${API_BASE_URL}/api/config/all`, getAccessToken);
+        const response = await authenticatedFetch(api.config.all(), getAccessToken);
         if (response.ok) {
           const data = await response.json();
           const mapped: TenantInfo[] = data.map((t: { tenantId: string; domainName: string }) => ({
@@ -119,8 +115,8 @@ export default function GatherRulesPage() {
   const fetchRules = useCallback(async () => {
     if (!effectiveTenantId) return;
     const url = isGlobalOverride
-      ? `${API_BASE_URL}/api/global/rules/gather?tenantId=${effectiveTenantId}`
-      : `${API_BASE_URL}/api/rules/gather?tenantId=${effectiveTenantId}`;
+      ? api.rules.globalGather(effectiveTenantId)
+      : api.rules.gather(effectiveTenantId);
     await fetchRulesExec(
       url,
       undefined,
@@ -140,8 +136,8 @@ export default function GatherRulesPage() {
     const fetchConfig = async () => {
       try {
         const url = isGlobalOverride
-          ? `${API_BASE_URL}/api/global/config/${effectiveTenantId}`
-          : `${API_BASE_URL}/api/config/${effectiveTenantId}`;
+          ? api.globalConfig.tenant(effectiveTenantId)
+          : api.config.tenant(effectiveTenantId);
         const response = await authenticatedFetch(url, getAccessToken);
         if (response.ok) {
           const data = await response.json();
@@ -157,7 +153,7 @@ export default function GatherRulesPage() {
   const handleToggleRule = async (rule: GatherRule) => {
     setTogglingRule(rule.ruleId);
     const result = await mutate(
-      `${API_BASE_URL}/api/rules/gather/${rule.ruleId}?tenantId=${effectiveTenantId}`,
+      api.rules.gatherRule(rule.ruleId, effectiveTenantId),
       {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -180,7 +176,7 @@ export default function GatherRulesPage() {
 
     setDeletingRule(rule.ruleId);
     const result = await mutate(
-      `${API_BASE_URL}/api/rules/gather/${rule.ruleId}?tenantId=${effectiveTenantId}`,
+      api.rules.gatherRule(rule.ruleId, effectiveTenantId),
       { method: "DELETE" }
     );
     if (result !== null) {
@@ -250,7 +246,7 @@ export default function GatherRulesPage() {
     };
 
     const result = await mutate(
-      `${API_BASE_URL}/api/rules/gather?tenantId=${effectiveTenantId}`,
+      api.rules.gather(effectiveTenantId),
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -334,7 +330,7 @@ export default function GatherRulesPage() {
     };
 
     const result = await mutate(
-      `${API_BASE_URL}/api/rules/gather/${rule.ruleId}?tenantId=${effectiveTenantId}`,
+      api.rules.gatherRule(rule.ruleId, effectiveTenantId),
       {
         method: "PUT",
         headers: { "Content-Type": "application/json" },

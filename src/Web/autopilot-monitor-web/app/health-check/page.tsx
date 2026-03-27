@@ -6,7 +6,7 @@ import { useSignalR } from '@/contexts/SignalRContext';
 import { useTenant } from '@/contexts/TenantContext';
 import { useState, useEffect, useCallback } from 'react';
 import * as signalR from '@microsoft/signalr';
-import { API_BASE_URL } from '@/lib/config';
+import { api } from '@/lib/api';
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 
 interface HealthCheck {
@@ -37,7 +37,7 @@ export default function HealthCheckPage() {
   const performHealthCheck = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await authenticatedFetch(`${API_BASE_URL}/api/health/detailed`, getAccessToken);
+      const response = await authenticatedFetch(api.health.detailed(), getAccessToken);
 
       if (!response.ok) {
         if (response.status === 403) {

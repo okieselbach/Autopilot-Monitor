@@ -1,8 +1,6 @@
 using System.Net;
-using AutopilotMonitor.Functions.Extensions;
 using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Security;
-using AutopilotMonitor.Functions.Services;
 using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared;
 using Microsoft.AspNetCore.Authorization;
@@ -20,19 +18,13 @@ namespace AutopilotMonitor.Functions.Functions.Admin;
 public class TenantOffboardFunction
 {
     private readonly ILogger<TenantOffboardFunction> _logger;
-    private readonly TenantAdminsService _tenantAdminsService;
-    private readonly GlobalAdminService _globalAdminService;
     private readonly IMaintenanceRepository _maintenanceRepo;
 
     public TenantOffboardFunction(
         ILogger<TenantOffboardFunction> logger,
-        TenantAdminsService tenantAdminsService,
-        GlobalAdminService globalAdminService,
         IMaintenanceRepository maintenanceRepo)
     {
         _logger = logger;
-        _tenantAdminsService = tenantAdminsService;
-        _globalAdminService = globalAdminService;
         _maintenanceRepo = maintenanceRepo;
     }
 
@@ -50,17 +42,12 @@ public class TenantOffboardFunction
         FunctionContext context)
     {
         // Authentication enforced by PolicyEnforcementMiddleware
-        var principal = context.GetUser()!;
+        var requestCtx = context.GetRequestContext();
+        var upn = requestCtx.UserPrincipalName;
 
-        var userTenantId = principal.GetTenantId();
-        var upn = principal.GetUserPrincipalName();
-
-        // Only Tenant Admins of the same tenant OR Global Admins may offboard
-        var isGlobalAdmin = await _globalAdminService.IsGlobalAdminAsync(upn);
-        var isTenantAdmin = tenantId.Equals(userTenantId, StringComparison.OrdinalIgnoreCase) &&
-                            await _tenantAdminsService.IsTenantAdminAsync(tenantId, upn);
-
-        if (!isGlobalAdmin && !isTenantAdmin)
+        // Middleware (TenantAdminOrGA policy) already verified GA or TenantAdmin of own tenant.
+        // For non-GA: only allow access to own tenant.
+        if (!requestCtx.IsGlobalAdmin && !tenantId.Equals(requestCtx.TenantId, StringComparison.OrdinalIgnoreCase))
         {
             _logger.LogWarning($"User {upn} attempted to offboard tenant {tenantId} without authorization");
             var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);

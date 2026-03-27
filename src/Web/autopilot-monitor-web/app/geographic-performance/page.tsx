@@ -6,8 +6,9 @@ import dynamic from "next/dynamic";
 import { ProtectedRoute } from "../../components/ProtectedRoute";
 import { useTenant } from "../../contexts/TenantContext";
 import { useAuth } from "../../contexts/AuthContext";
-import { API_BASE_URL } from "@/lib/config";
+import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
+import { useAdminMode } from "@/hooks/useAdminMode";
 
 // Dynamically import the map component (Leaflet requires window/document)
 const GeoMap = dynamic(() => import("./GeoMap"), { ssr: false });
@@ -106,19 +107,14 @@ export default function GeographicPerformancePage() {
   const { tenantId } = useTenant();
   const { getAccessToken } = useAuth();
 
-  const [globalAdminMode] = useState(() => {
-    if (typeof window !== "undefined") {
-      return localStorage.getItem("globalAdminMode") === "true";
-    }
-    return false;
-  });
+  const { globalAdminMode } = useAdminMode();
 
   const fetchGeoMetrics = useCallback(async (range: TimeRange = timeRange, group: GroupBy = groupBy) => {
     try {
       const days = range === "7d" ? 7 : range === "30d" ? 30 : 90;
       const endpoint = globalAdminMode
-        ? `${API_BASE_URL}/api/global/metrics/geographic?days=${days}&groupBy=${group}`
-        : `${API_BASE_URL}/api/metrics/geographic?tenantId=${tenantId}&days=${days}&groupBy=${group}`;
+        ? api.metrics.globalGeographic(days, group)
+        : api.metrics.geographic(tenantId, days, group);
       const response = await authenticatedFetch(endpoint, getAccessToken);
       if (response.ok) {
         const data = await response.json();

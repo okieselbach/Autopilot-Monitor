@@ -9,6 +9,7 @@ import { CollapseState } from "../hooks/useSidebarState";
 import { DefaultSectionIcon, BookOpenIcon, RocketLaunchIcon, InformationCircleIcon, DocumentTextIcon, ShieldCheckIcon } from "../lib/sidebarIcons";
 import { DASHBOARD_ITEM, NAV_GROUPS, EXPANDABLE_NAV_GROUPS, REGULAR_USER_ITEMS, NavItem, NavGroup, ExpandableNavGroup, ExpandableNavItem } from "../lib/globalNavConfig";
 import { PublicSiteNavbar } from "./PublicSiteNavbar";
+import { useAdminMode } from "../hooks/useAdminMode";
 
 // Sidebar pixel widths
 export const SIDEBAR_PX: Record<CollapseState, number> = {
@@ -45,19 +46,8 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
     return () => mql.removeEventListener("change", handler);
   }, []);
 
-  // Global admin mode from localStorage (same pattern as Navbar)
-  const [globalAdminMode, setGlobalAdminMode] = useState(false);
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const read = () => setGlobalAdminMode(localStorage.getItem("globalAdminMode") === "true");
-    read();
-    window.addEventListener("localStorageChange", read);
-    window.addEventListener("storage", read);
-    return () => {
-      window.removeEventListener("localStorageChange", read);
-      window.removeEventListener("storage", read);
-    };
-  }, []);
+  // Global admin mode from hook
+  const { globalAdminMode } = useAdminMode();
 
   // --- Scroll-spy for page sections ---
   const [activeSectionId, setActiveSectionId] = useState("");

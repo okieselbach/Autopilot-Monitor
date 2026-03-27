@@ -6,8 +6,9 @@ import { useTenant } from '../../contexts/TenantContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNotifications } from '../../contexts/NotificationContext';
 import { ProtectedRoute } from '../../components/ProtectedRoute';
-import { API_BASE_URL } from '@/lib/config';
+import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
+import { useAdminMode } from "@/hooks/useAdminMode";
 
 interface TenantInfo {
   tenantId: string;
@@ -87,12 +88,7 @@ export default function UsageMetricsPage() {
   const [refreshing, setRefreshing] = useState(false);
 
   // Global admin mode
-  const [globalAdminMode] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('globalAdminMode') === 'true';
-    }
-    return false;
-  });
+  const { globalAdminMode } = useAdminMode();
   const [tenants, setTenants] = useState<TenantInfo[]>([]);
   const [selectedTenantId, setSelectedTenantId] = useState<string>('');
 
@@ -101,7 +97,7 @@ export default function UsageMetricsPage() {
     if (!globalAdminMode || !user?.isGlobalAdmin) return;
     const fetchTenants = async () => {
       try {
-        const response = await authenticatedFetch(`${API_BASE_URL}/api/config/all`, getAccessToken);
+        const response = await authenticatedFetch(api.config.all(), getAccessToken);
         if (response.ok) {
           const data = await response.json();
           const mapped: TenantInfo[] = data.map((t: { tenantId: string; domainName: string }) => ({
@@ -143,8 +139,8 @@ export default function UsageMetricsPage() {
 
       // Global admin viewing another tenant → use global endpoint
       const url = isGlobalOverride
-        ? `${API_BASE_URL}/api/global/metrics/usage?tenantId=${effectiveTenantId}`
-        : `${API_BASE_URL}/api/metrics/usage?tenantId=${effectiveTenantId}`;
+        ? api.metrics.globalUsage(effectiveTenantId)
+        : api.metrics.usage(effectiveTenantId);
 
       const response = await authenticatedFetch(url, getAccessToken);
 

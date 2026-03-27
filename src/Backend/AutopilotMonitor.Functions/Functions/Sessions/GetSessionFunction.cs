@@ -1,7 +1,6 @@
 using System.Net;
 using System.Web;
 using AutopilotMonitor.Functions.Helpers;
-using AutopilotMonitor.Functions.Services;
 using AutopilotMonitor.Shared.DataAccess;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -13,16 +12,13 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
     {
         private readonly ILogger<GetSessionFunction> _logger;
         private readonly ISessionRepository _sessionRepo;
-        private readonly GlobalAdminService _globalAdminService;
 
         public GetSessionFunction(
             ILogger<GetSessionFunction> logger,
-            ISessionRepository sessionRepo,
-            GlobalAdminService globalAdminService)
+            ISessionRepository sessionRepo)
         {
             _logger = logger;
             _sessionRepo = sessionRepo;
-            _globalAdminService = globalAdminService;
         }
 
         [Function("GetSession")]
@@ -46,11 +42,11 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
             try
             {
                 // Authentication + MemberRead authorization enforced by PolicyEnforcementMiddleware
-                var userTenantId = TenantHelper.GetTenantId(req);
-                var userIdentifier = TenantHelper.GetUserIdentifier(req);
+                var requestCtx = req.GetRequestContext();
+                var userIdentifier = requestCtx.UserPrincipalName;
                 var query = HttpUtility.ParseQueryString(req.Url.Query);
                 var requestedTenantId = query["tenantId"];
-                var effectiveTenantId = string.IsNullOrWhiteSpace(requestedTenantId) ? userTenantId : requestedTenantId;
+                var effectiveTenantId = string.IsNullOrWhiteSpace(requestedTenantId) ? requestCtx.TenantId : requestedTenantId;
 
                 if (string.IsNullOrWhiteSpace(effectiveTenantId))
                 {
@@ -63,20 +59,16 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
                     return badRequest;
                 }
 
-                if (!string.Equals(effectiveTenantId, userTenantId, StringComparison.OrdinalIgnoreCase))
+                if (!requestCtx.IsGlobalAdmin && !string.Equals(effectiveTenantId, requestCtx.TenantId, StringComparison.OrdinalIgnoreCase))
                 {
-                    var isGlobalAdmin = await _globalAdminService.IsGlobalAdminAsync(userIdentifier);
-                    if (!isGlobalAdmin)
+                    _logger.LogWarning($"{sessionPrefix} User {userIdentifier} (tenant {requestCtx.TenantId}) attempted to access session in tenant {effectiveTenantId}");
+                    var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
+                    await forbiddenResponse.WriteAsJsonAsync(new
                     {
-                        _logger.LogWarning($"{sessionPrefix} User {userIdentifier} (tenant {userTenantId}) attempted to access session in tenant {effectiveTenantId}");
-                        var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-                        await forbiddenResponse.WriteAsJsonAsync(new
-                        {
-                            success = false,
-                            message = "Access denied. You can only view sessions for your own tenant."
-                        });
-                        return forbiddenResponse;
-                    }
+                        success = false,
+                        message = "Access denied. You can only view sessions for your own tenant."
+                    });
+                    return forbiddenResponse;
                 }
 
                 var session = await _sessionRepo.GetSessionAsync(effectiveTenantId, sessionId);
@@ -92,13 +84,11 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
                     return notFound;
                 }
 
-                var response = req.CreateResponse(HttpStatusCode.OK);
-                await response.WriteAsJsonAsync(new
+                return await req.OkAsync(new
                 {
                     success = true,
                     session
                 });
-                return response;
             }
             catch (Exception ex)
             {

@@ -6,8 +6,9 @@ import { useTenant } from '../../contexts/TenantContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNotifications } from '../../contexts/NotificationContext';
 import { ProtectedRoute } from '../../components/ProtectedRoute';
-import { API_BASE_URL } from '@/lib/config';
+import { api } from '@/lib/api';
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
+import { useAdminMode } from "@/hooks/useAdminMode";
 
 
 interface AuditLogEntry {
@@ -40,12 +41,7 @@ export default function AuditPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const logsPerPage = 12;
 
-  const [globalAdminMode] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('globalAdminMode') === 'true';
-    }
-    return false;
-  });
+  const { globalAdminMode } = useAdminMode();
 
   const fetchAuditLogs = async (showRefreshing = false) => {
     try {
@@ -56,8 +52,8 @@ export default function AuditPage() {
       }
 
       const endpoint = globalAdminMode
-        ? `${API_BASE_URL}/api/global/audit/logs`
-        : `${API_BASE_URL}/api/audit/logs`;
+        ? api.audit.globalLogs()
+        : api.audit.logs();
       const response = await authenticatedFetch(endpoint, getAccessToken);
 
       if (!response.ok) {

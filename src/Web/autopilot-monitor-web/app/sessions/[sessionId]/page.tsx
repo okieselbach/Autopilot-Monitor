@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState, useRef, useMemo } from "react";
+import { useSessionAnalysis } from "./hooks/useSessionAnalysis";
+import { useAutoScroll } from "./hooks/useAutoScroll";
 import { useParams, useRouter } from "next/navigation";
 import { useSignalR } from "../../../contexts/SignalRContext";
 import { useTenant } from "../../../contexts/TenantContext";
@@ -11,7 +13,7 @@ import PerformanceChart from '../../../components/PerformanceChart';
 import DownloadProgress from '../../../components/DownloadProgress';
 import InstallProgress from '../../../components/InstallProgress';
 import ScriptExecutions from '../../../components/ScriptExecutions';
-import { API_BASE_URL } from "@/lib/config";
+import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 
 import { V1_PHASE_NAMES, V2_PHASE_NAMES, V1_PHASE_ORDER, V2_PHASE_ORDER } from "./utils/phaseConstants";
@@ -30,6 +32,7 @@ import DeviceDetailsCard from "./components/DeviceDetailsCard";
 import { generateUiExport, generateCsvExport, generateSessionCsvExport, generateRuleResultsCsvExport, SessionExportEvent } from "@/lib/sessionExportUtils";
 import { Session, EnrollmentEvent, RuleResult } from "@/types";
 import { trackEvent } from "@/lib/appInsights";
+import { useAdminMode } from "@/hooks/useAdminMode";
 
 const GUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -49,27 +52,12 @@ export default function SessionDetailPage() {
   const [reportSubmitting, setReportSubmitting] = useState(false);
   const [showScriptOutput, setShowScriptOutput] = useState(true);
   const [enableSoftwareInventoryAnalyzer, setEnableSoftwareInventoryAnalyzer] = useState(false);
-  const [analysisResults, setAnalysisResults] = useState<RuleResult[]>([]);
-  const [loadingAnalysis, setLoadingAnalysis] = useState(false);
   const [analysisExpanded, setAnalysisExpanded] = useState(true);
-  const [vulnerabilityReport, setVulnerabilityReport] = useState<any>(null);
   const [vulnerabilityReportExpanded, setVulnerabilityReportExpanded] = useState(false);
   const [phaseTimelineExpanded, setPhaseTimelineExpanded] = useState(true);
   const [perfExpanded, setPerfExpanded] = useState(true);
   const [timelineExpanded, setTimelineExpanded] = useState(true);
-  const [autoScroll, setAutoScroll] = useState(false);
-  const [adminMode, setAdminMode] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('adminMode') === 'true';
-    }
-    return false;
-  });
-  const [globalAdminMode, setGlobalAdminMode] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('globalAdminMode') === 'true';
-    }
-    return false;
-  });
+  const { adminMode, setAdminMode, globalAdminMode, setGlobalAdminMode } = useAdminMode();
 
   // Debounce real-time event refreshes to avoid burst reads in Table Storage.
   const eventRefreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -88,18 +76,22 @@ export default function SessionDetailPage() {
   const fetchEventsInFlight = useRef(false);
   const fetchEventsQueued = useRef(false);
 
-  // Auto-scroll: tracks whether the user is near the bottom of the page
-  const isNearBottomRef = useRef(false);
-  // Auto-scroll: guards against race condition where content growth during
-  // a programmatic smooth-scroll temporarily moves the viewport away from
-  // the bottom, causing isNearBottomRef to flip false prematurely.
-  const isProgrammaticScrollRef = useRef(false);
-
   // Use global contexts
   const { on, off, isConnected, joinGroup, leaveGroup } = useSignalR();
   const { tenantId } = useTenant();
   const { getAccessToken, user } = useAuth();
   const { addNotification } = useNotifications();
+
+  const {
+    analysisResults,
+    loadingAnalysis,
+    vulnerabilityReport,
+    setVulnerabilityReport,
+    fetchAnalysisResults,
+    fetchVulnerabilityReport,
+  } = useSessionAnalysis(sessionId, sessionTenantId, getAccessToken);
+
+  const { autoScroll, handleAutoScrollToggle } = useAutoScroll(events);
 
   useEffect(() => {
     sessionRef.current = session;
@@ -116,52 +108,6 @@ export default function SessionDetailPage() {
   useEffect(() => {
     globalAdminModeRef.current = globalAdminMode;
   }, [globalAdminMode]);
-
-  // Auto-scroll: track whether user is near the bottom (only while feature is enabled).
-  // Uses a ref so scroll events don't cause re-renders.
-  useEffect(() => {
-    if (!autoScroll) return;
-    const handleScroll = () => {
-      const distanceFromBottom = document.body.scrollHeight - window.scrollY - window.innerHeight;
-      if (isProgrammaticScrollRef.current) {
-        // During a programmatic scroll animation, only allow flipping to true
-        // (we reached the bottom) — never flip to false (content grew mid-animation).
-        if (distanceFromBottom <= 150) isNearBottomRef.current = true;
-      } else {
-        isNearBottomRef.current = distanceFromBottom <= 150;
-      }
-    };
-    window.addEventListener('scroll', handleScroll, { passive: true });
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, [autoScroll]);
-
-  // Auto-scroll: when new events arrive, scroll to bottom only if user is already near the bottom.
-  useEffect(() => {
-    if (!autoScroll || events.length === 0 || !isNearBottomRef.current) return;
-    isProgrammaticScrollRef.current = true;
-    const timer = setTimeout(() => {
-      window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
-      // Keep the guard up long enough for the smooth scroll animation to finish.
-      setTimeout(() => { isProgrammaticScrollRef.current = false; }, 600);
-    }, 150);
-    return () => { clearTimeout(timer); isProgrammaticScrollRef.current = false; };
-  }, [events, autoScroll]);
-
-  const handleAutoScrollToggle = () => {
-    setAutoScroll(prev => {
-      const next = !prev;
-      if (next) {
-        // Enabling: immediately scroll to bottom and mark as near-bottom
-        isNearBottomRef.current = true;
-        isProgrammaticScrollRef.current = true;
-        setTimeout(() => {
-          window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
-          setTimeout(() => { isProgrammaticScrollRef.current = false; }, 600);
-        }, 50);
-      }
-      return next;
-    });
-  };
 
   const resolveEffectiveTenantId = () => {
     const knownSessionTenant = sessionTenantIdRef.current || sessionRef.current?.tenantId || null;
@@ -214,7 +160,7 @@ export default function SessionDetailPage() {
       (async () => {
         try {
           const res = await authenticatedFetch(
-            `${API_BASE_URL}/api/config/${sessionTenantId}`,
+            api.config.tenant(sessionTenantId),
             getAccessToken
           );
           if (res.ok) {
@@ -347,10 +293,10 @@ export default function SessionDetailPage() {
     try {
       const knownTenantId = resolveEffectiveTenantId();
       const endpoint = knownTenantId
-        ? `${API_BASE_URL}/api/sessions/${sessionId}?tenantId=${knownTenantId}`
+        ? api.sessions.get(sessionId, knownTenantId)
         : globalAdminMode
-          ? `${API_BASE_URL}/api/global/sessions`
-          : `${API_BASE_URL}/api/sessions/${sessionId}`;
+          ? api.globalSessions.list()
+          : api.sessions.get(sessionId);
 
       const response = await authenticatedFetch(endpoint, getAccessToken);
       if (response.ok) {
@@ -392,7 +338,7 @@ export default function SessionDetailPage() {
 
     try {
       const response = await authenticatedFetch(
-        `${API_BASE_URL}/api/sessions/${sessionId}/events?tenantId=${effectiveTenantId}`,
+        api.sessions.events(sessionId, effectiveTenantId),
         getAccessToken
       );
       if (response.ok) {
@@ -449,48 +395,6 @@ export default function SessionDetailPage() {
     }
   };
 
-  const fetchAnalysisResults = async (reanalyze = false) => {
-    const effectiveTenantId = resolveEffectiveTenantId();
-    if (!effectiveTenantId || !GUID_REGEX.test(effectiveTenantId)) return;
-    try {
-      setLoadingAnalysis(true);
-
-      const reanalyzeParam = reanalyze ? '&reanalyze=true' : '';
-      const response = await authenticatedFetch(
-        `${API_BASE_URL}/api/sessions/${sessionId}/analysis?tenantId=${effectiveTenantId}${reanalyzeParam}`,
-        getAccessToken
-      );
-      if (response.ok) {
-        const data = await response.json();
-        if (data.results) {
-          setAnalysisResults(data.results.sort((a: RuleResult, b: RuleResult) => b.confidenceScore - a.confidenceScore));
-        }
-      }
-    } catch (error) {
-      console.error("Failed to fetch analysis results:", error);
-    } finally {
-      setLoadingAnalysis(false);
-    }
-  };
-
-  const fetchVulnerabilityReport = async (rescan = false) => {
-    const effectiveTenantId = resolveEffectiveTenantId();
-    if (!effectiveTenantId || !GUID_REGEX.test(effectiveTenantId)) return;
-    try {
-      const rescanParam = rescan ? '&rescan=true' : '';
-      const response = await authenticatedFetch(
-        `${API_BASE_URL}/api/sessions/${sessionId}/vulnerability-report?tenantId=${effectiveTenantId}${rescanParam}`,
-        getAccessToken
-      );
-      if (response.ok) {
-        const data = await response.json();
-        setVulnerabilityReport(data.report ?? null);
-      }
-    } catch (error) {
-      console.error("Failed to fetch vulnerability report:", error);
-    }
-  };
-
   const markAsFailed = () => {
     setShowMarkFailedConfirm(true);
   };
@@ -504,7 +408,7 @@ export default function SessionDetailPage() {
 
     try {
       const response = await authenticatedFetch(
-        `${API_BASE_URL}/api/sessions/${sessionId}/mark-failed?tenantId=${effectiveTenantId}`,
+        api.sessions.markFailed(sessionId, effectiveTenantId),
         getAccessToken,
         { method: 'POST' }
       );
@@ -527,7 +431,7 @@ export default function SessionDetailPage() {
 
     try {
       const response = await authenticatedFetch(
-        `${API_BASE_URL}/api/sessions/${sessionId}/mark-succeeded?tenantId=${effectiveTenantId}`,
+        api.sessions.markSucceeded(sessionId, effectiveTenantId),
         getAccessToken,
         { method: 'POST' }
       );
@@ -573,7 +477,7 @@ export default function SessionDetailPage() {
       const ruleResultsCsv = generateRuleResultsCsvExport(analysisResults);
 
       const response = await authenticatedFetch(
-        `${API_BASE_URL}/api/sessions/${sessionId}/report?tenantId=${effectiveTenantId}`,
+        api.sessions.report(sessionId, effectiveTenantId),
         getAccessToken,
         {
           method: 'POST',
@@ -604,10 +508,11 @@ export default function SessionDetailPage() {
         addNotification('error', 'Report Failed', message, 'report-error');
         throw new Error(message);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       // Re-throw so the modal can show inline error feedback.
       // Only log unexpected errors (not the ones we threw ourselves above).
-      if (!err?.message?.includes('Failed to submit report') && !err?.message?.includes('Failed to get access token')) {
+      const errMessage = err instanceof Error ? err.message : '';
+      if (!errMessage.includes('Failed to submit report') && !errMessage.includes('Failed to get access token')) {
         console.error('Error submitting report:', err);
       }
       throw err;
@@ -930,7 +835,7 @@ export default function SessionDetailPage() {
                 onClick={async () => {
                   try {
                     const res = await authenticatedFetch(
-                      `${API_BASE_URL}/api/diagnostics/download-url?tenantId=${session.tenantId}&blobName=${encodeURIComponent(session.diagnosticsBlobName!)}`,
+                      api.diagnostics.downloadUrl(session.tenantId, session.diagnosticsBlobName!),
                       getAccessToken
                     );
                     if (!res.ok) throw new Error('Failed to get download URL');

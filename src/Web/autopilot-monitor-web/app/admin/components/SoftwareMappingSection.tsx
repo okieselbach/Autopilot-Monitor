@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { API_BASE_URL } from "@/lib/config";
+import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 import { trackEvent } from "@/lib/appInsights";
 
@@ -82,7 +82,7 @@ export function SoftwareMappingSection({
       setError(null);
 
       const response = await authenticatedFetch(
-        `${API_BASE_URL}/api/vulnerability/unmatched-software`,
+        api.vulnerability.unmatchedSoftware(),
         getAccessToken
       );
 
@@ -117,7 +117,7 @@ export function SoftwareMappingSection({
       setError(null);
 
       const response = await authenticatedFetch(
-        `${API_BASE_URL}/api/vulnerability/cpe-mappings`,
+        api.vulnerability.cpeMappings(),
         getAccessToken
       );
 
@@ -207,7 +207,7 @@ export function SoftwareMappingSection({
       setError(null);
 
       const response = await authenticatedFetch(
-        `${API_BASE_URL}/api/vulnerability/cpe-mapping`,
+        api.vulnerability.cpeMapping(),
         getAccessToken,
         {
           method: "POST",
@@ -316,7 +316,7 @@ export function SoftwareMappingSection({
         .filter(Boolean);
 
       const response = await authenticatedFetch(
-        `${API_BASE_URL}/api/vulnerability/cpe-mapping`,
+        api.vulnerability.cpeMapping(),
         getAccessToken,
         {
           method: "POST",
@@ -363,7 +363,7 @@ export function SoftwareMappingSection({
       setError(null);
 
       const response = await authenticatedFetch(
-        `${API_BASE_URL}/api/vulnerability/cpe-mapping`,
+        api.vulnerability.cpeMapping(),
         getAccessToken,
         {
           method: "DELETE",

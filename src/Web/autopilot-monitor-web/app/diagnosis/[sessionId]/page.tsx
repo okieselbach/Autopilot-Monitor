@@ -7,11 +7,12 @@ import { useTenant } from "../../../contexts/TenantContext";
 import { useAuth } from "../../../contexts/AuthContext";
 import { useNotifications } from "../../../contexts/NotificationContext";
 import { ProtectedRoute } from "../../../components/ProtectedRoute";
-import { API_BASE_URL } from "@/lib/config";
+import { api } from "@/lib/api";
 import { formatInlineMarkdown } from "@/lib/formatInlineMarkdown";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 import { ConfidenceBadge, SeverityBadge } from "./components/DiagnosisBadges";
 import { Session, EnrollmentEvent, RuleResult } from "@/types";
+import { useAdminMode } from "@/hooks/useAdminMode";
 
 export default function DiagnosisPage() {
   const params = useParams();
@@ -37,12 +38,7 @@ export default function DiagnosisPage() {
   const { getAccessToken } = useAuth();
   const { addNotification } = useNotifications();
 
-  const [globalAdminMode] = useState(() => {
-    if (typeof window !== "undefined") {
-      return localStorage.getItem("globalAdminMode") === "true";
-    }
-    return false;
-  });
+  const { globalAdminMode } = useAdminMode();
 
   useEffect(() => {
     if (!sessionId) return;
@@ -117,8 +113,8 @@ export default function DiagnosisPage() {
   const fetchSessionDetails = async () => {
     try {
       const endpoint = globalAdminMode
-        ? `${API_BASE_URL}/api/global/sessions`
-        : `${API_BASE_URL}/api/sessions?tenantId=${tenantId}`;
+        ? api.globalSessions.list()
+        : api.sessions.list(tenantId);
       const response = await authenticatedFetch(endpoint, getAccessToken);
       if (response.ok) {
         const data = await response.json();
@@ -146,7 +142,7 @@ export default function DiagnosisPage() {
     const effectiveTenantId = sessionTenantId || tenantId;
     try {
       const response = await authenticatedFetch(
-        `${API_BASE_URL}/api/sessions/${sessionId}/events?tenantId=${effectiveTenantId}`,
+        api.sessions.events(sessionId, effectiveTenantId),
         getAccessToken
       );
       if (response.ok) {
@@ -169,7 +165,7 @@ export default function DiagnosisPage() {
     const effectiveTenantId = sessionTenantId || tenantId;
     try {
       const response = await authenticatedFetch(
-        `${API_BASE_URL}/api/sessions/${sessionId}/analysis?tenantId=${effectiveTenantId}`,
+        api.sessions.analysis(sessionId, effectiveTenantId),
         getAccessToken
       );
       if (response.ok) {

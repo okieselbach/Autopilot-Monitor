@@ -62,7 +62,8 @@ export function groupEventsByPhase(
   return { eventsByPhase, orderedPhases };
 }
 
-export function normalizeJsonLikeValue(value: any): any {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function normalizeJsonLikeValue(value: unknown): any {
   if (typeof value === "string") {
     const trimmed = value.trim();
     const looksLikeJson =

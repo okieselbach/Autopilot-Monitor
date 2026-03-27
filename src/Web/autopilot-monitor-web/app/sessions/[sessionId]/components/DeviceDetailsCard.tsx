@@ -201,16 +201,17 @@ export default function DeviceDetailsCard({ events }: { events: EnrollmentEvent[
             {(networkAdapters || dnsConfig || proxyConfig || networkInterfaceInfo || wifiSignalInfo) && (
               <DetailSection title="Network">
                 {networkAdapters && networkAdapters.adapters && (
-                  (networkAdapters.adapters as any[]).map((adapter: any, i: number) => {
-                    const { ipv4, ipv6 } = adapter.ipAddresses ? splitIpAddresses(adapter.ipAddresses) : { ipv4: [], ipv6: [] };
+                  (networkAdapters.adapters as unknown[]).map((adapter, i: number) => {
+                    const a = adapter as Record<string, unknown>;
+                    const { ipv4, ipv6 } = a.ipAddresses ? splitIpAddresses(a.ipAddresses as string) : { ipv4: [], ipv6: [] };
                     const hasIpv6 = ipv6.length > 0;
                     const isIpv6Shown = showIpv6[i] ?? false;
 
                     return (
                       <div key={i} className="mb-3 pb-3 border-b border-gray-100 last:border-b-0 last:mb-0 last:pb-0">
-                        <div className="text-sm font-medium text-gray-700 mb-1">{adapter.description || adapter.name || `Adapter ${i + 1}`}</div>
-                        {adapter.dhcpEnabled !== undefined && <DetailRow label="DHCP" value={adapter.dhcpEnabled ? "Enabled" : "Disabled"} />}
-                        {adapter.macAddress && <DetailRow label="MAC" value={adapter.macAddress} />}
+                        <div className="text-sm font-medium text-gray-700 mb-1">{(a.description || a.name || `Adapter ${i + 1}`) as string}</div>
+                        {a.dhcpEnabled !== undefined && <DetailRow label="DHCP" value={a.dhcpEnabled ? "Enabled" : "Disabled"} />}
+                        {a.macAddress && <DetailRow label="MAC" value={a.macAddress as string} />}
                         {ipv4.length > 0 && <DetailRow label="IPv4" value={ipv4.join(", ")} />}
                         {hasIpv6 && (
                           <div className="mt-1">
@@ -233,10 +234,11 @@ export default function DeviceDetailsCard({ events }: { events: EnrollmentEvent[
                           </div>
                         )}
                         {dnsConfig?.dnsEntries && Array.isArray(dnsConfig.dnsEntries) && (
-                          (dnsConfig.dnsEntries as any[])
-                            .filter((entry: any) => entry.adapter === adapter.description || entry.adapter === adapter.name)
-                            .map((entry: any, dnsIdx: number) => (
-                              <DetailRow key={`dns-${dnsIdx}`} label="DNS" value={entry.servers || "N/A"} />
+                          (dnsConfig.dnsEntries as unknown[])
+                            .map(e => e as Record<string, unknown>)
+                            .filter(entry => entry.adapter === a.description || entry.adapter === a.name)
+                            .map((entry, dnsIdx: number) => (
+                              <DetailRow key={`dns-${dnsIdx}`} label="DNS" value={(entry.servers || "N/A") as string} />
                             ))
                         )}
                       </div>
@@ -303,14 +305,17 @@ export default function DeviceDetailsCard({ events }: { events: EnrollmentEvent[
                     <DetailRow label="BitLocker" value={bitLockerStatus.systemDriveProtected ? "Protected" : "Not Protected"} />
                     {bitLockerStatus.volumes && Array.isArray(bitLockerStatus.volumes) && bitLockerStatus.volumes.length > 0 && (
                       <div className="mt-1 text-xs text-gray-500">
-                        {(bitLockerStatus.volumes as any[]).map((vol: any, i: number) => (
+                        {(bitLockerStatus.volumes as unknown[]).map((vol, i: number) => {
+                          const v = vol as Record<string, unknown>;
+                          return (
                           <div key={i}>
-                            {vol.driveLetter} {vol.protectionStatus === "1" ? "Protected" : "Not Protected"}
-                            {vol.encryptionMethod !== undefined && vol.encryptionMethod !== null && vol.encryptionMethod !== "" && (
-                              ` (Method: ${getBitLockerEncryptionMethodLabel(vol.encryptionMethod)})`
+                            {v.driveLetter as string} {v.protectionStatus === "1" ? "Protected" : "Not Protected"}
+                            {v.encryptionMethod !== undefined && v.encryptionMethod !== null && v.encryptionMethod !== "" && (
+                              ` (Method: ${getBitLockerEncryptionMethodLabel(v.encryptionMethod)})`
                             )}
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </>
@@ -414,9 +419,12 @@ export default function DeviceDetailsCard({ events }: { events: EnrollmentEvent[
                   <DetailRow label="DIMMs" value={`${hwSpec.ramDimmCount}${hwSpec.ramFormFactor ? ` (${hwSpec.ramFormFactor})` : ''}`} />
                 )}
 
-                {hwSpec.disks && Array.isArray(hwSpec.disks) && (hwSpec.disks as any[]).map((disk: any, i: number) => (
-                  <DetailRow key={`disk-${i}`} label={hwSpec.disks.length > 1 ? `Disk ${i + 1}` : 'Disk'} value={`${disk.model || 'Unknown'}${disk.sizeGB ? ` (${disk.sizeGB} GB)` : ''}${disk.mediaType && disk.mediaType !== 'Unknown' ? ` — ${disk.mediaType}` : ''}`} />
-                ))}
+                {hwSpec.disks && Array.isArray(hwSpec.disks) && (hwSpec.disks as unknown[]).map((disk, i: number) => {
+                  const d = disk as Record<string, unknown>;
+                  return (
+                  <DetailRow key={`disk-${i}`} label={hwSpec.disks.length > 1 ? `Disk ${i + 1}` : 'Disk'} value={`${d.model || 'Unknown'}${d.sizeGB ? ` (${d.sizeGB} GB)` : ''}${d.mediaType && d.mediaType !== 'Unknown' ? ` — ${d.mediaType}` : ''}`} />
+                  );
+                })}
                 {hwSpec.systemDriveFreeGB !== undefined && hwSpec.systemDriveTotalGB !== undefined && (
                   <DetailRow label="C: Free Space" value={`${hwSpec.systemDriveFreeGB} / ${hwSpec.systemDriveTotalGB} GB`} />
                 )}
@@ -440,9 +448,12 @@ export default function DeviceDetailsCard({ events }: { events: EnrollmentEvent[
                 )}
                 {hwSpec.batteryPresent === false && <DetailRow label="Battery" value="Not present (Desktop)" />}
 
-                {hwSpec.gpus && Array.isArray(hwSpec.gpus) && (hwSpec.gpus as any[]).map((gpu: any, i: number) => (
-                  <DetailRow key={`gpu-${i}`} label={hwSpec.gpus.length > 1 ? `GPU ${i + 1}` : 'GPU'} value={`${gpu.name || 'Unknown'}${gpu.adapterRAMGB ? ` (${gpu.adapterRAMGB} GB)` : ''}`} />
-                ))}
+                {hwSpec.gpus && Array.isArray(hwSpec.gpus) && (hwSpec.gpus as unknown[]).map((gpu, i: number) => {
+                  const g = gpu as Record<string, unknown>;
+                  return (
+                  <DetailRow key={`gpu-${i}`} label={hwSpec.gpus.length > 1 ? `GPU ${i + 1}` : 'GPU'} value={`${g.name || 'Unknown'}${g.adapterRAMGB ? ` (${g.adapterRAMGB} GB)` : ''}`} />
+                  );
+                })}
               </DetailSection>
             )}
           </div>

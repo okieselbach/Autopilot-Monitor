@@ -48,10 +48,15 @@ namespace AutopilotMonitor.Functions.Services.Notifications
 
                 var json = renderer.RenderToJson(alert);
                 var content = new StringContent(json, Encoding.UTF8, "application/json");
-                var sent = await PostWithRetryAsync(webhookUrl, content, alert.Summary ?? "notification");
+                var response = await _http.PostAsync(webhookUrl, content);
 
-                if (sent)
+                if (response.IsSuccessStatusCode)
                     _logger.LogInformation("Webhook notification sent: {Summary} (provider={ProviderType})", alert.Summary, providerType);
+                else
+                {
+                    var body = await response.Content.ReadAsStringAsync();
+                    _logger.LogWarning("Webhook returned {StatusCode} for {Summary}: {Body}", (int)response.StatusCode, alert.Summary, body);
+                }
             }
             catch (Exception ex)
             {
@@ -99,46 +104,6 @@ namespace AutopilotMonitor.Functions.Services.Notifications
             }
         }
 
-        /// <summary>
-        /// Posts content to a webhook URL with a single retry on transient failures (429, 5xx, network errors).
-        /// </summary>
-        private async Task<bool> PostWithRetryAsync(string webhookUrl, StringContent content, string context)
-        {
-            const int maxAttempts = 2;
-            for (int attempt = 1; attempt <= maxAttempts; attempt++)
-            {
-                try
-                {
-                    var response = await _http.PostAsync(webhookUrl, content);
-
-                    if (response.IsSuccessStatusCode)
-                        return true;
-
-                    var statusCode = (int)response.StatusCode;
-                    var isTransient = statusCode == 429 || statusCode >= 500 && statusCode <= 599;
-
-                    if (!isTransient || attempt >= maxAttempts)
-                    {
-                        var body = await response.Content.ReadAsStringAsync();
-                        _logger.LogWarning("Webhook returned {StatusCode} for {Context}: {Body}", statusCode, context, body);
-                        return false;
-                    }
-
-                    _logger.LogWarning(
-                        "Webhook returned {StatusCode} for {Context} (attempt {Attempt}/{MaxAttempts}). Retrying in 2s",
-                        statusCode, context, attempt, maxAttempts);
-                    await Task.Delay(TimeSpan.FromSeconds(2));
-                }
-                catch (Exception ex) when (attempt < maxAttempts && (ex is HttpRequestException or TaskCanceledException))
-                {
-                    _logger.LogWarning(ex,
-                        "Webhook network error for {Context} (attempt {Attempt}/{MaxAttempts}). Retrying in 2s",
-                        context, attempt, maxAttempts);
-                    await Task.Delay(TimeSpan.FromSeconds(2));
-                }
-            }
-            return false;
-        }
     }
 
     public class WebhookTestResult

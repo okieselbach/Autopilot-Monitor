@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { ProtectedRoute } from "../../components/ProtectedRoute";
 import { useTenant } from "../../contexts/TenantContext";
 import { useAuth } from "../../contexts/AuthContext";
-import { API_BASE_URL } from "@/lib/config";
+import { api } from "@/lib/api";
 import { authenticatedFetch } from "@/lib/authenticatedFetch";
 import { trackEvent } from "@/lib/appInsights";
 import { downloadAsJson, stripInternalFields, bumpVersion } from "@/lib/rulePageHelpers";
@@ -15,6 +15,7 @@ import { RuleFilterBar } from "@/components/rules/RuleFilterBar";
 import { EmptyState } from "@/components/rules/EmptyState";
 import { FormJsonToggle, JsonModeToggleButtons } from "@/components/rules/FormJsonToggle";
 import { useAuthenticatedFetch, useNotificationMessages } from "@/hooks";
+import { useAdminMode } from "@/hooks/useAdminMode";
 
 import { AnalyzeRule, RuleForm, EMPTY_FORM, EMPTY_CONDITION, ruleToForm } from "./types";
 import AnalyzeRuleFormFields from "./components/AnalyzeRuleFormFields";
@@ -71,12 +72,7 @@ export default function AnalyzeRulesPage() {
   const [deletingRuleId, setDeletingRuleId] = useState<string | null>(null);
 
   // Global admin mode
-  const [globalAdminMode] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('globalAdminMode') === 'true';
-    }
-    return false;
-  });
+  const { globalAdminMode } = useAdminMode();
   const [tenants, setTenants] = useState<TenantInfo[]>([]);
   const [selectedTenantId, setSelectedTenantId] = useState<string>('');
 
@@ -84,7 +80,7 @@ export default function AnalyzeRulesPage() {
     if (!globalAdminMode || !user?.isGlobalAdmin) return;
     const fetchTenants = async () => {
       try {
-        const response = await authenticatedFetch(`${API_BASE_URL}/api/config/all`, getAccessToken);
+        const response = await authenticatedFetch(api.config.all(), getAccessToken);
         if (response.ok) {
           const data = await response.json();
           const mapped: TenantInfo[] = data.map((t: { tenantId: string; domainName: string }) => ({
@@ -118,8 +114,8 @@ export default function AnalyzeRulesPage() {
   const fetchRules = useCallback(async () => {
     if (!effectiveTenantId) return;
     const url = isGlobalOverride
-      ? `${API_BASE_URL}/api/global/rules/analyze?tenantId=${effectiveTenantId}`
-      : `${API_BASE_URL}/api/rules/analyze`;
+      ? api.rules.globalAnalyze(effectiveTenantId)
+      : api.rules.analyze();
     await fetchRulesExec(
       url,
       undefined,
@@ -135,7 +131,7 @@ export default function AnalyzeRulesPage() {
   const handleToggleRule = async (rule: AnalyzeRule) => {
     setTogglingRuleId(rule.ruleId);
     const result = await mutate(
-      `${API_BASE_URL}/api/rules/analyze/${encodeURIComponent(rule.ruleId)}`,
+      api.rules.analyzeRule(rule.ruleId),
       {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -159,7 +155,7 @@ export default function AnalyzeRulesPage() {
 
     setDeletingRuleId(rule.ruleId);
     const result = await mutate(
-      `${API_BASE_URL}/api/rules/analyze/${encodeURIComponent(rule.ruleId)}`,
+      api.rules.analyzeRule(rule.ruleId),
       { method: "DELETE" }
     );
     if (result !== null) {
@@ -197,7 +193,7 @@ export default function AnalyzeRulesPage() {
     };
 
     const result = await mutate(
-      `${API_BASE_URL}/api/rules/analyze`,
+      api.rules.analyze(),
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -248,7 +244,7 @@ export default function AnalyzeRulesPage() {
     };
 
     const result = await mutate(
-      `${API_BASE_URL}/api/rules/analyze/${encodeURIComponent(rule.ruleId)}`,
+      api.rules.analyzeRule(rule.ruleId),
       {
         method: "PUT",
         headers: { "Content-Type": "application/json" },

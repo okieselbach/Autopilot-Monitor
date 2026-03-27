@@ -4,6 +4,7 @@ using AutopilotMonitor.Functions.DataAccess;
 using AutopilotMonitor.Functions.Functions.Config;
 using AutopilotMonitor.Functions.Functions.Ingest;
 using AutopilotMonitor.Functions.Functions.Sessions;
+using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Middleware;
 using AutopilotMonitor.Functions.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -20,7 +21,8 @@ var builder = FunctionsApplication.CreateBuilder(args);
 builder.ConfigureFunctionsWebApplication();
 
 // Register middleware pipeline (Azure Functions .NET 8 isolated worker pattern)
-// Order matters: API key auth → JWT authentication (401) → policy enforcement (403)
+// Order matters: correlation ID (all requests) → API key auth → JWT authentication (401) → policy enforcement (403)
+builder.UseMiddleware<CorrelationIdMiddleware>();
 builder.UseMiddleware<ApiKeyMiddleware>();
 builder.UseMiddleware<AuthenticationMiddleware>();
 builder.UseMiddleware<PolicyEnforcementMiddleware>();
@@ -99,6 +101,7 @@ builder.Services.AddHttpContextAccessor();
 // Register our services
 builder.Services.AddMemoryCache();
 builder.Services.AddHttpClient();
+builder.Services.AddSingleton<ResiliencePolicies>();
 builder.Services.AddSingleton<TableStorageService>();
 builder.Services.AddHostedService<TableInitializerService>(); // Initialize all tables at startup
 
@@ -118,7 +121,8 @@ builder.Services.AddSingleton<HealthCheckService>();
 builder.Services.AddSingleton<GatherRuleService>();
 builder.Services.AddSingleton<AnalyzeRuleService>();
 builder.Services.AddSingleton<ImeLogPatternService>();
-builder.Services.AddHttpClient<GitHubRuleRepository>();
+builder.Services.AddHttpClient<GitHubRuleRepository>()
+    .AddPolicyHandler((sp, _) => sp.GetRequiredService<ResiliencePolicies>().ExternalDataApi);
 builder.Services.AddSingleton<MaintenanceService>();
 builder.Services.AddSingleton<BlockedDeviceService>();
 builder.Services.AddSingleton<BlockedVersionService>();
@@ -129,9 +133,12 @@ builder.Services.AddSingleton<BootstrapSessionService>();
 builder.Services.AddSingleton<SignalRNotificationService>();
 
 // Vulnerability correlation services
-builder.Services.AddHttpClient<AutopilotMonitor.Functions.Services.Vulnerability.NvdApiClient>();
-builder.Services.AddHttpClient<AutopilotMonitor.Functions.Services.Vulnerability.KevDataService>();
-builder.Services.AddHttpClient<AutopilotMonitor.Functions.Services.Vulnerability.MsrcApiClient>();
+builder.Services.AddHttpClient<AutopilotMonitor.Functions.Services.Vulnerability.NvdApiClient>()
+    .AddPolicyHandler((sp, _) => sp.GetRequiredService<ResiliencePolicies>().ExternalDataApi);
+builder.Services.AddHttpClient<AutopilotMonitor.Functions.Services.Vulnerability.KevDataService>()
+    .AddPolicyHandler((sp, _) => sp.GetRequiredService<ResiliencePolicies>().ExternalDataApi);
+builder.Services.AddHttpClient<AutopilotMonitor.Functions.Services.Vulnerability.MsrcApiClient>()
+    .AddPolicyHandler((sp, _) => sp.GetRequiredService<ResiliencePolicies>().ExternalDataApi);
 builder.Services.AddSingleton<AutopilotMonitor.Functions.Services.Vulnerability.VulnerabilityCorrelationService>();
 
 // Register agent Function classes so bootstrap wrappers can inject them for code reuse
@@ -142,8 +149,10 @@ builder.Services.AddSingleton<ReportAgentErrorFunction>();
 builder.Services.AddSingleton<AutopilotMonitor.Functions.Security.GraphTokenService>();
 builder.Services.AddSingleton<AutopilotMonitor.Functions.Security.AutopilotDeviceValidator>();
 builder.Services.AddSingleton<AutopilotMonitor.Functions.Security.CorporateIdentifierValidator>();
-builder.Services.AddHttpClient<AutopilotMonitor.Functions.Services.Notifications.WebhookNotificationService>();
-builder.Services.AddHttpClient<TelegramNotificationService>();
+builder.Services.AddHttpClient<AutopilotMonitor.Functions.Services.Notifications.WebhookNotificationService>()
+    .AddPolicyHandler((sp, _) => sp.GetRequiredService<ResiliencePolicies>().Notification);
+builder.Services.AddHttpClient<TelegramNotificationService>()
+    .AddPolicyHandler((sp, _) => sp.GetRequiredService<ResiliencePolicies>().Notification);
 builder.Services.AddSingleton<ResendEmailService>();
 builder.Services.AddSingleton<GlobalNotificationService>();
 

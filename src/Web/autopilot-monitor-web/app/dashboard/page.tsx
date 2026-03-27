@@ -8,7 +8,7 @@ import { useSignalR } from "../../contexts/SignalRContext";
 import { useTenant } from "../../contexts/TenantContext";
 import { useAuth } from "../../contexts/AuthContext";
 import { useNotifications } from "../../contexts/NotificationContext";
-import { API_BASE_URL } from "@/lib/config";
+import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 import { trackEvent } from "@/lib/appInsights";
 import { Session } from "./types";
@@ -16,6 +16,9 @@ import { StatsCard } from "./components/StatsCards";
 import { WelcomeMessage } from "./components/WelcomeMessage";
 import { SessionTable } from "./components/SessionTable";
 import { DeleteConfirmModal, BlockConfirmModal } from "./components/ConfirmationModals";
+import { useAdminMode } from "@/hooks/useAdminMode";
+import { useDeleteSession } from "./hooks/useDeleteSession";
+import { useBlockDevice } from "./hooks/useBlockDevice";
 
 interface TenantConfigurationSummary {
   validateAutopilotDevice: boolean;
@@ -46,24 +49,22 @@ export default function Home() {
     }
     return 10;
   });
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [sessionToDelete, setSessionToDelete] = useState<{ sessionId: string; tenantId: string; deviceName?: string } | null>(null);
-  const [showBlockConfirm, setShowBlockConfirm] = useState(false);
-  const [sessionToBlock, setSessionToBlock] = useState<{ serialNumber: string; tenantId: string; deviceName?: string } | null>(null);
-  const [blockingDevice, setBlockingDevice] = useState(false);
-  const [blockedDevicesSet, setBlockedDevicesSet] = useState<Set<string>>(new Set());
-  const [adminMode, setAdminMode] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('adminMode') === 'true';
-    }
-    return false;
-  });
-  const [globalAdminMode, setGlobalAdminMode] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('globalAdminMode') === 'true';
-    }
-    return false;
-  });
+  const { adminMode, setAdminMode, globalAdminMode, setGlobalAdminMode } = useAdminMode();
+
+  const {
+    showDeleteConfirm, sessionToDelete,
+    deleteSession, confirmDelete, cancelDelete,
+  } = useDeleteSession(
+    getAccessToken,
+    addNotification,
+    adminMode,
+    (deletedId) => setSessions(prev => prev.filter(s => s.sessionId !== deletedId))
+  );
+
+  const {
+    showBlockConfirm, sessionToBlock, blockingDevice, blockedDevicesSet, setBlockedDevicesSet,
+    blockDevice, confirmBlock, cancelBlock,
+  } = useBlockDevice(getAccessToken, addNotification, adminMode, globalAdminMode);
 
   // Use global contexts
   const { on, off, isConnected, joinGroup, leaveGroup } = useSignalR();
@@ -94,8 +95,8 @@ export default function Home() {
       // Use different endpoint based on global admin mode
       const effectiveTenantFilter = globalTenantIdOverride !== undefined ? globalTenantIdOverride : tenantIdFilter.trim();
       let endpoint = globalAdminMode
-        ? `${API_BASE_URL}/api/global/sessions${effectiveTenantFilter ? `?tenantId=${encodeURIComponent(effectiveTenantFilter)}` : ''}`
-        : `${API_BASE_URL}/api/sessions?tenantId=${tenantId}`;
+        ? api.globalSessions.list(effectiveTenantFilter || undefined)
+        : api.sessions.list(tenantId);
 
       // Append cursor for "Load More" requests
       if (loadMoreCursor) {
@@ -160,7 +161,7 @@ export default function Home() {
 
       const results = await Promise.allSettled(
         tenantIds.map(tid =>
-          authenticatedFetch(`${API_BASE_URL}/api/devices/blocked?tenantId=${encodeURIComponent(tid)}`, getAccessToken)
+          authenticatedFetch(api.devices.blocked(tid), getAccessToken)
             .then(res => res.ok ? res.json() : { blocked: [] })
         )
       );
@@ -197,7 +198,7 @@ export default function Home() {
       if (user && !user.isTenantAdmin && !user.isGlobalAdmin && user.role !== 'Operator') return;
 
       try {
-        const response = await authenticatedFetch(`${API_BASE_URL}/api/config/${tenantId}`, getAccessToken);
+        const response = await authenticatedFetch(api.config.tenant(tenantId), getAccessToken);
 
         if (!response.ok) {
           setSerialValidationEnabled(null);
@@ -358,22 +359,6 @@ export default function Home() {
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  // Save admin mode to localStorage when it changes
-  useEffect(() => {
-    localStorage.setItem('adminMode', adminMode.toString());
-  }, [adminMode]);
-
-  // Save global admin mode to localStorage when it changes
-  useEffect(() => {
-    localStorage.setItem('globalAdminMode', globalAdminMode.toString());
-  }, [globalAdminMode]);
-
-  // Clear blocked devices set when admin mode or global admin mode is turned off
-  useEffect(() => {
-    if (!adminMode || !globalAdminMode) {
-      setBlockedDevicesSet(new Set());
-    }
-  }, [adminMode, globalAdminMode]);
 
   // Disable global admin mode if user is not a global admin
   useEffect(() => {
@@ -383,37 +368,6 @@ export default function Home() {
     }
   }, [user, globalAdminMode]);
 
-  // Listen for localStorage changes from other components (e.g., Navbar)
-  useEffect(() => {
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === 'adminMode' && e.newValue !== null) {
-        setAdminMode(e.newValue === 'true');
-      }
-      if (e.key === 'globalAdminMode' && e.newValue !== null) {
-        setGlobalAdminMode(e.newValue === 'true');
-      }
-    };
-
-    const handleCustomStorageChange = () => {
-      const newAdminMode = localStorage.getItem('adminMode') === 'true';
-      const newGlobalMode = localStorage.getItem('globalAdminMode') === 'true';
-
-      if (newAdminMode !== adminMode) {
-        setAdminMode(newAdminMode);
-      }
-      if (newGlobalMode !== globalAdminMode) {
-        setGlobalAdminMode(newGlobalMode);
-      }
-    };
-
-    window.addEventListener('storage', handleStorageChange);
-    window.addEventListener('localStorageChange', handleCustomStorageChange);
-
-    return () => {
-      window.removeEventListener('storage', handleStorageChange);
-      window.removeEventListener('localStorageChange', handleCustomStorageChange);
-    };
-  }, [adminMode, globalAdminMode]);
 
   // Refetch sessions when global admin mode changes
   useEffect(() => {
@@ -462,97 +416,6 @@ export default function Home() {
     setCurrentPage(1);
     setLoading(true);
     fetchSessions(undefined, "");
-  };
-
-  const deleteSession = (sessionId: string, sessionTenantId: string, deviceName?: string) => {
-    setSessionToDelete({ sessionId, tenantId: sessionTenantId, deviceName });
-    setShowDeleteConfirm(true);
-  };
-
-  const confirmDelete = async () => {
-    if (!sessionToDelete) return;
-
-    try {
-      const response = await authenticatedFetch(`${API_BASE_URL}/api/sessions/${sessionToDelete.sessionId}?tenantId=${sessionToDelete.tenantId}`, getAccessToken, {
-        method: 'DELETE',
-      });
-
-      if (response.ok) {
-        trackEvent("session_deleted", { inAdminMode: adminMode });
-        setSessions(prevSessions => prevSessions.filter(s => s.sessionId !== sessionToDelete.sessionId));
-        console.log(`Session ${sessionToDelete.sessionId} deleted successfully`);
-        setShowDeleteConfirm(false);
-        setSessionToDelete(null);
-      } else {
-        const data = await response.json();
-        alert(`Fehler beim Löschen: ${data.message || 'Unbekannter Fehler'}`);
-      }
-    } catch (error) {
-      if (error instanceof TokenExpiredError) {
-        addNotification('error', 'Session Expired', error.message, 'session-expired-error');
-      } else {
-        console.error('Failed to delete session:', error);
-        alert('Fehler beim Löschen der Session');
-      }
-    }
-  };
-
-  const cancelDelete = () => {
-    setShowDeleteConfirm(false);
-    setSessionToDelete(null);
-  };
-
-  const blockDevice = (serialNumber: string, sessionTenantId: string, deviceName?: string) => {
-    setSessionToBlock({ serialNumber, tenantId: sessionTenantId, deviceName });
-    setShowBlockConfirm(true);
-  };
-
-  const confirmBlock = async () => {
-    if (!sessionToBlock) return;
-
-    try {
-      setBlockingDevice(true);
-
-      const response = await authenticatedFetch(`${API_BASE_URL}/api/devices/block`, getAccessToken, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tenantId: sessionToBlock.tenantId,
-          serialNumber: sessionToBlock.serialNumber,
-          durationHours: 24,
-          reason: `Blocked from dashboard by Global Admin`
-        })
-      });
-
-      if (response.ok) {
-        console.log(`Device ${sessionToBlock.serialNumber} blocked successfully`);
-        setShowBlockConfirm(false);
-        setSessionToBlock(null);
-        addNotification('success', 'Device Blocked', `Device ${sessionToBlock.deviceName || sessionToBlock.serialNumber} blocked for 24 hours.`);
-        setBlockedDevicesSet(prev => {
-          const next = new Set(prev);
-          next.add(`${sessionToBlock.tenantId}:${sessionToBlock.serialNumber}`);
-          return next;
-        });
-      } else {
-        const data = await response.json();
-        alert(`Fehler beim Blocken: ${data.message || 'Unbekannter Fehler'}`);
-      }
-    } catch (error) {
-      if (error instanceof TokenExpiredError) {
-        addNotification('error', 'Session Expired', error.message, 'session-expired-error');
-      } else {
-        console.error('Failed to block device:', error);
-        alert('Fehler beim Blocken des Geräts');
-      }
-    } finally {
-      setBlockingDevice(false);
-    }
-  };
-
-  const cancelBlock = () => {
-    setShowBlockConfirm(false);
-    setSessionToBlock(null);
   };
 
   // Client-side tenant filter: ensures sessions from other tenants are never displayed,
@@ -632,14 +495,21 @@ export default function Home() {
   const sortedSessions = [...filteredSessions].sort((a, b) => {
     if (!sortColumn) return 0;
 
-    let aValue: any = a[sortColumn];
-    let bValue: any = b[sortColumn];
+    const rawA: Session[typeof sortColumn] = a[sortColumn];
+    const rawB: Session[typeof sortColumn] = b[sortColumn];
+
+    let aValue: number | string | boolean | null | undefined;
+    let bValue: number | string | boolean | null | undefined;
 
     if (sortColumn === "startedAt") {
-      aValue = new Date(aValue).getTime();
-      bValue = new Date(bValue).getTime();
+      aValue = new Date(rawA as string).getTime();
+      bValue = new Date(rawB as string).getTime();
+    } else {
+      aValue = rawA;
+      bValue = rawB;
     }
 
+    if (aValue == null || bValue == null) return 0;
     if (aValue < bValue) return sortDirection === "asc" ? -1 : 1;
     if (aValue > bValue) return sortDirection === "asc" ? 1 : -1;
     return 0;

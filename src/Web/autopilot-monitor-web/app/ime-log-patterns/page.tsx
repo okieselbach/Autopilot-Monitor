@@ -5,8 +5,9 @@ import { useRouter } from "next/navigation";
 import { ProtectedRoute } from "../../components/ProtectedRoute";
 import { useTenant } from "../../contexts/TenantContext";
 import { useAuth } from "../../contexts/AuthContext";
-import { API_BASE_URL } from "@/lib/config";
+import { api } from "@/lib/api";
 import { useAuthenticatedFetch, useNotificationMessages } from "@/hooks";
+import { useAdminMode } from "@/hooks/useAdminMode";
 import { downloadAsJson, stripInternalFields } from "@/lib/rulePageHelpers";
 import { StatCard } from "@/components/rules/StatCard";
 import { RuleFilterBar } from "@/components/rules/RuleFilterBar";
@@ -22,7 +23,7 @@ export default function ImeLogPatternsPage() {
   const { tenantId } = useTenant();
   const { user } = useAuth();
   const isGlobalAdmin = user?.isGlobalAdmin ?? false;
-  const [globalAdminMode, setGlobalAdminMode] = useState(false);
+  const { globalAdminMode } = useAdminMode();
 
   const { successMessage, error, showSuccess, showError } = useNotificationMessages();
 
@@ -59,20 +60,12 @@ export default function ImeLogPatternsPage() {
   const [newParamKey, setNewParamKey] = useState("");
   const [newParamValue, setNewParamValue] = useState("");
 
-  // Check global admin mode from localStorage
-  useEffect(() => {
-    const mode = localStorage.getItem("globalAdminMode") === "true";
-    setGlobalAdminMode(mode);
-    const handleStorage = () => setGlobalAdminMode(localStorage.getItem("globalAdminMode") === "true");
-    window.addEventListener("storage", handleStorage);
-    return () => window.removeEventListener("storage", handleStorage);
-  }, []);
 
   // Fetch patterns
   const fetchPatterns = useCallback(async () => {
     if (!tenantId) return;
     await fetchPatternsExec(
-      `${API_BASE_URL}/api/rules/ime-log-patterns`,
+      api.rules.imeLogPatterns(),
       undefined,
       { transform: (d) => { const r = d as { success?: boolean; patterns?: ImeLogPattern[] }; return r.success && Array.isArray(r.patterns) ? r.patterns : []; } }
     );
@@ -88,7 +81,7 @@ export default function ImeLogPatternsPage() {
 
     setTogglingPattern(pattern.patternId);
     const result = await mutate(
-      `${API_BASE_URL}/api/rules/ime-log-patterns/${encodeURIComponent(pattern.patternId)}?global=true`,
+      api.rules.imeLogPattern(pattern.patternId),
       {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -139,7 +132,7 @@ export default function ImeLogPatternsPage() {
     };
 
     const result = await mutate(
-      `${API_BASE_URL}/api/rules/ime-log-patterns/${encodeURIComponent(patternId)}?global=true`,
+      api.rules.imeLogPattern(patternId),
       {
         method: "PUT",
         headers: { "Content-Type": "application/json" },

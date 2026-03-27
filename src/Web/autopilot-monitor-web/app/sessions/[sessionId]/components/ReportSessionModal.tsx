@@ -104,9 +104,9 @@ export default function ReportSessionModal({
       setScreenshotFiles([]);
       setAgentLogFiles([]);
       setAgentLogError(null);
-    } catch (err: any) {
+    } catch (err: unknown) {
       setSubmitResult('error');
-      setSubmitErrorMessage(err?.message || 'Failed to submit report.');
+      setSubmitErrorMessage(err instanceof Error ? err.message : 'Failed to submit report.');
     }
   };
 

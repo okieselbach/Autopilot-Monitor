@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { API_BASE_URL } from "@/lib/config";
+import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 
 interface BlockedVersion {
@@ -34,7 +34,7 @@ export function VersionBlockSection({
   const fetchBlockedVersions = async () => {
     try {
       setLoadingVersions(true);
-      const response = await authenticatedFetch(`${API_BASE_URL}/api/versions/blocked`, getAccessToken);
+      const response = await authenticatedFetch(api.versions.blocked(), getAccessToken);
       if (!response.ok) throw new Error(`Failed to load version blocks: ${response.statusText}`);
       const data = await response.json();
       setBlockedVersions(data.rules ?? []);
@@ -58,7 +58,7 @@ export function VersionBlockSection({
     try {
       setAddingRule(true);
       setError(null);
-      const response = await authenticatedFetch(`${API_BASE_URL}/api/versions/block`, getAccessToken, {
+      const response = await authenticatedFetch(api.versions.block(), getAccessToken, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -94,7 +94,7 @@ export function VersionBlockSection({
       setRemovingPattern(pattern);
       setError(null);
       const response = await authenticatedFetch(
-        `${API_BASE_URL}/api/versions/block/${encodeURIComponent(pattern)}`,
+        api.versions.unblock(pattern),
         getAccessToken,
         { method: "DELETE" }
       );

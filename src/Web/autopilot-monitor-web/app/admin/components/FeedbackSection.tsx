@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { API_BASE_URL } from "@/lib/config";
+import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 
 interface FeedbackEntry {
@@ -31,7 +31,7 @@ export function FeedbackSection({ getAccessToken, setError }: FeedbackSectionPro
       setLoading(true);
       setError(null);
 
-      const response = await authenticatedFetch(`${API_BASE_URL}/api/feedback/all`, getAccessToken);
+      const response = await authenticatedFetch(api.feedback.all(), getAccessToken);
 
       if (!response.ok) {
         throw new Error(`Failed to load feedback: ${response.statusText}`);

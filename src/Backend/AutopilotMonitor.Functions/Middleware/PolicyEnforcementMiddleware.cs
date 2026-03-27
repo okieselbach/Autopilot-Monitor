@@ -1,6 +1,7 @@
 using System.Net;
 using System.Security.Claims;
 using AutopilotMonitor.Functions.Extensions;
+using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Functions.Services;
 using AutopilotMonitor.Shared;
@@ -72,6 +73,17 @@ public class PolicyEnforcementMiddleware : IFunctionsWorkerMiddleware
 
         if (decision.IsAllowed)
         {
+            // Store resolved context so functions can read IsGlobalAdmin/IsTenantAdmin without re-querying services
+            var principal = context.GetUser();
+            context.Items[RequestContext.ItemsKey] = new RequestContext
+            {
+                TenantId = principal?.GetTenantId() ?? string.Empty,
+                UserPrincipalName = decision.UserIdentifier,
+                IsGlobalAdmin = decision.UserRole == "GlobalAdmin",
+                IsTenantAdmin = decision.UserRole == Constants.TenantRoles.Admin,
+                UserRole = decision.UserRole
+            };
+
             _logger.LogDebug("[PolicyEnforcement] ALLOW {Method} {Path} policy={Policy} user={User} role={Role}",
                 httpMethod, requestPath, catalogEntry.Policy, decision.UserIdentifier, decision.UserRole);
             await next(context);

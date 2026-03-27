@@ -55,8 +55,7 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
                     page = await _sessionRepo.GetAllSessionsAsync(maxResults: 100, cursor: cursor);
                 }
 
-                var response = req.CreateResponse(HttpStatusCode.OK);
-                await response.WriteAsJsonAsync(new
+                return await req.OkAsync(new
                 {
                     success = true,
                     count = page.Sessions.Count,
@@ -64,8 +63,6 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
                     cursor = page.Cursor,
                     sessions = page.Sessions
                 });
-
-                return response;
             }
             catch (Exception ex)
             {

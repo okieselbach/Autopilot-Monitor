@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { API_BASE_URL } from "@/lib/config";
+import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 
 interface MaintenanceSectionProps {
@@ -28,8 +28,7 @@ export function MaintenanceSection({
       setError(null);
       setSuccessMessage(null);
 
-      const queryParams = maintenanceDate ? `?date=${maintenanceDate}` : '';
-      const response = await authenticatedFetch(`${API_BASE_URL}/api/maintenance/trigger${queryParams}`, getAccessToken, {
+      const response = await authenticatedFetch(api.maintenance.trigger(maintenanceDate || undefined), getAccessToken, {
         method: "POST",
       });
 
@@ -60,7 +59,7 @@ export function MaintenanceSection({
       setError(null);
       setSuccessMessage(null);
 
-      const response = await authenticatedFetch(`${API_BASE_URL}/api/rules/reseed-from-github?type=analyze`, getAccessToken, {
+      const response = await authenticatedFetch(api.rules.reseedFromGitHub("analyze"), getAccessToken, {
         method: "POST",
       });
 
@@ -90,7 +89,7 @@ export function MaintenanceSection({
       setError(null);
       setSuccessMessage(null);
 
-      const response = await authenticatedFetch(`${API_BASE_URL}/api/rules/reseed-from-github?type=gather`, getAccessToken, {
+      const response = await authenticatedFetch(api.rules.reseedFromGitHub("gather"), getAccessToken, {
         method: "POST",
       });
 
@@ -120,7 +119,7 @@ export function MaintenanceSection({
       setError(null);
       setSuccessMessage(null);
 
-      const response = await authenticatedFetch(`${API_BASE_URL}/api/rules/reseed-from-github?type=ime`, getAccessToken, {
+      const response = await authenticatedFetch(api.rules.reseedFromGitHub("ime"), getAccessToken, {
         method: "POST",
       });
 
@@ -150,7 +149,7 @@ export function MaintenanceSection({
       setError(null);
       setSuccessMessage(null);
 
-      const response = await authenticatedFetch(`${API_BASE_URL}/api/rules/reseed-from-github?type=all`, getAccessToken, {
+      const response = await authenticatedFetch(api.rules.reseedFromGitHub("all"), getAccessToken, {
         method: "POST",
       });
 

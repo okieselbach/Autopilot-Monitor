@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { API_BASE_URL } from "@/lib/config";
+import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 import { TenantAdminSection } from "./TenantAdminSection";
 
@@ -93,7 +93,7 @@ export function TenantManagementSection({
       setError(null);
       setSuccessMessage(null);
 
-      const response = await authenticatedFetch(`${API_BASE_URL}/api/config/${tenant.tenantId}`, getAccessToken, {
+      const response = await authenticatedFetch(api.config.tenant(tenant.tenantId), getAccessToken, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(tenant),
@@ -131,7 +131,7 @@ export function TenantManagementSection({
       setSuccessMessage(null);
 
       const response = await authenticatedFetch(
-        `${API_BASE_URL}/api/preview/send-welcome-email/${tenantId}`,
+        api.preview.sendWelcomeEmail(tenantId),
         getAccessToken,
         {
           method: "POST",
@@ -166,7 +166,7 @@ export function TenantManagementSection({
 
       const isCurrentlyApproved = previewApproved.has(tenantId);
 
-      const response = await authenticatedFetch(`${API_BASE_URL}/api/preview/whitelist/${tenantId}`, getAccessToken, {
+      const response = await authenticatedFetch(api.preview.whitelistTenant(tenantId), getAccessToken, {
         method: isCurrentlyApproved ? "DELETE" : "POST",
       });
 
@@ -373,7 +373,7 @@ export function TenantManagementSection({
                                   setNotificationEmail("");
                                   try {
                                     const resp = await authenticatedFetch(
-                                      `${API_BASE_URL}/api/preview/notification-email/${tenant.tenantId}`,
+                                      api.preview.notificationEmailTenant(tenant.tenantId),
                                       getAccessToken
                                     );
                                     if (resp.ok) {

@@ -4,7 +4,7 @@ import React, { createContext, useContext, useEffect, useState, useCallback, use
 import { PublicClientApplication, AccountInfo, InteractionStatus, InteractionRequiredAuthError, BrowserAuthError } from '@azure/msal-browser';
 import { MsalProvider, useMsal, useIsAuthenticated } from '@azure/msal-react';
 import { msalConfig, loginRequest, apiRequest } from '@/lib/msalConfig';
-import { API_BASE_URL } from '@/lib/config';
+import { api } from '@/lib/api';
 
 // Initialize MSAL instance
 const msalInstance = new PublicClientApplication(msalConfig);
@@ -124,7 +124,7 @@ function AuthProviderInternal({ children }: { children: React.ReactNode }) {
       const authMeTimeout = setTimeout(() => authMeController.abort(), 8000);
       let response: Response;
       try {
-        response = await fetch(`${API_BASE_URL}/api/auth/me`, {
+        response = await fetch(api.auth.me(), {
           headers: {
             'Authorization': `Bearer ${tokenResponse.accessToken}`,
           },
@@ -269,10 +269,10 @@ function AuthProviderInternal({ children }: { children: React.ReactNode }) {
 
     try {
       await instance.loginRedirect(loginRequest);
-    } catch (error: any) {
+    } catch (error: unknown) {
       // Ignore interaction_in_progress errors - this can happen if user clicks button multiple times
       // or if another part of the app already triggered a redirect.
-      if (error?.errorCode === 'interaction_in_progress') {
+      if (error instanceof Error && 'errorCode' in error && error.errorCode === 'interaction_in_progress') {
         console.log('[Auth] Interaction already in progress, ignoring duplicate login attempt');
         return;
       }

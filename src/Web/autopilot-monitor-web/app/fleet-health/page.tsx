@@ -7,10 +7,11 @@ import { useSignalR } from "../../contexts/SignalRContext";
 import { useTenant } from "../../contexts/TenantContext";
 import { useAuth } from "../../contexts/AuthContext";
 import { useNotifications } from "../../contexts/NotificationContext";
-import { API_BASE_URL } from "@/lib/config";
+import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 import FleetStatCard from "./components/FleetStatCard";
 import { Session } from "@/types";
+import { useAdminMode } from "@/hooks/useAdminMode";
 
 interface AppMetric {
   appName: string;
@@ -49,12 +50,7 @@ export default function FleetHealthPage() {
   const { getAccessToken } = useAuth();
   const { addNotification } = useNotifications();
 
-  const [globalAdminMode] = useState(() => {
-    if (typeof window !== "undefined") {
-      return localStorage.getItem("globalAdminMode") === "true";
-    }
-    return false;
-  });
+  const { globalAdminMode } = useAdminMode();
 
   useEffect(() => {
     if (!globalAdminMode && !tenantId) return; // wait for real tenant ID
@@ -128,8 +124,8 @@ export default function FleetHealthPage() {
   const fetchSessions = async () => {
     try {
       const endpoint = globalAdminMode
-        ? `${API_BASE_URL}/api/global/sessions`
-        : `${API_BASE_URL}/api/sessions?tenantId=${tenantId}`;
+        ? api.globalSessions.list()
+        : api.sessions.list(tenantId);
       const response = await authenticatedFetch(endpoint, getAccessToken);
       if (response.ok) {
         const data = await response.json();
@@ -153,8 +149,8 @@ export default function FleetHealthPage() {
     try {
       const days = range === "7d" ? 7 : range === "30d" ? 30 : 90;
       const endpoint = globalAdminMode
-        ? `${API_BASE_URL}/api/global/metrics/app?days=${days}`
-        : `${API_BASE_URL}/api/metrics/app?tenantId=${tenantId}&days=${days}`;
+        ? api.metrics.globalApp(days)
+        : api.metrics.app(tenantId, days);
       const response = await authenticatedFetch(endpoint, getAccessToken);
       if (response.ok) {
         const data = await response.json();

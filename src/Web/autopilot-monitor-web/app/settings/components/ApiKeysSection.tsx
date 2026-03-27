@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { API_BASE_URL } from "@/lib/config";
+import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 
 interface ApiKey {
@@ -43,7 +43,7 @@ export default function ApiKeysSection({
   const loadKeys = useCallback(async () => {
     try {
       setLoading(true);
-      const endpoint = isGlobalAdmin ? `${API_BASE_URL}/api/global/api-keys` : `${API_BASE_URL}/api/api-keys`;
+      const endpoint = isGlobalAdmin ? api.apiKeys.globalList() : api.apiKeys.list();
       const res = await authenticatedFetch(endpoint, getAccessToken);
       if (!res.ok) throw new Error(`Failed to load API keys: ${res.statusText}`);
       const data = await res.json();
@@ -66,7 +66,7 @@ export default function ApiKeysSection({
       const body: Record<string, unknown> = { label: newLabel.trim(), scope: newScope };
       if (newExpiryDays && parseInt(newExpiryDays) > 0) body.expiresInDays = parseInt(newExpiryDays);
       if (newScope === "tenant" && newTenantId) body.tenantIdOverride = newTenantId;
-      const res = await authenticatedFetch(`${API_BASE_URL}/api/api-keys`, getAccessToken, {
+      const res = await authenticatedFetch(api.apiKeys.list(), getAccessToken, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -91,7 +91,7 @@ export default function ApiKeysSection({
     try {
       setRevokingKey(keyId);
       setError(null);
-      const res = await authenticatedFetch(`${API_BASE_URL}/api/api-keys/${keyId}`, getAccessToken, { method: "DELETE" });
+      const res = await authenticatedFetch(api.apiKeys.delete(keyId), getAccessToken, { method: "DELETE" });
       if (!res.ok) throw new Error(`Failed to revoke: ${res.statusText}`);
       setSuccessMessage("API key revoked successfully");
       await loadKeys();

@@ -18,18 +18,15 @@ namespace AutopilotMonitor.Functions.Functions.Config
     {
         private readonly ILogger<UpdateTenantConfigurationFunction> _logger;
         private readonly TenantConfigurationService _configService;
-        private readonly GlobalAdminService _globalAdminService;
         private readonly IMaintenanceRepository _maintenanceRepo;
 
         public UpdateTenantConfigurationFunction(
             ILogger<UpdateTenantConfigurationFunction> logger,
             TenantConfigurationService configService,
-            GlobalAdminService globalAdminService,
             IMaintenanceRepository maintenanceRepo)
         {
             _logger = logger;
             _configService = configService;
-            _globalAdminService = globalAdminService;
             _maintenanceRepo = maintenanceRepo;
         }
 
@@ -41,17 +38,14 @@ namespace AutopilotMonitor.Functions.Functions.Config
             try
             {
                 // Authentication + TenantAdminOrGA authorization enforced by PolicyEnforcementMiddleware
-                string authenticatedTenantId = TenantHelper.GetTenantId(req);
-                string userIdentifier = TenantHelper.GetUserIdentifier(req);
-
-                // GA check needed for: cross-tenant bypass + protected field filtering
-                var isGlobalAdmin = await _globalAdminService.IsGlobalAdminAsync(userIdentifier);
+                var requestCtx = req.GetRequestContext();
+                var userIdentifier = requestCtx.UserPrincipalName;
 
                 // Validate tenant access: cross-tenant only for Global Admins
-                if (!isGlobalAdmin && !string.Equals(authenticatedTenantId, tenantId, StringComparison.OrdinalIgnoreCase))
+                if (!requestCtx.IsGlobalAdmin && !string.Equals(requestCtx.TenantId, tenantId, StringComparison.OrdinalIgnoreCase))
                 {
                     _logger.LogWarning("User {User} from tenant {AuthTenant} attempted to update configuration for tenant {TargetTenant}",
-                        userIdentifier, authenticatedTenantId, tenantId);
+                        userIdentifier, requestCtx.TenantId, tenantId);
                     var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
                     await forbiddenResponse.WriteAsJsonAsync(new
                     {
@@ -90,7 +84,7 @@ namespace AutopilotMonitor.Functions.Functions.Config
 
                 // Protect GA-only fields from non-Global-Admin callers
                 var existingConfig = await _configService.GetConfigurationAsync(tenantId);
-                if (!isGlobalAdmin)
+                if (!requestCtx.IsGlobalAdmin)
                 {
                     if (config.AllowInsecureAgentRequests != existingConfig.AllowInsecureAgentRequests ||
                         config.BootstrapTokenEnabled != existingConfig.BootstrapTokenEnabled ||

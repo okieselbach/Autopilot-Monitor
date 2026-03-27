@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { API_BASE_URL } from '@/lib/config';
+import { api } from '@/lib/api';
 import { useAuth } from '../../../../contexts/AuthContext';
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 
@@ -99,7 +99,7 @@ export function SectionPlatformUsage() {
       setError(null);
 
       // Platform-wide metrics - cross-tenant (Global Admin only)
-      const response = await authenticatedFetch(`${API_BASE_URL}/api/global/metrics/usage`, getAccessToken);
+      const response = await authenticatedFetch(api.metrics.globalUsage(), getAccessToken);
 
       if (!response.ok) {
         throw new Error(`Failed to fetch platform usage metrics: ${response.statusText}`);

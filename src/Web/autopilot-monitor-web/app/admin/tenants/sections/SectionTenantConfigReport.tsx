@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '../../../../contexts/AuthContext';
-import { API_BASE_URL } from '@/lib/config';
+import { api } from '@/lib/api';
 import { authenticatedFetch, TokenExpiredError } from '@/lib/authenticatedFetch';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -330,7 +330,7 @@ export function SectionTenantConfigReport() {
     const fetchTenants = async () => {
       try {
         setLoadingTenants(true);
-        const response = await authenticatedFetch(`${API_BASE_URL}/api/config/all`, getAccessToken);
+        const response = await authenticatedFetch(api.config.all(), getAccessToken);
         if (response.ok) {
           const data = await response.json();
           const mapped: TenantInfo[] = data.map((t: { tenantId: string; domainName: string }) => ({
@@ -361,7 +361,7 @@ export function SectionTenantConfigReport() {
       setLoading(true);
       setError(null);
       const response = await authenticatedFetch(
-        `${API_BASE_URL}/api/config/${selectedTenantId}`,
+        api.config.tenant(selectedTenantId),
         getAccessToken,
       );
       if (!response.ok) {

@@ -13,21 +13,15 @@ public class AutopilotDeviceValidationConsentFunction
 {
     private readonly ILogger<AutopilotDeviceValidationConsentFunction> _logger;
     private readonly IConfiguration _configuration;
-    private readonly TenantAdminsService _tenantAdminsService;
-    private readonly GlobalAdminService _globalAdminService;
     private readonly GraphTokenService _graphTokenService;
 
     public AutopilotDeviceValidationConsentFunction(
         ILogger<AutopilotDeviceValidationConsentFunction> logger,
         IConfiguration configuration,
-        TenantAdminsService tenantAdminsService,
-        GlobalAdminService globalAdminService,
         GraphTokenService graphTokenService)
     {
         _logger = logger;
         _configuration = configuration;
-        _tenantAdminsService = tenantAdminsService;
-        _globalAdminService = globalAdminService;
         _graphTokenService = graphTokenService;
     }
 
@@ -98,24 +92,15 @@ public class AutopilotDeviceValidationConsentFunction
     private async Task<HttpResponseData?> EnsureAuthorizedTenantAdminAsync(HttpRequestData req, string tenantId)
     {
         // Authentication enforced by PolicyEnforcementMiddleware
-        var authenticatedTenantId = TenantHelper.GetTenantId(req);
-        var userIdentifier = TenantHelper.GetUserIdentifier(req);
+        var requestCtx = req.GetRequestContext();
 
-        if (!string.Equals(authenticatedTenantId, tenantId, StringComparison.OrdinalIgnoreCase))
-        {
-            var forbidden = req.CreateResponse(HttpStatusCode.Forbidden);
-            await forbidden.WriteAsJsonAsync(new { error = "Access denied. You can only manage your own tenant." });
-            return forbidden;
-        }
-
-        var isGlobalAdmin = await _globalAdminService.IsGlobalAdminAsync(userIdentifier);
-        var isTenantAdmin = await _tenantAdminsService.IsTenantAdminAsync(tenantId, userIdentifier);
-
-        if (!isGlobalAdmin && !isTenantAdmin)
+        // Middleware (TenantAdminOrGA policy) already verified GA or TenantAdmin of own tenant.
+        // For non-GA: only allow access to own tenant.
+        if (!requestCtx.IsGlobalAdmin && !tenantId.Equals(requestCtx.TenantId, StringComparison.OrdinalIgnoreCase))
         {
             _logger.LogWarning(
                 "User {User} attempted autopilot-device-validation consent operation without admin rights for tenant {TenantId}",
-                userIdentifier,
+                requestCtx.UserPrincipalName,
                 tenantId);
 
             var forbidden = req.CreateResponse(HttpStatusCode.Forbidden);

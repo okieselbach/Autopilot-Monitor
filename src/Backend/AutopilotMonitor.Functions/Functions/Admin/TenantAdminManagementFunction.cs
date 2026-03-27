@@ -1,5 +1,4 @@
 using System.Net;
-using AutopilotMonitor.Functions.Extensions;
 using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Services;
 using AutopilotMonitor.Shared.DataAccess;
@@ -18,18 +17,15 @@ public class TenantAdminManagementFunction
 {
     private readonly ILogger<TenantAdminManagementFunction> _logger;
     private readonly TenantAdminsService _tenantAdminsService;
-    private readonly GlobalAdminService _globalAdminService;
     private readonly IMaintenanceRepository _maintenanceRepo;
 
     public TenantAdminManagementFunction(
         ILogger<TenantAdminManagementFunction> logger,
         TenantAdminsService tenantAdminsService,
-        GlobalAdminService globalAdminService,
         IMaintenanceRepository maintenanceRepo)
     {
         _logger = logger;
         _tenantAdminsService = tenantAdminsService;
-        _globalAdminService = globalAdminService;
         _maintenanceRepo = maintenanceRepo;
     }
 
@@ -46,17 +42,12 @@ public class TenantAdminManagementFunction
         FunctionContext context)
     {
         // Authentication enforced by PolicyEnforcementMiddleware
-        var principal = context.GetUser()!;
+        var requestCtx = context.GetRequestContext();
+        var upn = requestCtx.UserPrincipalName;
 
-        var userTenantId = principal.GetTenantId();
-        var upn = principal.GetUserPrincipalName();
-
-        // Check authorization: either Global Admin OR Tenant Admin of the same tenant
-        var isGlobalAdmin = await _globalAdminService.IsGlobalAdminAsync(upn);
-        var isTenantAdmin = tenantId.Equals(userTenantId, StringComparison.OrdinalIgnoreCase) &&
-                           await _tenantAdminsService.IsTenantAdminAsync(tenantId, upn);
-
-        if (!isGlobalAdmin && !isTenantAdmin)
+        // Middleware (TenantAdminOrGA policy) already verified GA or TenantAdmin of own tenant.
+        // For non-GA: only allow access to own tenant.
+        if (!requestCtx.IsGlobalAdmin && !tenantId.Equals(requestCtx.TenantId, StringComparison.OrdinalIgnoreCase))
         {
             _logger.LogWarning($"User {upn} attempted to access admins for tenant {tenantId} without authorization");
             var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
@@ -86,17 +77,12 @@ public class TenantAdminManagementFunction
         FunctionContext context)
     {
         // Authentication enforced by PolicyEnforcementMiddleware
-        var principal = context.GetUser()!;
+        var requestCtx = context.GetRequestContext();
+        var upn = requestCtx.UserPrincipalName;
 
-        var userTenantId = principal.GetTenantId();
-        var upn = principal.GetUserPrincipalName();
-
-        // Check authorization: either Global Admin OR Tenant Admin of the same tenant
-        var isGlobalAdmin = await _globalAdminService.IsGlobalAdminAsync(upn);
-        var isTenantAdmin = tenantId.Equals(userTenantId, StringComparison.OrdinalIgnoreCase) &&
-                           await _tenantAdminsService.IsTenantAdminAsync(tenantId, upn);
-
-        if (!isGlobalAdmin && !isTenantAdmin)
+        // Middleware (TenantAdminOrGA policy) already verified GA or TenantAdmin of own tenant.
+        // For non-GA: only allow access to own tenant.
+        if (!requestCtx.IsGlobalAdmin && !tenantId.Equals(requestCtx.TenantId, StringComparison.OrdinalIgnoreCase))
         {
             _logger.LogWarning($"User {upn} attempted to add admin to tenant {tenantId} without authorization");
             var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
@@ -152,17 +138,12 @@ public class TenantAdminManagementFunction
         FunctionContext context)
     {
         // Authentication enforced by PolicyEnforcementMiddleware
-        var principal = context.GetUser()!;
+        var requestCtx = context.GetRequestContext();
+        var upn = requestCtx.UserPrincipalName;
 
-        var userTenantId = principal.GetTenantId();
-        var upn = principal.GetUserPrincipalName();
-
-        // Check authorization: either Global Admin OR Tenant Admin of the same tenant
-        var isGlobalAdmin = await _globalAdminService.IsGlobalAdminAsync(upn);
-        var isTenantAdmin = tenantId.Equals(userTenantId, StringComparison.OrdinalIgnoreCase) &&
-                           await _tenantAdminsService.IsTenantAdminAsync(tenantId, upn);
-
-        if (!isGlobalAdmin && !isTenantAdmin)
+        // Middleware (TenantAdminOrGA policy) already verified GA or TenantAdmin of own tenant.
+        // For non-GA: only allow access to own tenant.
+        if (!requestCtx.IsGlobalAdmin && !tenantId.Equals(requestCtx.TenantId, StringComparison.OrdinalIgnoreCase))
         {
             _logger.LogWarning($"User {upn} attempted to remove admin from tenant {tenantId} without authorization");
             var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
@@ -174,7 +155,7 @@ public class TenantAdminManagementFunction
         if (adminUpn.Equals(upn, StringComparison.OrdinalIgnoreCase))
         {
             // Check if this is the last Admin-role member (only for non-Global-Admins)
-            if (!isGlobalAdmin)
+            if (!requestCtx.IsGlobalAdmin)
             {
                 var members = await _tenantAdminsService.GetTenantAdminsAsync(tenantId);
                 var adminCount = members.Count(m => m.IsEnabled && (m.Role == null || m.Role == AutopilotMonitor.Shared.Constants.TenantRoles.Admin));
@@ -219,17 +200,12 @@ public class TenantAdminManagementFunction
         FunctionContext context)
     {
         // Authentication enforced by PolicyEnforcementMiddleware
-        var principal = context.GetUser()!;
+        var requestCtx = context.GetRequestContext();
+        var upn = requestCtx.UserPrincipalName;
 
-        var userTenantId = principal.GetTenantId();
-        var upn = principal.GetUserPrincipalName();
-
-        // Check authorization: either Global Admin OR Tenant Admin of the same tenant
-        var isGlobalAdmin = await _globalAdminService.IsGlobalAdminAsync(upn);
-        var isTenantAdmin = tenantId.Equals(userTenantId, StringComparison.OrdinalIgnoreCase) &&
-                           await _tenantAdminsService.IsTenantAdminAsync(tenantId, upn);
-
-        if (!isGlobalAdmin && !isTenantAdmin)
+        // Middleware (TenantAdminOrGA policy) already verified GA or TenantAdmin of own tenant.
+        // For non-GA: only allow access to own tenant.
+        if (!requestCtx.IsGlobalAdmin && !tenantId.Equals(requestCtx.TenantId, StringComparison.OrdinalIgnoreCase))
         {
             _logger.LogWarning($"User {upn} attempted to disable admin for tenant {tenantId} without authorization");
             var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
@@ -270,17 +246,12 @@ public class TenantAdminManagementFunction
         FunctionContext context)
     {
         // Authentication enforced by PolicyEnforcementMiddleware
-        var principal = context.GetUser()!;
+        var requestCtx = context.GetRequestContext();
+        var upn = requestCtx.UserPrincipalName;
 
-        var userTenantId = principal.GetTenantId();
-        var upn = principal.GetUserPrincipalName();
-
-        // Check authorization: either Global Admin OR Tenant Admin of the same tenant
-        var isGlobalAdmin = await _globalAdminService.IsGlobalAdminAsync(upn);
-        var isTenantAdmin = tenantId.Equals(userTenantId, StringComparison.OrdinalIgnoreCase) &&
-                           await _tenantAdminsService.IsTenantAdminAsync(tenantId, upn);
-
-        if (!isGlobalAdmin && !isTenantAdmin)
+        // Middleware (TenantAdminOrGA policy) already verified GA or TenantAdmin of own tenant.
+        // For non-GA: only allow access to own tenant.
+        if (!requestCtx.IsGlobalAdmin && !tenantId.Equals(requestCtx.TenantId, StringComparison.OrdinalIgnoreCase))
         {
             _logger.LogWarning($"User {upn} attempted to enable admin for tenant {tenantId} without authorization");
             var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
@@ -320,17 +291,12 @@ public class TenantAdminManagementFunction
         FunctionContext context)
     {
         // Authentication enforced by PolicyEnforcementMiddleware
-        var principal = context.GetUser()!;
+        var requestCtx = context.GetRequestContext();
+        var upn = requestCtx.UserPrincipalName;
 
-        var userTenantId = principal.GetTenantId();
-        var upn = principal.GetUserPrincipalName();
-
-        // Check authorization: either Global Admin OR Tenant Admin of the same tenant
-        var isGlobalAdmin = await _globalAdminService.IsGlobalAdminAsync(upn);
-        var isTenantAdmin = tenantId.Equals(userTenantId, StringComparison.OrdinalIgnoreCase) &&
-                           await _tenantAdminsService.IsTenantAdminAsync(tenantId, upn);
-
-        if (!isGlobalAdmin && !isTenantAdmin)
+        // Middleware (TenantAdminOrGA policy) already verified GA or TenantAdmin of own tenant.
+        // For non-GA: only allow access to own tenant.
+        if (!requestCtx.IsGlobalAdmin && !tenantId.Equals(requestCtx.TenantId, StringComparison.OrdinalIgnoreCase))
         {
             _logger.LogWarning("User {Upn} attempted to update member permissions for tenant {TenantId} without authorization", upn, tenantId);
             var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
@@ -349,7 +315,7 @@ public class TenantAdminManagementFunction
         // Prevent demoting yourself if you're the last Admin
         if (adminUpn.Equals(upn, StringComparison.OrdinalIgnoreCase) && body.Role != AutopilotMonitor.Shared.Constants.TenantRoles.Admin)
         {
-            if (!isGlobalAdmin)
+            if (!requestCtx.IsGlobalAdmin)
             {
                 var members = await _tenantAdminsService.GetTenantAdminsAsync(tenantId);
                 var adminCount = members.Count(m => m.IsEnabled && (m.Role == null || m.Role == AutopilotMonitor.Shared.Constants.TenantRoles.Admin));

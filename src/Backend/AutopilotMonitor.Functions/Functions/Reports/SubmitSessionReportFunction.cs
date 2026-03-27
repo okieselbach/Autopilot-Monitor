@@ -14,7 +14,6 @@ namespace AutopilotMonitor.Functions.Functions.Reports
         private readonly ILogger<SubmitSessionReportFunction> _logger;
         private readonly SessionReportService _sessionReportService;
         private readonly IMaintenanceRepository _maintenanceRepo;
-        private readonly GlobalAdminService _globalAdminService;
         private readonly TelegramNotificationService _telegramNotificationService;
         private readonly GlobalNotificationService _globalNotificationService;
 
@@ -22,14 +21,12 @@ namespace AutopilotMonitor.Functions.Functions.Reports
             ILogger<SubmitSessionReportFunction> logger,
             SessionReportService sessionReportService,
             IMaintenanceRepository maintenanceRepo,
-            GlobalAdminService globalAdminService,
             TelegramNotificationService telegramNotificationService,
             GlobalNotificationService globalNotificationService)
         {
             _logger = logger;
             _sessionReportService = sessionReportService;
             _maintenanceRepo = maintenanceRepo;
-            _globalAdminService = globalAdminService;
             _telegramNotificationService = telegramNotificationService;
             _globalNotificationService = globalNotificationService;
         }
@@ -44,11 +41,9 @@ namespace AutopilotMonitor.Functions.Functions.Reports
             try
             {
                 // Authentication + TenantAdminOrGA authorization enforced by PolicyEnforcementMiddleware
-                string tenantId = TenantHelper.GetTenantId(req);
-                string userIdentifier = TenantHelper.GetUserIdentifier(req);
-
-                // Still needed: GA check for audit log skip logic
-                var isGlobalAdmin = await _globalAdminService.IsGlobalAdminAsync(userIdentifier);
+                var requestCtx = req.GetRequestContext();
+                var tenantId = requestCtx.TenantId;
+                var userIdentifier = requestCtx.UserPrincipalName;
 
                 // Request body size limit (1 MB)
                 if (req.Headers.TryGetValues("Content-Length", out var clValues)
@@ -84,7 +79,7 @@ namespace AutopilotMonitor.Functions.Functions.Reports
                 var metadata = await _sessionReportService.SubmitReportAsync(request, userIdentifier);
 
                 // Log audit entry — skip for Global Admins
-                if (!isGlobalAdmin)
+                if (!requestCtx.IsGlobalAdmin)
                 {
                     await _maintenanceRepo.LogAuditEntryAsync(
                         request.TenantId,

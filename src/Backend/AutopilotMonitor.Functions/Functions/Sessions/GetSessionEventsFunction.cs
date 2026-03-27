@@ -1,7 +1,6 @@
 using System.Net;
 using System.Web;
 using AutopilotMonitor.Functions.Helpers;
-using AutopilotMonitor.Functions.Services;
 using AutopilotMonitor.Shared.DataAccess;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -13,16 +12,13 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
     {
         private readonly ILogger<GetSessionEventsFunction> _logger;
         private readonly ISessionRepository _sessionRepo;
-        private readonly GlobalAdminService _globalAdminService;
 
         public GetSessionEventsFunction(
             ILogger<GetSessionEventsFunction> logger,
-            ISessionRepository sessionRepo,
-            GlobalAdminService globalAdminService)
+            ISessionRepository sessionRepo)
         {
             _logger = logger;
             _sessionRepo = sessionRepo;
-            _globalAdminService = globalAdminService;
         }
 
         [Function("GetSessionEvents")]
@@ -45,8 +41,8 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
                 // Authentication + MemberRead authorization enforced by PolicyEnforcementMiddleware
 
                 // Get user's tenant ID and identifier from JWT
-                var userTenantId = TenantHelper.GetTenantId(req);
-                var userIdentifier = TenantHelper.GetUserIdentifier(req);
+                var requestCtx = req.GetRequestContext();
+                var userIdentifier = requestCtx.UserPrincipalName;
 
                 // Get requested tenant ID from query parameter
                 var query = HttpUtility.ParseQueryString(req.Url.Query);
@@ -68,43 +64,35 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
                 }
 
                 // Validate tenant access: user must either own the tenant or be Global Admin
-                if (requestedTenantId != userTenantId)
+                if (!requestCtx.IsGlobalAdmin && requestedTenantId != requestCtx.TenantId)
                 {
-                    var isGlobalAdmin = await _globalAdminService.IsGlobalAdminAsync(userIdentifier);
-
-                    if (!isGlobalAdmin)
+                    _logger.LogWarning($"{sessionPrefix} User {userIdentifier} (tenant {requestCtx.TenantId}) attempted to access session events for tenant {requestedTenantId}");
+                    var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
+                    await forbiddenResponse.WriteAsJsonAsync(new
                     {
-                        _logger.LogWarning($"{sessionPrefix} User {userIdentifier} (tenant {userTenantId}) attempted to access session events for tenant {requestedTenantId}");
-                        var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-                        await forbiddenResponse.WriteAsJsonAsync(new
-                        {
-                            success = false,
-                            message = "Access denied. You can only view events for sessions in your own tenant.",
-                            sessionId = sessionId,
-                            count = 0,
-                            events = Array.Empty<object>()
-                        });
-                        return forbiddenResponse;
-                    }
-                    else
-                    {
-                        _logger.LogInformation($"{sessionPrefix} Global Admin {userIdentifier} accessing cross-tenant session events (tenant: {requestedTenantId})");
-                    }
+                        success = false,
+                        message = "Access denied. You can only view events for sessions in your own tenant.",
+                        sessionId = sessionId,
+                        count = 0,
+                        events = Array.Empty<object>()
+                    });
+                    return forbiddenResponse;
+                }
+                else if (requestCtx.IsGlobalAdmin && requestedTenantId != requestCtx.TenantId)
+                {
+                    _logger.LogInformation($"{sessionPrefix} Global Admin {userIdentifier} accessing cross-tenant session events (tenant: {requestedTenantId})");
                 }
 
                 // Get events from storage using the requested tenant ID
                 var events = await _sessionRepo.GetSessionEventsAsync(requestedTenantId, sessionId);
 
-                var response = req.CreateResponse(HttpStatusCode.OK);
-                await response.WriteAsJsonAsync(new
+                return await req.OkAsync(new
                 {
                     success = true,
                     sessionId = sessionId,
                     count = events.Count,
                     events = events
                 });
-
-                return response;
             }
             catch (Exception ex)
             {

@@ -1,7 +1,6 @@
 using System.Net;
 using System.Web;
 using AutopilotMonitor.Functions.Helpers;
-using AutopilotMonitor.Functions.Services;
 using AutopilotMonitor.Shared.DataAccess;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -18,16 +17,13 @@ public class ProgressPortalFunction
 {
     private readonly ILogger<ProgressPortalFunction> _logger;
     private readonly ISessionRepository _sessionRepo;
-    private readonly GlobalAdminService _globalAdminService;
 
     public ProgressPortalFunction(
         ILogger<ProgressPortalFunction> logger,
-        ISessionRepository sessionRepo,
-        GlobalAdminService globalAdminService)
+        ISessionRepository sessionRepo)
     {
         _logger = logger;
         _sessionRepo = sessionRepo;
-        _globalAdminService = globalAdminService;
     }
 
     /// <summary>
@@ -43,7 +39,7 @@ public class ProgressPortalFunction
         try
         {
             // Authentication + AuthenticatedUser authorization enforced by PolicyEnforcementMiddleware
-            var tenantId = TenantHelper.GetTenantId(req);
+            var tenantId = req.GetRequestContext().TenantId;
 
             _logger.LogInformation("ProgressGetSessions: Fetching sessions for tenant {TenantId}", tenantId);
 
@@ -96,8 +92,8 @@ public class ProgressPortalFunction
         try
         {
             // Authentication + AuthenticatedUser authorization enforced by PolicyEnforcementMiddleware
-            var userTenantId = TenantHelper.GetTenantId(req);
-            var userIdentifier = TenantHelper.GetUserIdentifier(req);
+            var requestCtx = req.GetRequestContext();
+            var userIdentifier = requestCtx.UserPrincipalName;
 
             var query = HttpUtility.ParseQueryString(req.Url.Query);
             var requestedTenantId = query["tenantId"];
@@ -117,23 +113,22 @@ public class ProgressPortalFunction
             }
 
             // Cross-tenant access only for Global Admins
-            if (requestedTenantId != userTenantId)
+            if (!requestCtx.IsGlobalAdmin && requestedTenantId != requestCtx.TenantId)
             {
-                var isGlobalAdmin = await _globalAdminService.IsGlobalAdminAsync(userIdentifier);
-                if (!isGlobalAdmin)
+                var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
+                await forbiddenResponse.WriteAsJsonAsync(new
                 {
-                    var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-                    await forbiddenResponse.WriteAsJsonAsync(new
-                    {
-                        success = false,
-                        message = "Access denied. You can only view events for sessions in your own tenant.",
-                        sessionId = sessionId,
-                        count = 0,
-                        events = Array.Empty<object>()
-                    });
-                    return forbiddenResponse;
-                }
+                    success = false,
+                    message = "Access denied. You can only view events for sessions in your own tenant.",
+                    sessionId = sessionId,
+                    count = 0,
+                    events = Array.Empty<object>()
+                });
+                return forbiddenResponse;
+            }
 
+            if (requestCtx.IsGlobalAdmin && requestedTenantId != requestCtx.TenantId)
+            {
                 _logger.LogInformation("{SessionPrefix} Global Admin {User} accessing cross-tenant progress events (tenant: {TenantId})",
                     sessionPrefix, userIdentifier, requestedTenantId);
             }

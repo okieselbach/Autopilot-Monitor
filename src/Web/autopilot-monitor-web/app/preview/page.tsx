@@ -3,7 +3,7 @@
 import { useAuth } from "../../contexts/AuthContext";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { API_BASE_URL } from "@/lib/config";
+import { api } from "@/lib/api";
 
 export default function PreviewPage() {
   const { isAuthenticated, isLoading, user, isPreviewBlocked, previewMessage, logout, getAccessToken } = useAuth();
@@ -44,7 +44,7 @@ export default function PreviewPage() {
         throw new Error("Not authenticated");
       }
 
-      const response = await fetch(`${API_BASE_URL}/api/preview/notification-email`, {
+      const response = await fetch(api.preview.notificationEmail(), {
         method: "PUT",
         headers: {
           "Authorization": `Bearer ${token}`,

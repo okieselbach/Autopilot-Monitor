@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { API_BASE_URL } from "@/lib/config";
+import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 import { trackEvent } from "@/lib/appInsights";
 
@@ -81,7 +81,7 @@ export function SessionReportsSection({
       setDownloadingBlob(blobName);
 
       const res = await authenticatedFetch(
-        `${API_BASE_URL}/api/global/session-reports/download-url?blobName=${encodeURIComponent(blobName)}`,
+        api.reports.downloadUrl(blobName),
         getAccessToken
       );
       if (!res.ok) throw new Error(`Failed to get download URL: ${res.statusText}`);
@@ -110,7 +110,7 @@ export function SessionReportsSection({
       setNoteSaveResult(null);
 
       const res = await authenticatedFetch(
-        `${API_BASE_URL}/api/global/session-reports/${selectedReport.reportId}/note`,
+        api.reports.note(selectedReport.reportId),
         getAccessToken,
         {
           method: "PATCH",
@@ -139,7 +139,7 @@ export function SessionReportsSection({
     try {
       setLoading(true);
 
-      const res = await authenticatedFetch(`${API_BASE_URL}/api/global/session-reports`, getAccessToken);
+      const res = await authenticatedFetch(api.reports.list(), getAccessToken);
 
       if (res.status === 404) {
         // Table/container doesn't exist yet — no reports submitted so far

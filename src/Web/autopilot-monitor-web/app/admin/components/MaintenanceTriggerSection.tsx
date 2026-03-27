@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { API_BASE_URL } from "@/lib/config";
+import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 
 interface MaintenanceTriggerSectionProps {
@@ -24,8 +24,7 @@ export function MaintenanceTriggerSection({
       setError(null);
       setSuccessMessage(null);
 
-      const queryParams = maintenanceDate ? `?date=${maintenanceDate}` : '';
-      const response = await authenticatedFetch(`${API_BASE_URL}/api/maintenance/trigger${queryParams}`, getAccessToken, {
+      const response = await authenticatedFetch(api.maintenance.trigger(maintenanceDate || undefined), getAccessToken, {
         method: "POST",
       });
 

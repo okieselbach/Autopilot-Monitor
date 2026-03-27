@@ -6,9 +6,9 @@ import { useGlobalNotifications } from '@/contexts/GlobalNotificationContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
-import { API_BASE_URL } from '@/lib/config';
 import { usePathname } from 'next/navigation';
 import { trackEvent } from '@/lib/appInsights';
+import { useAdminMode } from '@/hooks/useAdminMode';
 
 export default function Navbar() {
   const { isAuthenticated, user, logout } = useAuth();
@@ -21,18 +21,7 @@ export default function Navbar() {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
-  const [adminMode, setAdminMode] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('adminMode') === 'true';
-    }
-    return false;
-  });
-  const [globalAdminMode, setGlobalAdminMode] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('globalAdminMode') === 'true';
-    }
-    return false;
-  });
+  const { adminMode, setAdminMode, globalAdminMode, setGlobalAdminMode } = useAdminMode();
   const [previewMode, setPreviewMode] = useState(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('previewMode') === 'true';
@@ -44,21 +33,6 @@ export default function Navbar() {
   const userMenuRef = useRef<HTMLDivElement>(null);
   const settingsRef = useRef<HTMLDivElement>(null);
   const helpRef = useRef<HTMLDivElement>(null);
-
-  // Update localStorage when modes change and dispatch custom event
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('adminMode', adminMode.toString());
-      window.dispatchEvent(new Event('localStorageChange'));
-    }
-  }, [adminMode]);
-
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('globalAdminMode', globalAdminMode.toString());
-      window.dispatchEvent(new Event('localStorageChange'));
-    }
-  }, [globalAdminMode]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {

@@ -1,6 +1,5 @@
 using System.Net;
 using AutopilotMonitor.Functions.Helpers;
-using AutopilotMonitor.Functions.Services;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Azure.Functions.Worker.Extensions.SignalRService;
@@ -12,14 +11,11 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure
     public class SignalRAddToGroupFunction
     {
         private readonly ILogger<SignalRAddToGroupFunction> _logger;
-        private readonly GlobalAdminService _globalAdminService;
 
         public SignalRAddToGroupFunction(
-            ILogger<SignalRAddToGroupFunction> logger,
-            GlobalAdminService globalAdminService)
+            ILogger<SignalRAddToGroupFunction> logger)
         {
             _logger = logger;
-            _globalAdminService = globalAdminService;
         }
 
         [Function("AddToGroup")]
@@ -49,9 +45,10 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure
                     return new AddToGroupOutput { HttpResponse = errorResponse };
                 }
 
-                // Get user's tenant ID from JWT
-                var userTenantId = TenantHelper.GetTenantId(req);
-                var userEmail = TenantHelper.GetUserIdentifier(req);
+                // Get user's tenant ID from RequestContext
+                var requestCtx = req.GetRequestContext();
+                var userTenantId = requestCtx.TenantId;
+                var userEmail = requestCtx.UserPrincipalName;
 
                 // Validate tenant access
                 // Group names are in format: "tenant-{tenantId}", "session-{tenantId}-{sessionId}", or "global-admins"
@@ -60,8 +57,7 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure
                 // Explicit validation for the global-admins group
                 if (request.GroupName == "global-admins")
                 {
-                    var isGlobalAdmin = await _globalAdminService.IsGlobalAdminAsync(userEmail);
-                    if (!isGlobalAdmin)
+                    if (!requestCtx.IsGlobalAdmin)
                     {
                         _logger.LogWarning($"User {userEmail} (tenant {userTenantId}) attempted to join global-admins group without being a Global Admin");
                         var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
@@ -85,9 +81,7 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure
                     if (requestedTenantId != userTenantId)
                     {
                         // Check if user is Global Admin (they can join any tenant's group)
-                        var isGlobalAdmin = await _globalAdminService.IsGlobalAdminAsync(userEmail);
-
-                        if (!isGlobalAdmin)
+                        if (!requestCtx.IsGlobalAdmin)
                         {
                             _logger.LogWarning($"User {userEmail} (tenant {userTenantId}) attempted to join group for tenant {requestedTenantId}");
                             var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);

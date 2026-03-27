@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import * as signalR from '@microsoft/signalr';
-import { API_BASE_URL } from '@/lib/config';
+import { api } from '@/lib/api';
 import { authenticatedFetch } from '@/lib/authenticatedFetch';
 import { trackEvent } from '@/lib/appInsights';
 import { useAuth } from './AuthContext';
@@ -47,7 +47,7 @@ export function SignalRProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    const hubUrl = `${API_BASE_URL}/api/realtime`;
+    const hubUrl = api.realtime.hub();
     const newConnection = new signalR.HubConnectionBuilder()
       .withUrl(hubUrl, {
         accessTokenFactory: async () => {
@@ -94,7 +94,7 @@ export function SignalRProvider({ children }: { children: React.ReactNode }) {
       for (const groupName of previousGroups) {
         try {
           const response = await authenticatedFetch(
-            `${API_BASE_URL}/api/realtime/groups/join`,
+            api.realtime.joinGroup(),
             getAccessToken,
             {
               method: 'POST',
@@ -196,7 +196,7 @@ export function SignalRProvider({ children }: { children: React.ReactNode }) {
       }
 
       const response = await authenticatedFetch(
-        `${API_BASE_URL}/api/realtime/groups/join`,
+        api.realtime.joinGroup(),
         getAccessToken,
         {
           method: 'POST',
@@ -239,7 +239,7 @@ export function SignalRProvider({ children }: { children: React.ReactNode }) {
       }
 
       const response = await authenticatedFetch(
-        `${API_BASE_URL}/api/realtime/groups/leave`,
+        api.realtime.leaveGroup(),
         getAccessToken,
         {
           method: 'POST',

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { API_BASE_URL } from "@/lib/config";
+import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 
 interface TenantAdmin {
@@ -43,7 +43,7 @@ export function TenantAdminSection({
       setLoadingAdmins(true);
       setCurrentAdminPage(0); // Reset to first page when loading new tenant
 
-      const response = await authenticatedFetch(`${API_BASE_URL}/api/tenants/${tid}/admins`, getAccessToken);
+      const response = await authenticatedFetch(api.tenants.admins(tid), getAccessToken);
 
       if (!response.ok) {
         throw new Error(`Failed to load admins: ${response.statusText}`);
@@ -75,7 +75,7 @@ export function TenantAdminSection({
       setAddingAdmin(true);
       setError(null);
 
-      const response = await authenticatedFetch(`${API_BASE_URL}/api/tenants/${tenantId}/admins`, getAccessToken, {
+      const response = await authenticatedFetch(api.tenants.admins(tenantId), getAccessToken, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ upn: newAdminEmail.trim() }),
@@ -115,7 +115,7 @@ export function TenantAdminSection({
       setRemovingAdmin(adminUpn);
       setError(null);
 
-      const response = await authenticatedFetch(`${API_BASE_URL}/api/tenants/${tenantId}/admins/${encodeURIComponent(adminUpn)}`, getAccessToken, {
+      const response = await authenticatedFetch(api.tenants.admin(tenantId, adminUpn), getAccessToken, {
         method: "DELETE",
       });
 
@@ -149,7 +149,7 @@ export function TenantAdminSection({
       setError(null);
 
       const action = isEnabled ? 'disable' : 'enable';
-      const response = await authenticatedFetch(`${API_BASE_URL}/api/tenants/${tenantId}/admins/${encodeURIComponent(adminUpn)}/${action}`, getAccessToken, {
+      const response = await authenticatedFetch(api.tenants.adminAction(tenantId, adminUpn, action), getAccessToken, {
         method: "PATCH",
       });
 

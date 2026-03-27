@@ -1,3 +1,4 @@
+export { useAdminMode } from "./useAdminMode";
 export { useAuthenticatedFetch } from "./useAuthenticatedFetch";
 export type {
   UseAuthenticatedFetchOptions,

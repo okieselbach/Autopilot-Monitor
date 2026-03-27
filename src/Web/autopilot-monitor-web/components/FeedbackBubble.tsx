@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { API_BASE_URL } from "@/lib/config";
+import { api } from "@/lib/api";
 import { authenticatedFetch } from "@/lib/authenticatedFetch";
 
 type Phase = "loading" | "bubble" | "form" | "thankyou" | "hidden";
@@ -24,7 +24,7 @@ export default function FeedbackBubble() {
     const checkEligibility = async () => {
       try {
         const response = await authenticatedFetch(
-          `${API_BASE_URL}/api/feedback/status`,
+          api.feedback.status(),
           getAccessToken
         );
         if (cancelled) return;
@@ -54,7 +54,7 @@ export default function FeedbackBubble() {
   const handleDismiss = useCallback(async () => {
     setPhase("hidden");
     try {
-      await authenticatedFetch(`${API_BASE_URL}/api/feedback`, getAccessToken, {
+      await authenticatedFetch(api.feedback.submit(), getAccessToken, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ dismissed: true }),
@@ -69,7 +69,7 @@ export default function FeedbackBubble() {
     setSubmitting(true);
 
     try {
-      await authenticatedFetch(`${API_BASE_URL}/api/feedback`, getAccessToken, {
+      await authenticatedFetch(api.feedback.submit(), getAccessToken, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rating, comment: comment.trim() || null, dismissed: false }),

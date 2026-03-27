@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { API_BASE_URL } from "@/lib/config";
+import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 import { TenantConfiguration } from "./TenantManagementSection";
 import { TenantSearchSelect } from "./TenantSearchSelect";
@@ -47,7 +47,7 @@ export function SessionExportSection({
       setExportError(null);
       setExportedEvents(null);
       const res = await authenticatedFetch(
-        `${API_BASE_URL}/api/sessions/${sid}/events?tenantId=${encodeURIComponent(tid)}`,
+        api.sessions.events(sid, tid),
         getAccessToken
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);

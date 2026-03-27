@@ -52,14 +52,12 @@ namespace AutopilotMonitor.Functions.Services
 
                 var json = JsonConvert.SerializeObject(payload);
                 var content = new StringContent(json, Encoding.UTF8, "application/json");
-                var sent = await PostWithRetryAsync(webhookUrl, content, $"signup:{tenantId}");
+                var response = await _http.PostAsync(webhookUrl, content);
 
-                if (sent)
-                {
+                if (response.IsSuccessStatusCode)
                     _logger.LogInformation(
                         "Telegram Private Preview signup notification sent for tenant {TenantId}, UPN {Upn}",
                         tenantId, upn);
-                }
             }
             catch (Exception ex)
             {
@@ -93,13 +91,11 @@ namespace AutopilotMonitor.Functions.Services
 
                 var json = JsonConvert.SerializeObject(payload);
                 var content = new StringContent(json, Encoding.UTF8, "application/json");
-                var sent = await PostWithRetryAsync(webhookUrl, content, $"report:{reportId}");
+                var response = await _http.PostAsync(webhookUrl, content);
 
-                if (sent)
-                {
+                if (response.IsSuccessStatusCode)
                     _logger.LogInformation(
                         "Telegram session report notification sent for report {ReportId}", reportId);
-                }
             }
             catch (Exception ex)
             {
@@ -173,12 +169,10 @@ namespace AutopilotMonitor.Functions.Services
 
                 var json = JsonConvert.SerializeObject(payload);
                 var content = new StringContent(json, Encoding.UTF8, "application/json");
-                var sent = await PostWithRetryAsync(webhookUrl, content, $"feedback:{upn}");
+                var response = await _http.PostAsync(webhookUrl, content);
 
-                if (sent)
-                {
+                if (response.IsSuccessStatusCode)
                     _logger.LogInformation("Telegram feedback notification sent for user {Upn}", upn);
-                }
             }
             catch (Exception ex)
             {

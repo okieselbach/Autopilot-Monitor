@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { API_BASE_URL } from '@/lib/config';
+import { api } from '@/lib/api';
 import { useAuth } from '../../../../contexts/AuthContext';
 import { useNotifications } from '../../../../contexts/NotificationContext';
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
@@ -111,7 +111,7 @@ export function SectionAgentMetrics() {
     setError(null);
 
     try {
-      const res = await authenticatedFetch(`${API_BASE_URL}/api/global/metrics/platform`, getAccessToken);
+      const res = await authenticatedFetch(api.metrics.platform(), getAccessToken);
 
       if (!res.ok) {
         if (res.status === 403) {

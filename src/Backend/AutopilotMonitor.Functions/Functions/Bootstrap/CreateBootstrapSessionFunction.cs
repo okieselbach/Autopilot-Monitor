@@ -21,20 +21,17 @@ namespace AutopilotMonitor.Functions.Functions.Bootstrap
     {
         private readonly ILogger<CreateBootstrapSessionFunction> _logger;
         private readonly BootstrapSessionService _bootstrapService;
-        private readonly GlobalAdminService _globalAdminService;
         private readonly TenantConfigurationService _configService;
         private readonly IMaintenanceRepository _maintenanceRepo;
 
         public CreateBootstrapSessionFunction(
             ILogger<CreateBootstrapSessionFunction> logger,
             BootstrapSessionService bootstrapService,
-            GlobalAdminService globalAdminService,
             TenantConfigurationService configService,
             IMaintenanceRepository maintenanceRepo)
         {
             _logger = logger;
             _bootstrapService = bootstrapService;
-            _globalAdminService = globalAdminService;
             _configService = configService;
             _maintenanceRepo = maintenanceRepo;
         }
@@ -46,8 +43,9 @@ namespace AutopilotMonitor.Functions.Functions.Bootstrap
             try
             {
                 // Authentication + BootstrapManagerOrGA authorization enforced by PolicyEnforcementMiddleware
-                var authenticatedTenantId = TenantHelper.GetTenantId(req);
-                var userIdentifier = TenantHelper.GetUserIdentifier(req);
+                var requestCtx = req.GetRequestContext();
+                var authenticatedTenantId = requestCtx.TenantId;
+                var userIdentifier = requestCtx.UserPrincipalName;
 
                 // Read request body
                 string body;
@@ -66,15 +64,11 @@ namespace AutopilotMonitor.Functions.Functions.Bootstrap
                 var tenantId = !string.IsNullOrEmpty(request.TenantId) ? request.TenantId : authenticatedTenantId;
 
                 // Cross-tenant boundary check — only Global Admins may operate on other tenants
-                if (!string.Equals(authenticatedTenantId, tenantId, StringComparison.OrdinalIgnoreCase))
+                if (!requestCtx.IsGlobalAdmin && !string.Equals(authenticatedTenantId, tenantId, StringComparison.OrdinalIgnoreCase))
                 {
-                    var isGlobal = await _globalAdminService.IsGlobalAdminAsync(userIdentifier);
-                    if (!isGlobal)
-                    {
-                        var forbidden = req.CreateResponse(HttpStatusCode.Forbidden);
-                        await forbidden.WriteAsJsonAsync(new { error = "Access denied: tenant mismatch" });
-                        return forbidden;
-                    }
+                    var forbidden = req.CreateResponse(HttpStatusCode.Forbidden);
+                    await forbidden.WriteAsJsonAsync(new { error = "Access denied: tenant mismatch" });
+                    return forbidden;
                 }
 
                 // Check if bootstrap token feature is enabled for this tenant

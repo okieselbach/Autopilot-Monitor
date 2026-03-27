@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useTenant } from "../../contexts/TenantContext";
 import { useAuth } from "../../contexts/AuthContext";
 import { useNotifications } from "../../contexts/NotificationContext";
-import { API_BASE_URL } from "@/lib/config";
+import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 import { trackEvent } from "@/lib/appInsights";
 import { parseSasExpiry } from "./components/DiagnosticsSection";
@@ -278,7 +278,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
         setLoading(true);
         setError(null);
 
-        const response = await authenticatedFetch(`${API_BASE_URL}/api/config/${tenantId}`, getAccessToken);
+        const response = await authenticatedFetch(api.config.tenant(tenantId), getAccessToken);
 
         if (!response.ok) {
           throw new Error(`Failed to load configuration: ${response.statusText}`);
@@ -390,7 +390,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
     if (!tenantId) return;
     try {
       setLoadingAdmins(true);
-      const response = await authenticatedFetch(`${API_BASE_URL}/api/tenants/${tenantId}/admins`, getAccessToken);
+      const response = await authenticatedFetch(api.tenants.admins(tenantId), getAccessToken);
       if (!response.ok) {
         throw new Error(`Failed to load admins: ${response.statusText}`);
       }
@@ -422,7 +422,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
     try {
       setBootstrapLoading(true);
       const response = await authenticatedFetch(
-        `${API_BASE_URL}/api/bootstrap/sessions?tenantId=${tenantId}`,
+        api.bootstrap.sessions(tenantId),
         getAccessToken,
       );
       if (response.ok) {
@@ -448,7 +448,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
     if (!user?.isGlobalAdmin) return;
     const fetchGlobalDiagPaths = async () => {
       try {
-        const res = await authenticatedFetch(`${API_BASE_URL}/api/global/config`, getAccessToken);
+        const res = await authenticatedFetch(api.globalConfig.get(), getAccessToken);
         if (!res.ok) return;
         const data = await res.json();
         if (data.diagnosticsGlobalLogPathsJson) {
@@ -516,7 +516,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
         unrestrictedMode,
       };
 
-      const response = await authenticatedFetch(`${API_BASE_URL}/api/config/${tenantId}`, getAccessToken, {
+      const response = await authenticatedFetch(api.config.tenant(tenantId), getAccessToken, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updatedConfig),
@@ -571,7 +571,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
 
       const redirectUri = `${window.location.origin}/settings/validation/autopilot`;
       const response = await authenticatedFetch(
-        `${API_BASE_URL}/api/config/${tenantId}/autopilot-device-validation/consent-url?redirectUri=${encodeURIComponent(redirectUri)}`,
+        api.config.autopilotConsentUrl(tenantId, redirectUri),
         getAccessToken,
       );
 
@@ -633,7 +633,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
         setAutopilotConsentInProgress(true);
 
         const statusResponse = await authenticatedFetch(
-          `${API_BASE_URL}/api/config/${tenantId}/autopilot-device-validation/consent-status`,
+          api.config.autopilotConsentStatus(tenantId),
           getAccessToken,
         );
 
@@ -677,7 +677,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
     setTestingWebhook(true);
     setTestWebhookResult(null);
     try {
-      const response = await authenticatedFetch(`${API_BASE_URL}/api/config/${tenantId}/test-notification`, getAccessToken, {
+      const response = await authenticatedFetch(api.config.testNotification(tenantId), getAccessToken, {
         method: "POST",
       });
       const data = await response.json();
@@ -780,7 +780,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
       setError(null);
       setSuccessMessage(null);
 
-      const response = await authenticatedFetch(`${API_BASE_URL}/api/tenants/${tenantId}/admins`, getAccessToken, {
+      const response = await authenticatedFetch(api.tenants.admins(tenantId), getAccessToken, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ upn: newAdminEmail.trim(), role: newMemberRole }),
@@ -820,7 +820,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
       setError(null);
       setSuccessMessage(null);
 
-      const response = await authenticatedFetch(`${API_BASE_URL}/api/tenants/${tenantId}/admins/${encodeURIComponent(adminUpn)}`, getAccessToken, {
+      const response = await authenticatedFetch(api.tenants.admin(tenantId, adminUpn), getAccessToken, {
         method: "DELETE",
       });
 
@@ -857,7 +857,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
       setSuccessMessage(null);
 
       const response = await authenticatedFetch(
-        `${API_BASE_URL}/api/tenants/${tenantId}/admins/${encodeURIComponent(adminUpn)}/${action}`,
+        api.tenants.adminAction(tenantId, adminUpn, action),
         getAccessToken,
         { method: "PATCH" },
       );
@@ -894,7 +894,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
       setSuccessMessage(null);
 
       const response = await authenticatedFetch(
-        `${API_BASE_URL}/api/tenants/${tenantId}/admins/${encodeURIComponent(adminUpn)}/permissions`,
+        api.tenants.adminPermissions(tenantId, adminUpn),
         getAccessToken,
         {
           method: "PATCH",
@@ -932,7 +932,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
   const createBootstrapSession = useCallback(async (validityHours: number, label: string): Promise<string | null> => {
     if (!tenantId) return null;
     try {
-      const response = await authenticatedFetch(`${API_BASE_URL}/api/bootstrap/sessions`, getAccessToken, {
+      const response = await authenticatedFetch(api.bootstrap.sessions(), getAccessToken, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tenantId, validityHours, label }),
@@ -961,7 +961,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
     if (!tenantId) return;
     try {
       const response = await authenticatedFetch(
-        `${API_BASE_URL}/api/bootstrap/sessions/${code}?tenantId=${tenantId}`,
+        api.bootstrap.session(code, tenantId),
         getAccessToken,
         { method: "DELETE" },
       );
@@ -991,7 +991,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
       setOffboarding(true);
       setOffboardError(null);
 
-      const response = await authenticatedFetch(`${API_BASE_URL}/api/tenants/${tenantId}/offboard`, getAccessToken, {
+      const response = await authenticatedFetch(api.tenants.offboard(tenantId), getAccessToken, {
         method: 'DELETE',
       });
 

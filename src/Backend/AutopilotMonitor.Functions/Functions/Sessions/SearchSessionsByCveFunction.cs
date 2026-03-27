@@ -58,14 +58,12 @@ public class SearchSessionsByCveFunction
 
             var sessions = await _sessionRepo.SearchSessionsByCveAsync(tenantId, cveId, minCvssScore, overallRisk, limit);
 
-            var response = req.CreateResponse(HttpStatusCode.OK);
-            await response.WriteAsJsonAsync(new
+            return await req.OkAsync(new
             {
                 success = true,
                 count = sessions.Count,
                 sessions
             });
-            return response;
         }
         catch (Exception ex)
         {

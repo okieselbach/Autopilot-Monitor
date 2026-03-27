@@ -16,16 +16,13 @@ namespace AutopilotMonitor.Functions.Functions.Diagnostics
     {
         private readonly ILogger<DiagnosticsDownloadFunction> _logger;
         private readonly TenantConfigurationService _configService;
-        private readonly GlobalAdminService _globalAdminService;
 
         public DiagnosticsDownloadFunction(
             ILogger<DiagnosticsDownloadFunction> logger,
-            TenantConfigurationService configService,
-            GlobalAdminService globalAdminService)
+            TenantConfigurationService configService)
         {
             _logger = logger;
             _configService = configService;
-            _globalAdminService = globalAdminService;
         }
 
         [Function("DiagnosticsDownloadUrl")]
@@ -35,8 +32,7 @@ namespace AutopilotMonitor.Functions.Functions.Diagnostics
             try
             {
                 // Authentication + MemberRead authorization enforced by PolicyEnforcementMiddleware
-                var userTenantId = TenantHelper.GetTenantId(req);
-                var userIdentifier = TenantHelper.GetUserIdentifier(req);
+                var requestCtx = req.GetRequestContext();
 
                 var query = HttpUtility.ParseQueryString(req.Url.Query);
                 var tenantId = query["tenantId"];
@@ -50,15 +46,11 @@ namespace AutopilotMonitor.Functions.Functions.Diagnostics
                 }
 
                 // Validate tenant access
-                if (tenantId != userTenantId)
+                if (!requestCtx.IsGlobalAdmin && tenantId != requestCtx.TenantId)
                 {
-                    var isGlobalAdmin = await _globalAdminService.IsGlobalAdminAsync(userIdentifier);
-                    if (!isGlobalAdmin)
-                    {
-                        var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-                        await forbiddenResponse.WriteAsJsonAsync(new { success = false, message = "Access denied." });
-                        return forbiddenResponse;
-                    }
+                    var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
+                    await forbiddenResponse.WriteAsJsonAsync(new { success = false, message = "Access denied." });
+                    return forbiddenResponse;
                 }
 
                 // Validate blob name (prevent path traversal, double-encoding, and null byte attacks)

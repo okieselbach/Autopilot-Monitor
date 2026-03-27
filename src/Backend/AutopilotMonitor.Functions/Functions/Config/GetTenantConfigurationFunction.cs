@@ -13,16 +13,13 @@ namespace AutopilotMonitor.Functions.Functions.Config
     {
         private readonly ILogger<GetTenantConfigurationFunction> _logger;
         private readonly TenantConfigurationService _configService;
-        private readonly GlobalAdminService _globalAdminService;
 
         public GetTenantConfigurationFunction(
             ILogger<GetTenantConfigurationFunction> logger,
-            TenantConfigurationService configService,
-            GlobalAdminService globalAdminService)
+            TenantConfigurationService configService)
         {
             _logger = logger;
             _configService = configService;
-            _globalAdminService = globalAdminService;
         }
 
         [Function("GetTenantConfiguration")]
@@ -33,25 +30,21 @@ namespace AutopilotMonitor.Functions.Functions.Config
             try
             {
                 // Authentication + MemberRead authorization enforced by PolicyEnforcementMiddleware
-                string authenticatedTenantId = TenantHelper.GetTenantId(req);
-                string userIdentifier = TenantHelper.GetUserIdentifier(req);
+                var requestCtx = req.GetRequestContext();
+                var userIdentifier = requestCtx.UserPrincipalName;
 
                 // Validate tenant access: cross-tenant only for Global Admins
-                if (!string.Equals(authenticatedTenantId, tenantId, StringComparison.OrdinalIgnoreCase))
+                if (!requestCtx.IsGlobalAdmin && !string.Equals(requestCtx.TenantId, tenantId, StringComparison.OrdinalIgnoreCase))
                 {
-                    var isGlobalAdmin = await _globalAdminService.IsGlobalAdminAsync(userIdentifier);
-                    if (!isGlobalAdmin)
+                    _logger.LogWarning("User {User} from tenant {AuthTenant} attempted to access configuration for tenant {TargetTenant}",
+                        userIdentifier, requestCtx.TenantId, tenantId);
+                    var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
+                    await forbiddenResponse.WriteAsJsonAsync(new
                     {
-                        _logger.LogWarning("User {User} from tenant {AuthTenant} attempted to access configuration for tenant {TargetTenant}",
-                            userIdentifier, authenticatedTenantId, tenantId);
-                        var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-                        await forbiddenResponse.WriteAsJsonAsync(new
-                        {
-                            success = false,
-                            message = "Access denied. You can only access your own tenant's configuration."
-                        });
-                        return forbiddenResponse;
-                    }
+                        success = false,
+                        message = "Access denied. You can only access your own tenant's configuration."
+                    });
+                    return forbiddenResponse;
                 }
 
                 _logger.LogInformation($"GetTenantConfiguration: {tenantId} by user {userIdentifier}");

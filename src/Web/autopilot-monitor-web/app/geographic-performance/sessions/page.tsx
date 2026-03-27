@@ -5,8 +5,9 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { ProtectedRoute } from "../../../components/ProtectedRoute";
 import { useTenant } from "../../../contexts/TenantContext";
 import { useAuth } from "../../../contexts/AuthContext";
-import { API_BASE_URL } from "@/lib/config";
+import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
+import { useAdminMode } from "@/hooks/useAdminMode";
 
 interface SessionSummary {
   sessionId: string;
@@ -93,19 +94,14 @@ function LocationSessionsContent() {
   const { tenantId } = useTenant();
   const { getAccessToken } = useAuth();
 
-  const [globalAdminMode] = useState(() => {
-    if (typeof window !== "undefined") {
-      return localStorage.getItem("globalAdminMode") === "true";
-    }
-    return false;
-  });
+  const { globalAdminMode } = useAdminMode();
 
   const fetchSessions = useCallback(async () => {
     if (!locationKey) return;
     try {
       const endpoint = globalAdminMode
-        ? `${API_BASE_URL}/api/global/metrics/geographic/sessions?days=${days}&groupBy=${groupBy}&locationKey=${encodeURIComponent(locationKey)}`
-        : `${API_BASE_URL}/api/metrics/geographic/sessions?tenantId=${tenantId}&days=${days}&groupBy=${groupBy}&locationKey=${encodeURIComponent(locationKey)}`;
+        ? api.metrics.globalGeographicSessions(Number(days), groupBy, locationKey)
+        : api.metrics.geographicSessions(tenantId, Number(days), groupBy, locationKey);
       const response = await authenticatedFetch(endpoint, getAccessToken);
       if (response.ok) {
         const result = await response.json();

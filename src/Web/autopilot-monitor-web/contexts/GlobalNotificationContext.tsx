@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { useAuth } from './AuthContext';
-import { API_BASE_URL } from '@/lib/config';
+import { api } from '@/lib/api';
 import { authenticatedFetch } from '@/lib/authenticatedFetch';
 
 export interface GlobalNotification {
@@ -41,7 +41,7 @@ export function GlobalNotificationProvider({ children }: { children: React.React
 
     try {
       const response = await authenticatedFetch(
-        `${API_BASE_URL}/api/global/notifications`,
+        api.notifications.list(),
         getAccessToken,
       );
       if (response.ok) {
@@ -89,7 +89,7 @@ export function GlobalNotificationProvider({ children }: { children: React.React
 
     try {
       await authenticatedFetch(
-        `${API_BASE_URL}/api/global/notifications/${id}/dismiss`,
+        api.notifications.dismiss(id),
         getAccessToken,
         { method: 'POST' },
       );
@@ -103,7 +103,7 @@ export function GlobalNotificationProvider({ children }: { children: React.React
 
     try {
       await authenticatedFetch(
-        `${API_BASE_URL}/api/global/notifications/dismiss-all`,
+        api.notifications.dismissAll(),
         getAccessToken,
         { method: 'POST' },
       );

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { API_BASE_URL } from "@/lib/config";
+import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 import { trackEvent } from "@/lib/appInsights";
 import { TenantConfiguration } from "./TenantManagementSection";
@@ -62,7 +62,7 @@ export function DeviceBlockSection({
     if (!tenantId) return;
     try {
       setLoadingBlockedDevices(true);
-      const response = await authenticatedFetch(`${API_BASE_URL}/api/devices/blocked?tenantId=${encodeURIComponent(tenantId)}`, getAccessToken);
+      const response = await authenticatedFetch(api.devices.blocked(tenantId), getAccessToken);
       if (!response.ok) throw new Error(`Failed to load blocked devices: ${response.statusText}`);
       const data = await response.json();
       setBlockedDevices(data.blocked ?? []);
@@ -79,7 +79,7 @@ export function DeviceBlockSection({
   const fetchAllBlockedDevices = async () => {
     try {
       setLoadingAllBlocked(true);
-      const response = await authenticatedFetch(`${API_BASE_URL}/api/global/devices/blocked`, getAccessToken);
+      const response = await authenticatedFetch(api.devices.allBlocked(), getAccessToken);
       if (!response.ok) throw new Error(`Failed to load blocked devices: ${response.statusText}`);
       const data = await response.json();
       setBlockedDevices(data.blocked ?? []);
@@ -104,7 +104,7 @@ export function DeviceBlockSection({
     try {
       setBlockingDevice(true);
       setError(null);
-      const response = await authenticatedFetch(`${API_BASE_URL}/api/devices/block`, getAccessToken, {
+      const response = await authenticatedFetch(api.devices.block(), getAccessToken, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -143,7 +143,7 @@ export function DeviceBlockSection({
       setUnblockingDevice(serialNumber);
       setError(null);
       const response = await authenticatedFetch(
-        `${API_BASE_URL}/api/devices/block/${encodeURIComponent(serialNumber)}?tenantId=${encodeURIComponent(tenantId)}`,
+        api.devices.unblock(serialNumber, tenantId),
         getAccessToken,
         { method: "DELETE" }
       );
@@ -172,7 +172,7 @@ export function DeviceBlockSection({
       setKillingDevice(device.serialNumber);
       setError(null);
       const remainingHours = Math.max(1, Math.ceil((new Date(device.unblockAt).getTime() - Date.now()) / 3600000));
-      const response = await authenticatedFetch(`${API_BASE_URL}/api/devices/block`, getAccessToken, {
+      const response = await authenticatedFetch(api.devices.block(), getAccessToken, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
