@@ -101,7 +101,7 @@ public static class EndpointAccessPolicyCatalog
         new("POST",   "feedback",                  EndpointPolicy.AuthenticatedUser),
 
         // ── MemberRead (Admin + Operator, later + Viewer) ───────────────
-        new("GET",    "sessions/quick-search",           EndpointPolicy.MemberRead),
+        new("GET",    "quick-search",                  EndpointPolicy.MemberRead),
         new("GET",    "sessions/search",              EndpointPolicy.MemberRead),
         new("GET",    "sessions/search-by-event",     EndpointPolicy.MemberRead),
         new("GET",    "sessions/search-by-cve",       EndpointPolicy.MemberRead),
