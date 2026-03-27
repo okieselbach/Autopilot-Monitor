@@ -3,19 +3,19 @@
  *
  * Selection logic:
  *   1. Explicit env var SEARCH_BACKEND=vector|fuse  →  use that
- *   2. Auto-detect: try to load @xenova/transformers
+ *   2. Auto-detect: try to load @huggingface/transformers
  *      - available  →  vector
  *      - missing    →  fuse (graceful fallback)
  *
  * This allows running the MCP server without the ~23 MB model download
- * by setting SEARCH_BACKEND=fuse or simply not installing @xenova/transformers.
+ * by setting SEARCH_BACKEND=fuse or simply not installing @huggingface/transformers.
  */
 
 import type { SearchBackend, SearchProvider } from './search-provider.js';
 
 async function isTransformersAvailable(): Promise<boolean> {
   try {
-    await import('@xenova/transformers');
+    await import('@huggingface/transformers');
     return true;
   } catch {
     return false;

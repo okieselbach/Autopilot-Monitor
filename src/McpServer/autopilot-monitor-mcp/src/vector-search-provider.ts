@@ -1,12 +1,12 @@
 /**
  * SearchProvider backed by sentence-transformer embeddings + cosine similarity.
- * Uses @xenova/transformers with the all-MiniLM-L6-v2 model (quantized, ~23 MB).
+ * Uses @huggingface/transformers with the all-MiniLM-L6-v2 model (quantized, ~23 MB).
  *
  * Pros:  True semantic understanding — "timeout" matches "waiting exceeded".
  * Cons:  First-run downloads the model; higher memory & CPU at index time.
  */
 
-import { pipeline, type FeatureExtractionPipeline } from '@xenova/transformers';
+import type { FeatureExtractionPipeline } from '@huggingface/transformers';
 import type { SearchDocument, SearchOptions, SearchProvider, SearchResult } from './search-provider.js';
 
 const MODEL_NAME = 'Xenova/all-MiniLM-L6-v2';
@@ -17,9 +17,11 @@ let embedder: FeatureExtractionPipeline | null = null;
 
 async function getEmbedder(): Promise<FeatureExtractionPipeline> {
   if (!embedder) {
-    embedder = await pipeline('feature-extraction', MODEL_NAME, {
-      quantized: true,
-    }) as FeatureExtractionPipeline;
+    // Dynamic import + cast to avoid TS2590 from the overloaded pipeline() signature
+    const { pipeline } = await import('@huggingface/transformers');
+    embedder = (await (pipeline as Function)('feature-extraction', MODEL_NAME, {
+      dtype: 'q8',
+    })) as FeatureExtractionPipeline;
   }
   return embedder;
 }
