@@ -74,7 +74,7 @@ namespace AutopilotMonitor.Functions.Functions.Config
                 // Save configuration
                 await _adminConfigService.SaveConfigurationAsync(config);
 
-                await _storageService.LogAuditEntryAsync(
+                await _maintenanceRepo.LogAuditEntryAsync(
                     AutopilotMonitor.Shared.Constants.AuditGlobalTenantId,
                     "UPDATE",
                     "AdminConfiguration",

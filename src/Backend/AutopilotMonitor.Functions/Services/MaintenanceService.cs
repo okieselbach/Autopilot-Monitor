@@ -138,7 +138,7 @@ namespace AutopilotMonitor.Functions.Services
                     // --- Backfill & repair tasks (manual-only, not in timer path) ---
 
                     // Safety net: backfill any sessions missing from SessionsIndex
-                    await _storageService.BackfillSessionIndexAsync();
+                    await _maintenanceRepo.BackfillSessionIndexAsync();
 
                     // One-time cleanup: remove ghost SessionsIndex entries caused by the
                     // StoreSessionAsync Replace-mode IndexRowKey bug (now fixed).
@@ -192,7 +192,7 @@ namespace AutopilotMonitor.Functions.Services
                         var timeoutHours = config?.SessionTimeoutHours ?? 5;
                         var cutoffTime = DateTime.UtcNow.AddHours(-timeoutHours);
 
-                        var stalledSessions = await _storageService.GetStalledSessionsAsync(tenantId, cutoffTime);
+                        var stalledSessions = await _maintenanceRepo.GetStalledSessionsAsync(tenantId, cutoffTime);
 
                         if (stalledSessions.Count == 0)
                         {
@@ -204,7 +204,7 @@ namespace AutopilotMonitor.Functions.Services
 
                         foreach (var session in stalledSessions)
                         {
-                            await _storageService.UpdateSessionStatusAsync(
+                            await _sessionRepo.UpdateSessionStatusAsync(
                                 session.TenantId,
                                 session.SessionId,
                                 SessionStatus.Failed,
@@ -215,7 +215,7 @@ namespace AutopilotMonitor.Functions.Services
 
                         totalSessionsTimedOut += sessionCount;
 
-                        await _storageService.LogAuditEntryAsync(
+                        await _maintenanceRepo.LogAuditEntryAsync(
                             tenantId,
                             "SessionTimeout",
                             "Session",
@@ -274,7 +274,7 @@ namespace AutopilotMonitor.Functions.Services
                 {
                     try
                     {
-                        var sessions = await _storageService.GetExcessiveDataSendersAsync(tenantId, windowCutoff, adminConfig.MaxSessionWindowHours);
+                        var sessions = await _maintenanceRepo.GetExcessiveDataSendersAsync(tenantId, windowCutoff, adminConfig.MaxSessionWindowHours);
 
                         if (sessions.Count == 0)
                         {
@@ -309,7 +309,7 @@ namespace AutopilotMonitor.Functions.Services
 
                         if (blockedCount > 0)
                         {
-                            await _storageService.LogAuditEntryAsync(
+                            await _maintenanceRepo.LogAuditEntryAsync(
                                 tenantId,
                                 "ExcessiveDataBlock",
                                 "Device",

@@ -308,7 +308,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
 
                                 if (reportData != null)
                                 {
-                                    await _storageService.StoreVulnerabilityReportAsync(
+                                    await _vulnRepo.StoreVulnerabilityReportAsync(
                                         capturedTenantId, capturedSessionId, reportData);
                                     _logger.LogInformation("{Prefix} Vulnerability correlation complete (async)", capturedPrefix);
 
@@ -318,7 +318,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                                         : null;
                                     if (findings != null && findings.Count > 0)
                                     {
-                                        _ = _storageService.UpsertCveIndexEntriesAsync(capturedTenantId, capturedSessionId, findings)
+                                        _ = _sessionRepo.UpsertCveIndexEntriesAsync(capturedTenantId, capturedSessionId, findings)
                                             .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException,
                                                 "CveIndex update failed (non-fatal)"), TaskContinuationOptions.OnlyOnFaulted);
                                     }
@@ -343,10 +343,10 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
 
                 // Increment platform stats (fire-and-forget, non-blocking)
                 // Note: IssuesDetected is now incremented inside the async rule engine task above.
-                _ = _storageService.IncrementPlatformStatAsync("TotalEventsProcessed", processedCount)
+                _ = _metricsRepo.IncrementPlatformStatAsync("TotalEventsProcessed", processedCount)
                     .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException, "Fire-and-forget IncrementPlatformStatAsync failed"), TaskContinuationOptions.OnlyOnFaulted);
                 if (classification.CompletionEvent != null)
-                    _ = _storageService.IncrementPlatformStatAsync("SuccessfulEnrollments")
+                    _ = _metricsRepo.IncrementPlatformStatAsync("SuccessfulEnrollments")
                         .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException, "Fire-and-forget IncrementPlatformStatAsync failed"), TaskContinuationOptions.OnlyOnFaulted);
 
                 // Store diagnostics blob name on session (if agent uploaded a diagnostics package)
@@ -357,13 +357,13 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                         : null;
                     if (!string.IsNullOrEmpty(blobName))
                     {
-                        await _storageService.UpdateSessionDiagnosticsBlobAsync(
+                        await _sessionRepo.UpdateSessionDiagnosticsBlobAsync(
                             request.TenantId, request.SessionId, blobName);
                     }
                 }
 
                 // Retrieve updated session data to include in SignalR messages
-                var updatedSession = await _storageService.GetSessionAsync(request.TenantId, request.SessionId);
+                var updatedSession = await _sessionRepo.GetSessionAsync(request.TenantId, request.SessionId);
 
                 // Session age warning: log if session >4h old and still InProgress (observability only)
                 if (updatedSession != null && updatedSession.Status == SessionStatus.InProgress)
