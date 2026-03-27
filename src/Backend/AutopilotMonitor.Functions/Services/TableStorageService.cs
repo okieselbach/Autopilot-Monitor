@@ -2,6 +2,7 @@ using Azure;
 using Azure.Data.Tables;
 using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Shared;
+using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -276,23 +277,4 @@ namespace AutopilotMonitor.Functions.Services
         }
     }
 
-    public class AuditLogEntry
-    {
-        public string Id { get; set; } = string.Empty;
-        public string TenantId { get; set; } = string.Empty;
-        public string Action { get; set; } = string.Empty;
-        public string EntityType { get; set; } = string.Empty;
-        public string EntityId { get; set; } = string.Empty;
-        public string PerformedBy { get; set; } = string.Empty;
-        public DateTime Timestamp { get; set; }
-        public string Details { get; set; } = string.Empty;
-    }
-
-    public class UserActivityMetrics
-    {
-        public int TotalUniqueUsers { get; set; }
-        public int DailyLogins { get; set; }
-        public int ActiveUsersLast7Days { get; set; }
-        public int ActiveUsersLast30Days { get; set; }
-    }
 }

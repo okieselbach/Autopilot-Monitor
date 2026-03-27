@@ -1,6 +1,7 @@
 using Azure.Data.Tables;
 using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Shared;
+using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;

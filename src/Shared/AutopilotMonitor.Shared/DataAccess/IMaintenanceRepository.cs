@@ -1,3 +1,6 @@
+using System;
+using System.Collections.Generic;
+using System.Threading.Tasks;
 using AutopilotMonitor.Shared.Models;
 
 namespace AutopilotMonitor.Shared.DataAccess
@@ -35,5 +38,17 @@ namespace AutopilotMonitor.Shared.DataAccess
 
         // --- Tenant Offboarding ---
         Task<Dictionary<string, int>> DeleteAllTenantDataAsync(string tenantId);
+    }
+
+    public class AuditLogEntry
+    {
+        public string Id { get; set; } = string.Empty;
+        public string TenantId { get; set; } = string.Empty;
+        public string Action { get; set; } = string.Empty;
+        public string EntityType { get; set; } = string.Empty;
+        public string EntityId { get; set; } = string.Empty;
+        public string PerformedBy { get; set; } = string.Empty;
+        public DateTime Timestamp { get; set; }
+        public string Details { get; set; } = string.Empty;
     }
 }

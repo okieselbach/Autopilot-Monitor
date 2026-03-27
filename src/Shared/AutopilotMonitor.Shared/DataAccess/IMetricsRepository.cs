@@ -1,3 +1,6 @@
+using System;
+using System.Collections.Generic;
+using System.Threading.Tasks;
 using AutopilotMonitor.Shared.Models;
 
 namespace AutopilotMonitor.Shared.DataAccess
@@ -32,5 +35,13 @@ namespace AutopilotMonitor.Shared.DataAccess
 
         // --- Metrics Summary (Agent API) ---
         Task<List<object>> GetMetricsSummaryAsync(string? tenantId);
+    }
+
+    public class UserActivityMetrics
+    {
+        public int TotalUniqueUsers { get; set; }
+        public int DailyLogins { get; set; }
+        public int ActiveUsersLast7Days { get; set; }
+        public int ActiveUsersLast30Days { get; set; }
     }
 }
