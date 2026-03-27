@@ -175,6 +175,11 @@ export default function AnalyzeRulesPage() {
       return;
     }
 
+    if (rulesList.some(r => r.ruleId.toLowerCase() === form.ruleId.trim().toLowerCase())) {
+      showError(`A rule with ID "${form.ruleId.trim()}" already exists. Please use a unique Rule ID.`);
+      return;
+    }
+
     setCreating(true);
     const payload = {
       ruleId: form.ruleId.trim(),

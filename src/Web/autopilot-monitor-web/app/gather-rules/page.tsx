@@ -228,6 +228,11 @@ export default function GatherRulesPage() {
       return;
     }
 
+    if (rulesList.some(r => r.ruleId.toLowerCase() === form.ruleId.toLowerCase())) {
+      showError(`A rule with ID "${form.ruleId}" already exists. Please use a unique Rule ID.`);
+      return;
+    }
+
     setCreating(true);
     const payload = {
       ruleId: form.ruleId,
