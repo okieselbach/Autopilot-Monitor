@@ -191,6 +191,27 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
             }
         }
 
+        public async Task<bool> SetTenantMemberEnabledAsync(string tenantId, string upn, bool isEnabled)
+        {
+            tenantId = tenantId.ToLowerInvariant();
+            upn = upn.ToLowerInvariant();
+
+            try
+            {
+                var result = await _tenantAdminsTableClient.GetEntityAsync<TenantAdminEntity>(tenantId, upn);
+                var entity = result.Value;
+                if (entity == null) return false;
+
+                entity.IsEnabled = isEnabled;
+                await _tenantAdminsTableClient.UpdateEntityAsync(entity, ETag.All);
+                return true;
+            }
+            catch (RequestFailedException ex) when (ex.Status == 404)
+            {
+                return false;
+            }
+        }
+
         public async Task<TenantMember?> GetTenantMemberAsync(string tenantId, string upn)
         {
             tenantId = tenantId.ToLowerInvariant();

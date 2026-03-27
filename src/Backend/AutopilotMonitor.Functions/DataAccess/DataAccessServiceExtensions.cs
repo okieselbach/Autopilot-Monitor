@@ -32,9 +32,7 @@ namespace AutopilotMonitor.Functions.DataAccess
             services.AddSingleton<IConfigRepository, TableConfigRepository>();
             services.AddSingleton<IBootstrapRepository, TableBootstrapRepository>();
             services.AddSingleton<INotificationRepository, TableNotificationRepository>();
-
-            // Note: IDeviceSecurityRepository implementation will be
-            // added as existing services are migrated to use the DAL interfaces.
+            services.AddSingleton<IDeviceSecurityRepository, TableDeviceSecurityRepository>();
 
             return services;
         }

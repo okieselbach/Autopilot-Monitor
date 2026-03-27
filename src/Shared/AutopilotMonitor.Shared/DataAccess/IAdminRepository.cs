@@ -18,6 +18,7 @@ namespace AutopilotMonitor.Shared.DataAccess
         Task<bool> AddTenantMemberAsync(string tenantId, string upn, string addedBy, string role, bool canManageBootstrapTokens = false);
         Task<bool> RemoveTenantMemberAsync(string tenantId, string upn);
         Task<bool> UpdateMemberPermissionsAsync(string tenantId, string upn, string role, bool canManageBootstrapTokens);
+        Task<bool> SetTenantMemberEnabledAsync(string tenantId, string upn, bool isEnabled);
         Task<TenantMember?> GetTenantMemberAsync(string tenantId, string upn);
         Task<bool> IsTenantAdminAsync(string tenantId, string upn);
         Task<bool> IsTenantMemberAsync(string tenantId, string upn);

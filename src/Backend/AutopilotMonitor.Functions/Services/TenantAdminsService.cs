@@ -123,20 +123,11 @@ public class TenantAdminsService
         tenantId = tenantId.ToLowerInvariant();
         upn = upn.ToLowerInvariant();
 
-        // Disable by updating permissions to current values but with disabled state
-        // The repository's UpdateMemberPermissions doesn't handle IsEnabled,
-        // so we use the member data to re-add with disabled state via a direct approach
-        var member = await _adminRepo.GetTenantMemberAsync(tenantId, upn);
-        if (member != null)
-        {
-            // Re-add with same role but we need to handle disable at repo level
-            // For now, remove and the effect is the same from an access perspective
-            await _adminRepo.RemoveTenantMemberAsync(tenantId, upn);
+        await _adminRepo.SetTenantMemberEnabledAsync(tenantId, upn, false);
 
-            InvalidateMemberCache(tenantId, upn);
+        InvalidateMemberCache(tenantId, upn);
 
-            _logger.LogInformation($"Disabled Tenant Admin: {upn} for tenant {tenantId}");
-        }
+        _logger.LogInformation($"Disabled Tenant Admin: {upn} for tenant {tenantId}");
     }
 
     /// <summary>
@@ -147,16 +138,11 @@ public class TenantAdminsService
         tenantId = tenantId.ToLowerInvariant();
         upn = upn.ToLowerInvariant();
 
-        var member = await _adminRepo.GetTenantMemberAsync(tenantId, upn);
-        if (member != null)
-        {
-            // Re-add to ensure enabled state
-            await _adminRepo.AddTenantMemberAsync(tenantId, upn, member.AddedBy, member.Role, member.CanManageBootstrapTokens);
+        await _adminRepo.SetTenantMemberEnabledAsync(tenantId, upn, true);
 
-            InvalidateMemberCache(tenantId, upn);
+        InvalidateMemberCache(tenantId, upn);
 
-            _logger.LogInformation($"Enabled Tenant Admin: {upn} for tenant {tenantId}");
-        }
+        _logger.LogInformation($"Enabled Tenant Admin: {upn} for tenant {tenantId}");
     }
 
     /// <summary>
