@@ -469,7 +469,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
 
         private void HandleImeSessionChange(string changeType)
         {
-            _emitEvent(new EnrollmentEvent
+            EmitImeTrackerEvent(new EnrollmentEvent
             {
                 SessionId = _sessionId,
                 TenantId = _tenantId,
