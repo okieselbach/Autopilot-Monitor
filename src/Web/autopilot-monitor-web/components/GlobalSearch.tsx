@@ -212,9 +212,9 @@ export default function GlobalSearch() {
   };
 
   return (
-    <>
-      {/* Desktop: inline search field (visible md+) */}
-      <div ref={containerRef} className="hidden md:flex relative flex-1 max-w-md mr-1">
+    <div className="flex-1 flex items-center">
+      {/* Desktop: inline search field centered (visible md+) */}
+      <div ref={containerRef} className="hidden md:flex relative w-full max-w-md mx-auto">
         <div className="relative w-full">
           <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
             <SearchIcon />
@@ -233,10 +233,10 @@ export default function GlobalSearch() {
         <ResultsDropdown />
       </div>
 
-      {/* Mobile: magnifying glass button (visible <md) */}
+      {/* Mobile: magnifying glass button pushed right (visible <md) */}
       <button
         onClick={() => setMobileOpen(true)}
-        className="md:hidden p-2 rounded-lg hover:bg-gray-100 transition-colors"
+        className="md:hidden ml-auto p-2 rounded-lg hover:bg-gray-100 transition-colors"
         title="Search"
       >
         <svg className="w-5 h-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -277,6 +277,6 @@ export default function GlobalSearch() {
           <ResultsDropdown mobile />
         </div>
       )}
-    </>
+    </div>
   );
 }
