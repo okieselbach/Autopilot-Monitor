@@ -56,7 +56,7 @@ public class SearchSessionsByCveFunction
             var overallRisk = query["overallRisk"];
             var limit = int.TryParse(query["limit"], out var lim) ? Math.Min(lim, 100) : 50;
 
-            var sessions = await _storageService.SearchSessionsByCveAsync(tenantId, cveId, minCvssScore, overallRisk, limit);
+            var sessions = await _sessionRepo.SearchSessionsByCveAsync(tenantId, cveId, minCvssScore, overallRisk, limit);
 
             var response = req.CreateResponse(HttpStatusCode.OK);
             await response.WriteAsJsonAsync(new

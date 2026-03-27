@@ -1,3 +1,4 @@
+using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Extensions.Logging;
 using System.Linq;
@@ -10,13 +11,13 @@ namespace AutopilotMonitor.Functions.Services
     /// </summary>
     public class ImeLogPatternService
     {
-        private readonly TableStorageService _storageService;
+        private readonly IRuleRepository _ruleRepo;
         private readonly ILogger<ImeLogPatternService> _logger;
         private bool _seeded = false;
 
-        public ImeLogPatternService(TableStorageService storageService, ILogger<ImeLogPatternService> logger)
+        public ImeLogPatternService(IRuleRepository ruleRepo, ILogger<ImeLogPatternService> logger)
         {
-            _storageService = storageService;
+            _ruleRepo = ruleRepo;
             _logger = logger;
         }
 
@@ -28,8 +29,8 @@ namespace AutopilotMonitor.Functions.Services
         {
             await EnsureBuiltInPatternsSeededAsync();
 
-            var globalPatterns = await _storageService.GetImeLogPatternsAsync("global");
-            var tenantPatterns = await _storageService.GetImeLogPatternsAsync(tenantId);
+            var globalPatterns = await _ruleRepo.GetImeLogPatternsAsync("global");
+            var tenantPatterns = await _ruleRepo.GetImeLogPatternsAsync(tenantId);
 
             var tenantOverrides = tenantPatterns.ToDictionary(p => p.PatternId, p => p);
 
@@ -63,8 +64,8 @@ namespace AutopilotMonitor.Functions.Services
         {
             await EnsureBuiltInPatternsSeededAsync();
 
-            var globalPatterns = await _storageService.GetImeLogPatternsAsync("global");
-            var tenantPatterns = await _storageService.GetImeLogPatternsAsync(tenantId);
+            var globalPatterns = await _ruleRepo.GetImeLogPatternsAsync("global");
+            var tenantPatterns = await _ruleRepo.GetImeLogPatternsAsync(tenantId);
             var tenantOverrides = tenantPatterns.ToDictionary(p => p.PatternId, p => p);
 
             var mergedPatterns = new List<ImeLogPattern>();
@@ -96,7 +97,7 @@ namespace AutopilotMonitor.Functions.Services
         public async Task<bool> CreatePatternAsync(string tenantId, ImeLogPattern pattern)
         {
             pattern.IsBuiltIn = false;
-            return await _storageService.StoreImeLogPatternAsync(pattern, tenantId);
+            return await _ruleRepo.StoreImeLogPatternAsync(pattern, tenantId);
         }
 
         /// <summary>
@@ -105,7 +106,7 @@ namespace AutopilotMonitor.Functions.Services
         /// </summary>
         public async Task<bool> UpdatePatternAsync(string tenantId, ImeLogPattern pattern)
         {
-            return await _storageService.StoreImeLogPatternAsync(pattern, tenantId);
+            return await _ruleRepo.StoreImeLogPatternAsync(pattern, tenantId);
         }
 
         /// <summary>
@@ -115,7 +116,7 @@ namespace AutopilotMonitor.Functions.Services
         public async Task<bool> UpdateGlobalPatternAsync(ImeLogPattern pattern)
         {
             pattern.IsBuiltIn = true;
-            return await _storageService.StoreImeLogPatternAsync(pattern, "global");
+            return await _ruleRepo.StoreImeLogPatternAsync(pattern, "global");
         }
 
         /// <summary>
@@ -123,7 +124,7 @@ namespace AutopilotMonitor.Functions.Services
         /// </summary>
         public async Task<bool> DeletePatternAsync(string tenantId, string patternId)
         {
-            return await _storageService.DeleteImeLogPatternAsync(tenantId, patternId);
+            return await _ruleRepo.DeleteImeLogPatternAsync(tenantId, patternId);
         }
 
         /// <summary>
@@ -132,7 +133,7 @@ namespace AutopilotMonitor.Functions.Services
         public async Task<bool> DeleteGlobalPatternAsync(string patternId)
         {
             _seeded = false;
-            return await _storageService.DeleteImeLogPatternAsync("global", patternId);
+            return await _ruleRepo.DeleteImeLogPatternAsync("global", patternId);
         }
 
         /// <summary>
@@ -143,12 +144,12 @@ namespace AutopilotMonitor.Functions.Services
         {
             _logger.LogInformation("Reseeding built-in IME log patterns (full re-import)...");
 
-            var existingGlobalPatterns = await _storageService.GetImeLogPatternsAsync("global");
+            var existingGlobalPatterns = await _ruleRepo.GetImeLogPatternsAsync("global");
 
             var deleted = 0;
             foreach (var pattern in existingGlobalPatterns.Where(p => p.IsBuiltIn))
             {
-                await _storageService.DeleteImeLogPatternAsync("global", pattern.PatternId);
+                await _ruleRepo.DeleteImeLogPatternAsync("global", pattern.PatternId);
                 deleted++;
             }
             _logger.LogInformation($"Deleted {deleted} old global built-in IME log patterns");
@@ -157,7 +158,7 @@ namespace AutopilotMonitor.Functions.Services
             foreach (var pattern in builtInPatterns)
             {
                 pattern.IsBuiltIn = true;
-                await _storageService.StoreImeLogPatternAsync(pattern, "global");
+                await _ruleRepo.StoreImeLogPatternAsync(pattern, "global");
             }
             _logger.LogInformation($"Written {builtInPatterns.Count} built-in IME log patterns from code");
 
@@ -174,7 +175,7 @@ namespace AutopilotMonitor.Functions.Services
         {
             if (_seeded) return;
 
-            var existingPatterns = await _storageService.GetImeLogPatternsAsync("global");
+            var existingPatterns = await _ruleRepo.GetImeLogPatternsAsync("global");
             var builtInPatterns = BuiltInImeLogPatterns.GetAll();
 
             if (existingPatterns.Count == 0)
@@ -183,7 +184,7 @@ namespace AutopilotMonitor.Functions.Services
                 foreach (var pattern in builtInPatterns)
                 {
                     pattern.IsBuiltIn = true;
-                    await _storageService.StoreImeLogPatternAsync(pattern, "global");
+                    await _ruleRepo.StoreImeLogPatternAsync(pattern, "global");
                 }
                 _logger.LogInformation($"Seeded {builtInPatterns.Count} built-in IME log patterns");
             }
@@ -200,13 +201,13 @@ namespace AutopilotMonitor.Functions.Services
                         if (existing.Pattern != pattern.Pattern || existing.Action != pattern.Action
                             || existing.Category != pattern.Category || existing.Description != pattern.Description)
                         {
-                            await _storageService.StoreImeLogPatternAsync(pattern, "global");
+                            await _ruleRepo.StoreImeLogPatternAsync(pattern, "global");
                             updated++;
                         }
                     }
                     else
                     {
-                        await _storageService.StoreImeLogPatternAsync(pattern, "global");
+                        await _ruleRepo.StoreImeLogPatternAsync(pattern, "global");
                         updated++;
                     }
                 }

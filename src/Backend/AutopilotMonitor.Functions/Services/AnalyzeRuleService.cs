@@ -1,3 +1,4 @@
+using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Extensions.Logging;
 
@@ -12,13 +13,13 @@ namespace AutopilotMonitor.Functions.Services
     /// </summary>
     public class AnalyzeRuleService
     {
-        private readonly TableStorageService _storageService;
+        private readonly IRuleRepository _ruleRepo;
         private readonly ILogger<AnalyzeRuleService> _logger;
         private bool _seeded = false;
 
-        public AnalyzeRuleService(TableStorageService storageService, ILogger<AnalyzeRuleService> logger)
+        public AnalyzeRuleService(IRuleRepository ruleRepo, ILogger<AnalyzeRuleService> logger)
         {
-            _storageService = storageService;
+            _ruleRepo = ruleRepo;
             _logger = logger;
         }
 
@@ -39,14 +40,14 @@ namespace AutopilotMonitor.Functions.Services
             await EnsureBuiltInRulesSeededAsync();
 
             // Global rules: built-in + community (single source of truth for definitions)
-            var globalRules = await _storageService.GetAnalyzeRulesAsync("global");
+            var globalRules = await _ruleRepo.GetAnalyzeRulesAsync("global");
 
             // Tenant rules: only custom rules (IsBuiltIn=false, IsCommunity=false)
-            var tenantRules = await _storageService.GetAnalyzeRulesAsync(tenantId);
+            var tenantRules = await _ruleRepo.GetAnalyzeRulesAsync(tenantId);
             var customRules = tenantRules.Where(r => !r.IsBuiltIn && !r.IsCommunity).ToList();
 
             // Per-tenant enabled/disabled states for global rules
-            var ruleStates = await _storageService.GetRuleStatesAsync(tenantId);
+            var ruleStates = await _ruleRepo.GetRuleStatesAsync(tenantId);
 
             var mergedRules = new List<AnalyzeRule>();
 
@@ -73,7 +74,7 @@ namespace AutopilotMonitor.Functions.Services
             rule.IsCommunity = false;
             rule.CreatedAt = DateTime.UtcNow;
             rule.UpdatedAt = DateTime.UtcNow;
-            return await _storageService.StoreAnalyzeRuleAsync(rule, tenantId);
+            return await _ruleRepo.StoreAnalyzeRuleAsync(rule, tenantId);
         }
 
         /// <summary>
@@ -85,11 +86,11 @@ namespace AutopilotMonitor.Functions.Services
         {
             if (rule.IsBuiltIn || rule.IsCommunity)
             {
-                return await _storageService.StoreRuleStateAsync(tenantId, rule.RuleId, rule.Enabled);
+                return await _ruleRepo.StoreRuleStateAsync(tenantId, rule.RuleId, rule.Enabled);
             }
 
             rule.UpdatedAt = DateTime.UtcNow;
-            return await _storageService.StoreAnalyzeRuleAsync(rule, tenantId);
+            return await _ruleRepo.StoreAnalyzeRuleAsync(rule, tenantId);
         }
 
         /// <summary>
@@ -101,10 +102,10 @@ namespace AutopilotMonitor.Functions.Services
         {
             if (rule.IsBuiltIn || rule.IsCommunity)
             {
-                return await _storageService.DeleteRuleStateAsync(tenantId, rule.RuleId);
+                return await _ruleRepo.DeleteRuleStateAsync(tenantId, rule.RuleId);
             }
 
-            return await _storageService.DeleteAnalyzeRuleAsync(tenantId, rule.RuleId);
+            return await _ruleRepo.DeleteAnalyzeRuleAsync(tenantId, rule.RuleId);
         }
 
         /// <summary>
@@ -116,12 +117,12 @@ namespace AutopilotMonitor.Functions.Services
         {
             _logger.LogInformation("Reseeding built-in analyze rules (full re-import)...");
 
-            var existingGlobalRules = await _storageService.GetAnalyzeRulesAsync("global");
+            var existingGlobalRules = await _ruleRepo.GetAnalyzeRulesAsync("global");
 
             var deleted = 0;
             foreach (var rule in existingGlobalRules.Where(r => r.IsBuiltIn))
             {
-                await _storageService.DeleteAnalyzeRuleAsync("global", rule.RuleId);
+                await _ruleRepo.DeleteAnalyzeRuleAsync("global", rule.RuleId);
                 deleted++;
             }
             _logger.LogInformation($"Deleted {deleted} old global built-in analyze rules");
@@ -129,7 +130,7 @@ namespace AutopilotMonitor.Functions.Services
             var builtInRules = BuiltInAnalyzeRules.GetAll();
             foreach (var rule in builtInRules)
             {
-                await _storageService.StoreAnalyzeRuleAsync(rule, "global");
+                await _ruleRepo.StoreAnalyzeRuleAsync(rule, "global");
             }
             _logger.LogInformation($"Written {builtInRules.Count} built-in analyze rules from code");
 
@@ -146,7 +147,7 @@ namespace AutopilotMonitor.Functions.Services
         {
             if (_seeded) return;
 
-            var existingRules = await _storageService.GetAnalyzeRulesAsync("global");
+            var existingRules = await _ruleRepo.GetAnalyzeRulesAsync("global");
             var builtInRules = BuiltInAnalyzeRules.GetAll();
 
             if (existingRules.Count == 0)
@@ -154,7 +155,7 @@ namespace AutopilotMonitor.Functions.Services
                 _logger.LogInformation("Seeding built-in analyze rules...");
                 foreach (var rule in builtInRules)
                 {
-                    await _storageService.StoreAnalyzeRuleAsync(rule, "global");
+                    await _ruleRepo.StoreAnalyzeRuleAsync(rule, "global");
                 }
                 _logger.LogInformation($"Seeded {builtInRules.Count} built-in analyze rules");
             }
@@ -173,14 +174,14 @@ namespace AutopilotMonitor.Functions.Services
                             || existing.Severity != rule.Severity
                             || existing.Trigger != rule.Trigger)
                         {
-                            await _storageService.StoreAnalyzeRuleAsync(rule, "global");
+                            await _ruleRepo.StoreAnalyzeRuleAsync(rule, "global");
                             updated++;
                         }
                     }
                     else
                     {
                         // New built-in rule added in code
-                        await _storageService.StoreAnalyzeRuleAsync(rule, "global");
+                        await _ruleRepo.StoreAnalyzeRuleAsync(rule, "global");
                         updated++;
                     }
                 }
