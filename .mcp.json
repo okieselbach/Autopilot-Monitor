@@ -2,10 +2,7 @@
   "mcpServers": {
     "autopilot-monitor": {
       "type": "http",
-      "url": "https://autopilotmonitor-mcp.kindwave-58b4b547.westeurope.azurecontainerapps.io/mcp",
-      "oauth": {
-        "clientId": "1a400946-62c1-4ab4-aa37-f730ac89704d"
-      }
+      "url": "https://autopilotmonitor-mcp.kindwave-58b4b547.westeurope.azurecontainerapps.io/mcp"
     }
   }
 }

@@ -12,11 +12,19 @@
  *   4. Claude Code → POST /oauth/token → proxied to Entra ID /token
  */
 import { Router } from 'express';
+import crypto from 'node:crypto';
 
 const CLIENT_ID = process.env.AUTOPILOT_ENTRA_CLIENT_ID ?? '1a400946-62c1-4ab4-aa37-f730ac89704d';
 const CLIENT_SECRET = process.env.AUTOPILOT_ENTRA_CLIENT_SECRET ?? '';
 const AUTHORITY = process.env.AUTOPILOT_ENTRA_AUTHORITY ?? 'https://login.microsoftonline.com/organizations';
 const SCOPES = `api://${CLIENT_ID}/access_as_user openid profile offline_access`;
+
+/**
+ * In-memory store for dynamically registered OAuth clients (RFC 7591).
+ * Clients re-register after a server restart — this is fine because the MCP
+ * server acts as an OAuth proxy and the real credentials live in Entra ID.
+ */
+const registeredClients = new Map<string, { name: string; redirectUris: string[] }>();
 
 /**
  * Derives the public base URL of this MCP server.
@@ -41,10 +49,33 @@ export function createOAuthRouter(): Router {
       issuer: baseUrl,
       authorization_endpoint: `${baseUrl}/oauth/authorize`,
       token_endpoint: `${baseUrl}/oauth/token`,
+      registration_endpoint: `${baseUrl}/oauth/register`,
       response_types_supported: ['code'],
       grant_types_supported: ['authorization_code', 'refresh_token'],
       code_challenge_methods_supported: ['S256'],
       scopes_supported: ['openid', 'profile', 'offline_access', `api://${CLIENT_ID}/access_as_user`],
+    });
+  });
+
+  // --- Dynamic Client Registration (RFC 7591) ---
+  router.post('/oauth/register', (req, res) => {
+    const { client_name, redirect_uris, grant_types, response_types, token_endpoint_auth_method } = req.body ?? {};
+
+    const clientId = crypto.randomUUID();
+    registeredClients.set(clientId, {
+      name: client_name ?? 'unknown',
+      redirectUris: Array.isArray(redirect_uris) ? redirect_uris : [],
+    });
+
+    console.error(`[oauth/register] Registered dynamic client ${clientId} (${client_name ?? 'unknown'})`);
+
+    res.status(201).json({
+      client_id: clientId,
+      client_name: client_name ?? 'unknown',
+      redirect_uris: redirect_uris ?? [],
+      grant_types: grant_types ?? ['authorization_code', 'refresh_token'],
+      response_types: response_types ?? ['code'],
+      token_endpoint_auth_method: token_endpoint_auth_method ?? 'none',
     });
   });
 
