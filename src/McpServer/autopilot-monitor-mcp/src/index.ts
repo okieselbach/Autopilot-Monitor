@@ -16,12 +16,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = parseInt(process.env.PORT ?? '8080', 10);
 const RULES_DIR = process.env.RULES_DIR ?? resolve(__dirname, '..', '..', '..', '..', 'rules');
 
-// --- Initialize MCP Server ---
-
-const server = new McpServer({
-  name: 'autopilot-monitor',
-  version: '1.2.0',
-});
+// --- Load shared knowledge base (reused across all sessions) ---
 
 console.error('Loading knowledge base documents…');
 const docs = await loadKnowledgeDocs(RULES_DIR);
@@ -31,8 +26,13 @@ const knowledgeBase = await createSearchProvider();
 await knowledgeBase.index(docs);
 console.error(`Search provider ready: ${knowledgeBase.name} — ${knowledgeBase.size} documents indexed.`);
 
-registerTools(server, knowledgeBase);
-registerResources(server);
+/** Creates a fresh McpServer instance per session (each needs its own protocol). */
+function createMcpServer(): McpServer {
+  const s = new McpServer({ name: 'autopilot-monitor', version: '1.2.0' });
+  registerTools(s, knowledgeBase);
+  registerResources(s);
+  return s;
+}
 
 // --- HTTP Server with Streamable HTTP Transport ---
 
@@ -92,6 +92,7 @@ app.all('/mcp', async (req, res) => {
     }
   };
 
+  const server = createMcpServer();
   await server.connect(transport);
 
   // Store transport for session reuse
