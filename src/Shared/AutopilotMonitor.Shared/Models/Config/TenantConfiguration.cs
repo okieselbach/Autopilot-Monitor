@@ -79,6 +79,13 @@ namespace AutopilotMonitor.Shared.Models
         public int? CustomRateLimitRequestsPerMinute { get; set; } = null;
 
         /// <summary>
+        /// Tenant plan tier. Determines default API rate limits and feature gates.
+        /// Values: "free", "pro", "enterprise". Default: "free".
+        /// Managed by Global Admins.
+        /// </summary>
+        public string PlanTier { get; set; } = "free";
+
+        /// <summary>
         /// Hardware whitelist: Allowed manufacturers (supports wildcards like "Dell*")
         /// Comma-separated list
         /// </summary>

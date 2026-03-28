@@ -69,5 +69,7 @@ namespace AutopilotMonitor.Shared.DataAccess
         public DateTime? ExpiresAt { get; set; }
         public bool IsActive { get; set; } = true;
         public long RequestCount { get; set; }
+        /// <summary>Per-key rate limit override. Null = use tenant/plan default.</summary>
+        public int? CustomRateLimitPerMinute { get; set; }
     }
 }

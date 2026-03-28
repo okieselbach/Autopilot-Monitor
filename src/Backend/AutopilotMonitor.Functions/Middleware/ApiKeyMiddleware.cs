@@ -2,6 +2,7 @@ using System.Net;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using AutopilotMonitor.Functions.Services;
 using AutopilotMonitor.Shared.DataAccess;
 using Microsoft.AspNetCore.Http;
@@ -21,6 +22,13 @@ public class ApiKeyMiddleware : IFunctionsWorkerMiddleware
     private readonly ILogger<ApiKeyMiddleware> _logger;
     private readonly IAdminRepository _adminRepo;
     private readonly RateLimitService _rateLimitService;
+    private readonly RateLimitConfigService _rateLimitConfigService;
+    private readonly IApiUsageRepository _apiUsageRepo;
+
+    // Matches GUIDs and GUID-like segments in URL paths for normalization
+    private static readonly Regex GuidPattern = new(
+        @"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+        RegexOptions.Compiled);
 
     // Routes that bypass ApiKey middleware (use device cert / bootstrap token auth)
     private static readonly string[] _bypassPrefixes =
@@ -33,11 +41,13 @@ public class ApiKeyMiddleware : IFunctionsWorkerMiddleware
         "/api/progress/",
     };
 
-    public ApiKeyMiddleware(ILogger<ApiKeyMiddleware> logger, IAdminRepository adminRepo, RateLimitService rateLimitService)
+    public ApiKeyMiddleware(ILogger<ApiKeyMiddleware> logger, IAdminRepository adminRepo, RateLimitService rateLimitService, RateLimitConfigService rateLimitConfigService, IApiUsageRepository apiUsageRepo)
     {
         _logger = logger;
         _adminRepo = adminRepo;
         _rateLimitService = rateLimitService;
+        _rateLimitConfigService = rateLimitConfigService;
+        _apiUsageRepo = apiUsageRepo;
     }
 
     public async Task Invoke(FunctionContext context, FunctionExecutionDelegate next)
@@ -105,8 +115,8 @@ public class ApiKeyMiddleware : IFunctionsWorkerMiddleware
             var scope = foundKey.Scope ?? "tenant";
             var keyTenantId = foundKey.TenantId;
 
-            // Rate limit: 60 req/min for tenant-scoped, 120 req/min for global-scoped
-            var maxRequests = scope == "global" ? 120 : 60;
+            // Rate limit: resolve from key override → tenant override → plan tier → fallback
+            var maxRequests = await _rateLimitConfigService.ResolveRateLimitAsync(foundKey);
             var rateLimitResult = _rateLimitService.CheckRateLimit($"apikey_{foundKey.KeyId}", maxRequests);
             if (!rateLimitResult.IsAllowed)
             {
@@ -156,6 +166,10 @@ public class ApiKeyMiddleware : IFunctionsWorkerMiddleware
             // Increment request count (fire-and-forget)
             _ = IncrementRequestCountAsync(partitionKey, foundKey.KeyId);
 
+            // Record per-endpoint usage (fire-and-forget)
+            var normalizedEndpoint = NormalizeEndpoint(requestPath);
+            _ = RecordUsageAsync(foundKey.KeyId, foundKey.TenantId ?? "", scope, normalizedEndpoint);
+
             await next(context);
         }
         catch (Exception ex)
@@ -176,6 +190,35 @@ public class ApiKeyMiddleware : IFunctionsWorkerMiddleware
         {
             // Non-fatal — don't block the request
         }
+    }
+
+    private async Task RecordUsageAsync(string keyId, string tenantId, string scope, string endpoint)
+    {
+        try
+        {
+            await _apiUsageRepo.IncrementUsageAsync(keyId, tenantId, scope, endpoint);
+        }
+        catch
+        {
+            // Non-fatal — don't block the request
+        }
+    }
+
+    /// <summary>
+    /// Normalizes a request path for usage grouping by replacing GUIDs with {id}.
+    /// E.g. "/api/sessions/abc-def-123/events" → "sessions/{id}/events"
+    /// </summary>
+    internal static string NormalizeEndpoint(string path)
+    {
+        // Strip /api/ prefix
+        var normalized = path.StartsWith("/api/", StringComparison.OrdinalIgnoreCase)
+            ? path.Substring(5)
+            : path.TrimStart('/');
+
+        // Replace GUIDs with {id}
+        normalized = GuidPattern.Replace(normalized, "{id}");
+
+        return normalized.ToLowerInvariant();
     }
 
     private static string ComputeHash(string key)

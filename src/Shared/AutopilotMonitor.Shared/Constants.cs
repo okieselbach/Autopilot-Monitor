@@ -275,6 +275,9 @@ namespace AutopilotMonitor.Shared
             public const string CveIndex = "CveIndex";
             public const string ApiKeys = "ApiKeys";
 
+            // API usage tracking
+            public const string ApiUsageLog = "ApiUsageLog";
+
             /// <summary>
             /// Returns all table names for initialization
             /// </summary>
@@ -310,7 +313,8 @@ namespace AutopilotMonitor.Shared
                 EventTypeIndex,
                 DeviceSnapshot,
                 CveIndex,
-                ApiKeys
+                ApiKeys,
+                ApiUsageLog
             };
         }
     }

@@ -42,6 +42,12 @@ namespace AutopilotMonitor.Shared.Models
         public int GlobalRateLimitRequestsPerMinute { get; set; } = 100;
 
         /// <summary>
+        /// JSON-serialized plan tier definitions mapping tier name to rate limits and features.
+        /// Example: {"free":{"apiRateLimit":60},"pro":{"apiRateLimit":300},"enterprise":{"apiRateLimit":1000}}
+        /// </summary>
+        public string? PlanTierDefinitionsJson { get; set; }
+
+        /// <summary>
         /// Container SAS URL used by maintenance to publish platform stats JSON files.
         /// Expected format: https://{account}.blob.core.windows.net/{container}?sv=...&sig=...
         /// </summary>

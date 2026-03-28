@@ -329,4 +329,172 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
       };
     }
   );
+
+  // Tool 10: get_api_usage
+  server.tool(
+    'get_api_usage',
+    'Get API usage statistics for MCP/API keys. Shows request counts per endpoint, per day. ' +
+    'Use to monitor how much the API is being used. Requires a global-scoped API key.',
+    {
+      keyId: z.string().optional().describe('Specific API key ID to query usage for'),
+      tenantId: z.string().optional().describe('Filter usage by tenant ID'),
+      dateFrom: z.string().optional().describe('Start date (YYYY-MM-DD)'),
+      dateTo: z.string().optional().describe('End date (YYYY-MM-DD)'),
+      daily: z.boolean().optional().default(false).describe('Return daily aggregated summary instead of per-endpoint breakdown'),
+    },
+    async (args) => {
+      try {
+        let data: unknown;
+        if (args.keyId) {
+          const params: Record<string, string | undefined> = { dateFrom: args.dateFrom, dateTo: args.dateTo };
+          data = await apiFetch(`/api/api-keys/${args.keyId}/usage${buildQuery(params)}`);
+        } else if (args.daily) {
+          const params: Record<string, string | undefined> = { tenantId: args.tenantId, dateFrom: args.dateFrom, dateTo: args.dateTo };
+          data = await apiFetch(`/api/global/api-usage/daily${buildQuery(params)}`);
+        } else {
+          const params: Record<string, string | undefined> = { tenantId: args.tenantId, dateFrom: args.dateFrom, dateTo: args.dateTo };
+          data = await apiFetch(`/api/global/api-usage${buildQuery(params)}`);
+        }
+        return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes('403')) {
+          return { content: [{ type: 'text' as const, text: 'Access denied. This tool requires a global-scoped API key.' }] };
+        }
+        throw error;
+      }
+    }
+  );
+
+  // ── Phase 3.1: Raw Data Tools (Tier 1 — customer-facing) ──────────
+
+  // Tool 11: query_raw_events
+  server.tool(
+    'query_raw_events',
+    'Query raw enrollment events with flexible filters. Unlike get_session_events, this can query across sessions within a tenant. ' +
+    'Provide sessionId for single-session raw events, or eventType for cross-session event search. ' +
+    'Returns raw event data for custom analysis.',
+    {
+      tenantId: z.string().optional().describe('Tenant ID (global-scoped key: required; tenant-scoped key: ignored)'),
+      sessionId: z.string().optional().describe('Filter to a specific session'),
+      eventType: z.string().optional().describe('Event type filter (e.g. "app_install_failed", "error_detected")'),
+      severity: z.enum(['Info', 'Warning', 'Error', 'Critical']).optional(),
+      source: z.string().optional().describe('Filter by event source/app name (substring match)'),
+      startedAfter: z.string().optional().describe('ISO 8601 datetime — only events after this'),
+      startedBefore: z.string().optional().describe('ISO 8601 datetime — only events before this'),
+      limit: z.number().min(1).max(500).optional().default(100),
+    },
+    async (args) => {
+      const { tenantId, ...rest } = args;
+      const isGlobal = !!tenantId;
+      const basePath = isGlobal ? '/api/global/raw/events' : '/api/raw/events';
+      const params: Record<string, string | number | boolean | undefined | null> = { ...rest };
+      if (isGlobal) params.tenantId = tenantId;
+      const data = await apiFetch(`${basePath}${buildQuery(params)}`);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  // Tool 12: query_raw_sessions
+  server.tool(
+    'query_raw_sessions',
+    'Query raw session data with flexible filters and field projection. Returns complete session entities without search abstraction. ' +
+    'Use the fields parameter to select specific properties (e.g. "sessionId,status,startedAt,serialNumber").',
+    {
+      tenantId: z.string().optional().describe('Tenant ID (global-scoped key: required; tenant-scoped key: ignored)'),
+      status: z.enum(['InProgress', 'Succeeded', 'Failed']).optional(),
+      startedAfter: z.string().optional().describe('ISO 8601 datetime'),
+      startedBefore: z.string().optional().describe('ISO 8601 datetime'),
+      serialNumber: z.string().optional(),
+      fields: z.string().optional().describe('Comma-separated fields to return (e.g. "sessionId,status,startedAt,serialNumber,durationSeconds")'),
+      limit: z.number().min(1).max(200).optional().default(50),
+    },
+    async (args) => {
+      const { tenantId, ...rest } = args;
+      const isGlobal = !!tenantId;
+      const basePath = isGlobal ? '/api/global/raw/sessions' : '/api/raw/sessions';
+      const params: Record<string, string | number | boolean | undefined | null> = { ...rest };
+      if (isGlobal) params.tenantId = tenantId;
+      const data = await apiFetch(`${basePath}${buildQuery(params)}`);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  // ── Phase 3.2: Admin Diagnostic Tools (Tier 2 — internal) ──────────
+
+  // Tool 13: list_tables
+  server.tool(
+    'list_tables',
+    'List all available Azure Table Storage tables that can be queried via query_table. ' +
+    'Requires a global-scoped API key.',
+    {},
+    async () => {
+      try {
+        const data = await apiFetch('/api/global/raw/tables');
+        return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes('403')) {
+          return { content: [{ type: 'text' as const, text: 'Access denied. This tool requires a global-scoped API key.' }] };
+        }
+        throw error;
+      }
+    }
+  );
+
+  // Tool 14: query_table
+  server.tool(
+    'query_table',
+    'Query any Azure Table Storage table directly (admin only). Returns raw table entities. ' +
+    'Use list_tables to see available tables. Requires a global-scoped API key.',
+    {
+      tableName: z.string().describe('Table name (e.g. "Sessions", "Events", "RuleResults", "TenantConfiguration")'),
+      partitionKey: z.string().optional().describe('Filter by exact partition key (usually TenantId)'),
+      rowKeyPrefix: z.string().optional().describe('Filter by row key prefix'),
+      filter: z.string().optional().describe('OData filter expression (e.g. "Status eq \'Failed\'")'),
+      limit: z.number().min(1).max(500).optional().default(100),
+    },
+    async (args) => {
+      try {
+        const { tableName, ...rest } = args;
+        const data = await apiFetch(`/api/global/raw/tables/${encodeURIComponent(tableName)}${buildQuery(rest)}`);
+        return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes('403')) {
+          return { content: [{ type: 'text' as const, text: 'Access denied. This tool requires a global-scoped API key.' }] };
+        }
+        throw error;
+      }
+    }
+  );
+
+  // Tool 15: query_backend_logs
+  server.tool(
+    'query_backend_logs',
+    'Query backend Application Insights logs using KQL (admin only). Use for debugging backend issues, ' +
+    'tracing requests by correlation ID, and platform diagnostics. Requires a global-scoped API key.',
+    {
+      query: z.string().describe('KQL query (e.g. "traces | where message contains \'error\' | take 50")'),
+      timespan: z.string().optional().default('PT1H').describe('ISO 8601 duration (default: PT1H = last 1 hour). Examples: PT30M, PT6H, P1D'),
+    },
+    async (args) => {
+      try {
+        const data = await apiFetch('/api/global/raw/logs', {
+          method: 'POST',
+          body: JSON.stringify({ query: args.query, timespan: args.timespan }),
+        });
+        return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes('403')) {
+          return { content: [{ type: 'text' as const, text: 'Access denied. This tool requires a global-scoped API key.' }] };
+        }
+        if (message.includes('503')) {
+          return { content: [{ type: 'text' as const, text: 'Application Insights diagnostics is not configured. Set APPINSIGHTS_APP_ID and assign Monitoring Reader role to the Function App Managed Identity.' }] };
+        }
+        throw error;
+      }
+    }
+  );
 }

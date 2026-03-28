@@ -101,6 +101,8 @@ public static class EndpointAccessPolicyCatalog
         new("POST",   "feedback",                  EndpointPolicy.AuthenticatedUser),
 
         // ── MemberRead (Admin + Operator, later + Viewer) ───────────────
+        new("GET",    "raw/sessions",                        EndpointPolicy.MemberRead),
+        new("GET",    "raw/events",                          EndpointPolicy.MemberRead),
         new("GET",    "search/quick",                   EndpointPolicy.MemberRead),
         new("GET",    "search/sessions",                EndpointPolicy.MemberRead),
         new("GET",    "search/sessions-by-event",       EndpointPolicy.MemberRead),
@@ -156,6 +158,11 @@ public static class EndpointAccessPolicyCatalog
         new("DELETE", "bootstrap/sessions/{code}", EndpointPolicy.BootstrapManagerOrGA),
 
         // ── GlobalAdminOnly ────────────────────────────────────────────
+        new("GET",    "global/raw/sessions",                  EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "global/raw/events",                    EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "global/raw/tables",                    EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "global/raw/tables/{tableName}",        EndpointPolicy.GlobalAdminOnly),
+        new("POST",   "global/raw/logs",                      EndpointPolicy.GlobalAdminOnly),
         new("GET",    "global/search/sessions",              EndpointPolicy.GlobalAdminOnly),
         new("GET",    "global/search/sessions-by-event",   EndpointPolicy.GlobalAdminOnly),
         new("GET",    "global/search/sessions-by-cve",     EndpointPolicy.GlobalAdminOnly),
@@ -202,6 +209,11 @@ public static class EndpointAccessPolicyCatalog
         new("DELETE", "vulnerability/cpe-mapping",       EndpointPolicy.GlobalAdminOnly),
         new("GET",    "vulnerability/cpe-mappings",      EndpointPolicy.GlobalAdminOnly),
         new("POST",   "rules/ime-log-patterns/reseed", EndpointPolicy.GlobalAdminOnly),
+        new("PATCH",  "api-keys/{keyId}/rate-limit",                        EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "api-keys/{keyId}/usage",                            EndpointPolicy.GlobalAdminOnly),
+        new("PATCH",  "config/{tenantId}/plan",                            EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "global/api-usage",                                  EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "global/api-usage/daily",                            EndpointPolicy.GlobalAdminOnly),
         new("GET",    "feedback/all",                                     EndpointPolicy.GlobalAdminOnly),
         new("GET",    "global/notifications",                            EndpointPolicy.GlobalAdminOnly),
         new("POST",   "global/notifications/dismiss-all",                EndpointPolicy.GlobalAdminOnly),

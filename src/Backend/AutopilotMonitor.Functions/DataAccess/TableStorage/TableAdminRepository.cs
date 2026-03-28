@@ -272,6 +272,9 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                 ["RequestCount"] = entry.RequestCount,
             };
 
+            if (entry.CustomRateLimitPerMinute.HasValue)
+                entity["CustomRateLimitPerMinute"] = entry.CustomRateLimitPerMinute.Value;
+
             if (entry.ExpiresAt.HasValue)
                 entity["ExpiresAt"] = new DateTimeOffset(entry.ExpiresAt.Value, TimeSpan.Zero);
 
@@ -372,6 +375,7 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                 ExpiresAt = entity.GetDateTimeOffset("ExpiresAt")?.UtcDateTime,
                 IsActive = entity.GetBoolean("IsActive") ?? true,
                 RequestCount = entity.TryGetValue("RequestCount", out var rc) ? Convert.ToInt64(rc) : 0L,
+                CustomRateLimitPerMinute = entity.TryGetValue("CustomRateLimitPerMinute", out var crl) ? Convert.ToInt32(crl) : null,
             };
         }
     }
