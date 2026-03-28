@@ -61,9 +61,9 @@ app.use('/mcp', accessGuard);
 
 // MCP Streamable HTTP endpoint
 app.all('/mcp', async (req, res) => {
-  // Handle GET for SSE streams and DELETE for session termination
   const sessionId = req.headers['mcp-session-id'] as string | undefined;
 
+  // GET (SSE stream) or DELETE (session termination) — need existing session
   if (req.method === 'GET' || req.method === 'DELETE') {
     const transport = sessionId ? transports.get(sessionId) : undefined;
     if (!transport) {
@@ -74,14 +74,29 @@ app.all('/mcp', async (req, res) => {
     return;
   }
 
-  // POST — either new session (initialize) or existing session
+  // POST — existing session: forward to its transport
   if (sessionId && transports.has(sessionId)) {
     const transport = transports.get(sessionId)!;
     await transport.handleRequest(req, res, req.body);
     return;
   }
 
-  // New session or stale session ID — create fresh transport and connect
+  // POST — stale session ID with non-initialize request: tell client to re-initialize
+  const isInitialize = req.body?.method === 'initialize' ||
+    (Array.isArray(req.body) && req.body.some((m: { method?: string }) => m.method === 'initialize'));
+
+  if (sessionId && !isInitialize) {
+    console.error(`[mcp] Stale session ${sessionId}, method=${req.body?.method} — returning 404`);
+    res.status(404).json({
+      jsonrpc: '2.0',
+      error: { code: -32000, message: 'Session not found' },
+      id: req.body?.id ?? null,
+    });
+    return;
+  }
+
+  // POST — new initialize request: create fresh session
+  console.error(`[mcp] New session — initialize request received`);
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: () => randomUUID(),
   });
@@ -89,13 +104,13 @@ app.all('/mcp', async (req, res) => {
   transport.onclose = () => {
     if (transport.sessionId) {
       transports.delete(transport.sessionId);
+      console.error(`[mcp] Session ${transport.sessionId} closed`);
     }
   };
 
   const server = createMcpServer();
   await server.connect(transport);
 
-  // Store transport for session reuse
   if (transport.sessionId) {
     transports.set(transport.sessionId, transport);
   }
