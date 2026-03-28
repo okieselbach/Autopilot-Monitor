@@ -1,4 +1,4 @@
-import { PublicClientApplication, type DeviceCodeRequest, LogLevel } from '@azure/msal-node';
+import { PublicClientApplication, LogLevel } from '@azure/msal-node';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { homedir } from 'node:os';
@@ -7,7 +7,6 @@ import { exec } from 'node:child_process';
 const CLIENT_ID = process.env.AUTOPILOT_ENTRA_CLIENT_ID ?? '1a400946-62c1-4ab4-aa37-f730ac89704d';
 const AUTHORITY = process.env.AUTOPILOT_ENTRA_AUTHORITY ?? 'https://login.microsoftonline.com/organizations';
 const SCOPES = [`api://${CLIENT_ID}/access_as_user`];
-
 const CACHE_DIR = resolve(homedir(), '.autopilot-monitor');
 const CACHE_FILE = resolve(CACHE_DIR, 'auth-cache.json');
 
@@ -53,9 +52,21 @@ function getClient(): PublicClientApplication {
   return pca;
 }
 
+/** Open a URL in the system default browser */
+function openBrowser(url: string): Promise<void> {
+  return new Promise((resolve) => {
+    const cmd = process.platform === 'win32'
+      ? `start "" "${url}"`
+      : process.platform === 'darwin'
+        ? `open "${url}"`
+        : `xdg-open "${url}" 2>/dev/null`;
+    exec(cmd, () => resolve());
+  });
+}
+
 /**
- * Acquires an access token — tries silent refresh first, falls back to device code flow.
- * All interactive prompts go to stderr (stdout is the MCP JSON-RPC transport).
+ * Acquires an access token — tries silent refresh first, falls back to interactive browser login.
+ * All log output goes to stderr (stdout is the MCP JSON-RPC transport).
  */
 export async function getAccessToken(): Promise<string> {
   const client = getClient();
@@ -75,49 +86,33 @@ export async function getAccessToken(): Promise<string> {
         scopes: SCOPES,
       });
       if (result?.accessToken) {
-        // Persist updated cache (refreshed tokens)
         await saveCache(client.getTokenCache().serialize());
         return result.accessToken;
       }
     } catch {
-      // Silent failed — fall through to device code
+      // Silent failed — fall through to interactive login
     }
   }
 
-  // Device code flow — open browser & copy code to clipboard
-  const deviceCodeRequest: DeviceCodeRequest = {
+  // Interactive browser login — opens system browser, listens on localhost for redirect
+  console.error('');
+  console.error('=== Authentication Required ===');
+  console.error('Opening browser for sign-in…');
+  console.error('');
+
+  const result = await client.acquireTokenInteractive({
     scopes: SCOPES,
-    deviceCodeCallback: (response) => {
-      console.error('');
-      console.error('=== Authentication Required ===');
-      console.error(response.message);
-      console.error('');
+    openBrowser,
+  });
 
-      // Copy device code to clipboard and open verification URL in browser
-      const code = response.userCode;
-      const url = response.verificationUri;
-      if (process.platform === 'win32') {
-        exec(`echo|set /p="${code}" | clip`);
-        exec(`start "" "${url}"`);
-      } else if (process.platform === 'darwin') {
-        exec(`echo -n "${code}" | pbcopy`);
-        exec(`open "${url}"`);
-      } else {
-        exec(`echo -n "${code}" | xclip -selection clipboard 2>/dev/null || echo -n "${code}" | xsel --clipboard 2>/dev/null`);
-        exec(`xdg-open "${url}" 2>/dev/null`);
-      }
-      console.error(`[auth] Code "${code}" copied to clipboard — paste it in the browser to sign in.`);
-    },
-  };
-
-  const result = await client.acquireTokenByDeviceCode(deviceCodeRequest);
   if (!result?.accessToken) {
-    throw new Error('Device code authentication failed — no access token received');
+    throw new Error('Interactive authentication failed — no access token received');
   }
 
   // Persist cache after successful auth
   await saveCache(client.getTokenCache().serialize());
 
+  console.error(`[auth] Authenticated as ${result.account?.username ?? 'unknown'}`);
   return result.accessToken;
 }
 
