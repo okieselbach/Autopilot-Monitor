@@ -42,6 +42,7 @@ export default function McpUsersSection() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(0);
+  const [savingPolicy, setSavingPolicy] = useState(false);
 
   const ITEMS_PER_PAGE = 5;
 
@@ -67,6 +68,42 @@ export default function McpUsersSection() {
   useEffect(() => {
     fetchMcpUsers();
   }, [fetchMcpUsers]);
+
+  const handlePolicyChange = useCallback(async (newPolicy: McpPolicy) => {
+    try {
+      setSavingPolicy(true);
+      setError(null);
+      setSuccessMessage(null);
+
+      // Read current global config, update McpAccessPolicy, save back
+      const getRes = await authenticatedFetch(api.globalConfig.get(), getAccessToken);
+      if (!getRes.ok) throw new Error(`Failed to load global config: ${getRes.statusText}`);
+      const config = await getRes.json();
+
+      const saveRes = await authenticatedFetch(api.globalConfig.get(), getAccessToken, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...config, mcpAccessPolicy: newPolicy }),
+      });
+
+      if (!saveRes.ok) {
+        const data = await saveRes.json();
+        throw new Error(data.error || `Failed to save policy: ${saveRes.statusText}`);
+      }
+
+      setPolicy(newPolicy);
+      setSuccessMessage(`MCP access policy changed to "${POLICY_LABELS[newPolicy]}".`);
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err) {
+      if (err instanceof TokenExpiredError) {
+        addNotification("error", "Session Expired", err.message, "session-expired-error");
+      } else {
+        setError(err instanceof Error ? err.message : "Failed to save policy");
+      }
+    } finally {
+      setSavingPolicy(false);
+    }
+  }, [getAccessToken, addNotification]);
 
   const handleAddUser = useCallback(async () => {
     if (!newEmail.trim()) return;
@@ -203,20 +240,26 @@ export default function McpUsersSection() {
           </div>
         )}
 
-        {/* Policy Info */}
+        {/* Policy Selector */}
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <div className="flex items-start space-x-3">
-            <svg className="w-5 h-5 text-blue-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div className="text-sm text-blue-800">
-              <p className="font-medium">Access Policy: {POLICY_LABELS[policy]}</p>
+              <p className="font-medium">Access Policy</p>
               <p className="mt-1">{POLICY_DESCRIPTIONS[policy]}</p>
               {policy === "WhitelistOnly" && (
                 <p className="mt-1">Global Admins always have access, no separate entry needed.</p>
               )}
             </div>
+            <select
+              value={policy}
+              onChange={(e) => handlePolicyChange(e.target.value as McpPolicy)}
+              disabled={savingPolicy}
+              className="px-3 py-2 border border-blue-300 rounded-lg text-sm text-blue-900 bg-white focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:opacity-50 transition-colors"
+            >
+              <option value="Disabled">{POLICY_LABELS.Disabled}</option>
+              <option value="WhitelistOnly">{POLICY_LABELS.WhitelistOnly}</option>
+              <option value="AllMembers">{POLICY_LABELS.AllMembers}</option>
+            </select>
           </div>
         </div>
 

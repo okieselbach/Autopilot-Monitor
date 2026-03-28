@@ -243,7 +243,7 @@ export const EXPANDABLE_NAV_GROUPS: ExpandableNavGroup[] = [
         items: [
           { id: "ga-global", label: "Global Settings", href: "/admin/settings/global" },
           { id: "ga-diag-paths", label: "Diagnostics Log Paths", href: "/admin/settings/diagnostics-log-paths" },
-          { id: "ga-mcp-users", label: "MCP Users", href: "/settings/access/mcp-users" },
+          { id: "ga-mcp-users", label: "MCP Users", href: "/admin/settings/mcp-users" },
           { id: "ga-config-reseed", label: "Config Reseed", href: "/admin/settings/config-reseed" },
         ],
       },

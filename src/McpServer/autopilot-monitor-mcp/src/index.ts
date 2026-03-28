@@ -8,9 +8,8 @@ import { registerTools } from './tools.js';
 import { registerResources } from './resources.js';
 import { loadKnowledgeDocs } from './knowledge-base.js';
 import { createSearchProvider } from './search-factory.js';
-import { setCurrentToken } from './client.js';
-import { extractTokenClaims, isTokenExpired } from './auth.js';
 import { createOAuthRouter } from './oauth.js';
+import { accessGuard } from './access-guard.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -57,30 +56,8 @@ app.get('/health', (_req, res) => {
 // Track transports by session ID for reuse
 const transports = new Map<string, StreamableHTTPServerTransport>();
 
-// Auth middleware for /mcp — extract Bearer token, validate basic claims, set for pass-through
-app.use('/mcp', (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader?.startsWith('Bearer ')) {
-    res.status(401).json({ error: 'Missing or invalid Authorization header' });
-    return;
-  }
-
-  const token = authHeader.slice(7);
-  const claims = extractTokenClaims(token);
-  if (!claims || !claims.upn) {
-    res.status(401).json({ error: 'Invalid token: missing required claims' });
-    return;
-  }
-
-  if (isTokenExpired(claims)) {
-    res.status(401).json({ error: 'Token expired' });
-    return;
-  }
-
-  // Set token for pass-through to backend API
-  setCurrentToken(token);
-  next();
-});
+// Access guard for /mcp — validates JWT, checks backend whitelist, enforces rate limits
+app.use('/mcp', accessGuard);
 
 // MCP Streamable HTTP endpoint
 app.all('/mcp', async (req, res) => {
