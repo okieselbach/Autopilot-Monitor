@@ -1,5 +1,6 @@
 using Azure;
 using Azure.Data.Tables;
+using Azure.Identity;
 using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.DataAccess;
@@ -30,8 +31,28 @@ namespace AutopilotMonitor.Functions.Services
         public TableStorageService(IConfiguration configuration, ILogger<TableStorageService> logger)
         {
             _logger = logger;
+
             var connectionString = configuration["AzureTableStorageConnectionString"];
-            _tableServiceClient = new TableServiceClient(connectionString);
+            var storageAccountName = configuration["AzureStorageAccountName"];
+
+            if (!string.IsNullOrEmpty(storageAccountName))
+            {
+                // Managed Identity: use DefaultAzureCredential with storage account name
+                var tableUri = new Uri($"https://{storageAccountName}.table.core.windows.net");
+                _tableServiceClient = new TableServiceClient(tableUri, new DefaultAzureCredential());
+                _logger.LogInformation("Table Storage initialized with Managed Identity (account: {Account})", storageAccountName);
+            }
+            else if (!string.IsNullOrEmpty(connectionString))
+            {
+                // Fallback: connection string (local dev, legacy)
+                _tableServiceClient = new TableServiceClient(connectionString);
+                _logger.LogInformation("Table Storage initialized with connection string");
+            }
+            else
+            {
+                throw new InvalidOperationException(
+                    "Table Storage not configured. Set either 'AzureStorageAccountName' (for Managed Identity) or 'AzureTableStorageConnectionString'.");
+            }
         }
 
         /// <summary>

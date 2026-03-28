@@ -1,10 +1,8 @@
 using System.Net;
 using System.Web;
-using Azure.Storage.Blobs;
 using AutopilotMonitor.Functions.Services;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace AutopilotMonitor.Functions.Functions.Reports
@@ -16,16 +14,15 @@ namespace AutopilotMonitor.Functions.Functions.Reports
     public class GetSessionReportDownloadUrlFunction
     {
         private readonly ILogger<GetSessionReportDownloadUrlFunction> _logger;
-        private readonly string _blobConnectionString;
+        private readonly BlobStorageService _blobStorage;
         private const string ContainerName = "session-reports";
 
         public GetSessionReportDownloadUrlFunction(
             ILogger<GetSessionReportDownloadUrlFunction> logger,
-            IConfiguration configuration)
+            BlobStorageService blobStorage)
         {
             _logger = logger;
-            _blobConnectionString = configuration["AzureBlobStorageConnectionString"]
-                ?? throw new InvalidOperationException("AzureBlobStorageConnectionString is not configured");
+            _blobStorage = blobStorage;
         }
 
         [Function("GetSessionReportDownloadUrl")]
@@ -54,8 +51,7 @@ namespace AutopilotMonitor.Functions.Functions.Reports
                     return badRequest;
                 }
 
-                var blobServiceClient = new BlobServiceClient(_blobConnectionString);
-                var containerClient = blobServiceClient.GetBlobContainerClient(ContainerName);
+                var containerClient = _blobStorage.GetContainerClient(ContainerName);
                 var blobClient = containerClient.GetBlobClient(blobName);
 
                 if (!await blobClient.ExistsAsync())
@@ -65,9 +61,8 @@ namespace AutopilotMonitor.Functions.Functions.Reports
                     return notFoundResponse;
                 }
 
-                // The connection string uses a service-level SAS token, so the blob URI
-                // already contains the access token — no separate SAS generation needed.
-                var downloadUrl = blobClient.Uri.ToString();
+                // Generate time-limited download URL (15 minutes)
+                var downloadUrl = await _blobStorage.GetDownloadUrlAsync(ContainerName, blobName, TimeSpan.FromMinutes(15));
 
                 _logger.LogInformation("Generated session report download URL for blob {BlobName}", blobName);
 

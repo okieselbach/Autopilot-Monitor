@@ -4,11 +4,9 @@ using System.IO;
 using System.IO.Compression;
 using System.Text;
 using System.Threading.Tasks;
-using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
 using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 
@@ -23,18 +21,17 @@ namespace AutopilotMonitor.Functions.Services
     {
         private readonly INotificationRepository _notificationRepo;
         private readonly ILogger<SessionReportService> _logger;
-        private readonly string _blobConnectionString;
+        private readonly BlobStorageService _blobStorage;
         private const string ContainerName = "session-reports";
 
         public SessionReportService(
             INotificationRepository notificationRepo,
-            IConfiguration configuration,
+            BlobStorageService blobStorage,
             ILogger<SessionReportService> logger)
         {
             _notificationRepo = notificationRepo;
             _logger = logger;
-            _blobConnectionString = configuration["AzureBlobStorageConnectionString"]
-                ?? throw new InvalidOperationException("AzureBlobStorageConnectionString is not configured");
+            _blobStorage = blobStorage;
         }
 
         /// <summary>
@@ -127,8 +124,7 @@ namespace AutopilotMonitor.Functions.Services
 
             // 2. Upload ZIP to central blob storage
             zipStream.Position = 0;
-            var blobServiceClient = new BlobServiceClient(_blobConnectionString);
-            var containerClient = blobServiceClient.GetBlobContainerClient(ContainerName);
+            var containerClient = _blobStorage.GetContainerClient(ContainerName);
             await containerClient.CreateIfNotExistsAsync();
             var blobClient = containerClient.GetBlobClient(blobName);
             await blobClient.UploadAsync(zipStream, new BlobUploadOptions
