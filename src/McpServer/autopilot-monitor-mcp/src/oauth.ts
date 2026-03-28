@@ -6,17 +6,30 @@
  * endpoints, which redirect to/from Entra ID.
  *
  * Flow:
- *   1. Claude Code → GET /oauth/authorize → 302 to Entra ID /authorize
- *   2. User authenticates at Entra ID
- *   3. Entra ID → GET /oauth/callback → 302 back to Claude Code with code
- *   4. Claude Code → POST /oauth/token → proxied to Entra ID /token
+ *   1. Claude Code → POST /mcp → 401 (with WWW-Authenticate header)
+ *   2. Claude Code → GET /.well-known/oauth-protected-resource → discovers auth server (RFC 9728)
+ *   3. Claude Code → GET /.well-known/oauth-authorization-server → discovers endpoints (RFC 8414)
+ *   4. Claude Code → POST /oauth/register → dynamic client registration (RFC 7591)
+ *   5. Claude Code → GET /oauth/authorize → 302 to Entra ID /authorize
+ *   6. User authenticates at Entra ID
+ *   7. Entra ID → GET /oauth/callback → 302 back to Claude Code with code
+ *   8. Claude Code → POST /oauth/token → proxied to Entra ID /token
+ *   9. Claude Code → POST /mcp (with Bearer token) → MCP session established
  */
 import { Router } from 'express';
+import crypto from 'node:crypto';
 
 const CLIENT_ID = process.env.AUTOPILOT_ENTRA_CLIENT_ID ?? '1a400946-62c1-4ab4-aa37-f730ac89704d';
 const CLIENT_SECRET = process.env.AUTOPILOT_ENTRA_CLIENT_SECRET ?? '';
 const AUTHORITY = process.env.AUTOPILOT_ENTRA_AUTHORITY ?? 'https://login.microsoftonline.com/organizations';
 const SCOPES = `api://${CLIENT_ID}/access_as_user openid profile offline_access`;
+
+/**
+ * In-memory store for dynamically registered OAuth clients (RFC 7591).
+ * Clients re-register after a server restart — this is fine because the MCP
+ * server acts as an OAuth proxy and the real credentials live in Entra ID.
+ */
+const registeredClients = new Map<string, { name: string; redirectUris: string[] }>();
 
 /**
  * Derives the public base URL of this MCP server.
@@ -34,6 +47,19 @@ function getPublicBaseUrl(req: import('express').Request): string {
 export function createOAuthRouter(): Router {
   const router = Router();
 
+  // --- Protected Resource Metadata (RFC 9728) ---
+  // This is the FIRST endpoint Claude Code fetches after receiving a 401.
+  // It tells the client where the authorization server lives.
+  router.get('/.well-known/oauth-protected-resource', (req, res) => {
+    const baseUrl = getPublicBaseUrl(req);
+    res.json({
+      resource: baseUrl,
+      authorization_servers: [baseUrl],
+      bearer_methods_supported: ['header'],
+      scopes_supported: ['openid', 'profile', 'offline_access', `api://${CLIENT_ID}/access_as_user`],
+    });
+  });
+
   // --- OAuth Authorization Server Metadata (RFC 8414) ---
   router.get('/.well-known/oauth-authorization-server', (req, res) => {
     const baseUrl = getPublicBaseUrl(req);
@@ -41,10 +67,33 @@ export function createOAuthRouter(): Router {
       issuer: baseUrl,
       authorization_endpoint: `${baseUrl}/oauth/authorize`,
       token_endpoint: `${baseUrl}/oauth/token`,
+      registration_endpoint: `${baseUrl}/oauth/register`,
       response_types_supported: ['code'],
       grant_types_supported: ['authorization_code', 'refresh_token'],
       code_challenge_methods_supported: ['S256'],
       scopes_supported: ['openid', 'profile', 'offline_access', `api://${CLIENT_ID}/access_as_user`],
+    });
+  });
+
+  // --- Dynamic Client Registration (RFC 7591) ---
+  router.post('/oauth/register', (req, res) => {
+    const { client_name, redirect_uris, grant_types, response_types, token_endpoint_auth_method } = req.body ?? {};
+
+    const clientId = crypto.randomUUID();
+    registeredClients.set(clientId, {
+      name: client_name ?? 'unknown',
+      redirectUris: Array.isArray(redirect_uris) ? redirect_uris : [],
+    });
+
+    console.error(`[oauth/register] Registered dynamic client ${clientId} (${client_name ?? 'unknown'})`);
+
+    res.status(201).json({
+      client_id: clientId,
+      client_name: client_name ?? 'unknown',
+      redirect_uris: redirect_uris ?? [],
+      grant_types: grant_types ?? ['authorization_code', 'refresh_token'],
+      response_types: response_types ?? ['code'],
+      token_endpoint_auth_method: token_endpoint_auth_method ?? 'none',
     });
   });
 
