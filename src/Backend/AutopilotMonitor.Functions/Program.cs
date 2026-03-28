@@ -114,6 +114,7 @@ builder.Services.AddSingleton<RateLimitService>();
 builder.Services.AddSingleton<UsageMetricsService>();
 builder.Services.AddSingleton<PlatformMetricsService>();
 builder.Services.AddSingleton<GlobalAdminService>();
+builder.Services.AddSingleton<McpUserService>();
 builder.Services.AddSingleton<PreviewWhitelistService>();
 builder.Services.AddSingleton<TenantAdminsService>();
 builder.Services.AddSingleton<HealthCheckService>();

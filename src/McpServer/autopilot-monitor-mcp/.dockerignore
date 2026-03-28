@@ -1,0 +1,10 @@
+**/node_modules
+**/dist
+**/.git
+**/*.md
+**/.env
+**/.env.*
+src/Agent
+src/Backend
+src/Shared
+src/Web

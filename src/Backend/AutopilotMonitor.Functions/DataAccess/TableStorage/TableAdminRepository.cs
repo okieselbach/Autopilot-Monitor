@@ -15,6 +15,7 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
     {
         private readonly TableClient _globalAdminsTableClient;
         private readonly TableClient _tenantAdminsTableClient;
+        private readonly TableClient _mcpUsersTableClient;
         private readonly ILogger<TableAdminRepository> _logger;
 
         public TableAdminRepository(
@@ -24,6 +25,7 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
             _logger = logger;
             _globalAdminsTableClient = storage.GetTableClient(Constants.TableNames.GlobalAdmins);
             _tenantAdminsTableClient = storage.GetTableClient(Constants.TableNames.TenantAdmins);
+            _mcpUsersTableClient = storage.GetTableClient(Constants.TableNames.McpUsers);
         }
 
         // --- Global Admins ---
@@ -107,6 +109,96 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                 {
                     entity.IsEnabled = false;
                     await _globalAdminsTableClient.UpdateEntityAsync(entity, ETag.All);
+                }
+                return true;
+            }
+            catch (RequestFailedException ex) when (ex.Status == 404)
+            {
+                return false;
+            }
+        }
+
+        // --- MCP Users ---
+
+        public async Task<bool> IsMcpUserAsync(string upn)
+        {
+            if (string.IsNullOrWhiteSpace(upn))
+                return false;
+
+            try
+            {
+                var normalizedUpn = upn.ToLowerInvariant();
+                var entity = await _mcpUsersTableClient.GetEntityAsync<McpUserEntity>(
+                    "McpUsers", normalizedUpn);
+                return entity?.Value != null && entity.Value.IsEnabled;
+            }
+            catch (RequestFailedException ex) when (ex.Status == 404)
+            {
+                return false;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error checking MCP user status for {Upn}", upn);
+                return false;
+            }
+        }
+
+        public async Task<List<McpUserEntry>> GetAllMcpUsersAsync()
+        {
+            var users = new List<McpUserEntry>();
+            await foreach (var entity in _mcpUsersTableClient.QueryAsync<McpUserEntity>(
+                filter: $"PartitionKey eq 'McpUsers'"))
+            {
+                users.Add(new McpUserEntry
+                {
+                    Upn = entity.Upn,
+                    IsEnabled = entity.IsEnabled,
+                    AddedAt = entity.AddedDate,
+                    AddedBy = entity.AddedBy
+                });
+            }
+            return users;
+        }
+
+        public async Task<bool> AddMcpUserAsync(string upn, string addedBy)
+        {
+            upn = upn.ToLowerInvariant();
+            addedBy = addedBy.ToLowerInvariant();
+
+            var entity = new McpUserEntity
+            {
+                PartitionKey = "McpUsers",
+                RowKey = upn,
+                Upn = upn,
+                IsEnabled = true,
+                AddedDate = DateTime.UtcNow,
+                AddedBy = addedBy
+            };
+
+            await _mcpUsersTableClient.UpsertEntityAsync(entity);
+            return true;
+        }
+
+        public async Task<bool> RemoveMcpUserAsync(string upn)
+        {
+            upn = upn.ToLowerInvariant();
+            await _mcpUsersTableClient.DeleteEntityAsync("McpUsers", upn);
+            return true;
+        }
+
+        public async Task<bool> SetMcpUserEnabledAsync(string upn, bool isEnabled)
+        {
+            upn = upn.ToLowerInvariant();
+
+            try
+            {
+                var result = await _mcpUsersTableClient.GetEntityAsync<McpUserEntity>(
+                    "McpUsers", upn);
+                var entity = result.Value;
+                if (entity != null)
+                {
+                    entity.IsEnabled = isEnabled;
+                    await _mcpUsersTableClient.UpdateEntityAsync(entity, ETag.All);
                 }
                 return true;
             }

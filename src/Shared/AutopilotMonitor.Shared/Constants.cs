@@ -238,6 +238,7 @@ namespace AutopilotMonitor.Shared
             // Admin tables
             public const string GlobalAdmins = "GlobalAdmins";
             public const string TenantAdmins   = "TenantAdmins";
+            public const string McpUsers       = "McpUsers";
 
             // Preview gating (temporary — remove after GA)
             public const string PreviewWhitelist = "PreviewWhitelist";
@@ -297,6 +298,7 @@ namespace AutopilotMonitor.Shared
                 AdminConfiguration,
                 GlobalAdmins,
                 TenantAdmins,
+                McpUsers,
                 PreviewWhitelist,
                 PreviewConfig,
                 BlockedDevices,

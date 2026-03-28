@@ -129,6 +129,15 @@ namespace AutopilotMonitor.Shared.Models
             }
         }
 
+        // ===== MCP ACCESS CONTROL =====
+
+        /// <summary>
+        /// Controls who can access the remote MCP server.
+        /// "Disabled" = MCP off, "WhitelistOnly" = GlobalAdmins + McpUsers table (default),
+        /// "AllMembers" = any authenticated user.
+        /// </summary>
+        public string McpAccessPolicy { get; set; } = nameof(Models.McpAccessPolicy.WhitelistOnly);
+
         // ===== VULNERABILITY CORRELATION SETTINGS =====
 
         /// <summary>

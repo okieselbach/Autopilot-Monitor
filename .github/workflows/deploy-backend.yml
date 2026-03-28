@@ -11,6 +11,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
       - name: Setup .NET 8
         uses: actions/setup-dotnet@v4
         with:
@@ -30,4 +35,3 @@ jobs:
         with:
           app-name: autopilotmonitor-api
           package: ./publish
-          publish-profile: ${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE }}

@@ -213,6 +213,19 @@ export const api = {
     unmatchedSoftware: () => `${API_BASE_URL}/api/vulnerability/unmatched-software`,
   },
 
+  // ── MCP Users ─────────────────────────────────────────────────────────────
+  mcpUsers: {
+    list: () => `${API_BASE_URL}/api/admin/mcp-users`,
+    add: () => `${API_BASE_URL}/api/admin/mcp-users`,
+    remove: (upn: string) =>
+      `${API_BASE_URL}/api/admin/mcp-users/${encodeURIComponent(upn)}`,
+    enable: (upn: string) =>
+      `${API_BASE_URL}/api/admin/mcp-users/${encodeURIComponent(upn)}/enable`,
+    disable: (upn: string) =>
+      `${API_BASE_URL}/api/admin/mcp-users/${encodeURIComponent(upn)}/disable`,
+    check: () => `${API_BASE_URL}/api/admin/mcp-users/check`,
+  },
+
   // ── Maintenance ───────────────────────────────────────────────────────────
   maintenance: {
     trigger: (date?: string) =>

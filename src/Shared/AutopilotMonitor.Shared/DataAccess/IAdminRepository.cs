@@ -17,6 +17,13 @@ namespace AutopilotMonitor.Shared.DataAccess
         Task<bool> RemoveGlobalAdminAsync(string upn);
         Task<bool> DisableGlobalAdminAsync(string upn);
 
+        // --- MCP Users ---
+        Task<bool> IsMcpUserAsync(string upn);
+        Task<List<McpUserEntry>> GetAllMcpUsersAsync();
+        Task<bool> AddMcpUserAsync(string upn, string addedBy);
+        Task<bool> RemoveMcpUserAsync(string upn);
+        Task<bool> SetMcpUserEnabledAsync(string upn, bool isEnabled);
+
         // --- Tenant Members ---
         Task<List<TenantMember>> GetTenantMembersAsync(string tenantId);
         Task<bool> AddTenantMemberAsync(string tenantId, string upn, string addedBy, string role, bool canManageBootstrapTokens = false);
@@ -29,6 +36,14 @@ namespace AutopilotMonitor.Shared.DataAccess
     }
 
     public class GlobalAdminEntry
+    {
+        public string Upn { get; set; } = string.Empty;
+        public bool IsEnabled { get; set; } = true;
+        public DateTime AddedAt { get; set; }
+        public string AddedBy { get; set; } = string.Empty;
+    }
+
+    public class McpUserEntry
     {
         public string Upn { get; set; } = string.Empty;
         public bool IsEnabled { get; set; } = true;

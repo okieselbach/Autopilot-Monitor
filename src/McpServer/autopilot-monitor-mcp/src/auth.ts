@@ -1,145 +1,48 @@
-import { PublicClientApplication, LogLevel } from '@azure/msal-node';
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
-import { resolve } from 'node:path';
-import { homedir } from 'node:os';
-import { exec } from 'node:child_process';
+/**
+ * Auth module for the remote MCP server.
+ *
+ * In remote mode, the Claude Code client handles OAuth and sends a Bearer token
+ * with each MCP request. This module provides helpers for token validation and
+ * extracting user info from the JWT claims.
+ *
+ * The user's token is passed through to the backend API (access_as_user scope),
+ * so no service principal or separate credentials are needed.
+ */
 
-const CLIENT_ID = process.env.AUTOPILOT_ENTRA_CLIENT_ID ?? '1a400946-62c1-4ab4-aa37-f730ac89704d';
-const AUTHORITY = process.env.AUTOPILOT_ENTRA_AUTHORITY ?? 'https://login.microsoftonline.com/organizations';
-const SCOPES = [`api://${CLIENT_ID}/access_as_user`];
-const CACHE_DIR = resolve(homedir(), '.autopilot-monitor');
-const CACHE_FILE = resolve(CACHE_DIR, 'auth-cache.json');
+import { createDecoder } from './jwt-decode.js';
 
-let pca: PublicClientApplication | null = null;
+export interface TokenClaims {
+  /** User Principal Name (email) */
+  upn?: string;
+  /** Azure AD Object ID */
+  oid?: string;
+  /** Tenant ID */
+  tid?: string;
+  /** Token expiry (unix timestamp) */
+  exp?: number;
+  /** Audience */
+  aud?: string;
+}
 
-async function loadCache(): Promise<string | undefined> {
+const decode = createDecoder();
+
+/**
+ * Extracts claims from a JWT access token without cryptographic validation.
+ * Full validation (signature, issuer, audience) is deferred to the backend API
+ * which receives the same token. This avoids duplicating JWKS/OIDC config here.
+ */
+export function extractTokenClaims(token: string): TokenClaims | null {
   try {
-    return await readFile(CACHE_FILE, 'utf-8');
+    return decode(token);
   } catch {
-    return undefined;
+    return null;
   }
-}
-
-async function saveCache(cache: string): Promise<void> {
-  try {
-    await mkdir(CACHE_DIR, { recursive: true });
-    await writeFile(CACHE_FILE, cache, { mode: 0o600 });
-  } catch (err) {
-    console.error('[auth] Failed to persist token cache:', err);
-  }
-}
-
-function getClient(): PublicClientApplication {
-  if (!pca) {
-    pca = new PublicClientApplication({
-      auth: {
-        clientId: CLIENT_ID,
-        authority: AUTHORITY,
-      },
-      system: {
-        loggerOptions: {
-          loggerCallback: (_level, message) => {
-            if (_level <= LogLevel.Warning) {
-              console.error(`[msal] ${message}`);
-            }
-          },
-          logLevel: LogLevel.Warning,
-          piiLoggingEnabled: false,
-        },
-      },
-    });
-  }
-  return pca;
-}
-
-/** Open a URL in the system default browser */
-function openBrowser(url: string): Promise<void> {
-  return new Promise((resolve) => {
-    const cmd = process.platform === 'win32'
-      ? `start "" "${url}"`
-      : process.platform === 'darwin'
-        ? `open "${url}"`
-        : `xdg-open "${url}" 2>/dev/null`;
-    exec(cmd, () => resolve());
-  });
 }
 
 /**
- * Acquires an access token — tries silent refresh first, falls back to interactive browser login.
- * All log output goes to stderr (stdout is the MCP JSON-RPC transport).
+ * Checks if a token is expired (with 60s buffer).
  */
-export async function getAccessToken(): Promise<string> {
-  const client = getClient();
-
-  // Load persisted cache
-  const cacheData = await loadCache();
-  if (cacheData) {
-    client.getTokenCache().deserialize(cacheData);
-  }
-
-  // Try silent acquisition first (cached token or refresh)
-  const accounts = await client.getTokenCache().getAllAccounts();
-  if (accounts.length > 0) {
-    try {
-      const result = await client.acquireTokenSilent({
-        account: accounts[0],
-        scopes: SCOPES,
-      });
-      if (result?.accessToken) {
-        await saveCache(client.getTokenCache().serialize());
-        return result.accessToken;
-      }
-    } catch {
-      // Silent failed — fall through to interactive login
-    }
-  }
-
-  // Interactive browser login — opens system browser, listens on localhost for redirect
-  console.error('');
-  console.error('=== Authentication Required ===');
-  console.error('Opening browser for sign-in…');
-  console.error('');
-
-  const result = await client.acquireTokenInteractive({
-    scopes: SCOPES,
-    openBrowser,
-  });
-
-  if (!result?.accessToken) {
-    throw new Error('Interactive authentication failed — no access token received');
-  }
-
-  // Persist cache after successful auth
-  await saveCache(client.getTokenCache().serialize());
-
-  console.error(`[auth] Authenticated as ${result.account?.username ?? 'unknown'}`);
-  return result.accessToken;
-}
-
-/**
- * Returns a summary of the current auth state.
- */
-export async function getAuthStatus(): Promise<{
-  mode: string;
-  hasCachedToken: boolean;
-  user?: string;
-  tenantId?: string;
-}> {
-  const client = getClient();
-  const cacheData = await loadCache();
-  if (cacheData) {
-    client.getTokenCache().deserialize(cacheData);
-  }
-
-  const accounts = await client.getTokenCache().getAllAccounts();
-  if (accounts.length > 0) {
-    return {
-      mode: 'oauth',
-      hasCachedToken: true,
-      user: accounts[0].username,
-      tenantId: accounts[0].tenantId,
-    };
-  }
-
-  return { mode: 'oauth', hasCachedToken: false };
+export function isTokenExpired(claims: TokenClaims): boolean {
+  if (!claims.exp) return true;
+  return Date.now() / 1000 > claims.exp - 60;
 }

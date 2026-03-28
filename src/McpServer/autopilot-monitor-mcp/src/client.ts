@@ -1,10 +1,27 @@
-import { getAccessToken } from './auth.js';
-
 const BASE_URL = process.env.AUTOPILOT_API_URL ?? 'https://autopilotmonitor-api.azurewebsites.net';
 
+/**
+ * Per-request token store. The MCP request handler sets the current user's
+ * Bearer token before tool execution, and apiFetch reads it to pass through
+ * to the backend API.
+ */
+let _currentToken: string | undefined;
+
+export function setCurrentToken(token: string | undefined): void {
+  _currentToken = token;
+}
+
+export function getCurrentToken(): string | undefined {
+  return _currentToken;
+}
+
 async function apiFetch(path: string, options: RequestInit = {}): Promise<unknown> {
+  const token = _currentToken;
+  if (!token) {
+    throw new Error('No authentication token available. Ensure the request includes a valid Bearer token.');
+  }
+
   const url = `${BASE_URL}${path}`;
-  const token = await getAccessToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${token}`,

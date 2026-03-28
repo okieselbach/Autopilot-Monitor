@@ -155,6 +155,9 @@ public static class EndpointAccessPolicyCatalog
         new("POST",   "bootstrap/sessions",        EndpointPolicy.BootstrapManagerOrGA),
         new("DELETE", "bootstrap/sessions/{code}", EndpointPolicy.BootstrapManagerOrGA),
 
+        // ── MCP User Access Check (any authenticated user can check their own access) ──
+        new("GET",    "admin/mcp-users/check",               EndpointPolicy.AuthenticatedUser),
+
         // ── GlobalAdminOnly ────────────────────────────────────────────
         new("GET",    "global/raw/sessions",                  EndpointPolicy.GlobalAdminOnly),
         new("GET",    "global/raw/events",                    EndpointPolicy.GlobalAdminOnly),
@@ -208,6 +211,11 @@ public static class EndpointAccessPolicyCatalog
         new("DELETE", "vulnerability/cpe-mapping",       EndpointPolicy.GlobalAdminOnly),
         new("GET",    "vulnerability/cpe-mappings",      EndpointPolicy.GlobalAdminOnly),
         new("POST",   "rules/ime-log-patterns/reseed", EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "admin/mcp-users",                     EndpointPolicy.GlobalAdminOnly),
+        new("POST",   "admin/mcp-users",                     EndpointPolicy.GlobalAdminOnly),
+        new("DELETE", "admin/mcp-users/{upn}",               EndpointPolicy.GlobalAdminOnly),
+        new("PATCH",  "admin/mcp-users/{upn}/enable",        EndpointPolicy.GlobalAdminOnly),
+        new("PATCH",  "admin/mcp-users/{upn}/disable",       EndpointPolicy.GlobalAdminOnly),
         new("PATCH",  "config/{tenantId}/plan",                            EndpointPolicy.GlobalAdminOnly),
         new("GET",    "feedback/all",                                     EndpointPolicy.GlobalAdminOnly),
         new("GET",    "global/notifications",                            EndpointPolicy.GlobalAdminOnly),

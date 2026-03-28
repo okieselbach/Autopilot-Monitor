@@ -1,0 +1,42 @@
+name: Deploy MCP Server (Container App)
+
+on:
+  workflow_dispatch:
+
+env:
+  ACR_NAME: autopilotmonitoracr
+  CONTAINER_APP_NAME: autopilotmonitor-mcp
+  RESOURCE_GROUP: ${{ secrets.AZURE_MCP_RESOURCE_GROUP }}
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    name: Build and Deploy MCP Server
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Login to ACR
+        run: az acr login --name ${{ env.ACR_NAME }}
+
+      - name: Build and push container image
+        run: |
+          docker build \
+            -f src/McpServer/autopilot-monitor-mcp/Dockerfile \
+            -t ${{ env.ACR_NAME }}.azurecr.io/${{ env.CONTAINER_APP_NAME }}:${{ env.IMAGE_TAG }} \
+            -t ${{ env.ACR_NAME }}.azurecr.io/${{ env.CONTAINER_APP_NAME }}:latest \
+            .
+          docker push ${{ env.ACR_NAME }}.azurecr.io/${{ env.CONTAINER_APP_NAME }} --all-tags
+
+      - name: Deploy to Container App
+        run: |
+          az containerapp update \
+            --name ${{ env.CONTAINER_APP_NAME }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --image ${{ env.ACR_NAME }}.azurecr.io/${{ env.CONTAINER_APP_NAME }}:${{ env.IMAGE_TAG }}
