@@ -16,9 +16,9 @@ public class CorsMiddleware : IFunctionsWorkerMiddleware
 
     public CorsMiddleware()
     {
-        var origins = Environment.GetEnvironmentVariable("WEBSITE_CORS_ALLOWED_ORIGINS")
-            ?? Environment.GetEnvironmentVariable("Host__CORS")
-            ?? "";
+        // Read from custom App Setting (set in Azure Portal → Configuration → Application settings)
+        // Format: comma-separated origins, e.g. "https://www.autopilotmonitor.com,https://example.com"
+        var origins = Environment.GetEnvironmentVariable("CORS_ALLOWED_ORIGINS") ?? "";
 
         _allowedOrigins = new HashSet<string>(
             origins.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
