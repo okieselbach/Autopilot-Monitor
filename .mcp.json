@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "autopilot-monitor": {
+      "command": "node",
+      "args": ["src/McpServer/autopilot-monitor-mcp/dist/index.js"],
+      "env": {
+        "AUTOPILOT_API_URL": "https://autopilotmonitor-api.azurewebsites.net",
+        "AUTOPILOT_API_KEY": "${AUTOPILOT_API_KEY}"
+      }
+    }
+  }
+}

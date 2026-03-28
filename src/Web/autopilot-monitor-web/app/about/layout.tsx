@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "About Autopilot Monitor – Real-Time Windows Autopilot Monitoring Tool",
+  title: "About – Real-Time Windows Autopilot Monitoring",
   description:
     "Autopilot Monitor is a free, open-source real-time monitoring and troubleshooting platform for Windows Autopilot enrollments managed via Microsoft Intune. Built by Oliver Kieselbach.",
   keywords: [
