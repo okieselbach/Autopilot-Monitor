@@ -116,6 +116,10 @@ export function createOAuthRouter(): Router {
     const body = new URLSearchParams();
     const params = req.body as Record<string, string>;
 
+    console.error(`[oauth/token] grant_type=${params.grant_type}, baseUrl=${baseUrl}, redirect_uri=${baseUrl}/oauth/callback`);
+    console.error(`[oauth/token] client redirect_uri from request: ${params.redirect_uri ?? '(not sent)'}`);
+    console.error(`[oauth/token] has code=${!!params.code}, has code_verifier=${!!params.code_verifier}, has refresh_token=${!!params.refresh_token}`);
+
     body.set('client_id', CLIENT_ID);
     body.set('redirect_uri', `${baseUrl}/oauth/callback`);
 
@@ -133,6 +137,7 @@ export function createOAuthRouter(): Router {
       });
 
       const data = await tokenResponse.json();
+      console.error(`[oauth/token] Entra response status=${tokenResponse.status}`, tokenResponse.status !== 200 ? JSON.stringify(data) : 'OK');
       res.status(tokenResponse.status).json(data);
     } catch (err) {
       console.error('[oauth] Token exchange failed:', err);
