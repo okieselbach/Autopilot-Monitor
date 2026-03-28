@@ -136,9 +136,6 @@ public class PolicyEnforcementMiddleware : IFunctionsWorkerMiddleware
         var upn = principal?.GetUserPrincipalName();
         var userIdentifier = upn ?? "anonymous";
 
-        // API key with global scope: treat as GlobalAdmin for all policy tiers
-        var isApiKeyGlobal = principal?.FindFirst("is_global_admin")?.Value == "true";
-
         switch (entry.Policy)
         {
             case EndpointPolicy.PublicAnonymous:
@@ -153,19 +150,15 @@ public class PolicyEnforcementMiddleware : IFunctionsWorkerMiddleware
                 return CatalogDecisionResult.Deny(userIdentifier, "N/A", "NoJWT");
 
             case EndpointPolicy.MemberRead:
-                if (isApiKeyGlobal) return CatalogDecisionResult.Allow(userIdentifier, "GlobalAdmin", "ApiKeyGlobal");
                 return await EvaluateMemberReadAsync(tenantId, upn, userIdentifier);
 
             case EndpointPolicy.TenantAdminOrGA:
-                if (isApiKeyGlobal) return CatalogDecisionResult.Allow(userIdentifier, "GlobalAdmin", "ApiKeyGlobal");
                 return await EvaluateTenantAdminOrGAAsync(tenantId, upn, userIdentifier);
 
             case EndpointPolicy.BootstrapManagerOrGA:
-                if (isApiKeyGlobal) return CatalogDecisionResult.Allow(userIdentifier, "GlobalAdmin", "ApiKeyGlobal");
                 return await EvaluateBootstrapManagerOrGAAsync(tenantId, upn, userIdentifier);
 
             case EndpointPolicy.GlobalAdminOnly:
-                if (isApiKeyGlobal) return CatalogDecisionResult.Allow(userIdentifier, "GlobalAdmin", "ApiKeyGlobal");
                 return await EvaluateGlobalAdminOnlyAsync(upn, userIdentifier);
 
             default:

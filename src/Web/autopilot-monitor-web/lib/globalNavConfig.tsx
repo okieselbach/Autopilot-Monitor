@@ -236,7 +236,6 @@ export const EXPANDABLE_NAV_GROUPS: ExpandableNavGroup[] = [
           { id: "ga-device-block", label: "Device Block", href: "/admin/security/device-block" },
           { id: "ga-version-block", label: "Version Block", href: "/admin/security/version-block" },
           { id: "ga-vulnerability", label: "Vulnerability Data", href: "/admin/security/vulnerability-data" },
-          { id: "ga-api-keys", label: "API Keys", href: "/admin/security/api-keys" },
         ],
       },
       {

@@ -6,13 +6,11 @@ import { SECURITY_NAV_SECTIONS, type SecuritySectionId } from "../securityNavSec
 import { SectionDeviceBlock } from "../sections/SectionDeviceBlock";
 import { SectionVersionBlock } from "../sections/SectionVersionBlock";
 import { SectionVulnerabilityData } from "../sections/SectionVulnerabilityData";
-import { SectionApiKeys } from "../sections/SectionApiKeys";
 
 const SECTION_COMPONENTS: Record<SecuritySectionId, React.ComponentType> = {
   "device-block": SectionDeviceBlock,
   "version-block": SectionVersionBlock,
   "vulnerability-data": SectionVulnerabilityData,
-  "api-keys": SectionApiKeys,
 };
 
 export default function SecuritySectionPage() {

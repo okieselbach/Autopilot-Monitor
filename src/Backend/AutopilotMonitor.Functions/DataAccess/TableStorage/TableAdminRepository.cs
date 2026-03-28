@@ -9,13 +9,12 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
 {
     /// <summary>
     /// Table Storage implementation of IAdminRepository.
-    /// Performs direct CRUD against GlobalAdmins, TenantAdmins, and ApiKeys tables.
+    /// Performs direct CRUD against GlobalAdmins and TenantAdmins tables.
     /// </summary>
     public class TableAdminRepository : IAdminRepository
     {
         private readonly TableClient _globalAdminsTableClient;
         private readonly TableClient _tenantAdminsTableClient;
-        private readonly TableClient _apiKeysTableClient;
         private readonly ILogger<TableAdminRepository> _logger;
 
         public TableAdminRepository(
@@ -25,7 +24,6 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
             _logger = logger;
             _globalAdminsTableClient = storage.GetTableClient(Constants.TableNames.GlobalAdmins);
             _tenantAdminsTableClient = storage.GetTableClient(Constants.TableNames.TenantAdmins);
-            _apiKeysTableClient = storage.GetTableClient(Constants.TableNames.ApiKeys);
         }
 
         // --- Global Admins ---
@@ -246,105 +244,6 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
             return member.Role != Constants.TenantRoles.Viewer;
         }
 
-        // --- API Keys ---
-
-        public async Task<ApiKeyEntry?> ValidateApiKeyAsync(string apiKeyHash)
-        {
-            await foreach (var entity in _apiKeysTableClient.QueryAsync<TableEntity>(
-                filter: $"KeyHash eq '{apiKeyHash}'"))
-            {
-                return MapEntityToApiKeyEntry(entity);
-            }
-            return null;
-        }
-
-        public async Task<bool> StoreApiKeyAsync(string tenantId, ApiKeyEntry entry)
-        {
-            var entity = new TableEntity(tenantId, entry.KeyId)
-            {
-                ["KeyHash"] = entry.KeyHash,
-                ["Label"] = entry.Name,
-                ["Scope"] = entry.Scope,
-                ["TenantId"] = entry.TenantId,
-                ["CreatedBy"] = entry.CreatedBy,
-                ["CreatedAt"] = entry.CreatedAt,
-                ["IsActive"] = entry.IsActive,
-                ["RequestCount"] = entry.RequestCount,
-            };
-
-            if (entry.CustomRateLimitPerMinute.HasValue)
-                entity["CustomRateLimitPerMinute"] = entry.CustomRateLimitPerMinute.Value;
-
-            if (entry.ExpiresAt.HasValue)
-                entity["ExpiresAt"] = new DateTimeOffset(entry.ExpiresAt.Value, TimeSpan.Zero);
-
-            await _apiKeysTableClient.UpsertEntityAsync(entity);
-            return true;
-        }
-
-        public async Task<List<ApiKeyEntry>> GetApiKeysAsync(string tenantId)
-        {
-            var keys = new List<ApiKeyEntry>();
-            await foreach (var entity in _apiKeysTableClient.QueryAsync<TableEntity>(
-                filter: $"PartitionKey eq '{tenantId}'"))
-            {
-                keys.Add(MapEntityToApiKeyEntry(entity));
-            }
-            return keys;
-        }
-
-        public async Task<List<ApiKeyEntry>> GetAllApiKeysAsync()
-        {
-            var keys = new List<ApiKeyEntry>();
-            await foreach (var entity in _apiKeysTableClient.QueryAsync<TableEntity>())
-            {
-                keys.Add(MapEntityToApiKeyEntry(entity));
-            }
-            return keys;
-        }
-
-        public async Task<ApiKeyEntry?> GetApiKeyAsync(string partitionKey, string keyId)
-        {
-            try
-            {
-                var result = await _apiKeysTableClient.GetEntityAsync<TableEntity>(partitionKey, keyId);
-                return MapEntityToApiKeyEntry(result.Value);
-            }
-            catch (RequestFailedException ex) when (ex.Status == 404)
-            {
-                return null;
-            }
-        }
-
-        public async Task<bool> RevokeApiKeyAsync(string tenantId, string keyId)
-        {
-            try
-            {
-                await _apiKeysTableClient.DeleteEntityAsync(tenantId, keyId);
-                return true;
-            }
-            catch (RequestFailedException ex) when (ex.Status == 404)
-            {
-                return false;
-            }
-        }
-
-        public async Task IncrementApiKeyRequestCountAsync(string partitionKey, string keyId)
-        {
-            try
-            {
-                var result = await _apiKeysTableClient.GetEntityAsync<TableEntity>(partitionKey, keyId);
-                var entity = result.Value;
-                var count = entity.TryGetValue("RequestCount", out var c) ? Convert.ToInt64(c) : 0L;
-                entity["RequestCount"] = count + 1;
-                await _apiKeysTableClient.UpdateEntityAsync(entity, entity.ETag);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "Failed to increment request count for key {KeyId}", keyId);
-            }
-        }
-
         // --- Helpers ---
 
         private static TenantMember MapToTenantMember(TenantAdminEntity entity)
@@ -361,22 +260,5 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
             };
         }
 
-        private static ApiKeyEntry MapEntityToApiKeyEntry(TableEntity entity)
-        {
-            return new ApiKeyEntry
-            {
-                KeyId = entity.RowKey,
-                TenantId = entity.GetString("TenantId") ?? entity.PartitionKey,
-                KeyHash = entity.GetString("KeyHash") ?? string.Empty,
-                Name = entity.GetString("Label") ?? string.Empty,
-                Scope = entity.GetString("Scope") ?? "tenant",
-                CreatedBy = entity.GetString("CreatedBy") ?? string.Empty,
-                CreatedAt = entity.GetDateTimeOffset("CreatedAt")?.UtcDateTime ?? DateTime.MinValue,
-                ExpiresAt = entity.GetDateTimeOffset("ExpiresAt")?.UtcDateTime,
-                IsActive = entity.GetBoolean("IsActive") ?? true,
-                RequestCount = entity.TryGetValue("RequestCount", out var rc) ? Convert.ToInt64(rc) : 0L,
-                CustomRateLimitPerMinute = entity.TryGetValue("CustomRateLimitPerMinute", out var crl) ? Convert.ToInt32(crl) : null,
-            };
-        }
     }
 }

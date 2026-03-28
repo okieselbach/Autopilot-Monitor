@@ -34,4 +34,5 @@ await server.connect(transport);
 
 console.error('Autopilot-Monitor MCP Server running (stdio transport)');
 console.error(`API URL: ${process.env.AUTOPILOT_API_URL ?? 'https://autopilotmonitor-api.azurewebsites.net'}`);
+console.error(`Auth mode: OAuth (device code flow)`);
 console.error(`Search backend: ${knowledgeBase.name} | Documents: ${knowledgeBase.size} | Rules dir: ${RULES_DIR}`);

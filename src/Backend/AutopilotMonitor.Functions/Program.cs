@@ -21,9 +21,8 @@ var builder = FunctionsApplication.CreateBuilder(args);
 builder.ConfigureFunctionsWebApplication();
 
 // Register middleware pipeline (Azure Functions .NET 8 isolated worker pattern)
-// Order matters: correlation ID (all requests) → API key auth → JWT authentication (401) → policy enforcement (403)
+// Order matters: correlation ID (all requests) → JWT authentication (401) → policy enforcement (403)
 builder.UseMiddleware<CorrelationIdMiddleware>();
-builder.UseMiddleware<ApiKeyMiddleware>();
 builder.UseMiddleware<AuthenticationMiddleware>();
 builder.UseMiddleware<PolicyEnforcementMiddleware>();
 
@@ -112,7 +111,6 @@ builder.Services.AddTableStorageDataAccess();
 builder.Services.AddSingleton<TenantConfigurationService>();
 builder.Services.AddSingleton<AdminConfigurationService>();
 builder.Services.AddSingleton<RateLimitService>();
-builder.Services.AddSingleton<RateLimitConfigService>();
 builder.Services.AddSingleton<UsageMetricsService>();
 builder.Services.AddSingleton<PlatformMetricsService>();
 builder.Services.AddSingleton<GlobalAdminService>();

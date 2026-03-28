@@ -10,6 +10,8 @@ using System.IdentityModel.Tokens.Jwt;
 using Microsoft.AspNetCore.Http;
 using System.Net;
 using System.Security.Claims;
+using AutopilotMonitor.Functions.Helpers;
+using AutopilotMonitor.Shared.DataAccess;
 
 namespace AutopilotMonitor.Functions.Middleware;
 
@@ -22,6 +24,7 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
     private readonly ILogger<AuthenticationMiddleware> _logger;
     private readonly IConfiguration _configuration;
     private readonly JwtSecurityTokenHandler _tokenHandler;
+    private readonly IUserUsageRepository _userUsageRepo;
 
     // Cache configuration managers per tenant to avoid repeated OIDC metadata fetches
     // Bounded to prevent memory exhaustion from malicious tenant ID flooding
@@ -64,10 +67,12 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
 
     public AuthenticationMiddleware(
         ILogger<AuthenticationMiddleware> logger,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        IUserUsageRepository userUsageRepo)
     {
         _logger = logger;
         _configuration = configuration;
+        _userUsageRepo = userUsageRepo;
         _tokenHandler = new JwtSecurityTokenHandler();
         _configManagerCache = new Dictionary<string, IConfigurationManager<OpenIdConnectConfiguration>>();
 
@@ -225,6 +230,17 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
             httpContext.User = principal;
             context.Items["ClaimsPrincipal"] = principal;
             authenticated = true;
+
+            // Track per-user usage (fire-and-forget)
+            var oid = principal.FindFirst("oid")?.Value;
+            var upn = principal.FindFirst("upn")?.Value
+                   ?? principal.FindFirst("preferred_username")?.Value;
+            var tid = principal.FindFirst("tid")?.Value;
+            if (!string.IsNullOrEmpty(oid))
+            {
+                var normalizedEndpoint = EndpointNormalizer.Normalize(requestPath);
+                _ = RecordUserUsageAsync(oid, upn ?? "unknown", tid ?? "", normalizedEndpoint);
+            }
         }
         catch (SecurityTokenValidationException ex)
         {
@@ -249,6 +265,18 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
         }
 
         await next(context);
+    }
+
+    private async Task RecordUserUsageAsync(string userId, string upn, string tenantId, string endpoint)
+    {
+        try
+        {
+            await _userUsageRepo.IncrementUsageAsync(userId, upn, tenantId, endpoint);
+        }
+        catch
+        {
+            // Non-fatal — don't block the request
+        }
     }
 
     private static bool IsAnonymousRoute(string path)

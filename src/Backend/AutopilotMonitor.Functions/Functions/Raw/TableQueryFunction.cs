@@ -16,7 +16,6 @@ namespace AutopilotMonitor.Functions.Functions.Raw
         // Tables that must never be exposed (contain secrets)
         private static readonly HashSet<string> _blacklistedTables = new(StringComparer.OrdinalIgnoreCase)
         {
-            Constants.TableNames.ApiKeys
         };
 
         public TableQueryFunction(ILogger<TableQueryFunction> logger, TableStorageService storage)

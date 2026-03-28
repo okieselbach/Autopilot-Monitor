@@ -116,8 +116,6 @@ namespace AutopilotMonitor.Shared
             public const string SearchSessionsByEvent   = "/api/search/sessions-by-event";
             public const string SearchSessionsByCve     = "/api/search/sessions-by-cve";
             public const string MetricsSummary          = "/api/metrics/summary";
-            public const string ApiKeysEndpoint         = "/api/api-keys";
-
             // Bootstrap agent endpoints (cert-free, token-auth for pre-enrollment agents)
             public const string BootstrapRegisterSession = "/api/bootstrap/register-session";
             public const string BootstrapIngestEvents    = "/api/bootstrap/ingest";
@@ -273,10 +271,9 @@ namespace AutopilotMonitor.Shared
             public const string EventTypeIndex = "EventTypeIndex";
             public const string DeviceSnapshot = "DeviceSnapshot";
             public const string CveIndex = "CveIndex";
-            public const string ApiKeys = "ApiKeys";
 
-            // API usage tracking
-            public const string ApiUsageLog = "ApiUsageLog";
+            // User usage tracking (per-user, per-day, per-endpoint)
+            public const string UserUsageLog = "UserUsageLog";
 
             /// <summary>
             /// Returns all table names for initialization
@@ -313,8 +310,7 @@ namespace AutopilotMonitor.Shared
                 EventTypeIndex,
                 DeviceSnapshot,
                 CveIndex,
-                ApiKeys,
-                ApiUsageLog
+                UserUsageLog
             };
         }
     }

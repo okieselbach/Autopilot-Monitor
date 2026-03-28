@@ -1,11 +1,13 @@
+import { getAccessToken } from './auth.js';
+
 const BASE_URL = process.env.AUTOPILOT_API_URL ?? 'https://autopilotmonitor-api.azurewebsites.net';
-const API_KEY = process.env.AUTOPILOT_API_KEY ?? '';
 
 async function apiFetch(path: string, options: RequestInit = {}): Promise<unknown> {
   const url = `${BASE_URL}${path}`;
+  const token = await getAccessToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    ...(API_KEY ? { 'X-Api-Key': API_KEY } : {}),
+    'Authorization': `Bearer ${token}`,
     ...((options.headers as Record<string, string>) ?? {}),
   };
   const res = await fetch(url, { ...options, headers });

@@ -6,7 +6,7 @@ namespace AutopilotMonitor.Shared.DataAccess
 {
     /// <summary>
     /// Repository for admin and tenant member management.
-    /// Covers: GlobalAdmins, TenantAdmins, ApiKeys tables.
+    /// Covers: GlobalAdmins, TenantAdmins tables.
     /// </summary>
     public interface IAdminRepository
     {
@@ -26,15 +26,6 @@ namespace AutopilotMonitor.Shared.DataAccess
         Task<TenantMember?> GetTenantMemberAsync(string tenantId, string upn);
         Task<bool> IsTenantAdminAsync(string tenantId, string upn);
         Task<bool> IsTenantMemberAsync(string tenantId, string upn);
-
-        // --- API Keys ---
-        Task<ApiKeyEntry?> ValidateApiKeyAsync(string apiKeyHash);
-        Task<bool> StoreApiKeyAsync(string tenantId, ApiKeyEntry entry);
-        Task<List<ApiKeyEntry>> GetApiKeysAsync(string tenantId);
-        Task<List<ApiKeyEntry>> GetAllApiKeysAsync();
-        Task<ApiKeyEntry?> GetApiKeyAsync(string partitionKey, string keyId);
-        Task<bool> RevokeApiKeyAsync(string tenantId, string keyId);
-        Task IncrementApiKeyRequestCountAsync(string partitionKey, string keyId);
     }
 
     public class GlobalAdminEntry
@@ -56,20 +47,4 @@ namespace AutopilotMonitor.Shared.DataAccess
         public string AddedBy { get; set; } = string.Empty;
     }
 
-    public class ApiKeyEntry
-    {
-        public string KeyId { get; set; } = string.Empty;
-        public string TenantId { get; set; } = string.Empty;
-        public string KeyHash { get; set; } = string.Empty;
-        public string Name { get; set; } = string.Empty;
-        public string Scope { get; set; } = "tenant";
-        public string Upn { get; set; } = string.Empty;
-        public string CreatedBy { get; set; } = string.Empty;
-        public DateTime CreatedAt { get; set; }
-        public DateTime? ExpiresAt { get; set; }
-        public bool IsActive { get; set; } = true;
-        public long RequestCount { get; set; }
-        /// <summary>Per-key rate limit override. Null = use tenant/plan default.</summary>
-        public int? CustomRateLimitPerMinute { get; set; }
-    }
 }
