@@ -90,6 +90,13 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
             return;
         }
 
+        // CORS preflight requests are handled by the Azure Functions host — let them through
+        if (string.Equals(httpContext.Request.Method, "OPTIONS", StringComparison.OrdinalIgnoreCase))
+        {
+            await next(context);
+            return;
+        }
+
         // Allow anonymous routes without JWT validation
         var requestPath = httpContext.Request.Path.Value ?? string.Empty;
         if (IsAnonymousRoute(requestPath))
