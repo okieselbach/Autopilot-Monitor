@@ -554,6 +554,28 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
+        /// Deletes the stored vulnerability report for a session.
+        /// Used when a re-scan finds no vulnerabilities, to clear stale data.
+        /// </summary>
+        public async Task DeleteVulnerabilityReportAsync(string tenantId, string sessionId)
+        {
+            SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
+            SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
+
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.VulnerabilityReports);
+                var partitionKey = $"{tenantId}_{sessionId}";
+                await tableClient.DeleteEntityAsync(partitionKey, "report");
+                _logger.LogInformation("Deleted vulnerability report for session {SessionId}", sessionId);
+            }
+            catch (Azure.RequestFailedException ex) when (ex.Status == 404)
+            {
+                // Already deleted or never existed — nothing to do
+            }
+        }
+
+        /// <summary>
         /// Gets the vulnerability correlation report for a session.
         /// Returns the deserialized report data, or null if no report exists.
         /// </summary>
