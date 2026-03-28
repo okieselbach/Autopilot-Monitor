@@ -10,6 +10,7 @@ import { loadKnowledgeDocs } from './knowledge-base.js';
 import { createSearchProvider } from './search-factory.js';
 import { setCurrentToken } from './client.js';
 import { extractTokenClaims, isTokenExpired } from './auth.js';
+import { createOAuthRouter } from './oauth.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -38,6 +39,10 @@ registerResources(server);
 
 const app = express();
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// OAuth proxy (must be before auth middleware)
+app.use(createOAuthRouter());
 
 // Health check
 app.get('/health', (_req, res) => {
