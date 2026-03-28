@@ -102,11 +102,14 @@ app.all('/mcp', async (req, res) => {
   const server = createMcpServer();
   await server.connect(transport);
 
+  await transport.handleRequest(req, res, req.body);
+
+  // Register AFTER handleRequest — the session ID is only assigned during
+  // initialize processing inside handleRequest, not before.
   if (transport.sessionId) {
     transports.set(transport.sessionId, transport);
+    console.error(`[mcp] Session ${transport.sessionId} registered`);
   }
-
-  await transport.handleRequest(req, res, req.body);
 });
 
 app.listen(PORT, '0.0.0.0', () => {
