@@ -81,22 +81,13 @@ app.all('/mcp', async (req, res) => {
     return;
   }
 
-  // POST — stale session ID with non-initialize request: tell client to re-initialize
-  const isInitialize = req.body?.method === 'initialize' ||
-    (Array.isArray(req.body) && req.body.some((m: { method?: string }) => m.method === 'initialize'));
-
-  if (sessionId && !isInitialize) {
-    console.error(`[mcp] Stale session ${sessionId}, method=${req.body?.method} — returning 404`);
-    res.status(404).json({
-      jsonrpc: '2.0',
-      error: { code: -32000, message: 'Session not found' },
-      id: req.body?.id ?? null,
-    });
-    return;
+  // POST — unknown/stale session ID: strip it so transport treats this as a fresh connection
+  if (sessionId) {
+    console.error(`[mcp] Stale session ${sessionId}, method=${req.body?.method} — creating new session`);
+    delete req.headers['mcp-session-id'];
+  } else {
+    console.error(`[mcp] New session — method=${req.body?.method}`);
   }
-
-  // POST — new initialize request: create fresh session
-  console.error(`[mcp] New session — initialize request received`);
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: () => randomUUID(),
   });
