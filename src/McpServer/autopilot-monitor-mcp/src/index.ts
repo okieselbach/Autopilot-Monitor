@@ -81,7 +81,17 @@ app.all('/mcp', async (req, res) => {
     return;
   }
 
-  // New session — create transport and connect
+  // Stale session ID from a previous deployment — tell client to re-initialize
+  if (sessionId) {
+    res.status(404).json({
+      jsonrpc: '2.0',
+      error: { code: -32000, message: 'Session expired. Please reconnect.' },
+      id: null,
+    });
+    return;
+  }
+
+  // New session (no session ID) — create transport and connect
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: () => randomUUID(),
   });
