@@ -50,13 +50,6 @@ public class PolicyEnforcementMiddleware : IFunctionsWorkerMiddleware
         var requestPath = httpContext.Request.Path.Value ?? string.Empty;
         var httpMethod = httpContext.Request.Method;
 
-        // CORS preflight requests are handled by the Azure Functions host — let them through
-        if (string.Equals(httpMethod, "OPTIONS", StringComparison.OrdinalIgnoreCase))
-        {
-            await next(context);
-            return;
-        }
-
         // Look up the catalog policy for this route
         var catalogEntry = EndpointAccessPolicyCatalog.FindPolicy(httpMethod, requestPath);
 
