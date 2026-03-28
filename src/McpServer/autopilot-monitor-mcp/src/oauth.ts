@@ -6,10 +6,15 @@
  * endpoints, which redirect to/from Entra ID.
  *
  * Flow:
- *   1. Claude Code → GET /oauth/authorize → 302 to Entra ID /authorize
- *   2. User authenticates at Entra ID
- *   3. Entra ID → GET /oauth/callback → 302 back to Claude Code with code
- *   4. Claude Code → POST /oauth/token → proxied to Entra ID /token
+ *   1. Claude Code → POST /mcp → 401 (with WWW-Authenticate header)
+ *   2. Claude Code → GET /.well-known/oauth-protected-resource → discovers auth server (RFC 9728)
+ *   3. Claude Code → GET /.well-known/oauth-authorization-server → discovers endpoints (RFC 8414)
+ *   4. Claude Code → POST /oauth/register → dynamic client registration (RFC 7591)
+ *   5. Claude Code → GET /oauth/authorize → 302 to Entra ID /authorize
+ *   6. User authenticates at Entra ID
+ *   7. Entra ID → GET /oauth/callback → 302 back to Claude Code with code
+ *   8. Claude Code → POST /oauth/token → proxied to Entra ID /token
+ *   9. Claude Code → POST /mcp (with Bearer token) → MCP session established
  */
 import { Router } from 'express';
 import crypto from 'node:crypto';
@@ -41,6 +46,19 @@ function getPublicBaseUrl(req: import('express').Request): string {
 
 export function createOAuthRouter(): Router {
   const router = Router();
+
+  // --- Protected Resource Metadata (RFC 9728) ---
+  // This is the FIRST endpoint Claude Code fetches after receiving a 401.
+  // It tells the client where the authorization server lives.
+  router.get('/.well-known/oauth-protected-resource', (req, res) => {
+    const baseUrl = getPublicBaseUrl(req);
+    res.json({
+      resource: baseUrl,
+      authorization_servers: [baseUrl],
+      bearer_methods_supported: ['header'],
+      scopes_supported: ['openid', 'profile', 'offline_access', `api://${CLIENT_ID}/access_as_user`],
+    });
+  });
 
   // --- OAuth Authorization Server Metadata (RFC 8414) ---
   router.get('/.well-known/oauth-authorization-server', (req, res) => {

@@ -12,6 +12,16 @@ import { extractTokenClaims, isTokenExpired } from './auth.js';
 import { setCurrentToken } from './client.js';
 
 const BASE_URL = process.env.AUTOPILOT_API_URL ?? 'https://autopilotmonitor-api.azurewebsites.net';
+
+/**
+ * Derives the public base URL for the WWW-Authenticate header.
+ */
+function getPublicBaseUrl(req: Request): string {
+  if (process.env.MCP_PUBLIC_URL) return process.env.MCP_PUBLIC_URL;
+  const proto = (req.headers['x-forwarded-proto'] as string) ?? req.protocol;
+  const host = (req.headers['x-forwarded-host'] as string) ?? req.headers.host;
+  return `${proto}://${host}`;
+}
 const RATE_LIMIT = parseInt(process.env.MCP_RATE_LIMIT_PER_MINUTE ?? '60', 10);
 const ACCESS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -100,8 +110,12 @@ function isRateLimited(upn: string): boolean {
 // --- Express middleware ---
 
 export function accessGuard(req: Request, res: Response, next: NextFunction): void {
+  const baseUrl = getPublicBaseUrl(req);
+  const resourceMetadataUrl = `${baseUrl}/.well-known/oauth-protected-resource`;
+
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith('Bearer ')) {
+    res.setHeader('WWW-Authenticate', `Bearer resource_metadata="${resourceMetadataUrl}"`);
     res.status(401).json({ error: 'Missing or invalid Authorization header' });
     return;
   }
@@ -109,11 +123,13 @@ export function accessGuard(req: Request, res: Response, next: NextFunction): vo
   const token = authHeader.slice(7);
   const claims = extractTokenClaims(token);
   if (!claims || !claims.upn) {
+    res.setHeader('WWW-Authenticate', `Bearer resource_metadata="${resourceMetadataUrl}", error="invalid_token"`);
     res.status(401).json({ error: 'Invalid token: missing required claims' });
     return;
   }
 
   if (isTokenExpired(claims)) {
+    res.setHeader('WWW-Authenticate', `Bearer resource_metadata="${resourceMetadataUrl}", error="invalid_token"`);
     res.status(401).json({ error: 'Token expired' });
     return;
   }
