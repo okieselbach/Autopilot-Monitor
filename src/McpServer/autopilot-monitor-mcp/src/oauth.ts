@@ -52,12 +52,10 @@ export function createOAuthRouter(): Router {
   router.get('/oauth/authorize', (req, res) => {
     const baseUrl = getPublicBaseUrl(req);
     const {
-      client_id,
       redirect_uri,
       state,
       code_challenge,
       code_challenge_method,
-      scope,
     } = req.query as Record<string, string>;
 
     // Store Claude Code's redirect_uri in state so we can forward the code back
@@ -66,11 +64,15 @@ export function createOAuthRouter(): Router {
       redirectUri: redirect_uri,
     })).toString('base64url');
 
+    // Always use server-defined SCOPES — Claude Code may send scope values
+    // (e.g. after dynamic registration) that trigger AADSTS90009 when forwarded
+    // to Entra ID, because the app would be requesting a token for itself with
+    // an unsupported identifier format.
     const entraParams = new URLSearchParams({
       client_id: CLIENT_ID,
       response_type: 'code',
       redirect_uri: `${baseUrl}/oauth/callback`,
-      scope: scope || SCOPES,
+      scope: SCOPES,
       state: proxyState,
       ...(code_challenge ? { code_challenge } : {}),
       ...(code_challenge_method ? { code_challenge_method } : {}),
@@ -129,7 +131,8 @@ export function createOAuthRouter(): Router {
     if (params.code) body.set('code', params.code);
     if (params.refresh_token) body.set('refresh_token', params.refresh_token);
     if (params.code_verifier) body.set('code_verifier', params.code_verifier);
-    if (params.scope) body.set('scope', params.scope);
+    // Always use server-defined SCOPES (see authorize endpoint comment)
+    body.set('scope', SCOPES);
 
     try {
       const tokenResponse = await fetch(`${AUTHORITY}/oauth2/v2.0/token`, {
