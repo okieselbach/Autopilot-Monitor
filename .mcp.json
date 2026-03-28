@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "autopilot-monitor": {
-      "type": "streamable-http",
+      "type": "http",
       "url": "https://autopilotmonitor-mcp.kindwave-58b4b547.westeurope.azurecontainerapps.io/mcp"
     }
   }
