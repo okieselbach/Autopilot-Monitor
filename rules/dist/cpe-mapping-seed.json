@@ -1,6 +1,6 @@
 {
-  "version": "1.1.0",
-  "lastUpdated": "2026-03-21",
+  "version": "1.2.0",
+  "lastUpdated": "2026-03-28",
   "mappings": [
     {
       "normalizedVendor": "google",
@@ -831,6 +831,66 @@
       "cpeProduct": "endpoint_configuration_manager",
       "cpeUri": "cpe:2.3:a:microsoft:endpoint_configuration_manager",
       "category": "enterprise"
+    },
+    {
+      "normalizedVendor": "microsoft",
+      "normalizedProduct": "microsoft intune management extension",
+      "displayNamePatterns": ["microsoft intune management extension", "intune management extension"],
+      "publisherPatterns": ["microsoft", "microsoft corporation"],
+      "cpeVendor": "microsoft",
+      "cpeProduct": "intune_management_extension",
+      "cpeUri": "cpe:2.3:a:microsoft:intune_management_extension",
+      "category": "enterprise"
+    },
+    {
+      "normalizedVendor": "microsoft",
+      "normalizedProduct": "company portal",
+      "displayNamePatterns": ["company portal", "microsoft company portal", "intune company portal"],
+      "publisherPatterns": ["microsoft", "microsoft corporation"],
+      "cpeVendor": "microsoft",
+      "cpeProduct": "company_portal",
+      "cpeUri": "cpe:2.3:a:microsoft:company_portal",
+      "category": "enterprise"
+    },
+    {
+      "normalizedVendor": "microsoft",
+      "normalizedProduct": "microsoft odbc driver for sql server",
+      "displayNamePatterns": ["microsoft odbc driver", "odbc driver 17 for sql server", "odbc driver 18 for sql server"],
+      "publisherPatterns": ["microsoft", "microsoft corporation"],
+      "cpeVendor": "microsoft",
+      "cpeProduct": "odbc_driver_for_sql_server",
+      "cpeUri": "cpe:2.3:a:microsoft:odbc_driver_for_sql_server",
+      "category": "database"
+    },
+    {
+      "normalizedVendor": "microsoft",
+      "normalizedProduct": "microsoft ole db driver for sql server",
+      "displayNamePatterns": ["microsoft ole db driver for sql server", "msoledbsql"],
+      "publisherPatterns": ["microsoft", "microsoft corporation"],
+      "cpeVendor": "microsoft",
+      "cpeProduct": "ole_db_driver_for_sql_server",
+      "cpeUri": "cpe:2.3:a:microsoft:ole_db_driver_for_sql_server",
+      "category": "database"
+    },
+    {
+      "normalizedVendor": "microsoft",
+      "normalizedProduct": "remote desktop client",
+      "displayNamePatterns": ["remote desktop", "microsoft remote desktop", "msrdc"],
+      "publisherPatterns": ["microsoft", "microsoft corporation"],
+      "cpeVendor": "microsoft",
+      "cpeProduct": "remote_desktop",
+      "cpeUri": "cpe:2.3:a:microsoft:remote_desktop",
+      "category": "utility"
+    },
+    {
+      "normalizedVendor": "microsoft",
+      "normalizedProduct": "azure cli",
+      "displayNamePatterns": ["microsoft azure cli", "azure cli", "microsoft cli"],
+      "publisherPatterns": ["microsoft", "microsoft corporation"],
+      "cpeVendor": "microsoft",
+      "cpeProduct": "azure_cli",
+      "cpeUri": "cpe:2.3:a:microsoft:azure_cli",
+      "category": "development"
     },
     {
       "normalizedVendor": "hcl",
