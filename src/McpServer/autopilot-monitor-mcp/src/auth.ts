@@ -2,6 +2,7 @@ import { PublicClientApplication, type DeviceCodeRequest, LogLevel } from '@azur
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { homedir } from 'node:os';
+import { exec } from 'node:child_process';
 
 const CLIENT_ID = process.env.AUTOPILOT_ENTRA_CLIENT_ID ?? '1a400946-62c1-4ab4-aa37-f730ac89704d';
 const AUTHORITY = process.env.AUTOPILOT_ENTRA_AUTHORITY ?? 'https://login.microsoftonline.com/organizations';
@@ -83,7 +84,7 @@ export async function getAccessToken(): Promise<string> {
     }
   }
 
-  // Device code flow — prompt on stderr
+  // Device code flow — open browser & copy code to clipboard
   const deviceCodeRequest: DeviceCodeRequest = {
     scopes: SCOPES,
     deviceCodeCallback: (response) => {
@@ -91,6 +92,21 @@ export async function getAccessToken(): Promise<string> {
       console.error('=== Authentication Required ===');
       console.error(response.message);
       console.error('');
+
+      // Copy device code to clipboard and open verification URL in browser
+      const code = response.userCode;
+      const url = response.verificationUri;
+      if (process.platform === 'win32') {
+        exec(`echo|set /p="${code}" | clip`);
+        exec(`start "" "${url}"`);
+      } else if (process.platform === 'darwin') {
+        exec(`echo -n "${code}" | pbcopy`);
+        exec(`open "${url}"`);
+      } else {
+        exec(`echo -n "${code}" | xclip -selection clipboard 2>/dev/null || echo -n "${code}" | xsel --clipboard 2>/dev/null`);
+        exec(`xdg-open "${url}" 2>/dev/null`);
+      }
+      console.error(`[auth] Code "${code}" copied to clipboard — paste it in the browser to sign in.`);
     },
   };
 
