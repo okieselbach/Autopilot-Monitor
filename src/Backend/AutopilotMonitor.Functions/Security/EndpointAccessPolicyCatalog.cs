@@ -155,8 +155,8 @@ public static class EndpointAccessPolicyCatalog
         new("POST",   "bootstrap/sessions",        EndpointPolicy.BootstrapManagerOrGA),
         new("DELETE", "bootstrap/sessions/{code}", EndpointPolicy.BootstrapManagerOrGA),
 
-        // ── MCP User Access Check (any authenticated user can check their own access) ──
-        new("GET",    "global/mcp-users/check",               EndpointPolicy.AuthenticatedUser),
+        // ── MCP Access Check (any authenticated user can check their own access) ──
+        new("GET",    "auth/mcp",                              EndpointPolicy.AuthenticatedUser),
 
         // ── GlobalAdminOnly ────────────────────────────────────────────
         new("GET",    "global/raw/sessions",                  EndpointPolicy.GlobalAdminOnly),

@@ -32,11 +32,19 @@ async function checkAccess(upn: string, token: string): Promise<{ allowed: boole
   }
 
   try {
-    const res = await fetch(`${BASE_URL}/api/global/mcp-users/check`, {
+    const res = await fetch(`${BASE_URL}/api/auth/mcp`, {
       headers: { Authorization: `Bearer ${token}` },
     });
 
-    const data = (await res.json()) as { allowed: boolean; reason?: string; accessGrant?: string };
+    console.error(`[access-guard] Backend check for ${upn}: status=${res.status}`);
+
+    const text = await res.text();
+    if (!text) {
+      console.error(`[access-guard] Backend returned empty body for ${upn}`);
+      return { allowed: false, reason: `Backend returned ${res.status} with empty body` };
+    }
+
+    const data = JSON.parse(text) as { allowed: boolean; reason?: string; accessGrant?: string };
     const result = {
       allowed: data.allowed === true,
       reason: data.allowed ? (data.accessGrant ?? 'allowed') : (data.reason ?? 'denied'),

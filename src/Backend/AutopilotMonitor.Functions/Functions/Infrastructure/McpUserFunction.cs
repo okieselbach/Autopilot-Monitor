@@ -122,7 +122,7 @@ public class McpUserFunction
     }
 
     /// <summary>
-    /// GET /api/admin/mcp-users/check
+    /// GET /api/auth/mcp
     /// Lightweight access check for the remote MCP server.
     /// Called by MCP server auth middleware to validate if a user can access MCP.
     /// AuthenticatedUser policy — the endpoint itself checks MCP access via service.
@@ -130,7 +130,7 @@ public class McpUserFunction
     [Function("CheckMcpAccess")]
     [Authorize]
     public async Task<HttpResponseData> CheckMcpAccess(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "admin/mcp-users/check")] HttpRequestData req,
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "auth/mcp")] HttpRequestData req,
         FunctionContext context)
     {
         var principal = context.GetUser();
