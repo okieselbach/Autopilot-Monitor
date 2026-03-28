@@ -14,6 +14,7 @@
 import { Router } from 'express';
 
 const CLIENT_ID = process.env.AUTOPILOT_ENTRA_CLIENT_ID ?? '1a400946-62c1-4ab4-aa37-f730ac89704d';
+const CLIENT_SECRET = process.env.AUTOPILOT_ENTRA_CLIENT_SECRET ?? '';
 const AUTHORITY = process.env.AUTOPILOT_ENTRA_AUTHORITY ?? 'https://login.microsoftonline.com/organizations';
 const SCOPES = `api://${CLIENT_ID}/access_as_user openid profile offline_access`;
 
@@ -121,6 +122,7 @@ export function createOAuthRouter(): Router {
     console.error(`[oauth/token] has code=${!!params.code}, has code_verifier=${!!params.code_verifier}, has refresh_token=${!!params.refresh_token}`);
 
     body.set('client_id', CLIENT_ID);
+    if (CLIENT_SECRET) body.set('client_secret', CLIENT_SECRET);
     body.set('redirect_uri', `${baseUrl}/oauth/callback`);
 
     if (params.grant_type) body.set('grant_type', params.grant_type);
