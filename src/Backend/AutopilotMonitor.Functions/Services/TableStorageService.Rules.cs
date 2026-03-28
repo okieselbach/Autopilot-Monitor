@@ -559,6 +559,17 @@ namespace AutopilotMonitor.Functions.Services
         /// </summary>
         public async Task<Dictionary<string, object>?> GetVulnerabilityReportAsync(string tenantId, string sessionId)
         {
+            var json = await GetVulnerabilityReportJsonAsync(tenantId, sessionId);
+            if (json == null) return null;
+            return JsonConvert.DeserializeObject<Dictionary<string, object>>(json);
+        }
+
+        /// <summary>
+        /// Returns the raw ReportJson string without deserialization.
+        /// Avoids Newtonsoft JToken → System.Text.Json serialization mismatch.
+        /// </summary>
+        public async Task<string?> GetVulnerabilityReportJsonAsync(string tenantId, string sessionId)
+        {
             SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
             SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
 
@@ -571,9 +582,7 @@ namespace AutopilotMonitor.Functions.Services
                 if (entity == null) return null;
 
                 var reportJson = entity.GetString("ReportJson");
-                if (string.IsNullOrEmpty(reportJson)) return null;
-
-                return JsonConvert.DeserializeObject<Dictionary<string, object>>(reportJson);
+                return string.IsNullOrEmpty(reportJson) ? null : reportJson;
             }
             catch (Azure.RequestFailedException ex) when (ex.Status == 404)
             {
