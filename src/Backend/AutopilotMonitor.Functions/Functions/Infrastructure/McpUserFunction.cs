@@ -31,7 +31,7 @@ public class McpUserFunction
     [Function("GetMcpUsers")]
     [Authorize]
     public async Task<HttpResponseData> GetMcpUsers(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "admin/mcp-users")] HttpRequestData req)
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "global/mcp-users")] HttpRequestData req)
     {
         var users = await _mcpUserService.GetAllMcpUsersAsync();
         var policy = await _mcpUserService.GetPolicyAsync();
@@ -49,7 +49,7 @@ public class McpUserFunction
     [Function("AddMcpUser")]
     [Authorize]
     public async Task<HttpResponseData> AddMcpUser(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "admin/mcp-users")] HttpRequestData req,
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "global/mcp-users")] HttpRequestData req,
         FunctionContext context)
     {
         var principal = context.GetUser();
@@ -77,7 +77,7 @@ public class McpUserFunction
     [Function("RemoveMcpUser")]
     [Authorize]
     public async Task<HttpResponseData> RemoveMcpUser(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "delete", Route = "admin/mcp-users/{upn}")] HttpRequestData req,
+        [HttpTrigger(AuthorizationLevel.Anonymous, "delete", Route = "global/mcp-users/{upn}")] HttpRequestData req,
         string upn)
     {
         await _mcpUserService.RemoveMcpUserAsync(upn);
@@ -94,7 +94,7 @@ public class McpUserFunction
     [Function("EnableMcpUser")]
     [Authorize]
     public async Task<HttpResponseData> EnableMcpUser(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "patch", Route = "admin/mcp-users/{upn}/enable")] HttpRequestData req,
+        [HttpTrigger(AuthorizationLevel.Anonymous, "patch", Route = "global/mcp-users/{upn}/enable")] HttpRequestData req,
         string upn)
     {
         await _mcpUserService.SetMcpUserEnabledAsync(upn, true);
@@ -111,7 +111,7 @@ public class McpUserFunction
     [Function("DisableMcpUser")]
     [Authorize]
     public async Task<HttpResponseData> DisableMcpUser(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "patch", Route = "admin/mcp-users/{upn}/disable")] HttpRequestData req,
+        [HttpTrigger(AuthorizationLevel.Anonymous, "patch", Route = "global/mcp-users/{upn}/disable")] HttpRequestData req,
         string upn)
     {
         await _mcpUserService.SetMcpUserEnabledAsync(upn, false);

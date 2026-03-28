@@ -215,15 +215,15 @@ export const api = {
 
   // ── MCP Users ─────────────────────────────────────────────────────────────
   mcpUsers: {
-    list: () => `${API_BASE_URL}/api/admin/mcp-users`,
-    add: () => `${API_BASE_URL}/api/admin/mcp-users`,
+    list: () => `${API_BASE_URL}/api/global/mcp-users`,
+    add: () => `${API_BASE_URL}/api/global/mcp-users`,
     remove: (upn: string) =>
-      `${API_BASE_URL}/api/admin/mcp-users/${encodeURIComponent(upn)}`,
+      `${API_BASE_URL}/api/global/mcp-users/${encodeURIComponent(upn)}`,
     enable: (upn: string) =>
-      `${API_BASE_URL}/api/admin/mcp-users/${encodeURIComponent(upn)}/enable`,
+      `${API_BASE_URL}/api/global/mcp-users/${encodeURIComponent(upn)}/enable`,
     disable: (upn: string) =>
-      `${API_BASE_URL}/api/admin/mcp-users/${encodeURIComponent(upn)}/disable`,
-    check: () => `${API_BASE_URL}/api/admin/mcp-users/check`,
+      `${API_BASE_URL}/api/global/mcp-users/${encodeURIComponent(upn)}/disable`,
+    check: () => `${API_BASE_URL}/api/global/mcp-users/check`,
   },
 
   // ── Maintenance ───────────────────────────────────────────────────────────
