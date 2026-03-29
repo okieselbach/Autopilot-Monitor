@@ -292,11 +292,11 @@ export default function SessionDetailPage() {
   const fetchSessionDetails = async () => {
     try {
       const knownTenantId = resolveEffectiveTenantId();
+      // Always use the direct session endpoint — the backend resolves the tenant
+      // via FindSessionTenantIdAsync for global admins when tenantId is unknown.
       const endpoint = knownTenantId
         ? api.sessions.get(sessionId, knownTenantId)
-        : globalAdminMode
-          ? api.globalSessions.list()
-          : api.sessions.get(sessionId);
+        : api.sessions.get(sessionId);
 
       const response = await authenticatedFetch(endpoint, getAccessToken);
       if (response.ok) {
@@ -556,6 +556,16 @@ export default function SessionDetailPage() {
       skipped: parseInt(d.skipped ?? "0", 10),
       failed: parseInt(d.failed ?? "0", 10),
       pending: parseInt(d.pending ?? "0", 10),
+    };
+  }, [events]);
+
+  // Extract NTP offset from the first ntp_time_check event (if present)
+  const ntpOffset = useMemo(() => {
+    const ntpEvent = events.find(e => e.eventType === "ntp_time_check");
+    if (!ntpEvent?.data?.offsetSeconds) return null;
+    return {
+      offsetSeconds: ntpEvent.data.offsetSeconds as number,
+      ntpServer: ntpEvent.data.ntpServer as string | undefined,
     };
   }, [events]);
 
@@ -913,6 +923,7 @@ export default function SessionDetailPage() {
               enrollmentDuration={isWhiteGloveSession && whiteGloveDurations.combinedDuration ? whiteGloveDurations.combinedDuration : enrollmentDurationFromEvents}
               displayStatus={displayStatus}
               isGatherRulesSession={isGatherRulesSession}
+              ntpOffset={ntpOffset}
             />
             </div>
           )}

@@ -8,9 +8,10 @@ interface SessionInfoCardProps {
   enrollmentDuration: string | null;
   displayStatus: string;
   isGatherRulesSession: boolean;
+  ntpOffset?: { offsetSeconds: number; ntpServer?: string } | null;
 }
 
-export default function SessionInfoCard({ session, enrollmentDuration, displayStatus, isGatherRulesSession }: SessionInfoCardProps) {
+export default function SessionInfoCard({ session, enrollmentDuration, displayStatus, isGatherRulesSession, ntpOffset }: SessionInfoCardProps) {
   return (
     <div className="bg-white shadow rounded-lg p-6 mb-6">
       <div className="flex items-center justify-between mb-4">
@@ -53,6 +54,18 @@ export default function SessionInfoCard({ session, enrollmentDuration, displaySt
         <InfoItem label="Duration" value={enrollmentDuration ?? `${Math.round(session.durationSeconds / 60)} min`} />
         <InfoItem label="Events" value={session.eventCount.toString()} />
       </div>
+      {ntpOffset && Math.abs(ntpOffset.offsetSeconds) > 30 && (
+        <div className="mt-4 flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-800">
+          <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+          </svg>
+          <span>
+            <strong>Clock Skew:</strong> Device clock is {Math.abs(ntpOffset.offsetSeconds).toFixed(1)}s
+            {ntpOffset.offsetSeconds > 0 ? " ahead of" : " behind"} UTC
+            {ntpOffset.ntpServer && <> (NTP: {ntpOffset.ntpServer})</>}
+          </span>
+        </div>
+      )}
     </div>
   );
 }

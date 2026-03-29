@@ -663,9 +663,8 @@ namespace AutopilotMonitor.Functions.Services
 
         /// <summary>
         /// Gets all sessions across all tenants (global admin mode), ordered newest-first,
-        /// with cursor-based pagination. Queries SessionsIndex cross-partition.
-        /// Cross-partition queries require in-memory sort since Azure Table Storage only
-        /// guarantees RowKey order within a single partition.
+        /// with cursor-based pagination. Uses per-tenant fan-out to leverage the
+        /// inverted-tick RowKey ordering within each partition, then merge-sorts.
         /// </summary>
         public async Task<SessionPage> GetAllSessionsAsync(int maxResults = 100, string? cursor = null)
         {
@@ -673,67 +672,78 @@ namespace AutopilotMonitor.Functions.Services
             {
                 var indexTableClient = _tableServiceClient.GetTableClient(Constants.TableNames.SessionsIndex);
 
-                // For global queries, use StartedAt filter derived from cursor for efficiency
-                string? filter = null;
-                if (!string.IsNullOrEmpty(cursor))
+                // Step 1: Get tenant IDs from TenantConfiguration (1 row per tenant, not a session scan).
+                var configTableClient = _tableServiceClient.GetTableClient(Constants.TableNames.TenantConfiguration);
+                var tenantIds = new List<string>();
+                await foreach (var entity in configTableClient.QueryAsync<TableEntity>(
+                    select: new[] { "PartitionKey" }, maxPerPage: 1000))
                 {
-                    // Cursor format: "{invertedTicks}_{sessionId}" — extract StartedAt from inverted ticks
-                    var underscoreIdx = cursor.IndexOf('_');
-                    if (underscoreIdx > 0 && long.TryParse(cursor.Substring(0, underscoreIdx), out var invertedTicks))
-                    {
-                        var cursorStartedAt = new DateTime(DateTime.MaxValue.Ticks - invertedTicks, DateTimeKind.Utc);
-                        // Fetch sessions started at or before the cursor time (with small buffer)
-                        filter = $"StartedAt le datetime'{cursorStartedAt.AddSeconds(1):yyyy-MM-ddTHH:mm:ssZ}'";
-                    }
+                    tenantIds.Add(entity.PartitionKey);
                 }
 
-                // Over-fetch for cross-partition: we need enough to sort and paginate
-                var fetchCount = maxResults + 100;
-                var query = indexTableClient.QueryAsync<TableEntity>(
-                    filter: filter,
-                    maxPerPage: Math.Min(fetchCount, 1000)
-                );
-
-                var sessions = new List<SessionSummary>();
-                await foreach (var entity in query)
-                {
-                    sessions.Add(MapIndexEntityToSessionSummary(entity));
-                    if (sessions.Count >= fetchCount) break;
-                }
-
-                // If SessionsIndex is empty and no cursor, fall back to Sessions table
-                if (sessions.Count == 0 && string.IsNullOrEmpty(cursor))
-                {
+                if (tenantIds.Count == 0 && string.IsNullOrEmpty(cursor))
                     return await GetAllSessionsFromPrimaryTableAsync(maxResults);
-                }
 
-                // Sort by StartedAt descending (cross-partition results are not pre-sorted)
-                sessions = sessions.OrderByDescending(s => s.StartedAt).ToList();
-
-                // Apply cursor: skip sessions we've already returned
+                // Step 2: Per-tenant fan-out using RowKey ordering (inverted ticks → newest first).
+                // Parse cursor into invertedTicks prefix for cross-tenant RowKey filtering.
+                string? cursorRowKeyPrefix = null;
+                string? cursorSessionId = null;
                 if (!string.IsNullOrEmpty(cursor))
                 {
-                    var cursorSessionId = ExtractSessionIdFromIndexRowKey(cursor);
-                    var cursorIdx = sessions.FindIndex(s => s.SessionId == cursorSessionId);
-                    if (cursorIdx >= 0)
+                    var underscoreIdx = cursor.IndexOf('_');
+                    if (underscoreIdx > 0)
                     {
-                        sessions = sessions.Skip(cursorIdx + 1).ToList();
+                        cursorRowKeyPrefix = cursor.Substring(0, underscoreIdx);
+                        cursorSessionId = cursor.Substring(underscoreIdx + 1);
                     }
                 }
 
-                var hasMore = sessions.Count > maxResults;
-                sessions = sessions.Take(maxResults).ToList();
+                var fetchPerTenant = maxResults + 1;
+
+                // Parallel fan-out: query all tenants concurrently
+                var tasks = tenantIds.Select(async tenantId =>
+                {
+                    var filter = $"PartitionKey eq '{tenantId}'";
+                    if (cursorRowKeyPrefix != null)
+                        filter += $" and RowKey ge '{cursorRowKeyPrefix}'";
+
+                    var tenantSessions = new List<SessionSummary>();
+                    await foreach (var entity in indexTableClient.QueryAsync<TableEntity>(
+                        filter: filter, maxPerPage: Math.Min(fetchPerTenant, 1000)))
+                    {
+                        tenantSessions.Add(MapIndexEntityToSessionSummary(entity));
+                        if (tenantSessions.Count >= fetchPerTenant) break;
+                    }
+                    return tenantSessions;
+                });
+
+                var results = await Task.WhenAll(tasks);
+                var allSessions = results.SelectMany(s => s).ToList();
+
+                // Step 3: Merge-sort across tenants by StartedAt descending
+                allSessions = allSessions.OrderByDescending(s => s.StartedAt).ToList();
+
+                // Step 4: Skip past the cursor session (handles cross-tenant duplicates at page boundary)
+                if (cursorSessionId != null)
+                {
+                    var cursorIdx = allSessions.FindIndex(s => s.SessionId == cursorSessionId);
+                    if (cursorIdx >= 0)
+                        allSessions = allSessions.Skip(cursorIdx + 1).ToList();
+                }
+
+                var hasMore = allSessions.Count > maxResults;
+                allSessions = allSessions.Take(maxResults).ToList();
 
                 string? nextCursor = null;
-                if (hasMore && sessions.Count > 0)
+                if (hasMore && allSessions.Count > 0)
                 {
-                    var lastSession = sessions[sessions.Count - 1];
+                    var lastSession = allSessions[allSessions.Count - 1];
                     nextCursor = ComputeIndexRowKey(lastSession.StartedAt, lastSession.SessionId);
                 }
 
                 return new SessionPage
                 {
-                    Sessions = sessions,
+                    Sessions = allSessions,
                     HasMore = hasMore,
                     Cursor = nextCursor
                 };
@@ -964,22 +974,31 @@ namespace AutopilotMonitor.Functions.Services
                     // This drastically reduces ETag conflicts when concurrent requests update different fields.
                     await tableClient.UpdateEntityAsync(update, session.ETag, TableUpdateMode.Merge);
 
-                    // Dual-write: merge the same fields into SessionsIndex
-                    var indexRowKey = session.GetString("IndexRowKey");
-
-                    // Fallback: if IndexRowKey was lost (e.g. StoreSessionAsync Replace race),
-                    // compute it from StartedAt + SessionId so the index still gets updated.
-                    if (string.IsNullOrEmpty(indexRowKey))
+                    // Dual-write: keep SessionsIndex in sync
+                    if (earliestEventTimestamp.HasValue && earliestEventTimestamp.Value < currentStartedAt)
                     {
-                        var sessionStartedAt = session.GetDateTimeOffset("StartedAt")?.UtcDateTime;
-                        if (sessionStartedAt.HasValue)
-                        {
-                            indexRowKey = ComputeIndexRowKey(sessionStartedAt.Value, sessionId);
-                            _logger.LogWarning("Session {SessionId}: IndexRowKey was null, computed fallback from StartedAt", sessionId);
-                        }
+                        // StartedAt shifted — recompute IndexRowKey via full upsert (delete-old + create-new)
+                        var fullEntity = (await tableClient.GetEntityAsync<TableEntity>(tenantId, sessionId)).Value;
+                        await UpsertSessionIndexAsync(fullEntity, earliestEventTimestamp.Value);
                     }
+                    else
+                    {
+                        var indexRowKey = session.GetString("IndexRowKey");
 
-                    await MergeSessionIndexAsync(tenantId, indexRowKey, update);
+                        // Fallback: if IndexRowKey was lost (e.g. StoreSessionAsync Replace race),
+                        // compute it from StartedAt + SessionId so the index still gets updated.
+                        if (string.IsNullOrEmpty(indexRowKey))
+                        {
+                            var sessionStartedAt = session.GetDateTimeOffset("StartedAt")?.UtcDateTime;
+                            if (sessionStartedAt.HasValue)
+                            {
+                                indexRowKey = ComputeIndexRowKey(sessionStartedAt.Value, sessionId);
+                                _logger.LogWarning("Session {SessionId}: IndexRowKey was null, computed fallback from StartedAt", sessionId);
+                            }
+                        }
+
+                        await MergeSessionIndexAsync(tenantId, indexRowKey, update);
+                    }
 
                     _logger.LogInformation($"Updated session {sessionId} status to {status}");
                     return true;
@@ -1085,18 +1104,27 @@ namespace AutopilotMonitor.Functions.Services
                             // Unconditional merge write — ETag.All bypasses concurrency check
                             await forceTableClient.UpdateEntityAsync(forceUpdate, ETag.All, TableUpdateMode.Merge);
 
-                            // Dual-write: merge the same fields into SessionsIndex
-                            var forceIndexRowKey = freshSession.GetString("IndexRowKey");
-                            if (string.IsNullOrEmpty(forceIndexRowKey))
+                            // Dual-write: keep SessionsIndex in sync
+                            if (earliestEventTimestamp.HasValue && earliestEventTimestamp.Value < freshStartedAt)
                             {
-                                var forceStartedAt = freshSession.GetDateTimeOffset("StartedAt")?.UtcDateTime;
-                                if (forceStartedAt.HasValue)
-                                {
-                                    forceIndexRowKey = ComputeIndexRowKey(forceStartedAt.Value, sessionId);
-                                    _logger.LogWarning("Session {SessionId}: IndexRowKey was null in force-write path, computed fallback from StartedAt", sessionId);
-                                }
+                                // StartedAt shifted — recompute IndexRowKey via full upsert
+                                var updatedEntity = (await forceTableClient.GetEntityAsync<TableEntity>(tenantId, sessionId)).Value;
+                                await UpsertSessionIndexAsync(updatedEntity, earliestEventTimestamp.Value);
                             }
-                            await MergeSessionIndexAsync(tenantId, forceIndexRowKey, forceUpdate);
+                            else
+                            {
+                                var forceIndexRowKey = freshSession.GetString("IndexRowKey");
+                                if (string.IsNullOrEmpty(forceIndexRowKey))
+                                {
+                                    var forceStartedAt2 = freshSession.GetDateTimeOffset("StartedAt")?.UtcDateTime;
+                                    if (forceStartedAt2.HasValue)
+                                    {
+                                        forceIndexRowKey = ComputeIndexRowKey(forceStartedAt2.Value, sessionId);
+                                        _logger.LogWarning("Session {SessionId}: IndexRowKey was null in force-write path, computed fallback from StartedAt", sessionId);
+                                    }
+                                }
+                                await MergeSessionIndexAsync(tenantId, forceIndexRowKey, forceUpdate);
+                            }
 
                             _logger.LogInformation($"Force-updated session {sessionId} status to {status} (unconditional merge after ETag exhaustion)");
                             return true;
@@ -1196,15 +1224,26 @@ namespace AutopilotMonitor.Functions.Services
 
                     await tableClient.UpdateEntityAsync(update, entity.ETag, TableUpdateMode.Merge);
 
-                    // Dual-write: merge the same fields into SessionsIndex
-                    var indexRowKey = entity.GetString("IndexRowKey");
-                    if (string.IsNullOrEmpty(indexRowKey))
+                    // Dual-write: keep SessionsIndex in sync
+                    if (earliestEventTimestamp.HasValue && earliestEventTimestamp.Value < currentStartedAt)
                     {
-                        var incStartedAt = entity.GetDateTimeOffset("StartedAt")?.UtcDateTime;
-                        if (incStartedAt.HasValue)
-                            indexRowKey = ComputeIndexRowKey(incStartedAt.Value, sessionId);
+                        // StartedAt shifted — the IndexRowKey (inverted ticks) must be recomputed.
+                        // Re-read the full entity (now updated) and upsert to handle delete-old + create-new.
+                        var fullEntity = (await tableClient.GetEntityAsync<TableEntity>(tenantId, sessionId)).Value;
+                        await UpsertSessionIndexAsync(fullEntity, earliestEventTimestamp.Value);
                     }
-                    await MergeSessionIndexAsync(tenantId, indexRowKey, update);
+                    else
+                    {
+                        // No StartedAt change — efficient merge into existing index entry
+                        var indexRowKey = entity.GetString("IndexRowKey");
+                        if (string.IsNullOrEmpty(indexRowKey))
+                        {
+                            var incStartedAt = entity.GetDateTimeOffset("StartedAt")?.UtcDateTime;
+                            if (incStartedAt.HasValue)
+                                indexRowKey = ComputeIndexRowKey(incStartedAt.Value, sessionId);
+                        }
+                        await MergeSessionIndexAsync(tenantId, indexRowKey, update);
+                    }
 
                     return;
                 }

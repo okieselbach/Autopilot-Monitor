@@ -116,8 +116,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 "M-d-yyyy HH:mm:ss"
             };
 
-            return DateTime.TryParseExact(combined, formats, CultureInfo.InvariantCulture,
-                DateTimeStyles.None, out result);
+            // CMTrace timestamps are always in LOCAL time. Parse as local, then convert to UTC.
+            if (DateTime.TryParseExact(combined, formats, CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeLocal, out result))
+            {
+                result = result.ToUniversalTime();
+                return true;
+            }
+            return false;
         }
     }
 }
