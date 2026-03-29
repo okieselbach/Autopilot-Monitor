@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Net.Http;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
 using AutopilotMonitor.Shared;
@@ -69,6 +70,13 @@ namespace AutopilotMonitor.Agent
         }
 
         /// <summary>
+        /// Optional: backend-provided SHA-256 hash of the latest agent ZIP.
+        /// Set from the last AgentConfigResponse before calling CheckAndApplyUpdateAsync.
+        /// Takes priority over the hash in version.json (separate trust channel).
+        /// </summary>
+        public static string BackendExpectedSha256 { get; set; }
+
+        /// <summary>
         /// Checks for a newer agent version and applies the update if available.
         /// On success, restarts the process and never returns.
         /// On any failure, returns normally so the current version continues.
@@ -84,7 +92,7 @@ namespace AutopilotMonitor.Agent
             try
             {
                 // Step 1: Fetch version.json (1s timeout)
-                var latestVersion = await GetLatestVersionAsync(log);
+                var (latestVersion, manifestSha256) = await GetLatestVersionAsync(log);
                 if (latestVersion == null)
                     return; // Could not determine latest version — continue with current
 
@@ -101,6 +109,14 @@ namespace AutopilotMonitor.Agent
                 var zipPath = Path.Combine(Path.GetTempPath(), "AutopilotMonitor-Agent-Update.zip");
                 if (!await DownloadZipAsync(zipPath, log))
                     return;
+
+                // Step 3b: Verify SHA-256 integrity (backend hash has priority over version.json hash)
+                var expectedSha256 = !string.IsNullOrEmpty(BackendExpectedSha256) ? BackendExpectedSha256 : manifestSha256;
+                if (!VerifyZipIntegrity(zipPath, expectedSha256, log))
+                {
+                    CleanupStaging(null, zipPath);
+                    return;
+                }
 
                 // Step 4: Extract to staging directory
                 var stagingDir = Environment.ExpandEnvironmentVariables(Constants.AgentUpdateStagingDir);
@@ -139,10 +155,10 @@ namespace AutopilotMonitor.Agent
         }
 
         /// <summary>
-        /// Fetches version.json from blob storage and returns the version string.
-        /// Returns null if the check fails or times out.
+        /// Fetches version.json from blob storage and returns the version string and optional SHA-256 hash.
+        /// Returns (null, null) if the check fails or times out.
         /// </summary>
-        private static async Task<string> GetLatestVersionAsync(Action<string> log)
+        private static async Task<(string version, string sha256)> GetLatestVersionAsync(Action<string> log)
         {
             try
             {
@@ -158,26 +174,67 @@ namespace AutopilotMonitor.Agent
                     if (string.IsNullOrWhiteSpace(version))
                     {
                         log("Self-update: version.json has no 'version' field");
-                        return null;
+                        return (null, null);
                     }
 
-                    return version.Trim();
+                    var sha256 = obj["sha256"]?.ToString();
+                    if (!string.IsNullOrWhiteSpace(sha256))
+                        log($"Self-update: version.json has SHA-256 hash for integrity verification");
+
+                    return (version.Trim(), sha256?.Trim());
                 }
             }
             catch (TaskCanceledException)
             {
                 log("Self-update: version check timed out (1s) — skipping update");
-                return null;
+                return (null, null);
             }
             catch (HttpRequestException ex) when (ex.Message.Contains("404"))
             {
                 log("Self-update: version.json not found (404) — skipping update");
-                return null;
+                return (null, null);
             }
             catch (Exception ex)
             {
                 log($"Self-update: version check failed — {ex.Message}");
-                return null;
+                return (null, null);
+            }
+        }
+
+        /// <summary>
+        /// Verifies the SHA-256 hash of the downloaded ZIP against the expected hash.
+        /// Returns true if the hash matches or if no expected hash is available (backward compat).
+        /// </summary>
+        private static bool VerifyZipIntegrity(string zipPath, string expectedSha256, Action<string> log)
+        {
+            if (string.IsNullOrWhiteSpace(expectedSha256))
+            {
+                log("Self-update: no SHA-256 hash available — skipping integrity check (backward compat)");
+                return true;
+            }
+
+            try
+            {
+                using (var sha256 = SHA256.Create())
+                using (var stream = File.OpenRead(zipPath))
+                {
+                    var hashBytes = sha256.ComputeHash(stream);
+                    var actualHash = BitConverter.ToString(hashBytes).Replace("-", "").ToLowerInvariant();
+
+                    if (string.Equals(actualHash, expectedSha256.ToLowerInvariant(), StringComparison.Ordinal))
+                    {
+                        log("Self-update: SHA-256 integrity check passed");
+                        return true;
+                    }
+
+                    log($"Self-update: SHA-256 MISMATCH — expected={expectedSha256}, actual={actualHash}. Aborting update.");
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                log($"Self-update: SHA-256 verification failed — {ex.Message}. Aborting update.");
+                return false;
             }
         }
 

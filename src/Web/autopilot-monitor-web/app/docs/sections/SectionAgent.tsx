@@ -77,6 +77,50 @@ export function SectionAgent() {
         )}
       </div>
 
+      <div className="mb-6">
+        <div className="flex items-center gap-2 mb-3">
+          <svg className="w-5 h-5 text-green-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+          </svg>
+          <h3 className="text-lg font-semibold text-gray-900">Download Integrity Verification</h3>
+        </div>
+        <p className="text-gray-700 mb-4">
+          Every agent download is protected by SHA-256 integrity verification to ensure the binary has not
+          been tampered with or corrupted during transfer.
+        </p>
+        <div className="space-y-3 text-sm text-gray-700">
+          <div className="flex items-start gap-3 p-3 bg-green-50 border border-green-100 rounded-lg">
+            <span className="text-green-600 font-bold mt-0.5 shrink-0">1</span>
+            <div>
+              <span className="font-medium text-gray-900">Build-time hash:</span>{" "}
+              When a new agent version is built, the CI/CD pipeline computes the SHA-256 hash of the
+              agent package and publishes it alongside the binary in <span className="font-mono text-xs bg-green-100 px-1 py-0.5 rounded">version.json</span>.
+            </div>
+          </div>
+          <div className="flex items-start gap-3 p-3 bg-green-50 border border-green-100 rounded-lg">
+            <span className="text-green-600 font-bold mt-0.5 shrink-0">2</span>
+            <div>
+              <span className="font-medium text-gray-900">Download verification:</span>{" "}
+              Both the bootstrapper script and the agent&apos;s self-updater verify the SHA-256 hash of
+              the downloaded package before installation. If the hash does not match, installation is aborted.
+            </div>
+          </div>
+          <div className="flex items-start gap-3 p-3 bg-green-50 border border-green-100 rounded-lg">
+            <span className="text-green-600 font-bold mt-0.5 shrink-0">3</span>
+            <div>
+              <span className="font-medium text-gray-900">Backend cross-check:</span>{" "}
+              The expected hash is also stored in the backend and delivered to the agent via the
+              authenticated configuration endpoint — a second, independent trust channel. An attacker
+              would need to compromise both the download server and the backend API simultaneously.
+            </div>
+          </div>
+        </div>
+        <p className="mt-3 text-sm text-gray-500">
+          All communication uses HTTPS (TLS 1.2+). The agent authenticates to the backend using the
+          device&apos;s MDM client certificate, ensuring only authorized devices receive configuration data.
+        </p>
+      </div>
+
       <div className="text-sm text-gray-500 italic">
         More details about agent parameters, configuration options, and behavior will be added here soon.
       </div>

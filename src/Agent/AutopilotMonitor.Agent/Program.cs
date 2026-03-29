@@ -97,6 +97,22 @@ namespace AutopilotMonitor.Agent
             // Any failure → continue with current version (never block startup).
             var agentDir = Environment.ExpandEnvironmentVariables(Constants.AgentDirectory);
             SelfUpdater.CleanupPreviousUpdate(agentDir, msg => { if (consoleMode) Console.WriteLine(msg); });
+
+            // Try to load backend hash from cached remote-config.json (from a previous run).
+            // This gives the self-updater a second trust channel for integrity verification.
+            try
+            {
+                var cachedConfigPath = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor\Config\remote-config.json");
+                if (System.IO.File.Exists(cachedConfigPath))
+                {
+                    var cachedJson = System.IO.File.ReadAllText(cachedConfigPath);
+                    var cachedConfig = Newtonsoft.Json.JsonConvert.DeserializeObject<AutopilotMonitor.Shared.Models.AgentConfigResponse>(cachedJson);
+                    if (!string.IsNullOrEmpty(cachedConfig?.LatestAgentSha256))
+                        SelfUpdater.BackendExpectedSha256 = cachedConfig.LatestAgentSha256;
+                }
+            }
+            catch { /* Best-effort: if cache is corrupt or missing, version.json hash is used as fallback */ }
+
             SelfUpdater.CheckAndApplyUpdateAsync(GetAgentVersion(), agentDir, consoleMode).GetAwaiter().GetResult();
             // If we reach here, no update was applied — continue normal startup
 

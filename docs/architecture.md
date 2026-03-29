@@ -511,6 +511,35 @@ ValidateSecurityAsync()  (SecurityValidationExtensions.cs)
 └─ 6. Autopilot device validation via MS Graph (optional per tenant)
 ```
 
+### Agent Binary Integrity Verification
+
+Agent downloads are verified using SHA-256 hashes through two independent channels:
+
+**Channel 1: version.json (Blob Storage)**
+- CI/CD computes SHA-256 of the agent ZIP after build
+- Hash is written to `version.json`: `{ "version": "1.0.x", "sha256": "..." }`
+- Bootstrapper and Self-Updater verify the downloaded ZIP against this hash
+- Backward compatible: old agents/bootstrappers without hash checking continue to work
+
+**Channel 2: Backend Hash-Oracle (AdminConfiguration)**
+- CI/CD writes the SHA-256 hash to `AdminConfiguration.LatestAgentSha256` in Table Storage
+- Backend delivers the hash via `AgentConfigResponse.LatestAgentSha256`
+- Self-Updater uses the backend hash with priority over the version.json hash
+- Separate trust channel: an attacker would need to compromise both Blob Storage AND the backend
+
+**Verification flow:**
+```
+Self-Updater:
+  1. Fetch version.json → get sha256 field
+  2. Download ZIP
+  3. Verify SHA-256: backend hash (priority) > version.json hash > skip (backward compat)
+
+Bootstrapper:
+  1. Fetch version.json → get sha256 field
+  2. Download ZIP
+  3. Verify SHA-256: version.json hash > legacy Content-MD5 header > skip (backward compat)
+```
+
 ### Tenant Data Isolation
 
 - All Table Storage queries filtered by `PartitionKey = TenantId`

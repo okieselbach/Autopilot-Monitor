@@ -159,6 +159,22 @@ namespace AutopilotMonitor.Shared.Models
         /// </summary>
         public string NvdApiKey { get; set; } = default!;
 
+        // ===== AGENT INTEGRITY SETTINGS =====
+
+        /// <summary>
+        /// Version string of the latest published agent build (e.g. "1.0.706").
+        /// Written by CI/CD pipeline and PS build scripts after agent ZIP upload.
+        /// </summary>
+        public string LatestAgentVersion { get; set; } = default!;
+
+        /// <summary>
+        /// SHA-256 hash (lowercase hex) of the latest published agent ZIP.
+        /// Used as a backend hash-oracle: the agent compares this against the
+        /// downloaded ZIP to verify integrity via a separate trust channel.
+        /// Written by CI/CD pipeline and PS build scripts after agent ZIP upload.
+        /// </summary>
+        public string LatestAgentSha256 { get; set; } = default!;
+
         /// <summary>
         /// Whether vulnerability correlation is globally enabled.
         /// When false, agents still collect inventory but backend skips correlation.

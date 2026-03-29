@@ -161,6 +161,14 @@ namespace AutopilotMonitor.Shared.Models
         public bool UnrestrictedMode { get; set; } = false;
 
         /// <summary>
+        /// SHA-256 hash (lowercase hex) of the latest published agent ZIP, provided by the backend.
+        /// Used for integrity verification during self-update as a second trust channel
+        /// (separate from the hash in version.json on blob storage).
+        /// null = backend does not have a hash (backward compat with older backend deployments).
+        /// </summary>
+        public string LatestAgentSha256 { get; set; } = default!;
+
+        /// <summary>
         /// NTP server address for time check during enrollment.
         /// Default: "time.windows.com"
         /// </summary>

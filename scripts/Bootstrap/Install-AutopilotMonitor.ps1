@@ -7,9 +7,19 @@
     It runs VERY EARLY in the enrollment process (first Intune action) and:
     1. Creates a unique session ID for this enrollment
     2. Downloads the monitoring agent binaries
-    3. Installs agent binaries (agent uses built-in backend URL or CLI override)
-    4. Registers agent as Scheduled Task (runs on computer startup)
-    5. Agent self-destructs when enrollment completes
+    3. Verifies integrity via SHA-256 hash from version.json
+    4. Installs agent binaries (agent uses built-in backend URL or CLI override)
+    5. Registers agent as Scheduled Task (runs on computer startup)
+    6. Agent self-destructs when enrollment completes
+
+    INTEGRITY VERIFICATION:
+    The script downloads version.json from the same blob container as the agent ZIP.
+    If version.json contains a "sha256" field, the downloaded ZIP is verified against it
+    using SHA-256. This prevents tampering during download (MITM) and detects corrupted
+    downloads. If the hash does not match, installation is aborted.
+
+    For backward compatibility: if version.json does not contain a "sha256" field (older
+    builds), the script falls back to the legacy Content-MD5 header check.
 
 .PARAMETER AgentDownloadUrl
     URL to download the agent binaries from (ZIP file)
@@ -23,6 +33,7 @@
     - Everything in C:\ProgramData\AutopilotMonitor (easy cleanup)
     - No Registry entries (clean machine after removal)
     - Scheduled Task survives reboots during enrollment
+    - SHA-256 integrity verification since v1.0.706+
 #>
 
 [CmdletBinding()]
@@ -145,6 +156,25 @@ try {
         Write-Log "Downloading agent from $AgentDownloadUrl..."
 
         try {
+            # Derive version.json URL from the agent download URL (same blob container)
+            $versionJsonUrl = $AgentDownloadUrl -replace '[^/]+$', 'version.json'
+            $expectedSha256 = $null
+
+            # Download version.json for SHA-256 integrity verification
+            try {
+                Write-Log "Fetching version.json from $versionJsonUrl for integrity verification..."
+                $versionJsonResponse = Invoke-RestMethod -Uri $versionJsonUrl -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
+                if ($versionJsonResponse.sha256) {
+                    $expectedSha256 = $versionJsonResponse.sha256.ToLowerInvariant()
+                    Write-Log "SHA-256 hash from version.json: $expectedSha256 (version: $($versionJsonResponse.version))"
+                } else {
+                    Write-Log "version.json has no sha256 field — falling back to legacy MD5 check (older build)"
+                }
+            }
+            catch {
+                Write-Log "WARNING: Could not fetch version.json — falling back to legacy MD5 check: $($_.Exception.Message)"
+            }
+
             # Download agent ZIP
             $zipPath = Join-Path $env:TEMP "AutopilotMonitor-Agent.zip"
             $maxDownloadAttempts = 3
@@ -177,19 +207,30 @@ try {
                 }
             } while ($downloadAttempt -lt $maxDownloadAttempts)
 
-            # Integrity check: compare HTTP Content-MD5 with local ZIP hash
-            $expectedMd5Header = $downloadResponse.Headers["Content-MD5"]
-            $expectedMd5 = if ($expectedMd5Header -is [System.Array]) { "$($expectedMd5Header[0])".Trim() } else { "$expectedMd5Header".Trim() }
-            if ($expectedMd5 -notmatch '\S') {
-                Write-Log "WARNING: Response has no Content-MD5 header - skipping MD5 integrity validation"
+            # Integrity check: SHA-256 (preferred) or legacy Content-MD5 (fallback)
+            if ($expectedSha256) {
+                $actualSha256 = (Get-FileHash $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+                Write-Log "Validating SHA-256 hash against version.json"
+                if ($actualSha256 -ne $expectedSha256) {
+                    throw "SHA-256 integrity check FAILED. Expected='$expectedSha256', Actual='$actualSha256'. Download may be tampered or corrupted."
+                }
+                Write-Log "SHA-256 integrity check passed"
             }
             else {
-                $actualMd5 = Get-FileMd5Base64 -Path $zipPath
-                Write-Log "Validating Content-MD5 header against downloaded ZIP"
-                if ($actualMd5 -ne $expectedMd5) {
-                    throw "MD5 integrity check failed. Expected (Content-MD5)='$expectedMd5', Actual='$actualMd5'"
+                # Legacy fallback: Content-MD5 header check
+                $expectedMd5Header = $downloadResponse.Headers["Content-MD5"]
+                $expectedMd5 = if ($expectedMd5Header -is [System.Array]) { "$($expectedMd5Header[0])".Trim() } else { "$expectedMd5Header".Trim() }
+                if ($expectedMd5 -notmatch '\S') {
+                    Write-Log "WARNING: No SHA-256 and no Content-MD5 header — skipping integrity validation"
                 }
-                Write-Log "MD5 integrity check passed"
+                else {
+                    $actualMd5 = Get-FileMd5Base64 -Path $zipPath
+                    Write-Log "Validating Content-MD5 header against downloaded ZIP"
+                    if ($actualMd5 -ne $expectedMd5) {
+                        throw "MD5 integrity check failed. Expected (Content-MD5)='$expectedMd5', Actual='$actualMd5'"
+                    }
+                    Write-Log "MD5 integrity check passed"
+                }
             }
 
             # Extract to agent bin path

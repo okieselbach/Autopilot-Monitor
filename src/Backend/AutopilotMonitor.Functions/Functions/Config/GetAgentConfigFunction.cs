@@ -162,6 +162,7 @@ namespace AutopilotMonitor.Functions.Functions.Config
                     LocalAdminAllowedAccounts = tenantConfig.GetLocalAdminAllowedAccounts(),
                     EnableSoftwareInventoryAnalyzer = tenantConfig.EnableSoftwareInventoryAnalyzer ?? false
                 },
+                LatestAgentSha256 = adminConfig.LatestAgentSha256,
                 NtpServer = tenantConfig.NtpServer ?? "time.windows.com",
                 EnableTimezoneAutoSet = tenantConfig.EnableTimezoneAutoSet ?? false,
                 SendTraceEvents = tenantConfig.SendTraceEvents,

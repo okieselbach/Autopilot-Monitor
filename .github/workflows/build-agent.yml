@@ -139,12 +139,19 @@ jobs:
           Copy-Item $versionedZip $deployZip
           Write-Host "Created deployment artifact: $deployZip"
 
-          # Copy version.json for separate upload
-          Copy-Item "$agentOutput/version.json" "version.json"
+          # Compute SHA-256 hash of the deployment ZIP for integrity verification
+          $sha256Hash = (Get-FileHash $deployZip -Algorithm SHA256).Hash.ToLowerInvariant()
+          Write-Host "SHA-256: $sha256Hash"
+
+          # Enrich version.json with SHA-256 hash (MSBuild only writes version, we add the hash post-ZIP)
+          $versionObj = Get-Content "$agentOutput/version.json" -Raw | ConvertFrom-Json
+          $versionObj | Add-Member -NotePropertyName "sha256" -NotePropertyValue $sha256Hash -Force
+          $versionObj | ConvertTo-Json -Compress | Set-Content "version.json" -Encoding UTF8
           Write-Host "version.json content: $(Get-Content version.json)"
 
           "versioned_zip=$versionedZip" >> $env:GITHUB_OUTPUT
           "deploy_zip=$deployZip" >> $env:GITHUB_OUTPUT
+          "sha256=$sha256Hash" >> $env:GITHUB_OUTPUT
 
       - name: Upload to Azure Blob Storage
         if: inputs.upload_blob
@@ -171,7 +178,7 @@ jobs:
           Invoke-RestMethod -Uri $zipBlobUrl -Method Put -Headers $zipHeaders -Body $zipBytes
           Write-Host "ZIP uploaded successfully"
 
-          # Upload version.json
+          # Upload version.json (enriched with SHA-256 hash)
           $versionBlobUrl = "$containerUrl/version.json?$sasToken"
           $versionContent = Get-Content "version.json" -Raw
           $versionHeaders = @{
@@ -181,6 +188,25 @@ jobs:
           Write-Host "Uploading version.json: $versionContent"
           Invoke-RestMethod -Uri $versionBlobUrl -Method Put -Headers $versionHeaders -Body $versionContent
           Write-Host "version.json uploaded successfully"
+
+          # Update AdminConfiguration in Table Storage with latest agent hash
+          $tableSasToken = "${{ secrets.AZURE_TABLE_ADMIN_SAS_TOKEN }}"
+          if ([string]::IsNullOrEmpty($tableSasToken) -or $tableSasToken -eq "XXX") {
+            Write-Host "SKIPPED: Table SAS token not configured — set AZURE_TABLE_ADMIN_SAS_TOKEN secret to enable backend hash-oracle"
+          } else {
+            $sha256 = "${{ steps.artifact.outputs.sha256 }}"
+            $agentVersion = "${{ steps.version.outputs.version }}"
+            $tableUrl = "https://autopilotmonitor.table.core.windows.net/AdminConfiguration(PartitionKey='GlobalConfig',RowKey='config')?$tableSasToken"
+            $tableBody = @{
+              LatestAgentVersion = $agentVersion
+              LatestAgentSha256  = $sha256
+            } | ConvertTo-Json
+            Invoke-RestMethod -Uri $tableUrl -Method Merge -Headers @{
+              "Content-Type" = "application/json"
+              "Accept"       = "application/json"
+            } -Body $tableBody
+            Write-Host "AdminConfiguration updated: version=$agentVersion, sha256=$sha256"
+          }
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -216,6 +242,7 @@ jobs:
             ### Version Info
             - **Version:** ${{ steps.version.outputs.version }}
             - **Build Number:** ${{ steps.version.outputs.build_number }}
+            - **SHA-256:** `${{ steps.artifact.outputs.sha256 }}`
             - **Built from:** ${{ github.sha }}
           draft: false
           prerelease: ${{ inputs.prerelease }}
