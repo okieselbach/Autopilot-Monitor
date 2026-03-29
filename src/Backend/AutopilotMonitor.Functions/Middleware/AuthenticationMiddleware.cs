@@ -236,10 +236,17 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
             var oid = principal.GetObjectId();
             var upn = principal.GetUserPrincipalName();
             var tid = principal.GetTenantId();
+            _logger.LogWarning("[Auth Middleware] Usage tracking: oid={Oid}, upn={Upn}, tid={Tid}, path={Path}",
+                oid ?? "(null)", upn ?? "(null)", tid ?? "(null)", requestPath);
             if (!string.IsNullOrEmpty(oid))
             {
                 var normalizedEndpoint = EndpointNormalizer.Normalize(requestPath);
                 _ = Task.Run(() => RecordUserUsageAsync(oid, upn ?? "unknown", tid ?? "", normalizedEndpoint));
+            }
+            else
+            {
+                _logger.LogWarning("[Auth Middleware] No oid claim found — usage NOT tracked. Claims: {Claims}",
+                    string.Join(", ", principal.Claims.Select(c => $"{c.Type}={c.Value}")));
             }
         }
         catch (SecurityTokenValidationException ex)
