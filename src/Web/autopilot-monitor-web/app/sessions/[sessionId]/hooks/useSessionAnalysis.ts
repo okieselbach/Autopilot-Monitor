@@ -38,23 +38,18 @@ export function useSessionAnalysis(
   }, [sessionId, sessionTenantId, getAccessToken]);
 
   const fetchVulnerabilityReport = useCallback(async (rescan = false) => {
-    if (!sessionTenantId || !GUID_REGEX.test(sessionTenantId)) {
-      console.warn("[VulnReport] Skipped fetch: sessionTenantId missing or invalid", { sessionTenantId, rescan });
-      return;
-    }
-    const url = api.sessions.vulnerabilityReport(sessionId, sessionTenantId, rescan || undefined);
-    console.info(`[VulnReport] Fetching: rescan=${rescan}, url=${url}`);
+    if (!sessionTenantId || !GUID_REGEX.test(sessionTenantId)) return;
     try {
-      const response = await authenticatedFetch(url, getAccessToken);
+      const response = await authenticatedFetch(
+        api.sessions.vulnerabilityReport(sessionId, sessionTenantId, rescan || undefined),
+        getAccessToken
+      );
       if (response.ok) {
         const data = await response.json();
-        console.info(`[VulnReport] Response OK: rescan=${rescan}, hasReport=${data.report != null}, rescanned=${data.rescanned ?? false}`);
         setVulnerabilityReport(data.report ?? null);
-      } else {
-        console.warn(`[VulnReport] Response not OK: status=${response.status}, rescan=${rescan}`);
       }
     } catch (error) {
-      console.error("[VulnReport] Failed to fetch vulnerability report:", error);
+      console.error("Failed to fetch vulnerability report:", error);
     }
   }, [sessionId, sessionTenantId, getAccessToken]);
 
