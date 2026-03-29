@@ -19,10 +19,12 @@ namespace AutopilotMonitor.Shared.DataAccess
 
         // --- MCP Users ---
         Task<bool> IsMcpUserAsync(string upn);
+        Task<McpUserEntry?> GetMcpUserAsync(string upn);
         Task<List<McpUserEntry>> GetAllMcpUsersAsync();
         Task<bool> AddMcpUserAsync(string upn, string addedBy);
         Task<bool> RemoveMcpUserAsync(string upn);
         Task<bool> SetMcpUserEnabledAsync(string upn, bool isEnabled);
+        Task<bool> SetMcpUserUsagePlanAsync(string upn, string? usagePlan);
 
         // --- Tenant Members ---
         Task<List<TenantMember>> GetTenantMembersAsync(string tenantId);
@@ -49,6 +51,7 @@ namespace AutopilotMonitor.Shared.DataAccess
         public bool IsEnabled { get; set; } = true;
         public DateTime AddedAt { get; set; }
         public string AddedBy { get; set; } = string.Empty;
+        public string? UsagePlan { get; set; }
     }
 
     public class TenantMember

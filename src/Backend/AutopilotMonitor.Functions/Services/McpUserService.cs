@@ -115,9 +115,24 @@ public class McpUserService
         _logger.LogInformation("MCP user {Action}: {Upn}", isEnabled ? "enabled" : "disabled", upn);
     }
 
+    public async Task<McpUserEntry?> GetMcpUserAsync(string upn)
+    {
+        upn = upn.ToLowerInvariant();
+        return await _adminRepo.GetMcpUserAsync(upn);
+    }
+
     public async Task<List<McpUserEntry>> GetAllMcpUsersAsync()
     {
         return await _adminRepo.GetAllMcpUsersAsync();
+    }
+
+    public async Task<bool> SetMcpUserUsagePlanAsync(string upn, string? usagePlan)
+    {
+        upn = upn.ToLowerInvariant();
+        var result = await _adminRepo.SetMcpUserUsagePlanAsync(upn, usagePlan);
+        if (result)
+            _logger.LogInformation("MCP user usage plan set: {Upn} -> {Plan}", upn, usagePlan ?? "(inherit)");
+        return result;
     }
 
     /// <summary>
@@ -167,4 +182,5 @@ public class McpUserEntity : ITableEntity
     public bool IsEnabled { get; set; } = true;
     public DateTime AddedDate { get; set; }
     public string AddedBy { get; set; } = string.Empty;
+    public string? UsagePlan { get; set; }
 }

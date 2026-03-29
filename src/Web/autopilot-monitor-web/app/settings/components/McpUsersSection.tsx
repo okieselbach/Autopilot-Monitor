@@ -11,6 +11,14 @@ interface McpUser {
   isEnabled: boolean;
   addedAt: string;
   addedBy: string;
+  usagePlan: string | null;
+}
+
+interface PlanTierDefinition {
+  name: string;
+  dailyRequestLimit: number;
+  monthlyRequestLimit: number;
+  description: string;
 }
 
 type McpPolicy = "Disabled" | "WhitelistOnly" | "AllMembers";
@@ -43,6 +51,8 @@ export default function McpUsersSection() {
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(0);
   const [savingPolicy, setSavingPolicy] = useState(false);
+  const [planTiers, setPlanTiers] = useState<PlanTierDefinition[]>([]);
+  const [changingPlanUpn, setChangingPlanUpn] = useState<string | null>(null);
 
   const ITEMS_PER_PAGE = 5;
 
@@ -65,9 +75,22 @@ export default function McpUsersSection() {
     }
   }, [getAccessToken, addNotification]);
 
+  const fetchPlanTiers = useCallback(async () => {
+    try {
+      const res = await authenticatedFetch(api.mcpUsage.planTiers(), getAccessToken);
+      if (res.ok) {
+        const data = await res.json();
+        setPlanTiers(data.tiers || []);
+      }
+    } catch {
+      // Plan tiers are optional — if we can't fetch them, just skip
+    }
+  }, [getAccessToken]);
+
   useEffect(() => {
     fetchMcpUsers();
-  }, [fetchMcpUsers]);
+    fetchPlanTiers();
+  }, [fetchMcpUsers, fetchPlanTiers]);
 
   const handlePolicyChange = useCallback(async (newPolicy: McpPolicy) => {
     try {
@@ -192,6 +215,36 @@ export default function McpUsersSection() {
       }
     } finally {
       setTogglingUpn(null);
+    }
+  }, [getAccessToken, addNotification, fetchMcpUsers]);
+
+  const handleSetUsagePlan = useCallback(async (upn: string, usagePlan: string) => {
+    try {
+      setChangingPlanUpn(upn);
+      setError(null);
+
+      const response = await authenticatedFetch(api.mcpUsers.setUsagePlan(upn), getAccessToken, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ usagePlan: usagePlan || null }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || `Failed to set plan: ${response.statusText}`);
+      }
+
+      setSuccessMessage(`Usage plan for ${upn} updated.`);
+      await fetchMcpUsers();
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err) {
+      if (err instanceof TokenExpiredError) {
+        addNotification("error", "Session Expired", err.message, "session-expired-error");
+      } else {
+        setError(err instanceof Error ? err.message : "Failed to set usage plan");
+      }
+    } finally {
+      setChangingPlanUpn(null);
     }
   }, [getAccessToken, addNotification, fetchMcpUsers]);
 
@@ -367,6 +420,22 @@ export default function McpUsersSection() {
                       </div>
 
                       <div className="flex flex-wrap items-center gap-2">
+                        {/* Usage Plan Dropdown */}
+                        {planTiers.length > 0 && (
+                          <select
+                            value={mcpUser.usagePlan || ""}
+                            onChange={(e) => handleSetUsagePlan(mcpUser.upn, e.target.value)}
+                            disabled={changingPlanUpn === mcpUser.upn}
+                            className="px-2 py-1 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:opacity-50 transition-colors"
+                          >
+                            <option value="">Inherit (tenant default)</option>
+                            {planTiers.map((tier) => (
+                              <option key={tier.name} value={tier.name}>
+                                {tier.name}
+                              </option>
+                            ))}
+                          </select>
+                        )}
                         <button
                           onClick={() => handleToggleUser(mcpUser.upn, mcpUser.isEnabled)}
                           disabled={togglingUpn === mcpUser.upn}

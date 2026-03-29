@@ -158,6 +158,9 @@ public static class EndpointAccessPolicyCatalog
         // ── MCP Access Check (any authenticated user can check their own access) ──
         new("GET",    "auth/mcp",                              EndpointPolicy.AuthenticatedUser),
 
+        // ── MCP Usage (self-service) ──────────────────────────────────
+        new("GET",    "metrics/mcp-usage/me",                  EndpointPolicy.AuthenticatedUser),
+
         // ── GlobalAdminOnly ────────────────────────────────────────────
         new("GET",    "global/raw/sessions",                  EndpointPolicy.GlobalAdminOnly),
         new("GET",    "global/raw/events",                    EndpointPolicy.GlobalAdminOnly),
@@ -216,7 +219,10 @@ public static class EndpointAccessPolicyCatalog
         new("DELETE", "global/mcp-users/{upn}",               EndpointPolicy.GlobalAdminOnly),
         new("PATCH",  "global/mcp-users/{upn}/enable",        EndpointPolicy.GlobalAdminOnly),
         new("PATCH",  "global/mcp-users/{upn}/disable",       EndpointPolicy.GlobalAdminOnly),
+        new("PATCH",  "global/mcp-users/{upn}/usage-plan",    EndpointPolicy.GlobalAdminOnly),
         new("PATCH",  "config/{tenantId}/plan",                            EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "global/config/plan-tiers",                           EndpointPolicy.GlobalAdminOnly),
+        new("PUT",    "global/config/plan-tiers",                           EndpointPolicy.GlobalAdminOnly),
         new("GET",    "feedback/all",                                     EndpointPolicy.GlobalAdminOnly),
         new("GET",    "global/notifications",                            EndpointPolicy.GlobalAdminOnly),
         new("POST",   "global/notifications/dismiss-all",                EndpointPolicy.GlobalAdminOnly),

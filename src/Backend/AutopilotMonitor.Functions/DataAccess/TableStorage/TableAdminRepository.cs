@@ -143,6 +143,34 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
             }
         }
 
+        public async Task<McpUserEntry?> GetMcpUserAsync(string upn)
+        {
+            if (string.IsNullOrWhiteSpace(upn))
+                return null;
+
+            try
+            {
+                var normalizedUpn = upn.ToLowerInvariant();
+                var result = await _mcpUsersTableClient.GetEntityAsync<McpUserEntity>(
+                    "McpUsers", normalizedUpn);
+                var entity = result.Value;
+                if (entity == null) return null;
+
+                return new McpUserEntry
+                {
+                    Upn = entity.Upn,
+                    IsEnabled = entity.IsEnabled,
+                    AddedAt = entity.AddedDate,
+                    AddedBy = entity.AddedBy,
+                    UsagePlan = entity.UsagePlan
+                };
+            }
+            catch (RequestFailedException ex) when (ex.Status == 404)
+            {
+                return null;
+            }
+        }
+
         public async Task<List<McpUserEntry>> GetAllMcpUsersAsync()
         {
             var users = new List<McpUserEntry>();
@@ -154,7 +182,8 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                     Upn = entity.Upn,
                     IsEnabled = entity.IsEnabled,
                     AddedAt = entity.AddedDate,
-                    AddedBy = entity.AddedBy
+                    AddedBy = entity.AddedBy,
+                    UsagePlan = entity.UsagePlan
                 });
             }
             return users;
@@ -198,6 +227,28 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                 if (entity != null)
                 {
                     entity.IsEnabled = isEnabled;
+                    await _mcpUsersTableClient.UpdateEntityAsync(entity, ETag.All);
+                }
+                return true;
+            }
+            catch (RequestFailedException ex) when (ex.Status == 404)
+            {
+                return false;
+            }
+        }
+
+        public async Task<bool> SetMcpUserUsagePlanAsync(string upn, string? usagePlan)
+        {
+            upn = upn.ToLowerInvariant();
+
+            try
+            {
+                var result = await _mcpUsersTableClient.GetEntityAsync<McpUserEntity>(
+                    "McpUsers", upn);
+                var entity = result.Value;
+                if (entity != null)
+                {
+                    entity.UsagePlan = usagePlan;
                     await _mcpUsersTableClient.UpdateEntityAsync(entity, ETag.All);
                 }
                 return true;

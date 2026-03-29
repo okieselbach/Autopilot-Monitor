@@ -53,6 +53,7 @@ export function AdminPageSections() {
     // Metrics
     { id: "agent-metrics", label: "Agent Metrics", href: "/admin/metrics/agent-metrics", group: "Metrics", groupIcon: <ChartBarIcon /> },
     { id: "usage", label: "Platform Usage", href: "/admin/metrics/usage", group: "Metrics" },
+    { id: "mcp-usage", label: "MCP Usage", href: "/admin/metrics/mcp-usage", group: "Metrics" },
 
     // Reports
     { id: "session-reports", label: "Session Reports", href: "/admin/reports/session-reports", group: "Reports", groupIcon: <DocumentTextIcon /> },
@@ -68,6 +69,7 @@ export function AdminPageSections() {
     { id: "global", label: "Global Settings", href: "/admin/settings/global", group: "Settings", groupIcon: <GearIcon /> },
     { id: "diagnostics-log-paths", label: "Diagnostics Log Paths", href: "/admin/settings/diagnostics-log-paths", group: "Settings" },
     { id: "config-reseed", label: "Config Reseed", href: "/admin/settings/config-reseed", group: "Settings" },
+    { id: "usage-plans", label: "Usage Plans", href: "/admin/settings/usage-plans", group: "Settings" },
 
     // Ops (single page)
     { id: "ops", label: "Maintenance", href: "/admin/ops", group: "Ops", groupIcon: <WrenchIcon /> },

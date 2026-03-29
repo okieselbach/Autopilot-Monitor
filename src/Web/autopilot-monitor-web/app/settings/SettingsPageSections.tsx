@@ -5,7 +5,7 @@ import { usePageSections } from "../../hooks/usePageSections";
 import { PageSectionItem } from "../../contexts/SidebarContext";
 import { useTenantConfig } from "./TenantConfigContext";
 import {
-  ShieldCheckIcon, GearIcon, UsersIcon, BellIcon, CircleStackIcon,
+  ShieldCheckIcon, GearIcon, UsersIcon, BellIcon, CircleStackIcon, ChartBarIcon,
 } from "../../lib/sidebarIcons";
 
 /**
@@ -67,6 +67,11 @@ export function SettingsPageSections() {
         { id: "offboarding", label: "Offboarding", href: "/settings/management/offboarding", group: "Management" },
       );
     }
+
+    // 6. MCP (visible to any authenticated user — the API itself checks MCP access)
+    sections.push(
+      { id: "mcp-usage", label: "Usage", href: "/settings/mcp/usage", group: "MCP", groupIcon: <ChartBarIcon /> },
+    );
 
     return sections;
   }, [user, config?.unrestrictedModeEnabled, config?.bootstrapTokenEnabled]);

@@ -224,6 +224,21 @@ export const api = {
     disable: (upn: string) =>
       `${API_BASE_URL}/api/global/mcp-users/${encodeURIComponent(upn)}/disable`,
     check: () => `${API_BASE_URL}/api/global/mcp-users/check`,
+    setUsagePlan: (upn: string) =>
+      `${API_BASE_URL}/api/global/mcp-users/${encodeURIComponent(upn)}/usage-plan`,
+  },
+
+  // ── MCP Usage ──────────────────────────────────────────────────────────────
+  mcpUsage: {
+    me: (dateFrom?: string, dateTo?: string) =>
+      `${API_BASE_URL}/api/metrics/mcp-usage/me${qs({ dateFrom, dateTo })}`,
+    user: (userId: string, dateFrom?: string, dateTo?: string) =>
+      `${API_BASE_URL}/api/metrics/mcp-usage/${encodeURIComponent(userId)}${qs({ dateFrom, dateTo })}`,
+    global: (tenantId?: string, dateFrom?: string, dateTo?: string) =>
+      `${API_BASE_URL}/api/global/metrics/mcp-usage${qs({ tenantId, dateFrom, dateTo })}`,
+    daily: (tenantId?: string, dateFrom?: string, dateTo?: string) =>
+      `${API_BASE_URL}/api/global/metrics/mcp-usage/daily${qs({ tenantId, dateFrom, dateTo })}`,
+    planTiers: () => `${API_BASE_URL}/api/global/config/plan-tiers`,
   },
 
   // ── Maintenance ───────────────────────────────────────────────────────────

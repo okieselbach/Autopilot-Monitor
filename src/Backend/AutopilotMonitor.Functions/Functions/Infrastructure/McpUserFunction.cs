@@ -122,6 +122,33 @@ public class McpUserFunction
     }
 
     /// <summary>
+    /// PATCH /api/global/mcp-users/{upn}/usage-plan
+    /// Sets the usage plan for an MCP user. GlobalAdminOnly.
+    /// Body: { "usagePlan": "pro" } — null or empty to inherit tenant default.
+    /// </summary>
+    [Function("SetMcpUserUsagePlan")]
+    [Authorize]
+    public async Task<HttpResponseData> SetMcpUserUsagePlan(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "patch", Route = "global/mcp-users/{upn}/usage-plan")] HttpRequestData req,
+        string upn)
+    {
+        var body = await req.ReadFromJsonAsync<SetUsagePlanRequest>();
+        var usagePlan = string.IsNullOrWhiteSpace(body?.UsagePlan) ? null : body.UsagePlan.ToLowerInvariant();
+
+        var success = await _mcpUserService.SetMcpUserUsagePlanAsync(upn, usagePlan);
+        if (!success)
+        {
+            var notFound = req.CreateResponse(HttpStatusCode.NotFound);
+            await notFound.WriteAsJsonAsync(new { error = "MCP user not found" });
+            return notFound;
+        }
+
+        var response = req.CreateResponse(HttpStatusCode.OK);
+        await response.WriteAsJsonAsync(new { upn, usagePlan = usagePlan ?? "(inherit)" });
+        return response;
+    }
+
+    /// <summary>
     /// GET /api/auth/mcp
     /// Lightweight access check for the remote MCP server.
     /// Called by MCP server auth middleware to validate if a user can access MCP.
@@ -153,4 +180,9 @@ public class McpUserFunction
 public class AddMcpUserRequest
 {
     public string Upn { get; set; } = string.Empty;
+}
+
+public class SetUsagePlanRequest
+{
+    public string? UsagePlan { get; set; }
 }

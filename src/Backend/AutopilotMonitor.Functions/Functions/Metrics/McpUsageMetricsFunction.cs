@@ -1,5 +1,7 @@
 using System.Net;
+using AutopilotMonitor.Functions.Extensions;
 using AutopilotMonitor.Functions.Helpers;
+using AutopilotMonitor.Functions.Services;
 using AutopilotMonitor.Shared.DataAccess;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -14,13 +16,62 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
     {
         private readonly ILogger<McpUsageMetricsFunction> _logger;
         private readonly IUserUsageRepository _userUsageRepo;
+        private readonly McpUserService _mcpUserService;
 
         public McpUsageMetricsFunction(
             ILogger<McpUsageMetricsFunction> logger,
-            IUserUsageRepository userUsageRepo)
+            IUserUsageRepository userUsageRepo,
+            McpUserService mcpUserService)
         {
             _logger = logger;
             _userUsageRepo = userUsageRepo;
+            _mcpUserService = mcpUserService;
+        }
+
+        /// <summary>
+        /// GET /api/metrics/mcp-usage/me?dateFrom=&amp;dateTo= — Self-service: current user's usage + plan info
+        /// </summary>
+        [Function("GetMyMcpUsage")]
+        public async Task<HttpResponseData> GetMyUsage(
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "metrics/mcp-usage/me")] HttpRequestData req,
+            FunctionContext context)
+        {
+            var principal = context.GetUser();
+            var userId = principal?.GetObjectId();
+            var upn = principal?.GetUserPrincipalName();
+
+            if (string.IsNullOrWhiteSpace(userId))
+            {
+                var unauthorized = req.CreateResponse(HttpStatusCode.Unauthorized);
+                await unauthorized.WriteAsJsonAsync(new { error = "Unable to determine user identity" });
+                return unauthorized;
+            }
+
+            try
+            {
+                var dateFrom = req.Query["dateFrom"];
+                var dateTo = req.Query["dateTo"];
+
+                var records = await _userUsageRepo.GetUsageByUserAsync(userId, dateFrom, dateTo);
+                var mcpUser = !string.IsNullOrEmpty(upn) ? await _mcpUserService.GetMcpUserAsync(upn) : null;
+
+                var response = req.CreateResponse(HttpStatusCode.OK);
+                await response.WriteAsJsonAsync(new
+                {
+                    userId,
+                    upn,
+                    usagePlan = mcpUser?.UsagePlan,
+                    records
+                });
+                return response;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting own MCP usage");
+                var errorResponse = req.CreateResponse(HttpStatusCode.InternalServerError);
+                await errorResponse.WriteAsJsonAsync(new { error = "Internal server error" });
+                return errorResponse;
+            }
         }
 
         /// <summary>

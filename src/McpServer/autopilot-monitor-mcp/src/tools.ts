@@ -8,13 +8,14 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
   // Tool 1: search_sessions
   server.tool(
     'search_sessions',
-    'Search enrollment sessions. Basic properties (status, serial number, manufacturer, model, etc.) filter on the session index. ' +
+    'Search enrollment sessions. Omit tenantId for cross-tenant search (Global Admin), or specify tenantId for single-tenant. ' +
+    'Basic properties (status, serial number, manufacturer, model, etc.) filter on the session index. ' +
     'Use deviceProperties for ANY device hardware/config filter — keys use "eventType.propertyName" notation. ' +
     'Consult the device_properties resource for available keys. ' +
     'Examples: {"tpm_status.specVersion": "2.0"}, {"hardware_spec.ramTotalGB": ">=8"}, {"secureboot_status.uefiSecureBootEnabled": "True"}. ' +
     'Array values are searched as substring match (e.g. disks containing "NVMe").',
     {
-      tenantId: z.string().optional().describe('Tenant ID (only effective with a global-scoped API key; ignored with tenant-scoped key)'),
+      tenantId: z.string().optional().describe('Tenant ID. Omit for cross-tenant search (Global Admin only).'),
       status: z.enum(['InProgress', 'Succeeded', 'Failed']).optional().describe('Enrollment status filter'),
       serialNumber: z.string().optional().describe('Device serial number (exact match)'),
       deviceName: z.string().optional().describe('Device name (prefix match, e.g. "DESKTOP-")'),
@@ -38,14 +39,17 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
       limit: z.number().min(1).max(100).optional().default(50).describe('Maximum number of results (1-100, default 50)'),
     },
     async (args) => {
-      const { deviceProperties, ...rest } = args;
+      const { deviceProperties, tenantId, ...rest } = args;
       const queryParams: Record<string, string | number | boolean | undefined | null> = { ...rest };
+      if (tenantId) queryParams.tenantId = tenantId;
       if (deviceProperties) {
         for (const [key, value] of Object.entries(deviceProperties)) {
           queryParams[`prop.${key}`] = value;
         }
       }
-      const data = await apiFetch(`/api/search/sessions${buildQuery(queryParams)}`);
+      // Cross-tenant (no tenantId) → global endpoint; single-tenant → tenant-scoped
+      const basePath = tenantId ? '/api/search/sessions' : '/api/global/search/sessions';
+      const data = await apiFetch(`${basePath}${buildQuery(queryParams)}`);
       return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
     }
   );
@@ -53,14 +57,21 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
   // Tool 2: search_sessions_by_event
   server.tool(
     'search_sessions_by_event',
-    'Find sessions that contain a specific event type (e.g. app install failure, phase transitions, errors). Check the event_types resource for valid eventType values. Use this to answer: which devices had a failed Teams install, which sessions had an error in DeviceSetup phase.',
+    'Find sessions that contain a specific event type (e.g. app install failure, phase transitions, errors). ' +
+    'Omit tenantId for cross-tenant search (Global Admin). ' +
+    'Check the event_types resource for valid eventType values. ' +
+    'Use this to answer: which devices had a failed Teams install, which sessions had an error in DeviceSetup phase.',
     {
       eventType: z.string().describe('Event type string — see event_types resource for valid values (e.g. "app_install_failed", "enrollment_failed")'),
-      tenantId: z.string().optional().describe('Tenant ID filter (global-scoped key only)'),
+      tenantId: z.string().optional().describe('Tenant ID. Omit for cross-tenant search (Global Admin only).'),
       limit: z.number().min(1).max(100).optional().default(50),
     },
     async (args) => {
-      const data = await apiFetch(`/api/search/sessions-by-event${buildQuery(args as Record<string, string | number | boolean | undefined | null>)}`);
+      const { tenantId, ...rest } = args;
+      const params: Record<string, string | number | boolean | undefined | null> = { ...rest };
+      if (tenantId) params.tenantId = tenantId;
+      const basePath = tenantId ? '/api/search/sessions-by-event' : '/api/global/search/sessions-by-event';
+      const data = await apiFetch(`${basePath}${buildQuery(params)}`);
       return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
     }
   );
@@ -122,16 +133,22 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
   // Tool 5: get_metrics
   server.tool(
     'get_metrics',
-    'Get aggregated metrics: failure rates, slowest/most-failing apps, session counts per tenant. Omit tenantId (global-scoped key only) to get a cross-tenant overview.',
+    'Get aggregated enrollment metrics: failure rates, slowest/most-failing apps, session counts. ' +
+    'Omit tenantId for cross-tenant platform overview (Global Admin). Specify tenantId for single-tenant metrics.',
     {
-      tenantId: z.string().optional(),
+      tenantId: z.string().optional().describe('Tenant ID. Omit for cross-tenant overview (Global Admin only).'),
       days: z.union([z.literal(7), z.literal(30), z.literal(90)]).optional().default(30),
     },
     async (args) => {
-      const q = buildQuery(args as Record<string, string | number | undefined>);
+      const { tenantId, ...rest } = args;
+      const params: Record<string, string | number | undefined> = { ...rest };
+      if (tenantId) params.tenantId = tenantId;
+      const q = buildQuery(params);
+      // Cross-tenant → global endpoints; single-tenant → tenant-scoped
+      const prefix = tenantId ? '/api/metrics' : '/api/global/metrics';
       const [summary, apps] = await Promise.all([
-        apiFetch(`/api/metrics/summary${q}`).catch(() => null),
-        apiFetch(`/api/metrics/app${q}`).catch(() => null),
+        apiFetch(`${prefix}/summary${q}`).catch(() => null),
+        apiFetch(`${prefix}/app${q}`).catch(() => null),
       ]);
       return { content: [{ type: 'text' as const, text: JSON.stringify({ summary, apps }, null, 2) }] };
     }
@@ -140,16 +157,22 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
   // Tool 6: search_sessions_by_cve
   server.tool(
     'search_sessions_by_cve',
-    "Find all enrollment sessions where a specific CVE was detected in the device's software inventory. Requires vulnerability scanning to be enabled. Use this to answer: which devices are affected by CVE-2024-XXXX, show all critical KEV (known exploited) vulnerability sessions.",
+    "Find enrollment sessions where a specific CVE was detected in the device's software inventory. " +
+    "Omit tenantId for cross-tenant search (Global Admin). " +
+    "Requires vulnerability scanning to be enabled. Use this to answer: which devices are affected by CVE-2024-XXXX, show all critical vulnerability sessions.",
     {
       cveId: z.string().describe('CVE identifier (e.g. "CVE-2024-21447")'),
-      tenantId: z.string().optional(),
+      tenantId: z.string().optional().describe('Tenant ID. Omit for cross-tenant search (Global Admin only).'),
       minCvssScore: z.number().min(0).max(10).optional().describe('Minimum CVSS score filter (e.g. 7.0 for high+critical)'),
       overallRisk: z.enum(['low', 'medium', 'high', 'critical']).optional(),
       limit: z.number().min(1).max(100).optional().default(50),
     },
     async (args) => {
-      const data = await apiFetch(`/api/search/sessions-by-cve${buildQuery(args as Record<string, string | number | undefined | null>)}`);
+      const { tenantId, ...rest } = args;
+      const params: Record<string, string | number | boolean | undefined | null> = { ...rest };
+      if (tenantId) params.tenantId = tenantId;
+      const basePath = tenantId ? '/api/search/sessions-by-cve' : '/api/global/search/sessions-by-cve';
+      const data = await apiFetch(`${basePath}${buildQuery(params)}`);
       return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
     }
   );
@@ -199,8 +222,11 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
         events = data?.events ?? [];
         sessionIds = [sessionId];
       } else {
-        const searchQ = buildQuery({ status: 'Failed', tenantId, limit: 5 } as Record<string, string | number | undefined>);
-        const sessions = await apiFetch(`/api/search/sessions${searchQ}`) as {
+        const searchParams: Record<string, string | number | undefined> = { status: 'Failed', limit: 5 };
+        if (tenantId) searchParams.tenantId = tenantId;
+        const searchQ = buildQuery(searchParams);
+        const searchBase = tenantId ? '/api/search/sessions' : '/api/global/search/sessions';
+        const sessions = await apiFetch(`${searchBase}${searchQ}`) as {
           sessions?: Array<{ sessionId?: string }>;
         };
         const ids = (sessions?.sessions ?? []).map((s) => s.sessionId).filter(Boolean) as string[];
@@ -338,8 +364,8 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
   // Tool 10: get_api_usage
   server.tool(
     'get_api_usage',
-    'Get API usage statistics for MCP/API keys. Shows request counts per endpoint, per day. ' +
-    'Use to monitor how much the API is being used. Requires a global-scoped API key.',
+    'Get API/MCP usage statistics. Shows request counts per endpoint per day. ' +
+    'Use to monitor platform usage, identify heavy users, or debug rate limiting. Global Admin only.',
     {
       keyId: z.string().optional().describe('Specific API key ID to query usage for'),
       tenantId: z.string().optional().describe('Filter usage by tenant ID'),
@@ -364,10 +390,110 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
         if (message.includes('403')) {
-          return { content: [{ type: 'text' as const, text: 'Access denied. This tool requires a global-scoped API key.' }] };
+          return { content: [{ type: 'text' as const, text: 'Access denied. This tool requires Global Admin permissions.' }] };
         }
         throw error;
       }
+    }
+  );
+
+  // Tool 16: get_geographic_metrics
+  server.tool(
+    'get_geographic_metrics',
+    'Get geographic distribution of enrollments — where devices are enrolling from, with performance comparisons. ' +
+    'Shows per-location: session counts, success rates, avg/median/p95 duration, throughput, and outlier detection. ' +
+    'Omit tenantId for cross-tenant view (Global Admin). Use get_geographic_sessions to drill into a specific location.',
+    {
+      tenantId: z.string().optional().describe('Tenant ID. Omit for cross-tenant view (Global Admin only).'),
+      days: z.number().optional().default(30).describe('Time range in days (default: 30)'),
+      groupBy: z.enum(['country', 'region', 'city']).optional().default('city')
+        .describe('Geographic grouping level (default: "city")'),
+    },
+    async ({ tenantId, ...rest }) => {
+      const params: Record<string, string | number | undefined> = { ...rest };
+      if (tenantId) params.tenantId = tenantId;
+      const prefix = tenantId ? '/api/metrics' : '/api/global/metrics';
+      const data = await apiFetch(`${prefix}/geographic${buildQuery(params)}`);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  // Tool 17: get_geographic_sessions
+  server.tool(
+    'get_geographic_sessions',
+    'Drill into a specific geographic location from get_geographic_metrics. Returns all enrollment sessions at that location. ' +
+    'Use the locationKey from get_geographic_metrics results.',
+    {
+      locationKey: z.string().describe('Location key from get_geographic_metrics results (e.g. "DE|Saxony|Falkenstein")'),
+      tenantId: z.string().optional().describe('Tenant ID. Omit for cross-tenant view (Global Admin only).'),
+      days: z.number().optional().default(30).describe('Time range in days (default: 30)'),
+      groupBy: z.enum(['country', 'region', 'city']).optional().default('city'),
+    },
+    async ({ tenantId, ...rest }) => {
+      const params: Record<string, string | number | undefined> = { ...rest };
+      if (tenantId) params.tenantId = tenantId;
+      const prefix = tenantId ? '/api/metrics' : '/api/global/metrics';
+      const data = await apiFetch(`${prefix}/geographic/sessions${buildQuery(params)}`);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  // Tool 18: get_platform_metrics
+  server.tool(
+    'get_platform_metrics',
+    'Get platform-level agent performance metrics: per-session CPU usage, memory consumption, and network throughput. ' +
+    'Global Admin only. Useful for monitoring agent health and identifying resource-heavy enrollments.',
+    {},
+    async () => {
+      const data = await apiFetch('/api/global/metrics/platform');
+      return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  // Tool 19: get_usage_metrics
+  server.tool(
+    'get_usage_metrics',
+    'Get platform usage statistics: active tenants, session volumes, feature adoption. ' +
+    'Omit tenantId for platform-wide overview (Global Admin), or specify tenantId for tenant-specific usage.',
+    {
+      tenantId: z.string().optional().describe('Tenant ID for tenant-specific metrics. Omit for platform-wide overview (Global Admin only).'),
+    },
+    async ({ tenantId }) => {
+      if (tenantId) {
+        const data = await apiFetch(`/api/global/metrics/usage${buildQuery({ tenantId })}`);
+        return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+      }
+      const data = await apiFetch('/api/global/metrics/usage');
+      return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  // Tool 20: get_audit_logs
+  server.tool(
+    'get_audit_logs',
+    'Get audit trail of administrative actions: config changes, device blocks, user management, report submissions. ' +
+    'Omit tenantId for cross-tenant audit log (Global Admin). Returns up to 100 most recent entries.',
+    {
+      tenantId: z.string().optional().describe('Tenant ID for tenant-scoped audit log. Omit for cross-tenant view (Global Admin only).'),
+    },
+    async ({ tenantId }) => {
+      const endpoint = tenantId
+        ? `/api/audit/logs${buildQuery({ tenantId })}`
+        : '/api/global/audit/logs';
+      const data = await apiFetch(endpoint);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  // Tool 21: list_session_reports
+  server.tool(
+    'list_session_reports',
+    'List session reports submitted by tenant admins. Reports contain user comments, screenshots, and agent logs for troubleshooting. ' +
+    'Global Admin only — returns reports across all tenants.',
+    {},
+    async () => {
+      const data = await apiFetch('/api/global/session-reports');
+      return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
     }
   );
 
@@ -376,9 +502,9 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
   // Tool 11: query_raw_events
   server.tool(
     'query_raw_events',
-    'Query raw enrollment events with flexible filters. Unlike get_session_events, this can query across sessions within a tenant. ' +
-    'Provide sessionId for single-session raw events, or eventType for cross-session event search. ' +
-    'Returns raw event data for custom analysis.',
+    'Query raw enrollment events with flexible filters. Unlike get_session_events, this can query across sessions. ' +
+    'Provide tenantId for cross-tenant access (Global Admin), or omit for your own tenant. ' +
+    'Use sessionId for single-session events, or eventType for cross-session search. Returns raw event data.',
     {
       tenantId: z.string().optional().describe('Tenant ID (global-scoped key: required; tenant-scoped key: ignored)'),
       sessionId: z.string().optional().describe('Filter to a specific session'),
@@ -403,8 +529,9 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
   // Tool 12: query_raw_sessions
   server.tool(
     'query_raw_sessions',
-    'Query raw session data with flexible filters and field projection. Returns complete session entities without search abstraction. ' +
-    'Use the fields parameter to select specific properties (e.g. "sessionId,status,startedAt,serialNumber").',
+    'Query raw session data with flexible filters and field projection. ' +
+    'Provide tenantId for cross-tenant access (Global Admin), or omit for your own tenant. ' +
+    'Use the fields parameter to select specific properties (e.g. "sessionId,status,startedAt,serialNumber"). Returns raw session entities.',
     {
       tenantId: z.string().optional().describe('Tenant ID (global-scoped key: required; tenant-scoped key: ignored)'),
       status: z.enum(['InProgress', 'Succeeded', 'Failed']).optional(),
@@ -430,8 +557,7 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
   // Tool 13: list_tables
   server.tool(
     'list_tables',
-    'List all available Azure Table Storage tables that can be queried via query_table. ' +
-    'Requires a global-scoped API key.',
+    'List all available Azure Table Storage tables that can be queried via query_table. Global Admin only.',
     {},
     async () => {
       try {
@@ -440,7 +566,7 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
         if (message.includes('403')) {
-          return { content: [{ type: 'text' as const, text: 'Access denied. This tool requires a global-scoped API key.' }] };
+          return { content: [{ type: 'text' as const, text: 'Access denied. This tool requires Global Admin permissions.' }] };
         }
         throw error;
       }
@@ -450,8 +576,8 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
   // Tool 14: query_table
   server.tool(
     'query_table',
-    'Query any Azure Table Storage table directly (admin only). Returns raw table entities. ' +
-    'Use list_tables to see available tables. Requires a global-scoped API key.',
+    'Query any Azure Table Storage table directly with OData filters. Global Admin only. ' +
+    'Use list_tables to see available tables. Useful for inspecting TenantConfiguration, RuleResults, or any raw data.',
     {
       tableName: z.string().describe('Table name (e.g. "Sessions", "Events", "RuleResults", "TenantConfiguration")'),
       partitionKey: z.string().optional().describe('Filter by exact partition key (usually TenantId)'),
@@ -467,7 +593,7 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
         if (message.includes('403')) {
-          return { content: [{ type: 'text' as const, text: 'Access denied. This tool requires a global-scoped API key.' }] };
+          return { content: [{ type: 'text' as const, text: 'Access denied. This tool requires Global Admin permissions.' }] };
         }
         throw error;
       }
@@ -477,8 +603,8 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
   // Tool 15: query_backend_logs
   server.tool(
     'query_backend_logs',
-    'Query backend Application Insights logs using KQL (admin only). Use for debugging backend issues, ' +
-    'tracing requests by correlation ID, and platform diagnostics. Requires a global-scoped API key.',
+    'Query backend Application Insights logs using KQL. Global Admin only. ' +
+    'Use for debugging backend issues, tracing requests by correlation ID, and platform diagnostics.',
     {
       query: z.string().describe('KQL query (e.g. "traces | where message contains \'error\' | take 50")'),
       timespan: z.string().optional().default('PT1H').describe('ISO 8601 duration (default: PT1H = last 1 hour). Examples: PT30M, PT6H, P1D'),
@@ -493,7 +619,7 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
         if (message.includes('403')) {
-          return { content: [{ type: 'text' as const, text: 'Access denied. This tool requires a global-scoped API key.' }] };
+          return { content: [{ type: 'text' as const, text: 'Access denied. This tool requires Global Admin permissions.' }] };
         }
         if (message.includes('503')) {
           return { content: [{ type: 'text' as const, text: 'Application Insights diagnostics is not configured. Set APPINSIGHTS_APP_ID and assign Monitoring Reader role to the Function App Managed Identity.' }] };
