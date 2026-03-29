@@ -28,7 +28,7 @@ console.error(`Search provider ready: ${knowledgeBase.name} — ${knowledgeBase.
 
 /** Creates a fresh McpServer instance per session (each needs its own protocol). */
 function createMcpServer(): McpServer {
-  const s = new McpServer({ name: 'autopilot-monitor', version: '1.2.0' });
+  const s = new McpServer({ name: 'Autopilot-Monitor', version: '1.2.0' });
   registerTools(s, knowledgeBase);
   registerResources(s);
   return s;
