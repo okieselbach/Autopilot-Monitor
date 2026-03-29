@@ -224,7 +224,7 @@ export const EXPANDABLE_NAV_GROUPS: ExpandableNavGroup[] = [
       {
         id: "ga-metrics", label: "Metrics", icon: <ChartBarIcon />,
         items: [
-          { id: "ga-agent-metrics", label: "Platform Metrics", href: "/admin/metrics/agent-metrics" },
+          { id: "ga-platform-metrics", label: "Platform Metrics", href: "/admin/metrics/platform-metrics" },
           { id: "ga-usage", label: "Platform Usage", href: "/admin/metrics/usage" },
           { id: "ga-mcp-usage", label: "MCP Usage", href: "/admin/metrics/mcp-usage" },
         ],

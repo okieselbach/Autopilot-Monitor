@@ -8,7 +8,7 @@ import { SectionPlatformUsage } from "../sections/SectionPlatformUsage";
 import { SectionMcpUsage } from "../sections/SectionMcpUsage";
 
 const SECTION_COMPONENTS: Record<MetricsSectionId, React.ComponentType> = {
-  "agent-metrics": SectionAgentMetrics,
+  "platform-metrics": SectionAgentMetrics,
   "usage": SectionPlatformUsage,
   "mcp-usage": SectionMcpUsage,
 };

@@ -51,7 +51,7 @@ export function AdminPageSections() {
     { id: "config-report", label: "Config Report", href: "/admin/tenants/config-report", group: "Tenants" },
 
     // Metrics
-    { id: "agent-metrics", label: "Agent Metrics", href: "/admin/metrics/agent-metrics", group: "Metrics", groupIcon: <ChartBarIcon /> },
+    { id: "platform-metrics", label: "Platform Metrics", href: "/admin/metrics/platform-metrics", group: "Metrics", groupIcon: <ChartBarIcon /> },
     { id: "usage", label: "Platform Usage", href: "/admin/metrics/usage", group: "Metrics" },
     { id: "mcp-usage", label: "MCP Usage", href: "/admin/metrics/mcp-usage", group: "Metrics" },
 
