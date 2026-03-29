@@ -5,7 +5,7 @@ export function MetricsSidebar({ children }: { children: React.ReactNode }) {
     <>
       <header className="bg-white shadow">
         <div className="py-6 px-4 sm:px-6 lg:px-8">
-          <h1 className="text-2xl font-normal text-gray-900">Metrics</h1>
+          <h1 className="text-2xl font-normal text-gray-900">Platform Metrics</h1>
           <p className="text-sm text-gray-500 mt-1">Platform-wide analytics</p>
         </div>
       </header>

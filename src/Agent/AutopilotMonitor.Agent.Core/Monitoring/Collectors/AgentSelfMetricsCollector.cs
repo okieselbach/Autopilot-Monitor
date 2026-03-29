@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
 using AutopilotMonitor.Agent.Core.Logging;
+using AutopilotMonitor.Agent.Core.Monitoring.Core;
 using AutopilotMonitor.Agent.Core.Monitoring.Network;
 using AutopilotMonitor.Shared.Models;
 
@@ -17,6 +18,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
     {
         private readonly string _agentVersion;
         private readonly NetworkMetrics _networkMetrics;
+        private readonly EventSpool _spool;
 
         // Previous sample for delta calculations
         private TimeSpan _prevCpuTime;
@@ -28,12 +30,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             string tenantId,
             Action<EnrollmentEvent> onEventCollected,
             NetworkMetrics networkMetrics,
+            EventSpool spool,
             AgentLogger logger,
             string agentVersion = "unknown",
             int intervalSeconds = 60)
             : base(sessionId, tenantId, onEventCollected, logger, intervalSeconds)
         {
             _networkMetrics = networkMetrics ?? throw new ArgumentNullException(nameof(networkMetrics));
+            _spool = spool;
             _agentVersion = string.IsNullOrWhiteSpace(agentVersion) ? "unknown" : agentVersion;
         }
 
@@ -95,6 +99,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             catch (Exception ex)
             {
                 Logger.Debug($"Process metrics read failed: {ex.Message}");
+            }
+
+            // --- Spool queue depth ---
+            if (_spool != null)
+            {
+                try { data["spool_queue_depth"] = _spool.GetCount(); }
+                catch { }
             }
 
             // --- Network delta ---

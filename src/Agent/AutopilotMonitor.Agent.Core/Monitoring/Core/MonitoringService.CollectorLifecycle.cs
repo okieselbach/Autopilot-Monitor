@@ -53,6 +53,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                         _configuration.TenantId,
                         EmitEvent,
                         _apiClient.NetworkMetrics,
+                        _spool,
                         _logger,
                         _agentVersion,
                         selfMetricsInterval
@@ -373,6 +374,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                         _configuration.TenantId,
                         EmitEvent,
                         _apiClient.NetworkMetrics,
+                        _spool,
                         _logger,
                         _agentVersion,
                         selfMetricsInterval

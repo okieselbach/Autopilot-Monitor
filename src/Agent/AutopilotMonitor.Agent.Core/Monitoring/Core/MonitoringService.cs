@@ -82,6 +82,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         // Admin override detected during session registration (agent restart after admin action)
         private string _pendingAdminAction;
 
+        // Previous exit classification (crash detection)
+        private readonly string _previousExitType;     // "clean" | "exception_crash" | "hard_kill" | "first_run"
+        private readonly string _previousCrashException; // exception type name (only for exception_crash)
+        private long _persistedSequenceAtStartup;      // for detecting spool ceiling recovery
+
         // Auth failure circuit breaker
         private int _consecutiveAuthFailures = 0;
         private DateTime? _firstAuthFailureTime = null;
@@ -94,11 +99,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         private bool _isFirstConfigApply = true;
         private int? _deferredSecurityAuditConfigVersion; // deferred until after agent_started
 
-        public MonitoringService(AgentConfiguration configuration, AgentLogger logger, string agentVersion)
+        public MonitoringService(AgentConfiguration configuration, AgentLogger logger, string agentVersion,
+            string previousExitType = "first_run", string previousCrashException = null)
         {
             _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _agentVersion = string.IsNullOrWhiteSpace(agentVersion) ? "unknown" : agentVersion;
+            _previousExitType = previousExitType ?? "first_run";
+            _previousCrashException = previousCrashException;
 
             if (!_configuration.IsValid())
             {
@@ -115,6 +123,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             var dataDirectory = Environment.ExpandEnvironmentVariables(Constants.AgentDataDirectory);
             _sessionPersistence = new SessionPersistence(dataDirectory);
             _eventSequence = _sessionPersistence.LoadSequence();
+            _persistedSequenceAtStartup = _eventSequence;
             var spoolMax = _spool.GetMaxSequence();
             if (spoolMax > _eventSequence)
             {
@@ -193,6 +202,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             _logger.Info("FileSystemWatcher started for efficient event upload");
 
             // Emit agent_started event with startup context so the portal shows how the agent was launched
+            var spoolCeilingTriggered = _eventSequence > _persistedSequenceAtStartup;
             var startupData = new Dictionary<string, object>
             {
                 { "agentVersion", _agentVersion },
@@ -202,8 +212,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 { "selfDestructOnComplete", _configuration.SelfDestructOnComplete },
                 { "certAuth", _configuration.UseClientCertAuth },
                 { "agentMaxLifetimeMinutes", _configuration.AgentMaxLifetimeMinutes },
-                { "diagnosticsUploadMode", _configuration.DiagnosticsUploadMode ?? "Off" }
+                { "diagnosticsUploadMode", _configuration.DiagnosticsUploadMode ?? "Off" },
+                { "previousExitType", _previousExitType },
+                { "unsentSpoolEvents", _spool.GetCount() },
+                { "spoolCeilingRecovery", spoolCeilingTriggered }
             };
+            if (_previousCrashException != null)
+                startupData["previousCrashException"] = _previousCrashException;
 
             EmitEvent(new EnrollmentEvent
             {

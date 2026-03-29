@@ -28,10 +28,38 @@ interface SessionAgentMetricDTO {
   maxWorkingSet: number;
   avgPrivateBytes: number;
   avgLatency: number;
+  avgSpoolDepth: number;
+  maxSpoolDepth: number;
+}
+
+interface DeliveryLatencyMetricsDTO {
+  p50Ms: number;
+  p95Ms: number;
+  p99Ms: number;
+  avgMs: number;
+  sampleCount: number;
+  clockSkewPercent: number;
+}
+
+interface CrashExceptionSummaryDTO {
+  exceptionType: string;
+  count: number;
+}
+
+interface CrashRateMetricsDTO {
+  totalStarts: number;
+  cleanExits: number;
+  exceptionCrashes: number;
+  hardKills: number;
+  firstRuns: number;
+  crashRatePercent: number;
+  topExceptions: CrashExceptionSummaryDTO[];
 }
 
 interface PlatformMetricsResponse {
   sessions: SessionAgentMetricDTO[];
+  deliveryLatency?: DeliveryLatencyMetricsDTO;
+  crashRate?: CrashRateMetricsDTO;
   computedAt: string;
   computeDurationMs: number;
   fromCache: boolean;
@@ -49,6 +77,8 @@ interface SessionAgentMetrics {
   maxWorkingSet: number;
   avgPrivateBytes: number;
   avgLatency: number;
+  avgSpoolDepth: number;
+  maxSpoolDepth: number;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -59,6 +89,12 @@ function formatBytes(bytes: number): string {
   const i = Math.floor(Math.log(bytes) / Math.log(1024));
   const val = bytes / Math.pow(1024, i);
   return `${val.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
+function formatLatency(ms: number): string {
+  if (ms < 1000) return `${ms.toFixed(0)} ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)} s`;
+  return `${(ms / 60000).toFixed(1)} min`;
 }
 
 function formatVersion(version: string): string {
@@ -103,6 +139,8 @@ export function SectionAgentMetrics() {
   const [error, setError] = useState<string | null>(null);
   const [versionFilter, setVersionFilter] = useState<string>('all');
   const [cacheInfo, setCacheInfo] = useState<{ fromCache: boolean; computeDurationMs: number; computedAt: string } | null>(null);
+  const [deliveryLatency, setDeliveryLatency] = useState<DeliveryLatencyMetricsDTO | null>(null);
+  const [crashRate, setCrashRate] = useState<CrashRateMetricsDTO | null>(null);
 
   // ── Fetch pre-computed metrics from backend (with 5-min cache) ────────────
 
@@ -124,6 +162,8 @@ export function SectionAgentMetrics() {
 
       const data: PlatformMetricsResponse = await res.json();
       setCacheInfo({ fromCache: data.fromCache, computeDurationMs: data.computeDurationMs, computedAt: data.computedAt });
+      setDeliveryLatency(data.deliveryLatency || null);
+      setCrashRate(data.crashRate || null);
 
       const mapped: SessionAgentMetrics[] = (data.sessions || []).map((s) => ({
         session: {
@@ -146,6 +186,8 @@ export function SectionAgentMetrics() {
         maxWorkingSet: s.maxWorkingSet,
         avgPrivateBytes: s.avgPrivateBytes,
         avgLatency: s.avgLatency,
+        avgSpoolDepth: s.avgSpoolDepth,
+        maxSpoolDepth: s.maxSpoolDepth,
       }));
 
       setSessionMetrics(mapped);
@@ -540,33 +582,138 @@ export function SectionAgentMetrics() {
               </div>
             </div>
 
-            {/* ── Ideas for future metrics ──────────────────────────── */}
+            {/* ── Platform Health Metrics ───────────────────────────── */}
             <div className="bg-white shadow rounded-lg p-6">
-              <h3 className="text-sm font-semibold text-gray-900 mb-3">Future Platform Metrics Ideas</h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs text-gray-500">
-                <div className="flex items-start gap-2">
-                  <span className="text-gray-300 mt-0.5">&#9679;</span>
-                  <span>Agent crash rate &amp; restart frequency</span>
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">Platform Health</h2>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+
+                {/* Event Delivery Latency */}
+                <div>
+                  <h3 className="text-sm font-medium text-gray-700 mb-3">Event Delivery Latency</h3>
+                  {deliveryLatency && deliveryLatency.sampleCount > 0 ? (
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-500">p50</span>
+                        <span className="font-mono text-gray-900">{formatLatency(deliveryLatency.p50Ms)}</span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-500">p95</span>
+                        <span className={`font-mono ${deliveryLatency.p95Ms > 30000 ? 'text-yellow-600' : 'text-gray-900'}`}>
+                          {formatLatency(deliveryLatency.p95Ms)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-500">p99</span>
+                        <span className={`font-mono ${deliveryLatency.p99Ms > 60000 ? 'text-red-600' : 'text-gray-900'}`}>
+                          {formatLatency(deliveryLatency.p99Ms)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-sm border-t border-gray-100 pt-2">
+                        <span className="text-gray-500">avg</span>
+                        <span className="font-mono text-gray-900">{formatLatency(deliveryLatency.avgMs)}</span>
+                      </div>
+                      <p className="text-xs text-gray-400 mt-1">
+                        {deliveryLatency.sampleCount.toLocaleString()} events sampled
+                        {deliveryLatency.clockSkewPercent > 0 && (
+                          <span className="text-yellow-600 ml-1">
+                            ({deliveryLatency.clockSkewPercent.toFixed(1)}% clock skew)
+                          </span>
+                        )}
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-400">No latency data yet</p>
+                  )}
                 </div>
-                <div className="flex items-start gap-2">
-                  <span className="text-gray-300 mt-0.5">&#9679;</span>
-                  <span>Event delivery latency (emit &rarr; backend)</span>
+
+                {/* Crash Rate */}
+                <div>
+                  <h3 className="text-sm font-medium text-gray-700 mb-3">Agent Crash Rate</h3>
+                  {crashRate && crashRate.totalStarts > 0 ? (
+                    <div className="space-y-2">
+                      <div className="flex items-baseline gap-2">
+                        <span className={`text-2xl font-bold ${crashRate.crashRatePercent === 0 ? 'text-green-600' : crashRate.crashRatePercent < 5 ? 'text-yellow-600' : 'text-red-600'}`}>
+                          {crashRate.crashRatePercent.toFixed(1)}%
+                        </span>
+                        <span className="text-xs text-gray-500">crash rate</span>
+                      </div>
+                      <div className="space-y-1 text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Clean exits</span>
+                          <span className="font-mono text-green-600">{crashRate.cleanExits}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Exception crashes</span>
+                          <span className={`font-mono ${crashRate.exceptionCrashes > 0 ? 'text-red-600' : 'text-gray-400'}`}>{crashRate.exceptionCrashes}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Hard kills</span>
+                          <span className={`font-mono ${crashRate.hardKills > 0 ? 'text-orange-600' : 'text-gray-400'}`}>{crashRate.hardKills}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">First runs</span>
+                          <span className="font-mono text-gray-400">{crashRate.firstRuns}</span>
+                        </div>
+                      </div>
+                      {crashRate.topExceptions.length > 0 && (
+                        <div className="border-t border-gray-100 pt-2 mt-2">
+                          <p className="text-xs text-gray-500 mb-1">Top exceptions:</p>
+                          {crashRate.topExceptions.map((e) => (
+                            <div key={e.exceptionType} className="flex justify-between text-xs">
+                              <span className="text-red-600 font-mono truncate mr-2">{e.exceptionType}</span>
+                              <span className="text-gray-500">{e.count}x</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <p className="text-xs text-gray-400 mt-1">
+                        {crashRate.totalStarts} total starts across {globalStats.sessionsAnalyzed} sessions
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-400">No crash data yet (requires agent with clean-exit marker)</p>
+                  )}
                 </div>
-                <div className="flex items-start gap-2">
-                  <span className="text-gray-300 mt-0.5">&#9679;</span>
-                  <span>Spool queue depth over time</span>
-                </div>
-                <div className="flex items-start gap-2">
-                  <span className="text-gray-300 mt-0.5">&#9679;</span>
-                  <span>Backend Function execution time &amp; cost</span>
-                </div>
-                <div className="flex items-start gap-2">
-                  <span className="text-gray-300 mt-0.5">&#9679;</span>
-                  <span>SignalR connection health &amp; message throughput</span>
-                </div>
-                <div className="flex items-start gap-2">
-                  <span className="text-gray-300 mt-0.5">&#9679;</span>
-                  <span>Agent footprint trend over releases</span>
+
+                {/* Spool Queue Depth */}
+                <div>
+                  <h3 className="text-sm font-medium text-gray-700 mb-3">Spool Queue Depth</h3>
+                  {(() => {
+                    const spoolAvgs = filteredMetrics.map(s => s.avgSpoolDepth);
+                    const spoolMaxes = filteredMetrics.map(s => s.maxSpoolDepth);
+                    const hasData = spoolAvgs.some(v => v > 0) || spoolMaxes.some(v => v > 0);
+                    const overallAvg = avg(spoolAvgs);
+                    const overallMax = max(spoolMaxes);
+                    return hasData ? (
+                      <div className="space-y-2">
+                        <div className="flex items-baseline gap-2">
+                          <span className={`text-2xl font-bold ${overallAvg < 5 ? 'text-green-600' : overallAvg < 20 ? 'text-yellow-600' : 'text-red-600'}`}>
+                            {overallAvg.toFixed(1)}
+                          </span>
+                          <span className="text-xs text-gray-500">avg depth</span>
+                        </div>
+                        <div className="space-y-1 text-sm">
+                          <div className="flex justify-between">
+                            <span className="text-gray-500">Avg across sessions</span>
+                            <span className="font-mono text-gray-900">{overallAvg.toFixed(1)}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-gray-500">Peak max</span>
+                            <span className={`font-mono ${overallMax > 50 ? 'text-red-600' : 'text-gray-900'}`}>{overallMax.toFixed(0)}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-gray-500">p95 max</span>
+                            <span className="font-mono text-gray-900">{pN(spoolMaxes, 95).toFixed(0)}</span>
+                          </div>
+                        </div>
+                        <p className="text-xs text-gray-400 mt-1">
+                          Events queued in spool before upload (0 = real-time delivery)
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-400">No spool data yet (requires updated agent)</p>
+                    );
+                  })()}
                 </div>
               </div>
             </div>

@@ -1,5 +1,5 @@
 export const METRICS_NAV_SECTIONS = [
-  { id: "agent-metrics", label: "Agent Metrics", description: "Agent version distribution, footprints, and detailed breakdown" },
+  { id: "agent-metrics", label: "Platform Metrics", description: "Agent performance, delivery latency, crash rates, and platform health" },
   { id: "usage", label: "Platform Usage", description: "Platform usage statistics across all tenants" },
   { id: "mcp-usage", label: "MCP Usage", description: "MCP API usage metrics across all users" },
 ] as const;

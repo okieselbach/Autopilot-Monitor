@@ -42,6 +42,16 @@ namespace AutopilotMonitor.Agent
                 return;
             }
 
+            // Register ProcessExit handler BEFORE RunAgent so we can distinguish
+            // OS shutdown/reboot (clean exit) from crashes (no marker written).
+            var stateDir = Environment.ExpandEnvironmentVariables(Constants.AgentDataDirectory);
+            var cleanExitMarkerPath = Path.Combine(stateDir, "clean-exit.marker");
+            AppDomain.CurrentDomain.ProcessExit += (s, e) =>
+            {
+                try { File.WriteAllText(cleanExitMarkerPath, DateTime.UtcNow.ToString("O")); }
+                catch { }
+            };
+
             // Always run directly - no ServiceBase.Run.
             // The agent is started by the Scheduled Task (SYSTEM) or manually with --console.
             // Both paths land here and run identically; --console just enables console output.
@@ -205,7 +215,62 @@ namespace AutopilotMonitor.Agent
                     }
                 }
 
-                using (var service = new MonitoringService(config, logger, agentVersion))
+                // Evaluate previous exit signals before starting the monitoring service.
+                // clean-exit.marker present  → previous run exited cleanly (OS shutdown, reboot, normal exit)
+                // crash_*.log present        → unhandled exception crash (with stack trace)
+                // neither                    → hard kill (power loss, BSOD, taskkill /F) or first run
+                var cleanExitMarker = Path.Combine(
+                    Environment.ExpandEnvironmentVariables(Constants.AgentDataDirectory),
+                    "clean-exit.marker");
+                var crashLogDir = Environment.ExpandEnvironmentVariables(Constants.LogDirectory);
+                var hadCleanExit = File.Exists(cleanExitMarker);
+                var crashLogs = Directory.Exists(crashLogDir)
+                    ? Directory.GetFiles(crashLogDir, "crash_*.log")
+                    : Array.Empty<string>();
+
+                string previousExitType;
+                string previousCrashException = null;
+                if (hadCleanExit)
+                {
+                    previousExitType = "clean";
+                }
+                else if (crashLogs.Length > 0)
+                {
+                    previousExitType = "exception_crash";
+                    // Extract exception type from most recent crash log
+                    try
+                    {
+                        var mostRecent = crashLogs[crashLogs.Length - 1]; // sorted by name = chronological
+                        var crashContent = File.ReadAllText(mostRecent);
+                        // Format: "[timestamp] FATAL: ExceptionType: message..."
+                        var fatalIdx = crashContent.IndexOf("FATAL: ");
+                        if (fatalIdx >= 0)
+                        {
+                            var afterFatal = crashContent.Substring(fatalIdx + 7);
+                            var colonIdx = afterFatal.IndexOf(':');
+                            if (colonIdx > 0)
+                                previousCrashException = afterFatal.Substring(0, colonIdx).Trim();
+                        }
+                    }
+                    catch { }
+                }
+                else
+                {
+                    // No marker and no crash log — either first run ever or hard kill
+                    var sessionFile = Path.Combine(
+                        Environment.ExpandEnvironmentVariables(Constants.AgentDataDirectory), "session.id");
+                    previousExitType = File.Exists(sessionFile) ? "hard_kill" : "first_run";
+                }
+
+                // Clean up: delete marker and crash logs so next cycle starts fresh
+                try { File.Delete(cleanExitMarker); } catch { }
+                foreach (var crashLog in crashLogs)
+                    try { File.Delete(crashLog); } catch { }
+
+                if (previousExitType != "first_run")
+                    logger.Info($"Previous exit: {previousExitType}{(previousCrashException != null ? $" ({previousCrashException})" : "")}");
+
+                using (var service = new MonitoringService(config, logger, agentVersion, previousExitType, previousCrashException))
                 {
                     service.Start();
 
