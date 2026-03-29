@@ -108,10 +108,24 @@ namespace AutopilotMonitor.Agent
                     var cachedJson = System.IO.File.ReadAllText(cachedConfigPath);
                     var cachedConfig = Newtonsoft.Json.JsonConvert.DeserializeObject<AutopilotMonitor.Shared.Models.AgentConfigResponse>(cachedJson);
                     if (!string.IsNullOrEmpty(cachedConfig?.LatestAgentSha256))
+                    {
                         SelfUpdater.BackendExpectedSha256 = cachedConfig.LatestAgentSha256;
+                        SelfUpdater.Log($"Self-update: loaded backend integrity hash from cached config (sha256={cachedConfig.LatestAgentSha256.Substring(0, Math.Min(12, cachedConfig.LatestAgentSha256.Length))}...)");
+                    }
+                    else
+                    {
+                        SelfUpdater.Log("Self-update: no backend integrity hash in cached config — will use version.json hash as fallback");
+                    }
+                }
+                else
+                {
+                    SelfUpdater.Log("Self-update: no cached remote-config.json — first run, will use version.json hash only");
                 }
             }
-            catch { /* Best-effort: if cache is corrupt or missing, version.json hash is used as fallback */ }
+            catch (Exception ex)
+            {
+                SelfUpdater.Log($"Self-update: could not load cached config for backend hash: {ex.Message}");
+            }
 
             SelfUpdater.CheckAndApplyUpdateAsync(GetAgentVersion(), agentDir, consoleMode).GetAwaiter().GetResult();
             // If we reach here, no update was applied — continue normal startup

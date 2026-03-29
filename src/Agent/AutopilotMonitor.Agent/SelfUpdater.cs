@@ -34,6 +34,15 @@ namespace AutopilotMonitor.Agent
         }
 
         /// <summary>
+        /// Writes a message to the agent log file. Used for pre-update logging
+        /// when the full AgentLogger is not yet initialized.
+        /// </summary>
+        public static void Log(string message)
+        {
+            LogToFile(message);
+        }
+
+        /// <summary>
         /// Deletes leftover .old files from a previous self-update.
         /// Called early in startup before any other logic.
         /// </summary>
@@ -111,7 +120,22 @@ namespace AutopilotMonitor.Agent
                     return;
 
                 // Step 3b: Verify SHA-256 integrity (backend hash has priority over version.json hash)
-                var expectedSha256 = !string.IsNullOrEmpty(BackendExpectedSha256) ? BackendExpectedSha256 : manifestSha256;
+                string expectedSha256;
+                if (!string.IsNullOrEmpty(BackendExpectedSha256))
+                {
+                    expectedSha256 = BackendExpectedSha256;
+                    log("Self-update: using backend hash for integrity verification (cached config — trusted channel)");
+                }
+                else if (!string.IsNullOrEmpty(manifestSha256))
+                {
+                    expectedSha256 = manifestSha256;
+                    log("Self-update: using version.json hash for integrity verification (blob storage)");
+                }
+                else
+                {
+                    expectedSha256 = null;
+                }
+
                 if (!VerifyZipIntegrity(zipPath, expectedSha256, log))
                 {
                     CleanupStaging(null, zipPath);
