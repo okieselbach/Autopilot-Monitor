@@ -21,6 +21,11 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
             _sessionRepo = sessionRepo;
         }
 
+        private async Task<string?> ResolveSessionTenantAsync(string sessionId)
+        {
+            return await _sessionRepo.FindSessionTenantIdAsync(sessionId);
+        }
+
         [Function("GetSessionEvents")]
         public async Task<HttpResponseData> Run(
             [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "sessions/{sessionId}/events")] HttpRequestData req,
@@ -48,19 +53,45 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
                 var query = HttpUtility.ParseQueryString(req.Url.Query);
                 var requestedTenantId = query["tenantId"];
 
+                // Auto-resolve tenantId for Global Admin when not provided
                 if (string.IsNullOrEmpty(requestedTenantId))
                 {
-                    _logger.LogWarning($"{sessionPrefix} Missing tenantId query parameter");
-                    var badRequest = req.CreateResponse(HttpStatusCode.BadRequest);
-                    await badRequest.WriteAsJsonAsync(new
+                    if (requestCtx.IsGlobalAdmin)
                     {
-                        success = false,
-                        message = "tenantId query parameter is required",
-                        sessionId = sessionId,
-                        count = 0,
-                        events = Array.Empty<object>()
-                    });
-                    return badRequest;
+                        requestedTenantId = await ResolveSessionTenantAsync(sessionId);
+                        if (string.IsNullOrEmpty(requestedTenantId))
+                        {
+                            var notFound = req.CreateResponse(HttpStatusCode.NotFound);
+                            await notFound.WriteAsJsonAsync(new
+                            {
+                                success = false,
+                                message = "Session not found",
+                                sessionId = sessionId,
+                                count = 0,
+                                events = Array.Empty<object>()
+                            });
+                            return notFound;
+                        }
+                        _logger.LogInformation($"{sessionPrefix} Auto-resolved tenantId {requestedTenantId} for Global Admin");
+                    }
+                    else
+                    {
+                        // For non-Global Admin, fall back to their own tenant
+                        requestedTenantId = requestCtx.TenantId;
+                        if (string.IsNullOrEmpty(requestedTenantId))
+                        {
+                            var badRequest = req.CreateResponse(HttpStatusCode.BadRequest);
+                            await badRequest.WriteAsJsonAsync(new
+                            {
+                                success = false,
+                                message = "tenantId query parameter is required",
+                                sessionId = sessionId,
+                                count = 0,
+                                events = Array.Empty<object>()
+                            });
+                            return badRequest;
+                        }
+                    }
                 }
 
                 // Validate tenant access: user must either own the tenant or be Global Admin

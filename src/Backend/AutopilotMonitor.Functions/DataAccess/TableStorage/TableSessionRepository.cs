@@ -30,6 +30,9 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
         public Task<SessionSummary?> GetSessionAsync(string tenantId, string sessionId)
             => _storage.GetSessionAsync(tenantId, sessionId);
 
+        public Task<string?> FindSessionTenantIdAsync(string sessionId)
+            => _storage.FindSessionTenantIdAsync(sessionId);
+
         public Task<SessionPage> GetSessionsAsync(string tenantId, int maxResults = 100, string? cursor = null)
             => _storage.GetSessionsAsync(tenantId, maxResults, cursor);
 

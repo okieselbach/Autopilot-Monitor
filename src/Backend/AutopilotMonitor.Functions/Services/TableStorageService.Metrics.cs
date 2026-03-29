@@ -198,8 +198,8 @@ namespace AutopilotMonitor.Functions.Services
                     ["DownloadDurationSeconds"] = summary.DownloadDurationSeconds,
                     ["FailureCode"] = summary.FailureCode ?? string.Empty,
                     ["FailureMessage"] = summary.FailureMessage ?? string.Empty,
-                    ["StartedAt"] = summary.StartedAt,
-                    ["CompletedAt"] = summary.CompletedAt
+                    ["StartedAt"] = EnsureUtc(summary.StartedAt),
+                    ["CompletedAt"] = summary.CompletedAt.HasValue ? EnsureUtc(summary.CompletedAt.Value) : (DateTime?)null
                 };
 
                 await tableClient.UpsertEntityAsync(entity);

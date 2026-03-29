@@ -11,7 +11,7 @@
  * Required env vars:
  *   ANTHROPIC_API_KEY   — Claude API key
  *   AUTOPILOT_API_URL   — Backend URL, e.g. https://autopilotmonitor-api.azurewebsites.net
- *   AUTOPILOT_API_KEY   — Global-scoped API key (for cross-tenant queries)
+ *   AUTOPILOT_API_KEY   — API key for authentication (Global Admin for cross-tenant queries)
  */
 
 import Anthropic from '@anthropic-ai/sdk';

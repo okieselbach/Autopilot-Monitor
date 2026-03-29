@@ -233,7 +233,7 @@ export const api = {
     me: (dateFrom?: string, dateTo?: string) =>
       `${API_BASE_URL}/api/metrics/mcp-usage/me${qs({ dateFrom, dateTo })}`,
     user: (userId: string, dateFrom?: string, dateTo?: string) =>
-      `${API_BASE_URL}/api/metrics/mcp-usage/${encodeURIComponent(userId)}${qs({ dateFrom, dateTo })}`,
+      `${API_BASE_URL}/api/metrics/mcp-usage/user/${encodeURIComponent(userId)}${qs({ dateFrom, dateTo })}`,
     global: (tenantId?: string, dateFrom?: string, dateTo?: string) =>
       `${API_BASE_URL}/api/global/metrics/mcp-usage${qs({ tenantId, dateFrom, dateTo })}`,
     daily: (tenantId?: string, dateFrom?: string, dateTo?: string) =>

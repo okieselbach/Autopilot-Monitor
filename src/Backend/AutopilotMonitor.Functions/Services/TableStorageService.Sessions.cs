@@ -791,6 +791,30 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
+        /// Finds the tenantId for a session by scanning SessionsIndex.
+        /// Used for Global Admin cross-tenant session lookup when tenantId is unknown.
+        /// </summary>
+        public async Task<string?> FindSessionTenantIdAsync(string sessionId)
+        {
+            try
+            {
+                var indexTableClient = _tableServiceClient.GetTableClient(Constants.TableNames.SessionsIndex);
+                await foreach (var entity in indexTableClient.QueryAsync<TableEntity>(
+                    filter: $"SessionId eq '{sessionId}'",
+                    maxPerPage: 1))
+                {
+                    return entity.PartitionKey;
+                }
+                return null;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to find tenant for session {sessionId}");
+                return null;
+            }
+        }
+
+        /// <summary>
         /// Updates the session status and current phase.
         /// Uses Merge mode to write only changed fields, reducing ETag conflicts under concurrency.
         /// The caller (IngestEventsFunction) provides earliestEventTimestamp from the current batch;

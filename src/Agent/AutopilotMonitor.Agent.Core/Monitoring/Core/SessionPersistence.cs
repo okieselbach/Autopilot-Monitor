@@ -45,12 +45,25 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     // Check if session file exists and is valid
                     if (File.Exists(_sessionFilePath))
                     {
-                        var sessionId = File.ReadAllText(_sessionFilePath).Trim();
-
-                        // Validate it's a valid GUID format
-                        if (Guid.TryParse(sessionId, out _))
+                        // Guard: if session.id exists but session.created does not, this is
+                        // an orphaned session from a previous enrollment. This happens when
+                        // ProgramData survives an OS reset/reinstall (e.g. Autopilot Reset)
+                        // or when upgrading from an older agent that didn't write session.created.
+                        // Delete the stale files and fall through to create a fresh session.
+                        if (!File.Exists(_sessionCreatedPath))
                         {
-                            return sessionId;
+                            try { File.Delete(_sessionFilePath); } catch { }
+                            try { File.Delete(_sequenceFilePath); } catch { }
+                        }
+                        else
+                        {
+                            var sessionId = File.ReadAllText(_sessionFilePath).Trim();
+
+                            // Validate it's a valid GUID format
+                            if (Guid.TryParse(sessionId, out _))
+                            {
+                                return sessionId;
+                            }
                         }
                     }
 

@@ -75,11 +75,11 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
         }
 
         /// <summary>
-        /// GET /api/metrics/mcp-usage/{userId}?dateFrom=&amp;dateTo= — Usage for a specific user
+        /// GET /api/metrics/mcp-usage/user/{userId}?dateFrom=&amp;dateTo= — Usage for a specific user
         /// </summary>
         [Function("GetMcpUserUsage")]
         public async Task<HttpResponseData> GetUserUsage(
-            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "metrics/mcp-usage/{userId}")] HttpRequestData req,
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "metrics/mcp-usage/user/{userId}")] HttpRequestData req,
             string userId)
         {
             _logger.LogInformation("MCP user usage requested: userId={UserId}", userId);

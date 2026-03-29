@@ -82,7 +82,7 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
     'Get full details of a single enrollment session including all device metadata. Set includeAnalysis=true to also get AI rule analysis results explaining why the session failed and remediation suggestions.',
     {
       sessionId: z.string().describe('Session UUID'),
-      tenantId: z.string().optional().describe('Tenant ID (required for tenant-scoped key; optional for global-scoped key)'),
+      tenantId: z.string().optional().describe('Tenant ID. If omitted, auto-resolved from the session (Global Admin can access any tenant).'),
       includeAnalysis: z.boolean().optional().default(false).describe('Include rule analysis results (failure explanations and remediation steps)'),
     },
     async ({ sessionId, tenantId, includeAnalysis }) => {
@@ -105,7 +105,7 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
     'get_session_events',
     'Get the event timeline for a session. Filter by eventType, severity, or source (app name) to focus on relevant events. ' +
     'Useful for root cause analysis of failures. ' +
-    'If you omit tenantId, the tool will first look up the session to determine the tenant automatically.',
+    'If you omit tenantId, the backend auto-resolves it from the session (Global Admin can access any tenant).',
     {
       sessionId: z.string().describe('Session UUID'),
       tenantId: z.string().optional().describe('Tenant ID. If omitted, auto-resolved from the session.'),
@@ -114,15 +114,6 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
       source: z.string().optional().describe('Filter by event source/app name (e.g. "MicrosoftTeams")'),
     },
     async ({ sessionId, tenantId, ...filters }) => {
-      // Auto-resolve tenantId if not provided
-      if (!tenantId) {
-        try {
-          const session = await apiFetch(`/api/sessions/${sessionId}`) as { session?: { tenantId?: string } };
-          tenantId = session?.session?.tenantId;
-        } catch {
-          // Fall through — will fail with a clear error from the events endpoint
-        }
-      }
       const q = buildQuery({ tenantId } as Record<string, string | undefined>);
       const data = await apiFetch(`/api/sessions/${sessionId}/events${q}`) as {
         events?: Array<{ eventType?: string; severity?: string; source?: string }>;
@@ -217,7 +208,7 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
     {
       query: z.string().describe('Natural language description of what to find (e.g. "app download stuck", "certificate error", "disk space low")'),
       sessionId: z.string().optional().describe('Search within a specific session. If omitted, searches across recent failed sessions.'),
-      tenantId: z.string().optional().describe('Tenant ID (global-scoped key only)'),
+      tenantId: z.string().optional().describe('Tenant ID. Required for non-Global Admin users; Global Admin can omit to search across tenants.'),
       topK: z.coerce.number().min(1).max(30).optional().default(10).describe('Number of matching events to return (1-30, default 10)'),
       minScore: z.coerce.number().min(0).max(1).optional().default(0.35)
         .describe('Minimum similarity score (0-1, default 0.35)'),
@@ -585,10 +576,10 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
   server.tool(
     'query_raw_events',
     'Query raw enrollment events with flexible filters. Unlike get_session_events, this can query across sessions within a tenant. ' +
-    'Specify tenantId for a specific tenant, or omit for cross-tenant access (Global Admin only). ' +
+    'tenantId is always required (events are partitioned per tenant). Global Admin can query any tenant. ' +
     'Use sessionId for single-session events, or eventType for cross-session search. Returns raw event data.',
     {
-      tenantId: z.string().optional().describe('Tenant ID to query. Omit for cross-tenant access (Global Admin only).'),
+      tenantId: z.string().describe('Tenant ID to query (required). Global Admin can query any tenant.'),
       sessionId: z.string().optional().describe('Filter to a specific session'),
       eventType: z.string().optional().describe('Event type filter (e.g. "app_install_failed", "error_detected")'),
       severity: z.enum(['Info', 'Warning', 'Error', 'Critical']).optional(),
@@ -599,11 +590,8 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
     },
     async (args) => {
       const { tenantId, ...rest } = args;
-      const params: Record<string, string | number | boolean | undefined | null> = { ...rest };
-      // Tenant-scoped → /api/raw/events?tenantId=X; cross-tenant → /api/global/raw/events
-      const basePath = tenantId ? '/api/raw/events' : '/api/global/raw/events';
-      if (tenantId) params.tenantId = tenantId;
-      const data = await apiFetch(`${basePath}${buildQuery(params)}`);
+      const params: Record<string, string | number | boolean | undefined | null> = { ...rest, tenantId };
+      const data = await apiFetch(`/api/raw/events${buildQuery(params)}`);
       return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
     }
   );

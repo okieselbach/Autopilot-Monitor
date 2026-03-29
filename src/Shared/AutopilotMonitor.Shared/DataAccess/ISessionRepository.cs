@@ -14,6 +14,7 @@ namespace AutopilotMonitor.Shared.DataAccess
         // --- Session CRUD ---
         Task<bool> StoreSessionAsync(SessionRegistration registration);
         Task<SessionSummary?> GetSessionAsync(string tenantId, string sessionId);
+        Task<string?> FindSessionTenantIdAsync(string sessionId);
         Task<SessionPage> GetSessionsAsync(string tenantId, int maxResults = 100, string? cursor = null);
         Task<SessionPage> GetAllSessionsAsync(int maxResults = 100, string? cursor = null);
         Task<bool> DeleteSessionAsync(string tenantId, string sessionId);

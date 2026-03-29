@@ -72,6 +72,18 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
                 }
 
                 var session = await _sessionRepo.GetSessionAsync(effectiveTenantId, sessionId);
+
+                // Global Admin cross-tenant fallback: if not found in the effective tenant,
+                // try resolving the actual tenant via SessionsIndex
+                if (session == null && requestCtx.IsGlobalAdmin)
+                {
+                    var resolvedTenantId = await _sessionRepo.FindSessionTenantIdAsync(sessionId);
+                    if (resolvedTenantId != null && !string.Equals(resolvedTenantId, effectiveTenantId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        session = await _sessionRepo.GetSessionAsync(resolvedTenantId, sessionId);
+                    }
+                }
+
                 if (session == null)
                 {
                     var notFound = req.CreateResponse(HttpStatusCode.NotFound);
