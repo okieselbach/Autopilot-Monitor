@@ -200,6 +200,12 @@ export const EXPANDABLE_NAV_GROUPS: ExpandableNavGroup[] = [
           { id: "cfg-offboarding", label: "Offboarding", href: "/settings/management/offboarding" },
         ],
       },
+      {
+        id: "cfg-mcp", label: "MCP", icon: <ChartBarIcon />,
+        items: [
+          { id: "cfg-mcp-usage", label: "Usage", href: "/settings/mcp/usage" },
+        ],
+      },
     ],
   },
   {
@@ -220,6 +226,7 @@ export const EXPANDABLE_NAV_GROUPS: ExpandableNavGroup[] = [
         items: [
           { id: "ga-agent-metrics", label: "Agent Metrics", href: "/admin/metrics/agent-metrics" },
           { id: "ga-usage", label: "Platform Usage", href: "/admin/metrics/usage" },
+          { id: "ga-mcp-usage", label: "MCP Usage", href: "/admin/metrics/mcp-usage" },
         ],
       },
       {
@@ -245,6 +252,7 @@ export const EXPANDABLE_NAV_GROUPS: ExpandableNavGroup[] = [
           { id: "ga-diag-paths", label: "Diagnostics Log Paths", href: "/admin/settings/diagnostics-log-paths" },
           { id: "ga-mcp-users", label: "MCP Users", href: "/admin/settings/mcp-users" },
           { id: "ga-config-reseed", label: "Config Reseed", href: "/admin/settings/config-reseed" },
+          { id: "ga-usage-plans", label: "Usage Plans", href: "/admin/settings/usage-plans" },
         ],
       },
       {

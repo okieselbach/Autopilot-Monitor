@@ -175,8 +175,21 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
     }
   };
 
-  // Visible expandable groups
-  const visibleExpandableGroups = EXPANDABLE_NAV_GROUPS.filter(isGroupVisible);
+  // Visible expandable groups (with item-level filtering for feature-gated items)
+  const hasMcpAccess = user?.hasMcpAccess ?? false;
+  const visibleExpandableGroups = useMemo(() => {
+    return EXPANDABLE_NAV_GROUPS
+      .filter(isGroupVisible)
+      .map((group) => {
+        // Filter out MCP item if user doesn't have MCP access
+        const filteredItems = group.items.filter((item) => {
+          if (item.id === "cfg-mcp") return hasMcpAccess;
+          return true;
+        });
+        return { ...group, items: filteredItems };
+      });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdminOrOperator, isGlobalAdmin, globalAdminMode, hasMcpAccess]);
 
   // Auto-expand the group containing the current pathname
   useEffect(() => {

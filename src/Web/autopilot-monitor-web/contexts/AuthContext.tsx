@@ -68,6 +68,7 @@ interface UserInfo {
   isTenantAdmin: boolean;
   role: 'Admin' | 'Operator' | 'Viewer' | null;
   canManageBootstrapTokens: boolean;
+  hasMcpAccess: boolean;
 }
 
 interface AuthContextType {
@@ -157,6 +158,7 @@ function AuthProviderInternal({ children }: { children: React.ReactNode }) {
               isTenantAdmin: false,
               role: null,
               canManageBootstrapTokens: false,
+              hasMcpAccess: false,
             };
           }
         }
@@ -174,6 +176,7 @@ function AuthProviderInternal({ children }: { children: React.ReactNode }) {
         isTenantAdmin: data.isTenantAdmin || false,
         role: data.role || null,
         canManageBootstrapTokens: data.canManageBootstrapTokens || false,
+        hasMcpAccess: data.hasMcpAccess || false,
       };
     } catch (error) {
       // If the refresh token is expired or consent is required, redirect to
@@ -203,6 +206,7 @@ function AuthProviderInternal({ children }: { children: React.ReactNode }) {
         isTenantAdmin: false,
         role: null,
         canManageBootstrapTokens: false,
+        hasMcpAccess: false,
       };
     }
   }, [instance]);

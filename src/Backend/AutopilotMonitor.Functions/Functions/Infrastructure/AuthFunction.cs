@@ -23,6 +23,7 @@ public class AuthFunction
     private readonly PreviewWhitelistService _previewWhitelistService;
     private readonly TelegramNotificationService _telegramNotificationService;
     private readonly GlobalNotificationService _globalNotificationService;
+    private readonly McpUserService _mcpUserService;
 
     public AuthFunction(
         ILogger<AuthFunction> logger,
@@ -32,7 +33,8 @@ public class AuthFunction
         IMetricsRepository metricsRepo,
         PreviewWhitelistService previewWhitelistService,
         TelegramNotificationService telegramNotificationService,
-        GlobalNotificationService globalNotificationService)
+        GlobalNotificationService globalNotificationService,
+        McpUserService mcpUserService)
     {
         _logger = logger;
         _globalAdminService = globalAdminService;
@@ -42,6 +44,7 @@ public class AuthFunction
         _previewWhitelistService = previewWhitelistService;
         _telegramNotificationService = telegramNotificationService;
         _globalNotificationService = globalNotificationService;
+        _mcpUserService = mcpUserService;
     }
 
     /// <summary>
@@ -176,6 +179,9 @@ public class AuthFunction
         _ = _metricsRepo.RecordUserLoginAsync(tenantId, upn, displayName, objectId)
             .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException, "Fire-and-forget RecordUserLoginAsync failed"), TaskContinuationOptions.OnlyOnFaulted);
 
+        // Check MCP access (cached, lightweight)
+        var mcpCheck = await _mcpUserService.IsAllowedAsync(upn);
+
         var userInfo = new
         {
             tenantId,
@@ -185,7 +191,8 @@ public class AuthFunction
             isGlobalAdmin,
             isTenantAdmin,
             role,
-            canManageBootstrapTokens
+            canManageBootstrapTokens,
+            hasMcpAccess = mcpCheck.IsAllowed
         };
 
         var response = req.CreateResponse(HttpStatusCode.OK);
