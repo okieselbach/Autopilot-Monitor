@@ -21,7 +21,8 @@ var builder = FunctionsApplication.CreateBuilder(args);
 builder.ConfigureFunctionsWebApplication();
 
 // Register middleware pipeline (Azure Functions .NET 8 isolated worker pattern)
-// Order matters: correlation ID (all requests) → JWT authentication (401) → policy enforcement (403)
+// Order matters: request telemetry (wraps all) → correlation ID → JWT authentication (401) → policy enforcement (403)
+builder.UseMiddleware<RequestTelemetryMiddleware>();
 builder.UseMiddleware<CorrelationIdMiddleware>();
 builder.UseMiddleware<AuthenticationMiddleware>();
 builder.UseMiddleware<PolicyEnforcementMiddleware>();

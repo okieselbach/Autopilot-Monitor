@@ -10,6 +10,7 @@ using System.IdentityModel.Tokens.Jwt;
 using Microsoft.AspNetCore.Http;
 using System.Net;
 using System.Security.Claims;
+using AutopilotMonitor.Functions.Extensions;
 using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Shared.DataAccess;
 
@@ -232,10 +233,9 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
             authenticated = true;
 
             // Track per-user usage (fire-and-forget via Task.Run to ensure execution in isolated worker)
-            var oid = principal.FindFirst("oid")?.Value;
-            var upn = principal.FindFirst("upn")?.Value
-                   ?? principal.FindFirst("preferred_username")?.Value;
-            var tid = principal.FindFirst("tid")?.Value;
+            var oid = principal.GetObjectId();
+            var upn = principal.GetUserPrincipalName();
+            var tid = principal.GetTenantId();
             if (!string.IsNullOrEmpty(oid))
             {
                 var normalizedEndpoint = EndpointNormalizer.Normalize(requestPath);
