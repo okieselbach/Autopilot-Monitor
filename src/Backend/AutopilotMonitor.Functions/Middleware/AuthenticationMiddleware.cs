@@ -231,7 +231,7 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
             context.Items["ClaimsPrincipal"] = principal;
             authenticated = true;
 
-            // Track per-user usage (fire-and-forget)
+            // Track per-user usage (fire-and-forget via Task.Run to ensure execution in isolated worker)
             var oid = principal.FindFirst("oid")?.Value;
             var upn = principal.FindFirst("upn")?.Value
                    ?? principal.FindFirst("preferred_username")?.Value;
@@ -239,7 +239,7 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
             if (!string.IsNullOrEmpty(oid))
             {
                 var normalizedEndpoint = EndpointNormalizer.Normalize(requestPath);
-                _ = RecordUserUsageAsync(oid, upn ?? "unknown", tid ?? "", normalizedEndpoint);
+                _ = Task.Run(() => RecordUserUsageAsync(oid, upn ?? "unknown", tid ?? "", normalizedEndpoint));
             }
         }
         catch (SecurityTokenValidationException ex)
@@ -273,9 +273,9 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
         {
             await _userUsageRepo.IncrementUsageAsync(userId, upn, tenantId, endpoint);
         }
-        catch
+        catch (Exception ex)
         {
-            // Non-fatal — don't block the request
+            _logger.LogWarning(ex, "[Auth Middleware] Failed to record usage: user={UserId}, endpoint={Endpoint}", userId, endpoint);
         }
     }
 

@@ -365,9 +365,10 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
   server.tool(
     'get_api_usage',
     'Get API/MCP usage statistics. Shows request counts per endpoint per day. ' +
-    'Use to monitor platform usage, identify heavy users, or debug rate limiting. Global Admin only.',
+    'Use to monitor platform usage, identify heavy users, or debug rate limiting. ' +
+    'Use userId for a specific user, daily for aggregated summaries, or neither for global per-record breakdown.',
     {
-      keyId: z.string().optional().describe('Specific API key ID to query usage for'),
+      userId: z.string().optional().describe('Specific user object ID to query usage for'),
       tenantId: z.string().optional().describe('Filter usage by tenant ID'),
       dateFrom: z.string().optional().describe('Start date (YYYY-MM-DD)'),
       dateTo: z.string().optional().describe('End date (YYYY-MM-DD)'),
@@ -376,15 +377,13 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
     async (args) => {
       try {
         let data: unknown;
-        if (args.keyId) {
-          const params: Record<string, string | undefined> = { dateFrom: args.dateFrom, dateTo: args.dateTo };
-          data = await apiFetch(`/api/api-keys/${args.keyId}/usage${buildQuery(params)}`);
+        const params: Record<string, string | undefined> = { tenantId: args.tenantId, dateFrom: args.dateFrom, dateTo: args.dateTo };
+        if (args.userId) {
+          data = await apiFetch(`/api/metrics/mcp-usage/${encodeURIComponent(args.userId)}${buildQuery(params)}`);
         } else if (args.daily) {
-          const params: Record<string, string | undefined> = { tenantId: args.tenantId, dateFrom: args.dateFrom, dateTo: args.dateTo };
-          data = await apiFetch(`/api/global/api-usage/daily${buildQuery(params)}`);
+          data = await apiFetch(`/api/global/metrics/mcp-usage/daily${buildQuery(params)}`);
         } else {
-          const params: Record<string, string | undefined> = { tenantId: args.tenantId, dateFrom: args.dateFrom, dateTo: args.dateTo };
-          data = await apiFetch(`/api/global/api-usage${buildQuery(params)}`);
+          data = await apiFetch(`/api/global/metrics/mcp-usage${buildQuery(params)}`);
         }
         return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
       } catch (error: unknown) {

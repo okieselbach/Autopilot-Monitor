@@ -119,9 +119,7 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
                 var dateFrom = req.Query["dateFrom"];
                 var dateTo = req.Query["dateTo"];
 
-                var records = !string.IsNullOrEmpty(tenantId)
-                    ? await _userUsageRepo.GetUsageByTenantAsync(tenantId, dateFrom, dateTo)
-                    : await _userUsageRepo.GetUsageByTenantAsync("", dateFrom, dateTo);
+                var records = await _userUsageRepo.GetUsageByTenantAsync(tenantId ?? "", dateFrom, dateTo);
 
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(new { tenantId, records });

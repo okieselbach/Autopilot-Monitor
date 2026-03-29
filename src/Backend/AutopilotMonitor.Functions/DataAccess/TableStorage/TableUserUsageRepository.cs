@@ -70,7 +70,7 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                 }
             }
 
-            _logger.LogDebug("Failed to increment user usage after {MaxRetries} retries: user={UserId}, endpoint={Endpoint}",
+            _logger.LogWarning("Failed to increment user usage after {MaxRetries} retries: user={UserId}, endpoint={Endpoint}",
                 maxRetries, userId, endpoint);
         }
 
@@ -89,7 +89,9 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
 
         public async Task<List<UserUsageRecord>> GetUsageByTenantAsync(string tenantId, string? dateFrom = null, string? dateTo = null)
         {
-            var filter = $"TenantId eq '{tenantId}'";
+            string? filter = !string.IsNullOrEmpty(tenantId)
+                ? $"TenantId eq '{tenantId}'"
+                : null;
             filter = AppendDateFilter(filter, dateFrom, dateTo);
 
             var records = new List<UserUsageRecord>();
