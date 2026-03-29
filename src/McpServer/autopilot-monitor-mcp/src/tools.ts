@@ -157,13 +157,18 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
   // Tool 7: list_blocked_devices
   server.tool(
     'list_blocked_devices',
-    'List devices currently blocked from enrolling. Blocked devices have their enrollment sessions rejected by the backend.',
+    'List devices currently blocked from enrolling. Blocked devices have their enrollment sessions rejected by the backend. ' +
+    'Omit tenantId to list blocked devices across ALL tenants (requires Global Admin).',
     {
-      tenantId: z.string().optional().describe('Tenant ID (global-scoped key: optional; tenant-scoped: ignored)'),
+      tenantId: z.string().optional().describe('Tenant ID to scope results. Omit for cross-tenant listing (Global Admin only).'),
     },
     async ({ tenantId }) => {
-      const q = buildQuery({ tenantId } as Record<string, string | undefined>);
-      const data = await apiFetch(`/api/devices/blocked${q}`);
+      // Without tenantId → global endpoint (cross-tenant, Global Admin only)
+      // With tenantId → tenant-scoped endpoint
+      const endpoint = tenantId
+        ? `/api/devices/blocked${buildQuery({ tenantId } as Record<string, string | undefined>)}`
+        : '/api/global/devices/blocked';
+      const data = await apiFetch(endpoint);
       return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
     }
   );
