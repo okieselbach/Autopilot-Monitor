@@ -22,6 +22,9 @@ public static class EndpointNormalizer
         // Replace GUIDs with {id}
         normalized = GuidPattern.Replace(normalized, "{id}");
 
+        // Replace characters that are illegal in Azure Table Storage keys (/, \, #, ?)
+        normalized = normalized.Replace('/', '_').Replace('\\', '_').Replace('#', '_').Replace('?', '_');
+
         return normalized.ToLowerInvariant();
     }
 }
