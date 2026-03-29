@@ -83,10 +83,8 @@ app.all('/mcp', async (req, res) => {
 
   // POST — unknown/stale session ID: strip it so transport treats this as a fresh connection
   if (sessionId) {
-    console.error(`[mcp] Stale session ${sessionId}, method=${req.body?.method} — creating new session`);
+    console.error(`[mcp] Stale session ${sessionId} — creating new session`);
     delete req.headers['mcp-session-id'];
-  } else {
-    console.error(`[mcp] New session — method=${req.body?.method}`);
   }
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: () => randomUUID(),

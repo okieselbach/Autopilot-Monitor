@@ -12,7 +12,8 @@
       "mcp__autopilot-monitor__list_blocked_devices",
       "mcp__autopilot-monitor__query_backend_logs",
       "mcp__autopilot-monitor__query_table",
-      "mcp__autopilot-monitor__list_tables"
+      "mcp__autopilot-monitor__list_tables",
+      "mcp__autopilot-monitor__get_usage_metrics"
     ]
   }
 }

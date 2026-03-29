@@ -46,11 +46,9 @@ async function checkAccess(upn: string, token: string): Promise<{ allowed: boole
       headers: { Authorization: `Bearer ${token}` },
     });
 
-    console.error(`[access-guard] Backend check for ${upn}: status=${res.status}`);
-
     const text = await res.text();
     if (!text) {
-      console.error(`[access-guard] Backend returned empty body for ${upn}`);
+      console.error(`[access-guard] Backend returned empty body for ${upn} (status=${res.status})`);
       return { allowed: false, reason: `Backend returned ${res.status} with empty body` };
     }
 

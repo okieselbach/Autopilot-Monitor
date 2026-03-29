@@ -232,37 +232,31 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
             context.Items["ClaimsPrincipal"] = principal;
             authenticated = true;
 
-            // Track per-user usage (fire-and-forget via Task.Run to ensure execution in isolated worker)
-            var oid = principal.GetObjectId();
-            var upn = principal.GetUserPrincipalName();
-            var tid = principal.GetTenantId();
-            _logger.LogWarning("[Auth Middleware] Usage tracking: oid={Oid}, upn={Upn}, tid={Tid}, path={Path}",
-                oid ?? "(null)", upn ?? "(null)", tid ?? "(null)", requestPath);
-            if (!string.IsNullOrEmpty(oid))
+            // Track MCP usage only (identified by X-Client-Source header, fire-and-forget, non-blocking)
+            var isMcpRequest = string.Equals(
+                httpContext.Request.Headers["X-Client-Source"].FirstOrDefault(), "mcp", StringComparison.OrdinalIgnoreCase);
+            if (isMcpRequest)
             {
-                var normalizedEndpoint = EndpointNormalizer.Normalize(requestPath);
-                // Capture references for fire-and-forget closure (repo + logger are singletons, safe to capture)
-                var repo = _userUsageRepo;
-                var logger = _logger;
-                var capturedOid = oid;
-                var capturedUpn = upn ?? "unknown";
-                var capturedTid = tid ?? "";
-                _ = Task.Run(async () =>
+                var oid = principal.GetObjectId();
+                if (!string.IsNullOrEmpty(oid))
                 {
-                    try
+                    var upn = principal.GetUserPrincipalName() ?? "unknown";
+                    var tid = principal.GetTenantId() ?? "";
+                    var normalizedEndpoint = EndpointNormalizer.Normalize(requestPath);
+                    var repo = _userUsageRepo;
+                    var logger = _logger;
+                    _ = Task.Run(async () =>
                     {
-                        await repo.IncrementUsageAsync(capturedOid, capturedUpn, capturedTid, normalizedEndpoint);
-                    }
-                    catch (Exception ex)
-                    {
-                        logger.LogWarning(ex, "[Auth Middleware] Failed to record usage: user={UserId}, endpoint={Endpoint}", capturedOid, normalizedEndpoint);
-                    }
-                });
-            }
-            else
-            {
-                _logger.LogWarning("[Auth Middleware] No oid claim found — usage NOT tracked. Claims: {Claims}",
-                    string.Join(", ", principal.Claims.Select(c => $"{c.Type}={c.Value}")));
+                        try
+                        {
+                            await repo.IncrementUsageAsync(oid, upn, tid, normalizedEndpoint);
+                        }
+                        catch (Exception ex)
+                        {
+                            logger.LogWarning(ex, "[Auth Middleware] Failed to record usage: user={UserId}, endpoint={Endpoint}", oid, normalizedEndpoint);
+                        }
+                    });
+                }
             }
         }
         catch (SecurityTokenValidationException ex)

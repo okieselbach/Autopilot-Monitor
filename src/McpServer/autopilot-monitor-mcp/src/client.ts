@@ -25,6 +25,7 @@ async function apiFetch(path: string, options: RequestInit = {}): Promise<unknow
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${token}`,
+    'X-Client-Source': 'mcp',
     ...((options.headers as Record<string, string>) ?? {}),
   };
   const res = await fetch(url, { ...options, headers });
