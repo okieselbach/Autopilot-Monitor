@@ -203,7 +203,8 @@ jobs:
             } | ConvertTo-Json
             Invoke-RestMethod -Uri $tableUrl -Method Merge -Headers @{
               "Content-Type" = "application/json"
-              "Accept"       = "application/json"
+              "Accept"       = "application/json;odata=nometadata"
+              "If-Match"     = "*"
             } -Body $tableBody
             Write-Host "AdminConfiguration updated: version=$agentVersion, sha256=$sha256"
           }
