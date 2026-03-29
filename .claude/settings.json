@@ -9,7 +9,10 @@
       "Bash(.claude/commands/scripts/query-appinsights.sh \"traces | where timestamp between \\(datetime\\(2026-03-28T03:53:45Z\\) .. datetime\\(2026-03-28T03:53:55Z\\)\\) | project timestamp, message, severityLevel | order by timestamp asc | take 50\" PT1H)",
       "Bash(.claude/commands/scripts/query-appinsights.sh \"traces | where timestamp > datetime\\(2026-03-28T03:53:00Z\\) | where message startswith ''Executed'' | extend status = iif\\(message contains ''Succeeded'', ''Succeeded'', ''Failed''\\) | summarize total=count\\(\\), failed=countif\\(status == ''Failed''\\) by operation_Name | where failed > 0 | order by failed desc\" PT1H)",
       "Bash(echo \"exit: $?\")",
-      "mcp__autopilot-monitor__list_blocked_devices"
+      "mcp__autopilot-monitor__list_blocked_devices",
+      "mcp__autopilot-monitor__query_backend_logs",
+      "mcp__autopilot-monitor__query_table",
+      "mcp__autopilot-monitor__list_tables"
     ]
   }
 }

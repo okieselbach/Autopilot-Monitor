@@ -241,7 +241,23 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
             if (!string.IsNullOrEmpty(oid))
             {
                 var normalizedEndpoint = EndpointNormalizer.Normalize(requestPath);
-                _ = Task.Run(() => RecordUserUsageAsync(oid, upn ?? "unknown", tid ?? "", normalizedEndpoint));
+                // Capture references for fire-and-forget closure (repo + logger are singletons, safe to capture)
+                var repo = _userUsageRepo;
+                var logger = _logger;
+                var capturedOid = oid;
+                var capturedUpn = upn ?? "unknown";
+                var capturedTid = tid ?? "";
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await repo.IncrementUsageAsync(capturedOid, capturedUpn, capturedTid, normalizedEndpoint);
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogWarning(ex, "[Auth Middleware] Failed to record usage: user={UserId}, endpoint={Endpoint}", capturedOid, normalizedEndpoint);
+                    }
+                });
             }
             else
             {
