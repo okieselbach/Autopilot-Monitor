@@ -30,6 +30,12 @@ namespace AutopilotMonitor.Shared.DataAccess
         /// Gets aggregated daily usage summaries, optionally filtered by tenant.
         /// </summary>
         Task<List<UserUsageDailySummary>> GetDailySummaryAsync(string? tenantId = null, string? dateFrom = null, string? dateTo = null);
+
+        /// <summary>
+        /// Deletes all usage records older than the specified date (yyyyMMdd format).
+        /// Returns the number of records deleted.
+        /// </summary>
+        Task<int> DeleteRecordsOlderThanAsync(string dateCutoff);
     }
 
     /// <summary>

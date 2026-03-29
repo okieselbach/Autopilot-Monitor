@@ -46,24 +46,23 @@ public class TenantAdminsService
         // Normalize for case-insensitive comparison
         tenantId = tenantId.ToLowerInvariant();
         upn = upn.ToLowerInvariant();
-        _logger.LogInformation($"Checking if user is Tenant Admin: {upn} for tenant {tenantId}");
 
         // Check cache first
         var cacheKey = $"tenant-admin:{tenantId}:{upn}";
         if (_cache.TryGetValue<bool>(cacheKey, out var isAdmin))
         {
-            _logger.LogInformation($"Tenant Admin check (from cache): {upn} @ {tenantId} -> {isAdmin}");
+            _logger.LogDebug("Tenant Admin check (from cache): {Upn} @ {TenantId} -> {IsAdmin}", upn, tenantId, isAdmin);
             return isAdmin;
         }
 
         // Query via repository
-        _logger.LogInformation($"Querying repository for Tenant Admin: {upn} @ {tenantId}");
+        _logger.LogDebug("Querying repository for Tenant Admin: {Upn} @ {TenantId}", upn, tenantId);
         var member = await _adminRepo.GetTenantMemberAsync(tenantId, upn);
         // Only true for Admin role (null Role = Admin for backward compat)
         var result = member != null && member.IsEnabled
                      && (member.Role == null || member.Role == Constants.TenantRoles.Admin);
 
-        _logger.LogInformation($"Tenant Admin check result: {upn} @ {tenantId} -> {result} (Member found: {member != null}, IsEnabled: {member?.IsEnabled})");
+        _logger.LogDebug("Tenant Admin check result: {Upn} @ {TenantId} -> {Result}", upn, tenantId, result);
 
         _cache.Set(cacheKey, result, _cacheDuration);
 

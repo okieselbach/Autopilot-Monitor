@@ -72,6 +72,9 @@ interface TenantConfig {
   enableSoftwareInventoryAnalyzer?: boolean | null;
   localAdminAllowedAccountsJson?: string | null;
 
+  // Plan tier
+  planTier?: string;
+
   // Bootstrap & unrestricted
   bootstrapTokenEnabled?: boolean;
   unrestrictedModeEnabled?: boolean;
@@ -133,6 +136,7 @@ const DEFAULTS: Record<string, unknown> = {
   enableLocalAdminAnalyzer: null,
   enableSoftwareInventoryAnalyzer: null,
   localAdminAllowedAccountsJson: null,
+  planTier: 'free',
   bootstrapTokenEnabled: false,
   unrestrictedModeEnabled: false,
   unrestrictedMode: false,
@@ -506,6 +510,7 @@ export function SectionTenantConfigReport() {
                 <ConfigRow label="Disabled Reason" value={config.disabledReason} />
                 <ConfigRow label="Disabled Until" value={config.disabledUntil} isDate />
                 <ConfigRow label="Onboarded At" value={config.onboardedAt} isDate />
+                <ConfigRow label="Plan Tier" value={config.planTier || 'free'} configKey="planTier" defaults={DEFAULTS} />
               </Section>
 
               <Section title="Security & Validation">

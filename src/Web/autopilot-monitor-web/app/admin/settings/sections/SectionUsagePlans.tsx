@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "../../../../contexts/AuthContext";
+import { useAdminConfig } from "../../AdminConfigContext";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 import { api } from "@/lib/api";
 
@@ -21,6 +22,7 @@ const DEFAULT_TIER: PlanTierDefinition = {
 
 export function SectionUsagePlans() {
   const { getAccessToken } = useAuth();
+  const { tenants } = useAdminConfig();
   const [tiers, setTiers] = useState<PlanTierDefinition[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -160,6 +162,16 @@ export function SectionUsagePlans() {
       {error && (
         <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
           {error}
+        </div>
+      )}
+
+      {/* Tenant Default Info */}
+      {tenants.length > 0 && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <p className="text-sm text-blue-800">
+            Users without a per-user plan override inherit their tenant&apos;s default rate limit
+            ({tenants[0]?.rateLimitRequestsPerMinute ?? 100} req/min).
+          </p>
         </div>
       )}
 

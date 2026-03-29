@@ -135,7 +135,11 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
 
             // Get or create cached configuration manager for this tenant
             IConfigurationManager<OpenIdConnectConfiguration>? tenantConfigManager = null;
-            await _cacheLock.WaitAsync();
+            if (!await _cacheLock.WaitAsync(TimeSpan.FromSeconds(5)))
+            {
+                _logger.LogError("[Auth Middleware] Semaphore timeout acquiring OIDC config cache lock");
+                throw new TimeoutException("OIDC configuration cache lock timeout");
+            }
             try
             {
                 if (!_configManagerCache.TryGetValue(tenantSpecificAuthority, out tenantConfigManager))
@@ -154,7 +158,7 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
                     if (_configManagerCache.Count < MaxCacheSize)
                     {
                         _configManagerCache[tenantSpecificAuthority] = tenantConfigManager;
-                        _logger.LogInformation("[Auth Middleware] Created new config manager for {Authority}", tenantSpecificAuthority);
+                        _logger.LogDebug("[Auth Middleware] Created new config manager for {Authority}", tenantSpecificAuthority);
                     }
                     else
                     {
@@ -224,7 +228,7 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
                                principal.FindFirst("name")?.Value ??
                                "Unknown";
 
-            _logger.LogInformation("[Auth Middleware] Authenticated: {User}", userIdentifier);
+            _logger.LogDebug("[Auth Middleware] Authenticated: {User}", userIdentifier);
 
             // Set the principal on both the HTTP context AND the FunctionContext
             // This is critical for Azure Functions Isolated Worker (.NET 8)
@@ -282,18 +286,6 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
         }
 
         await next(context);
-    }
-
-    private async Task RecordUserUsageAsync(string userId, string upn, string tenantId, string endpoint)
-    {
-        try
-        {
-            await _userUsageRepo.IncrementUsageAsync(userId, upn, tenantId, endpoint);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "[Auth Middleware] Failed to record usage: user={UserId}, endpoint={Endpoint}", userId, endpoint);
-        }
     }
 
     private static bool IsAnonymousRoute(string path)

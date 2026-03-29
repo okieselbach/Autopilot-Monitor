@@ -244,12 +244,34 @@ namespace AutopilotMonitor.Functions.Services
                     }
                 }
 
+                // Usage data cleanup: delete UserUsageLog records older than 90 days
+                await CleanupOldUsageDataAsync();
+
                 cleanupStart.Stop();
                 _logger.LogInformation($"Data retention cleanup completed: {totalSessionsDeleted} sessions and {totalEventsDeleted} events deleted in {cleanupStart.ElapsedMilliseconds}ms");
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to cleanup old data");
+            }
+        }
+
+        /// <summary>
+        /// Deletes usage tracking records older than 90 days from UserUsageLog.
+        /// </summary>
+        private async Task CleanupOldUsageDataAsync()
+        {
+            try
+            {
+                var cutoffDate = DateTime.UtcNow.AddDays(-90).ToString("yyyyMMdd");
+                var deleted = await _userUsageRepo.DeleteRecordsOlderThanAsync(cutoffDate);
+
+                if (deleted > 0)
+                    _logger.LogInformation("Usage data cleanup: deleted {Count} records older than 90 days (cutoff: {Cutoff})", deleted, cutoffDate);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to cleanup old usage data");
             }
         }
 

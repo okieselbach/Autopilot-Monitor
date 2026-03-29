@@ -152,6 +152,35 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
             return string.IsNullOrEmpty(filter) ? null! : filter;
         }
 
+        public async Task<int> DeleteRecordsOlderThanAsync(string dateCutoff)
+        {
+            var filter = $"Date lt '{dateCutoff}'";
+            int deleted = 0;
+
+            // Collect entities in batches to avoid modifying collection during enumeration
+            var toDelete = new List<(string partitionKey, string rowKey)>();
+            await foreach (var entity in _tableClient.QueryAsync<TableEntity>(
+                filter: filter, select: new[] { "PartitionKey", "RowKey" }))
+            {
+                toDelete.Add((entity.PartitionKey, entity.RowKey));
+            }
+
+            foreach (var (pk, rk) in toDelete)
+            {
+                try
+                {
+                    await _tableClient.DeleteEntityAsync(pk, rk);
+                    deleted++;
+                }
+                catch (RequestFailedException ex) when (ex.Status == 404)
+                {
+                    // Already deleted, skip
+                }
+            }
+
+            return deleted;
+        }
+
         private static UserUsageRecord MapToRecord(TableEntity entity)
         {
             return new UserUsageRecord

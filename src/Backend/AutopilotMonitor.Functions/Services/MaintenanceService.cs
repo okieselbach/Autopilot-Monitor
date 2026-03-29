@@ -49,6 +49,7 @@ namespace AutopilotMonitor.Functions.Services
         private readonly AdminConfigurationService _adminConfigurationService;
         private readonly BlockedDeviceService _blockedDeviceService;
         private readonly TenantAdminsService _tenantAdminsService;
+        private readonly IUserUsageRepository _userUsageRepo;
         private readonly ILogger<MaintenanceService> _logger;
 
         private const string PlatformStatsAliasFileName = "platform-stats.json";
@@ -64,6 +65,7 @@ namespace AutopilotMonitor.Functions.Services
             AdminConfigurationService adminConfigurationService,
             BlockedDeviceService blockedDeviceService,
             TenantAdminsService tenantAdminsService,
+            IUserUsageRepository userUsageRepo,
             ILogger<MaintenanceService> logger)
         {
             _maintenanceRepo = maintenanceRepo;
@@ -74,6 +76,7 @@ namespace AutopilotMonitor.Functions.Services
             _adminConfigurationService = adminConfigurationService;
             _blockedDeviceService = blockedDeviceService;
             _tenantAdminsService = tenantAdminsService;
+            _userUsageRepo = userUsageRepo;
             _logger = logger;
         }
 

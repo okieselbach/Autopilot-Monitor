@@ -22,6 +22,7 @@ export interface TenantConfiguration {
   unrestrictedModeEnabled?: boolean;
   dataRetentionDays: number;
   sessionTimeoutHours: number;
+  planTier?: string;
 }
 
 export interface TenantManagementSectionProps {

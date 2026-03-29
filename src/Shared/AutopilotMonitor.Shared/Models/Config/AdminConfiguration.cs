@@ -42,6 +42,18 @@ namespace AutopilotMonitor.Shared.Models
         public int GlobalRateLimitRequestsPerMinute { get; set; } = 100;
 
         /// <summary>
+        /// Per-user rate limit for standard users (Tenant Admins, Operators, Viewers).
+        /// Requests per minute keyed by UPN. Default: 120.
+        /// </summary>
+        public int UserRateLimitRequestsPerMinute { get; set; } = 120;
+
+        /// <summary>
+        /// Per-user rate limit for Global Admins.
+        /// Higher budget but not exempt. Default: 600.
+        /// </summary>
+        public int GlobalAdminRateLimitRequestsPerMinute { get; set; } = 600;
+
+        /// <summary>
         /// JSON-serialized plan tier definitions mapping tier name to rate limits and features.
         /// Example: {"free":{"apiRateLimit":60},"pro":{"apiRateLimit":300},"enterprise":{"apiRateLimit":1000}}
         /// </summary>
@@ -172,6 +184,8 @@ namespace AutopilotMonitor.Shared.Models
                 LastUpdated = DateTime.UtcNow,
                 UpdatedBy = "System",
                 GlobalRateLimitRequestsPerMinute = 100,
+                UserRateLimitRequestsPerMinute = 120,
+                GlobalAdminRateLimitRequestsPerMinute = 600,
                 PlatformStatsBlobSasUrl = string.Empty,
                 CollectorIdleTimeoutMinutes = 15,
                 MaxSessionWindowHours = 24,

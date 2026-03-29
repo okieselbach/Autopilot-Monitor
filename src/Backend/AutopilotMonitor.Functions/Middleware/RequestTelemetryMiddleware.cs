@@ -92,7 +92,14 @@ public class RequestTelemetryMiddleware : IFunctionsWorkerMiddleware
             if (caughtException != null)
                 requestTelemetry.Properties["ExceptionType"] = caughtException.GetType().Name;
 
-            _telemetryClient.TrackRequest(requestTelemetry);
+            try
+            {
+                _telemetryClient.TrackRequest(requestTelemetry);
+            }
+            catch
+            {
+                // Never let telemetry failures mask the original exception or crash the pipeline
+            }
         }
     }
 }

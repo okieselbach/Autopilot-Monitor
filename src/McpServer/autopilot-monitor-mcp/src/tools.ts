@@ -36,7 +36,7 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
         'Values: exact match by default. Prefix with >=, <=, >, < for numeric ranges (e.g. ">=8"). ' +
         'Booleans: use "True" or "False". Arrays: substring match in any element.'
       ),
-      limit: z.number().min(1).max(100).optional().default(50).describe('Maximum number of results (1-100, default 50)'),
+      limit: z.coerce.number().min(1).max(100).optional().default(50).describe('Maximum number of results (1-100, default 50)'),
     },
     async (args) => {
       const { deviceProperties, tenantId, ...rest } = args;
@@ -64,7 +64,7 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
     {
       eventType: z.string().describe('Event type string — see event_types resource for valid values (e.g. "app_install_failed", "enrollment_failed")'),
       tenantId: z.string().optional().describe('Tenant ID. Omit for cross-tenant search (Global Admin only).'),
-      limit: z.number().min(1).max(100).optional().default(50),
+      limit: z.coerce.number().min(1).max(100).optional().default(50),
     },
     async (args) => {
       const { tenantId, ...rest } = args;
@@ -103,15 +103,26 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
   // Tool 4: get_session_events
   server.tool(
     'get_session_events',
-    'Get the event timeline for a session. Filter by eventType, severity, or source (app name) to focus on relevant events. Useful for root cause analysis of failures.',
+    'Get the event timeline for a session. Filter by eventType, severity, or source (app name) to focus on relevant events. ' +
+    'Useful for root cause analysis of failures. ' +
+    'If you omit tenantId, the tool will first look up the session to determine the tenant automatically.',
     {
       sessionId: z.string().describe('Session UUID'),
-      tenantId: z.string().optional(),
+      tenantId: z.string().optional().describe('Tenant ID. If omitted, auto-resolved from the session.'),
       eventType: z.string().optional().describe('Filter to only events of this type'),
       severity: z.enum(['Info', 'Warning', 'Error', 'Critical']).optional(),
       source: z.string().optional().describe('Filter by event source/app name (e.g. "MicrosoftTeams")'),
     },
     async ({ sessionId, tenantId, ...filters }) => {
+      // Auto-resolve tenantId if not provided
+      if (!tenantId) {
+        try {
+          const session = await apiFetch(`/api/sessions/${sessionId}`) as { session?: { tenantId?: string } };
+          tenantId = session?.session?.tenantId;
+        } catch {
+          // Fall through — will fail with a clear error from the events endpoint
+        }
+      }
       const q = buildQuery({ tenantId } as Record<string, string | undefined>);
       const data = await apiFetch(`/api/sessions/${sessionId}/events${q}`) as {
         events?: Array<{ eventType?: string; severity?: string; source?: string }>;
@@ -137,7 +148,7 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
     'Omit tenantId for cross-tenant platform overview (Global Admin). Specify tenantId for single-tenant metrics.',
     {
       tenantId: z.string().optional().describe('Tenant ID. Omit for cross-tenant overview (Global Admin only).'),
-      days: z.union([z.literal(7), z.literal(30), z.literal(90)]).optional().default(30),
+      days: z.coerce.number().refine(v => [7, 30, 90].includes(v), { message: 'days must be 7, 30, or 90' }).optional().default(30),
     },
     async (args) => {
       const { tenantId, ...rest } = args;
@@ -163,9 +174,9 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
     {
       cveId: z.string().describe('CVE identifier (e.g. "CVE-2024-21447")'),
       tenantId: z.string().optional().describe('Tenant ID. Omit for cross-tenant search (Global Admin only).'),
-      minCvssScore: z.number().min(0).max(10).optional().describe('Minimum CVSS score filter (e.g. 7.0 for high+critical)'),
+      minCvssScore: z.coerce.number().min(0).max(10).optional().describe('Minimum CVSS score filter (e.g. 7.0 for high+critical)'),
       overallRisk: z.enum(['low', 'medium', 'high', 'critical']).optional(),
-      limit: z.number().min(1).max(100).optional().default(50),
+      limit: z.coerce.number().min(1).max(100).optional().default(50),
     },
     async (args) => {
       const { tenantId, ...rest } = args;
@@ -207,8 +218,8 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
       query: z.string().describe('Natural language description of what to find (e.g. "app download stuck", "certificate error", "disk space low")'),
       sessionId: z.string().optional().describe('Search within a specific session. If omitted, searches across recent failed sessions.'),
       tenantId: z.string().optional().describe('Tenant ID (global-scoped key only)'),
-      topK: z.number().min(1).max(30).optional().default(10).describe('Number of matching events to return (1-30, default 10)'),
-      minScore: z.number().min(0).max(1).optional().default(0.35)
+      topK: z.coerce.number().min(1).max(30).optional().default(10).describe('Number of matching events to return (1-30, default 10)'),
+      minScore: z.coerce.number().min(0).max(1).optional().default(0.35)
         .describe('Minimum similarity score (0-1, default 0.35)'),
     },
     async ({ query, sessionId, tenantId, topK, minScore }) => {
@@ -312,10 +323,10 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
     'Great for finding remediation steps, understanding error patterns, or discovering relevant diagnostic rules.',
     {
       query: z.string().describe('Natural language search query (e.g. "app download timeout", "TPM not ready", "ESP stuck")'),
-      topK: z.number().min(1).max(20).optional().default(5).describe('Number of results to return (1-20, default 5)'),
+      topK: z.coerce.number().min(1).max(20).optional().default(5).describe('Number of results to return (1-20, default 5)'),
       type: z.enum(['all', 'analyze-rule', 'gather-rule', 'ime-log-pattern']).optional().default('all')
         .describe('Filter by document type. Default: search all types.'),
-      minScore: z.number().min(0).max(1).optional().default(0.3)
+      minScore: z.coerce.number().min(0).max(1).optional().default(0.3)
         .describe('Minimum similarity score threshold (0-1, default 0.3). Lower = more results, higher = stricter matching.'),
     },
     async ({ query, topK, type, minScore }) => {
@@ -404,7 +415,7 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
     'Omit tenantId for cross-tenant view (Global Admin). Use get_geographic_sessions to drill into a specific location.',
     {
       tenantId: z.string().optional().describe('Tenant ID. Omit for cross-tenant view (Global Admin only).'),
-      days: z.number().optional().default(30).describe('Time range in days (default: 30)'),
+      days: z.coerce.number().optional().default(30).describe('Time range in days (default: 30)'),
       groupBy: z.enum(['country', 'region', 'city']).optional().default('city')
         .describe('Geographic grouping level (default: "city")'),
     },
@@ -420,17 +431,26 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
   // Tool 17: get_geographic_sessions
   server.tool(
     'get_geographic_sessions',
-    'Drill into a specific geographic location from get_geographic_metrics. Returns all enrollment sessions at that location. ' +
-    'Use the locationKey from get_geographic_metrics results.',
+    'Drill into a specific geographic location. Returns all enrollment sessions at that location. ' +
+    'Either provide locationKey (from get_geographic_metrics results, e.g. "Falkenstein, Saxony, DE") ' +
+    'or use country/region/city filters to find sessions by location.',
     {
-      locationKey: z.string().describe('Location key from get_geographic_metrics results (e.g. "DE|Saxony|Falkenstein")'),
+      locationKey: z.string().optional().describe('Location key from get_geographic_metrics (e.g. "Falkenstein, Saxony, DE"). If provided, country/region/city are ignored.'),
+      country: z.string().optional().describe('2-letter country code filter (e.g. "DE", "US", "CH"). Used when locationKey is not provided.'),
+      region: z.string().optional().describe('Region/state filter (e.g. "Saxony", "North Carolina"). Used with country.'),
+      city: z.string().optional().describe('City filter (e.g. "Falkenstein"). Used with country.'),
       tenantId: z.string().optional().describe('Tenant ID. Omit for cross-tenant view (Global Admin only).'),
-      days: z.number().optional().default(30).describe('Time range in days (default: 30)'),
-      groupBy: z.enum(['country', 'region', 'city']).optional().default('city'),
+      days: z.coerce.number().optional().default(30).describe('Time range in days (default: 30)'),
     },
-    async ({ tenantId, ...rest }) => {
+    async ({ tenantId, country, region, city, ...rest }) => {
       const params: Record<string, string | number | undefined> = { ...rest };
       if (tenantId) params.tenantId = tenantId;
+      // Build locationKey from country/region/city if not explicitly provided
+      if (!params.locationKey && country) {
+        const parts = [city, region, country].filter(Boolean);
+        params.locationKey = parts.join(', ');
+        params.groupBy = city ? 'city' : region ? 'region' : 'country';
+      }
       const prefix = tenantId ? '/api/metrics' : '/api/global/metrics';
       const data = await apiFetch(`${prefix}/geographic/sessions${buildQuery(params)}`);
       return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
@@ -440,12 +460,75 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
   // Tool 18: get_platform_metrics
   server.tool(
     'get_platform_metrics',
-    'Get platform-level agent performance metrics: per-session CPU usage, memory consumption, and network throughput. ' +
-    'Global Admin only. Useful for monitoring agent health and identifying resource-heavy enrollments.',
+    'Get aggregated platform-level agent performance metrics across recent sessions. ' +
+    'Returns: avg/max/p95 CPU, memory (working set, private bytes), network (bytes up/down, latency, requests), ' +
+    'top sessions by CPU/memory, and per-agent-version breakdown. Global Admin only.',
     {},
     async () => {
-      const data = await apiFetch('/api/global/metrics/platform');
-      return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+      type SessionMetric = {
+        sessionId: string; tenantId: string; deviceName?: string; model?: string; status?: string;
+        agentVersion?: string; snapshotCount: number;
+        avgCpu: number; maxCpu: number; avgWorkingSet: number; maxWorkingSet: number;
+        avgPrivateBytes: number; avgLatency: number;
+        totalBytesUp: number; totalBytesDown: number; totalRequests: number;
+      };
+      const raw = await apiFetch('/api/global/metrics/platform') as { sessions?: SessionMetric[] };
+      const sessions = raw?.sessions ?? [];
+      if (sessions.length === 0) {
+        return { content: [{ type: 'text' as const, text: JSON.stringify({ sessionsAnalyzed: 0, message: 'No performance data available' }) }] };
+      }
+
+      const avg = (arr: number[]) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+      const p95 = (arr: number[]) => { const s = [...arr].sort((a, b) => a - b); return s[Math.floor(s.length * 0.95)] ?? 0; };
+      const round = (n: number) => Math.round(n * 100) / 100;
+
+      const cpus = sessions.map(s => s.avgCpu);
+      const maxCpus = sessions.map(s => s.maxCpu);
+      const ws = sessions.map(s => s.avgWorkingSet);
+      const pb = sessions.map(s => s.avgPrivateBytes);
+      const lat = sessions.filter(s => s.avgLatency > 0).map(s => s.avgLatency);
+
+      // Top 5 by CPU
+      const topCpu = [...sessions].sort((a, b) => b.maxCpu - a.maxCpu).slice(0, 5).map(s => ({
+        sessionId: s.sessionId, device: s.deviceName, model: s.model, maxCpu: round(s.maxCpu), avgCpu: round(s.avgCpu),
+      }));
+
+      // Top 5 by memory
+      const topMem = [...sessions].sort((a, b) => b.avgWorkingSet - a.avgWorkingSet).slice(0, 5).map(s => ({
+        sessionId: s.sessionId, device: s.deviceName, model: s.model, avgWorkingSetMB: round(s.avgWorkingSet),
+      }));
+
+      // Per agent version
+      const byVersion: Record<string, { count: number; avgCpu: number[]; avgMem: number[] }> = {};
+      for (const s of sessions) {
+        const v = s.agentVersion ?? 'unknown';
+        if (!byVersion[v]) byVersion[v] = { count: 0, avgCpu: [], avgMem: [] };
+        byVersion[v].count++;
+        byVersion[v].avgCpu.push(s.avgCpu);
+        byVersion[v].avgMem.push(s.avgWorkingSet);
+      }
+      const versionBreakdown = Object.entries(byVersion).map(([version, d]) => ({
+        version, sessions: d.count, avgCpu: round(avg(d.avgCpu)), avgMemMB: round(avg(d.avgMem)),
+      })).sort((a, b) => b.sessions - a.sessions);
+
+      const summary = {
+        sessionsAnalyzed: sessions.length,
+        cpu: { avgPercent: round(avg(cpus)), maxPercent: round(Math.max(...maxCpus)), p95Percent: round(p95(maxCpus)) },
+        memory: {
+          avgWorkingSetMB: round(avg(ws)), maxWorkingSetMB: round(Math.max(...ws)), p95WorkingSetMB: round(p95(ws)),
+          avgPrivateBytesMB: round(avg(pb)),
+        },
+        network: {
+          totalBytesUp: sessions.reduce((a, s) => a + s.totalBytesUp, 0),
+          totalBytesDown: sessions.reduce((a, s) => a + s.totalBytesDown, 0),
+          totalRequests: sessions.reduce((a, s) => a + s.totalRequests, 0),
+          avgLatencyMs: round(avg(lat)),
+        },
+        topSessionsByCpu: topCpu,
+        topSessionsByMemory: topMem,
+        agentVersionBreakdown: versionBreakdown,
+      };
+      return { content: [{ type: 'text' as const, text: JSON.stringify(summary, null, 2) }] };
     }
   );
 
@@ -501,25 +584,25 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
   // Tool 11: query_raw_events
   server.tool(
     'query_raw_events',
-    'Query raw enrollment events with flexible filters. Unlike get_session_events, this can query across sessions. ' +
-    'Provide tenantId for cross-tenant access (Global Admin), or omit for your own tenant. ' +
+    'Query raw enrollment events with flexible filters. Unlike get_session_events, this can query across sessions within a tenant. ' +
+    'Specify tenantId for a specific tenant, or omit for cross-tenant access (Global Admin only). ' +
     'Use sessionId for single-session events, or eventType for cross-session search. Returns raw event data.',
     {
-      tenantId: z.string().optional().describe('Tenant ID (global-scoped key: required; tenant-scoped key: ignored)'),
+      tenantId: z.string().optional().describe('Tenant ID to query. Omit for cross-tenant access (Global Admin only).'),
       sessionId: z.string().optional().describe('Filter to a specific session'),
       eventType: z.string().optional().describe('Event type filter (e.g. "app_install_failed", "error_detected")'),
       severity: z.enum(['Info', 'Warning', 'Error', 'Critical']).optional(),
       source: z.string().optional().describe('Filter by event source/app name (substring match)'),
       startedAfter: z.string().optional().describe('ISO 8601 datetime — only events after this'),
       startedBefore: z.string().optional().describe('ISO 8601 datetime — only events before this'),
-      limit: z.number().min(1).max(500).optional().default(100),
+      limit: z.coerce.number().min(1).max(500).optional().default(100),
     },
     async (args) => {
       const { tenantId, ...rest } = args;
-      const isGlobal = !!tenantId;
-      const basePath = isGlobal ? '/api/global/raw/events' : '/api/raw/events';
       const params: Record<string, string | number | boolean | undefined | null> = { ...rest };
-      if (isGlobal) params.tenantId = tenantId;
+      // Tenant-scoped → /api/raw/events?tenantId=X; cross-tenant → /api/global/raw/events
+      const basePath = tenantId ? '/api/raw/events' : '/api/global/raw/events';
+      if (tenantId) params.tenantId = tenantId;
       const data = await apiFetch(`${basePath}${buildQuery(params)}`);
       return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
     }
@@ -529,23 +612,23 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
   server.tool(
     'query_raw_sessions',
     'Query raw session data with flexible filters and field projection. ' +
-    'Provide tenantId for cross-tenant access (Global Admin), or omit for your own tenant. ' +
+    'Specify tenantId for a specific tenant, or omit for cross-tenant access (Global Admin only). ' +
     'Use the fields parameter to select specific properties (e.g. "sessionId,status,startedAt,serialNumber"). Returns raw session entities.',
     {
-      tenantId: z.string().optional().describe('Tenant ID (global-scoped key: required; tenant-scoped key: ignored)'),
+      tenantId: z.string().optional().describe('Tenant ID to query. Omit for cross-tenant access (Global Admin only).'),
       status: z.enum(['InProgress', 'Succeeded', 'Failed']).optional(),
       startedAfter: z.string().optional().describe('ISO 8601 datetime'),
       startedBefore: z.string().optional().describe('ISO 8601 datetime'),
       serialNumber: z.string().optional(),
       fields: z.string().optional().describe('Comma-separated fields to return (e.g. "sessionId,status,startedAt,serialNumber,durationSeconds")'),
-      limit: z.number().min(1).max(200).optional().default(50),
+      limit: z.coerce.number().min(1).max(200).optional().default(50),
     },
     async (args) => {
       const { tenantId, ...rest } = args;
-      const isGlobal = !!tenantId;
-      const basePath = isGlobal ? '/api/global/raw/sessions' : '/api/raw/sessions';
       const params: Record<string, string | number | boolean | undefined | null> = { ...rest };
-      if (isGlobal) params.tenantId = tenantId;
+      // Tenant-scoped → /api/raw/sessions?tenantId=X; cross-tenant → /api/global/raw/sessions
+      const basePath = tenantId ? '/api/raw/sessions' : '/api/global/raw/sessions';
+      if (tenantId) params.tenantId = tenantId;
       const data = await apiFetch(`${basePath}${buildQuery(params)}`);
       return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
     }
@@ -582,7 +665,7 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
       partitionKey: z.string().optional().describe('Filter by exact partition key (usually TenantId)'),
       rowKeyPrefix: z.string().optional().describe('Filter by row key prefix'),
       filter: z.string().optional().describe('OData filter expression (e.g. "Status eq \'Failed\'")'),
-      limit: z.number().min(1).max(500).optional().default(100),
+      limit: z.coerce.number().min(1).max(500).optional().default(100),
     },
     async (args) => {
       try {

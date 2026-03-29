@@ -68,8 +68,26 @@ public class PolicyEnforcementMiddleware : IFunctionsWorkerMiddleware
             return;
         }
 
-        // Evaluate the catalog policy for the current user
-        var decision = await EvaluateCatalogPolicyAsync(context, catalogEntry);
+        // Evaluate the catalog policy for the current user.
+        // Fail-closed on service errors: return 503 (not 500) so clients can retry.
+        CatalogDecisionResult decision;
+        try
+        {
+            decision = await EvaluateCatalogPolicyAsync(context, catalogEntry);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[PolicyEnforcement] Service error evaluating policy for {Method} {Path}", httpMethod, requestPath);
+            httpContext.Response.StatusCode = (int)HttpStatusCode.ServiceUnavailable;
+            httpContext.Response.ContentType = "application/json";
+            httpContext.Response.Headers["Retry-After"] = "5";
+            await httpContext.Response.WriteAsJsonAsync(new
+            {
+                error = "ServiceUnavailable",
+                message = "Authorization service temporarily unavailable. Please retry."
+            });
+            return;
+        }
 
         if (decision.IsAllowed)
         {

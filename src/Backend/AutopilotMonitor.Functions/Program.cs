@@ -26,6 +26,7 @@ builder.UseMiddleware<RequestTelemetryMiddleware>();
 builder.UseMiddleware<CorrelationIdMiddleware>();
 builder.UseMiddleware<AuthenticationMiddleware>();
 builder.UseMiddleware<PolicyEnforcementMiddleware>();
+builder.UseMiddleware<UserRateLimitMiddleware>();
 
 // Configure JSON serialization to use camelCase
 builder.Services.Configure<JsonSerializerOptions>(options =>

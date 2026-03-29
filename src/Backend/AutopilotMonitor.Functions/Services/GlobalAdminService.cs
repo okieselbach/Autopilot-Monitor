@@ -42,21 +42,20 @@ public class GlobalAdminService
 
         // Normalize UPN to lowercase for case-insensitive comparison
         upn = upn.ToLowerInvariant();
-        _logger.LogInformation($"Checking if user is Global Admin: {upn}");
 
         // Check cache first
         var cacheKey = $"global-admin:{upn}";
         if (_cache.TryGetValue<bool>(cacheKey, out var isAdmin))
         {
-            _logger.LogInformation($"Global Admin check (from cache): {upn} -> {isAdmin}");
+            _logger.LogDebug("Global Admin check (from cache): {Upn} -> {IsAdmin}", upn, isAdmin);
             return isAdmin;
         }
 
         // Query via repository
-        _logger.LogInformation($"Querying repository for Global Admin: {upn}");
+        _logger.LogDebug("Querying repository for Global Admin: {Upn}", upn);
         var result = await _adminRepo.IsGlobalAdminAsync(upn);
 
-        _logger.LogInformation($"Global Admin check result: {upn} -> {result}");
+        _logger.LogDebug("Global Admin check result: {Upn} -> {Result}", upn, result);
 
         // Cache the result
         _cache.Set(cacheKey, result, _cacheDuration);
