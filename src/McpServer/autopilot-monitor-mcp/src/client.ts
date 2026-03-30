@@ -1,9 +1,16 @@
 const BASE_URL = process.env.AUTOPILOT_API_URL ?? 'https://autopilotmonitor-api.azurewebsites.net';
 
+/** Default timeout for backend API requests (30 seconds) */
+const API_TIMEOUT_MS = 30_000;
+
 /**
  * Per-request token store. The MCP request handler sets the current user's
  * Bearer token before tool execution, and apiFetch reads it to pass through
  * to the backend API.
+ *
+ * NOTE: This is safe in the MCP server context because each MCP request is
+ * handled sequentially within a session — the token is set before tool
+ * execution and read during it, with no concurrent overlap.
  */
 let _currentToken: string | undefined;
 
@@ -28,7 +35,11 @@ async function apiFetch(path: string, options: RequestInit = {}): Promise<unknow
     'X-Client-Source': 'mcp',
     ...((options.headers as Record<string, string>) ?? {}),
   };
-  const res = await fetch(url, { ...options, headers });
+
+  // Apply timeout to prevent hanging on unresponsive backend
+  const signal = options.signal ?? AbortSignal.timeout(API_TIMEOUT_MS);
+
+  const res = await fetch(url, { ...options, headers, signal });
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`API error ${res.status}: ${text}`);

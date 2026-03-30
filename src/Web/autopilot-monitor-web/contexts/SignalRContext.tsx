@@ -30,6 +30,7 @@ export function SignalRProvider({ children }: { children: React.ReactNode }) {
   const joinedGroupsRef = useRef<Set<string>>(new Set());
   const [joinedGroups, setJoinedGroups] = useState<string[]>([]);
   const retryCountRef = useRef(0);
+  const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const maxRetries = 3;
 
   const syncJoinedGroups = useCallback(() => {
@@ -135,7 +136,7 @@ export function SignalRProvider({ children }: { children: React.ReactNode }) {
         if (retryCountRef.current < maxRetries) {
           retryCountRef.current++;
           const delay = Math.min(1000 * Math.pow(2, retryCountRef.current), 30000);
-          setTimeout(startConnection, delay);
+          retryTimeoutRef.current = setTimeout(startConnection, delay);
         } else {
           console.error('[SignalR] Max retries reached. Connection failed.');
           trackEvent("signalr_connection_failed");
@@ -147,6 +148,11 @@ export function SignalRProvider({ children }: { children: React.ReactNode }) {
 
     // Cleanup only when provider unmounts (app closes)
     return () => {
+      // Clear any pending retry timeout to prevent reconnection after unmount
+      if (retryTimeoutRef.current) {
+        clearTimeout(retryTimeoutRef.current);
+        retryTimeoutRef.current = null;
+      }
       if (connectionRef.current) {
         connectionRef.current.stop();
         connectionRef.current = null;

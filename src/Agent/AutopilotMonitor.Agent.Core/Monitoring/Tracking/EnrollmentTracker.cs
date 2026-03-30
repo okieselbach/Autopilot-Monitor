@@ -270,7 +270,17 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             _imeLogTracker.Start();
 
             // Collect and emit device info asynchronously (3 WMI queries + 5+ registry reads)
-            Task.Run(CollectDeviceInfo);
+            Task.Run(() =>
+            {
+                try
+                {
+                    CollectDeviceInfo();
+                }
+                catch (Exception ex)
+                {
+                    _logger.Warning($"EnrollmentTracker: background device info collection failed: {ex.Message}");
+                }
+            });
 
             // TODO: Überdenken ob ein 30s timer hier wirklich immer gut ist, hab einen Fall gesehen mit 
             // laaanger Wartephase in WhiteGlove weil ein 24H2 feature update reinkam und installiert wurde
@@ -288,9 +298,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         public void Stop()
         {
             _logger.Info("EnrollmentTracker: stopping");
+
             _summaryTimer?.Change(Timeout.Infinite, Timeout.Infinite);
             _debugStateTimer?.Change(Timeout.Infinite, Timeout.Infinite);
             _imeLogTracker?.Stop();
+
             _logger.Info("EnrollmentTracker: stopped");
         }
 

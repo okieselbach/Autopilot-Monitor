@@ -47,9 +47,27 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
                 using (var socket = new Socket(addresses[0].AddressFamily, SocketType.Dgram, ProtocolType.Udp))
                 {
                     socket.ReceiveTimeout = ReceiveTimeoutMs;
+                    socket.SendTimeout = ReceiveTimeoutMs;
                     socket.Connect(ipEndPoint);
                     socket.Send(ntpData);
-                    socket.Receive(ntpData);
+                    var received = socket.Receive(ntpData);
+
+                    // Validate NTP response: must be at least 48 bytes
+                    if (received < 48)
+                    {
+                        result.Error = $"Invalid NTP response: received {received} bytes (expected 48)";
+                        logger.Warning($"NTP time check failed: {result.Error}");
+                        return result;
+                    }
+
+                    // Check Leap Indicator (bits 6-7 of first byte): value 3 means unsynchronized
+                    var leapIndicator = (ntpData[0] >> 6) & 3;
+                    if (leapIndicator == 3)
+                    {
+                        result.Error = "NTP server is unsynchronized (Leap Indicator = 3)";
+                        logger.Warning($"NTP time check failed: {result.Error}");
+                        return result;
+                    }
                 }
 
                 // Parse transmit timestamp from bytes 40-47 (NTP epoch: 1900-01-01)

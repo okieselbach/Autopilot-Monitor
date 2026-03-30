@@ -149,10 +149,13 @@ namespace AutopilotMonitor.Functions.Security
 
                     var delay = retryDelays[attempt];
 
-                    // Respect Retry-After header from Azure AD / Graph throttling
+                    // Respect Retry-After header from Azure AD / Graph throttling, but cap
+                    // at 120s to prevent a misbehaving server from blocking indefinitely
                     if (response.Headers.RetryAfter?.Delta is TimeSpan retryAfterDelta && retryAfterDelta > delay)
                     {
-                        delay = retryAfterDelta;
+                        delay = retryAfterDelta > TimeSpan.FromSeconds(120)
+                            ? TimeSpan.FromSeconds(120)
+                            : retryAfterDelta;
                     }
 
                     _logger.LogInformation(
