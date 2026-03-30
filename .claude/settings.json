@@ -1,32 +1,5 @@
 {
   "permissions": {
-    "allow": [
-      "Bash(bash .claude/commands/scripts/query-appinsights.sh*)",
-      "Bash(bash .claude/commands/scripts/query-table.sh*)",
-      "Bash(bash .claude/commands/scripts/fetch-diag-zip.sh*)",
-      "Bash(echo \"exit: $?\")",
-      "mcp__autopilot-monitor__list_blocked_devices",
-      "mcp__autopilot-monitor__query_backend_logs",
-      "mcp__autopilot-monitor__query_table",
-      "mcp__autopilot-monitor__list_tables",
-      "mcp__autopilot-monitor__get_usage_metrics",
-      "mcp__autopilot-monitor__search_sessions",
-      "mcp__autopilot-monitor__get_platform_metrics",
-      "mcp__autopilot-monitor__get_metrics",
-      "mcp__autopilot-monitor__get_api_usage",
-      "mcp__autopilot-monitor__get_audit_logs",
-      "mcp__autopilot-monitor__get_geographic_metrics",
-      "mcp__autopilot-monitor__list_session_reports",
-      "mcp__autopilot-monitor__search_knowledge",
-      "mcp__autopilot-monitor__get_session",
-      "mcp__autopilot-monitor__search_sessions_by_event",
-      "mcp__autopilot-monitor__query_raw_sessions",
-      "mcp__autopilot-monitor__get_session_events",
-      "mcp__autopilot-monitor__query_raw_events",
-      "mcp__autopilot-monitor__search_sessions_by_cve",
-      "mcp__autopilot-monitor__search_events_semantic",
-      "mcp__autopilot-monitor__get_geographic_sessions",
-      "mcp__autopilot-monitor__get_session_summary"
-    ]
+    "allow": []
   }
 }
