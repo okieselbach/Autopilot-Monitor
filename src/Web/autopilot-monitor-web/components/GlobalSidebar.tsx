@@ -160,6 +160,18 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  // Track which expandable nav group categories are collapsed (e.g. "Global Admin")
+  const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
+
+  const toggleCategory = useCallback((categoryId: string) => {
+    setCollapsedCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(categoryId)) next.delete(categoryId);
+      else next.add(categoryId);
+      return next;
+    });
+  }, []);
+
   // --- Visibility filtering ---
   const isTenantAdmin = user?.isTenantAdmin ?? false;
   const isOperator = user?.role === "Operator";
@@ -196,6 +208,13 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
     for (const group of visibleExpandableGroups) {
       for (const item of group.items) {
         if (item.items.some((sub) => pathname === sub.href || pathname.startsWith(sub.href + "/"))) {
+          // Auto-expand the category if collapsed
+          setCollapsedCategories((prev) => {
+            if (!prev.has(group.id)) return prev;
+            const next = new Set(prev);
+            next.delete(group.id);
+            return next;
+          });
           setExpandedGroups((prev) => {
             if (prev.has(item.id)) return prev;
             const next = new Set(prev);
@@ -388,17 +407,28 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
           ))}
 
           {/* Expandable groups (GitHub-style) — Configuration, Global Admin */}
-          {!isRegularUser && visibleExpandableGroups.map((group) => (
+          {!isRegularUser && visibleExpandableGroups.map((group) => {
+            const isCategoryCollapsed = collapsedCategories.has(group.id);
+            return (
             <div key={group.id} className={`${collapseState === "full" || isMobile ? "mt-4" : "mt-1"}`}>
-              {/* Group label */}
+              {/* Group label — clickable to collapse/expand the category */}
               {(collapseState === "full" || isMobile) && (
-                <p className={`text-[11px] font-semibold uppercase tracking-wider mb-1 px-3 ${
-                  group.style === "global"
-                    ? "text-purple-500 dark:text-purple-400"
-                    : "text-gray-400 dark:text-gray-500"
-                }`}>
-                  {group.label}
-                </p>
+                <button
+                  onClick={() => toggleCategory(group.id)}
+                  className={`w-full flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider mb-1 px-3 py-0.5 rounded-sm transition-colors hover:opacity-80 ${
+                    group.style === "global"
+                      ? "text-purple-500 dark:text-purple-400"
+                      : "text-gray-400 dark:text-gray-500"
+                  }`}
+                >
+                  <span>{group.label}</span>
+                  <svg
+                    className={`w-3 h-3 shrink-0 transition-transform duration-150 ${isCategoryCollapsed ? "" : "rotate-90"}`}
+                    fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
               )}
               {collapseState === "icons" && !isMobile && (
                 <hr className={`mx-2 my-1.5 ${
@@ -407,6 +437,7 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
                     : "border-gray-200 dark:border-gray-700"
                 }`} />
               )}
+              {!isCategoryCollapsed && (
               <ul className="space-y-0.5">
                 {group.items.map((expandItem) => {
                   const isExpanded = expandedGroups.has(expandItem.id);
@@ -493,8 +524,10 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
                   );
                 })}
               </ul>
+              )}
             </div>
-          ))}
+            );
+          })}
         </>
       )}
 
