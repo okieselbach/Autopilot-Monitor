@@ -76,6 +76,7 @@ interface SessionTableProps {
   onTenantIdFilterChange: (value: string) => void;
   onTenantIdFilterSubmit: () => void;
   onTenantIdFilterClear: () => void;
+  tenantList: { tenantId: string; domainName: string }[];
   blockedDevicesSet: Set<string>;
   isPreviewBlocked: boolean;
   user: { isGlobalAdmin?: boolean } | null;
@@ -112,6 +113,7 @@ export function SessionTable({
   onTenantIdFilterChange,
   onTenantIdFilterSubmit,
   onTenantIdFilterClear,
+  tenantList,
   blockedDevicesSet,
   isPreviewBlocked,
   user,
@@ -126,6 +128,18 @@ export function SessionTable({
   const [openFilterColumn, setOpenFilterColumn] = useState<string | null>(null);
   const columnSelectorRef = useRef<HTMLDivElement>(null);
   const filterDropdownRef = useRef<HTMLDivElement>(null);
+  const tenantDropdownRef = useRef<HTMLDivElement>(null);
+  const [showTenantSuggestions, setShowTenantSuggestions] = useState(false);
+  const [tenantSelectedIndex, setTenantSelectedIndex] = useState(-1);
+
+  // Fuzzy-match tenants by domain name or tenant ID
+  const tenantSuggestions = (() => {
+    const q = tenantIdFilter.trim().toLowerCase();
+    if (q.length < 2 || tenantList.length === 0) return [];
+    return tenantList
+      .filter((t) => t.domainName.toLowerCase().includes(q) || t.tenantId.toLowerCase().includes(q))
+      .slice(0, 8);
+  })();
 
   // Persist visible columns to localStorage
   useEffect(() => {
@@ -141,12 +155,15 @@ export function SessionTable({
       if (filterDropdownRef.current && !filterDropdownRef.current.contains(e.target as Node)) {
         setOpenFilterColumn(null);
       }
+      if (tenantDropdownRef.current && !tenantDropdownRef.current.contains(e.target as Node)) {
+        setShowTenantSuggestions(false);
+      }
     }
-    if (showColumnSelector || openFilterColumn) {
+    if (showColumnSelector || openFilterColumn || showTenantSuggestions) {
       document.addEventListener("mousedown", handleClickOutside);
       return () => document.removeEventListener("mousedown", handleClickOutside);
     }
-  }, [showColumnSelector, openFilterColumn]);
+  }, [showColumnSelector, openFilterColumn, showTenantSuggestions]);
 
   // Compute unique values for a filterable field from all sessions (not filtered)
   const getUniqueValues = (field: keyof Session): string[] => {
@@ -283,14 +300,46 @@ export function SessionTable({
       {/* Tenant ID Filter (Global Admin only) */}
       {globalAdminMode && (
         <div className="mb-3 flex items-center gap-2">
-          <div className="relative flex-1">
+          <div className="relative flex-1" ref={tenantDropdownRef}>
             <input
               type="text"
-              placeholder="Filter by Tenant ID (paste a GUID and press Enter)"
+              placeholder="Filter by Tenant ID or domain name"
               value={tenantIdFilter}
-              onChange={(e) => onTenantIdFilterChange(e.target.value)}
+              onChange={(e) => {
+                onTenantIdFilterChange(e.target.value);
+                setShowTenantSuggestions(true);
+                setTenantSelectedIndex(-1);
+              }}
+              onFocus={() => {
+                if (tenantSuggestions.length > 0) setShowTenantSuggestions(true);
+              }}
               onKeyDown={(e) => {
+                if (showTenantSuggestions && tenantSuggestions.length > 0) {
+                  if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    setTenantSelectedIndex((i) => Math.min(i + 1, tenantSuggestions.length - 1));
+                    return;
+                  }
+                  if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    setTenantSelectedIndex((i) => Math.max(i - 1, -1));
+                    return;
+                  }
+                  if (e.key === "Enter" && tenantSelectedIndex >= 0) {
+                    e.preventDefault();
+                    const selected = tenantSuggestions[tenantSelectedIndex];
+                    onTenantIdFilterChange(selected.tenantId);
+                    setShowTenantSuggestions(false);
+                    setTenantSelectedIndex(-1);
+                    return;
+                  }
+                  if (e.key === "Escape") {
+                    setShowTenantSuggestions(false);
+                    return;
+                  }
+                }
                 if (e.key === "Enter") {
+                  setShowTenantSuggestions(false);
                   onTenantIdFilterSubmit();
                 }
               }}
@@ -298,7 +347,10 @@ export function SessionTable({
             />
             {tenantIdFilter && (
               <button
-                onClick={onTenantIdFilterClear}
+                onClick={() => {
+                  onTenantIdFilterClear();
+                  setShowTenantSuggestions(false);
+                }}
                 className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600 transition-colors"
                 title="Clear tenant filter"
               >
@@ -307,9 +359,35 @@ export function SessionTable({
                 </svg>
               </button>
             )}
+            {/* Tenant suggestions dropdown */}
+            {showTenantSuggestions && tenantSuggestions.length > 0 && (
+              <div className="absolute z-50 mt-1 w-full bg-white border border-purple-200 rounded-lg shadow-lg max-h-64 overflow-y-auto">
+                {tenantSuggestions.map((t, idx) => (
+                  <button
+                    key={t.tenantId}
+                    onClick={() => {
+                      onTenantIdFilterChange(t.tenantId);
+                      setShowTenantSuggestions(false);
+                      setTenantSelectedIndex(-1);
+                    }}
+                    className={`w-full text-left px-4 py-2.5 flex flex-col gap-0.5 transition-colors ${
+                      idx === tenantSelectedIndex
+                        ? "bg-purple-100"
+                        : "hover:bg-purple-50"
+                    }`}
+                  >
+                    <span className="text-sm font-medium text-gray-900">{t.domainName}</span>
+                    <span className="text-xs text-gray-500 font-mono">{t.tenantId}</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <button
-            onClick={onTenantIdFilterSubmit}
+            onClick={() => {
+              setShowTenantSuggestions(false);
+              onTenantIdFilterSubmit();
+            }}
             className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm font-medium shrink-0"
           >
             Filter

@@ -24,6 +24,11 @@ interface TenantConfigurationSummary {
   validateAutopilotDevice: boolean;
 }
 
+interface TenantListItem {
+  tenantId: string;
+  domainName: string;
+}
+
 export default function Home() {
   const router = useRouter();
   const { user, logout, getAccessToken, isPreviewBlocked } = useAuth();
@@ -37,6 +42,7 @@ export default function Home() {
   const [serialValidationEnabled, setSerialValidationEnabled] = useState<boolean | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [tenantIdFilter, setTenantIdFilter] = useState("");
+  const [tenantList, setTenantList] = useState<TenantListItem[]>([]);
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [sortColumn, setSortColumn] = useState<keyof Session | null>(null);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
@@ -389,6 +395,31 @@ export default function Home() {
     fetchSessions();
   }, [globalAdminMode]);
 
+  // Fetch tenant list for fuzzy search when entering global admin mode
+  useEffect(() => {
+    if (!globalAdminMode) {
+      setTenantList([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await authenticatedFetch(api.config.all(), getAccessToken);
+        if (!res.ok || cancelled) return;
+        const configs: { tenantId?: string; domainName?: string }[] = await res.json();
+        if (cancelled) return;
+        setTenantList(
+          configs
+            .filter((c): c is { tenantId: string; domainName: string } => !!c.tenantId && !!c.domainName)
+            .map((c) => ({ tenantId: c.tenantId, domainName: c.domainName }))
+        );
+      } catch {
+        // Non-critical — tenant autocomplete just won't work
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [globalAdminMode, getAccessToken]);
+
   // Reset to page 1 when search query, status filter, sort, or page size changes
   useEffect(() => {
     setCurrentPage(1);
@@ -680,6 +711,7 @@ export default function Home() {
               onTenantIdFilterChange={applyTenantIdFilter}
               onTenantIdFilterSubmit={submitTenantIdFilter}
               onTenantIdFilterClear={clearTenantIdFilter}
+              tenantList={tenantList}
               blockedDevicesSet={blockedDevicesSet}
               isPreviewBlocked={isPreviewBlocked}
               user={user}
