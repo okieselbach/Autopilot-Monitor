@@ -100,15 +100,6 @@ export function SectionMcpUsage() {
   const todayRequests = dailyAggregates.find(d => d.date === todayStr)?.totalRequests ?? 0;
   const maxDaily = Math.max(...dailyAggregates.map(d => d.totalRequests), 1);
 
-  // Top endpoints
-  const endpointTotals = new Map<string, number>();
-  for (const r of records) {
-    endpointTotals.set(r.endpoint, (endpointTotals.get(r.endpoint) || 0) + r.requestCount);
-  }
-  const topEndpoints = Array.from(endpointTotals.entries())
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 10);
-
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -196,23 +187,6 @@ export function SectionMcpUsage() {
                 <div className="w-16 text-xs text-gray-600 text-right shrink-0">
                   {day.totalRequests.toLocaleString()}
                 </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Top Endpoints */}
-      {topEndpoints.length > 0 && (
-        <div className="bg-white rounded-lg shadow overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-200">
-            <h3 className="text-sm font-medium text-gray-900">Top Endpoints</h3>
-          </div>
-          <div className="divide-y divide-gray-200">
-            {topEndpoints.map(([endpoint, count]) => (
-              <div key={endpoint} className="px-6 py-3 flex justify-between items-center hover:bg-gray-50">
-                <span className="text-sm font-mono text-gray-700">{endpoint}</span>
-                <span className="text-sm text-gray-500">{count.toLocaleString()} requests</span>
               </div>
             ))}
           </div>
