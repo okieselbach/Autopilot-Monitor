@@ -44,6 +44,17 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
         private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(5);
         private static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(2);
 
+        // Static HttpClient to avoid socket exhaustion from repeated short-lived instances.
+        // HttpClient is designed to be reused across requests.
+        private static readonly HttpClient SharedHttpClient = CreateSharedHttpClient();
+
+        private static HttpClient CreateSharedHttpClient()
+        {
+            var client = new HttpClient { Timeout = RequestTimeout };
+            client.DefaultRequestHeaders.Add("Accept", "application/json");
+            return client;
+        }
+
         public static async Task<GeoLocationAttemptResult> GetLocationAsync(AgentLogger logger)
         {
             var attempt = new GeoLocationAttemptResult();
@@ -88,10 +99,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
             {
                 logger?.Info("GeoLocation: Querying ipinfo.io...");
 
-                using (var client = new HttpClient { Timeout = RequestTimeout })
+                using (var httpResponse = await SharedHttpClient.GetAsync("https://ipinfo.io/json"))
                 {
-                    client.DefaultRequestHeaders.Add("Accept", "application/json");
-                    var httpResponse = await client.GetAsync("https://ipinfo.io/json");
                     if (!httpResponse.IsSuccessStatusCode)
                     {
                         var error = $"HTTP {(int)httpResponse.StatusCode} ({httpResponse.ReasonPhrase})";
@@ -136,10 +145,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
             {
                 logger?.Info("GeoLocation: Falling back to ifconfig.co...");
 
-                using (var client = new HttpClient { Timeout = RequestTimeout })
+                using (var httpResponse = await SharedHttpClient.GetAsync("https://ifconfig.co/json"))
                 {
-                    client.DefaultRequestHeaders.Add("Accept", "application/json");
-                    var httpResponse = await client.GetAsync("https://ifconfig.co/json");
                     if (!httpResponse.IsSuccessStatusCode)
                     {
                         var error = $"HTTP {(int)httpResponse.StatusCode} ({httpResponse.ReasonPhrase})";

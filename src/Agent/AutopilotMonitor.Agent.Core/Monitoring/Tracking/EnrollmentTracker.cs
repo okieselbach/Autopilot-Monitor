@@ -31,6 +31,22 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         private bool _summaryTimerActive;
         private Timer _debugStateTimer;
         private bool _debugStateTimerActive;
+
+        // ===== Thread-safety =====
+        // All mutable state fields below are accessed from multiple threads:
+        //   - Timer callbacks (SummaryTimer, DebugStateTimer, safety timers) → ThreadPool
+        //   - ImeLogTracker event handlers (HandleEspPhaseChanged, HandleAppStateChanged, etc.) → FileSystemWatcher thread
+        //   - EspAndHelloTracker event handlers (OnHelloCompleted, OnFinalizingSetupPhaseTriggered, etc.) → COM thread
+        //   - MonitoringService (NotifyDesktopArrived) → desktop detection thread
+        //   - Task.Run (CollectDeviceInfo) → ThreadPool
+        //
+        // A single lock protects all shared fields. Lock sections contain ONLY field reads/writes —
+        // never _emitEvent, _logger, timer operations, or external callbacks. This ensures:
+        //   - No deadlocks (no nested locking, no I/O under lock)
+        //   - Minimal contention (microsecond-level critical sections)
+        //   - Consistent multi-field reads (e.g., TryEmitEnrollmentComplete guard checks)
+        private readonly object _stateLock = new object();
+
         private string _lastEspPhase; // Track last ESP phase to prevent duplicate events
         private bool _hasAutoSwitchedToAppsPhase; // Track if we've already auto-switched to apps phase for current ESP phase
         private string _enrollmentType = "v1"; // "v1" = Autopilot Classic/ESP, "v2" = Windows Device Preparation
@@ -270,7 +286,17 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             _imeLogTracker.Start();
 
             // Collect and emit device info asynchronously (3 WMI queries + 5+ registry reads)
-            Task.Run(CollectDeviceInfo);
+            Task.Run(() =>
+            {
+                try
+                {
+                    CollectDeviceInfo();
+                }
+                catch (Exception ex)
+                {
+                    _logger.Warning($"EnrollmentTracker: background device info collection failed: {ex.Message}");
+                }
+            });
 
             // TODO: Überdenken ob ein 30s timer hier wirklich immer gut ist, hab einen Fall gesehen mit 
             // laaanger Wartephase in WhiteGlove weil ein 24H2 feature update reinkam und installiert wurde
@@ -288,9 +314,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         public void Stop()
         {
             _logger.Info("EnrollmentTracker: stopping");
+
             _summaryTimer?.Change(Timeout.Infinite, Timeout.Infinite);
             _debugStateTimer?.Change(Timeout.Infinite, Timeout.Infinite);
             _imeLogTracker?.Stop();
+
             _logger.Info("EnrollmentTracker: stopped");
         }
 
@@ -315,51 +343,71 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
 
         private void CollectDeviceInfo()
         {
-            var wasDeviceOnly = IsDeviceOnlyDeployment;
             var result = _deviceInfoCollector.CollectAll();
-            _enrollmentType = result.enrollmentType;
-            _skipUserStatusPage = result.skipUserStatusPage;
-            _skipDeviceStatusPage = result.skipDeviceStatusPage;
-            _autopilotMode = result.autopilotMode;
-            _aadJoinedWithUser = result.hasAadJoinedUser;
-            _stateData.EnrollmentType = _enrollmentType;
-            _stateData.SkipUserStatusPage = _skipUserStatusPage;
-            _stateData.SkipDeviceStatusPage = _skipDeviceStatusPage;
-            _stateData.AutopilotMode = _autopilotMode;
-            _stateData.AadJoinedWithUser = _aadJoinedWithUser;
-            _stateDirty = true;
 
-            _logger.Info($"EnrollmentTracker: enrollment type detected: {_enrollmentType ?? "unknown"} " +
-                         $"(autopilotMode={_autopilotMode}, skipUserStatusPage={_skipUserStatusPage}, skipDeviceStatusPage={_skipDeviceStatusPage}, aadJoinedWithUser={_aadJoinedWithUser})");
+            bool wasDeviceOnly;
+            lock (_stateLock)
+            {
+                wasDeviceOnly = IsDeviceOnlyDeployment;
+                _enrollmentType = result.enrollmentType;
+                _skipUserStatusPage = result.skipUserStatusPage;
+                _skipDeviceStatusPage = result.skipDeviceStatusPage;
+                _autopilotMode = result.autopilotMode;
+                _aadJoinedWithUser = result.hasAadJoinedUser;
+                _stateData.EnrollmentType = _enrollmentType;
+                _stateData.SkipUserStatusPage = _skipUserStatusPage;
+                _stateData.SkipDeviceStatusPage = _skipDeviceStatusPage;
+                _stateData.AutopilotMode = _autopilotMode;
+                _stateData.AadJoinedWithUser = _aadJoinedWithUser;
+                _stateDirty = true;
+            }
+
+            // Snapshot values under lock for trace events (emitted outside lock)
+            bool isDeviceOnly, isSelfDeploying, aadJoinedWithUser;
+            int? autopilotMode;
+            bool? skipUserStatusPage;
+            string enrollmentType;
+            lock (_stateLock)
+            {
+                isDeviceOnly = IsDeviceOnlyDeployment;
+                isSelfDeploying = IsSelfDeploying;
+                aadJoinedWithUser = _aadJoinedWithUser;
+                autopilotMode = _autopilotMode;
+                skipUserStatusPage = _skipUserStatusPage;
+                enrollmentType = _enrollmentType;
+            }
+
+            _logger.Info($"EnrollmentTracker: enrollment type detected: {enrollmentType ?? "unknown"} " +
+                         $"(autopilotMode={autopilotMode}, skipUserStatusPage={skipUserStatusPage}, skipDeviceStatusPage={result.skipDeviceStatusPage}, aadJoinedWithUser={aadJoinedWithUser})");
 
             // Emit trace when AAD join with user is detected and reclassifies away from device-only
-            if (_aadJoinedWithUser && wasDeviceOnly && !IsDeviceOnlyDeployment)
+            if (aadJoinedWithUser && wasDeviceOnly && !isDeviceOnly)
             {
                 EmitTraceEvent("user_session_detected_via_aad_join",
                     "AAD join with user detected — user session active, using standard completion paths",
                     new Dictionary<string, object>
                     {
-                        { "autopilotMode", _autopilotMode },
-                        { "skipUserStatusPage", _skipUserStatusPage },
+                        { "autopilotMode", autopilotMode },
+                        { "skipUserStatusPage", skipUserStatusPage },
                         { "aadJoinedWithUser", true },
                         { "isDeviceOnlyDeployment", false }
                     });
             }
 
-            if (IsDeviceOnlyDeployment)
+            if (isDeviceOnly)
             {
-                var reason = IsSelfDeploying
+                var reason = isSelfDeploying
                     ? "AutopilotMode=1 (Self-Deploying)"
-                    : $"SkipUserStatusPage=true (autopilotMode={_autopilotMode})";
+                    : $"SkipUserStatusPage=true (autopilotMode={autopilotMode})";
                 EmitTraceEvent("device_only_deployment_detected",
                     $"{reason} — Hello guard will be bypassed, provisioning status used as completion signal",
                     new Dictionary<string, object>
                     {
-                        { "autopilotMode", _autopilotMode },
-                        { "skipUserStatusPage", _skipUserStatusPage },
-                        { "enrollmentType", _enrollmentType },
-                        { "aadJoinedWithUser", _aadJoinedWithUser },
-                        { "isSelfDeploying", IsSelfDeploying },
+                        { "autopilotMode", autopilotMode },
+                        { "skipUserStatusPage", skipUserStatusPage },
+                        { "enrollmentType", enrollmentType },
+                        { "aadJoinedWithUser", aadJoinedWithUser },
+                        { "isSelfDeploying", isSelfDeploying },
                         { "isDeviceOnlyDeployment", true }
                     });
             }

@@ -34,6 +34,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
         private readonly AgentLogger _logger;
 
         private readonly HashSet<string> _reportedKeys = new HashSet<string>();
+        private readonly object _antiFloodLock = new object();
         private DateTime? _lastReportTime;
         private int _reportCount;
 
@@ -64,34 +65,41 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
             int? httpStatusCode = null,
             long? sequenceNumber = null)
         {
-            // Deduplicate by error type + status code: same failure category sent only once per session
+            // Deduplicate by error type + status code: same failure category sent only once per session.
+            // All anti-flood checks are protected by a lock to prevent race conditions when
+            // TrySendAsync is called concurrently (fire-and-forget from multiple threads).
             var key = $"{errorType}:{httpStatusCode}";
+            int currentReportCount;
 
-            if (_reportCount >= MaxReportsPerSession)
+            lock (_antiFloodLock)
             {
-                _logger?.Debug($"[EmergencyChannel] Suppressed ({_reportCount}/{MaxReportsPerSession} reports used): {key}");
-                return;
-            }
+                if (_reportCount >= MaxReportsPerSession)
+                {
+                    _logger?.Debug($"[EmergencyChannel] Suppressed ({_reportCount}/{MaxReportsPerSession} reports used): {key}");
+                    return;
+                }
 
-            if (_reportedKeys.Contains(key))
-            {
-                _logger?.Debug($"[EmergencyChannel] Suppressed (already reported): {key}");
-                return;
-            }
+                if (_reportedKeys.Contains(key))
+                {
+                    _logger?.Debug($"[EmergencyChannel] Suppressed (already reported): {key}");
+                    return;
+                }
 
-            if (_lastReportTime != null &&
-                (DateTime.UtcNow - _lastReportTime.Value).TotalMinutes < MinIntervalMinutes)
-            {
-                _logger?.Debug($"[EmergencyChannel] Suppressed (cooldown active, last report at {_lastReportTime.Value:HH:mm:ss}): {key}");
-                return;
-            }
+                if (_lastReportTime != null &&
+                    (DateTime.UtcNow - _lastReportTime.Value).TotalMinutes < MinIntervalMinutes)
+                {
+                    _logger?.Debug($"[EmergencyChannel] Suppressed (cooldown active, last report at {_lastReportTime.Value:HH:mm:ss}): {key}");
+                    return;
+                }
 
-            _reportedKeys.Add(key);
-            _reportCount++;
-            _lastReportTime = DateTime.UtcNow;
+                _reportedKeys.Add(key);
+                _reportCount++;
+                _lastReportTime = DateTime.UtcNow;
+                currentReportCount = _reportCount;
+            }
 
             var statusText = httpStatusCode.HasValue ? $" HTTP {httpStatusCode}" : string.Empty;
-            _logger?.Warning($"[EmergencyChannel] Sending report {_reportCount}/{MaxReportsPerSession}: {errorType}{statusText}");
+            _logger?.Warning($"[EmergencyChannel] Sending report {currentReportCount}/{MaxReportsPerSession}: {errorType}{statusText}");
 
             var report = new AgentErrorReport
             {
@@ -105,7 +113,15 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
                 Timestamp = DateTime.UtcNow
             };
 
-            await _apiClient.ReportAgentErrorAsync(report);
+            try
+            {
+                await _apiClient.ReportAgentErrorAsync(report);
+            }
+            catch (Exception ex)
+            {
+                // Swallow — emergency channel must never cascade failures into the caller
+                _logger?.Debug($"[EmergencyChannel] Failed to send report: {ex.Message}");
+            }
         }
     }
 }

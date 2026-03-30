@@ -61,11 +61,19 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             var events = new List<EnrollmentEvent>();
             for (int i = 1; i < lines.Length; i++)
             {
-                var evt = JsonConvert.DeserializeObject<EnrollmentEvent>(lines[i]);
-                if (evt != null)
+                try
                 {
-                    NormalizeEventData(evt);
-                    events.Add(evt);
+                    var evt = JsonConvert.DeserializeObject<EnrollmentEvent>(lines[i]);
+                    if (evt != null)
+                    {
+                        NormalizeEventData(evt);
+                        events.Add(evt);
+                    }
+                }
+                catch (JsonException)
+                {
+                    // Skip malformed event lines rather than failing the entire batch.
+                    // A single corrupted event should not cause data loss for valid events.
                 }
             }
 

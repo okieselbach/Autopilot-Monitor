@@ -18,10 +18,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
     {
         private void CollectDeviceInfoAtEnrollmentStart()
         {
-            if (_enrollmentStartDeviceInfoCollected)
-                return;
-
-            _enrollmentStartDeviceInfoCollected = true;
+            lock (_stateLock)
+            {
+                if (_enrollmentStartDeviceInfoCollected)
+                    return;
+                _enrollmentStartDeviceInfoCollected = true;
+            }
 
             if (!_isBootstrapMode)
             {
@@ -45,13 +47,19 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
 
         private void CollectDeviceInfoAtFinalizingSetup(string triggerReason)
         {
-            if (_finalDeviceInfoCollected)
+            bool alreadyCollected;
+            lock (_stateLock)
+            {
+                alreadyCollected = _finalDeviceInfoCollected;
+                if (!alreadyCollected)
+                    _finalDeviceInfoCollected = true;
+            }
+
+            if (alreadyCollected)
             {
                 _logger.Debug($"EnrollmentTracker: final device info already collected, skipping (trigger: {triggerReason})");
                 return;
             }
-
-            _finalDeviceInfoCollected = true;
             _logger.Info($"EnrollmentTracker: triggering final device info collection at FinalizingSetup (trigger: {triggerReason})");
             CollectDeviceInfoAtEnd();
         }
@@ -62,11 +70,24 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             EmitAppTrackingSummaryIfChanged();
 
             // Periodic state save (piggybacks on the existing 30s timer)
-            if (_stateDirty)
+            bool dirty;
+            EnrollmentStateData stateSnapshot;
+            lock (_stateLock)
             {
-                _stateDirty = false;
-                _statePersistence.Save(_stateData);
+                dirty = _stateDirty;
+                if (dirty)
+                {
+                    _stateDirty = false;
+                    stateSnapshot = _stateData;
+                }
+                else
+                {
+                    stateSnapshot = null;
+                }
             }
+
+            if (dirty)
+                _statePersistence.Save(stateSnapshot);
         }
 
         /// <summary>
@@ -77,6 +98,15 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         {
             try
             {
+                string lastPhaseDbg;
+                bool espFinalExitDbg, desktopDbg;
+                lock (_stateLock)
+                {
+                    lastPhaseDbg = _lastEspPhase;
+                    espFinalExitDbg = _espFinalExitSeen;
+                    desktopDbg = _desktopArrived;
+                }
+
                 var states = _imeLogTracker?.PackageStates;
                 if (states == null || states.CountAll == 0) return;
 
@@ -88,7 +118,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     $"user:{states.Count(x => x.IsError && x.Targeted == AppTargeted.User)}), " +
                     $"active: [{string.Join(", ", active)}], " +
                     $"failed: [{string.Join(", ", errors)}], " +
-                    $"phase: {_lastEspPhase ?? "none"}, espExit: {_espFinalExitSeen}, desktop: {_desktopArrived}");
+                    $"phase: {lastPhaseDbg ?? "none"}, espExit: {espFinalExitDbg}, desktop: {desktopDbg}");
             }
             catch (Exception ex)
             {
@@ -106,17 +136,19 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             if (states == null || states.CountAll == 0) return;
 
             var hash = GetSummaryHash(states);
-            if (hash == _lastEmittedSummaryHash) return;
 
-            _lastEmittedSummaryHash = hash;
+            EventSeverity severity;
+            lock (_stateLock)
+            {
+                if (hash == _lastEmittedSummaryHash) return;
+                _lastEmittedSummaryHash = hash;
 
-            // Elevate to Info only when completed/error counts change — mere downloading/installing
-            // state changes (same completed count) are Verbose to reduce log noise.
-            var compactHash = $"{states.CountCompleted}_{states.ErrorCount}";
-            var severity = (compactHash != _lastEmittedSummaryCompactHash)
-                ? (states.HasError ? EventSeverity.Warning : EventSeverity.Info)
-                : EventSeverity.Debug;
-            _lastEmittedSummaryCompactHash = compactHash;
+                var compactHash = $"{states.CountCompleted}_{states.ErrorCount}";
+                severity = (compactHash != _lastEmittedSummaryCompactHash)
+                    ? (states.HasError ? EventSeverity.Warning : EventSeverity.Info)
+                    : EventSeverity.Debug;
+                _lastEmittedSummaryCompactHash = compactHash;
+            }
 
             _emitEvent(new EnrollmentEvent
             {
@@ -141,7 +173,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             var states = _imeLogTracker?.PackageStates;
             if (states == null || states.CountAll == 0) return;
 
-            _lastEmittedSummaryHash = GetSummaryHash(states);
+            lock (_stateLock) { _lastEmittedSummaryHash = GetSummaryHash(states); }
 
             _emitEvent(new EnrollmentEvent
             {
@@ -310,7 +342,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     { "helloOutcome", _espAndHelloTracker?.HelloOutcome ?? "unknown" },
                     { "enrollmentType", _enrollmentType ?? "unknown" },
                     { "agentUptimeSeconds", (DateTime.UtcNow - _agentStartTimeUtc).TotalSeconds },
-                    { "signalsSeen", _stateData.SignalsSeen ?? new List<string>() },
+                    { "signalsSeen", SnapshotSignalsSeen() },
                     { "signalTimestamps", signalTimestamps },
                     { "appSummary", new Dictionary<string, object>
                         {

@@ -137,43 +137,47 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
             _logger?.Debug($"IngestEventsAsync: POST {url} — {request.Events.Count} events, {compressedContent.Length} bytes compressed");
             _logger?.Verbose($"IngestEventsAsync: NDJSON {ndjsonLength} bytes → gzip {compressedContent.Length} bytes ({(ndjsonLength > 0 ? (100 - compressedContent.Length * 100 / ndjsonLength) : 0)}% reduction)");
 
-            var httpRequest = new HttpRequestMessage(HttpMethod.Post, url)
+            using (var httpRequest = new HttpRequestMessage(HttpMethod.Post, url)
             {
                 Content = new ByteArrayContent(compressedContent)
-            };
-            httpRequest.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/x-ndjson");
-            httpRequest.Content.Headers.Add("Content-Encoding", "gzip");
-
-            // Add TenantId header so the backend can run security checks before parsing the body
-            httpRequest.Headers.Add("X-Tenant-Id", request.TenantId);
-
-            // Add additional security headers for device authorization (client cert is at TLS layer, but we can add hardware info in headers for whitelist validation and Autopilot device verification)
-            AddSecurityHeaders(httpRequest);
-
-            var sw = Stopwatch.StartNew();
-            var failed = false;
-            long bytesDown = 0;
-            try
+            })
             {
-                var httpResponse = await _httpClient.SendAsync(httpRequest);
-                ThrowOnAuthFailure(httpResponse);
-                httpResponse.EnsureSuccessStatusCode();
+                httpRequest.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/x-ndjson");
+                httpRequest.Content.Headers.Add("Content-Encoding", "gzip");
 
-                var responseJson = await httpResponse.Content.ReadAsStringAsync();
-                bytesDown = Encoding.UTF8.GetByteCount(responseJson);
-                var response = JsonConvert.DeserializeObject<IngestEventsResponse>(responseJson);
+                // Add TenantId header so the backend can run security checks before parsing the body
+                httpRequest.Headers.Add("X-Tenant-Id", request.TenantId);
 
-                return response;
-            }
-            catch
-            {
-                failed = true;
-                throw;
-            }
-            finally
-            {
-                sw.Stop();
-                _networkMetrics.RecordRequest(compressedContent.Length, bytesDown, sw.ElapsedMilliseconds, failed);
+                // Add additional security headers for device authorization (client cert is at TLS layer, but we can add hardware info in headers for whitelist validation and Autopilot device verification)
+                AddSecurityHeaders(httpRequest);
+
+                var sw = Stopwatch.StartNew();
+                var failed = false;
+                long bytesDown = 0;
+                try
+                {
+                    using (var httpResponse = await _httpClient.SendAsync(httpRequest))
+                    {
+                        ThrowOnAuthFailure(httpResponse);
+                        httpResponse.EnsureSuccessStatusCode();
+
+                        var responseJson = await httpResponse.Content.ReadAsStringAsync();
+                        bytesDown = Encoding.UTF8.GetByteCount(responseJson);
+                        var response = JsonConvert.DeserializeObject<IngestEventsResponse>(responseJson);
+
+                        return response;
+                    }
+                }
+                catch
+                {
+                    failed = true;
+                    throw;
+                }
+                finally
+                {
+                    sw.Stop();
+                    _networkMetrics.RecordRequest(compressedContent.Length, bytesDown, sw.ElapsedMilliseconds, failed);
+                }
             }
         }
 
@@ -189,54 +193,58 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
 
             // Retry on 503 (backend signals transient device validation failure)
             const int maxAttempts = 3;
+            const int maxRetryAfterSeconds = 120; // Cap Retry-After to prevent indefinite blocking
             for (int attempt = 1; attempt <= maxAttempts; attempt++)
             {
-                var httpRequest = new HttpRequestMessage(HttpMethod.Get, url);
-                AddSecurityHeaders(httpRequest);
-
-                _logger?.Debug($"GetAgentConfigAsync: GET {url} (attempt {attempt}/{maxAttempts})");
-
-                var sw = Stopwatch.StartNew();
-                var failed = false;
-                long bytesDown = 0;
-                try
+                using (var httpRequest = new HttpRequestMessage(HttpMethod.Get, url))
                 {
-                    var response = await _httpClient.SendAsync(httpRequest);
+                    AddSecurityHeaders(httpRequest);
 
-                    if (response.StatusCode == System.Net.HttpStatusCode.ServiceUnavailable && attempt < maxAttempts)
+                    _logger?.Debug($"GetAgentConfigAsync: GET {url} (attempt {attempt}/{maxAttempts})");
+
+                    var sw = Stopwatch.StartNew();
+                    var failed = false;
+                    long bytesDown = 0;
+                    try
                     {
-                        // Backend says "try again" — parse Retry-After or default to 30s
-                        var retryAfterSeconds = 30;
-                        if (response.Headers.TryGetValues("Retry-After", out var retryValues) &&
-                            int.TryParse(System.Linq.Enumerable.FirstOrDefault(retryValues), out var parsedRetry))
+                        using (var response = await _httpClient.SendAsync(httpRequest))
                         {
-                            retryAfterSeconds = parsedRetry;
+                            if (response.StatusCode == System.Net.HttpStatusCode.ServiceUnavailable && attempt < maxAttempts)
+                            {
+                                // Backend says "try again" — parse Retry-After or default to 30s
+                                var retryAfterSeconds = 30;
+                                if (response.Headers.TryGetValues("Retry-After", out var retryValues) &&
+                                    int.TryParse(System.Linq.Enumerable.FirstOrDefault(retryValues), out var parsedRetry))
+                                {
+                                    retryAfterSeconds = Math.Min(parsedRetry, maxRetryAfterSeconds);
+                                }
+
+                                _logger?.Warning($"GetAgentConfigAsync: 503 Service Unavailable (attempt {attempt}/{maxAttempts}). Retrying in {retryAfterSeconds}s...");
+                                sw.Stop();
+                                _networkMetrics.RecordRequest(0, 0, sw.ElapsedMilliseconds, true);
+                                await System.Threading.Tasks.Task.Delay(retryAfterSeconds * 1000);
+                                continue;
+                            }
+
+                            ThrowOnAuthFailure(response);
+                            response.EnsureSuccessStatusCode();
+
+                            var responseJson = await response.Content.ReadAsStringAsync();
+                            bytesDown = Encoding.UTF8.GetByteCount(responseJson);
+                            var result = JsonConvert.DeserializeObject<AgentConfigResponse>(responseJson);
+                            return result;
                         }
-
-                        _logger?.Warning($"GetAgentConfigAsync: 503 Service Unavailable (attempt {attempt}/{maxAttempts}). Retrying in {retryAfterSeconds}s...");
-                        sw.Stop();
-                        _networkMetrics.RecordRequest(0, 0, sw.ElapsedMilliseconds, true);
-                        await System.Threading.Tasks.Task.Delay(retryAfterSeconds * 1000);
-                        continue;
                     }
-
-                    ThrowOnAuthFailure(response);
-                    response.EnsureSuccessStatusCode();
-
-                    var responseJson = await response.Content.ReadAsStringAsync();
-                    bytesDown = Encoding.UTF8.GetByteCount(responseJson);
-                    var result = JsonConvert.DeserializeObject<AgentConfigResponse>(responseJson);
-                    return result;
-                }
-                catch
-                {
-                    failed = true;
-                    throw;
-                }
-                finally
-                {
-                    sw.Stop();
-                    _networkMetrics.RecordRequest(0, bytesDown, sw.ElapsedMilliseconds, failed);
+                    catch
+                    {
+                        failed = true;
+                        throw;
+                    }
+                    finally
+                    {
+                        sw.Stop();
+                        _networkMetrics.RecordRequest(0, bytesDown, sw.ElapsedMilliseconds, failed);
+                    }
                 }
             }
 
@@ -278,20 +286,23 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
                 var url = $"{_baseUrl}{errorEndpoint}";
                 var json = JsonConvert.SerializeObject(report);
 
-                var httpRequest = new HttpRequestMessage(HttpMethod.Post, url)
+                using (var httpRequest = new HttpRequestMessage(HttpMethod.Post, url)
                 {
                     Content = new StringContent(json, Encoding.UTF8, "application/json")
-                };
+                })
+                {
+                    // Security validation on the backend requires tenant ID before parsing the body
+                    httpRequest.Headers.Add("X-Tenant-Id", report.TenantId);
 
-                // Security validation on the backend requires tenant ID before parsing the body
-                httpRequest.Headers.Add("X-Tenant-Id", report.TenantId);
+                    // Hardware headers are required for full security validation
+                    AddSecurityHeaders(httpRequest);
 
-                // Hardware headers are required for full security validation
-                AddSecurityHeaders(httpRequest);
-
-                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-                await _httpClient.SendAsync(httpRequest, cts.Token);
-                // Response status is deliberately ignored — endpoint always returns 200
+                    using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5)))
+                    using (var response = await _httpClient.SendAsync(httpRequest, cts.Token))
+                    {
+                        // Response status is deliberately ignored — endpoint always returns 200
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -305,38 +316,41 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
             var json = JsonConvert.SerializeObject(data);
             var bytesUp = Encoding.UTF8.GetByteCount(json);
 
-            var httpRequest = new HttpRequestMessage(HttpMethod.Post, url)
+            using (var httpRequest = new HttpRequestMessage(HttpMethod.Post, url)
             {
                 Content = new StringContent(json, Encoding.UTF8, "application/json")
-            };
-
-            // Add additional security headers for device authorization (client cert is at TLS layer, but we can add hardware info in headers for whitelist validation and Autopilot device verification)
-            AddSecurityHeaders(httpRequest);
-
-            var sw = Stopwatch.StartNew();
-            var failed = false;
-            long bytesDown = 0;
-            try
+            })
             {
-                var response = await _httpClient.SendAsync(httpRequest);
-                ThrowOnAuthFailure(response);
-                response.EnsureSuccessStatusCode();
+                // Add additional security headers for device authorization (client cert is at TLS layer, but we can add hardware info in headers for whitelist validation and Autopilot device verification)
+                AddSecurityHeaders(httpRequest);
 
-                var responseJson = await response.Content.ReadAsStringAsync();
-                bytesDown = Encoding.UTF8.GetByteCount(responseJson);
-                var result = JsonConvert.DeserializeObject<TResponse>(responseJson);
+                var sw = Stopwatch.StartNew();
+                var failed = false;
+                long bytesDown = 0;
+                try
+                {
+                    using (var response = await _httpClient.SendAsync(httpRequest))
+                    {
+                        ThrowOnAuthFailure(response);
+                        response.EnsureSuccessStatusCode();
 
-                return result;
-            }
-            catch
-            {
-                failed = true;
-                throw;
-            }
-            finally
-            {
-                sw.Stop();
-                _networkMetrics.RecordRequest(bytesUp, bytesDown, sw.ElapsedMilliseconds, failed);
+                        var responseJson = await response.Content.ReadAsStringAsync();
+                        bytesDown = Encoding.UTF8.GetByteCount(responseJson);
+                        var result = JsonConvert.DeserializeObject<TResponse>(responseJson);
+
+                        return result;
+                    }
+                }
+                catch
+                {
+                    failed = true;
+                    throw;
+                }
+                finally
+                {
+                    sw.Stop();
+                    _networkMetrics.RecordRequest(bytesUp, bytesDown, sw.ElapsedMilliseconds, failed);
+                }
             }
         }
 
