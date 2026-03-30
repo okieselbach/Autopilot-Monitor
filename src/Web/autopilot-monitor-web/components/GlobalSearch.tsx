@@ -227,8 +227,19 @@ export default function GlobalSearch() {
             onKeyDown={handleKeyDown}
             onFocus={() => { if (query.length >= 2) setShowDropdown(true); }}
             placeholder="Search serial, device, session... (Ctrl+K)"
-            className="w-full pl-9 pr-3 py-1.5 text-sm bg-gray-100 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent focus:bg-white transition-colors"
+            className="w-full pl-9 pr-8 py-1.5 text-sm bg-gray-100 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent focus:bg-white transition-colors"
           />
+          {query && (
+            <button
+              onClick={() => { setQuery(''); setShowDropdown(false); inputRef.current?.focus(); }}
+              className="absolute inset-y-0 right-0 pr-2.5 flex items-center text-gray-400 hover:text-gray-600 transition-colors"
+              title="Clear search"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
         </div>
         <ResultsDropdown />
       </div>
@@ -262,8 +273,19 @@ export default function GlobalSearch() {
                 onChange={(e) => handleInputChange(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder="Search serial, device, session..."
-                className="w-full pl-9 pr-3 py-1.5 text-sm bg-gray-100 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent focus:bg-white transition-colors"
+                className="w-full pl-9 pr-8 py-1.5 text-sm bg-gray-100 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent focus:bg-white transition-colors"
               />
+              {query && (
+                <button
+                  onClick={() => { setQuery(''); setShowDropdown(false); mobileInputRef.current?.focus(); }}
+                  className="absolute inset-y-0 right-0 pr-2.5 flex items-center text-gray-400 hover:text-gray-600 transition-colors"
+                  title="Clear search"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
             </div>
             <button
               onClick={() => { setMobileOpen(false); setQuery(''); setShowDropdown(false); }}

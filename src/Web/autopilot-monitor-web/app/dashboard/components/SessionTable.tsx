@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState, useEffect, useRef } from "react";
 import { Session } from "../types";
 import { trackEvent } from "@/lib/appInsights";
+import { fuzzyContains } from "@/lib/fuzzy";
 
 // Column definition for the session table
 interface ColumnDef {
@@ -131,6 +132,77 @@ export function SessionTable({
   const tenantDropdownRef = useRef<HTMLDivElement>(null);
   const [showTenantSuggestions, setShowTenantSuggestions] = useState(false);
   const [tenantSelectedIndex, setTenantSelectedIndex] = useState(-1);
+  const searchDropdownRef = useRef<HTMLDivElement>(null);
+  const [showSearchSuggestions, setShowSearchSuggestions] = useState(false);
+  const [searchSelectedIndex, setSearchSelectedIndex] = useState(-1);
+
+  // Fuzzy-match sessions by multiple fields for search dropdown (two-phase: exact then Levenshtein)
+  interface SearchSuggestion {
+    session: Session;
+    matchedField: string;
+    matchedValue: string;
+    isExact: boolean;
+  }
+
+  const SEARCH_FIELDS: { key: keyof Session; label: string }[] = [
+    { key: "deviceName", label: "Device" },
+    { key: "serialNumber", label: "Serial" },
+    { key: "model", label: "Model" },
+    { key: "manufacturer", label: "Manufacturer" },
+    { key: "sessionId", label: "Session ID" },
+    { key: "geoCountry", label: "Country" },
+    { key: "geoRegion", label: "Region" },
+    { key: "geoCity", label: "City" },
+    { key: "agentVersion", label: "Agent Version" },
+    { key: "osName", label: "OS Name" },
+    { key: "osBuild", label: "OS Build" },
+    { key: "osDisplayVersion", label: "OS Version" },
+    { key: "osEdition", label: "OS Edition" },
+    { key: "status", label: "Status" },
+  ];
+
+  const searchSuggestions: SearchSuggestion[] = (() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (q.length < 2 || sessions.length === 0) return [];
+    if (/^[><]=?\s*\d+$/.test(q)) return [];
+
+    const exactResults: SearchSuggestion[] = [];
+    const fuzzyResults: SearchSuggestion[] = [];
+    const seen = new Set<string>();
+
+    // Phase 1: exact substring matches (highest priority)
+    for (const session of sessions) {
+      if (exactResults.length >= 8) break;
+      if (seen.has(session.sessionId)) continue;
+      for (const f of SEARCH_FIELDS) {
+        const val = session[f.key];
+        if (val != null && String(val).toLowerCase().includes(q)) {
+          seen.add(session.sessionId);
+          exactResults.push({ session, matchedField: f.label, matchedValue: String(val), isExact: true });
+          break;
+        }
+      }
+    }
+
+    // Phase 2: Levenshtein fuzzy matches (fill remaining slots, min 3 chars for fuzzy)
+    if (exactResults.length < 8 && q.length >= 3) {
+      const maxDist = q.length <= 4 ? 1 : 2;
+      for (const session of sessions) {
+        if (exactResults.length + fuzzyResults.length >= 8) break;
+        if (seen.has(session.sessionId)) continue;
+        for (const f of SEARCH_FIELDS) {
+          const val = session[f.key];
+          if (val != null && fuzzyContains(String(val), q, maxDist)) {
+            seen.add(session.sessionId);
+            fuzzyResults.push({ session, matchedField: f.label, matchedValue: String(val), isExact: false });
+            break;
+          }
+        }
+      }
+    }
+
+    return [...exactResults, ...fuzzyResults];
+  })();
 
   // Fuzzy-match tenants by domain name or tenant ID
   const tenantSuggestions = (() => {
@@ -158,8 +230,11 @@ export function SessionTable({
       if (tenantDropdownRef.current && !tenantDropdownRef.current.contains(e.target as Node)) {
         setShowTenantSuggestions(false);
       }
+      if (searchDropdownRef.current && !searchDropdownRef.current.contains(e.target as Node)) {
+        setShowSearchSuggestions(false);
+      }
     }
-    if (showColumnSelector || openFilterColumn || showTenantSuggestions) {
+    if (showColumnSelector || openFilterColumn || showTenantSuggestions || showSearchSuggestions) {
       document.addEventListener("mousedown", handleClickOutside);
       return () => document.removeEventListener("mousedown", handleClickOutside);
     }
@@ -395,18 +470,54 @@ export function SessionTable({
         </div>
       )}
 
-      {/* Search Input */}
-      <div className="mb-4 relative">
+      {/* Search Input with Fuzzy Suggestions */}
+      <div className="mb-4 relative" ref={searchDropdownRef}>
         <input
           type="text"
           placeholder="Search by device, serial, model, status, session ID, country, or duration (e.g., >30 for >30min)"
           value={searchQuery}
-          onChange={(e) => onSearchQueryChange(e.target.value)}
+          onChange={(e) => {
+            onSearchQueryChange(e.target.value);
+            setShowSearchSuggestions(true);
+            setSearchSelectedIndex(-1);
+          }}
+          onFocus={() => {
+            if (searchSuggestions.length > 0) setShowSearchSuggestions(true);
+          }}
+          onKeyDown={(e) => {
+            if (showSearchSuggestions && searchSuggestions.length > 0) {
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setSearchSelectedIndex((i) => Math.min(i + 1, searchSuggestions.length - 1));
+                return;
+              }
+              if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setSearchSelectedIndex((i) => Math.max(i - 1, -1));
+                return;
+              }
+              if (e.key === "Enter" && searchSelectedIndex >= 0) {
+                e.preventDefault();
+                const selected = searchSuggestions[searchSelectedIndex];
+                setShowSearchSuggestions(false);
+                setSearchSelectedIndex(-1);
+                router.push(`/sessions/${selected.session.sessionId}`);
+                return;
+              }
+              if (e.key === "Escape") {
+                setShowSearchSuggestions(false);
+                return;
+              }
+            }
+          }}
           className="w-full px-4 py-2 pr-10 border border-gray-300 rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
         />
         {searchQuery && (
           <button
-            onClick={() => onSearchQueryChange("")}
+            onClick={() => {
+              onSearchQueryChange("");
+              setShowSearchSuggestions(false);
+            }}
             className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600 transition-colors"
             title="Clear search"
           >
@@ -414,6 +525,79 @@ export function SessionTable({
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
+        )}
+        {/* Search suggestions dropdown */}
+        {showSearchSuggestions && searchSuggestions.length > 0 && (
+          <div className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-80 overflow-y-auto">
+            {searchSuggestions.map((s, idx) => {
+              const statusColors: Record<string, string> = {
+                Succeeded: "text-green-600",
+                Failed: "text-red-600",
+                InProgress: "text-blue-600",
+                Pending: "text-amber-600",
+              };
+              return (
+                <button
+                  key={s.session.sessionId}
+                  onClick={() => {
+                    setShowSearchSuggestions(false);
+                    setSearchSelectedIndex(-1);
+                    router.push(`/sessions/${s.session.sessionId}`);
+                  }}
+                  className={`w-full text-left px-4 py-2.5 flex items-center gap-3 transition-colors ${
+                    idx === searchSelectedIndex ? "bg-blue-50" : "hover:bg-gray-50"
+                  }`}
+                >
+                  <span className="text-gray-400 flex-shrink-0">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                    </svg>
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-medium text-gray-900 truncate">
+                        {s.session.deviceName || s.session.serialNumber || s.session.sessionId}
+                      </p>
+                      <span className={`text-[10px] font-semibold ${statusColors[s.session.status] ?? "text-gray-500"}`}>
+                        {s.session.status}
+                      </span>
+                      {!s.isExact && (
+                        <span className="text-[9px] font-medium text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-full">
+                          fuzzy
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-500 truncate">
+                      <span className="text-gray-400">Matched: </span>
+                      <span className="font-medium text-blue-600">{s.matchedField}</span>
+                      <span className="text-gray-300 mx-1">&middot;</span>
+                      {s.matchedValue}
+                      {s.session.serialNumber && s.matchedField !== "Serial" && (
+                        <span><span className="text-gray-300 mx-1">&middot;</span>{s.session.serialNumber}</span>
+                      )}
+                    </p>
+                  </div>
+                </button>
+              );
+            })}
+            {/* Hint when more sessions may exist on the server */}
+            {hasMore && searchSuggestions.length < 8 && (
+              <div className="border-t border-gray-100 px-4 py-2.5 flex items-center justify-between">
+                <span className="text-xs text-gray-400">
+                  Searching {sessions.length} loaded sessions
+                </span>
+                <button
+                  onClick={() => {
+                    setShowSearchSuggestions(false);
+                    onLoadMore();
+                  }}
+                  className="text-xs font-medium text-blue-600 hover:text-blue-800 transition-colors"
+                >
+                  Load more sessions
+                </button>
+              </div>
+            )}
+          </div>
         )}
       </div>
 
