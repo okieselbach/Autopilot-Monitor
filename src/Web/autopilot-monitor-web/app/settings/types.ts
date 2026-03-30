@@ -26,6 +26,7 @@ export interface TenantConfiguration {
   rebootOnComplete?: boolean;
   rebootDelaySeconds?: number;
   enableGeoLocation?: boolean;
+  enableTimezoneAutoSet?: boolean;
   enableImeMatchLog?: boolean;
   logLevel?: string;
   // Teams notifications (legacy)

@@ -58,6 +58,8 @@ interface TenantConfigContextValue {
   setRebootDelaySeconds: (v: number) => void;
   enableGeoLocation: boolean;
   setEnableGeoLocation: (v: boolean) => void;
+  enableTimezoneAutoSet: boolean;
+  setEnableTimezoneAutoSet: (v: boolean) => void;
   enableImeMatchLog: boolean;
   setEnableImeMatchLog: (v: boolean) => void;
   logLevel: string;
@@ -234,6 +236,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
   const [rebootOnComplete, setRebootOnComplete] = useState(false);
   const [rebootDelaySeconds, setRebootDelaySeconds] = useState(10);
   const [enableGeoLocation, setEnableGeoLocation] = useState(true);
+  const [enableTimezoneAutoSet, setEnableTimezoneAutoSet] = useState(false);
   const [enableImeMatchLog, setEnableImeMatchLog] = useState(false);
   const [logLevel, setLogLevel] = useState("Info");
   const [showScriptOutput, setShowScriptOutput] = useState(true);
@@ -302,6 +305,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
         setRebootOnComplete(data.rebootOnComplete ?? false);
         setRebootDelaySeconds(data.rebootDelaySeconds ?? 10);
         setEnableGeoLocation(data.enableGeoLocation ?? true);
+        setEnableTimezoneAutoSet(data.enableTimezoneAutoSet ?? false);
         setEnableImeMatchLog(data.enableImeMatchLog ?? false);
         setLogLevel(data.logLevel ?? "Info");
         setShowScriptOutput(data.showScriptOutput ?? true);
@@ -491,6 +495,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
         rebootOnComplete,
         rebootDelaySeconds,
         enableGeoLocation,
+        enableTimezoneAutoSet,
         enableImeMatchLog,
         logLevel,
         showScriptOutput,
@@ -552,7 +557,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
     manufacturerWhitelist, modelWhitelist, validateAutopilotDevice, validateCorporateIdentifier,
     dataRetentionDays, sessionTimeoutHours, enablePerformanceCollector, performanceCollectorInterval,
     helloWaitTimeoutSeconds, selfDestructOnComplete, keepLogFile, rebootOnComplete, rebootDelaySeconds,
-    enableGeoLocation, enableImeMatchLog, logLevel, showScriptOutput, showEnrollmentSummary,
+    enableGeoLocation, enableTimezoneAutoSet, enableImeMatchLog, logLevel, showScriptOutput, showEnrollmentSummary,
     enrollmentSummaryTimeoutSeconds, enrollmentSummaryBrandingImageUrl, enrollmentSummaryLaunchRetrySeconds,
     webhookProviderType, webhookUrl, webhookNotifyOnSuccess, webhookNotifyOnFailure,
     diagnosticsBlobSasUrl, diagnosticsUploadMode, tenantDiagPaths,
@@ -710,6 +715,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
     setRebootOnComplete(config.rebootOnComplete ?? false);
     setRebootDelaySeconds(config.rebootDelaySeconds ?? 10);
     setEnableGeoLocation(config.enableGeoLocation ?? true);
+    setEnableTimezoneAutoSet(config.enableTimezoneAutoSet ?? false);
     setEnableImeMatchLog(config.enableImeMatchLog ?? false);
     setLogLevel(config.logLevel ?? "Info");
     setShowScriptOutput(config.showScriptOutput ?? true);
@@ -1040,6 +1046,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
       rebootOnComplete, setRebootOnComplete,
       rebootDelaySeconds, setRebootDelaySeconds,
       enableGeoLocation, setEnableGeoLocation,
+      enableTimezoneAutoSet, setEnableTimezoneAutoSet,
       enableImeMatchLog, setEnableImeMatchLog,
       logLevel, setLogLevel,
       showScriptOutput, setShowScriptOutput,

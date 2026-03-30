@@ -19,6 +19,8 @@ interface AgentSettingsSectionProps {
   setRebootDelaySeconds: (value: number) => void;
   enableGeoLocation: boolean;
   setEnableGeoLocation: (value: boolean) => void;
+  enableTimezoneAutoSet: boolean;
+  setEnableTimezoneAutoSet: (value: boolean) => void;
   enableImeMatchLog: boolean;
   setEnableImeMatchLog: (value: boolean) => void;
   logLevel: string;
@@ -55,6 +57,8 @@ export default function AgentSettingsSection({
   setRebootDelaySeconds,
   enableGeoLocation,
   setEnableGeoLocation,
+  enableTimezoneAutoSet,
+  setEnableTimezoneAutoSet,
   enableImeMatchLog,
   setEnableImeMatchLog,
   logLevel,
@@ -159,6 +163,20 @@ export default function AgentSettingsSection({
               <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${enableGeoLocation ? 'translate-x-6' : 'translate-x-1'}`} />
             </button>
           </div>
+
+          {/* Timezone Auto-Set (sub-toggle of Geo-Location) */}
+          {enableGeoLocation && (
+            <div className="flex items-center justify-between p-4 rounded-lg border border-gray-200 hover:border-violet-200 transition-colors ml-4">
+              <div>
+                <p className="font-medium text-gray-900">Set Timezone Automatically</p>
+                <p className="text-sm text-gray-500">Set the device timezone based on IP geolocation result (uses tzutil /s)</p>
+              </div>
+              <button onClick={() => setEnableTimezoneAutoSet(!enableTimezoneAutoSet)}
+                className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${enableTimezoneAutoSet ? 'bg-violet-500' : 'bg-gray-300'}`}>
+                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${enableTimezoneAutoSet ? 'translate-x-6' : 'translate-x-1'}`} />
+              </button>
+            </div>
+          )}
 
           {/* IME Match Log */}
           <div className="flex items-center justify-between p-4 rounded-lg border border-gray-200 hover:border-violet-200 transition-colors">
