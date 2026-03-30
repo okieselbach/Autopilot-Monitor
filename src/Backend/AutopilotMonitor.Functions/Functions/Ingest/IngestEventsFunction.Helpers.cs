@@ -95,14 +95,14 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                     summary.Status = "Succeeded";
                     summary.CompletedAt = evt.Timestamp;
                     if (summary.StartedAt != DateTime.MinValue)
-                        summary.DurationSeconds = Math.Max(1, (int)(evt.Timestamp - summary.StartedAt).TotalSeconds);
+                        summary.DurationSeconds = Math.Max(1, EventTimestampValidator.SafeDurationSeconds(summary.StartedAt, evt.Timestamp));
                     break;
 
                 case "app_install_failed":
                     summary.Status = "Failed";
                     summary.CompletedAt = evt.Timestamp;
                     if (summary.StartedAt != DateTime.MinValue)
-                        summary.DurationSeconds = Math.Max(1, (int)(evt.Timestamp - summary.StartedAt).TotalSeconds);
+                        summary.DurationSeconds = Math.Max(1, EventTimestampValidator.SafeDurationSeconds(summary.StartedAt, evt.Timestamp));
                     // Agent does not send errorCode/errorMessage in Data — use the event message
                     summary.FailureCode = evt.Data?.ContainsKey("errorCode") == true
                         ? evt.Data["errorCode"]?.ToString() ?? string.Empty : string.Empty;
@@ -158,7 +158,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             RecalculateAppDurations(state);
         }
 
-        private static void RecalculateAppDurations(AppInstallAggregationState state)
+        internal static void RecalculateAppDurations(AppInstallAggregationState state)
         {
             var summary = state.Summary;
 
@@ -185,14 +185,16 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             if (state.DownloadStartedAt.HasValue && state.InstallStartedAt.HasValue &&
                 state.InstallStartedAt.Value >= state.DownloadStartedAt.Value)
             {
-                summary.DownloadDurationSeconds = (int)(state.InstallStartedAt.Value - state.DownloadStartedAt.Value).TotalSeconds;
+                summary.DownloadDurationSeconds = EventTimestampValidator.SafeDurationSeconds(
+                    state.DownloadStartedAt.Value, state.InstallStartedAt.Value);
             }
 
             // Full duration: from effective start to completion/failure.
             if (summary.CompletedAt.HasValue && summary.StartedAt != DateTime.MinValue &&
                 summary.CompletedAt.Value >= summary.StartedAt)
             {
-                summary.DurationSeconds = (int)(summary.CompletedAt.Value - summary.StartedAt).TotalSeconds;
+                summary.DurationSeconds = EventTimestampValidator.SafeDurationSeconds(
+                    summary.StartedAt, summary.CompletedAt.Value);
             }
         }
 

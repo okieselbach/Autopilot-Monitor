@@ -124,6 +124,20 @@ namespace AutopilotMonitor.Shared.Models
         public long Sequence { get; set; }
 
         /// <summary>
+        /// Original agent-side timestamp preserved when the backend clamps an out-of-range value.
+        /// Null when the timestamp was within the valid range and no correction was needed.
+        /// Use this for troubleshooting and root-cause analysis of clock issues on devices.
+        /// </summary>
+        public DateTime? OriginalTimestamp { get; set; }
+
+        /// <summary>
+        /// True when the backend had to clamp the agent-side Timestamp to a valid range.
+        /// When set, OriginalTimestamp contains the raw value the agent sent.
+        /// AI analysis and UI should treat clamped timestamps with caution.
+        /// </summary>
+        public bool TimestampClamped { get; set; }
+
+        /// <summary>
         /// Azure Table Storage RowKey — format: {Timestamp:yyyyMMddHHmmssfff}_{Sequence:D10}
         /// Represents the exact sort key used in storage.
         /// </summary>

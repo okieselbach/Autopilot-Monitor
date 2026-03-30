@@ -467,8 +467,12 @@ namespace AutopilotMonitor.Functions.Services
                             ? JsonConvert.SerializeObject(evt.Data)
                             : string.Empty,
                         "DataJson", evt.EventId),
-                    ["ReceivedAt"] = evt.ReceivedAt
+                    ["ReceivedAt"] = evt.ReceivedAt,
+                    ["TimestampClamped"] = evt.TimestampClamped
                 };
+
+                if (evt.OriginalTimestamp.HasValue)
+                    entity["OriginalTimestamp"] = EnsureUtc(evt.OriginalTimestamp.Value);
 
                 await tableClient.UpsertEntityAsync(entity);
                 _logger.LogDebug($"Stored event {evt.EventId}");
@@ -540,8 +544,12 @@ namespace AutopilotMonitor.Functions.Services
                                         ? JsonConvert.SerializeObject(evt.Data)
                                         : string.Empty,
                                     "DataJson", evt.EventId),
-                                ["ReceivedAt"] = evt.ReceivedAt
+                                ["ReceivedAt"] = evt.ReceivedAt,
+                                ["TimestampClamped"] = evt.TimestampClamped
                             };
+
+                            if (evt.OriginalTimestamp.HasValue)
+                                entity["OriginalTimestamp"] = EnsureUtc(evt.OriginalTimestamp.Value);
 
                             return new TableTransactionAction(TableTransactionActionType.UpsertReplace, entity);
                         }).ToList();
@@ -1520,7 +1528,9 @@ namespace AutopilotMonitor.Functions.Services
                 Sequence = entity.GetInt64("Sequence") ?? 0,
                 Data = DeserializeEventData(entity.GetString("DataJson")),
                 RowKey = entity.RowKey,
-                ReceivedAt = entity.GetDateTimeOffset("ReceivedAt")?.UtcDateTime
+                ReceivedAt = entity.GetDateTimeOffset("ReceivedAt")?.UtcDateTime,
+                OriginalTimestamp = entity.GetDateTimeOffset("OriginalTimestamp")?.UtcDateTime,
+                TimestampClamped = entity.GetBoolean("TimestampClamped") ?? false
             };
         }
 

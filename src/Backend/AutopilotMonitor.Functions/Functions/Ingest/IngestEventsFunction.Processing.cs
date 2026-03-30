@@ -128,6 +128,10 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                 var receivedAt = DateTime.UtcNow;
                 StampServerFields(request.Events, request.TenantId, request.SessionId, receivedAt);
 
+                // Sanitize agent-side timestamps: clamp out-of-range values to prevent storage/sorting issues.
+                // Original timestamps are preserved in OriginalTimestamp for troubleshooting.
+                SanitizeEventTimestamps(request.Events, receivedAt);
+
                 // Store events in Azure Table Storage (batch write for efficiency)
                 var storedEvents = await _sessionRepo.StoreEventsBatchAsync(request.Events);
                 int processedCount = storedEvents.Count;
@@ -740,6 +744,27 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                 evt.ReceivedAt = receivedAt;
                 evt.TenantId = tenantId;
                 evt.SessionId = sessionId;
+            }
+        }
+
+        /// <summary>
+        /// Sanitizes agent-side timestamps on all events by clamping out-of-range values.
+        /// When a timestamp is clamped, the original value is preserved in OriginalTimestamp
+        /// and TimestampClamped is set to true — keeping the raw data available for
+        /// troubleshooting and root-cause analysis of clock issues on devices.
+        /// Exposed as internal for unit testing.
+        /// </summary>
+        internal static void SanitizeEventTimestamps(List<EnrollmentEvent> events, DateTime utcNow)
+        {
+            foreach (var evt in events)
+            {
+                var sanitized = EventTimestampValidator.SanitizeTimestamp(evt.Timestamp, utcNow);
+                if (sanitized != evt.Timestamp)
+                {
+                    evt.OriginalTimestamp = evt.Timestamp;
+                    evt.TimestampClamped = true;
+                    evt.Timestamp = sanitized;
+                }
             }
         }
     }
