@@ -276,8 +276,8 @@ export function SectionSettings() {
         </SettingsRow>
       </SettingsGroup>
 
-      {/* Team Management */}
-      <SettingsGroup title="Team Management" color="bg-gray-100 text-gray-800" borderColor="border-gray-200">
+      {/* Access Management */}
+      <SettingsGroup title="Access Management" color="bg-gray-100 text-gray-800" borderColor="border-gray-200">
         <SettingsRow name="Team Members &amp; Roles">
           Manage who has access to the portal and at what level. New members are added by entering their UPN
           (e.g. <span className="font-mono text-xs bg-gray-100 px-1 py-0.5 rounded">user@contoso.com</span>).

@@ -355,7 +355,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
                 'Diagnostics SAS URL Expired',
                 `The Diagnostics SAS URL expired on ${expiry.toLocaleDateString()}. Diagnostics upload is non-functional.`,
                 'diagnostics-sas-expiry',
-                '/settings/integrations/diagnostics'
+                '/settings/agent/diagnostics'
               );
             } else if (daysRemaining <= 7) {
               addNotification(
@@ -363,7 +363,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
                 'Diagnostics SAS URL Expiring Soon',
                 `The Diagnostics SAS URL expires on ${expiry.toLocaleDateString()} (${daysRemaining} day${daysRemaining === 1 ? '' : 's'} remaining). Please update it soon.`,
                 'diagnostics-sas-expiry',
-                '/settings/integrations/diagnostics'
+                '/settings/agent/diagnostics'
               );
             }
           }
@@ -569,7 +569,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
       setError(null);
       setSuccessMessage(null);
 
-      const redirectUri = `${window.location.origin}/settings/validation/autopilot`;
+      const redirectUri = `${window.location.origin}/settings/tenant/autopilot`;
       const response = await authenticatedFetch(
         api.config.autopilotConsentUrl(tenantId, redirectUri),
         getAccessToken,
@@ -625,7 +625,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
           : consentError;
         setError(`Admin consent failed: ${errorText}`);
         setAutopilotConsentInProgress(false);
-        router.replace("/settings/validation/autopilot");
+        router.replace("/settings/tenant/autopilot");
         return;
       }
 
@@ -654,7 +654,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
           await saveConfiguration("autopilotValidation", { validateAutopilotDevice: true });
           setSuccessMessage("Autopilot Device Validation enabled. Backend agent endpoints are now unlocked for this tenant.");
         }
-        router.replace("/settings/validation/autopilot");
+        router.replace("/settings/tenant/autopilot");
       } catch (err) {
         if (err instanceof TokenExpiredError) {
           addNotification('error', 'Session Expired', err.message, 'session-expired-error');

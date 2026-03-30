@@ -4,7 +4,7 @@ import { useTenantConfig } from "../../TenantConfigContext";
 import { TenantNotifications } from "../../TenantNotifications";
 import AdminManagementSection from "../../components/AdminManagementSection";
 
-export function SectionAdminManagement() {
+export function SectionAccessManagement() {
   const {
     admins, loadingAdmins,
     newAdminEmail, setNewAdminEmail,

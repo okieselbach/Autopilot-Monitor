@@ -4,8 +4,9 @@ import { useMemo } from "react";
 import { usePageSections } from "../../hooks/usePageSections";
 import { PageSectionItem } from "../../contexts/SidebarContext";
 import { useTenantConfig } from "./TenantConfigContext";
+import { useAuth } from "../../contexts/AuthContext";
 import {
-  ShieldCheckIcon, GearIcon, UsersIcon, BellIcon, CircleStackIcon, ChartBarIcon,
+  BuildingOfficeIcon, GearIcon, WrenchScrewdriverIcon, ChartBarIcon,
 } from "../../lib/sidebarIcons";
 
 /**
@@ -14,16 +15,24 @@ import {
  */
 export function SettingsPageSections() {
   const { config, user } = useTenantConfig();
+  const { user: authUser } = useAuth();
 
   const items: PageSectionItem[] = useMemo(() => {
     const sections: PageSectionItem[] = [];
     const isAdmin = user?.isTenantAdmin || user?.isGlobalAdmin;
 
-    // 1. Validation
+    // 1. Tenant
     if (isAdmin) {
       sections.push(
-        { id: "autopilot", label: "Autopilot Validation", href: "/settings/validation/autopilot", group: "Validation", groupIcon: <ShieldCheckIcon /> },
-        { id: "hardware-whitelist", label: "Hardware Whitelist", href: "/settings/validation/hardware-whitelist", group: "Validation" },
+        { id: "autopilot", label: "Autopilot Validation", href: "/settings/tenant/autopilot", group: "Tenant", groupIcon: <BuildingOfficeIcon /> },
+        { id: "hardware-whitelist", label: "Hardware Whitelist", href: "/settings/tenant/hardware-whitelist", group: "Tenant" },
+        { id: "notifications", label: "Notifications", href: "/settings/tenant/notifications", group: "Tenant" },
+        { id: "access-management", label: "Access Management", href: "/settings/tenant/access-management", group: "Tenant" },
+      );
+    }
+    if (config?.bootstrapTokenEnabled && (isAdmin || user?.canManageBootstrapTokens)) {
+      sections.push(
+        { id: "bootstrap-sessions", label: "Bootstrap Sessions", href: "/settings/tenant/bootstrap-sessions", group: "Tenant", ...(!isAdmin ? { groupIcon: <BuildingOfficeIcon /> } : {}) },
       );
     }
 
@@ -32,6 +41,7 @@ export function SettingsPageSections() {
       sections.push(
         { id: "settings", label: "Agent Settings", href: "/settings/agent/settings", group: "Agent", groupIcon: <GearIcon /> },
         { id: "analyzers", label: "Agent Analyzers", href: "/settings/agent/analyzers", group: "Agent" },
+        { id: "diagnostics", label: "Diagnostics Package", href: "/settings/agent/diagnostics", group: "Agent" },
       );
       if (config?.unrestrictedModeEnabled) {
         sections.push(
@@ -40,41 +50,23 @@ export function SettingsPageSections() {
       }
     }
 
-    // 3. Access
+    // 3. Maintenance
     if (isAdmin) {
       sections.push(
-        { id: "admin-management", label: "Admin Management", href: "/settings/access/admin-management", group: "Access", groupIcon: <UsersIcon /> },
-      );
-    }
-    if (config?.bootstrapTokenEnabled && (isAdmin || user?.canManageBootstrapTokens)) {
-      sections.push(
-        { id: "bootstrap-sessions", label: "Bootstrap Sessions", href: "/settings/access/bootstrap-sessions", group: "Access", ...(!isAdmin ? { groupIcon: <UsersIcon /> } : {}) },
+        { id: "data", label: "Data Management", href: "/settings/management/data", group: "Maintenance", groupIcon: <WrenchScrewdriverIcon /> },
+        { id: "offboarding", label: "Offboarding", href: "/settings/management/offboarding", group: "Maintenance" },
       );
     }
 
-    // 4. Integrations
-    if (isAdmin) {
+    // 4. Reporting (only visible if user has MCP access)
+    if (authUser?.hasMcpAccess) {
       sections.push(
-        { id: "notifications", label: "Notifications", href: "/settings/integrations/notifications", group: "Integrations", groupIcon: <BellIcon /> },
-        { id: "diagnostics", label: "Diagnostics", href: "/settings/integrations/diagnostics", group: "Integrations" },
+        { id: "mcp-usage", label: "MCP Usage", href: "/settings/reporting/mcp-usage", group: "Reporting", groupIcon: <ChartBarIcon /> },
       );
     }
-
-    // 5. Management
-    if (isAdmin) {
-      sections.push(
-        { id: "data", label: "Data Management", href: "/settings/management/data", group: "Management", groupIcon: <CircleStackIcon /> },
-        { id: "offboarding", label: "Offboarding", href: "/settings/management/offboarding", group: "Management" },
-      );
-    }
-
-    // 6. MCP (visible to any authenticated user — the API itself checks MCP access)
-    sections.push(
-      { id: "mcp-usage", label: "Usage", href: "/settings/mcp/usage", group: "MCP", groupIcon: <ChartBarIcon /> },
-    );
 
     return sections;
-  }, [user, config?.unrestrictedModeEnabled, config?.bootstrapTokenEnabled]);
+  }, [user, config?.unrestrictedModeEnabled, config?.bootstrapTokenEnabled, authUser?.hasMcpAccess]);
 
   usePageSections(items, "Configuration", "route");
 

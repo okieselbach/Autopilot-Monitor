@@ -3,9 +3,6 @@ import {
   GearIcon,
   DocumentTextIcon,
   ShieldCheckIcon,
-  UsersIcon,
-  BellIcon,
-  CircleStackIcon,
   BuildingOfficeIcon,
   NoSymbolIcon,
   KeyIcon,
@@ -13,6 +10,7 @@ import {
   ArrowDownTrayIcon,
   ArrowPathIcon,
   FolderIcon,
+  WrenchScrewdriverIcon,
 } from "./sidebarIcons";
 
 // --- Icons defined inline (not in sidebarIcons) ---
@@ -167,10 +165,12 @@ export const EXPANDABLE_NAV_GROUPS: ExpandableNavGroup[] = [
     visibility: "adminOrOperator",
     items: [
       {
-        id: "cfg-validation", label: "Validation", icon: <ShieldCheckIcon />,
+        id: "cfg-tenant", label: "Tenant", icon: <BuildingOfficeIcon />,
         items: [
-          { id: "cfg-autopilot", label: "Autopilot Validation", href: "/settings/validation/autopilot" },
-          { id: "cfg-hardware", label: "Hardware Whitelist", href: "/settings/validation/hardware-whitelist" },
+          { id: "cfg-autopilot", label: "Autopilot Validation", href: "/settings/tenant/autopilot" },
+          { id: "cfg-hardware", label: "Hardware Whitelist", href: "/settings/tenant/hardware-whitelist" },
+          { id: "cfg-notifications", label: "Notifications", href: "/settings/tenant/notifications" },
+          { id: "cfg-access-mgmt", label: "Access Management", href: "/settings/tenant/access-management" },
         ],
       },
       {
@@ -178,32 +178,20 @@ export const EXPANDABLE_NAV_GROUPS: ExpandableNavGroup[] = [
         items: [
           { id: "cfg-agent-settings", label: "Agent Settings", href: "/settings/agent/settings" },
           { id: "cfg-agent-analyzers", label: "Agent Analyzers", href: "/settings/agent/analyzers" },
+          { id: "cfg-diagnostics", label: "Diagnostics Package", href: "/settings/agent/diagnostics" },
         ],
       },
       {
-        id: "cfg-access", label: "Access", icon: <UsersIcon />,
-        items: [
-          { id: "cfg-admin-mgmt", label: "Admin Management", href: "/settings/access/admin-management" },
-        ],
-      },
-      {
-        id: "cfg-integrations", label: "Integrations", icon: <BellIcon />,
-        items: [
-          { id: "cfg-notifications", label: "Notifications", href: "/settings/integrations/notifications" },
-          { id: "cfg-diagnostics", label: "Diagnostics", href: "/settings/integrations/diagnostics" },
-        ],
-      },
-      {
-        id: "cfg-management", label: "Management", icon: <CircleStackIcon />,
+        id: "cfg-maintenance", label: "Maintenance", icon: <WrenchScrewdriverIcon />,
         items: [
           { id: "cfg-data", label: "Data Management", href: "/settings/management/data" },
           { id: "cfg-offboarding", label: "Offboarding", href: "/settings/management/offboarding" },
         ],
       },
       {
-        id: "cfg-mcp", label: "MCP", icon: <ChartBarIcon />,
+        id: "cfg-reporting", label: "Reporting", icon: <ChartBarIcon />,
         items: [
-          { id: "cfg-mcp-usage", label: "Usage", href: "/settings/mcp/usage" },
+          { id: "cfg-mcp-usage", label: "MCP Usage", href: "/settings/reporting/mcp-usage" },
         ],
       },
     ],

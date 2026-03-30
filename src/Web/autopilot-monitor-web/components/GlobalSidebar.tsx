@@ -183,7 +183,7 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
       .map((group) => {
         // Filter out MCP item if user doesn't have MCP access
         const filteredItems = group.items.filter((item) => {
-          if (item.id === "cfg-mcp") return hasMcpAccess;
+          if (item.id === "cfg-reporting") return hasMcpAccess;
           return true;
         });
         return { ...group, items: filteredItems };
