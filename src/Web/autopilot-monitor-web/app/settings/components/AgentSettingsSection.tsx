@@ -75,83 +75,6 @@ export default function AgentSettingsSection({
 }: AgentSettingsSectionProps) {
   return (
     <>
-      {/* Agent Collectors */}
-      <div className="bg-white rounded-lg shadow">
-        <div className="p-6 border-b border-gray-200 bg-gradient-to-r from-emerald-50 to-teal-50">
-          <div className="flex items-center space-x-2">
-            <svg className="w-6 h-6 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-            </svg>
-            <div>
-              <h2 className="text-xl font-semibold text-gray-900">Agent Collectors</h2>
-              <p className="text-sm text-gray-500 mt-1">Enable optional data collectors on enrolled devices. These generate additional telemetry traffic.</p>
-            </div>
-          </div>
-        </div>
-        <div className="p-6 space-y-5">
-          {/* Performance Collector */}
-          <div className="flex items-center justify-between p-4 rounded-lg border border-gray-200 hover:border-emerald-200 transition-colors">
-            <div className="flex-1">
-              <div className="flex items-center space-x-2">
-                <p className="font-medium text-gray-900">Performance Collector</p>
-              </div>
-              <p className="text-sm text-gray-500 mt-1">CPU, memory, disk metrics at configurable intervals</p>
-              {enablePerformanceCollector && (
-                <div className="mt-2">
-                  <div className="flex items-center space-x-2">
-                    <span className="text-sm text-gray-600">Interval:</span>
-                    <input
-                      type="number"
-                      min={30}
-                      max={300}
-                      value={performanceCollectorInterval}
-                      onChange={(e) => setPerformanceCollectorInterval(parseInt(e.target.value) || 30)}
-                      onBlur={() => setPerformanceCollectorInterval(Math.max(30, Math.min(300, performanceCollectorInterval)))}
-                      className="w-20 px-2 py-1 border border-gray-300 rounded text-sm text-gray-900 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-                    />
-                    <span className="text-sm text-gray-500">seconds</span>
-                  </div>
-                  <p className="text-xs text-gray-400 mt-1">Minimum: 30 seconds, Maximum: 300 seconds (5 minutes)</p>
-                </div>
-              )}
-            </div>
-            <button
-              onClick={() => setEnablePerformanceCollector(!enablePerformanceCollector)}
-              className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${enablePerformanceCollector ? 'bg-emerald-500' : 'bg-gray-300'}`}
-            >
-              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${enablePerformanceCollector ? 'translate-x-6' : 'translate-x-1'}`} />
-            </button>
-          </div>
-
-          {/* Hello Wait Timeout */}
-          <div className="flex items-center justify-between p-4 rounded-lg border border-gray-200 hover:border-emerald-200 transition-colors">
-            <div className="flex-1">
-              <div className="flex items-center space-x-2">
-                <p className="font-medium text-gray-900">Hello Wait Timeout</p>
-              </div>
-              <p className="text-sm text-gray-500 mt-1">Seconds to wait for the Windows Hello wizard after ESP exit</p>
-              <div className="mt-2">
-                <div className="flex items-center space-x-2">
-                  <span className="text-sm text-gray-600">Timeout:</span>
-                  <input
-                    type="number"
-                    min={30}
-                    max={300}
-                    value={helloWaitTimeoutSeconds}
-                    onChange={(e) => setHelloWaitTimeoutSeconds(parseInt(e.target.value) || 30)}
-                    onBlur={() => setHelloWaitTimeoutSeconds(Math.max(30, Math.min(300, helloWaitTimeoutSeconds)))}
-                    className="w-20 px-2 py-1 border border-gray-300 rounded text-sm text-gray-900 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-                  />
-                  <span className="text-sm text-gray-500">seconds</span>
-                </div>
-                <p className="text-xs text-gray-400 mt-1">Minimum: 30 seconds, Maximum: 300 seconds (5 minutes)</p>
-              </div>
-            </div>
-          </div>
-
-        </div>
-      </div>
-
       {/* Agent Parameters */}
       <div className="bg-white rounded-lg shadow">
         <div className="p-6 border-b border-gray-200 bg-gradient-to-r from-violet-50 to-purple-50">
@@ -352,6 +275,83 @@ export default function AgentSettingsSection({
           )}
 
           <SaveResetBar onSave={onSave} onReset={onReset} saving={saving} />
+        </div>
+      </div>
+
+      {/* Agent Collectors */}
+      <div className="bg-white rounded-lg shadow">
+        <div className="p-6 border-b border-gray-200 bg-gradient-to-r from-emerald-50 to-teal-50">
+          <div className="flex items-center space-x-2">
+            <svg className="w-6 h-6 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+            </svg>
+            <div>
+              <h2 className="text-xl font-semibold text-gray-900">Agent Collectors</h2>
+              <p className="text-sm text-gray-500 mt-1">Enable optional data collectors on enrolled devices. These generate additional telemetry traffic.</p>
+            </div>
+          </div>
+        </div>
+        <div className="p-6 space-y-5">
+          {/* Performance Collector */}
+          <div className="flex items-center justify-between p-4 rounded-lg border border-gray-200 hover:border-emerald-200 transition-colors">
+            <div className="flex-1">
+              <div className="flex items-center space-x-2">
+                <p className="font-medium text-gray-900">Performance Collector</p>
+              </div>
+              <p className="text-sm text-gray-500 mt-1">CPU, memory, disk metrics at configurable intervals</p>
+              {enablePerformanceCollector && (
+                <div className="mt-2">
+                  <div className="flex items-center space-x-2">
+                    <span className="text-sm text-gray-600">Interval:</span>
+                    <input
+                      type="number"
+                      min={30}
+                      max={300}
+                      value={performanceCollectorInterval}
+                      onChange={(e) => setPerformanceCollectorInterval(parseInt(e.target.value) || 30)}
+                      onBlur={() => setPerformanceCollectorInterval(Math.max(30, Math.min(300, performanceCollectorInterval)))}
+                      className="w-20 px-2 py-1 border border-gray-300 rounded text-sm text-gray-900 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                    />
+                    <span className="text-sm text-gray-500">seconds</span>
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1">Minimum: 30 seconds, Maximum: 300 seconds (5 minutes)</p>
+                </div>
+              )}
+            </div>
+            <button
+              onClick={() => setEnablePerformanceCollector(!enablePerformanceCollector)}
+              className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${enablePerformanceCollector ? 'bg-emerald-500' : 'bg-gray-300'}`}
+            >
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${enablePerformanceCollector ? 'translate-x-6' : 'translate-x-1'}`} />
+            </button>
+          </div>
+
+          {/* Hello Wait Timeout */}
+          <div className="flex items-center justify-between p-4 rounded-lg border border-gray-200 hover:border-emerald-200 transition-colors">
+            <div className="flex-1">
+              <div className="flex items-center space-x-2">
+                <p className="font-medium text-gray-900">Hello Wait Timeout</p>
+              </div>
+              <p className="text-sm text-gray-500 mt-1">Seconds to wait for the Windows Hello wizard after ESP exit</p>
+              <div className="mt-2">
+                <div className="flex items-center space-x-2">
+                  <span className="text-sm text-gray-600">Timeout:</span>
+                  <input
+                    type="number"
+                    min={30}
+                    max={300}
+                    value={helloWaitTimeoutSeconds}
+                    onChange={(e) => setHelloWaitTimeoutSeconds(parseInt(e.target.value) || 30)}
+                    onBlur={() => setHelloWaitTimeoutSeconds(Math.max(30, Math.min(300, helloWaitTimeoutSeconds)))}
+                    className="w-20 px-2 py-1 border border-gray-300 rounded text-sm text-gray-900 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                  />
+                  <span className="text-sm text-gray-500">seconds</span>
+                </div>
+                <p className="text-xs text-gray-400 mt-1">Minimum: 30 seconds, Maximum: 300 seconds (5 minutes)</p>
+              </div>
+            </div>
+          </div>
+
         </div>
       </div>
     </>

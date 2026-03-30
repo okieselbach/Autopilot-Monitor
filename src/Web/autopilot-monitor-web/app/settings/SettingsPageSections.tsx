@@ -24,10 +24,10 @@ export function SettingsPageSections() {
     // 1. Tenant
     if (isAdmin) {
       sections.push(
-        { id: "autopilot", label: "Autopilot Validation", href: "/settings/tenant/autopilot", group: "Tenant", groupIcon: <BuildingOfficeIcon /> },
+        { id: "access-management", label: "Access Management", href: "/settings/tenant/access-management", group: "Tenant", groupIcon: <BuildingOfficeIcon /> },
+        { id: "autopilot", label: "Autopilot Validation", href: "/settings/tenant/autopilot", group: "Tenant" },
         { id: "hardware-whitelist", label: "Hardware Whitelist", href: "/settings/tenant/hardware-whitelist", group: "Tenant" },
         { id: "notifications", label: "Notifications", href: "/settings/tenant/notifications", group: "Tenant" },
-        { id: "access-management", label: "Access Management", href: "/settings/tenant/access-management", group: "Tenant" },
       );
     }
     if (config?.bootstrapTokenEnabled && (isAdmin || user?.canManageBootstrapTokens)) {
