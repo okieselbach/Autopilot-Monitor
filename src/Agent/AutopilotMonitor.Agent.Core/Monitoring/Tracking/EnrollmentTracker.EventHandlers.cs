@@ -36,15 +36,22 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
 
         private void HandleEspPhaseChanged(string phase)
         {
+            string enrollType, lastPhase;
+            lock (_stateLock)
+            {
+                enrollType = _enrollmentType;
+                lastPhase = _lastEspPhase;
+            }
+
             // WDP (v2) has no ESP - skip ESP phase handling entirely
-            if (_enrollmentType == "v2")
+            if (enrollType == "v2")
             {
                 _logger.Debug($"EnrollmentTracker: skipping ESP phase event in WDP enrollment (phase: {phase})");
                 return;
             }
 
             // Only emit event if the phase has actually changed
-            if (string.Equals(phase, _lastEspPhase, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(phase, lastPhase, StringComparison.OrdinalIgnoreCase))
             {
                 _logger.Debug($"EnrollmentTracker: ESP phase unchanged ({phase}), skipping event");
                 return;
@@ -64,19 +71,22 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     _logger.Info("EnrollmentTracker: AccountSetup suppressed — no real user profile (likely WhiteGlove)");
                     EmitTraceEvent("AccountSetup_suppressed",
                         "ESP reported AccountSetup but no real user profile found — likely WhiteGlove pre-provisioning",
-                        new Dictionary<string, object> { { "espPhase", phase }, { "previousPhase", _lastEspPhase ?? "null" } });
+                        new Dictionary<string, object> { { "espPhase", phase }, { "previousPhase", lastPhase ?? "null" } });
                     return;
                 }
             }
 
-            _logger.Info($"EnrollmentTracker: ESP phase changed from '{_lastEspPhase ?? "null"}' to '{phase}'");
-            _lastEspPhase = phase;
-            _hasAutoSwitchedToAppsPhase = false; // Reset when ESP phase changes
-            _espEverSeen = true;
-            _stateData.EspEverSeen = true;
-            _stateData.LastEspPhase = phase;
-            if (_stateData.EspFirstSeenUtc == null)
-                _stateData.EspFirstSeenUtc = DateTime.UtcNow;
+            _logger.Info($"EnrollmentTracker: ESP phase changed from '{lastPhase ?? "null"}' to '{phase}'");
+            lock (_stateLock)
+            {
+                _lastEspPhase = phase;
+                _hasAutoSwitchedToAppsPhase = false; // Reset when ESP phase changes
+                _espEverSeen = true;
+                _stateData.EspEverSeen = true;
+                _stateData.LastEspPhase = phase;
+                if (_stateData.EspFirstSeenUtc == null)
+                    _stateData.EspFirstSeenUtc = DateTime.UtcNow;
+            }
             RecordSignal($"esp_phase_{phase}");
 
             // ESP phase change means ESP is progressing — cancel any pending failure grace period
@@ -155,17 +165,25 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             // Auto-switch to app installation phase when first app activity detected
             // If we're in DeviceSetup and an app starts downloading/installing, switch to AppsDevice
             // If we're in AccountSetup and an app starts downloading/installing, switch to AppsUser
-            if (!_hasAutoSwitchedToAppsPhase &&
+            bool hasAutoSwitched;
+            string currentPhase;
+            lock (_stateLock)
+            {
+                hasAutoSwitched = _hasAutoSwitchedToAppsPhase;
+                currentPhase = _lastEspPhase;
+            }
+
+            if (!hasAutoSwitched &&
                 (newState == AppInstallationState.Downloading || newState == AppInstallationState.Installing) &&
                 oldState < AppInstallationState.Downloading)
             {
-                if (_lastEspPhase != null)
+                if (currentPhase != null)
                 {
-                    if (string.Equals(_lastEspPhase, "DeviceSetup", StringComparison.OrdinalIgnoreCase))
+                    if (string.Equals(currentPhase, "DeviceSetup", StringComparison.OrdinalIgnoreCase))
                     {
                         // Switch from DeviceSetup to AppsDevice
                         _logger.Info($"EnrollmentTracker: First app activity detected during DeviceSetup, switching to AppsDevice phase");
-                        _hasAutoSwitchedToAppsPhase = true;
+                        lock (_stateLock) { _hasAutoSwitchedToAppsPhase = true; }
                         EmitImeTrackerEvent(new EnrollmentEvent
                         {
                             SessionId = _sessionId,
@@ -179,11 +197,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                             ImmediateUpload = true
                         });
                     }
-                    else if (string.Equals(_lastEspPhase, "AccountSetup", StringComparison.OrdinalIgnoreCase))
+                    else if (string.Equals(currentPhase, "AccountSetup", StringComparison.OrdinalIgnoreCase))
                     {
                         // Switch from AccountSetup to AppsUser
                         _logger.Info($"EnrollmentTracker: First app activity detected during AccountSetup, switching to AppsUser phase");
-                        _hasAutoSwitchedToAppsPhase = true;
+                        lock (_stateLock) { _hasAutoSwitchedToAppsPhase = true; }
                         EmitImeTrackerEvent(new EnrollmentEvent
                         {
                             SessionId = _sessionId,
@@ -197,11 +215,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                             ImmediateUpload = true
                         });
                     }
-                    else if (string.Equals(_lastEspPhase, "FinalizingSetup", StringComparison.OrdinalIgnoreCase))
+                    else if (string.Equals(currentPhase, "FinalizingSetup", StringComparison.OrdinalIgnoreCase))
                     {
                         // SkipUserStatusPage flow: apps starting after FinalizingSetup are background user apps
                         _logger.Info($"EnrollmentTracker: First app activity detected during FinalizingSetup (SkipUserStatusPage), switching to AppsUser phase");
-                        _hasAutoSwitchedToAppsPhase = true;
+                        lock (_stateLock) { _hasAutoSwitchedToAppsPhase = true; }
                         EmitImeTrackerEvent(new EnrollmentEvent
                         {
                             SessionId = _sessionId,
@@ -357,9 +375,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             // Note: Phase transition to FinalizingSetup is now handled by Shell-Core events
             // (ESP exit or Hello wizard start) for more robust detection.
             // We no longer automatically transition here when apps complete.
-            if (_lastEspPhase != null)
+            string phaseSnap;
+            lock (_stateLock) { phaseSnap = _lastEspPhase; }
+            if (phaseSnap != null)
             {
-                _logger.Info($"EnrollmentTracker: All apps completed while in phase '{_lastEspPhase}'");
+                _logger.Info($"EnrollmentTracker: All apps completed while in phase '{phaseSnap}'");
                 _logger.Info("EnrollmentTracker: Waiting for ESP exit or Hello wizard events to transition to FinalizingSetup");
             }
         }
@@ -512,9 +532,19 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
 
             // Device-only deployment (Self-Deploying or SkipUserStatusPage=true): skip Hello wait
             // entirely — no interactive user session means Hello provisioning cannot complete.
-            if (IsDeviceOnlyDeployment)
+            bool isDeviceOnlySnap;
+            int? autopilotModeSnap;
+            bool? skipUserSnap;
+            lock (_stateLock)
             {
-                _logger.Info($"EnrollmentTracker: Device-only deployment (autopilotMode={_autopilotMode}, skipUserStatusPage={_skipUserStatusPage}) — skipping Hello wait, proceeding to completion");
+                isDeviceOnlySnap = IsDeviceOnlyDeployment;
+                autopilotModeSnap = _autopilotMode;
+                skipUserSnap = _skipUserStatusPage;
+            }
+
+            if (isDeviceOnlySnap)
+            {
+                _logger.Info($"EnrollmentTracker: Device-only deployment (autopilotMode={autopilotModeSnap}, skipUserStatusPage={skipUserSnap}) — skipping Hello wait, proceeding to completion");
                 TryEmitEnrollmentComplete("ime_pattern");
                 return;
             }
@@ -544,9 +574,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     });
 
                     // Set flag so we know we're waiting
-                    _isWaitingForHello = true;
-                    _stateData.IsWaitingForHello = true;
-                    _stateDirty = true;
+                    lock (_stateLock)
+                    {
+                        _isWaitingForHello = true;
+                        _stateData.IsWaitingForHello = true;
+                        _stateDirty = true;
+                    }
                     _statePersistence.Save(_stateData); // Immediate persist — summary timer was just stopped
 
                     // Defense-in-depth: Ensure Hello wait timer is running.
