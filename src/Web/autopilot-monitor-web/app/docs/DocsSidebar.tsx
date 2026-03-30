@@ -1,7 +1,9 @@
 "use client";
 
+import { useMemo } from "react";
 import { usePageSections } from "../../hooks/usePageSections";
 import { PageSectionItem } from "../../contexts/SidebarContext";
+import { useAuth } from "../../contexts/AuthContext";
 import { NAV_SECTIONS } from "./docsNavSections";
 import {
   KeyIcon,
@@ -15,6 +17,7 @@ import {
   SparklesIcon,
   CodeBracketIcon,
   QuestionMarkCircleIcon,
+  CommandLineIcon,
 } from "../../lib/sidebarIcons";
 
 const SECTION_ICONS: Record<string, React.ReactNode> = {
@@ -29,16 +32,25 @@ const SECTION_ICONS: Record<string, React.ReactNode> = {
   "analyze-rules": <SparklesIcon />,
   "ime-log-patterns": <CodeBracketIcon />,
   "faq": <QuestionMarkCircleIcon />,
+  "mcp-integration": <CommandLineIcon />,
 };
 
-const docsItems: PageSectionItem[] = NAV_SECTIONS.map((s) => ({
-  id: s.id,
-  label: s.label,
-  icon: SECTION_ICONS[s.id],
-  href: `/docs/${s.id}`,
-}));
-
 export function DocsSidebar({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+
+  const docsItems: PageSectionItem[] = useMemo(
+    () =>
+      NAV_SECTIONS
+        .filter((s) => !s.requiresMcpAccess || user?.hasMcpAccess)
+        .map((s) => ({
+          id: s.id,
+          label: s.label,
+          icon: SECTION_ICONS[s.id],
+          href: `/docs/${s.id}`,
+        })),
+    [user?.hasMcpAccess],
+  );
+
   usePageSections(docsItems, "Contents", "route");
 
   return (

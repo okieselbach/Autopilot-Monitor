@@ -1,4 +1,11 @@
-export const NAV_SECTIONS = [
+interface NavSection {
+  readonly id: string;
+  readonly label: string;
+  readonly description: string;
+  readonly requiresMcpAccess?: true;
+}
+
+export const NAV_SECTIONS: readonly NavSection[] = [
   { id: "private-preview", label: "Private Preview",   description: "Join the Autopilot Monitor private preview for early access. Learn about onboarding steps, requirements, and how to start monitoring Windows Autopilot enrollments." },
   { id: "overview",        label: "Overview",          description: "Explore the Autopilot Monitor architecture and core components. Learn how the agent, backend, and web dashboard work together to monitor Windows Autopilot enrollments." },
   { id: "general",         label: "General",            description: "Learn general Autopilot Monitor concepts including Admin Mode, session lifecycle statuses, user roles, and how enrollment data flows through the platform." },
@@ -10,6 +17,7 @@ export const NAV_SECTIONS = [
   { id: "analyze-rules",   label: "Analyze Rules",     description: "Set up analyze rules to automatically evaluate Windows Autopilot enrollments. Define conditions, severity levels, and custom logic to detect issues in real time." },
   { id: "ime-log-patterns", label: "IME Log Patterns", description: "Define regex patterns for parsing the Intune Management Extension (IME) log into structured events. Customize how Autopilot Monitor extracts log entries." },
   { id: "faq",              label: "FAQ",              description: "Frequently asked questions about Autopilot Monitor — covering setup, agent behavior, troubleshooting common issues, and tips for getting the most out of the platform." },
+  { id: "mcp-integration", label: "MCP Integration",  description: "Connect AI assistants to Autopilot Monitor via Model Context Protocol. Configure MCP clients, explore available tools, and learn how to query enrollment data with natural language.", requiresMcpAccess: true },
 ] as const;
 
-export type SectionId = (typeof NAV_SECTIONS)[number]["id"];
+export type SectionId = NavSection["id"];

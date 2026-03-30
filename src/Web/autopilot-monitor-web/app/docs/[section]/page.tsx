@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { NAV_SECTIONS, type SectionId } from "../docsNavSections";
+import { McpDocsGate } from "../McpDocsGate";
 import { SectionPrivatePreview } from "../sections/SectionPrivatePreview";
 import { SectionGeneral } from "../sections/SectionGeneral";
 import { SectionOverview } from "../sections/SectionOverview";
@@ -13,7 +14,7 @@ import { SectionAnalyzeRules } from "../sections/SectionAnalyzeRules";
 import { SectionImeLogPatterns } from "../sections/SectionImeLogPatterns";
 import { SectionFaq } from "../sections/SectionFaq";
 
-const SECTION_COMPONENTS: Record<SectionId, React.ComponentType> = {
+const SECTION_COMPONENTS: Record<string, React.ComponentType> = {
   "private-preview": SectionPrivatePreview,
   "general":         SectionGeneral,
   "overview":        SectionOverview,
@@ -26,6 +27,10 @@ const SECTION_COMPONENTS: Record<SectionId, React.ComponentType> = {
   "ime-log-patterns": SectionImeLogPatterns,
   "faq":              SectionFaq,
 };
+
+function isMcpSection(id: string): boolean {
+  return NAV_SECTIONS.some((s) => s.id === id && s.requiresMcpAccess);
+}
 
 export function generateStaticParams() {
   return NAV_SECTIONS.map((s) => ({ section: s.id }));
@@ -58,19 +63,23 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
 export default async function DocsSectionPage({ params }: Props) {
   const { section } = await params;
-  const SectionContent = SECTION_COMPONENTS[section as SectionId];
-  if (!SectionContent) notFound();
-
   const nav = NAV_SECTIONS.find((s) => s.id === section);
+  if (!nav) notFound();
+
+  // MCP-only sections are rendered entirely client-side via McpDocsGate
+  // (dynamic import — no HTML shipped until auth check passes).
+  const isMcp = isMcpSection(section);
+  if (!isMcp && !SECTION_COMPONENTS[section]) notFound();
+
+  const SectionContent = isMcp ? null : SECTION_COMPONENTS[section]!;
+
   const breadcrumbJsonLd = {
     "@context": "https://schema.org",
     "@type": "BreadcrumbList",
     itemListElement: [
       { "@type": "ListItem", position: 1, name: "Home", item: "https://www.autopilotmonitor.com" },
       { "@type": "ListItem", position: 2, name: "Docs", item: "https://www.autopilotmonitor.com/docs" },
-      ...(nav
-        ? [{ "@type": "ListItem", position: 3, name: nav.label, item: `https://www.autopilotmonitor.com/docs/${section}` }]
-        : []),
+      { "@type": "ListItem", position: 3, name: nav.label, item: `https://www.autopilotmonitor.com/docs/${section}` },
     ],
   };
 
@@ -80,7 +89,7 @@ export default async function DocsSectionPage({ params }: Props) {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
       />
-      <SectionContent />
+      {isMcp ? <McpDocsGate sectionId={section} /> : SectionContent && <SectionContent />}
     </>
   );
 }
