@@ -34,6 +34,19 @@
     - No Registry entries (clean machine after removal)
     - Scheduled Task survives reboots during enrollment
     - SHA-256 integrity verification since v1.0.706+
+    - IMPORTANT: This script MUST remain pure ASCII (no Unicode/UTF-8 special chars).
+      PowerShell 5.1 (IME) reads scripts without BOM as ANSI, corrupting multi-byte chars.
+
+.CHANGELOG
+    2026-03-30  Fixed non-ASCII characters (em-dashes, Unicode symbols) that broke
+                script parsing under PowerShell 5.1 / IME AgentExecutor
+    2026-03-29  Hardened integrity check: SHA-256 verification via version.json
+    2026-02-16  Extended OS age default threshold
+    2026-02-13  Simplified bootstrapper, introduced --install parameter for agent
+    2026-02-12  More robust download with integrity check (Content-MD5)
+    2026-02-12  Enhanced pre-flight checks, boot time support
+    2026-02-12  Added pre-flight check: skip if agent already installed
+    2026-02-05  Initial version
 #>
 
 [CmdletBinding()]
@@ -273,9 +286,8 @@ try {
     Write-Log "  - Generate unique session ID on startup"
     Write-Log "  - Survive reboots during enrollment"
     Write-Log "  - Monitor enrollment phases in real-time"
-    Write-Log "  - Upload events to built-in backend URL (or CLI override /--backend-api)"
+    Write-Log "  - Upload events to built-in backend URL"
     Write-Log "  - Self-destruct when enrollment completes"
-    Write-Log "  - Clean removal: delete C:\ProgramData\AutopilotMonitor folder"
 
     exit 0
 }
