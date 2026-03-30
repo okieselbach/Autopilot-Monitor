@@ -50,6 +50,42 @@ export default function ChangelogPage() {
             <div>
               <div className="flex items-center gap-3 mb-3">
                 <span className="text-xs font-mono font-semibold text-gray-400 uppercase tracking-wider">
+                  2026-03-30 - 12:00 CET
+                </span>
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                  Platform Update
+                </span>
+              </div>
+              <h2 className="text-base font-semibold text-gray-900 mb-2">
+                Updated bootstrapper script, agent crash detection, and quick search
+              </h2>
+              <ul className="space-y-2 text-sm text-gray-600 leading-relaxed list-none">
+                <li className="flex gap-2">
+                  <span className="text-orange-500 flex-shrink-0">⚠</span>
+                  <span><span className="font-medium text-gray-800">Updated bootstrapper script (action recommended)</span> — The bootstrapper script (<code>Install-AutopilotMonitor.ps1</code>) now uses SHA-256 integrity verification for agent downloads instead of MD5. If you deployed the script via Intune, it is recommended to replace it with the latest version from the repository for improved security.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Agent crash detection</span> — The agent now detects and reports unexpected crashes with automatic recovery. Platform-level metrics (CPU, memory, disk) are collected alongside enrollment events for better diagnostics.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Global quick search</span> — A fuzzy search across sessions, devices, and users is now available from the navigation bar for fast lookups.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Rate limiting</span> — Per-user request rate limiting protects the backend from excessive API usage.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Bugfixes</span> — Vulnerability report rescan persistence, orphaned session handling, timezone parsing, and NTP clock-skew warnings improved.</span>
+                </li>
+              </ul>
+            </div>
+
+            <div>
+              <div className="flex items-center gap-3 mb-3">
+                <span className="text-xs font-mono font-semibold text-gray-400 uppercase tracking-wider">
                   2026-03-26 - 12:00 CET
                 </span>
                 <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
