@@ -51,10 +51,6 @@ namespace AutopilotMonitor.Agent.Core.Configuration
         /// </summary>
         public bool UseClientCertAuth { get; set; } = true;
 
-        /// <summary>
-        /// Client certificate thumbprint (if using cert auth)
-        /// </summary>
-        public string ClientCertThumbprint { get; set; }
 
         /// <summary>
         /// Log verbosity level: Info (default), Debug, Verbose.

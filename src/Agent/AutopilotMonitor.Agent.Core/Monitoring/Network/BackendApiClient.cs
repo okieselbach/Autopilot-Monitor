@@ -52,8 +52,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
                 logger?.Debug("Client certificate authentication enabled - searching for certificate...");
 
                 _clientCertificate = CertificateHelper.FindMdmCertificate(
-                    configuration.ClientCertThumbprint,
-                    logger
+                    logger: logger
                 );
 
                 if (_clientCertificate != null)

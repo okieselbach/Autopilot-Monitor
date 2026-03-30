@@ -177,11 +177,7 @@ namespace AutopilotMonitor.Agent
                         Console.WriteLine($"Replay Dir:  {config.ReplayLogDir} ({config.ReplaySpeedFactor}x)");
                     if (config.RebootOnComplete) Console.WriteLine("Reboot:      ON COMPLETE");
                     if (config.UseClientCertAuth)
-                    {
                         Console.WriteLine($"Cert Auth:   ENABLED");
-                        if (!string.IsNullOrEmpty(config.ClientCertThumbprint))
-                            Console.WriteLine($"Thumbprint:  {config.ClientCertThumbprint}");
-                    }
                     if (config.AwaitEnrollment)
                         Console.WriteLine($"Await Enroll: ENABLED (timeout: {config.AwaitEnrollmentTimeoutMinutes}min)");
                     Console.WriteLine();
@@ -196,9 +192,8 @@ namespace AutopilotMonitor.Agent
                         Console.WriteLine("Await-enrollment: Waiting for MDM certificate...");
 
                     var cert = EnrollmentAwaiter.WaitForMdmCertificateAsync(
-                        config.ClientCertThumbprint,
-                        config.AwaitEnrollmentTimeoutMinutes,
-                        logger).GetAwaiter().GetResult();
+                        timeoutMinutes: config.AwaitEnrollmentTimeoutMinutes,
+                        logger: logger).GetAwaiter().GetResult();
 
                     if (cert == null)
                     {
@@ -380,6 +375,7 @@ namespace AutopilotMonitor.Agent
             Console.WriteLine();
             Console.WriteLine("Modes:");
             Console.WriteLine("  --install                         Deploy payload, create Scheduled Task, and start it");
+            Console.WriteLine("  --tenant-id <ID>                  Tenant ID for bootstrap-config (used with --install)");
             Console.WriteLine("  --run-gather-rules                Execute startup gather rules once and exit");
             Console.WriteLine("  --run-ime-matching <PATH>         Parse IME logs and produce ime_pattern_matching.log");
             Console.WriteLine("                                    PATH = folder (all IME logs) or single log file");
@@ -396,8 +392,6 @@ namespace AutopilotMonitor.Agent
             Console.WriteLine("  --disable-geolocation             Skip geo-location detection");
             Console.WriteLine();
             Console.WriteLine("Authentication:");
-            Console.WriteLine("  --no-auth                         Disable client cert auth (with --bootstrap-token only)");
-            Console.WriteLine("  --cert-thumbprint <THUMBPRINT>    Use a specific certificate instead of auto-detection");
             Console.WriteLine("  --bootstrap-token <TOKEN>         Use bootstrap token auth (pre-MDM OOBE phase)");
             Console.WriteLine();
             Console.WriteLine("Await-enrollment mode:");
@@ -405,7 +399,6 @@ namespace AutopilotMonitor.Agent
             Console.WriteLine("  --await-enrollment-timeout <MIN>  Timeout in minutes for await-enrollment (default: 480)");
             Console.WriteLine();
             Console.WriteLine("Overrides:");
-            Console.WriteLine("  --tenant-id <ID>                  Override tenant ID (instead of registry discovery)");
             Console.WriteLine("  --api-url <URL>                   Override backend API base URL");
             Console.WriteLine("  --backend-api <URL>               Alias for --api-url");
             Console.WriteLine("  --ime-log-path <PATH>             Override IME logs directory");

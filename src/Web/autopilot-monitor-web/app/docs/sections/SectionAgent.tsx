@@ -153,6 +153,18 @@ export function SectionAgent() {
               <p className="mt-1">Preserves the log directory during self-destruct. Logs remain on disk for later analysis
               even after the agent cleans up everything else.</p>
             </div>
+            <div>
+              <span className="font-mono text-xs bg-purple-50 px-1.5 py-0.5 rounded font-medium">--reboot-on-complete</span>
+              <p className="mt-1">Reboots the device after enrollment completes. The reboot is delayed by 10 seconds by default
+              (configurable via the remote configuration). Useful when a reboot is required to finalize
+              device setup but not configured as a tenant default.</p>
+            </div>
+            <div>
+              <span className="font-mono text-xs bg-purple-50 px-1.5 py-0.5 rounded font-medium">--disable-geolocation</span>
+              <p className="mt-1">Disables geo-location detection. The agent will not attempt to resolve the device&apos;s
+              geographic location via IP-based lookup. Useful in restricted network environments or when
+              location data is not desired.</p>
+            </div>
           </div>
         </div>
 

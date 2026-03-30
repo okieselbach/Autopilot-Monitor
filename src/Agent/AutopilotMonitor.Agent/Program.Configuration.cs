@@ -47,7 +47,6 @@ namespace AutopilotMonitor.Agent
 
         static AgentConfiguration LoadConfiguration(string[] args = null)
         {
-            var noAuth            = args?.Contains("--no-auth") ?? false;
             var noCleanup         = args?.Contains("--no-cleanup") ?? false;
             var rebootOnComplete  = args?.Contains("--reboot-on-complete") ?? false;
             var disableGeoLoc     = args?.Contains("--disable-geolocation") ?? false;
@@ -55,8 +54,6 @@ namespace AutopilotMonitor.Agent
             var keepLogFile       = args?.Contains("--keep-logfile") ?? false;
             var awaitEnrollment   = args?.Contains("--await-enrollment") ?? false;
 
-            string certThumbprint        = null;
-            string tenantIdOverride      = null;
             string apiBaseUrlOverride    = null;
             string imeLogPathOverride    = null;
             string imeMatchLogPath       = null;
@@ -67,14 +64,6 @@ namespace AutopilotMonitor.Agent
 
             if (args != null)
             {
-                var thumbprintIndex = Array.IndexOf(args, "--cert-thumbprint");
-                if (thumbprintIndex >= 0 && thumbprintIndex + 1 < args.Length)
-                    certThumbprint = args[thumbprintIndex + 1];
-
-                var tenantIdIndex = Array.IndexOf(args, "--tenant-id");
-                if (tenantIdIndex >= 0 && tenantIdIndex + 1 < args.Length)
-                    tenantIdOverride = args[tenantIdIndex + 1];
-
                 // Local backend URL override for debugging/testing.
                 // Supported aliases:
                 // --api-url https://...
@@ -127,16 +116,8 @@ namespace AutopilotMonitor.Agent
                 selfDestructOnComplete = false;
             }
 
-            // Determine TenantId: command-line arg > registry > fallback
-            string tenantId;
-            if (!string.IsNullOrEmpty(tenantIdOverride))
-            {
-                tenantId = tenantIdOverride;
-            }
-            else
-            {
-                tenantId = GetTenantIdFromRegistry();
-            }
+            // Determine TenantId from registry (or bootstrap-config.json fallback below)
+            string tenantId = GetTenantIdFromRegistry();
 
             var dataDirectory    = Environment.ExpandEnvironmentVariables(Constants.AgentDataDirectory);
             var sessionPersist   = new SessionPersistence(dataDirectory);
@@ -160,12 +141,10 @@ namespace AutopilotMonitor.Agent
                     if (bootstrapConfig != null)
                     {
                         bootstrapToken = bootstrapConfig.BootstrapToken;
-                        if (string.IsNullOrEmpty(tenantIdOverride) && !string.IsNullOrEmpty(bootstrapConfig.TenantId))
+                        if (string.IsNullOrEmpty(tenantId) && !string.IsNullOrEmpty(bootstrapConfig.TenantId))
                         {
                             tenantId = bootstrapConfig.TenantId;
                         }
-                        // Also set noAuth so cert search is skipped
-                        noAuth = true;
                     }
                 }
                 catch { /* ignore corrupt file */ }
@@ -201,8 +180,7 @@ namespace AutopilotMonitor.Agent
                 UploadIntervalSeconds = uploadIntervalSeconds,
                 MaxBatchSize          = Constants.MaxBatchSize,
                 LogLevel              = AgentLogLevel.Info,
-                UseClientCertAuth     = !noAuth && !useBootstrapToken && useClientCertAuthConfig,
-                ClientCertThumbprint  = certThumbprint,
+                UseClientCertAuth     = !useBootstrapToken && useClientCertAuthConfig,
                 SelfDestructOnComplete = selfDestructOnComplete,
                 RebootOnComplete      = rebootOnComplete || rebootOnCompleteConfig,
                 EnableGeoLocation     = !disableGeoLoc && enableGeoLocationConfig,
