@@ -1,9 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(.claude/commands/scripts/query-appinsights.sh)",
-      "Bash(.claude/commands/scripts/query-table.sh)",
-      "Bash(.claude/commands/scripts/fetch-diag-zip.sh)",
+      "Bash(bash .claude/commands/scripts/query-appinsights.sh*)",
+      "Bash(bash .claude/commands/scripts/query-table.sh*)",
+      "Bash(bash .claude/commands/scripts/fetch-diag-zip.sh*)",
       "Bash(echo \"exit: $?\")",
       "mcp__autopilot-monitor__list_blocked_devices",
       "mcp__autopilot-monitor__query_backend_logs",
