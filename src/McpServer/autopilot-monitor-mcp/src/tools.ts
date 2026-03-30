@@ -132,7 +132,163 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
     }
   );
 
-  // Tool 5: get_metrics
+  // Tool 5: get_session_summary
+  const EXCLUDED_EVENT_TYPES = new Set([
+    'performance_snapshot', 'agent_metrics_snapshot',
+    'performance_snapshot_stopped', 'agent_metrics_snapshot_stopped',
+    'gather_result', 'gather_rules_collection_completed',
+    'software_inventory_analysis', 'security_audit',
+    'device_location', 'ntp_time_check', 'ime_agent_version',
+  ]);
+  const KEY_EVENT_TYPES = new Set([
+    'phase_transition', 'esp_phase_changed', 'enrollment_type_detected',
+    'app_install_started', 'app_install_completed', 'app_install_failed', 'app_install_skipped',
+    'app_tracking_summary', 'error_detected',
+    'enrollment_complete', 'enrollment_failed', 'completion_check',
+    'desktop_arrived', 'hello_policy_detected', 'waiting_for_hello', 'hello_completion_timeout',
+    'agent_started', 'agent_shutdown', 'trace_event',
+    'script_completed', 'script_failed', 'vulnerability_report',
+  ]);
+  const SEVERITY_RANK: Record<string, number> = { Trace: -1, Debug: 0, Info: 1, Warning: 2, Error: 3, Critical: 4 };
+  const PHASE_NAMES: Record<number, string> = {
+    0: 'Unknown', 1: 'Device Preparation', 2: 'Device Setup', 3: 'Account Setup',
+    4: 'Device ESP', 5: 'User ESP', 6: 'Complete', 7: 'Pre-Provisioning',
+  };
+
+  server.tool(
+    'get_session_summary',
+    'Get a concise, structured summary of an enrollment session optimized for analysis. ' +
+    'Returns: session overview (status, duration, device, enrollment config), ' +
+    'key events timeline (errors, warnings, phase transitions, app installs — noise filtered out), ' +
+    'rule analysis results (probable cause, remediation), and aggregate stats. ' +
+    'Use this as the FIRST tool when investigating a session. ' +
+    'For raw unfiltered events use get_session_events. For full metadata use get_session.',
+    {
+      sessionId: z.string().describe('Session UUID'),
+      tenantId: z.string().optional().describe('Tenant ID. If omitted, auto-resolved from the session (Global Admin can access any tenant).'),
+    },
+    async ({ sessionId, tenantId }) => {
+      const q = buildQuery({ tenantId } as Record<string, string | undefined>);
+      const fetchOpts = { signal: AbortSignal.timeout(90_000) };
+
+      const [sessionData, eventsData, analysisData] = await Promise.all([
+        apiFetch(`/api/sessions/${sessionId}${q}`, fetchOpts) as Promise<Record<string, unknown>>,
+        apiFetch(`/api/sessions/${sessionId}/events${q}`, fetchOpts) as Promise<{ events?: Array<Record<string, unknown>>; count?: number }>,
+        apiFetch(`/api/sessions/${sessionId}/analysis${q}`, fetchOpts).catch(() => null) as Promise<Record<string, unknown> | null>,
+      ]);
+
+      // Unwrap session from response envelope if needed
+      const s = (sessionData.session ?? sessionData) as Record<string, unknown>;
+
+      // Build overview
+      const overview = {
+        sessionId,
+        tenantId: s.tenantId ?? tenantId,
+        status: s.status,
+        failureReason: s.failureReason ?? null,
+        startedAt: s.startedAt,
+        completedAt: s.completedAt ?? null,
+        durationSeconds: s.durationSeconds ?? null,
+        currentPhase: PHASE_NAMES[Number(s.currentPhase)] ?? String(s.currentPhase ?? 'Unknown'),
+        enrollmentType: s.enrollmentType,
+        isPreProvisioned: s.isPreProvisioned ?? false,
+        isHybridJoin: s.isHybridJoin ?? false,
+        isUserDriven: s.isUserDriven ?? false,
+        device: {
+          name: s.deviceName,
+          serialNumber: s.serialNumber,
+          manufacturer: s.manufacturer,
+          model: s.model,
+          osBuild: s.osBuild,
+          osEdition: s.osEdition,
+        },
+        agent: {
+          version: s.agentVersion,
+          imeVersion: s.imeAgentVersion,
+        },
+        location: (s.geoCountry || s.geoRegion || s.geoCity)
+          ? { country: s.geoCountry, region: s.geoRegion, city: s.geoCity }
+          : null,
+      };
+
+      // Filter events
+      const allEvents = (eventsData?.events ?? []) as Array<Record<string, unknown>>;
+
+      // Compute stats from full event list
+      let errorCount = 0;
+      let warningCount = 0;
+      let appTotal = 0;
+      let appSucceeded = 0;
+      let appFailed = 0;
+      let appSkipped = 0;
+      for (const e of allEvents) {
+        const sev = String(e.severity ?? '');
+        if (sev === 'Error' || sev === 'Critical') errorCount++;
+        if (sev === 'Warning') warningCount++;
+        const et = String(e.eventType ?? '');
+        if (et === 'app_install_started') appTotal++;
+        if (et === 'app_install_completed') appSucceeded++;
+        if (et === 'app_install_failed') appFailed++;
+        if (et === 'app_install_skipped') appSkipped++;
+      }
+
+      // Filter to key events
+      let keyEvents = allEvents.filter((e) => {
+        const et = String(e.eventType ?? '');
+        if (EXCLUDED_EVENT_TYPES.has(et)) return false;
+        if (KEY_EVENT_TYPES.has(et)) return true;
+        return (SEVERITY_RANK[String(e.severity ?? '')] ?? -1) >= 2; // Warning+
+      });
+
+      const mappedEvents = keyEvents.map((e) => ({
+        timestamp: e.timestamp,
+        eventType: e.eventType,
+        severity: e.severity,
+        phase: PHASE_NAMES[Number(e.phase)] ?? String(e.phase ?? ''),
+        message: e.message,
+        source: e.source,
+        details: e.data && typeof e.data === 'object' && Object.keys(e.data as object).length > 0
+          ? e.data
+          : (e.dataJson ? (() => { try { return JSON.parse(String(e.dataJson)); } catch { return null; } })() : null),
+      }));
+
+      // Build analysis
+      let analysis = null;
+      if (analysisData) {
+        const a = analysisData as Record<string, unknown>;
+        const results = (a.results ?? []) as Array<Record<string, unknown>>;
+        analysis = {
+          totalIssues: a.totalIssues ?? results.length,
+          criticalCount: a.criticalCount ?? 0,
+          highCount: a.highCount ?? 0,
+          warningCount: a.warningCount ?? 0,
+          issues: results.map((r) => ({
+            ruleTitle: r.ruleTitle ?? r.title,
+            severity: r.severity,
+            explanation: r.explanation,
+            remediation: r.remediation,
+          })),
+        };
+      }
+
+      const result = {
+        overview,
+        keyEvents: mappedEvents,
+        analysis,
+        stats: {
+          totalEvents: allEvents.length,
+          keyEventsShown: mappedEvents.length,
+          errorCount,
+          warningCount,
+          appInstalls: { total: appTotal, succeeded: appSucceeded, failed: appFailed, skipped: appSkipped },
+        },
+      };
+
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  // Tool 6: get_metrics
   server.tool(
     'get_metrics',
     'Get aggregated enrollment metrics: failure rates, slowest/most-failing apps, session counts. ' +
@@ -156,7 +312,7 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
     }
   );
 
-  // Tool 6: search_sessions_by_cve
+  // Tool 7: search_sessions_by_cve
   server.tool(
     'search_sessions_by_cve',
     "Find enrollment sessions where a specific CVE was detected in the device's software inventory. " +
@@ -179,7 +335,7 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
     }
   );
 
-  // Tool 7: list_blocked_devices
+  // Tool 8: list_blocked_devices
   server.tool(
     'list_blocked_devices',
     'List devices currently blocked from enrolling. Blocked devices have their enrollment sessions rejected by the backend. ' +
@@ -198,7 +354,7 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
     }
   );
 
-  // Tool 8: search_events_semantic
+  // Tool 9: search_events_semantic
   server.tool(
     'search_events_semantic',
     'Semantic/fuzzy search over enrollment event messages within a session or across recent failed sessions. ' +
@@ -305,7 +461,7 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
     }
   );
 
-  // Tool 9: search_knowledge
+  // Tool 10: search_knowledge
   server.tool(
     'search_knowledge',
     'Semantic/fuzzy search over the Autopilot Monitor knowledge base: analysis rules, gather rules, and IME log patterns. ' +
@@ -363,7 +519,7 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
     }
   );
 
-  // Tool 10: get_api_usage
+  // Tool 11: get_api_usage
   server.tool(
     'get_api_usage',
     'Get API/MCP usage statistics. Shows request counts per endpoint per day. ' +
@@ -398,7 +554,7 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
     }
   );
 
-  // Tool 16: get_geographic_metrics
+  // Tool 12: get_geographic_metrics
   server.tool(
     'get_geographic_metrics',
     'Get geographic distribution of enrollments — where devices are enrolling from, with performance comparisons. ' +
@@ -419,7 +575,7 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
     }
   );
 
-  // Tool 17: get_geographic_sessions
+  // Tool 13: get_geographic_sessions
   server.tool(
     'get_geographic_sessions',
     'Drill into a specific geographic location. Returns all enrollment sessions at that location. ' +
@@ -448,7 +604,7 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
     }
   );
 
-  // Tool 18: get_platform_metrics
+  // Tool 14: get_platform_metrics
   server.tool(
     'get_platform_metrics',
     'Get aggregated platform-level agent performance metrics across recent sessions. ' +
@@ -523,7 +679,7 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
     }
   );
 
-  // Tool 19: get_usage_metrics
+  // Tool 15: get_usage_metrics
   server.tool(
     'get_usage_metrics',
     'Get platform usage statistics: active tenants, session volumes, feature adoption. ' +
@@ -541,7 +697,7 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
     }
   );
 
-  // Tool 20: get_audit_logs
+  // Tool 16: get_audit_logs
   server.tool(
     'get_audit_logs',
     'Get audit trail of administrative actions: config changes, device blocks, user management, report submissions. ' +
@@ -558,7 +714,7 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
     }
   );
 
-  // Tool 21: list_session_reports
+  // Tool 17: list_session_reports
   server.tool(
     'list_session_reports',
     'List session reports submitted by tenant admins. Reports contain user comments, screenshots, and agent logs for troubleshooting. ' +
@@ -572,7 +728,7 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
 
   // ── Phase 3.1: Raw Data Tools (Tier 1 — customer-facing) ──────────
 
-  // Tool 11: query_raw_events
+  // Tool 18: query_raw_events
   server.tool(
     'query_raw_events',
     'Query raw enrollment events with flexible filters. Unlike get_session_events, this can query across sessions within a tenant. ' +
@@ -596,7 +752,7 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
     }
   );
 
-  // Tool 12: query_raw_sessions
+  // Tool 19: query_raw_sessions
   server.tool(
     'query_raw_sessions',
     'Query raw session data with flexible filters and field projection. ' +
@@ -624,7 +780,7 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
 
   // ── Phase 3.2: Admin Diagnostic Tools (Tier 2 — internal) ──────────
 
-  // Tool 13: list_tables
+  // Tool 20: list_tables
   server.tool(
     'list_tables',
     'List all available Azure Table Storage tables that can be queried via query_table. Global Admin only.',
@@ -643,7 +799,7 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
     }
   );
 
-  // Tool 14: query_table
+  // Tool 21: query_table
   server.tool(
     'query_table',
     'Query any Azure Table Storage table directly with OData filters. Global Admin only. ' +
@@ -670,7 +826,7 @@ export function registerTools(server: McpServer, knowledgeBase?: SearchProvider)
     }
   );
 
-  // Tool 15: query_backend_logs
+  // Tool 22: query_backend_logs
   server.tool(
     'query_backend_logs',
     'Query backend Application Insights logs using KQL. Global Admin only. ' +
