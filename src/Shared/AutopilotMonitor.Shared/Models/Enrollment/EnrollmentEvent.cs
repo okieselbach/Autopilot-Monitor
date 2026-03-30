@@ -61,8 +61,12 @@ namespace AutopilotMonitor.Shared.Models
         public string Source { get; set; } = default!;
 
         /// <summary>
-        /// Phase during which this event occurred (internal property, not serialized)
-        /// Defaults to Unknown (chronologically sorted into active phase)
+        /// Enrollment phase associated with this event.
+        /// IMPORTANT: Only set this to a concrete phase (e.g. DeviceSetup, AccountSetup) when the event
+        /// represents an actual phase transition/declaration. The UI timeline relies on phase values to
+        /// render phase boundaries — setting a phase on a non-transition event will break phase grouping.
+        /// Leave as Unknown (default) for informational events that occur within a phase but do not
+        /// initiate a phase change. Unknown events are chronologically sorted into the active phase.
         /// </summary>
         [JsonIgnore]
         public EnrollmentPhase Phase { get; set; } = EnrollmentPhase.Unknown;

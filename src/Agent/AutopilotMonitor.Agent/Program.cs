@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Diagnostics.Eventing.Reader;
 using System.IO;
 using System.Linq;
 using AutopilotMonitor.Agent.Core.Configuration;
@@ -260,6 +261,7 @@ namespace AutopilotMonitor.Agent
 
                 string previousExitType;
                 string previousCrashException = null;
+                DateTime? lastBootUtc = null;
                 if (hadCleanExit)
                 {
                     previousExitType = "clean";
@@ -286,10 +288,36 @@ namespace AutopilotMonitor.Agent
                 }
                 else
                 {
-                    // No marker and no crash log — either first run ever or hard kill
+                    // No marker and no crash log — either first run ever, reboot kill, or hard kill
                     var sessionFile = Path.Combine(
                         Environment.ExpandEnvironmentVariables(Constants.AgentDataDirectory), "session.id");
-                    previousExitType = File.Exists(sessionFile) ? "hard_kill" : "first_run";
+                    if (File.Exists(sessionFile))
+                    {
+                        previousExitType = "hard_kill";
+                        // Check if a system reboot caused the kill by comparing
+                        // the latest boot time (Event Log 6009) with session creation time.
+                        lastBootUtc = GetLastBootTimeFromEventLog();
+                        var sessionCreatedFile = Path.Combine(
+                            Environment.ExpandEnvironmentVariables(Constants.AgentDataDirectory), "session.created");
+                        if (lastBootUtc.HasValue && File.Exists(sessionCreatedFile))
+                        {
+                            try
+                            {
+                                var content = File.ReadAllText(sessionCreatedFile).Trim();
+                                if (DateTime.TryParse(content, null,
+                                    System.Globalization.DateTimeStyles.RoundtripKind, out var sessionCreated))
+                                {
+                                    if (lastBootUtc.Value > sessionCreated.ToUniversalTime())
+                                        previousExitType = "reboot_kill";
+                                }
+                            }
+                            catch { }
+                        }
+                    }
+                    else
+                    {
+                        previousExitType = "first_run";
+                    }
                 }
 
                 // Clean up: delete marker and crash logs so next cycle starts fresh
@@ -300,7 +328,7 @@ namespace AutopilotMonitor.Agent
                 if (previousExitType != "first_run")
                     logger.Info($"Previous exit: {previousExitType}{(previousCrashException != null ? $" ({previousCrashException})" : "")}");
 
-                using (var service = new MonitoringService(config, logger, agentVersion, previousExitType, previousCrashException))
+                using (var service = new MonitoringService(config, logger, agentVersion, previousExitType, previousCrashException, lastBootUtc))
                 {
                     service.Start();
 
@@ -411,6 +439,33 @@ namespace AutopilotMonitor.Agent
         /// <summary>
         /// Checks if another AutopilotMonitor.Agent.exe process is already running.
         /// </summary>
+        /// <summary>
+        /// Queries the System Event Log for the most recent boot event (ID 6009 = OS version logged at startup).
+        /// Returns the UTC timestamp of the last system boot, or null if the query fails.
+        /// </summary>
+        static DateTime? GetLastBootTimeFromEventLog()
+        {
+            try
+            {
+                var query = new EventLogQuery("System", PathType.LogName,
+                    "*[System[Provider[@Name='EventLog'] and (EventID=6009)]]")
+                {
+                    ReverseDirection = true
+                };
+                using (var reader = new EventLogReader(query))
+                {
+                    var record = reader.ReadEvent();
+                    if (record?.TimeCreated != null)
+                    {
+                        using (record)
+                            return record.TimeCreated.Value.ToUniversalTime();
+                    }
+                }
+            }
+            catch { }
+            return null;
+        }
+
         static bool IsAnotherAgentInstanceRunning()
         {
             try

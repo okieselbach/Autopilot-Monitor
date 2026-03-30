@@ -51,6 +51,7 @@ interface CrashRateMetricsDTO {
   cleanExits: number;
   exceptionCrashes: number;
   hardKills: number;
+  rebootKills: number;
   firstRuns: number;
   crashRatePercent: number;
   topExceptions: CrashExceptionSummaryDTO[];
@@ -649,6 +650,10 @@ export function SectionAgentMetrics() {
                         <div className="flex justify-between">
                           <span className="text-gray-500">Hard kills</span>
                           <span className={`font-mono ${crashRate.hardKills > 0 ? 'text-orange-600' : 'text-gray-400'}`}>{crashRate.hardKills}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Reboot kills</span>
+                          <span className={`font-mono ${(crashRate.rebootKills ?? 0) > 0 ? 'text-blue-500' : 'text-gray-400'}`}>{crashRate.rebootKills ?? 0}</span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-gray-500">First runs</span>

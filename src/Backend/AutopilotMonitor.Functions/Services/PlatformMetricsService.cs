@@ -265,6 +265,9 @@ namespace AutopilotMonitor.Functions.Services
                             case "hard_kill":
                                 metrics.HardKills++;
                                 break;
+                            case "reboot_kill":
+                                metrics.RebootKills++;
+                                break;
                             default:
                                 metrics.FirstRuns++;
                                 break;
@@ -375,6 +378,7 @@ namespace AutopilotMonitor.Functions.Services
         public int CleanExits { get; set; }
         public int ExceptionCrashes { get; set; }
         public int HardKills { get; set; }
+        public int RebootKills { get; set; }
         public int FirstRuns { get; set; }
         public double CrashRatePercent { get; set; }
         public List<CrashExceptionSummary> TopExceptions { get; set; } = new();

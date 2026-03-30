@@ -83,8 +83,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         private string _pendingAdminAction;
 
         // Previous exit classification (crash detection)
-        private readonly string _previousExitType;     // "clean" | "exception_crash" | "hard_kill" | "first_run"
+        private readonly string _previousExitType;     // "clean" | "exception_crash" | "hard_kill" | "reboot_kill" | "first_run"
         private readonly string _previousCrashException; // exception type name (only for exception_crash)
+        private readonly DateTime? _lastBootTimeUtc;   // boot time from Event Log (only for reboot_kill)
         private long _persistedSequenceAtStartup;      // for detecting spool ceiling recovery
 
         // Auth failure circuit breaker
@@ -100,13 +101,15 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         private int? _deferredSecurityAuditConfigVersion; // deferred until after agent_started
 
         public MonitoringService(AgentConfiguration configuration, AgentLogger logger, string agentVersion,
-            string previousExitType = "first_run", string previousCrashException = null)
+            string previousExitType = "first_run", string previousCrashException = null,
+            DateTime? lastBootTimeUtc = null)
         {
             _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _agentVersion = string.IsNullOrWhiteSpace(agentVersion) ? "unknown" : agentVersion;
             _previousExitType = previousExitType ?? "first_run";
             _previousCrashException = previousCrashException;
+            _lastBootTimeUtc = lastBootTimeUtc;
 
             if (!_configuration.IsValid())
             {
@@ -232,6 +235,34 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 Data = startupData,
                 ImmediateUpload = true
             });
+
+            // If previous exit was caused by a system reboot, emit a timeline event for visibility
+            if (_previousExitType == "reboot_kill" && _lastBootTimeUtc.HasValue)
+            {
+                var timeSinceBoot = DateTime.UtcNow - _lastBootTimeUtc.Value;
+                var bootDisplay = timeSinceBoot.TotalSeconds < 120
+                    ? $"{(int)timeSinceBoot.TotalSeconds}s"
+                    : $"{(int)timeSinceBoot.TotalMinutes}min";
+
+                EmitEvent(new EnrollmentEvent
+                {
+                    SessionId = _configuration.SessionId,
+                    TenantId = _configuration.TenantId,
+                    EventType = "system_reboot_detected",
+                    Severity = EventSeverity.Info,
+                    Source = "Agent",
+                    // Phase intentionally left as Unknown — see EnrollmentEvent.Phase docs.
+                    // Only phase-transition events set Phase; this is an informational event.
+                    Message = $"System rebooted {bootDisplay} ago (boot: {_lastBootTimeUtc.Value:HH:mm:ss} UTC) — previous agent terminated by reboot",
+                    Data = new Dictionary<string, object>
+                    {
+                        { "bootTimeUtc", _lastBootTimeUtc.Value.ToString("O") },
+                        { "secondsSinceBoot", (int)timeSinceBoot.TotalSeconds },
+                        { "previousExitType", "reboot_kill" }
+                    },
+                    ImmediateUpload = true
+                });
+            }
 
             // Emit deferred security_audit (initial UnrestrictedMode) now that agent_started has its sequence
             if (_deferredSecurityAuditConfigVersion.HasValue)
