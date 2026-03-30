@@ -47,14 +47,18 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
 
         private void CollectDeviceInfoAtFinalizingSetup(string triggerReason)
         {
+            bool alreadyCollected;
             lock (_stateLock)
             {
-                if (_finalDeviceInfoCollected)
-                {
-                    _logger.Debug($"EnrollmentTracker: final device info already collected, skipping (trigger: {triggerReason})");
-                    return;
-                }
-                _finalDeviceInfoCollected = true;
+                alreadyCollected = _finalDeviceInfoCollected;
+                if (!alreadyCollected)
+                    _finalDeviceInfoCollected = true;
+            }
+
+            if (alreadyCollected)
+            {
+                _logger.Debug($"EnrollmentTracker: final device info already collected, skipping (trigger: {triggerReason})");
+                return;
             }
             _logger.Info($"EnrollmentTracker: triggering final device info collection at FinalizingSetup (trigger: {triggerReason})");
             CollectDeviceInfoAtEnd();
@@ -338,7 +342,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     { "helloOutcome", _espAndHelloTracker?.HelloOutcome ?? "unknown" },
                     { "enrollmentType", _enrollmentType ?? "unknown" },
                     { "agentUptimeSeconds", (DateTime.UtcNow - _agentStartTimeUtc).TotalSeconds },
-                    { "signalsSeen", _stateData.SignalsSeen ?? new List<string>() },
+                    { "signalsSeen", SnapshotSignalsSeen() },
                     { "signalTimestamps", signalTimestamps },
                     { "appSummary", new Dictionary<string, object>
                         {

@@ -345,7 +345,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 {
                     { "failureType", failureType },
                     { "failureSource", failureSource },
-                    { "signalsSeen", new List<string>(_stateData.SignalsSeen) },
+                    { "signalsSeen", SnapshotSignalsSeen() },
                     { "agentUptimeSeconds", (DateTime.UtcNow - _agentStartTimeUtc).TotalSeconds }
                 },
                 ImmediateUpload = true
@@ -601,6 +601,17 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 _logger.Debug($"EnrollmentTracker: signal '{signal}' already recorded — deduplicated");
         }
 
+        /// <summary>
+        /// Returns a thread-safe snapshot of _stateData.SignalsSeen for use in event data.
+        /// </summary>
+        private List<string> SnapshotSignalsSeen()
+        {
+            lock (_stateLock)
+            {
+                return new List<string>(_stateData.SignalsSeen);
+            }
+        }
+
         // ===== Unified Completion Logic =====
 
         /// <summary>
@@ -820,18 +831,24 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         /// </summary>
         public void NotifyDesktopArrived()
         {
+            bool alreadyArrived;
             lock (_stateLock)
             {
-                if (_desktopArrived)
+                alreadyArrived = _desktopArrived;
+                if (!alreadyArrived)
                 {
-                    _logger.Debug("EnrollmentTracker: NotifyDesktopArrived called but already arrived — ignoring");
-                    return;
+                    _desktopArrived = true;
+                    _stateData.DesktopArrived = true;
+                    _stateData.DesktopArrivedUtc = DateTime.UtcNow;
                 }
-
-                _desktopArrived = true;
-                _stateData.DesktopArrived = true;
-                _stateData.DesktopArrivedUtc = DateTime.UtcNow;
             }
+
+            if (alreadyArrived)
+            {
+                _logger.Debug("EnrollmentTracker: NotifyDesktopArrived called but already arrived — ignoring");
+                return;
+            }
+
             RecordSignal("desktop_arrived");
             _logger.Info("EnrollmentTracker: Desktop arrival notified");
 
