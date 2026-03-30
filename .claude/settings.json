@@ -1,13 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(.claude/commands/scripts/query-appinsights.sh \"traces | where timestamp > ago\\(5m\\) | where message has ''initialized with'' or message has ''Managed Identity'' or message has ''connection string'' or message has ''not configured'' or message has ''Table Storage'' or message has ''Blob Storage'' | project timestamp, message, severityLevel | order by timestamp desc | take 20\" PT1H)",
-      "Bash(.claude/commands/scripts/query-appinsights.sh \"exceptions | where timestamp > ago\\(5m\\) | project timestamp, outerMessage, innermostMessage, problemId | order by timestamp desc | take 10\" PT1H)",
-      "Bash(.claude/commands/scripts/query-appinsights.sh \"traces | where timestamp > ago\\(5m\\) | where message startswith ''Executed'' | project timestamp, message, operation_Name | order by timestamp desc | take 5\" PT1H)",
-      "Bash(.claude/commands/scripts/query-appinsights.sh \"traces | where timestamp > ago\\(5m\\) | where message startswith ''Executed'' | where message contains ''Failed'' | project timestamp, message, operation_Name | order by timestamp desc | take 10\" PT1H)",
-      "Bash(.claude/commands/scripts/query-appinsights.sh \"traces | where timestamp > ago\\(10m\\) | where message has ''initialized'' or message has ''Initializing'' | project timestamp, message, severityLevel | order by timestamp desc | take 20\" PT1H)",
-      "Bash(.claude/commands/scripts/query-appinsights.sh \"traces | where timestamp between \\(datetime\\(2026-03-28T03:53:45Z\\) .. datetime\\(2026-03-28T03:53:55Z\\)\\) | project timestamp, message, severityLevel | order by timestamp asc | take 50\" PT1H)",
-      "Bash(.claude/commands/scripts/query-appinsights.sh \"traces | where timestamp > datetime\\(2026-03-28T03:53:00Z\\) | where message startswith ''Executed'' | extend status = iif\\(message contains ''Succeeded'', ''Succeeded'', ''Failed''\\) | summarize total=count\\(\\), failed=countif\\(status == ''Failed''\\) by operation_Name | where failed > 0 | order by failed desc\" PT1H)",
+      "Bash(.claude/commands/scripts/query-appinsights.sh)",
+      "Bash(.claude/commands/scripts/query-table.sh)",
+      "Bash(.claude/commands/scripts/fetch-diag-zip.sh)",
       "Bash(echo \"exit: $?\")",
       "mcp__autopilot-monitor__list_blocked_devices",
       "mcp__autopilot-monitor__query_backend_logs",
