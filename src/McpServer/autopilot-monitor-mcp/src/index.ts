@@ -1,4 +1,5 @@
 import { resolve, dirname } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import express from 'express';
@@ -12,6 +13,9 @@ import { createOAuthRouter } from './oauth.js';
 import { accessGuard } from './access-guard.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+const pkg = JSON.parse(readFileSync(resolve(__dirname, '..', 'package.json'), 'utf-8')) as { version: string };
+const SERVER_VERSION: string = pkg.version;
 
 const PORT = parseInt(process.env.PORT ?? '8080', 10);
 const RULES_DIR = process.env.RULES_DIR ?? resolve(__dirname, '..', '..', '..', '..', 'rules');
@@ -28,7 +32,7 @@ console.error(`Search provider ready: ${knowledgeBase.name} — ${knowledgeBase.
 
 /** Creates a fresh McpServer instance per session (each needs its own protocol). */
 function createMcpServer(): McpServer {
-  const s = new McpServer({ name: 'Autopilot-Monitor', version: '1.2.0' });
+  const s = new McpServer({ name: 'Autopilot-Monitor', version: SERVER_VERSION });
   registerTools(s, knowledgeBase);
   registerResources(s);
   return s;
@@ -48,13 +52,27 @@ app.get('/health', (_req, res) => {
   res.json({
     status: 'healthy',
     server: 'autopilot-monitor-mcp',
-    version: '1.2.0',
+    version: SERVER_VERSION,
     search: { backend: knowledgeBase.name, documents: knowledgeBase.size },
   });
 });
 
 // Track transports by session ID for reuse
-const transports = new Map<string, StreamableHTTPServerTransport>();
+const transports = new Map<string, { transport: StreamableHTTPServerTransport; createdAt: number }>();
+
+// Session TTL cleanup — remove abandoned sessions that never sent a DELETE.
+// Currently runs every 12h (cost-effective for single-user on a sleeping container app).
+// TODO: Reduce interval (e.g. 30min) when scaling to multiple concurrent users.
+const SESSION_MAX_AGE_MS = 2 * 60 * 60 * 1000; // 2 hours
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, entry] of transports) {
+    if (now - entry.createdAt > SESSION_MAX_AGE_MS) {
+      transports.delete(id);
+      console.error(`[mcp] Reaped stale session ${id} (age > ${SESSION_MAX_AGE_MS / 1000 / 60}min)`);
+    }
+  }
+}, 12 * 60 * 60 * 1000); // 12h interval
 
 // Access guard for /mcp — validates JWT, checks backend whitelist, enforces rate limits
 app.use('/mcp', accessGuard);
@@ -65,19 +83,19 @@ app.all('/mcp', async (req, res) => {
 
   // GET (SSE stream) or DELETE (session termination) — need existing session
   if (req.method === 'GET' || req.method === 'DELETE') {
-    const transport = sessionId ? transports.get(sessionId) : undefined;
-    if (!transport) {
+    const entry = sessionId ? transports.get(sessionId) : undefined;
+    if (!entry) {
       res.status(400).json({ error: 'No valid session. Send an initialize request first.' });
       return;
     }
-    await transport.handleRequest(req, res);
+    await entry.transport.handleRequest(req, res);
     return;
   }
 
   // POST — existing session: forward to its transport
   if (sessionId && transports.has(sessionId)) {
-    const transport = transports.get(sessionId)!;
-    await transport.handleRequest(req, res, req.body);
+    const entry = transports.get(sessionId)!;
+    await entry.transport.handleRequest(req, res, req.body);
     return;
   }
 
@@ -105,7 +123,7 @@ app.all('/mcp', async (req, res) => {
   // Register AFTER handleRequest — the session ID is only assigned during
   // initialize processing inside handleRequest, not before.
   if (transport.sessionId) {
-    transports.set(transport.sessionId, transport);
+    transports.set(transport.sessionId, { transport, createdAt: Date.now() });
     console.error(`[mcp] Session ${transport.sessionId} registered`);
   }
 });

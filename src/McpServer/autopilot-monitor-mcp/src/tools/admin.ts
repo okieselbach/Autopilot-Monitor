@@ -1,0 +1,351 @@
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { z } from 'zod';
+import { apiFetch, buildQuery } from '../client.js';
+import { READ_ONLY, READ_ONLY_OPEN } from './shared.js';
+
+export function registerAdminTools(server: McpServer): void {
+  // Tool 11: get_api_usage
+  server.tool(
+    'get_api_usage',
+    'Get API/MCP usage statistics. Shows request counts per endpoint per day. ' +
+    'Use to monitor platform usage, identify heavy users, or debug rate limiting. ' +
+    'Use userId for a specific user, daily for aggregated summaries, or neither for global per-record breakdown.',
+    {
+      userId: z.string().optional().describe('Specific user object ID to query usage for'),
+      tenantId: z.string().optional().describe('Filter usage by tenant ID'),
+      dateFrom: z.string().optional().describe('Start date (YYYY-MM-DD)'),
+      dateTo: z.string().optional().describe('End date (YYYY-MM-DD)'),
+      daily: z.boolean().optional().default(false).describe('Return daily aggregated summary instead of per-endpoint breakdown'),
+    },
+    READ_ONLY,
+    async (args) => {
+      try {
+        let data: unknown;
+        const params: Record<string, string | undefined> = { tenantId: args.tenantId, dateFrom: args.dateFrom, dateTo: args.dateTo };
+        if (args.userId) {
+          data = await apiFetch(`/api/metrics/mcp-usage/${encodeURIComponent(args.userId)}${buildQuery(params)}`);
+        } else if (args.daily) {
+          data = await apiFetch(`/api/global/metrics/mcp-usage/daily${buildQuery(params)}`);
+        } else {
+          data = await apiFetch(`/api/global/metrics/mcp-usage${buildQuery(params)}`);
+        }
+        return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes('403')) {
+          return { isError: true, content: [{ type: 'text' as const, text: 'Access denied. This tool requires Global Admin permissions.' }] };
+        }
+        throw error;
+      }
+    }
+  );
+
+  // Tool 12: get_geographic_metrics
+  server.tool(
+    'get_geographic_metrics',
+    'Get geographic distribution of enrollments — where devices are enrolling from, with performance comparisons. ' +
+    'Shows per-location: session counts, success rates, avg/median/p95 duration, throughput, and outlier detection. ' +
+    'Omit tenantId for cross-tenant view (Global Admin). Use get_geographic_sessions to drill into a specific location.',
+    {
+      tenantId: z.string().optional().describe('Tenant ID. Omit for cross-tenant view (Global Admin only).'),
+      days: z.coerce.number().optional().default(30).describe('Time range in days (default: 30)'),
+      groupBy: z.enum(['country', 'region', 'city']).optional().default('city')
+        .describe('Geographic grouping level (default: "city")'),
+    },
+    READ_ONLY,
+    async ({ tenantId, ...rest }) => {
+      const params: Record<string, string | number | undefined> = { ...rest };
+      if (tenantId) params.tenantId = tenantId;
+      const prefix = tenantId ? '/api/metrics' : '/api/global/metrics';
+      const data = await apiFetch(`${prefix}/geographic${buildQuery(params)}`);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  // Tool 13: get_geographic_sessions
+  server.tool(
+    'get_geographic_sessions',
+    'Drill into a specific geographic location. Returns all enrollment sessions at that location. ' +
+    'Either provide locationKey (from get_geographic_metrics results, e.g. "Falkenstein, Saxony, DE") ' +
+    'or use country/region/city filters to find sessions by location.',
+    {
+      locationKey: z.string().optional().describe('Location key from get_geographic_metrics (e.g. "Falkenstein, Saxony, DE"). If provided, country/region/city are ignored.'),
+      country: z.string().optional().describe('2-letter country code filter (e.g. "DE", "US", "CH"). Used when locationKey is not provided.'),
+      region: z.string().optional().describe('Region/state filter (e.g. "Saxony", "North Carolina"). Used with country.'),
+      city: z.string().optional().describe('City filter (e.g. "Falkenstein"). Used with country.'),
+      tenantId: z.string().optional().describe('Tenant ID. Omit for cross-tenant view (Global Admin only).'),
+      days: z.coerce.number().optional().default(30).describe('Time range in days (default: 30)'),
+    },
+    READ_ONLY,
+    async ({ tenantId, country, region, city, ...rest }) => {
+      const params: Record<string, string | number | undefined> = { ...rest };
+      if (tenantId) params.tenantId = tenantId;
+      if (!params.locationKey && country) {
+        const parts = [city, region, country].filter(Boolean);
+        params.locationKey = parts.join(', ');
+        params.groupBy = city ? 'city' : region ? 'region' : 'country';
+      }
+      const prefix = tenantId ? '/api/metrics' : '/api/global/metrics';
+      const data = await apiFetch(`${prefix}/geographic/sessions${buildQuery(params)}`);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  // Tool 14: get_platform_metrics
+  server.tool(
+    'get_platform_metrics',
+    'Get aggregated platform-level agent performance metrics across recent sessions. ' +
+    'Returns: avg/max/p95 CPU, memory (working set, private bytes), network (bytes up/down, latency, requests), ' +
+    'top sessions by CPU/memory, and per-agent-version breakdown. Global Admin only.',
+    {},
+    READ_ONLY,
+    async () => {
+      type SessionMetric = {
+        sessionId: string; tenantId: string; deviceName?: string; model?: string; status?: string;
+        agentVersion?: string; snapshotCount: number;
+        avgCpu: number; maxCpu: number; avgWorkingSet: number; maxWorkingSet: number;
+        avgPrivateBytes: number; avgLatency: number;
+        totalBytesUp: number; totalBytesDown: number; totalRequests: number;
+      };
+      const raw = await apiFetch('/api/global/metrics/platform') as { sessions?: SessionMetric[] };
+      const sessions = raw?.sessions ?? [];
+      if (sessions.length === 0) {
+        return { content: [{ type: 'text' as const, text: JSON.stringify({ sessionsAnalyzed: 0, message: 'No performance data available' }) }] };
+      }
+
+      const avg = (arr: number[]) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+      const p95 = (arr: number[]) => { const s = [...arr].sort((a, b) => a - b); return s[Math.floor(s.length * 0.95)] ?? 0; };
+      const round = (n: number) => Math.round(n * 100) / 100;
+
+      const cpus = sessions.map(s => s.avgCpu);
+      const maxCpus = sessions.map(s => s.maxCpu);
+      const ws = sessions.map(s => s.avgWorkingSet);
+      const pb = sessions.map(s => s.avgPrivateBytes);
+      const lat = sessions.filter(s => s.avgLatency > 0).map(s => s.avgLatency);
+
+      const topCpu = [...sessions].sort((a, b) => b.maxCpu - a.maxCpu).slice(0, 5).map(s => ({
+        sessionId: s.sessionId, device: s.deviceName, model: s.model, maxCpu: round(s.maxCpu), avgCpu: round(s.avgCpu),
+      }));
+
+      const topMem = [...sessions].sort((a, b) => b.avgWorkingSet - a.avgWorkingSet).slice(0, 5).map(s => ({
+        sessionId: s.sessionId, device: s.deviceName, model: s.model, avgWorkingSetMB: round(s.avgWorkingSet),
+      }));
+
+      const byVersion: Record<string, { count: number; avgCpu: number[]; avgMem: number[] }> = {};
+      for (const s of sessions) {
+        const v = s.agentVersion ?? 'unknown';
+        if (!byVersion[v]) byVersion[v] = { count: 0, avgCpu: [], avgMem: [] };
+        byVersion[v].count++;
+        byVersion[v].avgCpu.push(s.avgCpu);
+        byVersion[v].avgMem.push(s.avgWorkingSet);
+      }
+      const versionBreakdown = Object.entries(byVersion).map(([version, d]) => ({
+        version, sessions: d.count, avgCpu: round(avg(d.avgCpu)), avgMemMB: round(avg(d.avgMem)),
+      })).sort((a, b) => b.sessions - a.sessions);
+
+      const summary = {
+        sessionsAnalyzed: sessions.length,
+        cpu: { avgPercent: round(avg(cpus)), maxPercent: round(Math.max(...maxCpus)), p95Percent: round(p95(maxCpus)) },
+        memory: {
+          avgWorkingSetMB: round(avg(ws)), maxWorkingSetMB: round(Math.max(...ws)), p95WorkingSetMB: round(p95(ws)),
+          avgPrivateBytesMB: round(avg(pb)),
+        },
+        network: {
+          totalBytesUp: sessions.reduce((a, s) => a + s.totalBytesUp, 0),
+          totalBytesDown: sessions.reduce((a, s) => a + s.totalBytesDown, 0),
+          totalRequests: sessions.reduce((a, s) => a + s.totalRequests, 0),
+          avgLatencyMs: round(avg(lat)),
+        },
+        topSessionsByCpu: topCpu,
+        topSessionsByMemory: topMem,
+        agentVersionBreakdown: versionBreakdown,
+      };
+      return { content: [{ type: 'text' as const, text: JSON.stringify(summary, null, 2) }] };
+    }
+  );
+
+  // Tool 15: get_usage_metrics
+  server.tool(
+    'get_usage_metrics',
+    'Get platform usage statistics: active tenants, session volumes, feature adoption. ' +
+    'Omit tenantId for platform-wide overview (Global Admin), or specify tenantId for tenant-specific usage.',
+    {
+      tenantId: z.string().optional().describe('Tenant ID for tenant-specific metrics. Omit for platform-wide overview (Global Admin only).'),
+    },
+    READ_ONLY,
+    async ({ tenantId }) => {
+      if (tenantId) {
+        const data = await apiFetch(`/api/global/metrics/usage${buildQuery({ tenantId })}`);
+        return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+      }
+      const data = await apiFetch('/api/global/metrics/usage');
+      return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  // Tool 16: get_audit_logs
+  server.tool(
+    'get_audit_logs',
+    'Get audit trail of administrative actions: config changes, device blocks, user management, report submissions. ' +
+    'Omit tenantId for cross-tenant audit log (Global Admin). Returns up to 100 most recent entries.',
+    {
+      tenantId: z.string().optional().describe('Tenant ID for tenant-scoped audit log. Omit for cross-tenant view (Global Admin only).'),
+    },
+    READ_ONLY,
+    async ({ tenantId }) => {
+      const endpoint = tenantId
+        ? `/api/audit/logs${buildQuery({ tenantId })}`
+        : '/api/global/audit/logs';
+      const data = await apiFetch(endpoint);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  // Tool 17: list_session_reports
+  server.tool(
+    'list_session_reports',
+    'List session reports submitted by tenant admins. Reports contain user comments, screenshots, and agent logs for troubleshooting. ' +
+    'Global Admin only — returns reports across all tenants.',
+    {},
+    READ_ONLY,
+    async () => {
+      const data = await apiFetch('/api/global/session-reports');
+      return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  // ── Raw Data Tools ────────────────────────────────────────────────────
+
+  // Tool 18: query_raw_events
+  server.tool(
+    'query_raw_events',
+    'TIER 2 — RAW CROSS-SESSION EVENT QUERY (fallback for broader scope). ' +
+    'Query raw enrollment events with flexible filters across sessions within a tenant. ' +
+    'tenantId is always required (events are partitioned per tenant). Global Admin can query any tenant. ' +
+    'Use this when search_events_semantic does not cover the time range or session scope you need, ' +
+    'or when you need exact event-type filtering across many sessions. Returns raw event data.',
+    {
+      tenantId: z.string().describe('Tenant ID to query (required). Global Admin can query any tenant.'),
+      sessionId: z.string().optional().describe('Filter to a specific session'),
+      eventType: z.string().optional().describe('Event type filter (e.g. "app_install_failed", "error_detected")'),
+      severity: z.enum(['Info', 'Warning', 'Error', 'Critical']).optional(),
+      source: z.string().optional().describe('Filter by event source/app name (substring match)'),
+      startedAfter: z.string().optional().describe('ISO 8601 datetime — only events after this'),
+      startedBefore: z.string().optional().describe('ISO 8601 datetime — only events before this'),
+      limit: z.coerce.number().min(1).max(500).optional().default(100),
+    },
+    READ_ONLY,
+    async (args) => {
+      const { tenantId, ...rest } = args;
+      const params: Record<string, string | number | boolean | undefined | null> = { ...rest, tenantId };
+      const data = await apiFetch(`/api/raw/events${buildQuery(params)}`);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  // Tool 19: query_raw_sessions
+  server.tool(
+    'query_raw_sessions',
+    'Query raw session data with flexible filters and field projection. ' +
+    'Specify tenantId for a specific tenant, or omit for cross-tenant access (Global Admin only). ' +
+    'Use the fields parameter to select specific properties (e.g. "sessionId,status,startedAt,serialNumber"). Returns raw session entities.',
+    {
+      tenantId: z.string().optional().describe('Tenant ID to query. Omit for cross-tenant access (Global Admin only).'),
+      status: z.enum(['InProgress', 'Succeeded', 'Failed']).optional(),
+      startedAfter: z.string().optional().describe('ISO 8601 datetime'),
+      startedBefore: z.string().optional().describe('ISO 8601 datetime'),
+      serialNumber: z.string().optional(),
+      fields: z.string().optional().describe('Comma-separated fields to return (e.g. "sessionId,status,startedAt,serialNumber,durationSeconds")'),
+      limit: z.coerce.number().min(1).max(200).optional().default(50),
+    },
+    READ_ONLY,
+    async (args) => {
+      const { tenantId, ...rest } = args;
+      const params: Record<string, string | number | boolean | undefined | null> = { ...rest };
+      const basePath = tenantId ? '/api/raw/sessions' : '/api/global/raw/sessions';
+      if (tenantId) params.tenantId = tenantId;
+      const data = await apiFetch(`${basePath}${buildQuery(params)}`);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  // ── Admin Diagnostic Tools ────────────────────────────────────────────
+
+  // Tool 20: list_tables
+  server.tool(
+    'list_tables',
+    'List all available Azure Table Storage tables that can be queried via query_table. Global Admin only.',
+    {},
+    READ_ONLY,
+    async () => {
+      try {
+        const data = await apiFetch('/api/global/raw/tables');
+        return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes('403')) {
+          return { isError: true, content: [{ type: 'text' as const, text: 'Access denied. This tool requires Global Admin permissions.' }] };
+        }
+        throw error;
+      }
+    }
+  );
+
+  // Tool 21: query_table
+  server.tool(
+    'query_table',
+    'Query any Azure Table Storage table directly with OData filters. Global Admin only. ' +
+    'Use list_tables to see available tables. Useful for inspecting TenantConfiguration, RuleResults, or any raw data.',
+    {
+      tableName: z.string().describe('Table name (e.g. "Sessions", "Events", "RuleResults", "TenantConfiguration")'),
+      partitionKey: z.string().optional().describe('Filter by exact partition key (usually TenantId)'),
+      rowKeyPrefix: z.string().optional().describe('Filter by row key prefix'),
+      filter: z.string().optional().describe('OData filter expression (e.g. "Status eq \'Failed\'")'),
+      limit: z.coerce.number().min(1).max(500).optional().default(100),
+    },
+    READ_ONLY,
+    async (args) => {
+      try {
+        const { tableName, ...rest } = args;
+        const data = await apiFetch(`/api/global/raw/tables/${encodeURIComponent(tableName)}${buildQuery(rest)}`);
+        return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes('403')) {
+          return { isError: true, content: [{ type: 'text' as const, text: 'Access denied. This tool requires Global Admin permissions.' }] };
+        }
+        throw error;
+      }
+    }
+  );
+
+  // Tool 22: query_backend_logs
+  server.tool(
+    'query_backend_logs',
+    'Query backend Application Insights logs using KQL. Global Admin only. ' +
+    'Use for debugging backend issues, tracing requests by correlation ID, and platform diagnostics.',
+    {
+      query: z.string().describe('KQL query (e.g. "traces | where message contains \'error\' | take 50")'),
+      timespan: z.string().optional().default('PT1H').describe('ISO 8601 duration (default: PT1H = last 1 hour). Examples: PT30M, PT6H, P1D'),
+    },
+    READ_ONLY_OPEN,
+    async (args) => {
+      try {
+        const data = await apiFetch('/api/global/raw/logs', {
+          method: 'POST',
+          body: JSON.stringify({ query: args.query, timespan: args.timespan }),
+        });
+        return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes('403')) {
+          return { isError: true, content: [{ type: 'text' as const, text: 'Access denied. This tool requires Global Admin permissions.' }] };
+        }
+        if (message.includes('503')) {
+          return { isError: true, content: [{ type: 'text' as const, text: 'Application Insights diagnostics is not configured. Set APPINSIGHTS_APP_ID and assign Monitoring Reader role to the Function App Managed Identity.' }] };
+        }
+        throw error;
+      }
+    }
+  );
+}

@@ -9,7 +9,7 @@
  */
 import type { Request, Response, NextFunction } from 'express';
 import { extractTokenClaims, isTokenExpired } from './auth.js';
-import { setCurrentToken } from './client.js';
+import { setCurrentToken, runWithToken } from './client.js';
 
 const BASE_URL = process.env.AUTOPILOT_API_URL ?? 'https://autopilotmonitor-api.azurewebsites.net';
 
@@ -148,9 +148,12 @@ export function accessGuard(req: Request, res: Response, next: NextFunction): vo
         return;
       }
 
-      // Set token for pass-through to backend API
+      // Set token for pass-through to backend API.
+      // runWithToken scopes the token to this async context so concurrent
+      // sessions cannot overwrite each other's tokens on the event loop.
+      // setCurrentToken is kept as fallback during the transition.
       setCurrentToken(token);
-      next();
+      runWithToken(token, () => next());
     })
     .catch(() => {
       res.status(503).json({ error: 'Access check failed' });

@@ -1,29 +1,45 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
+
 const BASE_URL = process.env.AUTOPILOT_API_URL ?? 'https://autopilotmonitor-api.azurewebsites.net';
 
 /** Default timeout for backend API requests (30 seconds) */
 const API_TIMEOUT_MS = 30_000;
 
 /**
- * Per-request token store. The MCP request handler sets the current user's
- * Bearer token before tool execution, and apiFetch reads it to pass through
- * to the backend API.
+ * Per-request token store using AsyncLocalStorage.
  *
- * NOTE: This is safe in the MCP server context because each MCP request is
- * handled sequentially within a session — the token is set before tool
- * execution and read during it, with no concurrent overlap.
+ * Each incoming MCP request runs inside its own async context (via
+ * `runWithToken`), so concurrent sessions cannot overwrite each other's
+ * tokens — even when async operations interleave on the event loop.
  */
-let _currentToken: string | undefined;
+const tokenStore = new AsyncLocalStorage<string>();
+
+/**
+ * Run a callback within an async context that carries the given Bearer token.
+ * All calls to `apiFetch` inside the callback (and its async descendants)
+ * will automatically use this token.
+ */
+export function runWithToken<T>(token: string, fn: () => T): T {
+  return tokenStore.run(token, fn);
+}
+
+/**
+ * @deprecated Use `runWithToken` instead. Kept for backward compatibility
+ * during the transition — sets a fallback global token for code paths that
+ * haven't migrated to `runWithToken` yet.
+ */
+let _fallbackToken: string | undefined;
 
 export function setCurrentToken(token: string | undefined): void {
-  _currentToken = token;
+  _fallbackToken = token;
 }
 
 export function getCurrentToken(): string | undefined {
-  return _currentToken;
+  return tokenStore.getStore() ?? _fallbackToken;
 }
 
 async function apiFetch(path: string, options: RequestInit = {}): Promise<unknown> {
-  const token = _currentToken;
+  const token = getCurrentToken();
   if (!token) {
     throw new Error('No authentication token available. Ensure the request includes a valid Bearer token.');
   }
