@@ -29,7 +29,8 @@
       "mcp__autopilot-monitor__query_raw_events",
       "mcp__autopilot-monitor__search_sessions_by_cve",
       "mcp__autopilot-monitor__search_events_semantic",
-      "mcp__autopilot-monitor__get_geographic_sessions"
+      "mcp__autopilot-monitor__get_geographic_sessions",
+      "mcp__autopilot-monitor__get_session_summary"
     ]
   }
 }
