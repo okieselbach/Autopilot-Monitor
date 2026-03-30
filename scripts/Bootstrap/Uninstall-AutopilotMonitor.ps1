@@ -37,14 +37,14 @@ try {
 
         Write-Host "Removing Scheduled Task..." -ForegroundColor Yellow
         Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction Stop
-        Write-Host "  ✓ Scheduled Task removed" -ForegroundColor Green
+        Write-Host "  [OK] Scheduled Task removed" -ForegroundColor Green
     }
     else {
-        Write-Host "  → Scheduled Task not found (already removed)" -ForegroundColor Gray
+        Write-Host "  [SKIP] Scheduled Task not found (already removed)" -ForegroundColor Gray
     }
 }
 catch {
-    Write-Host "  ✗ Error removing Scheduled Task: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "  [FAIL] Error removing Scheduled Task: $($_.Exception.Message)" -ForegroundColor Red
 }
 
 # Delete agent folder
@@ -56,15 +56,15 @@ try {
         Start-Sleep -Seconds 2
 
         Remove-Item -Path $AgentBasePath -Recurse -Force -ErrorAction Stop
-        Write-Host "  ✓ Agent folder deleted" -ForegroundColor Green
+        Write-Host "  [OK] Agent folder deleted" -ForegroundColor Green
     }
     else {
-        Write-Host "  → Agent folder not found (already removed)" -ForegroundColor Gray
+        Write-Host "  [SKIP] Agent folder not found (already removed)" -ForegroundColor Gray
     }
 }
 catch {
-    Write-Host "  ✗ Error deleting folder: $($_.Exception.Message)" -ForegroundColor Red
-    Write-Host "  → You may need to manually delete: $AgentBasePath" -ForegroundColor Yellow
+    Write-Host "  [FAIL] Error deleting folder: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "  [INFO] You may need to manually delete: $AgentBasePath" -ForegroundColor Yellow
 }
 
 Write-Host ""

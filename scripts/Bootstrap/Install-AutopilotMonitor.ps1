@@ -90,7 +90,7 @@ function Get-FileMd5Base64 {
 try {
     Write-Log "===== Autopilot Monitor Bootstrap Started ====="
 
-    # ── Pre-flight: Skip installation on already-enrolled devices ──
+    # -- Pre-flight: Skip installation on already-enrolled devices --
 
     # Check 1: OS install date must be within threshold (fresh device)
     # TODO: issue is the OS might got installed a long time ago but the OOBE just started now (e.g. old image, or re-flash).
@@ -168,11 +168,11 @@ try {
                     $expectedSha256 = $versionJsonResponse.sha256.ToLowerInvariant()
                     Write-Log "SHA-256 hash from version.json: $expectedSha256 (version: $($versionJsonResponse.version))"
                 } else {
-                    Write-Log "version.json has no sha256 field — falling back to legacy MD5 check (older build)"
+                    Write-Log "version.json has no sha256 field - falling back to legacy MD5 check (older build)"
                 }
             }
             catch {
-                Write-Log "WARNING: Could not fetch version.json — falling back to legacy MD5 check: $($_.Exception.Message)"
+                Write-Log "WARNING: Could not fetch version.json - falling back to legacy MD5 check: $($_.Exception.Message)"
             }
 
             # Download agent ZIP
@@ -221,7 +221,7 @@ try {
                 $expectedMd5Header = $downloadResponse.Headers["Content-MD5"]
                 $expectedMd5 = if ($expectedMd5Header -is [System.Array]) { "$($expectedMd5Header[0])".Trim() } else { "$expectedMd5Header".Trim() }
                 if ($expectedMd5 -notmatch '\S') {
-                    Write-Log "WARNING: No SHA-256 and no Content-MD5 header — skipping integrity validation"
+                    Write-Log "WARNING: No SHA-256 and no Content-MD5 header - skipping integrity validation"
                 }
                 else {
                     $actualMd5 = Get-FileMd5Base64 -Path $zipPath
