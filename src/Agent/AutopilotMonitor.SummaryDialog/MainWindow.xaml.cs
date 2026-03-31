@@ -46,9 +46,13 @@ namespace AutopilotMonitor.SummaryDialog
                 ApplyScrollBarStyle();
                 ApplyContentClip();
                 ApplyRoundedCorners();
-                ApplyTaskbarIcon();
 
                 LoadStatusData();
+
+                var isSuccess = _status == null ||
+                    string.Equals(_status.Outcome, "completed", StringComparison.OrdinalIgnoreCase);
+                ApplyTaskbarIcon(isSuccess);
+
                 RenderOutcome();
                 RenderAppList();
                 StartCountdown();
@@ -499,42 +503,24 @@ namespace AutopilotMonitor.SummaryDialog
         /// <summary>
         /// Generates a green checkmark icon and sets it as the window/taskbar icon.
         /// </summary>
-        private void ApplyTaskbarIcon()
+        /// <summary>
+        /// Sets the taskbar icon. Success icon is loaded statically via XAML;
+        /// this method only overrides it with the error icon when enrollment failed.
+        /// </summary>
+        private void ApplyTaskbarIcon(bool isSuccess)
         {
-            const int size = 32;
-            var dv = new DrawingVisual();
-            using (var dc = dv.RenderOpen())
+            if (!isSuccess)
             {
-                var successGreen = Color.FromRgb(0x05, 0x96, 0x69);
-                var bgBrush = new SolidColorBrush(Color.FromRgb(0xEC, 0xFD, 0xF5));
-                var strokePen = new Pen(new SolidColorBrush(successGreen), 2.0);
-                var checkPen = new Pen(new SolidColorBrush(successGreen), 3.0)
+                try
                 {
-                    StartLineCap = PenLineCap.Round,
-                    EndLineCap = PenLineCap.Round,
-                    LineJoin = PenLineJoin.Round
-                };
-
-                // Circle background + outline
-                var center = new Point(size / 2.0, size / 2.0);
-                dc.DrawEllipse(bgBrush, strokePen, center, 14, 14);
-
-                // Checkmark path (scaled from 56px icon to 32px)
-                var checkPath = new StreamGeometry();
-                using (var ctx = checkPath.Open())
-                {
-                    ctx.BeginFigure(new Point(9, 16), false, false);
-                    ctx.LineTo(new Point(14, 21), true, true);
-                    ctx.LineTo(new Point(23, 11), true, true);
+                    var uri = new Uri("pack://application:,,,/icon-error.ico", UriKind.Absolute);
+                    Icon = new BitmapImage(uri);
                 }
-                checkPath.Freeze();
-                dc.DrawGeometry(null, checkPen, checkPath);
+                catch (Exception ex)
+                {
+                    App.Log($"ApplyTaskbarIcon: failed to load error icon ({ex.Message}), keeping success icon");
+                }
             }
-
-            var rtb = new RenderTargetBitmap(size, size, 96, 96, PixelFormats.Pbgra32);
-            rtb.Render(dv);
-            rtb.Freeze();
-            Icon = rtb;
         }
 
         private static bool DetectDarkTheme()

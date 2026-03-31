@@ -7,6 +7,7 @@
         ResizeMode="NoResize"
         WindowStartupLocation="CenterScreen"
         Topmost="True"
+        Icon="icon-success.ico"
         WindowStyle="None"
         AllowsTransparency="True"
         Background="Transparent"
