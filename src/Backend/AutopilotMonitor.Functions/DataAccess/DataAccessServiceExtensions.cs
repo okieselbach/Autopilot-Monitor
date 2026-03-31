@@ -34,6 +34,7 @@ namespace AutopilotMonitor.Functions.DataAccess
             services.AddSingleton<INotificationRepository, TableNotificationRepository>();
             services.AddSingleton<IDeviceSecurityRepository, TableDeviceSecurityRepository>();
             services.AddSingleton<IUserUsageRepository, TableUserUsageRepository>();
+            services.AddSingleton<IDistressReportRepository, TableDistressReportRepository>();
             return services;
         }
 

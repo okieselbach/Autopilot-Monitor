@@ -221,6 +221,7 @@ export const EXPANDABLE_NAV_GROUPS: ExpandableNavGroup[] = [
         id: "ga-reports", label: "Reports", icon: <DocumentTextIcon />,
         items: [
           { id: "ga-session-reports", label: "Session Reports", href: "/admin/reports/session-reports" },
+          { id: "ga-distress-reports", label: "Distress Reports", href: "/admin/reports/distress-reports" },
           { id: "ga-user-feedback", label: "User Feedback", href: "/admin/reports/user-feedback" },
           { id: "ga-session-export", label: "Session Export", href: "/admin/reports/session-export" },
         ],

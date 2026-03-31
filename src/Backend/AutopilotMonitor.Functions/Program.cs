@@ -113,6 +113,7 @@ builder.Services.AddTableStorageDataAccess();
 builder.Services.AddSingleton<TenantConfigurationService>();
 builder.Services.AddSingleton<AdminConfigurationService>();
 builder.Services.AddSingleton<RateLimitService>();
+builder.Services.AddSingleton<DistressRateLimitService>();
 builder.Services.AddSingleton<UsageMetricsService>();
 builder.Services.AddSingleton<PlatformMetricsService>();
 builder.Services.AddSingleton<GlobalAdminService>();

@@ -581,7 +581,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 catch (BackendAuthException ex)
                 {
                     _logger.Error($"Session registration authentication failed: {ex.Message}");
-                    HandleAuthFailure();
+                    HandleAuthFailure(ex.StatusCode);
                     return; // Auth failure is not retryable
                 }
                 catch (Exception ex)

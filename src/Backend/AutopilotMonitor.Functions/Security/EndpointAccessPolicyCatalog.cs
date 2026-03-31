@@ -76,6 +76,7 @@ public static class EndpointAccessPolicyCatalog
         new("GET",    "health",                    EndpointPolicy.PublicAnonymous),
         new("GET",    "stats/platform",            EndpointPolicy.PublicAnonymous),
         new("GET",    "bootstrap/validate/{code}", EndpointPolicy.PublicAnonymous),
+        new("POST",   "agent/distress",             EndpointPolicy.PublicAnonymous),
 
         // ── DeviceOrBootstrapAuth ───────────────────────────────────────
         new("POST",   "agent/register-session",    EndpointPolicy.DeviceOrBootstrapAuth),
@@ -192,6 +193,7 @@ public static class EndpointAccessPolicyCatalog
         new("GET",    "global/metrics/usage",       EndpointPolicy.GlobalAdminOnly),
         new("GET",    "global/metrics/mcp-usage",       EndpointPolicy.GlobalAdminOnly),
         new("GET",    "global/metrics/mcp-usage/daily", EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "global/distress-reports",    EndpointPolicy.GlobalAdminOnly),
         new("GET",    "global/session-reports",     EndpointPolicy.GlobalAdminOnly),
         new("GET",    "global/session-reports/download-url", EndpointPolicy.GlobalAdminOnly),
         new("PATCH",  "global/session-reports/{reportId}/note", EndpointPolicy.GlobalAdminOnly),

@@ -121,6 +121,9 @@ namespace AutopilotMonitor.Shared
             public const string BootstrapIngestEvents    = "/api/bootstrap/ingest";
             public const string BootstrapGetAgentConfig  = "/api/bootstrap/config";
             public const string BootstrapReportError     = "/api/bootstrap/error";
+
+            // Pre-auth distress channel (no authentication required)
+            public const string ReportDistress           = "/api/agent/distress";
         }
 
         // -----------------------------------------------------------------------
@@ -273,6 +276,9 @@ namespace AutopilotMonitor.Shared
             public const string DeviceSnapshot = "DeviceSnapshot";
             public const string CveIndex = "CveIndex";
 
+            // Pre-auth distress reports (unverified agent error signals)
+            public const string DistressReports = "DistressReports";
+
             // User usage tracking (per-user, per-day, per-endpoint)
             public const string UserUsageLog = "UserUsageLog";
 
@@ -312,6 +318,7 @@ namespace AutopilotMonitor.Shared
                 EventTypeIndex,
                 DeviceSnapshot,
                 CveIndex,
+                DistressReports,
                 UserUsageLog
             };
         }

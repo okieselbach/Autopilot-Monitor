@@ -51,6 +51,7 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
         "/api/agent/config",
         "/api/agent/upload-url",
         "/api/agent/error",
+        "/api/agent/distress",
         "/api/bootstrap/register-session",
         "/api/bootstrap/ingest",
         "/api/bootstrap/config",

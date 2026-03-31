@@ -423,6 +423,46 @@ namespace AutopilotMonitor.Functions.Services
             index = Math.Max(0, Math.Min(index, sortedValues.Count - 1));
             return Math.Round(sortedValues[index], 1);
         }
+
+        /// <summary>
+        /// Removes distress reports older than 14 days. Distress data is unverified
+        /// and low-volume; short retention keeps Table Storage lean.
+        /// </summary>
+        private async Task CleanupOldDistressReportsAsync()
+        {
+            const int retentionDays = 14;
+            var cutoff = DateTime.UtcNow.AddDays(-retentionDays);
+            _logger.LogInformation("Starting distress report cleanup (retention: {Days} days, cutoff: {Cutoff:yyyy-MM-dd})", retentionDays, cutoff);
+
+            try
+            {
+                var tenantIds = await _maintenanceRepo.GetAllTenantIdsAsync();
+                var totalDeleted = 0;
+
+                foreach (var tenantId in tenantIds)
+                {
+                    try
+                    {
+                        var deleted = await _distressReportRepo.DeleteDistressReportsOlderThanAsync(tenantId, cutoff);
+                        if (deleted > 0)
+                        {
+                            totalDeleted += deleted;
+                            _logger.LogInformation("Tenant {TenantId}: Deleted {Count} old distress reports", tenantId, deleted);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to cleanup distress reports for tenant {TenantId}", tenantId);
+                    }
+                }
+
+                _logger.LogInformation("Distress report cleanup complete: {Total} reports deleted across all tenants", totalDeleted);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Distress report cleanup failed");
+            }
+        }
     }
 }
 

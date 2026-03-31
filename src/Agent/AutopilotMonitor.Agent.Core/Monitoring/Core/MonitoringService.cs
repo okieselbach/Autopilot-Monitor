@@ -95,6 +95,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         // Non-auth upload failure tracking for the emergency channel
         private int _consecutiveUploadFailures = 0;
         private EmergencyReporter _emergencyReporter;
+        private DistressReporter _distressReporter;
 
         // UnrestrictedMode audit: tracks whether the first config apply has happened
         private bool _isFirstConfigApply = true;
@@ -117,8 +118,25 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             }
 
             _spool = new EventSpool(_configuration.SpoolDirectory);
+
+            // DistressReporter is created BEFORE BackendApiClient so it's available even if cert loading fails.
+            // It uses its own plain HttpClient (no cert, no mTLS) for the pre-auth distress endpoint.
+            var hwInfo = Security.HardwareInfo.GetHardwareInfo(_logger);
+            _distressReporter = new DistressReporter(
+                _configuration.ApiBaseUrl, _configuration.TenantId,
+                hwInfo.Manufacturer, hwInfo.Model, hwInfo.SerialNumber,
+                _agentVersion, _logger);
+
             _apiClient = new BackendApiClient(_configuration.ApiBaseUrl, _configuration, _logger, _agentVersion);
             _emergencyReporter = new EmergencyReporter(_apiClient, _configuration.SessionId, _configuration.TenantId, agentVersion, _logger);
+
+            // Detect cert-missing at construction time and send distress signal
+            if (_configuration.UseClientCertAuth && _apiClient.ClientCertificate == null)
+            {
+                _ = _distressReporter.TrySendAsync(
+                    DistressErrorType.AuthCertificateMissing,
+                    "MDM certificate not found in LocalMachine or CurrentUser store");
+            }
             _cleanupService = new CleanupService(_configuration, _logger);
             _diagnosticsService = new DiagnosticsPackageService(_configuration, _logger, _apiClient);
 
@@ -525,7 +543,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         {
             try
             {
-                _remoteConfigService = new RemoteConfigService(_apiClient, _configuration.TenantId, _logger, _emergencyReporter);
+                _remoteConfigService = new RemoteConfigService(_apiClient, _configuration.TenantId, _logger, _emergencyReporter, _distressReporter);
                 _remoteConfigService.FetchConfigAsync().Wait(TimeSpan.FromSeconds(15));
                 ApplyRuntimeSettingsFromRemoteConfig();
             }

@@ -171,6 +171,11 @@ export const api = {
       `${API_BASE_URL}/api/global/session-reports/${reportId}/note`,
   },
 
+  // ── Distress Reports ──────────────────────────────────────────────────────
+  distressReports: {
+    list: () => `${API_BASE_URL}/api/global/distress-reports`,
+  },
+
   // ── Notifications ─────────────────────────────────────────────────────────
   notifications: {
     list: () => `${API_BASE_URL}/api/global/notifications`,

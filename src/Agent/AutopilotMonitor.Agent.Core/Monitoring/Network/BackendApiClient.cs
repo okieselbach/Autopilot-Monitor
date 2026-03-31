@@ -38,6 +38,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
         /// </summary>
         public NetworkMetrics NetworkMetrics => _networkMetrics;
 
+        /// <summary>
+        /// The MDM client certificate loaded at construction time, or null if not found.
+        /// Used by DistressReporter to detect cert-missing scenarios.
+        /// </summary>
+        public X509Certificate2 ClientCertificate => _clientCertificate;
+
         public BackendApiClient(string baseUrl, AgentConfiguration configuration = null, Logging.AgentLogger logger = null, string agentVersion = null)
         {
             _baseUrl = baseUrl.TrimEnd('/');
@@ -364,7 +370,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
             {
                 throw new BackendAuthException(
                     $"Backend returned {(int)response.StatusCode} {response.StatusCode}. " +
-                    "The device is not authorized. Check client certificate and Autopilot device validation.");
+                    "The device is not authorized. Check client certificate and Autopilot device validation.",
+                    (int)response.StatusCode);
             }
         }
 
@@ -466,6 +473,15 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
     /// </summary>
     public class BackendAuthException : Exception
     {
-        public BackendAuthException(string message) : base(message) { }
+        /// <summary>
+        /// HTTP status code returned by the backend (401 or 403).
+        /// Used by the DistressReporter to classify the failure type.
+        /// </summary>
+        public int StatusCode { get; }
+
+        public BackendAuthException(string message, int statusCode = 0) : base(message)
+        {
+            StatusCode = statusCode;
+        }
     }
 }

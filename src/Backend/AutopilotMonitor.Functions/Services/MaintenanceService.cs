@@ -50,6 +50,7 @@ namespace AutopilotMonitor.Functions.Services
         private readonly BlockedDeviceService _blockedDeviceService;
         private readonly TenantAdminsService _tenantAdminsService;
         private readonly IUserUsageRepository _userUsageRepo;
+        private readonly IDistressReportRepository _distressReportRepo;
         private readonly ILogger<MaintenanceService> _logger;
 
         private const string PlatformStatsAliasFileName = "platform-stats.json";
@@ -66,6 +67,7 @@ namespace AutopilotMonitor.Functions.Services
             BlockedDeviceService blockedDeviceService,
             TenantAdminsService tenantAdminsService,
             IUserUsageRepository userUsageRepo,
+            IDistressReportRepository distressReportRepo,
             ILogger<MaintenanceService> logger)
         {
             _maintenanceRepo = maintenanceRepo;
@@ -77,6 +79,7 @@ namespace AutopilotMonitor.Functions.Services
             _blockedDeviceService = blockedDeviceService;
             _tenantAdminsService = tenantAdminsService;
             _userUsageRepo = userUsageRepo;
+            _distressReportRepo = distressReportRepo;
             _logger = logger;
         }
 
@@ -94,6 +97,7 @@ namespace AutopilotMonitor.Functions.Services
                 await BlockExcessiveDataSendersAsync();
                 await AggregateMetricsWithCatchUpAsync();
                 await CleanupOldDataAsync();
+                await CleanupOldDistressReportsAsync();
                 await RecomputePlatformStatsAsync();
 
                 // Backfill and one-time repair tasks run only via manual trigger (RunManualAsync)

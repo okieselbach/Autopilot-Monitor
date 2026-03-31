@@ -20,6 +20,7 @@ namespace AutopilotMonitor.Agent.Core.Configuration
         private readonly AgentLogger _logger;
         private readonly string _cacheFilePath;
         private readonly EmergencyReporter _emergencyReporter;
+        private readonly DistressReporter _distressReporter;
 
         private AgentConfigResponse _currentConfig;
         private readonly object _configLock = new object();
@@ -38,12 +39,13 @@ namespace AutopilotMonitor.Agent.Core.Configuration
             }
         }
 
-        public RemoteConfigService(BackendApiClient apiClient, string tenantId, AgentLogger logger, EmergencyReporter emergencyReporter = null)
+        public RemoteConfigService(BackendApiClient apiClient, string tenantId, AgentLogger logger, EmergencyReporter emergencyReporter = null, DistressReporter distressReporter = null)
         {
             _apiClient = apiClient ?? throw new ArgumentNullException(nameof(apiClient));
             _tenantId = tenantId ?? throw new ArgumentNullException(nameof(tenantId));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _emergencyReporter = emergencyReporter;
+            _distressReporter = distressReporter;
 
             var cacheDir = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor\Config");
             _cacheFilePath = Path.Combine(cacheDir, "remote-config.json");
@@ -73,11 +75,24 @@ namespace AutopilotMonitor.Agent.Core.Configuration
 
                 _logger.Warning("Remote config fetch returned empty response");
             }
+            catch (BackendAuthException ex)
+            {
+                _logger.Warning($"Config fetch authentication failed: {ex.Message}");
+
+                // Auth failure → use distress channel (pre-auth, works without cert)
+                if (_distressReporter != null)
+                {
+                    _ = _distressReporter.TrySendAsync(
+                        DistressErrorType.ConfigFetchDenied,
+                        ex.Message,
+                        httpStatusCode: ex.StatusCode);
+                }
+            }
             catch (Exception ex)
             {
                 _logger.Warning($"Failed to fetch remote config: {ex.Message}");
 
-                // Report to emergency channel if available (not available in --run-gather-rules mode)
+                // Non-auth failure → use authenticated emergency channel
                 if (_emergencyReporter != null)
                 {
                     _ = _emergencyReporter.TrySendAsync(

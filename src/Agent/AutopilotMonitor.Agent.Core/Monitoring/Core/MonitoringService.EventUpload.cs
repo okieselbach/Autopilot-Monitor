@@ -387,7 +387,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             catch (BackendAuthException ex)
             {
                 _logger.Error($"Upload authentication failed: {ex.Message}");
-                HandleAuthFailure();
+                HandleAuthFailure(ex.StatusCode);
             }
             catch (Exception ex)
             {
@@ -417,12 +417,25 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         /// Handles an authentication failure by incrementing the counter and shutting down
         /// the agent if the configured threshold is reached.
         /// </summary>
-        private void HandleAuthFailure()
+        private void HandleAuthFailure(int httpStatusCode = 0)
         {
             _consecutiveAuthFailures++;
 
             if (_firstAuthFailureTime == null)
                 _firstAuthFailureTime = DateTime.UtcNow;
+
+            // Send distress signal on first auth failure (before potential agent shutdown).
+            // The DistressReporter deduplicates: same error key is only sent once per session.
+            if (_consecutiveAuthFailures == 1 && _distressReporter != null)
+            {
+                var distressType = httpStatusCode == 401
+                    ? DistressErrorType.AuthCertificateRejected
+                    : DistressErrorType.DeviceNotRegistered; // 403 = whitelist/device/tenant rejection
+
+                _ = _distressReporter.TrySendAsync(distressType,
+                    $"Backend returned {httpStatusCode} during event upload",
+                    httpStatusCode: httpStatusCode);
+            }
 
             _logger.Warning($"Authentication failure {_consecutiveAuthFailures}" +
                 (_configuration.MaxAuthFailures > 0 ? $"/{_configuration.MaxAuthFailures}" : "") +
@@ -863,6 +876,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             _networkChangeDetector?.Dispose();
             _gatherRuleExecutor?.Dispose();
             _remoteConfigService?.Dispose();
+            _distressReporter?.Dispose();
             _completionEvent.Dispose();
         }
     }
