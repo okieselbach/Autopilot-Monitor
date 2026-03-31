@@ -100,11 +100,10 @@ namespace AutopilotMonitor.Functions.Services
                 await CleanupOldDistressReportsAsync();
                 await RecomputePlatformStatsAsync();
 
-                // Backfill and one-time repair tasks run only via manual trigger (RunManualAsync)
+                // Backfill and repair tasks run only via manual trigger (RunManualAsync)
                 // to keep the timer-triggered path lightweight. See RunManualAsync for:
                 // - BackfillSessionIndexAsync (safety net for missing index entries)
-                // - CleanupGhostSessionIndexEntriesAsync (one-time ghost cleanup)
-                // - BackfillTenantOnboardedAtAsync (backfill missing OnboardedAt)
+                // - CleanupGhostSessionIndexEntriesAsync (safety net for ghost entries)
 
                 maintenanceStart.Stop();
                 _logger.LogInformation($"Daily maintenance completed in {maintenanceStart.ElapsedMilliseconds}ms");
@@ -147,18 +146,10 @@ namespace AutopilotMonitor.Functions.Services
                     // Safety net: backfill any sessions missing from SessionsIndex
                     await _maintenanceRepo.BackfillSessionIndexAsync();
 
-                    // One-time cleanup: remove ghost SessionsIndex entries caused by the
+                    // Safety net: remove ghost SessionsIndex entries caused by the
                     // StoreSessionAsync Replace-mode IndexRowKey bug (now fixed).
-                    // TODO: Remove after 2026-06-01
                     await _maintenanceRepo.CleanupGhostSessionIndexEntriesAsync();
 
-                    // Backfill OnboardedAt for tenants that don't have it yet
-                    // TODO: Remove once all tenants have been backfilled
-                    await BackfillTenantOnboardedAtAsync();
-
-                    // Backfill NtpServer for tenants with null/empty value
-                    // TODO: Remove after 2026-06-01
-                    await BackfillNtpServerDefaultAsync();
                 }
 
                 await RecomputePlatformStatsAsync();
@@ -355,105 +346,6 @@ namespace AutopilotMonitor.Functions.Services
             }
         }
 
-        /// <summary>
-        /// Backfills OnboardedAt for tenants that don't have it set yet.
-        /// Derives the value from the earliest TenantAdmin AddedDate for each tenant.
-        /// Self-healing: runs every maintenance cycle, no-ops once all tenants are backfilled.
-        /// </summary>
-        private async Task BackfillTenantOnboardedAtAsync()
-        {
-            _logger.LogInformation("Backfilling OnboardedAt for tenants...");
-
-            try
-            {
-                var allConfigs = await _tenantConfigService.GetAllConfigurationsAsync();
-                var configsWithoutOnboardedAt = allConfigs.Where(c => c.OnboardedAt == null).ToList();
-
-                if (configsWithoutOnboardedAt.Count == 0)
-                {
-                    _logger.LogInformation("All tenants already have OnboardedAt set");
-                    return;
-                }
-
-                int backfilledCount = 0;
-
-                foreach (var config in configsWithoutOnboardedAt)
-                {
-                    try
-                    {
-                        var admins = await _tenantAdminsService.GetTenantAdminsAsync(config.TenantId);
-
-                        if (admins.Count == 0)
-                        {
-                            // No admins yet — use LastUpdated as fallback (config creation date)
-                            config.OnboardedAt = config.LastUpdated;
-                        }
-                        else
-                        {
-                            config.OnboardedAt = admins.Min(a => a.AddedDate);
-                        }
-
-                        await _tenantConfigService.SaveConfigurationAsync(config);
-                        backfilledCount++;
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to backfill OnboardedAt for tenant {TenantId}", config.TenantId);
-                    }
-                }
-
-                _logger.LogInformation("OnboardedAt backfill completed: {Count} tenants updated", backfilledCount);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to backfill OnboardedAt for tenants");
-            }
-        }
-
-        /// <summary>
-        /// Backfills NtpServer for tenants that have null or empty value.
-        /// Sets them to the default "time.windows.com".
-        /// Self-healing: runs every manual maintenance cycle, no-ops once all tenants are backfilled.
-        /// TODO: Remove after 2026-06-01
-        /// </summary>
-        private async Task BackfillNtpServerDefaultAsync()
-        {
-            _logger.LogInformation("Backfilling NtpServer for tenants with missing value...");
-
-            try
-            {
-                var allConfigs = await _tenantConfigService.GetAllConfigurationsAsync();
-                var configsMissingNtp = allConfigs.Where(c => string.IsNullOrEmpty(c.NtpServer)).ToList();
-
-                if (configsMissingNtp.Count == 0)
-                {
-                    _logger.LogInformation("All tenants already have NtpServer set");
-                    return;
-                }
-
-                int backfilledCount = 0;
-
-                foreach (var config in configsMissingNtp)
-                {
-                    try
-                    {
-                        config.NtpServer = "time.windows.com";
-                        await _tenantConfigService.SaveConfigurationAsync(config);
-                        backfilledCount++;
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to backfill NtpServer for tenant {TenantId}", config.TenantId);
-                    }
-                }
-
-                _logger.LogInformation("NtpServer backfill completed: {Count} tenants updated", backfilledCount);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to backfill NtpServer for tenants");
-            }
-        }
 
         /// <summary>
         /// Aggregates metrics for any missed days in the last 7 days, plus yesterday.

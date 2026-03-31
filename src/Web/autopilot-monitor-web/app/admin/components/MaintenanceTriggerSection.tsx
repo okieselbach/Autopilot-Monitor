@@ -96,11 +96,7 @@ export function MaintenanceTriggerSection({
               </li>
               <li className="flex items-start">
                 <span className="text-amber-500 dark:text-amber-400 mr-2">&bull;</span>
-                <span>Clean up ghost SessionsIndex entries <span className="text-xs text-gray-500 dark:text-gray-400">(remove after 2026-06)</span></span>
-              </li>
-              <li className="flex items-start">
-                <span className="text-amber-500 dark:text-amber-400 mr-2">&bull;</span>
-                <span>Backfill tenant OnboardedAt dates <span className="text-xs text-gray-500 dark:text-gray-400">(remove when complete)</span></span>
+                <span>Clean up ghost SessionsIndex entries</span>
               </li>
             </ul>
           </div>
