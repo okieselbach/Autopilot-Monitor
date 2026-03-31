@@ -117,6 +117,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         // True when AAD join status shows a joined device with a real user email
         public bool AadJoinedWithUser { get; set; }
 
+        // True when Autopilot profile indicates Hybrid Azure AD Join (CloudAssignedDomainJoinMethod == 1)
+        public bool IsHybridJoin { get; set; }
+
         // Signal timestamps for audit trail
         public DateTime? EspFirstSeenUtc { get; set; }
         public DateTime? EspFinalExitUtc { get; set; }

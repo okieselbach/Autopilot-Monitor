@@ -391,6 +391,28 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         }
 
         /// <summary>
+        /// Resets Hello tracking state when ESP resumes after a mid-enrollment reboot (hybrid join).
+        /// Stops all running timers and clears Hello state so the timer chain restarts fresh when
+        /// ESP exits again for real.
+        /// </summary>
+        public void ResetForEspResumption()
+        {
+            lock (_stateLock)
+            {
+                _helloWaitTimer?.Dispose();
+                _helloWaitTimer = null;
+                _helloCompletionTimer?.Dispose();
+                _helloCompletionTimer = null;
+
+                _isHelloCompleted = false;
+                _helloWizardStarted = false;
+                _espExitDetected = false;
+                HelloOutcome = null;
+            }
+            _logger.Info("EspAndHelloTracker: Reset for ESP resumption — Hello tracking restarted");
+        }
+
+        /// <summary>
         /// Starts the Hello wait timer. Should be called by EnrollmentTracker when AccountSetup phase exits.
         /// The timer waits for Hello wizard to start (event 62404) within the configured timeout.
         /// If timeout expires without Hello wizard, marks Hello as completed so enrollment can proceed.

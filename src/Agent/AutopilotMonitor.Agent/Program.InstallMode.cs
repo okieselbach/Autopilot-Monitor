@@ -6,6 +6,7 @@ using System.Reflection;
 using AutopilotMonitor.Agent.Core.Configuration;
 using AutopilotMonitor.Agent.Core.Logging;
 using AutopilotMonitor.Shared;
+using Microsoft.Win32;
 
 namespace AutopilotMonitor.Agent
 {
@@ -102,6 +103,21 @@ namespace AutopilotMonitor.Agent
                 }
 
                 logger.Info($"Scheduled Task '{taskName}' started successfully");
+
+                // Write deployment marker — survives self-destruct, prevents ghost re-installs.
+                // Written here (not in bootstrap script) so manual --install also sets it.
+                try
+                {
+                    using (var regKey = Registry.LocalMachine.CreateSubKey(@"SOFTWARE\AutopilotMonitor"))
+                    {
+                        regKey.SetValue("Deployed", DateTime.UtcNow.ToString("O"));
+                    }
+                    logger.Info("Deployment registry marker written (HKLM\\SOFTWARE\\AutopilotMonitor\\Deployed)");
+                }
+                catch (Exception regEx)
+                {
+                    logger.Warning($"Failed to write deployment registry marker: {regEx.Message}");
+                }
 
                 if (consoleMode)
                 {

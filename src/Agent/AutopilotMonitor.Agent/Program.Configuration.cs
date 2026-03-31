@@ -222,6 +222,56 @@ namespace AutopilotMonitor.Agent
         /// </summary>
         static bool CheckEnrollmentCompleteMarker(AgentConfiguration config, AgentLogger logger, bool consoleMode)
         {
+            // Registry guard: if "Deployed" key exists but no active session file,
+            // this is a ghost restart after previous self-destruct. Exit immediately.
+            try
+            {
+                using (var regKey = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\AutopilotMonitor"))
+                {
+                    var deployed = regKey?.GetValue("Deployed") as string;
+                    if (!string.IsNullOrEmpty(deployed))
+                    {
+                        var dataDir = Environment.ExpandEnvironmentVariables(Constants.AgentDataDirectory);
+                        var sessionPersistence = new SessionPersistence(dataDir);
+
+                        if (!sessionPersistence.SessionExists())
+                        {
+                            logger.Info($"Agent was previously deployed ({deployed}) but no active session — ghost restart detected");
+
+                            if (config.SelfDestructOnComplete)
+                            {
+                                logger.Info("Attempting cleanup retry (scheduled task may still be registered)...");
+                                try
+                                {
+                                    using (var service = new MonitoringService(config, logger, GetAgentVersion()))
+                                    {
+                                        service.TriggerCleanup();
+                                    }
+                                    logger.Info("Cleanup retry completed.");
+                                }
+                                catch (Exception cleanupEx)
+                                {
+                                    logger.Warning($"Cleanup retry failed: {cleanupEx.Message}");
+                                }
+                            }
+
+                            if (consoleMode)
+                                Console.WriteLine("Agent was previously deployed but no active session. Exiting.");
+
+                            return true;
+                        }
+
+                        // session.id exists → normal restart (Part 2, crash recovery) → continue
+                        logger.Info($"Deployment marker found ({deployed}) with active session — continuing normally");
+                    }
+                }
+            }
+            catch (Exception regEx)
+            {
+                logger.Warning($"Registry deployment marker check failed: {regEx.Message}");
+            }
+
+            // File-based enrollment-complete marker (original guard)
             var stateDirectory = Environment.ExpandEnvironmentVariables(Constants.StateDirectory);
             var markerPath = Path.Combine(stateDirectory, "enrollment-complete.marker");
 

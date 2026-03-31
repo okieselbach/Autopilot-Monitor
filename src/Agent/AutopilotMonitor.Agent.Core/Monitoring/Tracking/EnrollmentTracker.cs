@@ -72,6 +72,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         private bool _espFinalExitSeen;
         private bool _enrollmentCompleteEmitted;
         private bool _desktopArrived;
+        private bool _isHybridJoin;
         private readonly DateTime _agentStartTimeUtc = DateTime.UtcNow;
 
         // Device-Only ESP detection (Phase 3C)
@@ -189,6 +190,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         {
             _isBootstrapMode = isBootstrapMode;
             _sendTraceEvents = sendTraceEvents;
+            _isHybridJoin = DetectHybridJoinStatic();
             _sessionId = sessionId;
             _tenantId = tenantId;
             _emitEvent = emitEvent;
@@ -359,6 +361,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 _stateData.SkipDeviceStatusPage = _skipDeviceStatusPage;
                 _stateData.AutopilotMode = _autopilotMode;
                 _stateData.AadJoinedWithUser = _aadJoinedWithUser;
+                _stateData.IsHybridJoin = _isHybridJoin;
                 _stateDirty = true;
             }
 

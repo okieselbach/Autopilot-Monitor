@@ -550,6 +550,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 _skipDeviceStatusPage = loaded.SkipDeviceStatusPage;
                 _autopilotMode = loaded.AutopilotMode;
                 _aadJoinedWithUser = loaded.AadJoinedWithUser;
+                // Restore hybrid join flag from persisted state; re-detect as fallback
+                _isHybridJoin = loaded.IsHybridJoin || DetectHybridJoinStatic();
                 _stateData = loaded;
             }
 
@@ -632,6 +634,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             // and OnWaitingForHelloSafetyTimeout) both read _enrollmentCompleteEmitted=false simultaneously.
             bool helloResolved;
             bool espGateBlocked;
+            bool hybridRebootGateBlocked;
             bool alreadyEmitted;
             string enrollmentType;
             bool espEverSeen, espFinalExitSeen, desktopArrived;
@@ -646,6 +649,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     alreadyEmitted = true;
                     helloResolved = false;
                     espGateBlocked = false;
+                    hybridRebootGateBlocked = false;
                     enrollmentType = _enrollmentType;
                     espEverSeen = _espEverSeen;
                     espFinalExitSeen = _espFinalExitSeen;
@@ -674,8 +678,23 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     espGateBlocked = (source == "desktop_arrival" || source == "desktop_hello")
                         && enrollmentType != "v2" && espEverSeen && !espFinalExitSeen;
 
+                    // GUARD 3: Hybrid Join reboot gate
+                    // In hybrid join, ESP exit may be for a mid-enrollment reboot (domain user
+                    // login required). Block esp_hello_composite unless we have stronger confirmation:
+                    // - IME user session completed (strongest signal: IME says enrollment is done)
+                    // - Agent restarted after ESP exit (reboot happened, we survived it)
+                    hybridRebootGateBlocked = false;
+                    if (_isHybridJoin && source == "esp_hello_composite")
+                    {
+                        bool hasImeCompletion = _stateData.ImePatternSeenUtc.HasValue;
+                        bool agentRestartedAfterEspExit = _stateData.EspFinalExitUtc.HasValue
+                            && _agentStartTimeUtc > _stateData.EspFinalExitUtc.Value;
+
+                        hybridRebootGateBlocked = !hasImeCompletion && !agentRestartedAfterEspExit;
+                    }
+
                     // If all guards pass, claim the flag atomically
-                    if (helloResolved && !espGateBlocked)
+                    if (helloResolved && !espGateBlocked && !hybridRebootGateBlocked)
                     {
                         _enrollmentCompleteEmitted = true;
                         _stateData.EnrollmentCompleteEmitted = true;
@@ -698,7 +717,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             _logger.Debug($"EnrollmentTracker: TryEmitEnrollmentComplete('{source}') — evaluating guards " +
                           $"[espEverSeen={espEverSeen}, espFinalExitSeen={espFinalExitSeen}, desktopArrived={desktopArrived}, " +
                           $"helloCompleted={_espAndHelloTracker?.IsHelloCompleted ?? false}, helloPolicyConfigured={_espAndHelloTracker?.IsPolicyConfigured ?? false}, " +
-                          $"enrollmentType={enrollmentType}, autopilotMode={autopilotMode}, isSelfDeploying={isSelfDeploying}, isDeviceOnlyDeployment={isDeviceOnly}]");
+                          $"enrollmentType={enrollmentType}, autopilotMode={autopilotMode}, isSelfDeploying={isSelfDeploying}, isDeviceOnlyDeployment={isDeviceOnly}, " +
+                          $"isHybridJoin={_isHybridJoin}]");
 
             if (!helloResolved)
             {
@@ -711,6 +731,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             {
                 _logger.Info($"EnrollmentTracker: Completion source '{source}' blocked — ESP still active");
                 EmitCompletionCheck(source, "blocked", "esp_active");
+                return;
+            }
+
+            if (hybridRebootGateBlocked)
+            {
+                _logger.Info($"EnrollmentTracker: Completion source '{source}' blocked — hybrid join reboot gate " +
+                             $"(waiting for IME completion or agent restart after ESP exit)");
+                EmitCompletionCheck(source, "blocked", "hybrid_reboot_gate");
                 return;
             }
 

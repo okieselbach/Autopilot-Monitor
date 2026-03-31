@@ -50,6 +50,45 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 return;
             }
 
+            // ESP resumed after final exit (e.g., hybrid join reboot recovery).
+            // If ESP was marked as "final exited" but we see the same phase again from IME,
+            // ESP has resumed after a reboot. Reset completion state so the agent waits for the
+            // real final exit instead of self-destructing prematurely.
+            bool espFinalExitSeen;
+            lock (_stateLock) { espFinalExitSeen = _espFinalExitSeen; }
+
+            if (espFinalExitSeen && string.Equals(phase, lastPhase, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.Info($"EnrollmentTracker: ESP phase '{phase}' re-detected after final exit — " +
+                             "ESP has resumed (hybrid join reboot recovery), resetting completion state");
+                lock (_stateLock)
+                {
+                    _espFinalExitSeen = false;
+                    _stateData.EspFinalExitSeen = false;
+                    _stateData.EspFinalExitUtc = null;
+                }
+                RecordSignal("esp_resumed");
+                _espAndHelloTracker?.ResetForEspResumption();
+
+                _emitEvent(new EnrollmentEvent
+                {
+                    SessionId = _sessionId,
+                    TenantId = _tenantId,
+                    EventType = "esp_resumed",
+                    Severity = EventSeverity.Info,
+                    Source = "EnrollmentTracker",
+                    Phase = EnrollmentPhase.AccountSetup,
+                    Message = $"ESP phase '{phase}' re-detected after final exit — enrollment resumed after reboot",
+                    Data = new Dictionary<string, object>
+                    {
+                        { "espPhase", phase },
+                        { "isHybridJoin", _isHybridJoin }
+                    },
+                    ImmediateUpload = true
+                });
+                return;
+            }
+
             // Only emit event if the phase has actually changed
             if (string.Equals(phase, lastPhase, StringComparison.OrdinalIgnoreCase))
             {

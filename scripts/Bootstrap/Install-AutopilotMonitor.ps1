@@ -31,7 +31,7 @@
 .NOTES
     - Agent is temporary and auto-removes after enrollment
     - Everything in C:\ProgramData\AutopilotMonitor (easy cleanup)
-    - No Registry entries (clean machine after removal)
+    - One Registry key left after removal: HKLM\SOFTWARE\AutopilotMonitor\Deployed (prevents ghost re-installs)
     - Scheduled Task survives reboots during enrollment
     - SHA-256 integrity verification since v1.0.706+
     - IMPORTANT: This script MUST remain pure ASCII (no Unicode/UTF-8 special chars).
@@ -53,9 +53,9 @@
 param(
     [Parameter(Mandatory = $false)]
     [string]$AgentDownloadUrl = "https://autopilotmonitor.blob.core.windows.net/agent/AutopilotMonitor-Agent.zip",
-    
+
     [Parameter(Mandatory = $false)]
-    [int]$MaxOsAgeMinutes = 120
+    [int]$MaxBootstrapWindowHours = 12
 )
 
 # Configuration - Everything in ProgramData for easy cleanup
@@ -103,61 +103,75 @@ function Get-FileMd5Base64 {
 try {
     Write-Log "===== Autopilot Monitor Bootstrap Started ====="
 
-    # -- Pre-flight: Skip installation on already-enrolled devices --
+    # -- Pre-flight: Multi-signal guard to prevent installation on non-provisioning devices --
+    # Layered approach: each guard catches a different scenario.
+    # Guard 1: Ghost re-installs (registry marker from previous deployment)
+    # Guard 2: Productive devices not in OOBE
+    # Guard 3: Productive devices with stale OOBEInProgress flag (real user profile exists)
+    # Guard 4: Ultra edge case (no key, OOBE stuck, no user, but device running too long)
+    # Guard 5: Agent binary already present from a previous run
 
-    # Check 1: OS install date must be within threshold (fresh device)
-    # TODO: issue is the OS might got installed a long time ago but the OOBE just started now (e.g. old image, or re-flash).
-    # Ideally we want to detect the OOBE start time... need to investigate if there's a reliable way to get that (event log? registry? WMI?). 
-    # For now we just check OS install date as a proxy, which should work in most cases except for old images or re-flashed devices.
-    $osInstallDate = (Get-CimInstance Win32_OperatingSystem).InstallDate
-    $osAge = (Get-Date) - $osInstallDate
-    $osAgeMinutesRounded = [int][Math]::Round($osAge.TotalMinutes)
-    Write-Log "OS install date: $osInstallDate (age: ${osAgeMinutesRounded}m)"
-
-    if ($osAge.TotalMinutes -gt $MaxOsAgeMinutes) {
-        Write-Log "SKIP: OS was installed ${osAgeMinutesRounded}m ago (threshold: ${MaxOsAgeMinutes}m). Device is not freshly provisioned."
+    # Guard 1: Agent was already deployed on this device (registry marker survives self-destruct)
+    $deployed = (Get-ItemProperty -Path 'HKLM:\SOFTWARE\AutopilotMonitor' -Name 'Deployed' -ErrorAction SilentlyContinue).Deployed
+    if ($deployed) {
+        Write-Log "SKIP: Agent was previously deployed at $deployed."
         exit 0
     }
 
-    # Check 2: MDM enrollment must not be completed yet
-    $enrollmentPath = "HKLM:\SOFTWARE\Microsoft\Enrollments"
-    $mdmEnrolled = $false
-
-    if (Test-Path $enrollmentPath) {
-        $enrollmentEntries = Get-ChildItem -Path $enrollmentPath -ErrorAction SilentlyContinue |
-            Where-Object { $_.PSChildName -match '^[0-9A-Fa-f\-]{36}$' }
-
-        foreach ($entry in $enrollmentEntries) {
-            $providerID = (Get-ItemProperty -Path $entry.PSPath -Name "ProviderID" -ErrorAction SilentlyContinue).ProviderID
-            if ($providerID) {
-                $mdmEnrolled = $true
-                Write-Log "Found MDM enrollment: ProviderID=$providerID (EnrollmentID=$($entry.PSChildName))"
-                break
-            }
-        }
+    # Guard 2: Device must be in OOBE (= actively provisioning)
+    $oobeInProgress = (Get-ItemProperty -Path 'HKLM:\SYSTEM\Setup' -Name 'OOBEInProgress' -ErrorAction SilentlyContinue).OOBEInProgress
+    Write-Log "OOBEInProgress=$oobeInProgress"
+    if ($oobeInProgress -ne 1) {
+        Write-Log "SKIP: Device is not in OOBE (OOBEInProgress=$oobeInProgress). Not a fresh enrollment."
+        exit 0
     }
 
-    if ($mdmEnrolled) {
-        # Double-check: Is enrollment status tracking showing completed?
-        $espPath = "HKLM:\SOFTWARE\Microsoft\Windows\Autopilot\EnrollmentStatusTracking\Device\Setup"
-        $hasCompleted = (Get-ItemProperty -Path $espPath -Name "HasProvisioningCompleted" -ErrorAction SilentlyContinue).HasProvisioningCompleted
+    # Guard 3: No real user profile should exist yet (catches stale OOBEInProgress on productive devices)
+    # Combines WMI (Win32_UserProfile.Special flag) and filesystem for maximum reliability.
+    $excludePattern = '^(defaultuser\d*|Public|Default( User)?|All Users)$'
 
-        if ($hasCompleted -eq 1) {
-            Write-Log "SKIP: Autopilot enrollment already completed (HasProvisioningCompleted=1). Device is already enrolled."
-            exit 0
-        }
+    $profileNames = @(
+        # WMI/CIM view -- Special flag reliably excludes SYSTEM/LocalService/NetworkService
+        try {
+            Get-CimInstance Win32_UserProfile -ErrorAction Stop |
+                Where-Object { -not $_.Special -and $_.LocalPath -like 'C:\Users\*' } |
+                ForEach-Object { Split-Path $_.LocalPath -Leaf }
+        } catch { Write-Log "INFO: WMI profile query failed, continuing with filesystem check." }
+
+        # Filesystem view -- catches profiles WMI might miss
+        (Get-ChildItem 'C:\Users' -Directory -ErrorAction SilentlyContinue).Name
+    ) | Where-Object { $_ -and $_ -notmatch $excludePattern } |
+        Select-Object -Unique
+
+    if ($profileNames) {
+        $names = ($profileNames | Select-Object -First 3) -join ', '
+        Write-Log "SKIP: Real user profile(s) found ($names). Device appears productive."
+        exit 0
     }
 
-    # Check 3: Is the agent already installed? (leftover from previous run)
+    # Guard 4: Bootstrap window check (ultra edge case: no key, OOBE stuck, no user profiles)
+    # NOT "how long may enrollment take" -- agent handles that internally (6h emergency break).
+    # This is "how old can the OOBE state be before I no longer trust it for initial install".
+    # 12h bootstrap window vs 6h agent emergency break = consistent layered approach.
+    # Sleep/standby does NOT reset uptime -- only real boot/restart does.
+    $lastBoot = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime
+    $uptimeHours = ((Get-Date) - $lastBoot).TotalHours
+    Write-Log "Device uptime: $([int]$uptimeHours)h (last boot: $lastBoot)"
+    if ($uptimeHours -gt $MaxBootstrapWindowHours) {
+        Write-Log "SKIP: Device uptime is $([int]$uptimeHours)h. OOBE state is older than accepted bootstrap window of ${MaxBootstrapWindowHours}h."
+        exit 0
+    }
+
+    # Guard 5: Is the agent already installed? (leftover from previous run)
     if (Test-Path $AgentBinPath) {
         $existingAgent = Get-ChildItem -Path $AgentBinPath -Filter "AutopilotMonitor.Agent.exe" -ErrorAction SilentlyContinue
         if ($existingAgent) {
-            Write-Log "SKIP: Agent already installed at $($existingAgent.FullName). Previous enrollment may have been in progress. Please check if enrollment completed or clean up C:\ProgramData\AutopilotMonitor before re-running."
+            Write-Log "SKIP: Agent already installed at $($existingAgent.FullName)."
             exit 0
         }
     }
 
-    Write-Log "Pre-flight checks passed - device is freshly provisioned and enrollment in progress"
+    Write-Log "Pre-flight checks passed -- device is in OOBE, no prior deployment, no real user profiles"
 
     # Download and extract agent binaries
     $agentExePath = Join-Path $AgentBinPath "AutopilotMonitor.Agent.exe"
