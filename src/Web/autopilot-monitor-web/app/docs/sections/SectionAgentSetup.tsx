@@ -36,7 +36,19 @@ export function SectionAgentSetup() {
               <span className="font-mono text-xs bg-green-100 px-1.5 py-0.5 rounded">Win32_UserProfile.Special</span>{" "}
               ) and filesystem checks under{" "}
               <span className="font-mono text-xs bg-green-100 px-1.5 py-0.5 rounded">C:\Users</span>{" "}
-              — system profiles (defaultuser*, Public, Default) are excluded. Real user profiles indicate the device is already in productive use. This is the primary guard against accidental installation on non-provisioning devices.</span>
+              — system profiles (defaultuser*, Public, Default) are excluded. Real user profiles indicate the device is already in productive use.</span>
+          </li>
+          <li className="flex items-start gap-2">
+            <span className="text-green-600 font-bold mt-0.5 shrink-0">✓</span>
+            <span><strong>No previous user logon:</strong> Checks{" "}
+              <span className="font-mono text-xs bg-green-100 px-1.5 py-0.5 rounded">LastLoggedOnUser</span>{" "}
+              in the LogonUI registry — during Device ESP no real user has logged on yet. A real username indicates the device has been used interactively.</span>
+          </li>
+          <li className="flex items-start gap-2">
+            <span className="text-green-600 font-bold mt-0.5 shrink-0">✓</span>
+            <span><strong>No desktop shell:</strong> Checks if{" "}
+              <span className="font-mono text-xs bg-green-100 px-1.5 py-0.5 rounded">explorer.exe</span>{" "}
+              is running — during Device ESP the enrollment status page is shown instead of the Windows desktop. A running explorer process indicates the device is beyond initial enrollment.</span>
           </li>
           <li className="flex items-start gap-2">
             <span className="text-green-600 font-bold mt-0.5 shrink-0">✓</span>

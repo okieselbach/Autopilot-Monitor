@@ -111,10 +111,12 @@ try {
     # -- Pre-flight: Multi-signal guard to prevent installation on non-provisioning devices --
     # Layered approach: each guard catches a different scenario.
     # Guard 1: Ghost re-installs (registry marker from previous deployment)
-    # Guard 2: Productive devices (real user profile exists — WMI + filesystem)
-    # Guard 3: Bootstrap window expired (device uptime > 12h without agent)
-    # Guard 4: Agent binary already present from a previous run
-    # NOTE: OOBEInProgress is NOT used — it is unreliable (observed =0 during active enrollment).
+    # Guard 2: Productive devices (real user profile exists -- WMI + filesystem)
+    # Guard 3: Productive devices (a real user has logged on before)
+    # Guard 4: Productive devices (explorer.exe running = user desktop active)
+    # Guard 5: Bootstrap window expired (device uptime > 12h without agent)
+    # Guard 6: Agent binary already present from a previous run
+    # NOTE: OOBEInProgress is NOT used -- it is unreliable (observed =0 during active enrollment).
 
     # Guard 1: Agent was already deployed on this device (registry marker survives self-destruct)
     $deployed = (Get-ItemProperty -Path 'HKLM:\SOFTWARE\AutopilotMonitor' -Name 'Deployed' -ErrorAction SilentlyContinue).Deployed
@@ -146,7 +148,20 @@ try {
         exit 0
     }
 
-    # Guard 3: Bootstrap window check (no key, no user profiles, but device running too long)
+    # Guard 3: LastLoggedOnUser -- during Device ESP no real user has logged on yet
+    $lastLoggedOnUser = (Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\LogonUI' -Name 'LastLoggedOnUser' -EA SilentlyContinue).LastLoggedOnUser
+    if ($lastLoggedOnUser -and $lastLoggedOnUser -notmatch 'defaultuser\d*') {
+        Write-Log "SKIP: LastLoggedOnUser found ($lastLoggedOnUser). Device appears productive."
+        exit 0
+    }
+
+    # Guard 4: explorer.exe running -- during Device ESP no desktop shell is active
+    if (Get-Process explorer -ErrorAction SilentlyContinue) {
+        Write-Log "SKIP: explorer.exe is running. Device appears beyond initial enrollment."
+        exit 0
+    }
+
+    # Guard 5: Bootstrap window check (no key, no user profiles, but device running too long)
     # NOT "how long may enrollment take" -- agent handles that internally (6h emergency break).
     # This is "how old can the OOBE state be before I no longer trust it for initial install".
     # 12h bootstrap window vs 6h agent emergency break = consistent layered approach.
@@ -159,7 +174,7 @@ try {
         exit 0
     }
 
-    # Guard 4: Is the agent already installed? (leftover from previous run)
+    # Guard 6: Is the agent already installed? (leftover from previous run)
     if (Test-Path $AgentBinPath) {
         $existingAgent = Get-ChildItem -Path $AgentBinPath -Filter "AutopilotMonitor.Agent.exe" -ErrorAction SilentlyContinue
         if ($existingAgent) {
@@ -168,7 +183,7 @@ try {
         }
     }
 
-    Write-Log "Pre-flight checks passed -- device is in OOBE, no prior deployment, no real user profiles"
+    Write-Log "Pre-flight checks passed -- no prior deployment, no real user profiles, no logged-on user, no explorer"
 
     # Download and extract agent binaries
     $agentExePath = Join-Path $AgentBinPath "AutopilotMonitor.Agent.exe"

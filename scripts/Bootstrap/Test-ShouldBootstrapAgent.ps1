@@ -100,7 +100,27 @@ if ($profileNames) {
     Write-Step -Status 'PASS' -Message 'Guard 2: No real user profiles found (combined WMI/filesystem view).'
 }
 
-# Guard 3: Bootstrap window check
+# Guard 3: LastLoggedOnUser -- during Device ESP no real user has logged on yet
+$lastLoggedOnUser = (Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\LogonUI' -Name 'LastLoggedOnUser' -EA SilentlyContinue).LastLoggedOnUser
+if ($lastLoggedOnUser -and $lastLoggedOnUser -notmatch 'defaultuser\d*') {
+    Write-Step -Status 'SKIP' -Message "Guard 3: LastLoggedOnUser found ($lastLoggedOnUser). Device appears productive."
+    $wouldInstall = $false
+    $reasons.Add("LastLoggedOnUser found: $lastLoggedOnUser")
+} else {
+    Write-Step -Status 'PASS' -Message "Guard 3: No real LastLoggedOnUser (value: '$lastLoggedOnUser')."
+}
+
+# Guard 4: explorer.exe running -- during Device ESP no desktop shell is active
+$explorerRunning = $null -ne (Get-Process explorer -ErrorAction SilentlyContinue)
+if ($explorerRunning) {
+    Write-Step -Status 'SKIP' -Message 'Guard 4: explorer.exe is running. Device appears beyond initial enrollment.'
+    $wouldInstall = $false
+    $reasons.Add('explorer.exe is running')
+} else {
+    Write-Step -Status 'PASS' -Message 'Guard 4: explorer.exe is not running.'
+}
+
+# Guard 5: Bootstrap window check
 # NOT "how long may enrollment take" -- agent handles that internally (6h emergency break).
 # This is "how old can the OOBE state be before I no longer trust it for initial install".
 # 12h bootstrap window vs 6h agent emergency break = consistent layered approach.
@@ -113,24 +133,24 @@ try {
     $uptimeHours = ((Get-Date) - $lastBoot).TotalHours
 
     if ($uptimeHours -gt $MaxBootstrapWindowHours) {
-        Write-Step -Status 'SKIP' -Message "Guard 3: Device uptime is $([int]$uptimeHours)h. Older than accepted bootstrap window of ${MaxBootstrapWindowHours}h."
+        Write-Step -Status 'SKIP' -Message "Guard 5: Device uptime is $([int]$uptimeHours)h. Older than accepted bootstrap window of ${MaxBootstrapWindowHours}h."
         $wouldInstall = $false
         $reasons.Add("Uptime exceeds bootstrap window: $([int]$uptimeHours)h > ${MaxBootstrapWindowHours}h")
     } else {
-        Write-Step -Status 'PASS' -Message "Guard 3: Device uptime is $([int]$uptimeHours)h and within bootstrap window of ${MaxBootstrapWindowHours}h."
+        Write-Step -Status 'PASS' -Message "Guard 5: Device uptime is $([int]$uptimeHours)h and within bootstrap window of ${MaxBootstrapWindowHours}h."
     }
 }
 catch {
-    Write-Step -Status 'WARN' -Message 'Guard 3: Could not determine LastBootUpTime / uptime.'
+    Write-Step -Status 'WARN' -Message 'Guard 5: Could not determine LastBootUpTime / uptime.'
 }
 
-# Guard 4: Agent binary already present
+# Guard 6: Agent binary already present
 if (Test-Path $AgentExePath) {
-    Write-Step -Status 'SKIP' -Message "Guard 4: Agent already installed at '$AgentExePath'."
+    Write-Step -Status 'SKIP' -Message "Guard 6: Agent already installed at '$AgentExePath'."
     $wouldInstall = $false
     $reasons.Add("Agent binary already present: $AgentExePath")
 } else {
-    Write-Step -Status 'PASS' -Message "Guard 4: Agent binary not present at '$AgentExePath'."
+    Write-Step -Status 'PASS' -Message "Guard 6: Agent binary not present at '$AgentExePath'."
 }
 
 Write-Host ''
@@ -157,9 +177,11 @@ if ($reasons.Count -eq 0) {
 Write-Host ''
 Write-Host '=== Raw Values ==='
 Write-Host "Deployed marker           : $deployed"
+Write-Host "DetectedProfileNames      : $($profileNames -join ', ')"
+Write-Host "LastLoggedOnUser          : $lastLoggedOnUser"
+Write-Host "ExplorerRunning           : $explorerRunning"
 Write-Host "MaxBootstrapWindowHours   : $MaxBootstrapWindowHours"
 Write-Host "LastBootUpTime            : $lastBoot"
 Write-Host "UptimeHours               : $([string]$uptimeHours)"
 Write-Host "AgentExePath              : $AgentExePath"
-Write-Host "DetectedProfileNames      : $($profileNames -join ', ')"
 Write-Host ''

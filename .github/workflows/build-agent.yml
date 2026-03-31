@@ -75,6 +75,7 @@ jobs:
         run: |
           dotnet restore src/Agent/AutopilotMonitor.Agent/AutopilotMonitor.Agent.csproj
           dotnet restore src/Agent/AutopilotMonitor.SummaryDialog/AutopilotMonitor.SummaryDialog.csproj
+          dotnet restore src/Agent/AutopilotMonitor.Agent.Core.Tests/AutopilotMonitor.Agent.Core.Tests.csproj
 
       - name: Build Agent
         run: >
@@ -89,6 +90,13 @@ jobs:
           dotnet build src/Agent/AutopilotMonitor.SummaryDialog/AutopilotMonitor.SummaryDialog.csproj
           --configuration Release
           --no-restore
+
+      - name: Run Agent unit tests
+        run: >
+          dotnet test src/Agent/AutopilotMonitor.Agent.Core.Tests/AutopilotMonitor.Agent.Core.Tests.csproj
+          --configuration Release
+          --no-restore
+          --verbosity quiet
 
       - name: Update buildcounter.txt
         if: inputs.build_number == ''
