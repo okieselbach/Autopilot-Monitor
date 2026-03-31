@@ -32,19 +32,15 @@ export function SectionAgentSetup() {
           </li>
           <li className="flex items-start gap-2">
             <span className="text-green-600 font-bold mt-0.5 shrink-0">✓</span>
-            <span><strong>Device is in OOBE:</strong> The bootstrapper checks{" "}
-              <span className="font-mono text-xs bg-green-100 px-1.5 py-0.5 rounded">OOBEInProgress=1</span>{" "}
-              — only devices actively going through the Out-of-Box Experience qualify. Already-productive devices are skipped.</span>
-          </li>
-          <li className="flex items-start gap-2">
-            <span className="text-green-600 font-bold mt-0.5 shrink-0">✓</span>
-            <span><strong>No real user profiles:</strong> Combines WMI and filesystem checks under{" "}
+            <span><strong>No real user profiles:</strong> Combines WMI ({" "}
+              <span className="font-mono text-xs bg-green-100 px-1.5 py-0.5 rounded">Win32_UserProfile.Special</span>{" "}
+              ) and filesystem checks under{" "}
               <span className="font-mono text-xs bg-green-100 px-1.5 py-0.5 rounded">C:\Users</span>{" "}
-              — system profiles (defaultuser*, Public, Default) are excluded. Real user profiles indicate the device is already in use.</span>
+              — system profiles (defaultuser*, Public, Default) are excluded. Real user profiles indicate the device is already in productive use. This is the primary guard against accidental installation on non-provisioning devices.</span>
           </li>
           <li className="flex items-start gap-2">
             <span className="text-green-600 font-bold mt-0.5 shrink-0">✓</span>
-            <span><strong>Within bootstrap window:</strong> Device uptime must be under 12 hours. Prevents installation on devices where OOBE state is stale (e.g. sat powered on overnight). Sleep and standby do not reset this timer.</span>
+            <span><strong>Within bootstrap window:</strong> Device uptime must be under 12 hours. Prevents installation on devices that have been sitting powered on without completing enrollment. Sleep and standby do not reset this timer.</span>
           </li>
           <li className="flex items-start gap-2">
             <span className="text-green-600 font-bold mt-0.5 shrink-0">✓</span>
