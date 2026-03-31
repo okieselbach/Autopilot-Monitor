@@ -192,10 +192,25 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                 {
                     // X-Forwarded-For can contain "client, proxy1, proxy2" — take the first
                     var ip = fwd.Split(',')[0].Trim();
-                    // Strip port if present (e.g., "1.2.3.4:12345")
+
+                    // Handle bracketed IPv6 with port: [::1]:12345
+                    if (ip.StartsWith('['))
+                    {
+                        var closeBracket = ip.IndexOf(']');
+                        if (closeBracket > 0)
+                            ip = ip.Substring(1, closeBracket - 1);
+                        return ip;
+                    }
+
+                    // Bare IPv6 (contains multiple colons): return as-is
+                    if (ip.IndexOf(':') != ip.LastIndexOf(':'))
+                        return ip;
+
+                    // IPv4 with optional port: strip port (e.g., "1.2.3.4:12345")
                     var colonIdx = ip.LastIndexOf(':');
-                    if (colonIdx > 0 && !ip.Contains(']')) // avoid stripping IPv6
+                    if (colonIdx > 0)
                         ip = ip.Substring(0, colonIdx);
+
                     return ip;
                 }
             }

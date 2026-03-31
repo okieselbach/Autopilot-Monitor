@@ -270,6 +270,10 @@ export function registerAdminTools(server: McpServer): void {
   );
 
   // ── Admin Diagnostic Tools ────────────────────────────────────────────
+  // Security note: query_table and query_backend_logs accept arbitrary OData/KQL
+  // expressions. This is by design — these are trusted-admin-only diagnostic tools
+  // gated by GlobalAdmin RBAC on the backend. No client-side filter allowlist is
+  // needed because the backend enforces the same permission boundary.
 
   // Tool 20: list_tables
   server.tool(

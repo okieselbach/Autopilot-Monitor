@@ -23,19 +23,8 @@ export function runWithToken<T>(token: string, fn: () => T): T {
   return tokenStore.run(token, fn);
 }
 
-/**
- * @deprecated Use `runWithToken` instead. Kept for backward compatibility
- * during the transition — sets a fallback global token for code paths that
- * haven't migrated to `runWithToken` yet.
- */
-let _fallbackToken: string | undefined;
-
-export function setCurrentToken(token: string | undefined): void {
-  _fallbackToken = token;
-}
-
 export function getCurrentToken(): string | undefined {
-  return tokenStore.getStore() ?? _fallbackToken;
+  return tokenStore.getStore();
 }
 
 async function apiFetch(path: string, options: RequestInit = {}): Promise<unknown> {
