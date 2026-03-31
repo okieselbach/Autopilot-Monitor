@@ -39,8 +39,8 @@
 
 .CHANGELOG
     2026-03-31  Replaced OS age + MDM pre-flight checks with multi-signal guard:
-                registry deployment marker, OOBE state, WMI/filesystem user profile
-                detection, and 12h bootstrap window. Fixes ghost sessions on hybrid
+                registry deployment marker, WMI/filesystem user profile detection,
+                and 12h bootstrap window. OOBEInProgress dropped (unreliable). Fixes ghost sessions on hybrid
                 join pre-provisioned devices where Intune re-targets the bootstrap
                 script after self-destruct.
     2026-03-30  Fixed non-ASCII characters (em-dashes, Unicode symbols) that broke
@@ -111,10 +111,10 @@ try {
     # -- Pre-flight: Multi-signal guard to prevent installation on non-provisioning devices --
     # Layered approach: each guard catches a different scenario.
     # Guard 1: Ghost re-installs (registry marker from previous deployment)
-    # Guard 2: Productive devices not in OOBE
-    # Guard 3: Productive devices with stale OOBEInProgress flag (real user profile exists)
-    # Guard 4: Ultra edge case (no key, OOBE stuck, no user, but device running too long)
-    # Guard 5: Agent binary already present from a previous run
+    # Guard 2: Productive devices (real user profile exists — WMI + filesystem)
+    # Guard 3: Bootstrap window expired (device uptime > 12h without agent)
+    # Guard 4: Agent binary already present from a previous run
+    # NOTE: OOBEInProgress is NOT used — it is unreliable (observed =0 during active enrollment).
 
     # Guard 1: Agent was already deployed on this device (registry marker survives self-destruct)
     $deployed = (Get-ItemProperty -Path 'HKLM:\SOFTWARE\AutopilotMonitor' -Name 'Deployed' -ErrorAction SilentlyContinue).Deployed
@@ -123,15 +123,7 @@ try {
         exit 0
     }
 
-    # Guard 2: Device must be in OOBE (= actively provisioning)
-    $oobeInProgress = (Get-ItemProperty -Path 'HKLM:\SYSTEM\Setup' -Name 'OOBEInProgress' -ErrorAction SilentlyContinue).OOBEInProgress
-    Write-Log "OOBEInProgress=$oobeInProgress"
-    if ($oobeInProgress -ne 1) {
-        Write-Log "SKIP: Device is not in OOBE (OOBEInProgress=$oobeInProgress). Not a fresh enrollment."
-        exit 0
-    }
-
-    # Guard 3: No real user profile should exist yet (catches stale OOBEInProgress on productive devices)
+    # Guard 2: No real user profile should exist yet (primary productive-device guard)
     # Combines WMI (Win32_UserProfile.Special flag) and filesystem for maximum reliability.
     $excludePattern = '^(defaultuser\d*|Public|Default( User)?|All Users)$'
 
@@ -154,7 +146,7 @@ try {
         exit 0
     }
 
-    # Guard 4: Bootstrap window check (ultra edge case: no key, OOBE stuck, no user profiles)
+    # Guard 3: Bootstrap window check (no key, no user profiles, but device running too long)
     # NOT "how long may enrollment take" -- agent handles that internally (6h emergency break).
     # This is "how old can the OOBE state be before I no longer trust it for initial install".
     # 12h bootstrap window vs 6h agent emergency break = consistent layered approach.
@@ -167,7 +159,7 @@ try {
         exit 0
     }
 
-    # Guard 5: Is the agent already installed? (leftover from previous run)
+    # Guard 4: Is the agent already installed? (leftover from previous run)
     if (Test-Path $AgentBinPath) {
         $existingAgent = Get-ChildItem -Path $AgentBinPath -Filter "AutopilotMonitor.Agent.exe" -ErrorAction SilentlyContinue
         if ($existingAgent) {
