@@ -293,19 +293,9 @@ try {
         throw "Agent install failed with exit code $installExitCode"
     }
     Write-Log "Agent install mode completed successfully"
-
     Write-Log "===== Bootstrap Completed Successfully ====="
-    Write-Log "Agent Path: $AgentBasePath"
-    Write-Log "Scheduled Task: managed by agent (--install)"
-    Write-Log "Agent will monitor enrollment and auto-remove when complete"
-    Write-Log "Bootstrap log: $LogFile"
-    Write-Log ""
-    Write-Log "IMPORTANT: Agent runs as Scheduled Task and will:"
-    Write-Log "  - Generate unique session ID on startup"
-    Write-Log "  - Survive reboots during enrollment"
-    Write-Log "  - Monitor enrollment phases in real-time"
-    Write-Log "  - Upload events to built-in backend URL"
-    Write-Log "  - Self-destruct when enrollment completes"
+
+    Write-Host "AutopilotMonitor agent installed and started successfully."
 
     exit 0
 }
@@ -314,5 +304,10 @@ catch {
     Write-Log "ERROR: $($_.Exception.Message)"
     Write-Log "Stack trace: $($_.ScriptStackTrace)"
     Write-Log "Please check log file: $LogFile"
+
+    $errMsg = "AutopilotMonitor bootstrap failed: $($_.Exception.Message)"
+    if ($errMsg.Length -gt 2048) { $errMsg = $errMsg.Substring(0, 2045) + '...' }
+    [Console]::Error.WriteLine($errMsg)
+
     exit 1
 }
