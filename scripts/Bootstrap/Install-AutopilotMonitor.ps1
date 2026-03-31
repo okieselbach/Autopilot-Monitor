@@ -38,6 +38,11 @@
       PowerShell 5.1 (IME) reads scripts without BOM as ANSI, corrupting multi-byte chars.
 
 .CHANGELOG
+    2026-03-31  Replaced OS age + MDM pre-flight checks with multi-signal guard:
+                registry deployment marker, OOBE state, WMI/filesystem user profile
+                detection, and 12h bootstrap window. Fixes ghost sessions on hybrid
+                join pre-provisioned devices where Intune re-targets the bootstrap
+                script after self-destruct.
     2026-03-30  Fixed non-ASCII characters (em-dashes, Unicode symbols) that broke
                 script parsing under PowerShell 5.1 / IME AgentExecutor
     2026-03-29  Hardened integrity check: SHA-256 verification via version.json

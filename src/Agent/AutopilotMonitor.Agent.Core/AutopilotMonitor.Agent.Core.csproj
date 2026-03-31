@@ -6,6 +6,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>AutopilotMonitor.Agent.Core.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\Shared\AutopilotMonitor.Shared\AutopilotMonitor.Shared.csproj" />
   </ItemGroup>
 

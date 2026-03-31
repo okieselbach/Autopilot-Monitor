@@ -182,7 +182,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         /// Handles both "User" and "DOMAIN\User" formats.
         /// Also matches the pattern DefaultUser* (case-insensitive).
         /// </summary>
-        private static bool IsExcludedUser(string fullUserName)
+        internal static bool IsExcludedUser(string fullUserName)
         {
             if (string.IsNullOrEmpty(fullUserName))
                 return true;
