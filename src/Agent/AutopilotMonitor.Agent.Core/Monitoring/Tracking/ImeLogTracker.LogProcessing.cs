@@ -57,12 +57,56 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
 
                         using (var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 1024, leaveOpen: true))
                         {
+                            // Buffer for multiline CMTrace entries (e.g. AgentExecutor.log
+                            // "write output done. output = ..." spans many lines)
+                            StringBuilder multiLineBuffer = null;
+                            int multiLineCount = 0;
+
                             string line;
                             while ((line = await reader.ReadLineAsync()) != null)
                             {
                                 if (token.IsCancellationRequested) break;
 
-                                // Parse CMTrace format to get the message content
+                                // --- Multiline CMTrace buffering ---
+                                // CMTrace entries: <![LOG[message]LOG]!><time=...>
+                                // When message contains newlines, the entry spans multiple lines.
+                                // We buffer until we find the closing ]LOG]!> tag.
+                                if (multiLineBuffer != null)
+                                {
+                                    // Continuing a multiline entry
+                                    multiLineBuffer.Append('\n').Append(line);
+                                    multiLineCount++;
+
+                                    if (line.Contains("]LOG]!>"))
+                                    {
+                                        // Entry complete — use the assembled line
+                                        line = multiLineBuffer.ToString();
+                                        multiLineBuffer = null;
+                                        multiLineCount = 0;
+                                    }
+                                    else if (multiLineCount >= MaxMultiLineBufferLines)
+                                    {
+                                        // Safety limit — discard to prevent unbounded memory usage
+                                        _logger.Debug($"ImeLogTracker: discarding multiline CMTrace buffer after {multiLineCount} lines (corrupt entry?)");
+                                        multiLineBuffer = null;
+                                        multiLineCount = 0;
+                                        continue;
+                                    }
+                                    else
+                                    {
+                                        // Still accumulating — read next line
+                                        continue;
+                                    }
+                                }
+                                else if (line.StartsWith("<![LOG[") && !line.Contains("]LOG]!>"))
+                                {
+                                    // Start of a multiline CMTrace entry
+                                    multiLineBuffer = new StringBuilder(line);
+                                    multiLineCount = 1;
+                                    continue;
+                                }
+
+                                // --- Normal processing (single-line or completed multiline) ---
                                 CmTraceLogEntry entry;
                                 string messageToMatch;
                                 if (CmTraceLogParser.TryParseLine(line, out entry))

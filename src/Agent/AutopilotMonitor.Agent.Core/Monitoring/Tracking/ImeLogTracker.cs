@@ -100,6 +100,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             new Dictionary<string, ScriptExecutionState>(StringComparer.OrdinalIgnoreCase);
         private string _lastPlatformScriptPolicyId;
         private const int MaxScriptOutputLength = 2048;
+        private const int MaxMultiLineBufferLines = 100;
 
         // Set synchronously during HandlePatternMatch so callbacks can read it
         public string LastMatchedPatternId { get; private set; }
