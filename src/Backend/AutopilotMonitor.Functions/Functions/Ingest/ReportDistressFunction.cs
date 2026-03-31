@@ -35,17 +35,18 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
         private readonly TelemetryClient _telemetryClient;
 
         // Strict limits for the unauthenticated endpoint
-        private const int MaxContentLength = 1024;
-        private const int MaxStringField64 = 64;
-        private const int MaxStringField32 = 32;
-        private const int MaxMessageLength = 256;
-        private static readonly TimeSpan MaxTimestampAge = TimeSpan.FromHours(24);
+        internal const int MaxContentLength = 1024;
+        internal const int MaxStringField64 = 64;
+        internal const int MaxStringField32 = 32;
+        internal const int MaxMessageLength = 256;
+        internal static readonly TimeSpan MaxTimestampAge = TimeSpan.FromHours(24);
+        internal static readonly TimeSpan MaxTimestampFuture = TimeSpan.FromMinutes(5);
 
         // Strip control characters (except common whitespace)
-        private static readonly Regex ControlChars = new Regex(@"[\x00-\x08\x0B\x0C\x0E-\x1F]", RegexOptions.Compiled);
+        internal static readonly Regex ControlChars = new Regex(@"[\x00-\x08\x0B\x0C\x0E-\x1F]", RegexOptions.Compiled);
 
         // Simple GUID format check (avoids injection)
-        private static readonly Regex GuidPattern = new Regex(
+        internal static readonly Regex GuidPattern = new Regex(
             @"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
             RegexOptions.Compiled);
 
@@ -122,8 +123,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                     return req.CreateResponse(HttpStatusCode.OK);
 
                 // Validate timestamp (reject stale/future)
-                var age = DateTime.UtcNow - report.Timestamp;
-                if (age < TimeSpan.FromMinutes(-5) || age > MaxTimestampAge)
+                if (!IsDistressTimestampValid(report.Timestamp, DateTime.UtcNow))
                     return req.CreateResponse(HttpStatusCode.OK);
 
                 // Sanitize strings
@@ -187,37 +187,58 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
         {
             if (req.Headers.TryGetValues("X-Forwarded-For", out var fwdValues))
             {
-                var fwd = fwdValues.FirstOrDefault();
-                if (!string.IsNullOrEmpty(fwd))
-                {
-                    // X-Forwarded-For can contain "client, proxy1, proxy2" — take the first
-                    var ip = fwd.Split(',')[0].Trim();
-
-                    // Handle bracketed IPv6 with port: [::1]:12345
-                    if (ip.StartsWith('['))
-                    {
-                        var closeBracket = ip.IndexOf(']');
-                        if (closeBracket > 0)
-                            ip = ip.Substring(1, closeBracket - 1);
-                        return ip;
-                    }
-
-                    // Bare IPv6 (contains multiple colons): return as-is
-                    if (ip.IndexOf(':') != ip.LastIndexOf(':'))
-                        return ip;
-
-                    // IPv4 with optional port: strip port (e.g., "1.2.3.4:12345")
-                    var colonIdx = ip.LastIndexOf(':');
-                    if (colonIdx > 0)
-                        ip = ip.Substring(0, colonIdx);
-
-                    return ip;
-                }
+                return ParseIpFromForwardedFor(fwdValues.FirstOrDefault());
             }
             return "unknown";
         }
 
-        private static string? Sanitize(string? value, int maxLength)
+        /// <summary>
+        /// Parses client IP from X-Forwarded-For header value.
+        /// Handles IPv4 with port, bracketed IPv6, bare IPv6, multiple proxies.
+        /// </summary>
+        internal static string ParseIpFromForwardedFor(string? forwardedFor)
+        {
+            if (string.IsNullOrEmpty(forwardedFor))
+                return "unknown";
+
+            // X-Forwarded-For can contain "client, proxy1, proxy2" — take the first
+            var ip = forwardedFor.Split(',')[0].Trim();
+
+            if (string.IsNullOrEmpty(ip))
+                return "unknown";
+
+            // Handle bracketed IPv6 with port: [::1]:12345
+            if (ip.StartsWith('['))
+            {
+                var closeBracket = ip.IndexOf(']');
+                if (closeBracket > 0)
+                    ip = ip.Substring(1, closeBracket - 1);
+                return ip;
+            }
+
+            // Bare IPv6 (contains multiple colons): return as-is
+            if (ip.IndexOf(':') != ip.LastIndexOf(':'))
+                return ip;
+
+            // IPv4 with optional port: strip port (e.g., "1.2.3.4:12345")
+            var colonIdx = ip.LastIndexOf(':');
+            if (colonIdx > 0)
+                ip = ip.Substring(0, colonIdx);
+
+            return ip;
+        }
+
+        /// <summary>
+        /// Validates that a distress report timestamp is within acceptable range.
+        /// Rejects timestamps older than 24 hours or more than 5 minutes in the future.
+        /// </summary>
+        internal static bool IsDistressTimestampValid(DateTime reportTimestamp, DateTime utcNow)
+        {
+            var age = utcNow - reportTimestamp;
+            return age >= -MaxTimestampFuture && age <= MaxTimestampAge;
+        }
+
+        internal static string? Sanitize(string? value, int maxLength)
         {
             if (string.IsNullOrEmpty(value)) return null;
             // Strip control characters
