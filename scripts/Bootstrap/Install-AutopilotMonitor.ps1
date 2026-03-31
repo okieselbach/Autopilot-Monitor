@@ -295,8 +295,6 @@ try {
     Write-Log "Agent install mode completed successfully"
     Write-Log "===== Bootstrap Completed Successfully ====="
 
-    Write-Host "AutopilotMonitor agent installed and started successfully."
-
     exit 0
 }
 catch {
@@ -305,8 +303,9 @@ catch {
     Write-Log "Stack trace: $($_.ScriptStackTrace)"
     Write-Log "Please check log file: $LogFile"
 
+    # some errors are captured by Intune but not fully visible in the UI (truncated, no stack trace), so also write critical info to stderr for better visibility.
     $errMsg = "AutopilotMonitor bootstrap failed: $($_.Exception.Message)"
-    if ($errMsg.Length -gt 2048) { $errMsg = $errMsg.Substring(0, 2045) + '...' }
+    if ($errMsg.Length -gt 2048) { $errMsg = $errMsg.Substring(0, 1045) + '...' }
     [Console]::Error.WriteLine($errMsg)
 
     exit 1
