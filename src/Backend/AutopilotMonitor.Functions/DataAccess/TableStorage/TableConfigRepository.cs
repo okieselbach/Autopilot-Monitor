@@ -464,7 +464,7 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                 RebootDelaySeconds = entity.GetInt32("RebootDelaySeconds"),
                 EnableGeoLocation = entity.GetBoolean("EnableGeoLocation"),
                 EnableTimezoneAutoSet = entity.GetBoolean("EnableTimezoneAutoSet"),
-                NtpServer = entity.GetString("NtpServer") ?? "time.windows.com",
+                NtpServer = string.IsNullOrWhiteSpace(entity.GetString("NtpServer")) ? "time.windows.com" : entity.GetString("NtpServer"),
                 EnableImeMatchLog = entity.GetBoolean("EnableImeMatchLog"),
                 LogLevel = entity.GetString("LogLevel"),
                 MaxBatchSize = entity.GetInt32("MaxBatchSize"),

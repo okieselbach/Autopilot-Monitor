@@ -437,7 +437,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         {
             try
             {
-                var ntpServer = _configuration.NtpServer ?? "time.windows.com";
+                var ntpServer = string.IsNullOrEmpty(_configuration.NtpServer) ? "time.windows.com" : _configuration.NtpServer;
                 var result = NtpTimeCheckService.CheckTime(ntpServer, _logger);
 
                 if (result.Success)

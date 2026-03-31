@@ -155,6 +155,10 @@ namespace AutopilotMonitor.Functions.Services
                     // Backfill OnboardedAt for tenants that don't have it yet
                     // TODO: Remove once all tenants have been backfilled
                     await BackfillTenantOnboardedAtAsync();
+
+                    // Backfill NtpServer for tenants with null/empty value
+                    // TODO: Remove after 2026-06-01
+                    await BackfillNtpServerDefaultAsync();
                 }
 
                 await RecomputePlatformStatsAsync();
@@ -403,6 +407,51 @@ namespace AutopilotMonitor.Functions.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to backfill OnboardedAt for tenants");
+            }
+        }
+
+        /// <summary>
+        /// Backfills NtpServer for tenants that have null or empty value.
+        /// Sets them to the default "time.windows.com".
+        /// Self-healing: runs every manual maintenance cycle, no-ops once all tenants are backfilled.
+        /// TODO: Remove after 2026-06-01
+        /// </summary>
+        private async Task BackfillNtpServerDefaultAsync()
+        {
+            _logger.LogInformation("Backfilling NtpServer for tenants with missing value...");
+
+            try
+            {
+                var allConfigs = await _tenantConfigService.GetAllConfigurationsAsync();
+                var configsMissingNtp = allConfigs.Where(c => string.IsNullOrEmpty(c.NtpServer)).ToList();
+
+                if (configsMissingNtp.Count == 0)
+                {
+                    _logger.LogInformation("All tenants already have NtpServer set");
+                    return;
+                }
+
+                int backfilledCount = 0;
+
+                foreach (var config in configsMissingNtp)
+                {
+                    try
+                    {
+                        config.NtpServer = "time.windows.com";
+                        await _tenantConfigService.SaveConfigurationAsync(config);
+                        backfilledCount++;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to backfill NtpServer for tenant {TenantId}", config.TenantId);
+                    }
+                }
+
+                _logger.LogInformation("NtpServer backfill completed: {Count} tenants updated", backfilledCount);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to backfill NtpServer for tenants");
             }
         }
 

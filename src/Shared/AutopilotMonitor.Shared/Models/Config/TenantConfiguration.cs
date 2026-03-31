@@ -545,7 +545,8 @@ namespace AutopilotMonitor.Shared.Models
                 SelfDestructOnComplete = true,
                 KeepLogFile = false,
                 ShowScriptOutput = true,
-                OnboardedAt = DateTime.UtcNow
+                OnboardedAt = DateTime.UtcNow,
+                NtpServer = "time.windows.com"
             };
         }
     }
