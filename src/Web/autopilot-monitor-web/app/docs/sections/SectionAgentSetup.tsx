@@ -26,22 +26,29 @@ export function SectionAgentSetup() {
         <ul className="space-y-1.5 ml-1">
           <li className="flex items-start gap-2">
             <span className="text-green-600 font-bold mt-0.5 shrink-0">✓</span>
-            <div>
-              <span><strong>Fresh OS install:</strong> The OS installation date must be within the threshold (default: 120 minutes). Devices enrolled weeks or months ago fail this check immediately.</span>
-              <p className="mt-1 text-green-800">
-                If you have devices that were imaged earlier and sat in storage before deployment, adjust the threshold via the script parameter{" "}
-                <span className="font-mono text-xs bg-green-100 px-1.5 py-0.5 rounded">MaxOsAgeMinutes</span>{" "}
-                at the top of the script — e.g. set it to <span className="font-mono text-xs bg-green-100 px-1.5 py-0.5 rounded">2880</span> for 48 hours.
-              </p>
-            </div>
+            <span><strong>No previous deployment:</strong> A registry marker{" "}
+              <span className="font-mono text-xs bg-green-100 px-1.5 py-0.5 rounded">HKLM:\SOFTWARE\AutopilotMonitor\Deployed</span>{" "}
+              survives agent self-destruct. If the agent was already deployed once, the device is skipped permanently.</span>
           </li>
           <li className="flex items-start gap-2">
             <span className="text-green-600 font-bold mt-0.5 shrink-0">✓</span>
-            <span><strong>MDM enrollment not yet complete:</strong> If the device is already fully MDM-enrolled, the script exits without installing anything.</span>
+            <span><strong>Device is in OOBE:</strong> The bootstrapper checks{" "}
+              <span className="font-mono text-xs bg-green-100 px-1.5 py-0.5 rounded">OOBEInProgress=1</span>{" "}
+              — only devices actively going through the Out-of-Box Experience qualify. Already-productive devices are skipped.</span>
           </li>
           <li className="flex items-start gap-2">
             <span className="text-green-600 font-bold mt-0.5 shrink-0">✓</span>
-            <span><strong>No existing agent:</strong> If a previous agent installation is detected (leftover from a prior run), the script skips re-installation.</span>
+            <span><strong>No real user profiles:</strong> Combines WMI and filesystem checks under{" "}
+              <span className="font-mono text-xs bg-green-100 px-1.5 py-0.5 rounded">C:\Users</span>{" "}
+              — system profiles (defaultuser*, Public, Default) are excluded. Real user profiles indicate the device is already in use.</span>
+          </li>
+          <li className="flex items-start gap-2">
+            <span className="text-green-600 font-bold mt-0.5 shrink-0">✓</span>
+            <span><strong>Within bootstrap window:</strong> Device uptime must be under 12 hours. Prevents installation on devices where OOBE state is stale (e.g. sat powered on overnight). Sleep and standby do not reset this timer.</span>
+          </li>
+          <li className="flex items-start gap-2">
+            <span className="text-green-600 font-bold mt-0.5 shrink-0">✓</span>
+            <span><strong>Agent not already installed:</strong> If the agent binary is already present at the expected path, the script skips re-installation.</span>
           </li>
         </ul>
         <p className="mt-3 text-green-800">
@@ -49,6 +56,47 @@ export function SectionAgentSetup() {
           uninstalls itself and removes the scheduled task. It only exists on the device for the duration of the
           enrollment process.
         </p>
+        <div className="mt-4 pt-4 border-t border-green-200">
+          <p className="font-semibold mb-1 flex items-center gap-2">
+            <svg className="w-4 h-4 text-green-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+            </svg>
+            Test it yourself: Dry-run before deployment
+          </p>
+          <p className="text-green-800 mb-2">
+            Want to verify which devices would receive the agent? Run this read-only check in PowerShell on any
+            machine — it evaluates all bootstrap guards and transparently reports the install decision.
+            No changes are made, only read operations:
+          </p>
+          <div className="bg-green-100 rounded px-3 py-2 font-mono text-xs select-all mb-2">
+            irm &apos;https://autopilotmonitor.blob.core.windows.net/agent/Test-ShouldBootstrapAgent.ps1&apos; | iex
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <a
+              href="https://github.com/okieselbach/Autopilot-Monitor/blob/main/scripts/Bootstrap/Test-ShouldBootstrapAgent.ps1"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 px-3 py-1.5 bg-green-700 hover:bg-green-800 text-white text-xs font-medium rounded-lg transition-colors"
+            >
+              <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" />
+              </svg>
+              Test-ShouldBootstrapAgent.ps1
+            </a>
+            <a
+              href="https://raw.githubusercontent.com/okieselbach/Autopilot-Monitor/refs/heads/main/scripts/Bootstrap/Test-ShouldBootstrapAgent.ps1"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-green-700 hover:text-green-900 text-xs font-medium rounded-md transition-colors"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+              </svg>
+              Raw script
+            </a>
+          </div>
+        </div>
       </div>
 
       <ol className="space-y-5">

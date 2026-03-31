@@ -189,6 +189,17 @@ jobs:
           Invoke-RestMethod -Uri $versionBlobUrl -Method Put -Headers $versionHeaders -Body $versionContent
           Write-Host "version.json uploaded successfully"
 
+          # Upload Test-ShouldBootstrapAgent.ps1 (dry-run bootstrap guard test)
+          $testScriptBlobUrl = "$containerUrl/Test-ShouldBootstrapAgent.ps1?$sasToken"
+          $testScriptContent = Get-Content "scripts/Bootstrap/Test-ShouldBootstrapAgent.ps1" -Raw
+          $testScriptHeaders = @{
+            "x-ms-blob-type" = "BlockBlob"
+            "Content-Type"   = "text/plain; charset=utf-8"
+          }
+          Write-Host "Uploading Test-ShouldBootstrapAgent.ps1..."
+          Invoke-RestMethod -Uri $testScriptBlobUrl -Method Put -Headers $testScriptHeaders -Body $testScriptContent
+          Write-Host "Test-ShouldBootstrapAgent.ps1 uploaded successfully"
+
           # Update AdminConfiguration in Table Storage with latest agent hash
           $tableSasToken = "${{ secrets.AZURE_TABLE_ADMIN_SAS_TOKEN }}"
           if ([string]::IsNullOrEmpty($tableSasToken) -or $tableSasToken -eq "XXX") {
