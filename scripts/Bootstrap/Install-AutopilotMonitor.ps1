@@ -8,7 +8,7 @@
     1. Creates a unique session ID for this enrollment
     2. Downloads the monitoring agent binaries
     3. Verifies integrity via SHA-256 hash from version.json
-    4. Installs agent binaries (agent uses built-in backend URL or CLI override)
+    4. Installs agent binaries (agent uses built-in backend URL)
     5. Registers agent as Scheduled Task (runs on computer startup)
     6. Agent self-destructs when enrollment completes
 
@@ -40,9 +40,7 @@
 .CHANGELOG
     2026-03-31  Replaced OS age + MDM pre-flight checks with multi-signal guard:
                 registry deployment marker, WMI/filesystem user profile detection,
-                and 12h bootstrap window. OOBEInProgress dropped (unreliable). Fixes ghost sessions on hybrid
-                join pre-provisioned devices where Intune re-targets the bootstrap
-                script after self-destruct.
+                lastloggedonUser set, explorer.exe running, and 12h bootstrap window. 
     2026-03-30  Fixed non-ASCII characters (em-dashes, Unicode symbols) that broke
                 script parsing under PowerShell 5.1 / IME AgentExecutor
     2026-03-29  Hardened integrity check: SHA-256 verification via version.json
