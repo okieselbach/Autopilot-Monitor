@@ -28,7 +28,7 @@ export function SectionAgentSetup() {
             <span className="text-green-600 font-bold mt-0.5 shrink-0">✓</span>
             <span><strong>No previous deployment:</strong> A registry marker{" "}
               <span className="font-mono text-xs bg-green-100 px-1.5 py-0.5 rounded">HKLM:\SOFTWARE\AutopilotMonitor\Deployed</span>{" "}
-              survives agent self-destruct. If the agent was already deployed once, the device is skipped permanently.</span>
+              is the only artifact that survives agent self-destruct — everything else is removed. This marker acts as a critical security gate that permanently prevents repeated execution of the bootstrapper and agent on the same device.</span>
           </li>
           <li className="flex items-start gap-2">
             <span className="text-green-600 font-bold mt-0.5 shrink-0">✓</span>
