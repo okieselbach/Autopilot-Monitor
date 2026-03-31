@@ -46,12 +46,6 @@ export function SectionAgentSetup() {
           </li>
           <li className="flex items-start gap-2">
             <span className="text-green-600 font-bold mt-0.5 shrink-0">✓</span>
-            <span><strong>No desktop shell:</strong> Checks if{" "}
-              <span className="font-mono text-xs bg-green-100 px-1.5 py-0.5 rounded">explorer.exe</span>{" "}
-              is running — during Device ESP the enrollment status page is shown instead of the Windows desktop. A running explorer process indicates the device is beyond initial enrollment.</span>
-          </li>
-          <li className="flex items-start gap-2">
-            <span className="text-green-600 font-bold mt-0.5 shrink-0">✓</span>
             <span><strong>Within bootstrap window:</strong> Device uptime must be under 12 hours. Prevents installation on devices that have been sitting powered on without completing enrollment. Sleep and standby do not reset this timer.</span>
           </li>
           <li className="flex items-start gap-2">
