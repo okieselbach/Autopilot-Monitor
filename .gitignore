@@ -100,6 +100,7 @@ tmp/
 
 # Claude Code temporary files
 tmpclaude-*-cwd
+.claude/worktrees/
 
 # Claude skills and scripts are now in a private submodule (.claude/commands/)
 # No individual file ignores needed — the submodule handles everything
