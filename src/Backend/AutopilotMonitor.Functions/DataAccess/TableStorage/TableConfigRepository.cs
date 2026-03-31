@@ -397,6 +397,8 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                 { "RebootOnComplete", config.RebootOnComplete },
                 { "RebootDelaySeconds", config.RebootDelaySeconds },
                 { "EnableGeoLocation", config.EnableGeoLocation },
+                { "EnableTimezoneAutoSet", config.EnableTimezoneAutoSet },
+                { "NtpServer", config.NtpServer },
                 { "EnableImeMatchLog", config.EnableImeMatchLog },
                 { "LogLevel", config.LogLevel },
                 { "MaxBatchSize", config.MaxBatchSize },
@@ -424,7 +426,8 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                 { "BootstrapTokenEnabled", config.BootstrapTokenEnabled },
                 { "UnrestrictedModeEnabled", config.UnrestrictedModeEnabled },
                 { "UnrestrictedMode", config.UnrestrictedMode },
-                { "OnboardedAt", config.OnboardedAt }
+                { "OnboardedAt", config.OnboardedAt },
+                { "PlanTier", config.PlanTier }
             };
 
             return entity;
@@ -460,6 +463,8 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                 RebootOnComplete = entity.GetBoolean("RebootOnComplete"),
                 RebootDelaySeconds = entity.GetInt32("RebootDelaySeconds"),
                 EnableGeoLocation = entity.GetBoolean("EnableGeoLocation"),
+                EnableTimezoneAutoSet = entity.GetBoolean("EnableTimezoneAutoSet"),
+                NtpServer = entity.GetString("NtpServer") ?? "",
                 EnableImeMatchLog = entity.GetBoolean("EnableImeMatchLog"),
                 LogLevel = entity.GetString("LogLevel"),
                 MaxBatchSize = entity.GetInt32("MaxBatchSize"),
@@ -487,7 +492,8 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                 BootstrapTokenEnabled = entity.GetBoolean("BootstrapTokenEnabled") ?? false,
                 UnrestrictedModeEnabled = entity.GetBoolean("UnrestrictedModeEnabled") ?? false,
                 UnrestrictedMode = entity.GetBoolean("UnrestrictedMode") ?? false,
-                OnboardedAt = entity.GetDateTime("OnboardedAt")
+                OnboardedAt = entity.GetDateTime("OnboardedAt"),
+                PlanTier = entity.GetString("PlanTier") ?? "free"
             };
         }
 
