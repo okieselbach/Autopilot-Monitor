@@ -16,6 +16,7 @@ import { StatsCard } from "./components/StatsCards";
 import { WelcomeMessage } from "./components/WelcomeMessage";
 import { SessionTable } from "./components/SessionTable";
 import { DeleteConfirmModal, BlockConfirmModal } from "./components/ConfirmationModals";
+import TipOfTheDay from "./components/TipOfTheDay";
 import { useAdminMode } from "@/hooks/useAdminMode";
 import { useDeleteSession } from "./hooks/useDeleteSession";
 import { useBlockDevice } from "./hooks/useBlockDevice";
@@ -678,6 +679,8 @@ export default function Home() {
               color="red"
             />
           </div>
+
+          <TipOfTheDay />
 
           {/* Welcome message - only show when no sessions */}
           {sessions.length === 0 && <WelcomeMessage />}
