@@ -287,7 +287,7 @@ export function SessionTable({
   const colSpan = activeColumns.length;
 
   return (
-    <div className="mt-8 bg-white shadow rounded-lg p-6">
+    <div className="mt-4 bg-white shadow rounded-lg p-6">
       <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
         <h2 className="text-xl font-semibold text-gray-900">
           Sessions ({sessions.length}{hasMore ? '+' : ''})
