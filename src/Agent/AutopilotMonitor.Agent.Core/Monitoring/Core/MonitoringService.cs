@@ -78,6 +78,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         private Timer _maxLifetimeTimer;
         private readonly DateTime _agentStartTimeUtc = DateTime.UtcNow;
         private bool _enrollmentTerminalEventSeen;
+        private bool _isWhiteGlovePart2;
 
         // Admin override detected during session registration (agent restart after admin action)
         private string _pendingAdminAction;
@@ -308,6 +309,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             // emit a whiteglove_resumed event so the backend transitions Pending → InProgress.
             if (_sessionPersistence.IsWhiteGloveResume())
             {
+                _isWhiteGlovePart2 = true;
                 _logger.Info("WhiteGlove Part 2 detected — emitting whiteglove_resumed event");
                 EmitEvent(new EnrollmentEvent
                 {

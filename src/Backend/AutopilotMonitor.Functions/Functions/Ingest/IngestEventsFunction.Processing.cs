@@ -296,8 +296,19 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                         }
                     }
 
+                    // Detect White Glove part tag from inventory events (1 = pre-provisioning, 2 = user enrollment)
+                    int? whiteGlovePart = null;
+                    var firstShutdownChunk = inventoryChunks.FirstOrDefault();
+                    if (firstShutdownChunk?.Data != null &&
+                        firstShutdownChunk.Data.TryGetValue("whiteglove_part", out var wgPartObj))
+                    {
+                        whiteGlovePart = Convert.ToInt32(wgPartObj);
+                    }
+
                     if (allInventoryItems.Count > 0)
                     {
+                        var capturedWhiteGlovePart = whiteGlovePart;
+
                         _ = Task.Run(async () =>
                         {
                             try
@@ -312,9 +323,48 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
 
                                 if (reportData != null)
                                 {
+                                    // Tag findings with phase label for White Glove scenarios
+                                    var phaseLabel = capturedWhiteGlovePart == 1 ? "device_setup"
+                                        : capturedWhiteGlovePart == 2 ? "user_enrollment"
+                                        : (string?)null;
+
+                                    if (phaseLabel != null && reportData.ContainsKey("findings")
+                                        && reportData["findings"] is List<Dictionary<string, object>> tagFindings)
+                                    {
+                                        foreach (var f in tagFindings)
+                                            f.TryAdd("phase", phaseLabel);
+                                    }
+
+                                    // White Glove Part 2: merge with existing Part 1 report
+                                    if (capturedWhiteGlovePart == 2)
+                                    {
+                                        try
+                                        {
+                                            var existingReport = await _vulnRepo.GetVulnerabilityReportAsync(
+                                                capturedTenantId, capturedSessionId);
+                                            if (existingReport != null)
+                                            {
+                                                reportData = VulnerabilityCorrelationService.MergeReports(
+                                                    existingReport, reportData,
+                                                    existingPhaseLabel: "device_setup",
+                                                    newPhaseLabel: "user_enrollment");
+                                                _logger.LogInformation(
+                                                    "{Prefix} WhiteGlove Part 2: merged vulnerability report with Part 1 findings",
+                                                    capturedPrefix);
+                                            }
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            _logger.LogWarning(ex,
+                                                "{Prefix} Failed to load Part 1 report for merge (storing Part 2 standalone)",
+                                                capturedPrefix);
+                                        }
+                                    }
+
                                     await _vulnRepo.StoreVulnerabilityReportAsync(
                                         capturedTenantId, capturedSessionId, reportData);
-                                    _logger.LogInformation("{Prefix} Vulnerability correlation complete (async)", capturedPrefix);
+                                    _logger.LogInformation("{Prefix} Vulnerability correlation complete (async, whiteGlovePart={Part})",
+                                        capturedPrefix, capturedWhiteGlovePart?.ToString() ?? "none");
 
                                     // Update CveIndex for searchable CVE queries
                                     var findings = reportData.ContainsKey("findings")

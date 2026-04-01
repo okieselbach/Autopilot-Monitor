@@ -510,16 +510,29 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         /// </summary>
         private void RunShutdownAnalyzers()
         {
+            RunShutdownAnalyzers(EnrollmentPhase.Complete, whiteGlovePart: null);
+        }
+
+        /// <summary>
+        /// Phase-aware shutdown analyzers. For SoftwareInventoryAnalyzer the phase and
+        /// whiteGlovePart are forwarded so the emitted events can be tagged for backend
+        /// merge logic (Part 1 = pre-provisioning, Part 2 = user enrollment).
+        /// </summary>
+        private void RunShutdownAnalyzers(EnrollmentPhase phase, int? whiteGlovePart)
+        {
             if (_analyzers.Count == 0)
                 return;
 
-            _logger.Info($"Running {_analyzers.Count} shutdown analyzer(s)");
+            _logger.Info($"Running {_analyzers.Count} shutdown analyzer(s) (phase={phase}, whiteGlovePart={whiteGlovePart?.ToString() ?? "none"})");
 
             foreach (var analyzer in _analyzers)
             {
                 try
                 {
-                    analyzer.AnalyzeAtShutdown();
+                    if (analyzer is Analyzers.SoftwareInventoryAnalyzer softwareAnalyzer)
+                        softwareAnalyzer.AnalyzeAtShutdown(phase, whiteGlovePart);
+                    else
+                        analyzer.AnalyzeAtShutdown();
                 }
                 catch (Exception ex)
                 {

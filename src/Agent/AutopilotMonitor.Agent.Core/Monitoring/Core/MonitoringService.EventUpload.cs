@@ -585,8 +585,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 StopEventCollectors();
                 _spool.StopWatching();
 
-                // Step 1.5: Run shutdown analyzers to capture end-state (delta from startup)
-                RunShutdownAnalyzers();
+                // Step 1.5: Run shutdown analyzers to capture end-state (delta from startup).
+                // In WhiteGlove Part 2, tag events so the backend merges findings with Part 1.
+                RunShutdownAnalyzers(EnrollmentPhase.Complete, _isWhiteGlovePart2 ? 2 : null);
 
                 // Step 2: Upload all remaining events (includes analyzer findings)
                 _logger.Info("Uploading final events...");
@@ -677,6 +678,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             try
             {
                 _logger.Info("===== WHITEGLOVE COMPLETE - Starting graceful shutdown sequence =====");
+
+                // Step 0: Run shutdown analyzers to capture software inventory delta for pre-provisioning.
+                // Tagged as Part 1 so the backend produces an initial vulnerability report.
+                RunShutdownAnalyzers(EnrollmentPhase.DeviceSetup, whiteGlovePart: 1);
 
                 // Step 1: Drain the entire spool — whiteglove_complete may be beyond the first
                 //         MaxBatchSize (100) events, so loop until empty.

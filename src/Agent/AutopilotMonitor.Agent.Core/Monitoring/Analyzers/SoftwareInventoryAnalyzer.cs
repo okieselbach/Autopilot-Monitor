@@ -374,12 +374,22 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Analyzers
 
         public void AnalyzeAtShutdown()
         {
-            _logger.Info($"{Name}: Running shutdown analysis (delta detection)");
+            AnalyzeAtShutdown(EnrollmentPhase.Complete, whiteGlovePart: null);
+        }
+
+        /// <summary>
+        /// Phase-aware shutdown analysis. Allows callers to tag the emitted events
+        /// with a specific enrollment phase and White Glove part number so the backend
+        /// can distinguish Part 1 (pre-provisioning) from Part 2 (user enrollment).
+        /// </summary>
+        public void AnalyzeAtShutdown(EnrollmentPhase phase, int? whiteGlovePart)
+        {
+            _logger.Info($"{Name}: Running shutdown analysis (delta detection, phase={phase}, whiteGlovePart={whiteGlovePart?.ToString() ?? "none"})");
             try
             {
                 var currentInventory = CollectAndNormalize();
                 var newInstalls = ComputeDelta(_startupInventory ?? new List<SoftwareEntry>(), currentInventory);
-                EmitInventoryEvents("shutdown", EnrollmentPhase.Complete, currentInventory, newInstalls);
+                EmitInventoryEvents("shutdown", phase, currentInventory, newInstalls, whiteGlovePart);
             }
             catch (Exception ex)
             {
@@ -811,7 +821,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Analyzers
             string trigger,
             EnrollmentPhase phase,
             List<SoftwareEntry> inventory,
-            List<SoftwareEntry> newInstalls)
+            List<SoftwareEntry> newInstalls,
+            int? whiteGlovePart = null)
         {
             int totalChunks = Math.Max(1, (int)Math.Ceiling(inventory.Count / (double)ChunkSize));
 
@@ -831,6 +842,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Analyzers
                     { "chunk_count", totalChunks },
                     { "inventory", chunk.Select(SerializeEntry).ToList() }
                 };
+
+                // White Glove part tag (1 = pre-provisioning, 2 = user enrollment)
+                if (whiteGlovePart.HasValue)
+                {
+                    data["whiteglove_part"] = whiteGlovePart.Value;
+                }
 
                 // Confidence summary only in first chunk
                 if (i == 0)
