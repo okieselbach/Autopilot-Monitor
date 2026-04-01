@@ -28,14 +28,10 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
     private readonly IUserUsageRepository _userUsageRepo;
 
     // Cache configuration managers per tenant to avoid repeated OIDC metadata fetches
-    // Bounded to prevent memory exhaustion from malicious tenant ID flooding
-    private const int MaxCacheSize = 100;
-    private readonly Dictionary<string, IConfigurationManager<OpenIdConnectConfiguration>> _configManagerCache;
+    // Bounded with LRU eviction to prevent memory exhaustion from malicious tenant ID flooding
+    private const int MaxCacheSize = 500;
+    private readonly Dictionary<string, (IConfigurationManager<OpenIdConnectConfiguration> Manager, DateTime LastAccessed)> _configManagerCache;
     private readonly SemaphoreSlim _cacheLock = new SemaphoreSlim(1, 1);
-
-    // Track if we're currently initializing a tenant to prevent race conditions
-    private readonly HashSet<string> _initializingTenants = new HashSet<string>();
-    private readonly object _initLock = new object();
 
     /// <summary>
     /// Routes that do not require JWT authentication (exact match).
@@ -76,7 +72,7 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
         _configuration = configuration;
         _userUsageRepo = userUsageRepo;
         _tokenHandler = new JwtSecurityTokenHandler();
-        _configManagerCache = new Dictionary<string, IConfigurationManager<OpenIdConnectConfiguration>>();
+        _configManagerCache = new Dictionary<string, (IConfigurationManager<OpenIdConnectConfiguration> Manager, DateTime LastAccessed)>();
 
         // Disable PII logging in production for security
         Microsoft.IdentityModel.Logging.IdentityModelEventSource.ShowPII = false;
@@ -143,7 +139,12 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
             }
             try
             {
-                if (!_configManagerCache.TryGetValue(tenantSpecificAuthority, out tenantConfigManager))
+                if (_configManagerCache.TryGetValue(tenantSpecificAuthority, out var cached))
+                {
+                    tenantConfigManager = cached.Manager;
+                    _configManagerCache[tenantSpecificAuthority] = (cached.Manager, DateTime.UtcNow);
+                }
+                else
                 {
                     var tenantMetadataAddress = $"{tenantSpecificAuthority}/.well-known/openid-configuration";
                     tenantConfigManager = new ConfigurationManager<OpenIdConnectConfiguration>(
@@ -156,15 +157,16 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
                         RefreshInterval = TimeSpan.FromHours(24)
                     };
 
-                    if (_configManagerCache.Count < MaxCacheSize)
+                    if (_configManagerCache.Count >= MaxCacheSize)
                     {
-                        _configManagerCache[tenantSpecificAuthority] = tenantConfigManager;
-                        _logger.LogDebug("[Auth Middleware] Created new config manager for {Authority}", tenantSpecificAuthority);
+                        // Evict least-recently-used entry
+                        var lruKey = _configManagerCache.MinBy(kvp => kvp.Value.LastAccessed).Key;
+                        _configManagerCache.Remove(lruKey);
+                        _logger.LogDebug("[Auth Middleware] Evicted LRU config manager for {Authority}", lruKey);
                     }
-                    else
-                    {
-                        _logger.LogWarning("[Auth Middleware] Config manager cache full ({MaxSize}). Tenant {Authority} not cached.", MaxCacheSize, tenantSpecificAuthority);
-                    }
+
+                    _configManagerCache[tenantSpecificAuthority] = (tenantConfigManager, DateTime.UtcNow);
+                    _logger.LogDebug("[Auth Middleware] Created new config manager for {Authority}", tenantSpecificAuthority);
                 }
             }
             finally
