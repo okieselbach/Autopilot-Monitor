@@ -2,6 +2,7 @@ using System.Net;
 using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Functions.Services;
+using Microsoft.ApplicationInsights;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Configuration;
@@ -14,15 +15,29 @@ public class AutopilotDeviceValidationConsentFunction
     private readonly ILogger<AutopilotDeviceValidationConsentFunction> _logger;
     private readonly IConfiguration _configuration;
     private readonly GraphTokenService _graphTokenService;
+    private readonly TelemetryClient _telemetryClient;
+
+    /// <summary>
+    /// Known redirect URIs registered in the Entra ID app registration for the admin consent flow.
+    /// If the frontend sends a redirect URI not in this list, the consent will fail at Azure AD
+    /// with AADSTS50011 and the user will be stuck — so we log a critical warning.
+    /// </summary>
+    internal static readonly HashSet<string> RegisteredConsentRedirectPaths = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "/settings/tenant/autopilot",
+        "/settings",
+    };
 
     public AutopilotDeviceValidationConsentFunction(
         ILogger<AutopilotDeviceValidationConsentFunction> logger,
         IConfiguration configuration,
-        GraphTokenService graphTokenService)
+        GraphTokenService graphTokenService,
+        TelemetryClient telemetryClient)
     {
         _logger = logger;
         _configuration = configuration;
         _graphTokenService = graphTokenService;
+        _telemetryClient = telemetryClient;
     }
 
     [Function("GetAutopilotDeviceValidationConsentUrl")]
@@ -51,11 +66,41 @@ public class AutopilotDeviceValidationConsentFunction
             redirectUri = $"{req.Url.Scheme}://{req.Url.Authority}/settings";
         }
 
+        // Validate redirect URI path against known registered paths
+        var redirectPath = new Uri(redirectUri).AbsolutePath;
+        if (!RegisteredConsentRedirectPaths.Contains(redirectPath))
+        {
+            _logger.LogCritical(
+                "ConsentRedirectUriMismatch: Redirect URI path '{RedirectPath}' (full: '{RedirectUri}') is NOT in RegisteredConsentRedirectPaths for tenant {TenantId}. " +
+                "Azure AD will reject this with AADSTS50011 — consent flow is BROKEN. " +
+                "Update RegisteredConsentRedirectPaths or the Entra ID app registration.",
+                redirectPath, redirectUri, requestCtx.TargetTenantId);
+
+            _telemetryClient.TrackEvent("ConsentRedirectUriMismatch", new Dictionary<string, string>
+            {
+                ["TenantId"]    = requestCtx.TargetTenantId,
+                ["UserId"]      = requestCtx.UserPrincipalName,
+                ["RedirectUri"] = redirectUri,
+                ["RedirectPath"] = redirectPath,
+            });
+        }
+
         var consentUrl =
             $"https://login.microsoftonline.com/{Uri.EscapeDataString(requestCtx.TargetTenantId)}/adminconsent" +
             $"?client_id={Uri.EscapeDataString(validatorClientId)}" +
             $"&redirect_uri={Uri.EscapeDataString(redirectUri)}" +
             $"&state={Uri.EscapeDataString("autopilot-device-validation-enable")}";
+
+        _logger.LogInformation(
+            "ConsentFlowStarted: tenant={TenantId} user={UserId} redirectUri={RedirectUri}",
+            requestCtx.TargetTenantId, requestCtx.UserPrincipalName, redirectUri);
+
+        _telemetryClient.TrackEvent("ConsentFlowStarted", new Dictionary<string, string>
+        {
+            ["TenantId"]    = requestCtx.TargetTenantId,
+            ["UserId"]      = requestCtx.UserPrincipalName,
+            ["RedirectUri"] = redirectUri,
+        });
 
         var response = req.CreateResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new
@@ -74,6 +119,15 @@ public class AutopilotDeviceValidationConsentFunction
         var requestCtx = req.GetRequestContext();
 
         var result = await _graphTokenService.GetConsentStatusAsync(requestCtx.TargetTenantId);
+
+        _telemetryClient.TrackEvent("ConsentStatusChecked", new Dictionary<string, string>
+        {
+            ["TenantId"]    = requestCtx.TargetTenantId,
+            ["UserId"]      = requestCtx.UserPrincipalName,
+            ["IsConsented"] = result.IsConsented.ToString(),
+            ["IsTransient"] = result.IsTransient.ToString(),
+        });
+
         var response = req.CreateResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new
         {
@@ -81,5 +135,52 @@ public class AutopilotDeviceValidationConsentFunction
             message = result.Message
         });
         return response;
+    }
+
+    /// <summary>
+    /// Frontend reports consent flow failures (Azure AD errors) so we have visibility
+    /// into broken consent flows that never reach our callback.
+    /// KQL: customEvents | where name == "ConsentFlowFailed"
+    /// </summary>
+    [Function("ReportConsentFailure")]
+    public async Task<HttpResponseData> ReportConsentFailure(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "config/{tenantId}/autopilot-device-validation/consent-failure")] HttpRequestData req,
+        string tenantId)
+    {
+        // Authentication enforced by PolicyEnforcementMiddleware
+        var requestCtx = req.GetRequestContext();
+
+        ConsentFailureReport? report;
+        try
+        {
+            report = await req.ReadFromJsonAsync<ConsentFailureReport>();
+        }
+        catch
+        {
+            report = null;
+        }
+
+        var errorCode = report?.Error ?? "unknown";
+        var errorDescription = report?.ErrorDescription ?? string.Empty;
+
+        _logger.LogError(
+            "ConsentFlowFailed: tenant={TenantId} user={UserId} error={ErrorCode} description={ErrorDescription}",
+            requestCtx.TargetTenantId, requestCtx.UserPrincipalName, errorCode, errorDescription);
+
+        _telemetryClient.TrackEvent("ConsentFlowFailed", new Dictionary<string, string>
+        {
+            ["TenantId"]         = requestCtx.TargetTenantId,
+            ["UserId"]           = requestCtx.UserPrincipalName,
+            ["Error"]            = errorCode,
+            ["ErrorDescription"] = errorDescription.Length > 500 ? errorDescription[..500] : errorDescription,
+        });
+
+        return req.CreateResponse(HttpStatusCode.OK);
+    }
+
+    private sealed class ConsentFailureReport
+    {
+        public string? Error { get; set; }
+        public string? ErrorDescription { get; set; }
     }
 }

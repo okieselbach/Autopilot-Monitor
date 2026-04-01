@@ -645,6 +645,23 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
           : consentError;
         setError(`Admin consent failed: ${errorText}`);
         setAutopilotConsentInProgress(false);
+
+        // Report consent failure to backend for observability —
+        // without this, Azure AD errors (e.g. AADSTS50011 redirect mismatch)
+        // are invisible to our monitoring.
+        try {
+          await authenticatedFetch(api.config.autopilotConsentFailure(tenantId), getAccessToken, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              error: consentError,
+              errorDescription: consentErrorDescription ? decodeURIComponent(consentErrorDescription) : undefined,
+            }),
+          });
+        } catch {
+          // Best-effort — don't block the UI if reporting fails
+        }
+
         router.replace("/settings/tenant/autopilot");
         return;
       }

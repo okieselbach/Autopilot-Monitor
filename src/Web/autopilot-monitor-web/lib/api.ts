@@ -58,6 +58,8 @@ export const api = {
       `${API_BASE_URL}/api/config/${tenantId}/autopilot-device-validation/consent-url${qs({ redirectUri })}`,
     autopilotConsentStatus: (tenantId: string) =>
       `${API_BASE_URL}/api/config/${tenantId}/autopilot-device-validation/consent-status`,
+    autopilotConsentFailure: (tenantId: string) =>
+      `${API_BASE_URL}/api/config/${tenantId}/autopilot-device-validation/consent-failure`,
     testNotification: (tenantId: string) =>
       `${API_BASE_URL}/api/config/${tenantId}/test-notification`,
   },
