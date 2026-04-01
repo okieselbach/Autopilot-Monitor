@@ -121,4 +121,18 @@ public class SecurityValidatorTests
             SecurityValidator.EnsureValidGuid("bad", "MyParam"));
         Assert.Contains("MyParam", ex.Message);
     }
+
+    // --- OData injection prevention (bootstrap token attack vectors) ---
+
+    [Theory]
+    [InlineData("' or '1'='1")]
+    [InlineData("' or Token ne '")]
+    [InlineData("' or PartitionKey ne 'CodeLookup")]
+    [InlineData("a1b2c3d4-e5f6-7890-abcd-ef1234567890' or '1'='1")]
+    [InlineData("'; --")]
+    [InlineData("' or 1 eq 1 or '")]
+    public void IsValidGuid_WithODataInjectionPayload_ReturnsFalse(string payload)
+    {
+        Assert.False(SecurityValidator.IsValidGuid(payload));
+    }
 }

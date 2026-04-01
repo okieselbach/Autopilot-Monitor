@@ -1,4 +1,5 @@
 using System.Net;
+using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Functions.Services;
 using AutopilotMonitor.Shared;
 using Azure.Data.Tables;
@@ -148,7 +149,9 @@ namespace AutopilotMonitor.Functions.Functions.Raw
 
             if (!string.IsNullOrEmpty(customFilter))
             {
-                // Basic sanitization: block potentially dangerous characters
+                // WARNING: This custom filter is passed through with minimal sanitization.
+                // This is acceptable because this endpoint requires admin JWT auth,
+                // but a proper OData filter allowlist should be considered in a future iteration.
                 var sanitizedFilter = customFilter
                     .Replace(";", "")
                     .Replace("--", "");
@@ -158,10 +161,6 @@ namespace AutopilotMonitor.Functions.Functions.Raw
             return parts.Count > 0 ? string.Join(" and ", parts) : null;
         }
 
-        private static string SanitizeOData(string value)
-        {
-            // Escape single quotes for OData
-            return value.Replace("'", "''");
-        }
+        private static string SanitizeOData(string value) => ODataSanitizer.EscapeValue(value);
     }
 }

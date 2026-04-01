@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Functions.Services;
 using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.DataAccess;
@@ -120,8 +121,9 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
         /// </summary>
         public async Task<BootstrapSession?> ValidateBootstrapTokenAsync(string token)
         {
+            var safeToken = ODataSanitizer.EscapeValue(token);
             var query = _tableClient.QueryAsync<TableEntity>(
-                filter: $"Token eq '{token}' and PartitionKey ne '{CodeLookupPartition}'",
+                filter: $"Token eq '{safeToken}' and PartitionKey ne '{CodeLookupPartition}'",
                 maxPerPage: 1);
 
             BootstrapSession? session = null;
@@ -145,8 +147,9 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
             var cutoff = DateTime.UtcNow.AddHours(-24);
             var sessions = new List<BootstrapSession>();
 
+            var safeTenantId = ODataSanitizer.EscapeValue(tenantId);
             var query = _tableClient.QueryAsync<TableEntity>(
-                filter: $"PartitionKey eq '{tenantId}'");
+                filter: $"PartitionKey eq '{safeTenantId}'");
 
             await foreach (var entity in query)
             {

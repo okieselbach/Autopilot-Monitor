@@ -110,6 +110,20 @@ namespace AutopilotMonitor.Functions.Security
 
             if (!string.IsNullOrEmpty(bootstrapTokenHeader) && _bootstrapSessionService != null)
             {
+                // SECURITY: Bootstrap tokens are always GUIDs. Reject non-GUID values
+                // to prevent OData filter injection in the token lookup query.
+                if (!IsValidGuid(bootstrapTokenHeader))
+                {
+                    _logger.LogWarning("Rejected agent request: bootstrap token is not a valid GUID format");
+                    return new SecurityValidationResult
+                    {
+                        IsValid = false,
+                        StatusCode = HttpStatusCode.Unauthorized,
+                        ErrorMessage = "Invalid bootstrap token format",
+                        Details = "Bootstrap token must be a valid GUID."
+                    };
+                }
+
                 var bootstrapSession = await _bootstrapSessionService.ValidateTokenAsync(bootstrapTokenHeader);
                 if (bootstrapSession == null)
                 {
