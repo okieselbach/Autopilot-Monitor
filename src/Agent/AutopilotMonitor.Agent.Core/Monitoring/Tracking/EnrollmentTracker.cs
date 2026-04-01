@@ -75,6 +75,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         private bool _isHybridJoin;
         private readonly DateTime _agentStartTimeUtc = DateTime.UtcNow;
 
+        // Device info readiness — guards against race where completion signals arrive before CollectDeviceInfo finishes
+        private volatile bool _deviceInfoCollected;
+        private string _pendingCompletionSource;
+
         // Device-Only ESP detection (Phase 3C)
         private Timer _deviceOnlyEspTimer;
         private const int DeviceOnlyEspTimerMinutes = 5;
@@ -413,6 +417,21 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                         { "isSelfDeploying", isSelfDeploying },
                         { "isDeviceOnlyDeployment", true }
                     });
+            }
+
+            // Mark device info as collected and re-evaluate any deferred completion signal
+            _deviceInfoCollected = true;
+
+            string pendingSource;
+            lock (_stateLock) { pendingSource = _pendingCompletionSource; _pendingCompletionSource = null; }
+            if (pendingSource != null)
+            {
+                _logger.Info($"EnrollmentTracker: re-evaluating deferred completion signal '{pendingSource}' now that device info is available " +
+                             $"(isDeviceOnly={isDeviceOnly}, autopilotMode={autopilotMode}, skipUserStatusPage={skipUserStatusPage})");
+                if (pendingSource == "device_setup_provisioning_complete")
+                    OnDeviceSetupProvisioningComplete(this, EventArgs.Empty);
+                else
+                    TryEmitEnrollmentComplete(pendingSource);
             }
         }
 

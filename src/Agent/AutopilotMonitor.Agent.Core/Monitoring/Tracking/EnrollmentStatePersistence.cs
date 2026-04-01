@@ -104,6 +104,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         public bool DesktopArrived { get; set; }
         public string LastEspPhase { get; set; }
         public bool IsWaitingForHello { get; set; }
+        public DateTime? WaitingForHelloStartedUtc { get; set; }
         public bool EnrollmentCompleteEmitted { get; set; }
         public string EnrollmentType { get; set; }
 

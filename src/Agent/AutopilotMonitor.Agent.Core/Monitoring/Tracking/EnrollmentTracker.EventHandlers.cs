@@ -67,6 +67,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     _stateData.EspFinalExitSeen = false;
                     _stateData.EspFinalExitUtc = null;
                 }
+                _statePersistence.Save(_stateData); // Immediate persist — ESP resumed resets final exit, must survive crash
                 RecordSignal("esp_resumed");
                 _espAndHelloTracker?.ResetForEspResumption();
 
@@ -617,6 +618,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     {
                         _isWaitingForHello = true;
                         _stateData.IsWaitingForHello = true;
+                        _stateData.WaitingForHelloStartedUtc = DateTime.UtcNow;
                         _stateDirty = true;
                     }
                     _statePersistence.Save(_stateData); // Immediate persist — summary timer was just stopped

@@ -89,6 +89,17 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
 
             if (!isDeviceOnly)
             {
+                if (!_deviceInfoCollected)
+                {
+                    _logger.Info("EnrollmentTracker: DeviceSetup provisioning complete but device info not yet collected — " +
+                                 "deferring classification decision until CollectDeviceInfo completes");
+                    lock (_stateLock) { _pendingCompletionSource = "device_setup_provisioning_complete"; }
+                    EmitTraceEvent("device_setup_complete_deferred",
+                        "DeviceSetup provisioning complete but device classification pending — will re-evaluate after CollectDeviceInfo",
+                        new Dictionary<string, object> { { "autopilotMode", autopilotModeSnap }, { "skipUserStatusPage", skipUserSnap } });
+                    return;
+                }
+
                 _logger.Info("EnrollmentTracker: DeviceSetup provisioning complete but not device-only deployment — " +
                              "using normal completion paths (ESP exit + Hello)");
                 EmitTraceEvent("device_setup_complete_non_device_only",
@@ -120,7 +131,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 }
             }
             if (needsSignal)
+            {
+                _statePersistence.Save(_stateData); // Immediate persist — EspFinalExitUtc critical for hybrid reboot gate
                 RecordSignal("self_deploying_esp_final_exit");
+            }
 
             // Emit FinalizingSetup phase event
             _emitEvent(new EnrollmentEvent
@@ -395,6 +409,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                         _stateData.EspFinalExitSeen = true;
                         _stateData.EspFinalExitUtc = DateTime.UtcNow;
                     }
+                    _statePersistence.Save(_stateData); // Immediate persist — EspFinalExitUtc critical for hybrid reboot gate
                     RecordSignal("esp_final_exit");
 
                     // Emit phase change event to FinalizingSetup
@@ -439,6 +454,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                         _stateData.EspFinalExitSeen = true;
                         _stateData.EspFinalExitUtc = DateTime.UtcNow;
                     }
+                    _statePersistence.Save(_stateData); // Immediate persist — EspFinalExitUtc critical for hybrid reboot gate
                     RecordSignal("device_only_esp_registry");
 
                     _emitEvent(new EnrollmentEvent
@@ -564,16 +580,37 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 _espAndHelloTracker.StartHelloWaitTimer();
             }
 
-            // Restart safety timer if we were waiting for Hello
+            // Restart safety timer if we were waiting for Hello — use remaining time, not full duration
             if (_isWaitingForHello && !_enrollmentCompleteEmitted)
             {
-                _logger.Info("EnrollmentTracker: restarting waiting_for_hello safety timer after state recovery");
-                _waitingForHelloSafetyTimer?.Dispose();
-                _waitingForHelloSafetyTimer = new Timer(
-                    OnWaitingForHelloSafetyTimeout,
-                    null,
-                    TimeSpan.FromSeconds(WaitingForHelloSafetyTimeoutSeconds),
-                    TimeSpan.FromMilliseconds(-1));
+                var remaining = WaitingForHelloSafetyTimeoutSeconds;
+                if (_stateData.WaitingForHelloStartedUtc.HasValue)
+                {
+                    var elapsed = (DateTime.UtcNow - _stateData.WaitingForHelloStartedUtc.Value).TotalSeconds;
+                    remaining = Math.Max(0, WaitingForHelloSafetyTimeoutSeconds - (int)elapsed);
+                }
+
+                if (remaining <= 0)
+                {
+                    _logger.Warning("EnrollmentTracker: waiting_for_hello safety timeout already expired during crash recovery — forcing completion now");
+                    _isWaitingForHello = false;
+                    _waitingForHelloSafetyTimer?.Dispose();
+                    _waitingForHelloSafetyTimer = new Timer(
+                        OnWaitingForHelloSafetyTimeout,
+                        null,
+                        TimeSpan.Zero,
+                        TimeSpan.FromMilliseconds(-1));
+                }
+                else
+                {
+                    _logger.Info($"EnrollmentTracker: restarting waiting_for_hello safety timer after state recovery ({remaining}s remaining)");
+                    _waitingForHelloSafetyTimer?.Dispose();
+                    _waitingForHelloSafetyTimer = new Timer(
+                        OnWaitingForHelloSafetyTimeout,
+                        null,
+                        TimeSpan.FromSeconds(remaining),
+                        TimeSpan.FromMilliseconds(-1));
+                }
             }
         }
 
@@ -877,6 +914,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 return;
             }
 
+            _statePersistence.Save(_stateData); // Immediate persist — desktop arrival is completion-critical
             RecordSignal("desktop_arrived");
             _logger.Info("EnrollmentTracker: Desktop arrival notified");
 
@@ -909,6 +947,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                         _stateData.EspFinalExitUtc = DateTime.UtcNow;
                         _hasAutoSwitchedToAppsPhase = false;
                     }
+                    _statePersistence.Save(_stateData); // Immediate persist — EspFinalExitUtc critical for hybrid reboot gate
                     RecordSignal("desktop_arrived_skip_user");
                     _logger.Info($"EnrollmentTracker: Desktop arrival with SkipUserStatusPage=true — skipping AccountSetup, transitioning to FinalizingSetup (was: {previousPhase})");
 
@@ -1016,6 +1055,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     _stateData.EspFinalExitSeen = true;
                     _stateData.EspFinalExitUtc = DateTime.UtcNow;
                 }
+                _statePersistence.Save(_stateData); // Immediate persist — device-only ESP final exit
                 RecordSignal("device_only_esp_final_exit");
                 _espAndHelloTracker?.StartHelloWaitTimer();
             }
