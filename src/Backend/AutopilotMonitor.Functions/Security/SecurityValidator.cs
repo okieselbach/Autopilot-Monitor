@@ -173,6 +173,24 @@ namespace AutopilotMonitor.Functions.Security
                 _logger.LogInformation("Bootstrap token auth accepted for tenant {TenantId} (code {ShortCode})",
                     tenantId, bootstrapSession.ShortCode);
 
+                // Rate limit check for bootstrap auth (DoS protection)
+                var bsRateLimitValue = config.CustomRateLimitRequestsPerMinute ?? config.RateLimitRequestsPerMinute;
+                var bsRateLimitResult = _rateLimitService.CheckRateLimit(
+                    $"bootstrap:{bootstrapTokenHeader}",
+                    bsRateLimitValue
+                );
+
+                if (!bsRateLimitResult.IsAllowed)
+                {
+                    return new SecurityValidationResult
+                    {
+                        IsValid = false,
+                        StatusCode = HttpStatusCode.TooManyRequests,
+                        ErrorMessage = "Rate limit exceeded",
+                        RateLimitResult = bsRateLimitResult
+                    };
+                }
+
                 return new SecurityValidationResult
                 {
                     IsValid = true,
@@ -180,7 +198,8 @@ namespace AutopilotMonitor.Functions.Security
                     BootstrapShortCode = bootstrapSession.ShortCode,
                     Manufacturer = bsManufacturer,
                     Model = bsModel,
-                    SerialNumber = bsSerial
+                    SerialNumber = bsSerial,
+                    RateLimitResult = bsRateLimitResult
                 };
             }
 

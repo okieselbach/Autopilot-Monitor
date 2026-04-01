@@ -513,7 +513,9 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                 { "DiagnosticsGlobalLogPathsJson", config.DiagnosticsGlobalLogPathsJson },
                 { "NvdApiKey", config.NvdApiKey },
                 { "VulnerabilityCorrelationEnabled", config.VulnerabilityCorrelationEnabled },
-                { "VulnerabilityDataLastSyncUtc", config.VulnerabilityDataLastSyncUtc }
+                { "VulnerabilityDataLastSyncUtc", config.VulnerabilityDataLastSyncUtc },
+                { "MaxDiagnosticsDownloadSizeMB", config.MaxDiagnosticsDownloadSizeMB },
+                { "DiagnosticsDownloadTimeoutSeconds", config.DiagnosticsDownloadTimeoutSeconds }
             };
 
             return entity;
@@ -535,7 +537,9 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                 DiagnosticsGlobalLogPathsJson = entity.GetString("DiagnosticsGlobalLogPathsJson"),
                 NvdApiKey = entity.GetString("NvdApiKey"),
                 VulnerabilityCorrelationEnabled = entity.GetBoolean("VulnerabilityCorrelationEnabled") ?? true,
-                VulnerabilityDataLastSyncUtc = entity.GetString("VulnerabilityDataLastSyncUtc")
+                VulnerabilityDataLastSyncUtc = entity.GetString("VulnerabilityDataLastSyncUtc"),
+                MaxDiagnosticsDownloadSizeMB = entity.GetInt32("MaxDiagnosticsDownloadSizeMB") ?? 500,
+                DiagnosticsDownloadTimeoutSeconds = entity.GetInt32("DiagnosticsDownloadTimeoutSeconds") ?? 120
             };
         }
 

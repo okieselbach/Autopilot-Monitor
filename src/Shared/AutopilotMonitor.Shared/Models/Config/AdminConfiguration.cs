@@ -141,6 +141,21 @@ namespace AutopilotMonitor.Shared.Models
             }
         }
 
+        // ===== DIAGNOSTICS DOWNLOAD LIMITS =====
+
+        /// <summary>
+        /// Maximum allowed diagnostics download size in MB.
+        /// Blobs exceeding this are rejected before streaming (413).
+        /// 0 = no limit. Default: 500 MB.
+        /// </summary>
+        public int MaxDiagnosticsDownloadSizeMB { get; set; } = 500;
+
+        /// <summary>
+        /// Timeout in seconds for the entire diagnostics download+stream operation.
+        /// 0 = no timeout. Default: 120 seconds.
+        /// </summary>
+        public int DiagnosticsDownloadTimeoutSeconds { get; set; } = 120;
+
         // ===== MCP ACCESS CONTROL =====
 
         /// <summary>

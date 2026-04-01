@@ -23,15 +23,18 @@ namespace AutopilotMonitor.Functions.Functions.Diagnostics
     {
         private readonly ILogger<DiagnosticsDownloadFunction> _logger;
         private readonly TenantConfigurationService _configService;
+        private readonly AdminConfigurationService _adminConfigService;
         private readonly TelemetryClient _telemetryClient;
 
         public DiagnosticsDownloadFunction(
             ILogger<DiagnosticsDownloadFunction> logger,
             TenantConfigurationService configService,
+            AdminConfigurationService adminConfigService,
             TelemetryClient telemetryClient)
         {
             _logger = logger;
             _configService = configService;
+            _adminConfigService = adminConfigService;
             _telemetryClient = telemetryClient;
         }
 
@@ -98,13 +101,40 @@ namespace AutopilotMonitor.Functions.Functions.Diagnostics
                     blobUrl = $"{containerSasUrl.TrimEnd('/')}/{blobName}";
                 }
 
+                // Load admin configuration for download limits
+                var adminConfig = await _adminConfigService.GetConfigurationAsync();
+                var maxSizeBytes = (long)adminConfig.MaxDiagnosticsDownloadSizeMB * 1024 * 1024;
+                var timeoutSeconds = adminConfig.DiagnosticsDownloadTimeoutSeconds;
+
+                using var cts = timeoutSeconds > 0
+                    ? new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds))
+                    : new CancellationTokenSource();
+
                 // Download blob server-side and stream to client
                 var sw = Stopwatch.StartNew();
                 var blobClient = new BlobClient(new Uri(blobUrl));
-                var download = await blobClient.DownloadStreamingAsync();
+                var download = await blobClient.DownloadStreamingAsync(cancellationToken: cts.Token);
                 sw.Stop();
 
                 var contentLength = download.Value.Details.ContentLength;
+
+                // Enforce size limit before streaming (fast reject)
+                if (maxSizeBytes > 0 && contentLength > maxSizeBytes)
+                {
+                    _logger.LogWarning(
+                        "DiagnosticsDownload: Blob {BlobName} for tenant {TenantId} rejected — size {SizeBytes} bytes exceeds limit {MaxSizeBytes} bytes",
+                        blobName, tenantId, contentLength, maxSizeBytes);
+
+                    download.Value.Content.Dispose();
+
+                    var tooLarge = req.CreateResponse(HttpStatusCode.RequestEntityTooLarge);
+                    await tooLarge.WriteAsJsonAsync(new
+                    {
+                        success = false,
+                        message = $"Diagnostics package size ({contentLength / (1024 * 1024)} MB) exceeds the maximum allowed size ({adminConfig.MaxDiagnosticsDownloadSizeMB} MB)."
+                    });
+                    return tooLarge;
+                }
 
                 _logger.LogInformation(
                     "DiagnosticsDownload: Proxying blob {BlobName} for tenant {TenantId}, size {SizeBytes} bytes, fetch took {DurationMs}ms",
@@ -125,7 +155,7 @@ namespace AutopilotMonitor.Functions.Functions.Diagnostics
                         ["DurationMs"] = sw.ElapsedMilliseconds
                     });
 
-                // Stream blob content to client
+                // Stream blob content to client (with timeout)
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 response.Headers.Add("Content-Type", "application/octet-stream");
                 response.Headers.Add("Content-Disposition", $"attachment; filename=\"{blobName}\"");
@@ -134,7 +164,7 @@ namespace AutopilotMonitor.Functions.Functions.Diagnostics
                     response.Headers.Add("Content-Length", contentLength.ToString());
                 }
 
-                await download.Value.Content.CopyToAsync(response.Body);
+                await download.Value.Content.CopyToAsync(response.Body, cts.Token);
                 return response;
             }
             catch (Azure.RequestFailedException ex) when (ex.Status == 404)
@@ -143,6 +173,17 @@ namespace AutopilotMonitor.Functions.Functions.Diagnostics
                 var notFoundResponse = req.CreateResponse(HttpStatusCode.NotFound);
                 await notFoundResponse.WriteAsJsonAsync(new { success = false, message = "Diagnostics package not found." });
                 return notFoundResponse;
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogWarning("DiagnosticsDownload: Operation timed out or was cancelled for requested blob download");
+                var timeoutResponse = req.CreateResponse(HttpStatusCode.GatewayTimeout);
+                await timeoutResponse.WriteAsJsonAsync(new
+                {
+                    success = false,
+                    message = "Diagnostics download timed out. The file may be too large or the connection is too slow."
+                });
+                return timeoutResponse;
             }
             catch (Exception ex)
             {
