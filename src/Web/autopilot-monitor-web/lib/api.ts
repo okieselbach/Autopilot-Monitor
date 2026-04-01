@@ -53,6 +53,7 @@ export const api = {
   config: {
     all: () => `${API_BASE_URL}/api/config/all`,
     tenant: (tenantId: string) => `${API_BASE_URL}/api/config/${tenantId}`,
+    featureFlags: (tenantId: string) => `${API_BASE_URL}/api/config/${tenantId}/feature-flags`,
     autopilotConsentUrl: (tenantId: string, redirectUri: string) =>
       `${API_BASE_URL}/api/config/${tenantId}/autopilot-device-validation/consent-url${qs({ redirectUri })}`,
     autopilotConsentStatus: (tenantId: string) =>

@@ -276,10 +276,25 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
   useEffect(() => {
     if (!tenantId) return;
 
+    // Operators (non-admin) only need feature flags, not the full config
+    const isAdminOrGA = user?.isTenantAdmin || user?.isGlobalAdmin;
+
     const fetchConfiguration = async () => {
       try {
         setLoading(true);
         setError(null);
+
+        if (!isAdminOrGA) {
+          // Operator with canManageBootstrapTokens — load only feature flags
+          const response = await authenticatedFetch(api.config.featureFlags(tenantId), getAccessToken);
+          if (!response.ok) {
+            throw new Error(`Failed to load feature flags: ${response.statusText}`);
+          }
+          const flags = await response.json();
+          // Create a minimal config object with just the feature flag
+          setConfig({ bootstrapTokenEnabled: flags.bootstrapTokenEnabled } as TenantConfiguration);
+          return;
+        }
 
         const response = await authenticatedFetch(api.config.tenant(tenantId), getAccessToken);
 

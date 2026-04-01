@@ -124,7 +124,8 @@ public static class EndpointAccessPolicyCatalog
         new("GET",    "rules/gather",              EndpointPolicy.MemberRead),
         new("GET",    "rules/analyze",             EndpointPolicy.MemberRead),
         new("GET",    "rules/ime-log-patterns",    EndpointPolicy.MemberRead),
-        new("GET",    "config/{tenantId}",         EndpointPolicy.MemberRead),
+        new("GET",    "config/{tenantId}",         EndpointPolicy.TenantAdminOrGA),
+        new("GET",    "config/{tenantId}/feature-flags", EndpointPolicy.MemberRead),
 
         // ── TenantAdminOrGA ─────────────────────────────────────────────
         new("PUT",    "config/{tenantId}",         EndpointPolicy.TenantAdminOrGA),
