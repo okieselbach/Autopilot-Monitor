@@ -126,6 +126,30 @@ public class PolicyEnforcementMiddleware : IFunctionsWorkerMiddleware
                 }
             }
 
+            // Cross-tenant enforcement for routes with optional ?tenantId= query parameter
+            if (catalogEntry.TenantScoping == TenantScoping.QueryParam)
+            {
+                var queryTenantId = httpContext.Request.Query["tenantId"].FirstOrDefault();
+                if (!string.IsNullOrWhiteSpace(queryTenantId))
+                {
+                    targetTenantId = queryTenantId;
+
+                    if (!isGlobalAdmin && !string.Equals(queryTenantId, jwtTenantId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        _logger.LogWarning("[PolicyEnforcement] BLOCKED cross-tenant access (query): user={User} jwtTenant={JwtTenant} queryTenant={QueryTenant} path={Path}",
+                            decision.UserIdentifier, jwtTenantId, queryTenantId, requestPath);
+                        httpContext.Response.StatusCode = (int)HttpStatusCode.Forbidden;
+                        httpContext.Response.ContentType = "application/json";
+                        await httpContext.Response.WriteAsJsonAsync(new
+                        {
+                            error = "CrossTenantAccessDenied",
+                            message = "Access denied. You can only access your own tenant's resources."
+                        });
+                        return;
+                    }
+                }
+            }
+
             context.Items[RequestContext.ItemsKey] = new RequestContext
             {
                 TenantId = jwtTenantId,

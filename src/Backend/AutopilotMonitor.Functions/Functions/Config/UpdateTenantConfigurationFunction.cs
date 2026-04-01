@@ -42,21 +42,7 @@ namespace AutopilotMonitor.Functions.Functions.Config
                 var requestCtx = req.GetRequestContext();
                 var userIdentifier = requestCtx.UserPrincipalName;
 
-                // Validate tenant access: cross-tenant only for Global Admins
-                if (!requestCtx.IsGlobalAdmin && !string.Equals(requestCtx.TenantId, tenantId, StringComparison.OrdinalIgnoreCase))
-                {
-                    _logger.LogWarning("User {User} from tenant {AuthTenant} attempted to update configuration for tenant {TargetTenant}",
-                        userIdentifier, requestCtx.TenantId, tenantId);
-                    var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-                    await forbiddenResponse.WriteAsJsonAsync(new
-                    {
-                        success = false,
-                        message = "Access denied. You can only update your own tenant's configuration."
-                    });
-                    return forbiddenResponse;
-                }
-
-                _logger.LogInformation("UpdateTenantConfiguration: {TenantId} by user {User}", tenantId, userIdentifier);
+                _logger.LogInformation("UpdateTenantConfiguration: {TenantId} by user {User}", requestCtx.TargetTenantId, userIdentifier);
 
                 // Parse request body
                 if (req.Headers.TryGetValues("Content-Length", out var clValues)
@@ -94,13 +80,13 @@ namespace AutopilotMonitor.Functions.Functions.Config
                 }
 
                 // Ensure tenant ID matches
-                config.TenantId = tenantId;
+                config.TenantId = requestCtx.TargetTenantId;
 
                 // Set the actual user identifier for audit logging
                 config.UpdatedBy = userIdentifier;
 
                 // Protect GA-only fields from non-Global-Admin callers
-                var existingConfig = await _configService.GetConfigurationAsync(tenantId);
+                var existingConfig = await _configService.GetConfigurationAsync(requestCtx.TargetTenantId);
                 if (!requestCtx.IsGlobalAdmin)
                 {
                     if (config.AllowInsecureAgentRequests != existingConfig.AllowInsecureAgentRequests ||
@@ -112,7 +98,7 @@ namespace AutopilotMonitor.Functions.Functions.Config
                     {
                         _logger.LogWarning(
                             "Tenant Admin {User} attempted to modify GA-only fields for tenant {TenantId}",
-                            userIdentifier, tenantId);
+                            userIdentifier, requestCtx.TargetTenantId);
                     }
 
                     config.AllowInsecureAgentRequests = existingConfig.AllowInsecureAgentRequests;
@@ -139,10 +125,10 @@ namespace AutopilotMonitor.Functions.Functions.Config
 
                 var changes = ConfigDiffHelper.GetChanges(existingConfig, config);
                 await _maintenanceRepo.LogAuditEntryAsync(
-                    tenantId,
+                    requestCtx.TargetTenantId,
                     "UPDATE",
                     "TenantConfiguration",
-                    tenantId,
+                    requestCtx.TargetTenantId,
                     userIdentifier,
                     changes.Count > 0 ? changes : null
                 );

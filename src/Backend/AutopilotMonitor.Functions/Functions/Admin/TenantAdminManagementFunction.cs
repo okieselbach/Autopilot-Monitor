@@ -45,19 +45,9 @@ public class TenantAdminManagementFunction
         var requestCtx = context.GetRequestContext();
         var upn = requestCtx.UserPrincipalName;
 
-        // Middleware (TenantAdminOrGA policy) already verified GA or TenantAdmin of own tenant.
-        // For non-GA: only allow access to own tenant.
-        if (!requestCtx.IsGlobalAdmin && !tenantId.Equals(requestCtx.TenantId, StringComparison.OrdinalIgnoreCase))
-        {
-            _logger.LogWarning($"User {upn} attempted to access admins for tenant {tenantId} without authorization");
-            var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-            await forbiddenResponse.WriteAsJsonAsync(new { error = "Access denied. You must be a Global Admin or a Tenant Admin for this tenant." });
-            return forbiddenResponse;
-        }
+        var admins = await _tenantAdminsService.GetTenantAdminsAsync(requestCtx.TargetTenantId);
 
-        var admins = await _tenantAdminsService.GetTenantAdminsAsync(tenantId);
-
-        _logger.LogInformation($"Retrieved {admins.Count} admins for tenant {tenantId} by {upn}");
+        _logger.LogInformation($"Retrieved {admins.Count} admins for tenant {requestCtx.TargetTenantId} by {upn}");
 
         var response = req.CreateResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(admins);
@@ -80,16 +70,6 @@ public class TenantAdminManagementFunction
         var requestCtx = context.GetRequestContext();
         var upn = requestCtx.UserPrincipalName;
 
-        // Middleware (TenantAdminOrGA policy) already verified GA or TenantAdmin of own tenant.
-        // For non-GA: only allow access to own tenant.
-        if (!requestCtx.IsGlobalAdmin && !tenantId.Equals(requestCtx.TenantId, StringComparison.OrdinalIgnoreCase))
-        {
-            _logger.LogWarning($"User {upn} attempted to add admin to tenant {tenantId} without authorization");
-            var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-            await forbiddenResponse.WriteAsJsonAsync(new { error = "Access denied. You must be a Global Admin or a Tenant Admin for this tenant." });
-            return forbiddenResponse;
-        }
-
         // Parse request body
         var body = await req.ReadFromJsonAsync<AddTenantAdminRequest>();
         if (body == null || string.IsNullOrWhiteSpace(body.Upn))
@@ -101,10 +81,10 @@ public class TenantAdminManagementFunction
 
         // Determine role (default to Admin for backward compat)
         var role = !string.IsNullOrWhiteSpace(body.Role) ? body.Role : AutopilotMonitor.Shared.Constants.TenantRoles.Admin;
-        var newAdmin = await _tenantAdminsService.AddTenantMemberAsync(tenantId, body.Upn, upn!, role, body.CanManageBootstrapTokens);
+        var newAdmin = await _tenantAdminsService.AddTenantMemberAsync(requestCtx.TargetTenantId, body.Upn, upn!, role, body.CanManageBootstrapTokens);
 
         await _maintenanceRepo.LogAuditEntryAsync(
-            tenantId,
+            requestCtx.TargetTenantId,
             "CREATE",
             "TenantAdmin",
             body.Upn,
@@ -116,7 +96,7 @@ public class TenantAdminManagementFunction
             }
         );
 
-        _logger.LogInformation($"Tenant member added: {body.Upn} with role {role} to tenant {tenantId} by {upn}");
+        _logger.LogInformation($"Tenant member added: {body.Upn} with role {role} to tenant {requestCtx.TargetTenantId} by {upn}");
 
         var response = req.CreateResponse(HttpStatusCode.Created);
         await response.WriteAsJsonAsync(new { admin = newAdmin });
@@ -141,23 +121,13 @@ public class TenantAdminManagementFunction
         var requestCtx = context.GetRequestContext();
         var upn = requestCtx.UserPrincipalName;
 
-        // Middleware (TenantAdminOrGA policy) already verified GA or TenantAdmin of own tenant.
-        // For non-GA: only allow access to own tenant.
-        if (!requestCtx.IsGlobalAdmin && !tenantId.Equals(requestCtx.TenantId, StringComparison.OrdinalIgnoreCase))
-        {
-            _logger.LogWarning($"User {upn} attempted to remove admin from tenant {tenantId} without authorization");
-            var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-            await forbiddenResponse.WriteAsJsonAsync(new { error = "Access denied. You must be a Global Admin or a Tenant Admin for this tenant." });
-            return forbiddenResponse;
-        }
-
         // Check if trying to remove self
         if (adminUpn.Equals(upn, StringComparison.OrdinalIgnoreCase))
         {
             // Check if this is the last Admin-role member (only for non-Global-Admins)
             if (!requestCtx.IsGlobalAdmin)
             {
-                var members = await _tenantAdminsService.GetTenantAdminsAsync(tenantId);
+                var members = await _tenantAdminsService.GetTenantAdminsAsync(requestCtx.TargetTenantId);
                 var adminCount = members.Count(m => m.IsEnabled && (m.Role == null || m.Role == AutopilotMonitor.Shared.Constants.TenantRoles.Admin));
                 if (adminCount <= 1)
                 {
@@ -169,17 +139,17 @@ public class TenantAdminManagementFunction
         }
 
         // Remove the admin
-        await _tenantAdminsService.RemoveTenantAdminAsync(tenantId, adminUpn);
+        await _tenantAdminsService.RemoveTenantAdminAsync(requestCtx.TargetTenantId, adminUpn);
 
         await _maintenanceRepo.LogAuditEntryAsync(
-            tenantId,
+            requestCtx.TargetTenantId,
             "DELETE",
             "TenantAdmin",
             adminUpn,
             upn!
         );
 
-        _logger.LogInformation($"Tenant Admin removed: {adminUpn} from tenant {tenantId} by {upn}");
+        _logger.LogInformation($"Tenant Admin removed: {adminUpn} from tenant {requestCtx.TargetTenantId} by {upn}");
 
         var response = req.CreateResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new { message = "Tenant Admin removed successfully" });
@@ -203,21 +173,11 @@ public class TenantAdminManagementFunction
         var requestCtx = context.GetRequestContext();
         var upn = requestCtx.UserPrincipalName;
 
-        // Middleware (TenantAdminOrGA policy) already verified GA or TenantAdmin of own tenant.
-        // For non-GA: only allow access to own tenant.
-        if (!requestCtx.IsGlobalAdmin && !tenantId.Equals(requestCtx.TenantId, StringComparison.OrdinalIgnoreCase))
-        {
-            _logger.LogWarning($"User {upn} attempted to disable admin for tenant {tenantId} without authorization");
-            var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-            await forbiddenResponse.WriteAsJsonAsync(new { error = "Access denied. You must be a Global Admin or a Tenant Admin for this tenant." });
-            return forbiddenResponse;
-        }
-
         // Disable the admin
-        await _tenantAdminsService.DisableTenantAdminAsync(tenantId, adminUpn);
+        await _tenantAdminsService.DisableTenantAdminAsync(requestCtx.TargetTenantId, adminUpn);
 
         await _maintenanceRepo.LogAuditEntryAsync(
-            tenantId,
+            requestCtx.TargetTenantId,
             "UPDATE",
             "TenantAdmin",
             adminUpn,
@@ -225,7 +185,7 @@ public class TenantAdminManagementFunction
             new Dictionary<string, string> { { "Action", "Disable" } }
         );
 
-        _logger.LogInformation($"Tenant Admin disabled: {adminUpn} for tenant {tenantId} by {upn}");
+        _logger.LogInformation($"Tenant Admin disabled: {adminUpn} for tenant {requestCtx.TargetTenantId} by {upn}");
 
         var response = req.CreateResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new { message = "Tenant Admin disabled successfully" });
@@ -249,21 +209,11 @@ public class TenantAdminManagementFunction
         var requestCtx = context.GetRequestContext();
         var upn = requestCtx.UserPrincipalName;
 
-        // Middleware (TenantAdminOrGA policy) already verified GA or TenantAdmin of own tenant.
-        // For non-GA: only allow access to own tenant.
-        if (!requestCtx.IsGlobalAdmin && !tenantId.Equals(requestCtx.TenantId, StringComparison.OrdinalIgnoreCase))
-        {
-            _logger.LogWarning($"User {upn} attempted to enable admin for tenant {tenantId} without authorization");
-            var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-            await forbiddenResponse.WriteAsJsonAsync(new { error = "Access denied. You must be a Global Admin or a Tenant Admin for this tenant." });
-            return forbiddenResponse;
-        }
-
         // Enable the admin
-        await _tenantAdminsService.EnableTenantAdminAsync(tenantId, adminUpn);
+        await _tenantAdminsService.EnableTenantAdminAsync(requestCtx.TargetTenantId, adminUpn);
 
         await _maintenanceRepo.LogAuditEntryAsync(
-            tenantId,
+            requestCtx.TargetTenantId,
             "UPDATE",
             "TenantAdmin",
             adminUpn,
@@ -271,7 +221,7 @@ public class TenantAdminManagementFunction
             new Dictionary<string, string> { { "Action", "Enable" } }
         );
 
-        _logger.LogInformation($"Tenant Admin enabled: {adminUpn} for tenant {tenantId} by {upn}");
+        _logger.LogInformation($"Tenant Admin enabled: {adminUpn} for tenant {requestCtx.TargetTenantId} by {upn}");
 
         var response = req.CreateResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new { message = "Tenant Admin enabled successfully" });
@@ -294,16 +244,6 @@ public class TenantAdminManagementFunction
         var requestCtx = context.GetRequestContext();
         var upn = requestCtx.UserPrincipalName;
 
-        // Middleware (TenantAdminOrGA policy) already verified GA or TenantAdmin of own tenant.
-        // For non-GA: only allow access to own tenant.
-        if (!requestCtx.IsGlobalAdmin && !tenantId.Equals(requestCtx.TenantId, StringComparison.OrdinalIgnoreCase))
-        {
-            _logger.LogWarning("User {Upn} attempted to update member permissions for tenant {TenantId} without authorization", upn, tenantId);
-            var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-            await forbiddenResponse.WriteAsJsonAsync(new { error = "Access denied. You must be a Global Admin or a Tenant Admin for this tenant." });
-            return forbiddenResponse;
-        }
-
         var body = await req.ReadFromJsonAsync<UpdateMemberPermissionsRequest>();
         if (body == null || string.IsNullOrWhiteSpace(body.Role))
         {
@@ -317,7 +257,7 @@ public class TenantAdminManagementFunction
         {
             if (!requestCtx.IsGlobalAdmin)
             {
-                var members = await _tenantAdminsService.GetTenantAdminsAsync(tenantId);
+                var members = await _tenantAdminsService.GetTenantAdminsAsync(requestCtx.TargetTenantId);
                 var adminCount = members.Count(m => m.IsEnabled && (m.Role == null || m.Role == AutopilotMonitor.Shared.Constants.TenantRoles.Admin));
                 if (adminCount <= 1)
                 {
@@ -328,7 +268,7 @@ public class TenantAdminManagementFunction
             }
         }
 
-        var updated = await _tenantAdminsService.UpdateMemberPermissionsAsync(tenantId, adminUpn, body.Role, body.CanManageBootstrapTokens);
+        var updated = await _tenantAdminsService.UpdateMemberPermissionsAsync(requestCtx.TargetTenantId, adminUpn, body.Role, body.CanManageBootstrapTokens);
         if (!updated)
         {
             var notFoundResponse = req.CreateResponse(HttpStatusCode.NotFound);
@@ -337,7 +277,7 @@ public class TenantAdminManagementFunction
         }
 
         await _maintenanceRepo.LogAuditEntryAsync(
-            tenantId,
+            requestCtx.TargetTenantId,
             "UPDATE",
             "TenantAdmin",
             adminUpn,
@@ -350,7 +290,7 @@ public class TenantAdminManagementFunction
             }
         );
 
-        _logger.LogInformation("Member permissions updated: {AdminUpn} -> role={Role} in tenant {TenantId} by {Upn}", adminUpn, body.Role, tenantId, upn);
+        _logger.LogInformation("Member permissions updated: {AdminUpn} -> role={Role} in tenant {TenantId} by {Upn}", adminUpn, body.Role, requestCtx.TargetTenantId, upn);
 
         var response = req.CreateResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new { message = "Member permissions updated successfully" });

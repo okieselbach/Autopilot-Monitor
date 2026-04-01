@@ -1,6 +1,6 @@
 using System.Net;
 using AutopilotMonitor.Functions.Helpers;
-using AutopilotMonitor.Functions.Security;
+
 using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared;
 using Microsoft.AspNetCore.Authorization;
@@ -45,30 +45,14 @@ public class TenantOffboardFunction
         var requestCtx = context.GetRequestContext();
         var upn = requestCtx.UserPrincipalName;
 
-        // Middleware (TenantAdminOrGA policy) already verified GA or TenantAdmin of own tenant.
-        // For non-GA: only allow access to own tenant.
-        if (!requestCtx.IsGlobalAdmin && !tenantId.Equals(requestCtx.TenantId, StringComparison.OrdinalIgnoreCase))
-        {
-            _logger.LogWarning($"User {upn} attempted to offboard tenant {tenantId} without authorization");
-            var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-            await forbiddenResponse.WriteAsJsonAsync(new
-            {
-                error = "Access denied. Only a Tenant Admin of this tenant may perform offboarding."
-            });
-            return forbiddenResponse;
-        }
-
-        // Validate tenantId format to prevent OData injection
-        SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
-
-        _logger.LogWarning($"TENANT OFFBOARD initiated for tenant {tenantId} by {upn}");
+        _logger.LogWarning($"TENANT OFFBOARD initiated for tenant {requestCtx.TargetTenantId} by {upn}");
 
         // Audit under Global TenantId so the entry survives tenant data deletion
         await _maintenanceRepo.LogAuditEntryAsync(
             Constants.AuditGlobalTenantId,
             "DELETE",
             "Tenant",
-            tenantId,
+            requestCtx.TargetTenantId,
             upn!,
             new Dictionary<string, string>
             {
@@ -76,15 +60,15 @@ public class TenantOffboardFunction
                 { "Phase", "Initiated" }
             });
 
-        var result = new OffboardResult { TenantId = tenantId, InitiatedBy = upn!, InitiatedAt = DateTime.UtcNow };
+        var result = new OffboardResult { TenantId = requestCtx.TargetTenantId, InitiatedBy = upn!, InitiatedAt = DateTime.UtcNow };
 
         try
         {
-            var deletedCounts = await _maintenanceRepo.DeleteAllTenantDataAsync(tenantId);
+            var deletedCounts = await _maintenanceRepo.DeleteAllTenantDataAsync(requestCtx.TargetTenantId);
             result.DeletedCounts = deletedCounts;
 
             result.Success = true;
-            _logger.LogWarning($"TENANT OFFBOARD completed for tenant {tenantId} by {upn}. " +
+            _logger.LogWarning($"TENANT OFFBOARD completed for tenant {requestCtx.TargetTenantId} by {upn}. " +
                 $"Total rows deleted: {result.DeletedCounts.Values.Sum()}");
 
             // Audit completion with deletion summary
@@ -96,7 +80,7 @@ public class TenantOffboardFunction
                 Constants.AuditGlobalTenantId,
                 "DELETE",
                 "Tenant",
-                tenantId,
+                requestCtx.TargetTenantId,
                 upn!,
                 details);
 
@@ -106,7 +90,7 @@ public class TenantOffboardFunction
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Tenant offboard failed for tenant {tenantId}");
+            _logger.LogError(ex, $"Tenant offboard failed for tenant {requestCtx.TargetTenantId}");
             result.Success = false;
             result.Error = "Internal server error";
 

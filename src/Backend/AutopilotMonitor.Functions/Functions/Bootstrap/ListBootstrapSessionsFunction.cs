@@ -39,18 +39,7 @@ namespace AutopilotMonitor.Functions.Functions.Bootstrap
             {
                 // Authentication + BootstrapManagerOrGA authorization enforced by PolicyEnforcementMiddleware
                 var requestCtx = req.GetRequestContext();
-                var authenticatedTenantId = requestCtx.TenantId;
-                var userIdentifier = requestCtx.UserPrincipalName;
-
-                var tenantId = req.Query["tenantId"] ?? authenticatedTenantId;
-
-                // Cross-tenant boundary check — only Global Admins may operate on other tenants
-                if (!requestCtx.IsGlobalAdmin && !string.Equals(authenticatedTenantId, tenantId, StringComparison.OrdinalIgnoreCase))
-                {
-                    var forbidden = req.CreateResponse(HttpStatusCode.Forbidden);
-                    await forbidden.WriteAsJsonAsync(new { error = "Access denied: tenant mismatch" });
-                    return forbidden;
-                }
+                var tenantId = requestCtx.TargetTenantId;
 
                 // Check if bootstrap token feature is enabled for this tenant
                 var tenantConfig = await _configService.GetConfigurationAsync(tenantId);

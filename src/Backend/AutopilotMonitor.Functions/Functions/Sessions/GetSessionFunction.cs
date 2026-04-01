@@ -1,5 +1,4 @@
 using System.Net;
-using System.Web;
 using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Shared.DataAccess;
 using Microsoft.Azure.Functions.Worker;
@@ -42,43 +41,17 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
             try
             {
                 // Authentication + MemberRead authorization enforced by PolicyEnforcementMiddleware
+                // Cross-tenant access check handled by middleware (TargetTenantId)
                 var requestCtx = req.GetRequestContext();
-                var userIdentifier = requestCtx.UserPrincipalName;
-                var query = HttpUtility.ParseQueryString(req.Url.Query);
-                var requestedTenantId = query["tenantId"];
-                var effectiveTenantId = string.IsNullOrWhiteSpace(requestedTenantId) ? requestCtx.TenantId : requestedTenantId;
 
-                if (string.IsNullOrWhiteSpace(effectiveTenantId))
-                {
-                    var badRequest = req.CreateResponse(HttpStatusCode.BadRequest);
-                    await badRequest.WriteAsJsonAsync(new
-                    {
-                        success = false,
-                        message = "Unable to resolve tenantId."
-                    });
-                    return badRequest;
-                }
-
-                if (!requestCtx.IsGlobalAdmin && !string.Equals(effectiveTenantId, requestCtx.TenantId, StringComparison.OrdinalIgnoreCase))
-                {
-                    _logger.LogWarning($"{sessionPrefix} User {userIdentifier} (tenant {requestCtx.TenantId}) attempted to access session in tenant {effectiveTenantId}");
-                    var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-                    await forbiddenResponse.WriteAsJsonAsync(new
-                    {
-                        success = false,
-                        message = "Access denied. You can only view sessions for your own tenant."
-                    });
-                    return forbiddenResponse;
-                }
-
-                var session = await _sessionRepo.GetSessionAsync(effectiveTenantId, sessionId);
+                var session = await _sessionRepo.GetSessionAsync(requestCtx.TargetTenantId, sessionId);
 
                 // Global Admin cross-tenant fallback: if not found in the effective tenant,
                 // try resolving the actual tenant via SessionsIndex
                 if (session == null && requestCtx.IsGlobalAdmin)
                 {
                     var resolvedTenantId = await _sessionRepo.FindSessionTenantIdAsync(sessionId);
-                    if (resolvedTenantId != null && !string.Equals(resolvedTenantId, effectiveTenantId, StringComparison.OrdinalIgnoreCase))
+                    if (resolvedTenantId != null && !string.Equals(resolvedTenantId, requestCtx.TargetTenantId, StringComparison.OrdinalIgnoreCase))
                     {
                         session = await _sessionRepo.GetSessionAsync(resolvedTenantId, sessionId);
                     }

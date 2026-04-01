@@ -30,11 +30,8 @@ public class AutopilotDeviceValidationConsentFunction
         [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "config/{tenantId}/autopilot-device-validation/consent-url")] HttpRequestData req,
         string tenantId)
     {
-        var authError = await EnsureAuthorizedTenantAdminAsync(req, tenantId);
-        if (authError != null)
-        {
-            return authError;
-        }
+        // Authentication enforced by PolicyEnforcementMiddleware
+        var requestCtx = req.GetRequestContext();
 
         var validatorClientId = _configuration["EntraId:ClientId"];
         if (string.IsNullOrWhiteSpace(validatorClientId))
@@ -55,7 +52,7 @@ public class AutopilotDeviceValidationConsentFunction
         }
 
         var consentUrl =
-            $"https://login.microsoftonline.com/{Uri.EscapeDataString(tenantId)}/adminconsent" +
+            $"https://login.microsoftonline.com/{Uri.EscapeDataString(requestCtx.TargetTenantId)}/adminconsent" +
             $"?client_id={Uri.EscapeDataString(validatorClientId)}" +
             $"&redirect_uri={Uri.EscapeDataString(redirectUri)}" +
             $"&state={Uri.EscapeDataString("autopilot-device-validation-enable")}";
@@ -73,13 +70,10 @@ public class AutopilotDeviceValidationConsentFunction
         [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "config/{tenantId}/autopilot-device-validation/consent-status")] HttpRequestData req,
         string tenantId)
     {
-        var authError = await EnsureAuthorizedTenantAdminAsync(req, tenantId);
-        if (authError != null)
-        {
-            return authError;
-        }
+        // Authentication enforced by PolicyEnforcementMiddleware
+        var requestCtx = req.GetRequestContext();
 
-        var result = await _graphTokenService.GetConsentStatusAsync(tenantId);
+        var result = await _graphTokenService.GetConsentStatusAsync(requestCtx.TargetTenantId);
         var response = req.CreateResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new
         {
@@ -87,30 +81,5 @@ public class AutopilotDeviceValidationConsentFunction
             message = result.Message
         });
         return response;
-    }
-
-    private async Task<HttpResponseData?> EnsureAuthorizedTenantAdminAsync(HttpRequestData req, string tenantId)
-    {
-        // Authentication enforced by PolicyEnforcementMiddleware
-        var requestCtx = req.GetRequestContext();
-
-        // Middleware (TenantAdminOrGA policy) already verified GA or TenantAdmin of own tenant.
-        // For non-GA: only allow access to own tenant.
-        if (!requestCtx.IsGlobalAdmin && !tenantId.Equals(requestCtx.TenantId, StringComparison.OrdinalIgnoreCase))
-        {
-            _logger.LogWarning(
-                "User {User} attempted autopilot-device-validation consent operation without admin rights for tenant {TenantId}",
-                requestCtx.UserPrincipalName,
-                tenantId);
-
-            var forbidden = req.CreateResponse(HttpStatusCode.Forbidden);
-            await forbidden.WriteAsJsonAsync(new
-            {
-                error = "Access denied. Tenant Admin or Global Admin required."
-            });
-            return forbidden;
-        }
-
-        return null;
     }
 }

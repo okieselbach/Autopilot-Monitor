@@ -43,8 +43,9 @@ namespace AutopilotMonitor.Functions.Functions.Bootstrap
             try
             {
                 // Authentication + BootstrapManagerOrGA authorization enforced by PolicyEnforcementMiddleware
+                // Cross-tenant check enforced by middleware via TenantScoping.QueryParam
                 var requestCtx = req.GetRequestContext();
-                var authenticatedTenantId = requestCtx.TenantId;
+                var tenantId = requestCtx.TargetTenantId;
                 var userIdentifier = requestCtx.UserPrincipalName;
 
                 // Read request body
@@ -58,17 +59,6 @@ namespace AutopilotMonitor.Functions.Functions.Bootstrap
                     var badReq = req.CreateResponse(HttpStatusCode.BadRequest);
                     await badReq.WriteAsJsonAsync(new { error = "Invalid request body" });
                     return badReq;
-                }
-
-                // Use tenant from JWT if not specified in body
-                var tenantId = !string.IsNullOrEmpty(request.TenantId) ? request.TenantId : authenticatedTenantId;
-
-                // Cross-tenant boundary check — only Global Admins may operate on other tenants
-                if (!requestCtx.IsGlobalAdmin && !string.Equals(authenticatedTenantId, tenantId, StringComparison.OrdinalIgnoreCase))
-                {
-                    var forbidden = req.CreateResponse(HttpStatusCode.Forbidden);
-                    await forbidden.WriteAsJsonAsync(new { error = "Access denied: tenant mismatch" });
-                    return forbidden;
                 }
 
                 // Check if bootstrap token feature is enabled for this tenant

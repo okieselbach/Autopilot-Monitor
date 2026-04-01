@@ -33,23 +33,9 @@ namespace AutopilotMonitor.Functions.Functions.Config
                 var requestCtx = req.GetRequestContext();
                 var userIdentifier = requestCtx.UserPrincipalName;
 
-                // Validate tenant access: cross-tenant only for Global Admins
-                if (!requestCtx.IsGlobalAdmin && !string.Equals(requestCtx.TenantId, tenantId, StringComparison.OrdinalIgnoreCase))
-                {
-                    _logger.LogWarning("User {User} from tenant {AuthTenant} attempted to access configuration for tenant {TargetTenant}",
-                        userIdentifier, requestCtx.TenantId, tenantId);
-                    var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-                    await forbiddenResponse.WriteAsJsonAsync(new
-                    {
-                        success = false,
-                        message = "Access denied. You can only access your own tenant's configuration."
-                    });
-                    return forbiddenResponse;
-                }
+                _logger.LogInformation($"GetTenantConfiguration: {requestCtx.TargetTenantId} by user {userIdentifier}");
 
-                _logger.LogInformation($"GetTenantConfiguration: {tenantId} by user {userIdentifier}");
-
-                var config = await _configService.GetConfigurationAsync(tenantId);
+                var config = await _configService.GetConfigurationAsync(requestCtx.TargetTenantId);
 
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(config);
@@ -57,7 +43,7 @@ namespace AutopilotMonitor.Functions.Functions.Config
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"Error getting configuration for tenant {tenantId}");
+                _logger.LogError(ex, "Error getting configuration for tenant {TenantId}", tenantId);
                 var response = req.CreateResponse(HttpStatusCode.InternalServerError);
                 await response.WriteAsJsonAsync(new { error = "Internal server error" });
                 return response;

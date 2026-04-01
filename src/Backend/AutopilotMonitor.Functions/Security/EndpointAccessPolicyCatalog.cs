@@ -16,6 +16,9 @@ public enum TenantScoping
 
     /// <summary>TenantId comes from {tenantId} route parameter. Middleware enforces cross-tenant check.</summary>
     RouteParam,
+
+    /// <summary>TenantId comes from ?tenantId= query parameter (optional, falls back to JWT tenant). Middleware enforces cross-tenant check.</summary>
+    QueryParam,
 }
 
 /// <summary>
@@ -131,10 +134,10 @@ public static class EndpointAccessPolicyCatalog
         new("GET",    "search/sessions-by-cve",         EndpointPolicy.MemberRead),
         new("GET",    "metrics/summary",              EndpointPolicy.MemberRead),
         new("GET",    "sessions",                  EndpointPolicy.MemberRead),
-        new("GET",    "sessions/{sessionId}",      EndpointPolicy.MemberRead),
-        new("GET",    "sessions/{sessionId}/events", EndpointPolicy.MemberRead),
-        new("GET",    "sessions/{sessionId}/analysis", EndpointPolicy.MemberRead),
-        new("GET",    "sessions/{sessionId}/vulnerability-report", EndpointPolicy.MemberRead),
+        new("GET",    "sessions/{sessionId}",      EndpointPolicy.MemberRead, TenantScoping.QueryParam),
+        new("GET",    "sessions/{sessionId}/events", EndpointPolicy.MemberRead, TenantScoping.QueryParam),
+        new("GET",    "sessions/{sessionId}/analysis", EndpointPolicy.MemberRead, TenantScoping.QueryParam),
+        new("GET",    "sessions/{sessionId}/vulnerability-report", EndpointPolicy.MemberRead, TenantScoping.QueryParam),
         new("GET",    "metrics/app",               EndpointPolicy.MemberRead),
         new("GET",    "metrics/usage",             EndpointPolicy.MemberRead),
         new("GET",    "metrics/geographic",        EndpointPolicy.MemberRead),
@@ -174,9 +177,9 @@ public static class EndpointAccessPolicyCatalog
         new("POST",   "config/{tenantId}/test-notification",                           EndpointPolicy.TenantAdminOrGA, TenantScoping.RouteParam),
 
         // ── BootstrapManagerOrGA ────────────────────────────────────────
-        new("GET",    "bootstrap/sessions",        EndpointPolicy.BootstrapManagerOrGA),
-        new("POST",   "bootstrap/sessions",        EndpointPolicy.BootstrapManagerOrGA),
-        new("DELETE", "bootstrap/sessions/{code}", EndpointPolicy.BootstrapManagerOrGA),
+        new("GET",    "bootstrap/sessions",        EndpointPolicy.BootstrapManagerOrGA, TenantScoping.QueryParam),
+        new("POST",   "bootstrap/sessions",        EndpointPolicy.BootstrapManagerOrGA, TenantScoping.QueryParam),
+        new("DELETE", "bootstrap/sessions/{code}", EndpointPolicy.BootstrapManagerOrGA, TenantScoping.QueryParam),
 
         // ── MCP Access Check (any authenticated user can check their own access) ──
         new("GET",    "auth/mcp",                              EndpointPolicy.AuthenticatedUser),

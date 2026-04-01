@@ -18,7 +18,7 @@ public class CrossTenantAccessTests
     private const string TenantB = "00000000-0000-0000-0000-bbbbbbbbbbbb";
 
     /// <summary>
-    /// Simulates the middleware cross-tenant check: extract tenantId from route,
+    /// Simulates the middleware cross-tenant check for RouteParam routes: extract tenantId from route,
     /// compare to JWT tenant, return whether access should be blocked.
     /// </summary>
     private static (bool isBlocked, string? routeTenantId) SimulateCrossTenantCheck(
@@ -45,6 +45,29 @@ public class CrossTenantAccessTests
 
         var isCrossTenant = !string.Equals(routeTenantId, jwtTenantId, StringComparison.OrdinalIgnoreCase);
         return (isCrossTenant, routeTenantId);
+    }
+
+    /// <summary>
+    /// Simulates the middleware cross-tenant check for QueryParam routes: read tenantId from query string,
+    /// fall back to JWT tenant, compare against JWT tenant.
+    /// </summary>
+    private static (bool isBlocked, string targetTenantId) SimulateQueryParamCheck(
+        string httpMethod, string requestPath, string jwtTenantId, bool isGlobalAdmin, string? queryTenantId)
+    {
+        var entry = EndpointAccessPolicyCatalog.FindPolicy(httpMethod, requestPath);
+        if (entry == null)
+            return (true, string.Empty);
+
+        if (entry.TenantScoping != TenantScoping.QueryParam)
+            return (false, jwtTenantId); // no query param check, defaults to JWT
+
+        var targetTenantId = string.IsNullOrWhiteSpace(queryTenantId) ? jwtTenantId : queryTenantId;
+
+        if (isGlobalAdmin)
+            return (false, targetTenantId);
+
+        var isCrossTenant = !string.Equals(targetTenantId, jwtTenantId, StringComparison.OrdinalIgnoreCase);
+        return (isCrossTenant, targetTenantId);
     }
 
     // ── Same-tenant access (must be allowed) ───────────────────────────
@@ -172,5 +195,85 @@ public class CrossTenantAccessTests
         Assert.NotNull(entry);
         Assert.Equal(EndpointPolicy.GlobalAdminOnly, entry.Policy);
         Assert.Equal(TenantScoping.RouteParam, entry.TenantScoping);
+    }
+
+    // ── QueryParam: no query param → defaults to JWT tenant ───────────
+
+    [Theory]
+    [InlineData("GET", "/api/sessions/abc-123")]
+    [InlineData("GET", "/api/sessions/abc-123/events")]
+    [InlineData("GET", "/api/sessions/abc-123/analysis")]
+    [InlineData("GET", "/api/sessions/abc-123/vulnerability-report")]
+    [InlineData("GET", "/api/bootstrap/sessions")]
+    public void QueryParam_NoQueryTenant_DefaultsToJwt(string httpMethod, string path)
+    {
+        var (isBlocked, targetTenantId) = SimulateQueryParamCheck(httpMethod, path, TenantA, isGlobalAdmin: false, queryTenantId: null);
+
+        Assert.False(isBlocked);
+        Assert.Equal(TenantA, targetTenantId);
+    }
+
+    // ── QueryParam: same tenant in query → allowed ────────────────────
+
+    [Theory]
+    [InlineData("GET", "/api/sessions/abc-123")]
+    [InlineData("GET", "/api/sessions/abc-123/events")]
+    [InlineData("GET", "/api/bootstrap/sessions")]
+    public void QueryParam_SameTenant_IsAllowed(string httpMethod, string path)
+    {
+        var (isBlocked, targetTenantId) = SimulateQueryParamCheck(httpMethod, path, TenantA, isGlobalAdmin: false, queryTenantId: TenantA);
+
+        Assert.False(isBlocked);
+        Assert.Equal(TenantA, targetTenantId);
+    }
+
+    // ── QueryParam: cross-tenant by non-GA → blocked ──────────────────
+
+    [Theory]
+    [InlineData("GET", "/api/sessions/abc-123")]
+    [InlineData("GET", "/api/sessions/abc-123/events")]
+    [InlineData("GET", "/api/sessions/abc-123/analysis")]
+    [InlineData("GET", "/api/sessions/abc-123/vulnerability-report")]
+    [InlineData("GET", "/api/bootstrap/sessions")]
+    [InlineData("DELETE", "/api/bootstrap/sessions/CODE123")]
+    public void QueryParam_CrossTenant_NonGA_IsBlocked(string httpMethod, string path)
+    {
+        var (isBlocked, targetTenantId) = SimulateQueryParamCheck(httpMethod, path, TenantA, isGlobalAdmin: false, queryTenantId: TenantB);
+
+        Assert.True(isBlocked, $"Cross-tenant query param should be blocked: {httpMethod} {path}");
+        Assert.Equal(TenantB, targetTenantId);
+    }
+
+    // ── QueryParam: cross-tenant by GA → allowed ──────────────────────
+
+    [Theory]
+    [InlineData("GET", "/api/sessions/abc-123")]
+    [InlineData("GET", "/api/sessions/abc-123/events")]
+    [InlineData("GET", "/api/bootstrap/sessions")]
+    public void QueryParam_CrossTenant_GlobalAdmin_IsAllowed(string httpMethod, string path)
+    {
+        var (isBlocked, targetTenantId) = SimulateQueryParamCheck(httpMethod, path, TenantA, isGlobalAdmin: true, queryTenantId: TenantB);
+
+        Assert.False(isBlocked);
+        Assert.Equal(TenantB, targetTenantId);
+    }
+
+    // ── QueryParam routes have correct scoping ────────────────────────
+
+    [Theory]
+    [InlineData("GET", "sessions/{sessionId}")]
+    [InlineData("GET", "sessions/{sessionId}/events")]
+    [InlineData("GET", "sessions/{sessionId}/analysis")]
+    [InlineData("GET", "sessions/{sessionId}/vulnerability-report")]
+    [InlineData("GET", "bootstrap/sessions")]
+    [InlineData("POST", "bootstrap/sessions")]
+    [InlineData("DELETE", "bootstrap/sessions/{code}")]
+    public void QueryParamRoutes_HaveCorrectScoping(string httpMethod, string routeTemplate)
+    {
+        var entry = EndpointAccessPolicyCatalog.Entries
+            .FirstOrDefault(e => e.HttpMethod == httpMethod.ToUpperInvariant() && e.RouteTemplate == routeTemplate);
+
+        Assert.NotNull(entry);
+        Assert.Equal(TenantScoping.QueryParam, entry.TenantScoping);
     }
 }

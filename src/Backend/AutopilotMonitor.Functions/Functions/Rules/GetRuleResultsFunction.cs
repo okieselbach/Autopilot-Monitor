@@ -1,5 +1,4 @@
 using System.Net;
-using System.Web;
 using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Services;
 using AutopilotMonitor.Shared.DataAccess;
@@ -43,27 +42,9 @@ namespace AutopilotMonitor.Functions.Functions.Rules
         {
             // Authentication + MemberRead authorization enforced by PolicyEnforcementMiddleware
             var requestCtx = req.GetRequestContext();
-            var userIdentifier = requestCtx.UserPrincipalName;
+            var effectiveTenantId = requestCtx.TargetTenantId;
 
-            // Resolve effective tenant ID: use query param if provided, fall back to JWT tenant
-            var query = HttpUtility.ParseQueryString(req.Url.Query);
-            var requestedTenantId = query["tenantId"];
-            var effectiveTenantId = string.IsNullOrEmpty(requestedTenantId) ? requestCtx.TenantId : requestedTenantId;
-
-            // Cross-tenant access requires Global Admin
-            if (!requestCtx.IsGlobalAdmin && effectiveTenantId != requestCtx.TenantId)
-            {
-                var forbidden = req.CreateResponse(HttpStatusCode.Forbidden);
-                await forbidden.WriteAsJsonAsync(new { success = false, message = "Access denied. You can only view analysis results for your own tenant." });
-                return forbidden;
-            }
-
-            if (requestCtx.IsGlobalAdmin && effectiveTenantId != requestCtx.TenantId)
-            {
-                _logger.LogInformation($"Global Admin {userIdentifier} accessing cross-tenant analysis results (tenant: {effectiveTenantId})");
-            }
-
-            var reanalyze = string.Equals(query["reanalyze"], "true", StringComparison.OrdinalIgnoreCase);
+            var reanalyze = string.Equals(req.Query["reanalyze"], "true", StringComparison.OrdinalIgnoreCase);
 
             if (reanalyze)
             {

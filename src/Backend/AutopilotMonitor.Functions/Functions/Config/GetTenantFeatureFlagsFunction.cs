@@ -31,23 +31,8 @@ namespace AutopilotMonitor.Functions.Functions.Config
             {
                 // Authentication + MemberRead authorization enforced by PolicyEnforcementMiddleware
                 var requestCtx = req.GetRequestContext();
-                var userIdentifier = requestCtx.UserPrincipalName;
 
-                // Validate tenant access: cross-tenant only for Global Admins
-                if (!requestCtx.IsGlobalAdmin && !string.Equals(requestCtx.TenantId, tenantId, StringComparison.OrdinalIgnoreCase))
-                {
-                    _logger.LogWarning("User {User} from tenant {AuthTenant} attempted to access feature flags for tenant {TargetTenant}",
-                        userIdentifier, requestCtx.TenantId, tenantId);
-                    var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-                    await forbiddenResponse.WriteAsJsonAsync(new
-                    {
-                        success = false,
-                        message = "Access denied. You can only access your own tenant's feature flags."
-                    });
-                    return forbiddenResponse;
-                }
-
-                var config = await _configService.GetConfigurationAsync(tenantId);
+                var config = await _configService.GetConfigurationAsync(requestCtx.TargetTenantId);
 
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(new
