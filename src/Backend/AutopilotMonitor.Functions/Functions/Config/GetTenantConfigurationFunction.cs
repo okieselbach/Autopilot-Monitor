@@ -29,7 +29,7 @@ namespace AutopilotMonitor.Functions.Functions.Config
         {
             try
             {
-                // Authentication + MemberRead authorization enforced by PolicyEnforcementMiddleware
+                // Authentication + TenantAdminOrGA authorization enforced by PolicyEnforcementMiddleware
                 var requestCtx = req.GetRequestContext();
                 var userIdentifier = requestCtx.UserPrincipalName;
 

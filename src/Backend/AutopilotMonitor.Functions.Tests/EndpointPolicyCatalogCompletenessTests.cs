@@ -158,7 +158,7 @@ public class EndpointPolicyCatalogCompletenessTests
 
         Assert.NotNull(getConfig);
         Assert.NotNull(putConfig);
-        Assert.Equal(EndpointPolicy.MemberRead, getConfig.Policy);
+        Assert.Equal(EndpointPolicy.TenantAdminOrGA, getConfig.Policy);
         Assert.Equal(EndpointPolicy.TenantAdminOrGA, putConfig.Policy);
 
         var getRules = EndpointAccessPolicyCatalog.FindPolicy("GET", "/api/rules/gather");
