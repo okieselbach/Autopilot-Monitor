@@ -443,7 +443,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                 // Send webhook notifications (fire-and-forget, non-fatal)
                 await SendWebhookNotificationsAsync(
                     request, sessionPrefix, classification, updatedSession,
-                    statusTransitioned, whiteGloveStatusTransitioned, failureReason);
+                    statusTransitioned, whiteGloveStatusTransitioned, failureReason, newRuleResults);
 
                 // Check if an admin has externally marked the session as terminal.
                 // Only signal the agent when this batch did NOT contain the terminal event itself
@@ -630,7 +630,8 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
         /// </summary>
         private async Task SendWebhookNotificationsAsync(
             IngestEventsRequest request, string sessionPrefix, EventClassification c,
-            SessionSummary? updatedSession, bool statusTransitioned, bool whiteGloveStatusTransitioned, string? failureReason)
+            SessionSummary? updatedSession, bool statusTransitioned, bool whiteGloveStatusTransitioned, string? failureReason,
+            List<AutopilotMonitor.Shared.Models.RuleResult> ruleResults)
         {
             // Read config once (was 3 separate reads before)
             var tenantConfig = await _configService.GetConfigurationAsync(request.TenantId);
@@ -673,6 +674,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                         failureReason: failureReason,
                         duration: duration,
                         sessionUrl: sessionUrl);
+                    NotificationAlertBuilder.AddRuleResultSections(alert, ruleResults);
 
                     _ = _webhookNotificationService.SendNotificationAsync(webhookUrl, providerType, alert);
                 }
@@ -693,6 +695,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                     success: true,
                     duration: duration,
                     sessionUrl: sessionUrl);
+                NotificationAlertBuilder.AddRuleResultSections(alert, ruleResults);
 
                 _ = _webhookNotificationService.SendNotificationAsync(webhookUrl, providerType, alert);
             }
@@ -712,6 +715,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                     success: false,
                     duration: duration,
                     sessionUrl: sessionUrl);
+                NotificationAlertBuilder.AddRuleResultSections(alert, ruleResults);
 
                 _ = _webhookNotificationService.SendNotificationAsync(webhookUrl, providerType, alert);
             }

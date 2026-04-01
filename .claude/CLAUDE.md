@@ -1,4 +1,9 @@
 ## Workflow Orchestration
+# Agent Directives: Mechanical Overrides
+
+You are operating within a constrained context window and strict system prompts. To produce production-grade code, you MUST adhere to these overrides:
+
+
 
 ### 1. Plan Mode Default
 - Enter plan mode for ANY non-trivial task (3+ steps or architectural decisions)
@@ -35,6 +40,17 @@
 - Point at logs, errors, failing tests — then resolve them
 - Zero context switching required from the user
 - Go fix failing CI tests without being told how
+
+
+
+### Tools Execution
+- Read any file over 500 LOC in chunks using offset and limit parameters.
+- Do not assume a single grep caught everything.
+
+### Code Quality
+- If architecture is flawed, state is duplicated, or patterns are inconsistent - propose and implement structural fixes. Ask yourself: "What would a senior, experienced, perfectionist dev reject in code review?" Fix all of it.
+
+
 
 ## Task Management
 

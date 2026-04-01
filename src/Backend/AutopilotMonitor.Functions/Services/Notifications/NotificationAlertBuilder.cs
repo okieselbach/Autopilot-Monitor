@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using AutopilotMonitor.Shared.Models;
 using AutopilotMonitor.Shared.Models.Notifications;
 
 namespace AutopilotMonitor.Functions.Services.Notifications
@@ -121,6 +123,44 @@ namespace AutopilotMonitor.Functions.Services.Notifications
                     new() { Type = "openUrl", Title = "Open Autopilot Monitor", Url = "https://www.autopilotmonitor.com" },
                 },
             };
+        }
+
+        /// <summary>
+        /// Appends rule results as notification sections (warning/high/critical only, max 5).
+        /// </summary>
+        public static void AddRuleResultSections(NotificationAlert alert, List<RuleResult> ruleResults)
+        {
+            if (ruleResults == null || ruleResults.Count == 0)
+                return;
+
+            var significant = ruleResults
+                .Where(r => r.Severity is "warning" or "high" or "critical")
+                .OrderByDescending(r => r.Severity == "critical" ? 3 : r.Severity == "high" ? 2 : 1)
+                .Take(5)
+                .ToList();
+
+            if (significant.Count == 0)
+                return;
+
+            foreach (var r in significant)
+            {
+                var emoji = r.Severity switch
+                {
+                    "critical" => "\ud83d\udfe5",
+                    "high" => "\ud83d\udfe0",
+                    _ => "\ud83d\udfe1"
+                };
+
+                var explanation = r.Explanation?.Length > 200
+                    ? r.Explanation[..200] + "..."
+                    : r.Explanation ?? "";
+
+                alert.Sections.Add(new NotificationSection
+                {
+                    Title = $"{emoji} {r.RuleTitle}",
+                    Text = explanation
+                });
+            }
         }
 
         private static string BuildHardwareText(string? manufacturer, string? model)
