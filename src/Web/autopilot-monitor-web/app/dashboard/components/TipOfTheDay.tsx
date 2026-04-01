@@ -26,7 +26,7 @@ export default function TipOfTheDay() {
   if (!tip) return null;
 
   return (
-    <div className="mt-1 mb-1 flex items-center justify-center gap-2 text-xs text-gray-400 dark:text-gray-500 select-none">
+    <div className="mt-3 mb-1 flex items-center justify-center gap-2 text-xs text-gray-400 dark:text-gray-500 select-none">
       <svg
         className="w-3.5 h-3.5 text-amber-400 shrink-0"
         fill="none"
