@@ -1,5 +1,6 @@
 using Azure;
 using Azure.Data.Tables;
+using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Extensions.Logging;
@@ -526,19 +527,25 @@ namespace AutopilotMonitor.Functions.Services
 
             var filterParts = new List<string>();
             if (!string.IsNullOrEmpty(tenantId))
-                filterParts.Add($"PartitionKey eq '{tenantId}'");
+                filterParts.Add($"PartitionKey eq '{ODataSanitizer.EscapeValue(tenantId)}'");
             if (!string.IsNullOrEmpty(filter.Status))
-                filterParts.Add($"Status eq '{filter.Status}'");
+                filterParts.Add($"Status eq '{ODataSanitizer.EscapeValue(filter.Status)}'");
             if (!string.IsNullOrEmpty(filter.Manufacturer))
-                filterParts.Add($"Manufacturer eq '{filter.Manufacturer}'");
+                filterParts.Add($"Manufacturer eq '{ODataSanitizer.EscapeValue(filter.Manufacturer)}'");
             if (!string.IsNullOrEmpty(filter.Model))
-                filterParts.Add($"Model eq '{filter.Model}'");
+                filterParts.Add($"Model eq '{ODataSanitizer.EscapeValue(filter.Model)}'");
             if (!string.IsNullOrEmpty(filter.EnrollmentType))
-                filterParts.Add($"EnrollmentType eq '{filter.EnrollmentType}'");
+                filterParts.Add($"EnrollmentType eq '{ODataSanitizer.EscapeValue(filter.EnrollmentType)}'");
             if (!string.IsNullOrEmpty(filter.DeviceName))
-                filterParts.Add($"DeviceName ge '{filter.DeviceName}' and DeviceName lt '{filter.DeviceName}~'");
+            {
+                var safeName = ODataSanitizer.EscapeValue(filter.DeviceName);
+                filterParts.Add($"DeviceName ge '{safeName}' and DeviceName lt '{safeName}~'");
+            }
             if (!string.IsNullOrEmpty(filter.OsBuild))
-                filterParts.Add($"OsBuild ge '{filter.OsBuild}' and OsBuild lt '{filter.OsBuild}~'");
+            {
+                var safeBuild = ODataSanitizer.EscapeValue(filter.OsBuild);
+                filterParts.Add($"OsBuild ge '{safeBuild}' and OsBuild lt '{safeBuild}~'");
+            }
 
             var oDataFilter = filterParts.Count > 0 ? string.Join(" and ", filterParts) : null;
 
@@ -651,7 +658,8 @@ namespace AutopilotMonitor.Functions.Services
 
             string? oDataFilter;
             if (!string.IsNullOrEmpty(tenantId))
-                oDataFilter = $"PartitionKey eq '{tenantId}_{eventType}'";
+                oDataFilter = $"PartitionKey eq '{ODataSanitizer.EscapeValue(tenantId)}_{ODataSanitizer.EscapeValue(eventType)}'";
+
             else
                 oDataFilter = null; // full scan — not efficient but functional
 
@@ -691,9 +699,12 @@ namespace AutopilotMonitor.Functions.Services
 
             string oDataFilter;
             if (!string.IsNullOrEmpty(tenantId))
-                oDataFilter = $"PartitionKey eq '{tenantId}_{cveId}'";
+                oDataFilter = $"PartitionKey eq '{ODataSanitizer.EscapeValue(tenantId)}_{ODataSanitizer.EscapeValue(cveId)}'";
             else
-                oDataFilter = $"PartitionKey ge '{cveId}' and PartitionKey lt '{cveId}~'";
+            {
+                var safeCveId = ODataSanitizer.EscapeValue(cveId);
+                oDataFilter = $"PartitionKey ge '{safeCveId}' and PartitionKey lt '{safeCveId}~'";
+            }
 
             var sessionIds = new List<string>();
             await foreach (var entity in tableClient.QueryAsync<TableEntity>(filter: oDataFilter))
