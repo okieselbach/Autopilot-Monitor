@@ -13,6 +13,7 @@ const tips = [
   "Connect Teams or Slack under Notifications to get real-time enrollment alerts in your channel.",
   "Share the Progress Portal link with your team \u2014 anyone can check enrollment status by serial number.",
   "Missing an event in your sessions? Use Gather Rules to collect it.",
+  "Analyze Rules are continuously refined \u2014 analysis results may shift as rules improve. This is normal.",
 ];
 
 export default function TipOfTheDay() {
