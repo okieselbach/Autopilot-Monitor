@@ -212,7 +212,7 @@ export default function GlobalSearch() {
   };
 
   return (
-    <div className="flex-1 flex items-center">
+    <div className="flex-1 flex items-center px-3">
       {/* Desktop: inline search field centered (visible md+) */}
       <div ref={containerRef} className="hidden md:flex relative w-full max-w-md mx-auto">
         <div className="relative w-full">
