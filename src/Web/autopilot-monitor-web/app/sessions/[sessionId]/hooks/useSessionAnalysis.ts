@@ -3,8 +3,7 @@ import { useState, useCallback } from "react";
 import { api } from "@/lib/api";
 import { authenticatedFetch } from "@/lib/authenticatedFetch";
 import { RuleResult } from "@/types";
-
-const GUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+import { isGuid } from "@/lib/inputValidation";
 
 export function useSessionAnalysis(
   sessionId: string,
@@ -16,7 +15,7 @@ export function useSessionAnalysis(
   const [vulnerabilityReport, setVulnerabilityReport] = useState<unknown>(null);
 
   const fetchAnalysisResults = useCallback(async (reanalyze = false) => {
-    if (!sessionTenantId || !GUID_REGEX.test(sessionTenantId)) return;
+    if (!sessionTenantId || !isGuid(sessionTenantId)) return;
     try {
       setLoadingAnalysis(true);
 
@@ -38,7 +37,7 @@ export function useSessionAnalysis(
   }, [sessionId, sessionTenantId, getAccessToken]);
 
   const fetchVulnerabilityReport = useCallback(async (rescan = false) => {
-    if (!sessionTenantId || !GUID_REGEX.test(sessionTenantId)) return;
+    if (!sessionTenantId || !isGuid(sessionTenantId)) return;
     try {
       const response = await authenticatedFetch(
         api.sessions.vulnerabilityReport(sessionId, sessionTenantId, rescan || undefined),

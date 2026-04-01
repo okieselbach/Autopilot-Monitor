@@ -11,6 +11,7 @@ import { useNotifications } from "../../contexts/NotificationContext";
 import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 import { trackEvent } from "@/lib/appInsights";
+import { asGuidOrUndefined } from "@/lib/inputValidation";
 import { Session } from "./types";
 import { StatsCard } from "./components/StatsCards";
 import { WelcomeMessage } from "./components/WelcomeMessage";
@@ -100,9 +101,11 @@ export default function Home() {
   const fetchSessions = async (loadMoreCursor?: string, globalTenantIdOverride?: string) => {
     try {
       // Use different endpoint based on global admin mode
-      const effectiveTenantFilter = globalTenantIdOverride !== undefined ? globalTenantIdOverride : tenantIdFilter.trim();
+      // Only pass tenantIdFilter as query param if it's a valid GUID (fuzzy search sets the GUID on selection)
+      const rawFilter = globalTenantIdOverride !== undefined ? globalTenantIdOverride : tenantIdFilter.trim();
+      const effectiveTenantFilter = asGuidOrUndefined(rawFilter);
       let endpoint = globalAdminMode
-        ? api.globalSessions.list(effectiveTenantFilter || undefined)
+        ? api.globalSessions.list(effectiveTenantFilter)
         : api.sessions.list(tenantId);
 
       // Append cursor for "Load More" requests

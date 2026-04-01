@@ -33,8 +33,7 @@ import { generateUiExport, generateCsvExport, generateSessionCsvExport, generate
 import { Session, EnrollmentEvent, RuleResult } from "@/types";
 import { trackEvent } from "@/lib/appInsights";
 import { useAdminMode } from "@/hooks/useAdminMode";
-
-const GUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+import { isGuid } from "@/lib/inputValidation";
 
 export default function SessionDetailPage() {
   const params = useParams();
@@ -330,7 +329,7 @@ export default function SessionDetailPage() {
       return;
     }
     const effectiveTenantId = resolveEffectiveTenantId();
-    if (!effectiveTenantId || !GUID_REGEX.test(effectiveTenantId)) {
+    if (!effectiveTenantId || !isGuid(effectiveTenantId)) {
       return;
     }
     fetchEventsInFlight.current = true;
