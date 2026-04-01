@@ -1,7 +1,10 @@
+using System.Diagnostics;
 using System.Net;
 using System.Web;
 using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Services;
+using Azure.Storage.Blobs;
+using Microsoft.ApplicationInsights;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
@@ -9,20 +12,27 @@ using Microsoft.Extensions.Logging;
 namespace AutopilotMonitor.Functions.Functions.Diagnostics
 {
     /// <summary>
-    /// Returns a download URL for a diagnostics package stored in the tenant's Blob Storage.
-    /// Constructs the full blob URL from the tenant's configured Container SAS URL + blob name.
+    /// Proxies a diagnostics blob download through the backend.
+    /// The tenant's container SAS URL never leaves the server — the backend fetches
+    /// the blob and streams it directly to the authenticated user.
+    ///
+    /// Emits a "DiagnosticsDownloadProxied" custom event to Application Insights
+    /// with blob size and duration metrics for traffic monitoring.
     /// </summary>
     public class DiagnosticsDownloadFunction
     {
         private readonly ILogger<DiagnosticsDownloadFunction> _logger;
         private readonly TenantConfigurationService _configService;
+        private readonly TelemetryClient _telemetryClient;
 
         public DiagnosticsDownloadFunction(
             ILogger<DiagnosticsDownloadFunction> logger,
-            TenantConfigurationService configService)
+            TenantConfigurationService configService,
+            TelemetryClient telemetryClient)
         {
             _logger = logger;
             _configService = configService;
+            _telemetryClient = telemetryClient;
         }
 
         [Function("DiagnosticsDownloadUrl")]
@@ -73,30 +83,70 @@ namespace AutopilotMonitor.Functions.Functions.Diagnostics
                     return notFoundResponse;
                 }
 
-                // Construct full blob download URL from container SAS + blob name
+                // Construct full blob URL from container SAS + blob name (SAS never leaves the server)
                 var containerSasUrl = tenantConfig.DiagnosticsBlobSasUrl;
                 var questionMarkIndex = containerSasUrl.IndexOf('?');
-                string downloadUrl;
+                string blobUrl;
                 if (questionMarkIndex >= 0)
                 {
                     var basePath = containerSasUrl.Substring(0, questionMarkIndex).TrimEnd('/');
                     var queryString = containerSasUrl.Substring(questionMarkIndex);
-                    downloadUrl = $"{basePath}/{blobName}{queryString}";
+                    blobUrl = $"{basePath}/{blobName}{queryString}";
                 }
                 else
                 {
-                    downloadUrl = $"{containerSasUrl.TrimEnd('/')}/{blobName}";
+                    blobUrl = $"{containerSasUrl.TrimEnd('/')}/{blobName}";
                 }
 
-                _logger.LogInformation($"Generated diagnostics download URL for tenant {tenantId}, blob {blobName}");
+                // Download blob server-side and stream to client
+                var sw = Stopwatch.StartNew();
+                var blobClient = new BlobClient(new Uri(blobUrl));
+                var download = await blobClient.DownloadStreamingAsync();
+                sw.Stop();
 
+                var contentLength = download.Value.Details.ContentLength;
+
+                _logger.LogInformation(
+                    "DiagnosticsDownload: Proxying blob {BlobName} for tenant {TenantId}, size {SizeBytes} bytes, fetch took {DurationMs}ms",
+                    blobName, tenantId, contentLength, sw.ElapsedMilliseconds);
+
+                // Track custom event for analytics
+                _telemetryClient.TrackEvent("DiagnosticsDownloadProxied",
+                    properties: new Dictionary<string, string>
+                    {
+                        ["TenantId"] = tenantId,
+                        ["BlobName"] = blobName,
+                        ["UserId"] = requestCtx.UserPrincipalName,
+                        ["UserRole"] = requestCtx.UserRole
+                    },
+                    metrics: new Dictionary<string, double>
+                    {
+                        ["BlobSizeBytes"] = contentLength,
+                        ["DurationMs"] = sw.ElapsedMilliseconds
+                    });
+
+                // Stream blob content to client
                 var response = req.CreateResponse(HttpStatusCode.OK);
-                await response.WriteAsJsonAsync(new { success = true, downloadUrl });
+                response.Headers.Add("Content-Type", "application/octet-stream");
+                response.Headers.Add("Content-Disposition", $"attachment; filename=\"{blobName}\"");
+                if (contentLength > 0)
+                {
+                    response.Headers.Add("Content-Length", contentLength.ToString());
+                }
+
+                await download.Value.Content.CopyToAsync(response.Body);
                 return response;
+            }
+            catch (Azure.RequestFailedException ex) when (ex.Status == 404)
+            {
+                _logger.LogWarning("DiagnosticsDownload: Blob not found for requested download");
+                var notFoundResponse = req.CreateResponse(HttpStatusCode.NotFound);
+                await notFoundResponse.WriteAsJsonAsync(new { success = false, message = "Diagnostics package not found." });
+                return notFoundResponse;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error generating diagnostics download URL");
+                _logger.LogError(ex, "Error proxying diagnostics download");
                 var errorResponse = req.CreateResponse(HttpStatusCode.InternalServerError);
                 await errorResponse.WriteAsJsonAsync(new { success = false, message = "Internal server error." });
                 return errorResponse;

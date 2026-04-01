@@ -10,10 +10,27 @@ using Microsoft.Extensions.Logging;
 namespace AutopilotMonitor.Functions.Functions.Diagnostics
 {
     /// <summary>
-    /// Returns a short-lived SAS URL for diagnostics package upload.
+    /// Returns the tenant's container SAS URL for diagnostics package upload.
     /// Called by the agent just before uploading diagnostics — not at startup.
     /// The SAS URL is never cached in the agent's config, reducing its exposure window.
     /// Uses device authentication (client certificate), not JWT.
+    ///
+    /// SECURITY NOTE — Accepted risk (container-scope SAS):
+    /// The SAS URL returned here is a long-lived, container-scoped token stored in
+    /// TenantConfiguration. Generating short-lived blob-scoped tokens would require
+    /// Managed Identity delegation on each tenant's storage account, which is not
+    /// feasible in a SaaS model where tenants self-configure their storage.
+    ///
+    /// Mitigations in place:
+    /// - Device authentication required (client certificate validated against Intune CA)
+    /// - SAS URL never persisted on device (memory-only, discarded after upload)
+    /// - SAS URL never logged
+    /// - Rate-limited and hardware-whitelisted
+    /// - Upload endpoint not accessible to web users (device auth only)
+    ///
+    /// If a future architecture change makes MI-based delegation feasible,
+    /// replace this with BlobStorageService.GetTenantUploadSasAsync() for
+    /// blob-scoped, 15-minute User Delegation SAS tokens.
     /// </summary>
     public class GetDiagnosticsUploadUrlFunction
     {
@@ -121,6 +138,7 @@ namespace AutopilotMonitor.Functions.Functions.Diagnostics
                 await response.WriteAsJsonAsync(new GetDiagnosticsUploadUrlResponse
                 {
                     Success = true,
+                    // Container-scoped SAS — accepted risk, see class docstring for rationale
                     UploadUrl = tenantConfig.DiagnosticsBlobSasUrl,
                     ExpiresAt = sasExpiry ?? DateTime.UtcNow.AddHours(1),
                     Message = null

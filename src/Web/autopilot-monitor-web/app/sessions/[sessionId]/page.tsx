@@ -848,9 +848,13 @@ export default function SessionDetailPage() {
                       api.diagnostics.downloadUrl(session.tenantId, session.diagnosticsBlobName!),
                       getAccessToken
                     );
-                    if (!res.ok) throw new Error('Failed to get download URL');
-                    const data = await res.json();
-                    window.open(data.downloadUrl, '_blank');
+                    if (!res.ok) throw new Error('Failed to download diagnostics package');
+                    const blob = await res.blob();
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    a.download = session.diagnosticsBlobName!;
+                    a.click();
+                    URL.revokeObjectURL(a.href);
                   } catch (err) {
                     if (err instanceof TokenExpiredError) {
                       addNotification('error', 'Session Expired', err.message, 'session-expired-error');
