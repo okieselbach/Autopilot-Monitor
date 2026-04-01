@@ -36,7 +36,22 @@ namespace AutopilotMonitor.Functions.Functions.Config
             try
             {
                 // Authentication + TenantAdminOrGA authorization enforced by PolicyEnforcementMiddleware
-                string userIdentifier = TenantHelper.GetUserIdentifier(req);
+                var requestCtx = req.GetRequestContext();
+                string userIdentifier = requestCtx.UserPrincipalName;
+
+                // Validate tenant access: cross-tenant only for Global Admins
+                if (!requestCtx.IsGlobalAdmin && !string.Equals(requestCtx.TenantId, tenantId, StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogWarning("User {User} from tenant {AuthTenant} attempted to test notification for tenant {TargetTenant}",
+                        userIdentifier, requestCtx.TenantId, tenantId);
+                    var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
+                    await forbiddenResponse.WriteAsJsonAsync(new
+                    {
+                        success = false,
+                        message = "Access denied. You can only test notifications for your own tenant."
+                    });
+                    return forbiddenResponse;
+                }
 
                 _logger.LogInformation("Test webhook notification requested by {User} for tenant {TenantId}",
                     userIdentifier, tenantId);
