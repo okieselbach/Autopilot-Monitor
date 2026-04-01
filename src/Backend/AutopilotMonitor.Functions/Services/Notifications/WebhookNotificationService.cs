@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
+using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Shared.Models.Notifications;
 using Microsoft.Extensions.Logging;
 
@@ -46,6 +47,8 @@ namespace AutopilotMonitor.Functions.Services.Notifications
                     return;
                 }
 
+                await SsrfGuard.ValidateDestinationAsync(webhookUrl);
+
                 var json = renderer.RenderToJson(alert);
                 var content = new StringContent(json, Encoding.UTF8, "application/json");
                 var response = await _http.PostAsync(webhookUrl, content);
@@ -77,6 +80,15 @@ namespace AutopilotMonitor.Functions.Services.Notifications
 
             if (!_renderers.TryGetValue(providerType, out var renderer))
                 return new WebhookTestResult { Success = false, Message = $"Unknown provider type: {providerType}" };
+
+            try
+            {
+                await SsrfGuard.ValidateDestinationAsync(webhookUrl);
+            }
+            catch (SsrfException ex)
+            {
+                return new WebhookTestResult { Success = false, Message = ex.Message };
+            }
 
             try
             {

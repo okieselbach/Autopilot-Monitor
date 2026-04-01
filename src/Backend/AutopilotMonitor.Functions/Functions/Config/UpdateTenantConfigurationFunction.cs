@@ -4,6 +4,7 @@ using System.Net;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using AutopilotMonitor.Functions.Helpers;
+using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Functions.Services;
 using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
@@ -73,6 +74,22 @@ namespace AutopilotMonitor.Functions.Functions.Config
                 {
                     var badRequest = req.CreateResponse(HttpStatusCode.BadRequest);
                     await badRequest.WriteAsJsonAsync(new { error = "Invalid configuration" });
+                    return badRequest;
+                }
+
+                // Validate webhook URLs (SSRF protection)
+                var webhookUrlError = SsrfGuard.ValidateWebhookUrlFormat(config.WebhookUrl);
+                if (webhookUrlError != null)
+                {
+                    var badRequest = req.CreateResponse(HttpStatusCode.BadRequest);
+                    await badRequest.WriteAsJsonAsync(new { success = false, message = $"Invalid Webhook URL: {webhookUrlError}" });
+                    return badRequest;
+                }
+                var teamsUrlError = SsrfGuard.ValidateWebhookUrlFormat(config.TeamsWebhookUrl);
+                if (teamsUrlError != null)
+                {
+                    var badRequest = req.CreateResponse(HttpStatusCode.BadRequest);
+                    await badRequest.WriteAsJsonAsync(new { success = false, message = $"Invalid Teams Webhook URL: {teamsUrlError}" });
                     return badRequest;
                 }
 

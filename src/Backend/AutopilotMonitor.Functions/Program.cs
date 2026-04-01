@@ -154,6 +154,12 @@ builder.Services.AddSingleton<AutopilotMonitor.Functions.Security.GraphTokenServ
 builder.Services.AddSingleton<AutopilotMonitor.Functions.Security.AutopilotDeviceValidator>();
 builder.Services.AddSingleton<AutopilotMonitor.Functions.Security.CorporateIdentifierValidator>();
 builder.Services.AddHttpClient<AutopilotMonitor.Functions.Services.Notifications.WebhookNotificationService>()
+    .ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.SocketsHttpHandler
+    {
+        AllowAutoRedirect = false,
+        ConnectTimeout = TimeSpan.FromSeconds(10),
+    })
+    .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(15))
     .AddPolicyHandler((sp, _) => sp.GetRequiredService<ResiliencePolicies>().Notification);
 builder.Services.AddHttpClient<TelegramNotificationService>()
     .AddPolicyHandler((sp, _) => sp.GetRequiredService<ResiliencePolicies>().Notification);
