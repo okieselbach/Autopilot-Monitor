@@ -182,4 +182,61 @@ public class EndpointPolicyCatalogCompletenessTests
         var entry = EndpointAccessPolicyCatalog.FindPolicy(httpMethod, requestPath);
         Assert.Null(entry);
     }
+
+    /// <summary>
+    /// Every route template containing {tenantId} must declare TenantScoping.RouteParam.
+    /// This prevents new endpoints with {tenantId} from bypassing cross-tenant validation.
+    /// </summary>
+    [Fact]
+    public void RoutesWithTenantIdParam_MustHaveTenantScopingRouteParam()
+    {
+        var missing = EndpointAccessPolicyCatalog.Entries
+            .Where(e => e.RouteTemplate.Contains("{tenantId}")
+                     && e.TenantScoping != TenantScoping.RouteParam)
+            .Select(e => $"{e.HttpMethod} {e.RouteTemplate} [{e.Policy}]")
+            .ToList();
+
+        Assert.True(missing.Count == 0,
+            "Routes with {tenantId} in template must declare TenantScoping.RouteParam:\n" +
+            string.Join("\n", missing.Select(m => $"  - {m}")));
+    }
+
+    /// <summary>
+    /// Every entry with TenantScoping.RouteParam must have {tenantId} in its route template.
+    /// Prevents misattributed scoping declarations.
+    /// </summary>
+    [Fact]
+    public void RouteParamScoping_RequiresTenantIdInTemplate()
+    {
+        var invalid = EndpointAccessPolicyCatalog.Entries
+            .Where(e => e.TenantScoping == TenantScoping.RouteParam
+                     && !e.RouteTemplate.Contains("{tenantId}"))
+            .Select(e => $"{e.HttpMethod} {e.RouteTemplate} [{e.Policy}]")
+            .ToList();
+
+        Assert.True(invalid.Count == 0,
+            "Entries with TenantScoping.RouteParam must have {tenantId} in their route template:\n" +
+            string.Join("\n", invalid.Select(i => $"  - {i}")));
+    }
+
+    /// <summary>
+    /// Named capture group for {tenantId} correctly extracts the value from request paths.
+    /// </summary>
+    [Theory]
+    [InlineData("GET", "/api/config/00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000001")]
+    [InlineData("GET", "/api/tenants/abc-def-123/admins", "abc-def-123")]
+    [InlineData("DELETE", "/api/tenants/tid-1/admins/user@contoso.com", "tid-1")]
+    public void RouteParamRoutes_ExtractTenantIdFromPath(string httpMethod, string requestPath, string expectedTenantId)
+    {
+        var entry = EndpointAccessPolicyCatalog.FindPolicy(httpMethod, requestPath);
+        Assert.NotNull(entry);
+        Assert.Equal(TenantScoping.RouteParam, entry.TenantScoping);
+
+        var normalizedPath = requestPath.StartsWith("/api/", StringComparison.OrdinalIgnoreCase)
+            ? requestPath.Substring(5)
+            : requestPath;
+        var match = entry.RouteRegex.Match(normalizedPath);
+        Assert.True(match.Success);
+        Assert.Equal(expectedTenantId, match.Groups["tenantId"].Value);
+    }
 }

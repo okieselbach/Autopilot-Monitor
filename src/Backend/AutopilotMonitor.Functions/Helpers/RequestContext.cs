@@ -26,6 +26,14 @@ public sealed record RequestContext
 
     /// <summary>The resolved role string (e.g. "GlobalAdmin", "Admin", "Operator", "Viewer").</summary>
     public string UserRole { get; init; } = string.Empty;
+
+    /// <summary>
+    /// The validated target tenant ID for this request.
+    /// For RouteParam routes: the {tenantId} from the URL (after cross-tenant validation by middleware).
+    /// For all other routes: equals TenantId (the JWT tenant).
+    /// Handlers should use this for data access instead of extracting tenantId from route params manually.
+    /// </summary>
+    public string TargetTenantId { get; init; } = string.Empty;
 }
 
 /// <summary>

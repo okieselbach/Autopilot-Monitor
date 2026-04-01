@@ -93,11 +93,45 @@ public class PolicyEnforcementMiddleware : IFunctionsWorkerMiddleware
         {
             // Store resolved context so functions can read IsGlobalAdmin/IsTenantAdmin without re-querying services
             var principal = context.GetUser();
+            var jwtTenantId = principal?.GetTenantId() ?? string.Empty;
+            var isGlobalAdmin = decision.UserRole == "GlobalAdmin";
+            var targetTenantId = jwtTenantId; // default: JWT tenant
+
+            // Cross-tenant enforcement for routes with {tenantId} in the URL
+            if (catalogEntry.TenantScoping == TenantScoping.RouteParam)
+            {
+                var normalizedPath = requestPath.StartsWith("/api/", StringComparison.OrdinalIgnoreCase)
+                    ? requestPath.Substring(5)
+                    : requestPath;
+                var match = catalogEntry.RouteRegex.Match(normalizedPath);
+                var routeTenantId = match.Groups["tenantId"].Value;
+
+                if (!string.IsNullOrEmpty(routeTenantId))
+                {
+                    targetTenantId = routeTenantId;
+
+                    if (!isGlobalAdmin && !string.Equals(routeTenantId, jwtTenantId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        _logger.LogWarning("[PolicyEnforcement] BLOCKED cross-tenant access: user={User} jwtTenant={JwtTenant} routeTenant={RouteTenant} path={Path}",
+                            decision.UserIdentifier, jwtTenantId, routeTenantId, requestPath);
+                        httpContext.Response.StatusCode = (int)HttpStatusCode.Forbidden;
+                        httpContext.Response.ContentType = "application/json";
+                        await httpContext.Response.WriteAsJsonAsync(new
+                        {
+                            error = "CrossTenantAccessDenied",
+                            message = "Access denied. You can only access your own tenant's resources."
+                        });
+                        return;
+                    }
+                }
+            }
+
             context.Items[RequestContext.ItemsKey] = new RequestContext
             {
-                TenantId = principal?.GetTenantId() ?? string.Empty,
+                TenantId = jwtTenantId,
+                TargetTenantId = targetTenantId,
                 UserPrincipalName = decision.UserIdentifier,
-                IsGlobalAdmin = decision.UserRole == "GlobalAdmin",
+                IsGlobalAdmin = isGlobalAdmin,
                 IsTenantAdmin = decision.UserRole == Constants.TenantRoles.Admin,
                 UserRole = decision.UserRole
             };

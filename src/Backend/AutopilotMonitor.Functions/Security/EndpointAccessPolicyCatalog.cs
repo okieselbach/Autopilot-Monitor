@@ -3,6 +3,22 @@ using System.Text.RegularExpressions;
 namespace AutopilotMonitor.Functions.Security;
 
 /// <summary>
+/// Tenant scoping mode for endpoint access control.
+/// Determines how the middleware enforces tenant isolation.
+/// </summary>
+public enum TenantScoping
+{
+    /// <summary>No tenant scoping needed (public, device-auth, global-admin-only routes).</summary>
+    None,
+
+    /// <summary>TenantId comes from JWT tid claim (inherently safe, no middleware check needed).</summary>
+    Jwt,
+
+    /// <summary>TenantId comes from {tenantId} route parameter. Middleware enforces cross-tenant check.</summary>
+    RouteParam,
+}
+
+/// <summary>
 /// Authorization policy tiers for endpoint access control.
 /// Ordered from least restrictive to most restrictive.
 /// </summary>
@@ -38,28 +54,33 @@ public sealed class EndpointPolicyEntry
     public string HttpMethod { get; }
     public string RouteTemplate { get; }
     public EndpointPolicy Policy { get; }
+    public TenantScoping TenantScoping { get; }
 
     // Pre-compiled regex for matching actual request paths against the route template
     internal Regex RouteRegex { get; }
 
-    public EndpointPolicyEntry(string httpMethod, string routeTemplate, EndpointPolicy policy)
+    public EndpointPolicyEntry(string httpMethod, string routeTemplate, EndpointPolicy policy,
+        TenantScoping tenantScoping = TenantScoping.None)
     {
         HttpMethod = httpMethod.ToUpperInvariant();
         RouteTemplate = routeTemplate;
         Policy = policy;
+        TenantScoping = tenantScoping;
         RouteRegex = BuildRouteRegex(routeTemplate);
     }
 
     /// <summary>
     /// Converts a route template like "sessions/{sessionId}/events" into a regex
     /// that matches actual paths like "sessions/abc-123/events".
+    /// Uses a named capture group for {tenantId} so the middleware can extract it.
     /// </summary>
     private static Regex BuildRouteRegex(string routeTemplate)
     {
-        // Escape regex special chars, then replace {param} placeholders with [^/]+
-        // Note: Regex.Escape escapes { to \{ but does NOT escape } — so pattern matches \{...}
+        // Escape regex special chars, then replace {param} placeholders
+        // {tenantId} gets a named capture group; all others get a generic [^/]+
         var escaped = Regex.Escape(routeTemplate);
-        var pattern = Regex.Replace(escaped, @"\\\{[^}]+}", "[^/]+");
+        var pattern = Regex.Replace(escaped, @"\\\{([^}]+)}", m =>
+            m.Groups[1].Value == "tenantId" ? "(?<tenantId>[^/]+)" : "[^/]+");
         return new Regex($"^{pattern}$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     }
 }
@@ -124,12 +145,12 @@ public static class EndpointAccessPolicyCatalog
         new("GET",    "rules/gather",              EndpointPolicy.MemberRead),
         new("GET",    "rules/analyze",             EndpointPolicy.MemberRead),
         new("GET",    "rules/ime-log-patterns",    EndpointPolicy.MemberRead),
-        new("GET",    "config/{tenantId}",         EndpointPolicy.TenantAdminOrGA),
-        new("GET",    "config/{tenantId}/feature-flags", EndpointPolicy.MemberRead),
+        new("GET",    "config/{tenantId}",         EndpointPolicy.TenantAdminOrGA, TenantScoping.RouteParam),
+        new("GET",    "config/{tenantId}/feature-flags", EndpointPolicy.MemberRead, TenantScoping.RouteParam),
 
         // ── TenantAdminOrGA ─────────────────────────────────────────────
-        new("PUT",    "config/{tenantId}",         EndpointPolicy.TenantAdminOrGA),
-        new("POST",   "config/{tenantId}",         EndpointPolicy.TenantAdminOrGA),
+        new("PUT",    "config/{tenantId}",         EndpointPolicy.TenantAdminOrGA, TenantScoping.RouteParam),
+        new("POST",   "config/{tenantId}",         EndpointPolicy.TenantAdminOrGA, TenantScoping.RouteParam),
         new("POST",   "rules/gather",              EndpointPolicy.TenantAdminOrGA),
         new("PUT",    "rules/gather/{ruleId}",     EndpointPolicy.TenantAdminOrGA),
         new("DELETE", "rules/gather/{ruleId}",     EndpointPolicy.TenantAdminOrGA),
@@ -141,16 +162,16 @@ public static class EndpointAccessPolicyCatalog
         new("POST",   "sessions/{sessionId}/mark-succeeded", EndpointPolicy.TenantAdminOrGA),
         new("POST",   "sessions/{sessionId}/report",        EndpointPolicy.TenantAdminOrGA),
         new("DELETE", "sessions/{sessionId}",      EndpointPolicy.TenantAdminOrGA),
-        new("GET",    "tenants/{tenantId}/admins",           EndpointPolicy.TenantAdminOrGA),
-        new("POST",   "tenants/{tenantId}/admins",           EndpointPolicy.TenantAdminOrGA),
-        new("DELETE", "tenants/{tenantId}/admins/{adminUpn}", EndpointPolicy.TenantAdminOrGA),
-        new("PATCH",  "tenants/{tenantId}/admins/{adminUpn}/disable",     EndpointPolicy.TenantAdminOrGA),
-        new("PATCH",  "tenants/{tenantId}/admins/{adminUpn}/enable",      EndpointPolicy.TenantAdminOrGA),
-        new("PATCH",  "tenants/{tenantId}/admins/{adminUpn}/permissions", EndpointPolicy.TenantAdminOrGA),
-        new("DELETE", "tenants/{tenantId}/offboard", EndpointPolicy.TenantAdminOrGA),
-        new("GET",    "config/{tenantId}/autopilot-device-validation/consent-url",    EndpointPolicy.TenantAdminOrGA),
-        new("GET",    "config/{tenantId}/autopilot-device-validation/consent-status",  EndpointPolicy.TenantAdminOrGA),
-        new("POST",   "config/{tenantId}/test-notification",                           EndpointPolicy.TenantAdminOrGA),
+        new("GET",    "tenants/{tenantId}/admins",           EndpointPolicy.TenantAdminOrGA, TenantScoping.RouteParam),
+        new("POST",   "tenants/{tenantId}/admins",           EndpointPolicy.TenantAdminOrGA, TenantScoping.RouteParam),
+        new("DELETE", "tenants/{tenantId}/admins/{adminUpn}", EndpointPolicy.TenantAdminOrGA, TenantScoping.RouteParam),
+        new("PATCH",  "tenants/{tenantId}/admins/{adminUpn}/disable",     EndpointPolicy.TenantAdminOrGA, TenantScoping.RouteParam),
+        new("PATCH",  "tenants/{tenantId}/admins/{adminUpn}/enable",      EndpointPolicy.TenantAdminOrGA, TenantScoping.RouteParam),
+        new("PATCH",  "tenants/{tenantId}/admins/{adminUpn}/permissions", EndpointPolicy.TenantAdminOrGA, TenantScoping.RouteParam),
+        new("DELETE", "tenants/{tenantId}/offboard", EndpointPolicy.TenantAdminOrGA, TenantScoping.RouteParam),
+        new("GET",    "config/{tenantId}/autopilot-device-validation/consent-url",    EndpointPolicy.TenantAdminOrGA, TenantScoping.RouteParam),
+        new("GET",    "config/{tenantId}/autopilot-device-validation/consent-status",  EndpointPolicy.TenantAdminOrGA, TenantScoping.RouteParam),
+        new("POST",   "config/{tenantId}/test-notification",                           EndpointPolicy.TenantAdminOrGA, TenantScoping.RouteParam),
 
         // ── BootstrapManagerOrGA ────────────────────────────────────────
         new("GET",    "bootstrap/sessions",        EndpointPolicy.BootstrapManagerOrGA),
@@ -181,10 +202,10 @@ public static class EndpointAccessPolicyCatalog
         new("POST",   "auth/global-admins",        EndpointPolicy.GlobalAdminOnly),
         new("DELETE", "auth/global-admins/{upn}",  EndpointPolicy.GlobalAdminOnly),
         new("GET",    "preview/whitelist",          EndpointPolicy.GlobalAdminOnly),
-        new("POST",   "preview/whitelist/{tenantId}", EndpointPolicy.GlobalAdminOnly),
-        new("DELETE", "preview/whitelist/{tenantId}", EndpointPolicy.GlobalAdminOnly),
-        new("GET",    "preview/notification-email/{tenantId}", EndpointPolicy.GlobalAdminOnly),
-        new("POST",   "preview/send-welcome-email/{tenantId}", EndpointPolicy.GlobalAdminOnly),
+        new("POST",   "preview/whitelist/{tenantId}", EndpointPolicy.GlobalAdminOnly, TenantScoping.RouteParam),
+        new("DELETE", "preview/whitelist/{tenantId}", EndpointPolicy.GlobalAdminOnly, TenantScoping.RouteParam),
+        new("GET",    "preview/notification-email/{tenantId}", EndpointPolicy.GlobalAdminOnly, TenantScoping.RouteParam),
+        new("POST",   "preview/send-welcome-email/{tenantId}", EndpointPolicy.GlobalAdminOnly, TenantScoping.RouteParam),
         new("GET",    "global/sessions",            EndpointPolicy.GlobalAdminOnly),
         new("GET",    "global/audit/logs",          EndpointPolicy.GlobalAdminOnly),
         new("GET",    "global/metrics/platform",    EndpointPolicy.GlobalAdminOnly),
@@ -223,7 +244,7 @@ public static class EndpointAccessPolicyCatalog
         new("PATCH",  "global/mcp-users/{upn}/enable",        EndpointPolicy.GlobalAdminOnly),
         new("PATCH",  "global/mcp-users/{upn}/disable",       EndpointPolicy.GlobalAdminOnly),
         new("PATCH",  "global/mcp-users/{upn}/usage-plan",    EndpointPolicy.GlobalAdminOnly),
-        new("PATCH",  "config/{tenantId}/plan",                            EndpointPolicy.GlobalAdminOnly),
+        new("PATCH",  "config/{tenantId}/plan",                            EndpointPolicy.GlobalAdminOnly, TenantScoping.RouteParam),
         new("GET",    "global/config/plan-tiers",                           EndpointPolicy.GlobalAdminOnly),
         new("PUT",    "global/config/plan-tiers",                           EndpointPolicy.GlobalAdminOnly),
         new("GET",    "feedback/all",                                     EndpointPolicy.GlobalAdminOnly),
