@@ -261,39 +261,37 @@ export default function ProgressPortalPage() {
     if (e.key === "Enter") searchBySerial();
   };
 
-  // Derive app installation progress from events
-  const appProgress = useMemo(() => {
-    // Check esp_ui_state events for app progress
+  // Derive app installation summary from events
+  const appSummary = useMemo(() => {
+    // Best source: app_tracking_summary (real-time aggregate from agent)
+    const summaryEvents = events.filter((e) => e.eventType === "app_tracking_summary");
+    if (summaryEvents.length > 0) {
+      const latest = summaryEvents[summaryEvents.length - 1];
+      const d = latest.data;
+      if (d) {
+        const total = parseInt(d.totalApps ?? d.total_apps ?? "0", 10);
+        if (total > 0) {
+          return {
+            total,
+            installed: parseInt(d.installed ?? "0", 10),
+            failed: parseInt(d.failed ?? "0", 10),
+            installing: parseInt(d.installing ?? "0", 10),
+            downloading: parseInt(d.downloading ?? "0", 10),
+          };
+        }
+      }
+    }
+
+    // Fallback: esp_ui_state (ESP blocking app counts)
     const espEvents = events.filter((e) => e.eventType === "esp_ui_state");
     if (espEvents.length > 0) {
       const latest = espEvents[espEvents.length - 1];
       const d = latest.data;
       if (d) {
-        const completed = parseInt(
-          d.blocking_apps_completed ?? d.blockingAppsCompleted ?? "0",
-          10
-        );
-        const total = parseInt(
-          d.blocking_apps_total ?? d.blockingAppsTotal ?? "0",
-          10
-        );
-        const currentItem =
-          d.current_item ?? d.currentItem ?? d.status_text ?? d.statusText ?? null;
-        if (total > 0) return { completed, total, currentItem };
-      }
-    }
-
-    // Check download_progress events for current app name
-    const downloadEvents = events.filter((e) => e.eventType === "download_progress");
-    if (downloadEvents.length > 0) {
-      const latest = downloadEvents[downloadEvents.length - 1];
-      const d = latest.data;
-      if (d) {
-        const appName = d.app_name ?? d.appName ?? null;
-        const status = d.status ?? "";
-        const isComplete = status === "completed" || status === "failed" || d.isCompleted === true || d.is_completed === true;
-        if (appName && !isComplete) {
-          return { completed: 0, total: 0, currentItem: appName };
+        const total = parseInt(d.blocking_apps_total ?? d.blockingAppsTotal ?? "0", 10);
+        const installed = parseInt(d.blocking_apps_completed ?? d.blockingAppsCompleted ?? "0", 10);
+        if (total > 0) {
+          return { total, installed, failed: 0, installing: 0, downloading: 0 };
         }
       }
     }
@@ -727,19 +725,20 @@ export default function ProgressPortalPage() {
                               {step.label}
                               {isCurrent &&
                                 (step.id === 3 || step.id === 5) &&
-                                appProgress &&
-                                appProgress.total > 0 &&
-                                appProgress.completed > 0 &&
-                                ` (${appProgress.completed}/${appProgress.total})`}
+                                appSummary &&
+                                appSummary.total > 0 &&
+                                ` (${appSummary.installed}/${appSummary.total})`}
                             </span>
-                            {/* App install detail below the "Installing apps" steps */}
+                            {/* Current activity detail below the active step */}
                             {isCurrent && (step.id === 3 || step.id === 5) && (
                               <div className="flex items-center space-x-1.5 mt-0.5">
                                 <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse flex-shrink-0" />
                                 <span className="text-xs text-blue-500 truncate">
-                                  {appProgress?.currentItem
-                                    ? `${appProgress.currentItem} installing...`
-                                    : "Installing applications..."}
+                                  {currentDownload?.active && currentDownload.appName
+                                    ? `Downloading ${currentDownload.appName}...`
+                                    : currentInstall?.active && currentInstall.appName
+                                    ? `Installing ${currentInstall.appName}...`
+                                    : "Processing..."}
                                 </span>
                               </div>
                             )}
@@ -750,8 +749,8 @@ export default function ProgressPortalPage() {
                   })}
                 </div>
 
-                {/* Activity Details */}
-                {session.status === "InProgress" && (currentDownload?.active || currentInstall?.active || currentInstall?.completedCount) && (
+                {/* Activity Details — visible during app install phases */}
+                {session.status === "InProgress" && (session.currentPhase === 3 || session.currentPhase === 5) && (appSummary || currentDownload || currentInstall) && (
                   <div className="bg-blue-50 rounded-lg p-4 space-y-3">
                     {/* Download section */}
                     {currentDownload?.active && currentDownload.appName && (
@@ -797,31 +796,39 @@ export default function ProgressPortalPage() {
                     )}
 
                     {/* Install section */}
-                    {currentInstall && (currentInstall.active || currentInstall.completedCount > 0) && (
+                    {currentInstall?.active && currentInstall.appName && (
                       <div>
-                        {currentInstall.active && currentInstall.appName && (
-                          <div className="flex items-center justify-between mb-1">
-                            <div className="flex items-center space-x-1.5 min-w-0">
-                              <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse flex-shrink-0" />
-                              <span className="text-sm text-blue-700 font-medium truncate">
-                                {currentInstall.appName}
-                              </span>
-                            </div>
-                            {installElapsedMs != null && installElapsedMs > 0 && (
-                              <span className="text-xs text-blue-600 font-medium tabular-nums flex-shrink-0 ml-2">
-                                {formatDuration(installElapsedMs)}
-                              </span>
-                            )}
+                        <p className="text-xs text-blue-500 mb-1 font-medium">Installing</p>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center space-x-1.5 min-w-0">
+                            <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse flex-shrink-0" />
+                            <span className="text-sm text-blue-700 font-medium truncate">
+                              {currentInstall.appName}
+                            </span>
                           </div>
-                        )}
-                        <div className="flex items-center justify-between text-xs text-blue-500">
-                          <span>
-                            {currentInstall.completedCount}{currentInstall.failedCount > 0 ? ` + ${currentInstall.failedCount} failed` : ""} / {currentInstall.totalCount} apps installed
-                          </span>
+                          {installElapsedMs != null && installElapsedMs > 0 && (
+                            <span className="text-xs text-blue-600 font-medium tabular-nums flex-shrink-0 ml-2">
+                              {formatDuration(installElapsedMs)}
+                            </span>
+                          )}
                         </div>
                       </div>
                     )}
 
+                    {/* App counter — always visible in app phases */}
+                    {(() => {
+                      const total = appSummary?.total ?? currentInstall?.totalCount ?? 0;
+                      const installed = appSummary?.installed ?? currentInstall?.completedCount ?? 0;
+                      const failed = appSummary?.failed ?? currentInstall?.failedCount ?? 0;
+                      if (total === 0) return null;
+                      return (
+                        <div className="flex items-center justify-between text-xs text-blue-600 pt-1 border-t border-blue-100">
+                          <span className="font-medium">
+                            {installed}{failed > 0 ? ` + ${failed} failed` : ""} / {total} apps installed
+                          </span>
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
 
