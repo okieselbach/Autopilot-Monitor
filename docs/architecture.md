@@ -253,7 +253,8 @@ Security/            Certificate helper, enrollment awaiter, hardware info
 └── State/
     ├── enrollment-state.json
     ├── ime-tracker-state.json
-    └── enrollment-complete.marker
+    ├── enrollment-complete.marker
+    └── self-update-info.json
 ```
 
 ---
@@ -700,7 +701,7 @@ Bootstrapper:
 
 #### Endpoint Access Policies (EndpointAccessPolicyCatalog)
 
-Six policy tiers (fail-closed: unregistered routes get 403):
+Six policy tiers (fail-closed: unregistered routes get 403). Each entry also specifies a `TenantScoping` mode (see [Tenant Data Isolation](#tenant-data-isolation-centralized-enforcement)):
 
 | Policy | Description |
 |--------|-------------|
@@ -721,11 +722,28 @@ Six policy tiers (fail-closed: unregistered routes get 403):
 | **Operator** | Single tenant | Write access, optionally Bootstrap Manager permission |
 | **Viewer** | Single tenant | Read-only dashboard, session detail view |
 
-### Tenant Data Isolation
+### Tenant Data Isolation (Centralized Enforcement)
 
+Tenant isolation is enforced centrally in the middleware pipeline via `TenantScoping` on every catalog entry:
+
+| Scoping Mode | Source | Middleware Behavior |
+|-------------|--------|---------------------|
+| `None` | N/A | No tenant check (public, device-auth, global-admin-only routes) |
+| `Jwt` | JWT `tid` claim | Inherently safe — tenant derived from token, no cross-tenant check needed |
+| `RouteParam` | `{tenantId}` in route | Middleware extracts from path, enforces JWT tenant == route tenant (Global Admins exempt) |
+| `QueryParam` | `?tenantId=` query | Middleware extracts from query string (falls back to JWT tenant), enforces cross-tenant check |
+
+**How it works:**
+1. `PolicyEnforcementMiddleware` resolves the `EndpointPolicyEntry` for every request
+2. For `RouteParam`/`QueryParam` scoping: extracts the target tenant ID from the request
+3. Compares target tenant against JWT `tid` claim — rejects with 403 if mismatched (unless Global Admin)
+4. Sets `RequestContext.TargetTenantId` for downstream use by function handlers
+5. Fail-closed: unregistered routes get 403 automatically
+
+**Additional layers:**
 - All Table Storage queries filtered by `PartitionKey = TenantId`
 - SignalR groups: `tenant-{tenantId}` for scoped broadcasts
-- JWT `tid` claim determines tenant for web requests
+- `CrossTenantAccessTests` validates that every tenant-scoped endpoint correctly rejects cross-tenant access
 
 ---
 
@@ -963,6 +981,8 @@ Enrollment completion/failure events trigger webhook notifications via `WebhookN
 
 Configuration per tenant via `TenantConfiguration.WebhookUrl` + `WebhookProviderType`.
 
+**Rule Results in Notifications:** `NotificationAlertBuilder.AddRuleResultSections()` appends significant analyze rule findings (warning/high/critical severity only, max 5) to enrollment completion/failure webhook alerts — giving admins immediate visibility into detected issues without visiting the portal.
+
 ### Telegram Notifications
 
 `TelegramNotificationService` sends enrollment notifications via Telegram bot API. Configured per tenant.
@@ -993,6 +1013,9 @@ Configuration per tenant via `TenantConfiguration.WebhookUrl` + `WebhookProvider
 | `NdjsonParserTests` | NDJSON parsing |
 | `BuiltInRulesTests` | Built-in rule logic |
 | `EndpointPolicyCatalogCompletenessTests` | Ensures every HTTP route has a catalog entry |
+| `CrossTenantAccessTests` | Validates tenant-scoped endpoints reject cross-tenant access |
+| `ODataSanitizerTests` | OData query sanitization |
+| `SsrfGuardTests` | SSRF protection validation |
 
 ### Agent Tests (`src/Agent/AutopilotMonitor.Agent.Core.Tests/`)
 
