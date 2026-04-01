@@ -635,8 +635,8 @@ namespace AutopilotMonitor.Functions.Services
                     existingEntities[entity.RowKey] = entity;
                 }
 
-                // Build the batch of entities to upsert
-                var entitiesToUpsert = new List<TableEntity>();
+                // Build the batch of entities to upsert (dictionary to deduplicate by RowKey)
+                var entitiesToUpsert = new Dictionary<string, TableEntity>(StringComparer.OrdinalIgnoreCase);
 
                 foreach (var item in inventoryItems)
                 {
@@ -695,13 +695,14 @@ namespace AutopilotMonitor.Functions.Services
                         };
                     }
 
-                    entitiesToUpsert.Add(entity);
+                    entitiesToUpsert[rowKey] = entity;
                 }
 
                 // Batch write (max 100 per batch, all same PK)
-                for (int i = 0; i < entitiesToUpsert.Count; i += 100)
+                var upsertList = entitiesToUpsert.Values.ToList();
+                for (int i = 0; i < upsertList.Count; i += 100)
                 {
-                    var batch = entitiesToUpsert.Skip(i).Take(100)
+                    var batch = upsertList.Skip(i).Take(100)
                         .Select(e => new TableTransactionAction(TableTransactionActionType.UpsertReplace, e))
                         .ToList();
 
@@ -711,7 +712,7 @@ namespace AutopilotMonitor.Functions.Services
                     }
                 }
 
-                _logger.LogInformation("Upserted {Count} software inventory entries for tenant {TenantId}", entitiesToUpsert.Count, tenantId);
+                _logger.LogInformation("Upserted {Count} software inventory entries for tenant {TenantId}", upsertList.Count, tenantId);
             }
             catch (Exception ex)
             {
