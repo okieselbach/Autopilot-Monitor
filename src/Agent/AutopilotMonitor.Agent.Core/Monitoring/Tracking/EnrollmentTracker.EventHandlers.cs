@@ -50,14 +50,16 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 return;
             }
 
-            // ESP resumed after final exit (e.g., hybrid join reboot recovery).
-            // If ESP was marked as "final exited" but we see the same phase again from IME,
-            // ESP has resumed after a reboot. Reset completion state so the agent waits for the
-            // real final exit instead of self-destructing prematurely.
+            // ESP resumed after final exit — only possible during hybrid join reboot recovery.
+            // In hybrid join, ESP exits for a mid-enrollment reboot (domain user login required),
+            // then the same phase re-appears in IME after the agent restarts. Reset completion state
+            // so the agent waits for the real final exit instead of self-destructing prematurely.
+            // Non-hybrid scenarios can see the same phase re-reported by IME (e.g., during user
+            // session completion) which is NOT a real resumption — skip the reset entirely.
             bool espFinalExitSeen;
             lock (_stateLock) { espFinalExitSeen = _espFinalExitSeen; }
 
-            if (espFinalExitSeen && string.Equals(phase, lastPhase, StringComparison.OrdinalIgnoreCase))
+            if (_isHybridJoin && espFinalExitSeen && string.Equals(phase, lastPhase, StringComparison.OrdinalIgnoreCase))
             {
                 _logger.Info($"EnrollmentTracker: ESP phase '{phase}' re-detected after final exit — " +
                              "ESP has resumed (hybrid join reboot recovery), resetting completion state");
