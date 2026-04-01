@@ -110,4 +110,5 @@ scripts/Deployment/build_and_upload_debug_agent_build.ps1
 scripts/Deployment/build_and_upload_release_agent_build.ps1
 
 
-.dotnet-home/.dotnet/*
+.dotnet-home/
+.vscode/

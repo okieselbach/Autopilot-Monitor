@@ -88,59 +88,63 @@ export default function ProgressPortalPage() {
     };
   }, [isConnected, session?.sessionId, session?.tenantId, joinGroup, leaveGroup]);
 
+  // Debounced refetch: when SignalR signals new data, fetch fresh session + events from API
+  const refetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refetchSessionData = useRef(async () => {
+    const currentSession = sessionRef.current;
+    if (!currentSession) return;
+    try {
+      // Fetch fresh session summary
+      const sessionsResponse = await authenticatedFetch(
+        api.progress.sessions(tenantId),
+        getAccessToken
+      );
+      if (sessionsResponse.ok) {
+        const sessionsData = await sessionsResponse.json();
+        const sessions: Session[] = sessionsData.sessions || [];
+        const updated = sessions.find((s) => s.sessionId === currentSession.sessionId);
+        if (updated) {
+          setSession(updated);
+        }
+      }
+
+      // Fetch fresh events
+      const eventsResponse = await authenticatedFetch(
+        api.progress.sessionEvents(currentSession.sessionId, tenantId),
+        getAccessToken
+      );
+      if (eventsResponse.ok) {
+        const eventsData = await eventsResponse.json();
+        const fetched: EnrollmentEvent[] = eventsData.events || [];
+        setEvents((prev) => {
+          const existingIds = new Set(prev.map((e) => e.eventId));
+          const newEvents = fetched.filter((e) => !existingIds.has(e.eventId));
+          if (newEvents.length === 0) return prev;
+          return [...prev, ...newEvents].sort((a, b) => a.sequence - b.sequence);
+        });
+      }
+    } catch (error) {
+      console.error("[Progress] Refetch failed:", error);
+    }
+  });
+
   // Listen for real-time session updates
   useEffect(() => {
-    const handleNewEvents = (data: { sessionId: string; sessionUpdate?: Partial<Session>; session?: Session; events?: EnrollmentEvent[] }) => {
-      console.log('[Progress] Received newevents:', data);
-      if (
-        sessionRef.current &&
-        data.sessionId === sessionRef.current.sessionId
-      ) {
-        // Merge delta update into existing session
-        const update = data.sessionUpdate || data.session;
-        if (update) {
-          console.log('[Progress] Updating session from newevents');
-          setSession(prev => prev ? { ...prev, ...update } : prev);
-        }
-
-        // Add new events to the events list
-        if (data.events && data.events.length > 0) {
-          console.log('[Progress] Adding', data.events.length, 'new events from newevents');
-          setEvents((prev) => {
-            const existingIds = new Set(prev.map((e) => e.eventId));
-            const newEvents = data.events!.filter((e) => !existingIds.has(e.eventId));
-            if (newEvents.length === 0) return prev;
-            return [...prev, ...newEvents].sort((a, b) => a.sequence - b.sequence);
-          });
-        }
-      }
+    const scheduleRefetch = (source: string, sessionId: string) => {
+      if (!sessionRef.current || sessionId !== sessionRef.current.sessionId) return;
+      console.log(`[Progress] ${source} signal for current session, scheduling refetch`);
+      if (refetchTimerRef.current) clearTimeout(refetchTimerRef.current);
+      refetchTimerRef.current = setTimeout(() => {
+        refetchSessionData.current();
+      }, 500);
     };
 
-    const handleEventStream = (data: { session: Session; events?: EnrollmentEvent[] }) => {
-      console.log('[Progress] Received eventStream:', data);
-      if (
-        data.session &&
-        sessionRef.current &&
-        data.session.sessionId === sessionRef.current.sessionId
-      ) {
-        console.log('[Progress] Updating session from eventStream');
-        console.log('[Progress] Session currentPhase:', data.session.currentPhase, 'status:', data.session.status);
-        setSession(data.session);
+    const handleNewEvents = (data: { sessionId: string }) => {
+      scheduleRefetch("newevents", data.sessionId);
+    };
 
-        // Add new events to the events list
-        if (data.events && data.events.length > 0) {
-          console.log('[Progress] Adding', data.events.length, 'new events from eventStream');
-          console.log('[Progress] Event types:', data.events.map(e => e.eventType).join(', '));
-          setEvents((prev) => {
-            const existingIds = new Set(prev.map((e) => e.eventId));
-            const newEvents = data.events!.filter((e) => !existingIds.has(e.eventId));
-            if (newEvents.length === 0) return prev;
-            console.log('[Progress] Actually adding', newEvents.length, 'new events');
-            console.log('[Progress] Total events after update:', prev.length + newEvents.length);
-            return [...prev, ...newEvents].sort((a, b) => a.sequence - b.sequence);
-          });
-        }
-      }
+    const handleEventStream = (data: { sessionId: string }) => {
+      scheduleRefetch("eventStream", data.sessionId);
     };
 
     on("newevents", handleNewEvents);
@@ -150,6 +154,7 @@ export default function ProgressPortalPage() {
       off("newevents", handleNewEvents);
       off("newSession", handleNewEvents);
       off("eventStream", handleEventStream);
+      if (refetchTimerRef.current) clearTimeout(refetchTimerRef.current);
     };
   }, [on, off]);
 
@@ -431,17 +436,6 @@ export default function ProgressPortalPage() {
       : Math.min(100, (session.currentPhase / 6) * 100)
     : 0;
 
-  const estimatedRemaining = session
-    ? (() => {
-        if (session.status !== "InProgress") return null;
-        const currentPhase = Math.min(session.currentPhase, 6);
-        if (currentPhase === 0) return null;
-        const elapsed = session.durationSeconds;
-        const rate = elapsed / currentPhase;
-        const remaining = (6 - currentPhase) * rate;
-        return Math.round(remaining / 60);
-      })()
-    : null;
 
   return (
     <ProtectedRoute>
@@ -756,8 +750,8 @@ export default function ProgressPortalPage() {
                   })}
                 </div>
 
-                {/* Activity Details / Estimated Time */}
-                {session.status === "InProgress" && (currentDownload?.active || currentInstall?.active || currentInstall?.completedCount || estimatedRemaining) && (
+                {/* Activity Details */}
+                {session.status === "InProgress" && (currentDownload?.active || currentInstall?.active || currentInstall?.completedCount) && (
                   <div className="bg-blue-50 rounded-lg p-4 space-y-3">
                     {/* Download section */}
                     {currentDownload?.active && currentDownload.appName && (
@@ -828,17 +822,6 @@ export default function ProgressPortalPage() {
                       </div>
                     )}
 
-                    {/* Estimated time - only when no active download or install */}
-                    {!currentDownload?.active && !currentInstall?.active && estimatedRemaining != null && estimatedRemaining > 0 && (
-                      <div className="text-center">
-                        <div className="text-sm text-blue-700">
-                          Estimated time remaining:{" "}
-                          <span className="font-semibold">
-                            ~{estimatedRemaining} minutes
-                          </span>
-                        </div>
-                      </div>
-                    )}
                   </div>
                 )}
 
