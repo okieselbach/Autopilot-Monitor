@@ -30,6 +30,12 @@ namespace AutopilotMonitor.Shared
         public const string StateDirectory = @"%ProgramData%\AutopilotMonitor\State";
 
         /// <summary>
+        /// Marker file written by SelfUpdater before restart; read by MonitoringService on next startup
+        /// to emit an agent_self_updated event.
+        /// </summary>
+        public const string SelfUpdateMarkerFile = @"%ProgramData%\AutopilotMonitor\State\self-update-info.json";
+
+        /// <summary>
         /// Default path for the IME pattern match log file (debugging/diagnostics)
         /// </summary>
         public const string ImeMatchLogPath = @"%ProgramData%\AutopilotMonitor\Logs\ime_pattern_matches.log";
@@ -161,6 +167,7 @@ namespace AutopilotMonitor.Shared
             public const string EspProvisioningStatus = "esp_provisioning_status";
             public const string SoftwareInventoryAnalysis = "software_inventory_analysis";
             public const string VulnerabilityReport       = "vulnerability_report";
+            public const string AgentSelfUpdated          = "agent_self_updated";
         }
 
         // -----------------------------------------------------------------------

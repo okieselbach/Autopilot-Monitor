@@ -283,6 +283,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 });
             }
 
+            // If the agent was self-updated on the previous run, emit a timeline event
+            EmitSelfUpdateEventIfMarkerExists();
+
             // Emit deferred security_audit (initial UnrestrictedMode) now that agent_started has its sequence
             if (_deferredSecurityAuditConfigVersion.HasValue)
             {
@@ -667,6 +670,62 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     });
                 }
             }
+        }
+
+        /// <summary>
+        /// Reads the self-update marker file left by SelfUpdater, emits an agent_self_updated event,
+        /// and deletes the marker. Best-effort — failures are logged but never block startup.
+        /// </summary>
+        private void EmitSelfUpdateEventIfMarkerExists()
+        {
+            try
+            {
+                var markerPath = Environment.ExpandEnvironmentVariables(Constants.SelfUpdateMarkerFile);
+                if (!File.Exists(markerPath))
+                    return;
+
+                var json = File.ReadAllText(markerPath);
+                var marker = Newtonsoft.Json.JsonConvert.DeserializeObject<Dictionary<string, string>>(json);
+                if (marker == null)
+                {
+                    TryDeleteMarker(markerPath);
+                    return;
+                }
+
+                marker.TryGetValue("previousVersion", out var previousVersion);
+                marker.TryGetValue("newVersion", out var newVersion);
+                marker.TryGetValue("updatedAtUtc", out var updatedAtUtc);
+
+                _logger.Info($"Self-update detected: {previousVersion} → {newVersion}");
+
+                EmitEvent(new EnrollmentEvent
+                {
+                    SessionId = _configuration.SessionId,
+                    TenantId = _configuration.TenantId,
+                    EventType = Constants.EventTypes.AgentSelfUpdated,
+                    Severity = EventSeverity.Info,
+                    Source = "Agent",
+                    Message = $"Agent self-updated from {previousVersion} to {newVersion}",
+                    Data = new Dictionary<string, object>
+                    {
+                        { "previousVersion", previousVersion ?? "unknown" },
+                        { "newVersion", newVersion ?? "unknown" },
+                        { "updatedAtUtc", updatedAtUtc ?? "unknown" }
+                    },
+                    ImmediateUpload = true
+                });
+
+                TryDeleteMarker(markerPath);
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"Could not process self-update marker: {ex.Message}");
+            }
+        }
+
+        private static void TryDeleteMarker(string path)
+        {
+            try { File.Delete(path); } catch { }
         }
 
         /// <summary>

@@ -166,7 +166,10 @@ namespace AutopilotMonitor.Agent
                 // Step 7: Clean up staging + temp ZIP
                 CleanupStaging(stagingDir, zipPath);
 
-                // Step 8: Restart via PowerShell Wait-Process
+                // Step 8: Write marker file so the new agent can emit an event on next startup
+                WriteSelfUpdateMarker(currentVersion, latestVersion, log);
+
+                // Step 9: Restart via PowerShell Wait-Process
                 log($"Self-update: files swapped successfully, restarting agent (v{latestVersion})...");
                 RestartAgent(agentDir, log);
 
@@ -458,6 +461,29 @@ namespace AutopilotMonitor.Agent
 
             log("Self-update: restart script launched, exiting current process");
             Environment.Exit(0);
+        }
+
+        /// <summary>
+        /// Writes a small JSON marker so the next agent startup can emit an agent_self_updated event.
+        /// Best-effort — failure here must not block the update.
+        /// </summary>
+        private static void WriteSelfUpdateMarker(string previousVersion, string newVersion, Action<string> log)
+        {
+            try
+            {
+                var markerPath = Environment.ExpandEnvironmentVariables(Constants.SelfUpdateMarkerFile);
+                var dir = Path.GetDirectoryName(markerPath);
+                if (!Directory.Exists(dir))
+                    Directory.CreateDirectory(dir);
+
+                var json = $"{{\"previousVersion\":\"{previousVersion}\",\"newVersion\":\"{newVersion}\",\"updatedAtUtc\":\"{DateTime.UtcNow:O}\"}}";
+                File.WriteAllText(markerPath, json);
+                log("Self-update: marker file written for next-startup event");
+            }
+            catch (Exception ex)
+            {
+                log($"Self-update: could not write marker file — {ex.Message} (non-critical)");
+            }
         }
 
         /// <summary>
