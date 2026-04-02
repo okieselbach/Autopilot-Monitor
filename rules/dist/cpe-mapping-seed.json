@@ -15,7 +15,8 @@
     {
       "normalizedVendor": "microsoft",
       "normalizedProduct": "microsoft edge",
-      "displayNamePatterns": ["microsoft edge", "edge", "microsoft edge webview2", "webview2 runtime"],
+      "displayNamePatterns": ["microsoft edge", "microsoft edge webview2", "webview2 runtime"],
+      "excludePatterns": ["edge update"],
       "publisherPatterns": ["microsoft", "microsoft corporation"],
       "cpeVendor": "microsoft",
       "cpeProduct": "edge_chromium",
