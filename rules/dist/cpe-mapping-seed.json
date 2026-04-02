@@ -365,7 +365,7 @@
     {
       "normalizedVendor": "cisco",
       "normalizedProduct": "cisco anyconnect",
-      "displayNamePatterns": ["cisco anyconnect", "cisco anyconnect secure mobility", "cisco secure client"],
+      "displayNamePatterns": ["cisco anyconnect", "cisco anyconnect secure mobility"],
       "publisherPatterns": ["cisco", "cisco systems", "cisco systems, inc."],
       "cpeVendor": "cisco",
       "cpeProduct": "anyconnect_secure_mobility_client",
