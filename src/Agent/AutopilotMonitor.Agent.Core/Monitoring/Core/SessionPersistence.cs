@@ -8,6 +8,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
     /// </summary>
     public class SessionPersistence
     {
+        /// <summary>
+        /// Maximum age (hours) of a session.id file before the orphan guard treats it as
+        /// stale and discards it. Matches <c>AgentConfiguration.AbsoluteMaxSessionHours</c>.
+        /// A session.id younger than this whose session.created is missing is assumed to be
+        /// from the current enrollment (file lost during reboot/crash) and will be recovered.
+        /// </summary>
+        internal const double OrphanGuardMaxAgeHours = 48;
+
         private readonly string _sessionFilePath;
         private readonly string _sequenceFilePath;
         private readonly string _whiteGloveMarkerPath;
@@ -45,13 +53,28 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     // Check if session file exists and is valid
                     if (File.Exists(_sessionFilePath))
                     {
-                        // Guard: if session.id exists but session.created does not, this is
-                        // an orphaned session from a previous enrollment. This happens when
-                        // ProgramData survives an OS reset/reinstall (e.g. Autopilot Reset)
-                        // or when upgrading from an older agent that didn't write session.created.
-                        // Delete the stale files and fall through to create a fresh session.
+                        // Guard: if session.id exists but session.created does not, check
+                        // whether this is an orphaned session from a previous enrollment
+                        // (ProgramData survived OS reset/reinstall) or a current session
+                        // whose session.created was lost during a reboot/crash.
+                        // Distinguish by file age: recent session.id (< OrphanGuardMaxAgeHours)
+                        // is likely from the current enrollment → recover by initializing
+                        // session.created and resuming. Old session.id is a true orphan → discard.
                         if (!File.Exists(_sessionCreatedPath))
                         {
+                            var fileAge = DateTime.UtcNow - File.GetLastWriteTimeUtc(_sessionFilePath);
+                            if (fileAge.TotalHours < OrphanGuardMaxAgeHours)
+                            {
+                                // Recent session — recover: initialize session.created and resume
+                                var sessionId = File.ReadAllText(_sessionFilePath).Trim();
+                                if (Guid.TryParse(sessionId, out _))
+                                {
+                                    SaveSessionCreatedAt(DateTime.UtcNow);
+                                    return sessionId;
+                                }
+                            }
+
+                            // Old session or invalid GUID — true orphan, discard
                             try { File.Delete(_sessionFilePath); } catch { }
                             try { File.Delete(_sequenceFilePath); } catch { }
                         }
