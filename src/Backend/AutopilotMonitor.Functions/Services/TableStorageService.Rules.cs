@@ -825,6 +825,7 @@ namespace AutopilotMonitor.Functions.Services
                     { "CpeUri", mapping.CpeUri ?? "" },
                     { "Category", mapping.Category ?? "" },
                     { "DisplayNamePatternsJson", System.Text.Json.JsonSerializer.Serialize(mapping.DisplayNamePatterns ?? new List<string>()) },
+                    { "ExcludePatternsJson", System.Text.Json.JsonSerializer.Serialize(mapping.ExcludePatterns ?? new List<string>()) },
                     { "PublisherPatternsJson", System.Text.Json.JsonSerializer.Serialize(mapping.PublisherPatterns ?? new List<string>()) },
                     { "Source", "seed" },
                     { "ImportedAt", DateTime.UtcNow.ToString("o") }
@@ -893,6 +894,7 @@ namespace AutopilotMonitor.Functions.Services
                     { "CpeUri", mapping.CpeUri ?? "" },
                     { "Category", mapping.Category ?? "community" },
                     { "DisplayNamePatternsJson", System.Text.Json.JsonSerializer.Serialize(mapping.DisplayNamePatterns ?? new List<string>()) },
+                    { "ExcludePatternsJson", System.Text.Json.JsonSerializer.Serialize(mapping.ExcludePatterns ?? new List<string>()) },
                     { "PublisherPatternsJson", System.Text.Json.JsonSerializer.Serialize(mapping.PublisherPatterns ?? new List<string>()) },
                     { "Source", "community" },
                     { "ImportedAt", DateTime.UtcNow.ToString("o") }
