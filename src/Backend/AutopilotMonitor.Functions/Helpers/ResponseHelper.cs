@@ -132,7 +132,7 @@ public static class ResponseHelper
         return ex switch
         {
             RequestFailedException rfe when rfe.ErrorCode != null =>
-                $"{operation}: {rfe.ErrorCode} — {rfe.Message}",
+                $"{operation}: {rfe.ErrorCode} — {FirstLine(rfe.Message)}",
             RequestFailedException rfe =>
                 $"{operation}: Azure error (HTTP {rfe.Status}). Use correlationId to investigate in backend logs.",
             ArgumentException ae =>
@@ -153,6 +153,17 @@ public static class ResponseHelper
     }
 
     /// <summary>
+    /// Extract only the first line from a (potentially multi-line) Azure SDK error message.
+    /// Azure SDK messages dump the full HTTP response (RequestId, headers, body) after the
+    /// first line — those details leak infrastructure info and must not be exposed.
+    /// </summary>
+    private static string FirstLine(string message)
+    {
+        var idx = message.IndexOf('\n');
+        return idx > 0 ? message[..idx].TrimEnd('\r') : message;
+    }
+
+    /// <summary>
     /// Provide AI-targeted recovery hints based on exception type.
     /// Returns null when no specific guidance is available.
     /// </summary>
@@ -160,7 +171,7 @@ public static class ResponseHelper
     {
         return ex switch
         {
-            RequestFailedException { ErrorCode: "InvalidInput" or "BadRequest" } =>
+            RequestFailedException { ErrorCode: "InvalidInput" or "BadRequest" or "NotImplemented" } =>
                 "The OData filter expression may be malformed. Check syntax: string values need single quotes, property names are case-sensitive. Example: \"Status eq 'Failed'\".",
             RequestFailedException { Status: 404 } =>
                 "The requested resource was not found. Verify the table name, partition key, or entity exists.",

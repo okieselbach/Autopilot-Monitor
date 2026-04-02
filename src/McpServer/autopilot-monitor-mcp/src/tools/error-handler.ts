@@ -31,6 +31,7 @@ export function toolError(
     if (p.hint) parts.push(`**Suggestion**: ${p.hint}`);
     if (p.correlationId) parts.push(`**Correlation ID**: ${p.correlationId}`);
     if (p.exceptionType) parts.push(`**Exception type**: ${p.exceptionType}`);
+    if (p.errorCode) parts.push(`**Error code**: ${p.errorCode}`);
   } else if (error instanceof ApiError) {
     // API error but non-JSON body
     if (error.status === 403) {

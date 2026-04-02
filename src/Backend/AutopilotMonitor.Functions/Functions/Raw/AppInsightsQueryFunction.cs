@@ -79,12 +79,52 @@ namespace AutopilotMonitor.Functions.Functions.Raw
                     _logger.LogWarning("App Insights query failed: {StatusCode} {Response}",
                         aiResponse.StatusCode, responseText);
 
+                    // Extract the meaningful error message from AppInsights error JSON
+                    // Format: { "error": { "message": "...", "code": "...", "innererror": { "code": "SyntaxError", "message": "..." } } }
+                    var errorMessage = "Application Insights query failed";
+                    var errorCode = (string?)null;
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(responseText);
+                        if (doc.RootElement.TryGetProperty("error", out var errorObj))
+                        {
+                            if (errorObj.TryGetProperty("innererror", out var inner) &&
+                                inner.TryGetProperty("message", out var innerMsg))
+                            {
+                                errorMessage = innerMsg.GetString() ?? errorMessage;
+                            }
+                            else if (errorObj.TryGetProperty("message", out var msg))
+                            {
+                                errorMessage = msg.GetString() ?? errorMessage;
+                            }
+
+                            if (errorObj.TryGetProperty("innererror", out var innerErr) &&
+                                innerErr.TryGetProperty("code", out var innerCode))
+                            {
+                                errorCode = innerCode.GetString();
+                            }
+                            else if (errorObj.TryGetProperty("code", out var code))
+                            {
+                                errorCode = code.GetString();
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        // responseText is not JSON — keep generic message
+                    }
+
                     var errorResp = req.CreateResponse(HttpStatusCode.BadGateway);
                     await errorResp.WriteAsJsonAsync(new
                     {
-                        error = "Application Insights query failed",
+                        error = errorMessage,
+                        errorCode,
                         statusCode = (int)aiResponse.StatusCode,
-                        details = responseText
+                        hint = errorCode == "SyntaxError"
+                            ? "The KQL query has a syntax error. Check operators, pipe stages, and string quoting. Example: traces | where message contains 'error' | take 50"
+                            : errorCode == "SemanticError"
+                                ? "The KQL query references an unknown table or column. Valid tables: traces, requests, exceptions, customEvents, dependencies."
+                                : (string?)null,
                     });
                     return errorResp;
                 }
