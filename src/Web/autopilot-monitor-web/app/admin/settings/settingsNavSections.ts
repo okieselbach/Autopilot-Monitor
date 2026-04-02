@@ -4,6 +4,7 @@ export const SETTINGS_NAV_SECTIONS = [
   { id: "mcp-users", label: "MCP Users", description: "Manage AI agent access via MCP" },
   { id: "config-reseed", label: "Config Reseed", description: "Fetch and reseed rules from GitHub" },
   { id: "usage-plans", label: "Usage Plans", description: "Define MCP usage plan tiers and limits" },
+  { id: "alerts", label: "Alerts", description: "Configure ops event alert rules and notification providers" },
 ] as const;
 
 export type SettingsSectionId = (typeof SETTINGS_NAV_SECTIONS)[number]["id"];

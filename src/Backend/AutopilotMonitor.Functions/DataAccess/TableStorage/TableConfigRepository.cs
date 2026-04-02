@@ -516,7 +516,15 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                 { "VulnerabilityDataLastSyncUtc", config.VulnerabilityDataLastSyncUtc },
                 { "MaxDiagnosticsDownloadSizeMB", config.MaxDiagnosticsDownloadSizeMB },
                 { "DiagnosticsDownloadTimeoutSeconds", config.DiagnosticsDownloadTimeoutSeconds },
-                { "OpsEventRetentionDays", config.OpsEventRetentionDays }
+                { "OpsEventRetentionDays", config.OpsEventRetentionDays },
+                // Ops Alert settings
+                { "OpsAlertRulesJson", config.OpsAlertRulesJson ?? string.Empty },
+                { "OpsAlertTelegramEnabled", config.OpsAlertTelegramEnabled },
+                { "OpsAlertTelegramChatId", config.OpsAlertTelegramChatId ?? string.Empty },
+                { "OpsAlertTeamsEnabled", config.OpsAlertTeamsEnabled },
+                { "OpsAlertTeamsWebhookUrl", config.OpsAlertTeamsWebhookUrl ?? string.Empty },
+                { "OpsAlertSlackEnabled", config.OpsAlertSlackEnabled },
+                { "OpsAlertSlackWebhookUrl", config.OpsAlertSlackWebhookUrl ?? string.Empty }
             };
 
             return entity;
@@ -541,7 +549,15 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                 VulnerabilityDataLastSyncUtc = entity.GetString("VulnerabilityDataLastSyncUtc"),
                 MaxDiagnosticsDownloadSizeMB = entity.GetInt32("MaxDiagnosticsDownloadSizeMB") ?? 500,
                 DiagnosticsDownloadTimeoutSeconds = entity.GetInt32("DiagnosticsDownloadTimeoutSeconds") ?? 120,
-                OpsEventRetentionDays = entity.GetInt32("OpsEventRetentionDays") ?? 90
+                OpsEventRetentionDays = entity.GetInt32("OpsEventRetentionDays") ?? 90,
+                // Ops Alert settings
+                OpsAlertRulesJson = entity.GetString("OpsAlertRulesJson"),
+                OpsAlertTelegramEnabled = entity.GetBoolean("OpsAlertTelegramEnabled") ?? false,
+                OpsAlertTelegramChatId = entity.GetString("OpsAlertTelegramChatId"),
+                OpsAlertTeamsEnabled = entity.GetBoolean("OpsAlertTeamsEnabled") ?? false,
+                OpsAlertTeamsWebhookUrl = entity.GetString("OpsAlertTeamsWebhookUrl"),
+                OpsAlertSlackEnabled = entity.GetBoolean("OpsAlertSlackEnabled") ?? false,
+                OpsAlertSlackWebhookUrl = entity.GetString("OpsAlertSlackWebhookUrl")
             };
         }
 

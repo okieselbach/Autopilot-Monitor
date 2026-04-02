@@ -8,6 +8,7 @@ import { SectionDiagnosticsLogPaths } from "../sections/SectionDiagnosticsLogPat
 import { SectionMcpUsers } from "../sections/SectionMcpUsers";
 import { SectionConfigReseed } from "../sections/SectionConfigReseed";
 import { SectionUsagePlans } from "../sections/SectionUsagePlans";
+import { SectionAlerts } from "../sections/SectionAlerts";
 
 const SECTION_COMPONENTS: Record<SettingsSectionId, React.ComponentType> = {
   "global": SectionGlobalSettings,
@@ -15,6 +16,7 @@ const SECTION_COMPONENTS: Record<SettingsSectionId, React.ComponentType> = {
   "mcp-users": SectionMcpUsers,
   "config-reseed": SectionConfigReseed,
   "usage-plans": SectionUsagePlans,
+  "alerts": SectionAlerts,
 };
 
 export default function SettingsSectionPage() {

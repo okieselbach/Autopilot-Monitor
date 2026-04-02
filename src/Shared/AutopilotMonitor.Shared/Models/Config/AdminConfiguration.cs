@@ -181,6 +181,51 @@ namespace AutopilotMonitor.Shared.Models
         /// </summary>
         public string NvdApiKey { get; set; } = default!;
 
+        // ===== OPS EVENT ALERTING =====
+
+        /// <summary>
+        /// JSON-serialized list of OpsAlertRule objects defining which event types
+        /// trigger notifications. Provider-agnostic — rules apply to all enabled providers.
+        /// </summary>
+        public string OpsAlertRulesJson { get; set; } = default!;
+
+        /// <summary>
+        /// Returns the deserialized list of ops alert rules.
+        /// </summary>
+        public List<OpsAlertRule> GetOpsAlertRules()
+        {
+            if (string.IsNullOrEmpty(OpsAlertRulesJson))
+                return new List<OpsAlertRule>();
+            try
+            {
+                return JsonSerializer.Deserialize<List<OpsAlertRule>>(OpsAlertRulesJson,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+                    ?? new List<OpsAlertRule>();
+            }
+            catch
+            {
+                return new List<OpsAlertRule>();
+            }
+        }
+
+        /// <summary>Whether the Telegram alert provider is enabled. Default: false.</summary>
+        public bool OpsAlertTelegramEnabled { get; set; }
+
+        /// <summary>Telegram chat ID for ops alerts (e.g. ITEngineer channel).</summary>
+        public string OpsAlertTelegramChatId { get; set; } = default!;
+
+        /// <summary>Whether the Teams alert provider is enabled. Default: false.</summary>
+        public bool OpsAlertTeamsEnabled { get; set; }
+
+        /// <summary>Teams Workflow webhook URL for ops alerts.</summary>
+        public string OpsAlertTeamsWebhookUrl { get; set; } = default!;
+
+        /// <summary>Whether the Slack alert provider is enabled. Default: false.</summary>
+        public bool OpsAlertSlackEnabled { get; set; }
+
+        /// <summary>Slack Incoming Webhook URL for ops alerts.</summary>
+        public string OpsAlertSlackWebhookUrl { get; set; } = default!;
+
         // ===== AGENT INTEGRITY SETTINGS =====
 
         /// <summary>

@@ -1,8 +1,10 @@
 using System;
+using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
 using AutopilotMonitor.Shared.DataAccess;
+using AutopilotMonitor.Shared.Models.Notifications;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 
@@ -177,6 +179,45 @@ namespace AutopilotMonitor.Functions.Services
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to send Telegram feedback notification for {Upn}", upn);
+            }
+        }
+
+        /// <summary>
+        /// Sends an ops alert to the specified Telegram chat.
+        /// Converts the NotificationAlert into a plain-text Telegram message with severity emoji.
+        /// Best-effort — silently no-ops on failure.
+        /// </summary>
+        public async Task SendOpsAlertAsync(string chatId, NotificationAlert alert)
+        {
+            try
+            {
+                var webhookUrl = await GetWebhookUrlAsync();
+                if (string.IsNullOrWhiteSpace(webhookUrl) || string.IsNullOrWhiteSpace(chatId))
+                    return;
+
+                var icon = alert.Severity switch
+                {
+                    NotificationSeverity.Error => "\U0001f7e0",   // orange circle
+                    NotificationSeverity.Warning => "\U0001f7e1", // yellow circle
+                    NotificationSeverity.Info => "\u2139\ufe0f",  // info
+                    _ => "\U0001f534"                              // red circle (fallback / success)
+                };
+
+                var sb = new StringBuilder();
+                sb.AppendLine($"{icon} {alert.Title}");
+                sb.AppendLine(alert.Summary);
+
+                foreach (var fact in alert.Facts)
+                    sb.AppendLine($"{fact.Name}: {fact.Value}");
+
+                var payload = new { chat_id = chatId, text = sb.ToString().TrimEnd() };
+                var json = JsonConvert.SerializeObject(payload);
+                var content = new StringContent(json, Encoding.UTF8, "application/json");
+                await PostWithRetryAsync(webhookUrl, content, $"OpsAlert:{alert.Title}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to send Telegram ops alert: {Title}", alert.Title);
             }
         }
 

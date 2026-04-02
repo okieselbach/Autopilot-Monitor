@@ -16,11 +16,14 @@ namespace AutopilotMonitor.Functions.Services
     {
         private readonly IOpsEventRepository _repository;
         private readonly ILogger<OpsEventService> _logger;
+        private readonly OpsAlertDispatchService _alertDispatch;
 
-        public OpsEventService(IOpsEventRepository repository, ILogger<OpsEventService> logger)
+        public OpsEventService(IOpsEventRepository repository, ILogger<OpsEventService> logger,
+            OpsAlertDispatchService alertDispatch)
         {
             _repository = repository;
             _logger = logger;
+            _alertDispatch = alertDispatch;
         }
 
         // ── Consent ────────────────────────────────────────────────────────────
@@ -118,6 +121,10 @@ namespace AutopilotMonitor.Functions.Services
                 };
 
                 await _repository.SaveOpsEventAsync(entry);
+
+                // Fire-and-forget: dispatch alerts to enabled providers.
+                // TrySendAlerts has its own top-level try/catch so unobserved exceptions are safe.
+                _ = _alertDispatch.DispatchAsync(category, eventType, severity, message, tenantId);
             }
             catch (Exception ex)
             {

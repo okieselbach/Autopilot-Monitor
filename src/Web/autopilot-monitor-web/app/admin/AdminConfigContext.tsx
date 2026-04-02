@@ -22,6 +22,14 @@ export interface AdminConfiguration {
   nvdApiKey?: string;
   vulnerabilityCorrelationEnabled?: boolean;
   vulnerabilityDataLastSyncUtc?: string;
+  // Ops Alert settings
+  opsAlertRulesJson?: string;
+  opsAlertTelegramEnabled?: boolean;
+  opsAlertTelegramChatId?: string;
+  opsAlertTeamsEnabled?: boolean;
+  opsAlertTeamsWebhookUrl?: string;
+  opsAlertSlackEnabled?: boolean;
+  opsAlertSlackWebhookUrl?: string;
 }
 
 interface AdminConfigContextValue {
@@ -51,6 +59,24 @@ interface AdminConfigContextValue {
   setGlobalDiagPaths: React.Dispatch<React.SetStateAction<DiagnosticsLogPath[]>>;
   savingDiagPaths: boolean;
 
+  // Ops Alert settings
+  opsAlertRules: OpsAlertRule[];
+  setOpsAlertRules: React.Dispatch<React.SetStateAction<OpsAlertRule[]>>;
+  opsAlertTelegramEnabled: boolean;
+  setOpsAlertTelegramEnabled: (value: boolean) => void;
+  opsAlertTelegramChatId: string;
+  setOpsAlertTelegramChatId: (value: string) => void;
+  opsAlertTeamsEnabled: boolean;
+  setOpsAlertTeamsEnabled: (value: boolean) => void;
+  opsAlertTeamsWebhookUrl: string;
+  setOpsAlertTeamsWebhookUrl: (value: string) => void;
+  opsAlertSlackEnabled: boolean;
+  setOpsAlertSlackEnabled: (value: boolean) => void;
+  opsAlertSlackWebhookUrl: string;
+  setOpsAlertSlackWebhookUrl: (value: string) => void;
+  savingOpsAlerts: boolean;
+  handleSaveOpsAlertConfig: (rules: OpsAlertRule[], telegramEnabled: boolean, telegramChatId: string, teamsEnabled: boolean, teamsWebhookUrl: string, slackEnabled: boolean, slackWebhookUrl: string) => Promise<void>;
+
   // Tenants
   tenants: TenantConfiguration[];
   setTenants: React.Dispatch<React.SetStateAction<TenantConfiguration[]>>;
@@ -77,6 +103,12 @@ interface AdminConfigContextValue {
 import { type DiagnosticsLogPath } from "./components/DiagnosticsLogPathsSection";
 import { type TenantConfiguration } from "./components/TenantManagementSection";
 
+export interface OpsAlertRule {
+  eventType: string;
+  minSeverity: string;
+  enabled: boolean;
+}
+
 const AdminConfigContext = createContext<AdminConfigContextValue | null>(null);
 
 export function useAdminConfig() {
@@ -102,6 +134,16 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
   // Diagnostics Log Paths state
   const [globalDiagPaths, setGlobalDiagPaths] = useState<DiagnosticsLogPath[]>([]);
   const [savingDiagPaths, setSavingDiagPaths] = useState(false);
+
+  // Ops Alert state
+  const [opsAlertRules, setOpsAlertRules] = useState<OpsAlertRule[]>([]);
+  const [opsAlertTelegramEnabled, setOpsAlertTelegramEnabled] = useState(false);
+  const [opsAlertTelegramChatId, setOpsAlertTelegramChatId] = useState("");
+  const [opsAlertTeamsEnabled, setOpsAlertTeamsEnabled] = useState(false);
+  const [opsAlertTeamsWebhookUrl, setOpsAlertTeamsWebhookUrl] = useState("");
+  const [opsAlertSlackEnabled, setOpsAlertSlackEnabled] = useState(false);
+  const [opsAlertSlackWebhookUrl, setOpsAlertSlackWebhookUrl] = useState("");
+  const [savingOpsAlerts, setSavingOpsAlerts] = useState(false);
 
   // Tenant Management state
   const [tenants, setTenants] = useState<TenantConfiguration[]>([]);
@@ -142,6 +184,18 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
         } catch {
           setGlobalDiagPaths([]);
         }
+        // Ops Alert state hydration
+        try {
+          setOpsAlertRules(data.opsAlertRulesJson ? JSON.parse(data.opsAlertRulesJson) : []);
+        } catch {
+          setOpsAlertRules([]);
+        }
+        setOpsAlertTelegramEnabled(data.opsAlertTelegramEnabled ?? false);
+        setOpsAlertTelegramChatId(data.opsAlertTelegramChatId ?? "");
+        setOpsAlertTeamsEnabled(data.opsAlertTeamsEnabled ?? false);
+        setOpsAlertTeamsWebhookUrl(data.opsAlertTeamsWebhookUrl ?? "");
+        setOpsAlertSlackEnabled(data.opsAlertSlackEnabled ?? false);
+        setOpsAlertSlackWebhookUrl(data.opsAlertSlackWebhookUrl ?? "");
       } catch (err) {
         if (err instanceof TokenExpiredError) {
           console.error("Session expired while fetching admin configuration");
@@ -257,6 +311,17 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
     } catch {
       setGlobalDiagPaths([]);
     }
+    try {
+      setOpsAlertRules(adminConfig.opsAlertRulesJson ? JSON.parse(adminConfig.opsAlertRulesJson) : []);
+    } catch {
+      setOpsAlertRules([]);
+    }
+    setOpsAlertTelegramEnabled(adminConfig.opsAlertTelegramEnabled ?? false);
+    setOpsAlertTelegramChatId(adminConfig.opsAlertTelegramChatId ?? "");
+    setOpsAlertTeamsEnabled(adminConfig.opsAlertTeamsEnabled ?? false);
+    setOpsAlertTeamsWebhookUrl(adminConfig.opsAlertTeamsWebhookUrl ?? "");
+    setOpsAlertSlackEnabled(adminConfig.opsAlertSlackEnabled ?? false);
+    setOpsAlertSlackWebhookUrl(adminConfig.opsAlertSlackWebhookUrl ?? "");
     setSuccessMessage(null);
     setError(null);
   }, [adminConfig]);
@@ -297,6 +362,59 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
     }
   }, [adminConfig, getAccessToken]);
 
+  // Save ops alert config (rules + providers)
+  const handleSaveOpsAlertConfig = useCallback(async (
+    rules: OpsAlertRule[],
+    telegramEnabled: boolean, telegramChatId: string,
+    teamsEnabled: boolean, teamsWebhookUrl: string,
+    slackEnabled: boolean, slackWebhookUrl: string,
+  ) => {
+    if (!adminConfig) return;
+    try {
+      setSavingOpsAlerts(true);
+      setError(null);
+      setSuccessMessage(null);
+
+      const updatedConfig: AdminConfiguration = {
+        ...adminConfig,
+        opsAlertRulesJson: JSON.stringify(rules),
+        opsAlertTelegramEnabled: telegramEnabled,
+        opsAlertTelegramChatId: telegramChatId.trim(),
+        opsAlertTeamsEnabled: teamsEnabled,
+        opsAlertTeamsWebhookUrl: teamsWebhookUrl.trim(),
+        opsAlertSlackEnabled: slackEnabled,
+        opsAlertSlackWebhookUrl: slackWebhookUrl.trim(),
+      };
+
+      const response = await authenticatedFetch(api.globalConfig.get(), getAccessToken, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updatedConfig),
+      });
+
+      if (!response.ok) throw new Error(`Failed to save alert configuration: ${response.statusText}`);
+
+      const result = await response.json();
+      setAdminConfig(result.config);
+      setOpsAlertRules(rules);
+      setOpsAlertTelegramEnabled(telegramEnabled);
+      setOpsAlertTelegramChatId(telegramChatId.trim());
+      setOpsAlertTeamsEnabled(teamsEnabled);
+      setOpsAlertTeamsWebhookUrl(teamsWebhookUrl.trim());
+      setOpsAlertSlackEnabled(slackEnabled);
+      setOpsAlertSlackWebhookUrl(slackWebhookUrl.trim());
+      setSuccessMessage("Alert configuration saved successfully!");
+      setTimeout(() => setSuccessMessage(null), 4000);
+    } catch (err) {
+      if (err instanceof TokenExpiredError) {
+        console.error("Session expired while saving alert configuration");
+      }
+      setError(err instanceof Error ? err.message : "Failed to save alert configuration");
+    } finally {
+      setSavingOpsAlerts(false);
+    }
+  }, [adminConfig, getAccessToken]);
+
   return (
     <AdminConfigContext.Provider value={{
       adminConfig, setAdminConfig, loadingConfig, savingConfig, setSavingConfig,
@@ -307,11 +425,19 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
       maintenanceBlockDurationHours, setMaintenanceBlockDurationHours,
       opsEventRetentionDays, setOpsEventRetentionDays,
       globalDiagPaths, setGlobalDiagPaths, savingDiagPaths,
+      opsAlertRules, setOpsAlertRules,
+      opsAlertTelegramEnabled, setOpsAlertTelegramEnabled,
+      opsAlertTelegramChatId, setOpsAlertTelegramChatId,
+      opsAlertTeamsEnabled, setOpsAlertTeamsEnabled,
+      opsAlertTeamsWebhookUrl, setOpsAlertTeamsWebhookUrl,
+      opsAlertSlackEnabled, setOpsAlertSlackEnabled,
+      opsAlertSlackWebhookUrl, setOpsAlertSlackWebhookUrl,
+      savingOpsAlerts,
       tenants, setTenants, loadingTenants, fetchTenants,
       previewApproved, setPreviewApproved,
       error, setError, successMessage, setSuccessMessage,
       getAccessToken,
-      handleSaveAdminConfig, handleResetAdminConfig, handleSaveDiagPaths,
+      handleSaveAdminConfig, handleResetAdminConfig, handleSaveDiagPaths, handleSaveOpsAlertConfig,
     }}>
       {children}
     </AdminConfigContext.Provider>

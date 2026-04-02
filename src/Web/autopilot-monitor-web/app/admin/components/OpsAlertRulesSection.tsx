@@ -1,0 +1,299 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import { type OpsAlertRule } from "../AdminConfigContext";
+
+// All known ops event types grouped by category
+const OPS_EVENT_TYPES: Record<string, string[]> = {
+  Consent: ["ConsentFlowStarted", "ConsentFlowFailed", "ConsentRedirectUriMismatch"],
+  Maintenance: ["MaintenanceCompleted", "MaintenanceFailed", "OpsEventCleanup", "SessionTimeouts"],
+  Security: ["DeviceBlocked", "ExcessiveDataBlocked", "VersionBlocked"],
+  Tenant: ["TenantOffboarded"],
+  Agent: ["BlobStorageMissing", "BlobStorageUnreachable"],
+};
+
+const SEVERITIES = ["Info", "Warning", "Error", "Critical"];
+
+const CATEGORY_COLORS: Record<string, string> = {
+  Consent: "text-indigo-700 dark:text-indigo-300",
+  Maintenance: "text-purple-700 dark:text-purple-300",
+  Security: "text-orange-700 dark:text-orange-300",
+  Tenant: "text-teal-700 dark:text-teal-300",
+  Agent: "text-cyan-700 dark:text-cyan-300",
+};
+
+interface OpsAlertRulesSectionProps {
+  loadingConfig: boolean;
+  savingOpsAlerts: boolean;
+  adminConfigExists: boolean;
+  opsAlertRules: OpsAlertRule[];
+  opsAlertTelegramEnabled: boolean;
+  opsAlertTelegramChatId: string;
+  opsAlertTeamsEnabled: boolean;
+  opsAlertTeamsWebhookUrl: string;
+  opsAlertSlackEnabled: boolean;
+  opsAlertSlackWebhookUrl: string;
+  onSave: (
+    rules: OpsAlertRule[],
+    telegramEnabled: boolean, telegramChatId: string,
+    teamsEnabled: boolean, teamsWebhookUrl: string,
+    slackEnabled: boolean, slackWebhookUrl: string,
+  ) => Promise<void>;
+}
+
+export function OpsAlertRulesSection({
+  loadingConfig,
+  savingOpsAlerts,
+  adminConfigExists,
+  opsAlertRules,
+  opsAlertTelegramEnabled,
+  opsAlertTelegramChatId,
+  opsAlertTeamsEnabled,
+  opsAlertTeamsWebhookUrl,
+  opsAlertSlackEnabled,
+  opsAlertSlackWebhookUrl,
+  onSave,
+}: OpsAlertRulesSectionProps) {
+  // Local state for editing
+  const [rules, setRules] = useState<OpsAlertRule[]>([]);
+  const [telegramEnabled, setTelegramEnabled] = useState(false);
+  const [telegramChatId, setTelegramChatId] = useState("");
+  const [teamsEnabled, setTeamsEnabled] = useState(false);
+  const [teamsWebhookUrl, setTeamsWebhookUrl] = useState("");
+  const [slackEnabled, setSlackEnabled] = useState(false);
+  const [slackWebhookUrl, setSlackWebhookUrl] = useState("");
+
+  // Sync from props
+  useEffect(() => {
+    // Build full rule list: merge saved rules with all known event types
+    const ruleMap = new Map(opsAlertRules.map(r => [r.eventType, r]));
+    const fullRules: OpsAlertRule[] = [];
+    for (const eventTypes of Object.values(OPS_EVENT_TYPES)) {
+      for (const et of eventTypes) {
+        const existing = ruleMap.get(et);
+        fullRules.push(existing ?? { eventType: et, minSeverity: "Error", enabled: false });
+      }
+    }
+    setRules(fullRules);
+    setTelegramEnabled(opsAlertTelegramEnabled);
+    setTelegramChatId(opsAlertTelegramChatId);
+    setTeamsEnabled(opsAlertTeamsEnabled);
+    setTeamsWebhookUrl(opsAlertTeamsWebhookUrl);
+    setSlackEnabled(opsAlertSlackEnabled);
+    setSlackWebhookUrl(opsAlertSlackWebhookUrl);
+  }, [opsAlertRules, opsAlertTelegramEnabled, opsAlertTelegramChatId, opsAlertTeamsEnabled, opsAlertTeamsWebhookUrl, opsAlertSlackEnabled, opsAlertSlackWebhookUrl]);
+
+  const toggleRule = (eventType: string) => {
+    setRules(prev => prev.map(r => r.eventType === eventType ? { ...r, enabled: !r.enabled } : r));
+  };
+
+  const setSeverity = (eventType: string, minSeverity: string) => {
+    setRules(prev => prev.map(r => r.eventType === eventType ? { ...r, minSeverity } : r));
+  };
+
+  const handleSave = () => {
+    onSave(rules, telegramEnabled, telegramChatId, teamsEnabled, teamsWebhookUrl, slackEnabled, slackWebhookUrl);
+  };
+
+  const enabledRulesCount = rules.filter(r => r.enabled).length;
+  const enabledProviders = [telegramEnabled, teamsEnabled, slackEnabled].filter(Boolean).length;
+
+  // Get category for a given event type
+  const getCategoryForEvent = (eventType: string): string => {
+    for (const [cat, types] of Object.entries(OPS_EVENT_TYPES)) {
+      if (types.includes(eventType)) return cat;
+    }
+    return "Unknown";
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Alert Rules */}
+      <div className="bg-gradient-to-br from-amber-50 to-orange-50 dark:from-gray-800 dark:to-gray-800 border-2 border-amber-300 dark:border-amber-700 rounded-lg shadow-lg">
+        <div className="p-6 border-b border-amber-200 dark:border-amber-700 bg-gradient-to-r from-amber-100 to-orange-100 dark:from-amber-900/40 dark:to-orange-900/40">
+          <div className="flex items-center space-x-2">
+            <svg className="w-6 h-6 text-amber-600 dark:text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+            </svg>
+            <div>
+              <h2 className="text-xl font-semibold text-amber-900 dark:text-amber-100">Alert Rules</h2>
+              <p className="text-sm text-amber-600 dark:text-amber-300 mt-1">
+                Select which ops events trigger alerts. {enabledRulesCount} rule(s) active, {enabledProviders} provider(s) enabled.
+              </p>
+            </div>
+          </div>
+        </div>
+        <div className="p-6">
+          {loadingConfig ? (
+            <div className="text-center py-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-amber-600 dark:border-amber-400 mx-auto"></div>
+              <p className="mt-3 text-amber-800 dark:text-amber-200 text-sm">Loading configuration...</p>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {Object.entries(OPS_EVENT_TYPES).map(([category, eventTypes]) => (
+                <div key={category}>
+                  <h3 className={`text-sm font-semibold uppercase tracking-wide mb-2 ${CATEGORY_COLORS[category] ?? "text-gray-700 dark:text-gray-300"}`}>
+                    {category}
+                  </h3>
+                  <div className="space-y-1">
+                    {eventTypes.map(et => {
+                      const rule = rules.find(r => r.eventType === et);
+                      if (!rule) return null;
+                      return (
+                        <div key={et} className="flex items-center gap-3 py-1.5 px-3 rounded hover:bg-amber-100/50 dark:hover:bg-gray-700/50 transition-colors">
+                          <label className="relative inline-flex items-center cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={rule.enabled}
+                              onChange={() => toggleRule(et)}
+                              className="sr-only peer"
+                            />
+                            <div className="w-9 h-5 bg-gray-300 dark:bg-gray-600 rounded-full peer peer-checked:bg-amber-500 dark:peer-checked:bg-amber-500 transition-colors after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-full"></div>
+                          </label>
+                          <span className={`flex-1 text-sm font-mono ${rule.enabled ? "text-gray-900 dark:text-gray-100" : "text-gray-400 dark:text-gray-500"}`}>
+                            {et}
+                          </span>
+                          <select
+                            value={rule.minSeverity}
+                            onChange={(e) => setSeverity(et, e.target.value)}
+                            disabled={!rule.enabled}
+                            className="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus:ring-1 focus:ring-amber-500"
+                          >
+                            {SEVERITIES.map(s => (
+                              <option key={s} value={s}>{s}+</option>
+                            ))}
+                          </select>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Providers */}
+      <div className="bg-gradient-to-br from-sky-50 to-cyan-50 dark:from-gray-800 dark:to-gray-800 border-2 border-sky-300 dark:border-sky-700 rounded-lg shadow-lg">
+        <div className="p-6 border-b border-sky-200 dark:border-sky-700 bg-gradient-to-r from-sky-100 to-cyan-100 dark:from-sky-900/40 dark:to-cyan-900/40">
+          <div className="flex items-center space-x-2">
+            <svg className="w-6 h-6 text-sky-600 dark:text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+            <div>
+              <h2 className="text-xl font-semibold text-sky-900 dark:text-sky-100">Alert Providers</h2>
+              <p className="text-sm text-sky-600 dark:text-sky-300 mt-1">Configure where alert notifications are delivered</p>
+            </div>
+          </div>
+        </div>
+        <div className="p-6 space-y-6">
+          {/* Telegram */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={telegramEnabled}
+                  onChange={(e) => setTelegramEnabled(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-9 h-5 bg-gray-300 dark:bg-gray-600 rounded-full peer peer-checked:bg-sky-500 dark:peer-checked:bg-sky-500 transition-colors after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-full"></div>
+              </label>
+              <span className="font-medium text-sky-900 dark:text-sky-100">Telegram</span>
+            </div>
+            {telegramEnabled && (
+              <div className="ml-12">
+                <label className="block text-sm text-sky-800 dark:text-sky-200 mb-1">Chat ID</label>
+                <input
+                  type="text"
+                  value={telegramChatId}
+                  onChange={(e) => setTelegramChatId(e.target.value)}
+                  placeholder="-1003785642894"
+                  className="block w-full max-w-md px-3 py-2 border border-sky-300 dark:border-sky-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500 text-sm font-mono"
+                />
+                <p className="text-xs text-sky-600 dark:text-sky-400 mt-1">Telegram channel or group chat ID (negative number for groups)</p>
+              </div>
+            )}
+          </div>
+
+          <hr className="border-sky-200 dark:border-sky-700" />
+
+          {/* Teams */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={teamsEnabled}
+                  onChange={(e) => setTeamsEnabled(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-9 h-5 bg-gray-300 dark:bg-gray-600 rounded-full peer peer-checked:bg-sky-500 dark:peer-checked:bg-sky-500 transition-colors after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-full"></div>
+              </label>
+              <span className="font-medium text-sky-900 dark:text-sky-100">Microsoft Teams</span>
+              <span className="text-xs px-2 py-0.5 rounded bg-sky-200 dark:bg-sky-800 text-sky-700 dark:text-sky-300">Workflow Webhook</span>
+            </div>
+            {teamsEnabled && (
+              <div className="ml-12">
+                <label className="block text-sm text-sky-800 dark:text-sky-200 mb-1">Webhook URL</label>
+                <input
+                  type="url"
+                  value={teamsWebhookUrl}
+                  onChange={(e) => setTeamsWebhookUrl(e.target.value)}
+                  placeholder="https://prod-xx.westeurope.logic.azure.com/..."
+                  className="block w-full px-3 py-2 border border-sky-300 dark:border-sky-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500 text-sm"
+                />
+                <p className="text-xs text-sky-600 dark:text-sky-400 mt-1">Teams Workflow webhook URL (Adaptive Card format)</p>
+              </div>
+            )}
+          </div>
+
+          <hr className="border-sky-200 dark:border-sky-700" />
+
+          {/* Slack */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={slackEnabled}
+                  onChange={(e) => setSlackEnabled(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-9 h-5 bg-gray-300 dark:bg-gray-600 rounded-full peer peer-checked:bg-sky-500 dark:peer-checked:bg-sky-500 transition-colors after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-full"></div>
+              </label>
+              <span className="font-medium text-sky-900 dark:text-sky-100">Slack</span>
+              <span className="text-xs px-2 py-0.5 rounded bg-sky-200 dark:bg-sky-800 text-sky-700 dark:text-sky-300">Incoming Webhook</span>
+            </div>
+            {slackEnabled && (
+              <div className="ml-12">
+                <label className="block text-sm text-sky-800 dark:text-sky-200 mb-1">Webhook URL</label>
+                <input
+                  type="url"
+                  value={slackWebhookUrl}
+                  onChange={(e) => setSlackWebhookUrl(e.target.value)}
+                  placeholder="https://hooks.slack.com/services/..."
+                  className="block w-full px-3 py-2 border border-sky-300 dark:border-sky-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500 text-sm"
+                />
+                <p className="text-xs text-sky-600 dark:text-sky-400 mt-1">Slack Incoming Webhook URL</p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Save button */}
+      <div className="flex justify-end">
+        <button
+          onClick={handleSave}
+          disabled={savingOpsAlerts || loadingConfig || !adminConfigExists}
+          className="px-6 py-2.5 rounded-lg font-medium text-white bg-amber-600 hover:bg-amber-700 dark:bg-amber-500 dark:hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-md"
+        >
+          {savingOpsAlerts ? "Saving..." : "Save Alert Configuration"}
+        </button>
+      </div>
+    </div>
+  );
+}
