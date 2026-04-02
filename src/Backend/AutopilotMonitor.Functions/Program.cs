@@ -127,6 +127,7 @@ builder.Services.AddSingleton<ImeLogPatternService>();
 builder.Services.AddHttpClient<GitHubRuleRepository>()
     .AddPolicyHandler((sp, _) => sp.GetRequiredService<ResiliencePolicies>().ExternalDataApi);
 builder.Services.AddSingleton<MaintenanceService>();
+builder.Services.AddSingleton<OpsEventService>();
 builder.Services.AddSingleton<BlockedDeviceService>();
 builder.Services.AddSingleton<BlockedVersionService>();
 builder.Services.AddSingleton<BlobStorageService>();

@@ -90,6 +90,13 @@ namespace AutopilotMonitor.Shared.Models
         /// </summary>
         public int MaintenanceBlockDurationHours { get; set; } = 12;
 
+        /// <summary>
+        /// Retention period in days for operational events in the OpsEvents table.
+        /// Events older than this are deleted by the periodic maintenance job.
+        /// 0 = no cleanup (not recommended). Default: 90 days.
+        /// </summary>
+        public int OpsEventRetentionDays { get; set; } = 90;
+
         // ===== FEEDBACK SETTINGS =====
 
         /// <summary>

@@ -463,6 +463,40 @@ namespace AutopilotMonitor.Functions.Services
                 _logger.LogError(ex, "Distress report cleanup failed");
             }
         }
+
+        /// <summary>
+        /// Removes operational events older than the configured retention period.
+        /// Retention is controlled by AdminConfiguration.OpsEventRetentionDays (default: 90).
+        /// </summary>
+        private async Task CleanupOldOpsEventsAsync()
+        {
+            try
+            {
+                var adminConfig = await _adminConfigurationService.GetConfigurationAsync();
+                var retentionDays = adminConfig.OpsEventRetentionDays;
+
+                if (retentionDays <= 0)
+                {
+                    _logger.LogInformation("OpsEvents cleanup disabled (OpsEventRetentionDays = 0)");
+                    return;
+                }
+
+                var cutoff = DateTime.UtcNow.AddDays(-retentionDays);
+                _logger.LogInformation("Starting OpsEvents cleanup (retention: {Days} days, cutoff: {Cutoff:yyyy-MM-dd})", retentionDays, cutoff);
+
+                var deleted = await _opsEventRepo.DeleteOpsEventsOlderThanAsync(cutoff);
+                _logger.LogInformation("OpsEvents cleanup complete: {Deleted} events deleted", deleted);
+
+                if (deleted > 0)
+                {
+                    await _opsEventService.RecordOpsEventCleanupAsync(deleted, retentionDays);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "OpsEvents cleanup failed");
+            }
+        }
     }
 }
 

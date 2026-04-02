@@ -16,6 +16,7 @@ export interface AdminConfiguration {
   collectorIdleTimeoutMinutes?: number;
   maxSessionWindowHours?: number;
   maintenanceBlockDurationHours?: number;
+  opsEventRetentionDays?: number;
   diagnosticsGlobalLogPathsJson?: string;
   customSettings?: string;
   nvdApiKey?: string;
@@ -42,6 +43,8 @@ interface AdminConfigContextValue {
   setMaxSessionWindowHours: (value: number) => void;
   maintenanceBlockDurationHours: number;
   setMaintenanceBlockDurationHours: (value: number) => void;
+  opsEventRetentionDays: number;
+  setOpsEventRetentionDays: (value: number) => void;
 
   // Diagnostics log paths
   globalDiagPaths: DiagnosticsLogPath[];
@@ -94,6 +97,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
   const [collectorIdleTimeoutMinutes, setCollectorIdleTimeoutMinutes] = useState(15);
   const [maxSessionWindowHours, setMaxSessionWindowHours] = useState(24);
   const [maintenanceBlockDurationHours, setMaintenanceBlockDurationHours] = useState(12);
+  const [opsEventRetentionDays, setOpsEventRetentionDays] = useState(90);
 
   // Diagnostics Log Paths state
   const [globalDiagPaths, setGlobalDiagPaths] = useState<DiagnosticsLogPath[]>([]);
@@ -132,6 +136,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
         setCollectorIdleTimeoutMinutes(data.collectorIdleTimeoutMinutes ?? 15);
         setMaxSessionWindowHours(data.maxSessionWindowHours ?? 24);
         setMaintenanceBlockDurationHours(data.maintenanceBlockDurationHours ?? 12);
+        setOpsEventRetentionDays(data.opsEventRetentionDays ?? 90);
         try {
           setGlobalDiagPaths(data.diagnosticsGlobalLogPathsJson ? JSON.parse(data.diagnosticsGlobalLogPathsJson) : []);
         } catch {
@@ -209,6 +214,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
         collectorIdleTimeoutMinutes,
         maxSessionWindowHours,
         maintenanceBlockDurationHours,
+        opsEventRetentionDays,
       };
 
       const response = await authenticatedFetch(api.globalConfig.get(), getAccessToken, {
@@ -235,7 +241,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
     } finally {
       setSavingConfig(false);
     }
-  }, [adminConfig, globalRateLimit, platformStatsBlobSasUrl, collectorIdleTimeoutMinutes, maxSessionWindowHours, maintenanceBlockDurationHours, getAccessToken]);
+  }, [adminConfig, globalRateLimit, platformStatsBlobSasUrl, collectorIdleTimeoutMinutes, maxSessionWindowHours, maintenanceBlockDurationHours, opsEventRetentionDays, getAccessToken]);
 
   // Reset admin config
   const handleResetAdminConfig = useCallback(() => {
@@ -245,6 +251,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
     setCollectorIdleTimeoutMinutes(adminConfig.collectorIdleTimeoutMinutes ?? 15);
     setMaxSessionWindowHours(adminConfig.maxSessionWindowHours ?? 24);
     setMaintenanceBlockDurationHours(adminConfig.maintenanceBlockDurationHours ?? 12);
+    setOpsEventRetentionDays(adminConfig.opsEventRetentionDays ?? 90);
     try {
       setGlobalDiagPaths(adminConfig.diagnosticsGlobalLogPathsJson ? JSON.parse(adminConfig.diagnosticsGlobalLogPathsJson) : []);
     } catch {
@@ -298,6 +305,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
       collectorIdleTimeoutMinutes, setCollectorIdleTimeoutMinutes,
       maxSessionWindowHours, setMaxSessionWindowHours,
       maintenanceBlockDurationHours, setMaintenanceBlockDurationHours,
+      opsEventRetentionDays, setOpsEventRetentionDays,
       globalDiagPaths, setGlobalDiagPaths, savingDiagPaths,
       tenants, setTenants, loadingTenants, fetchTenants,
       previewApproved, setPreviewApproved,

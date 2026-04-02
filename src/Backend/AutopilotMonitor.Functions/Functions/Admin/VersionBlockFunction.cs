@@ -17,15 +17,18 @@ namespace AutopilotMonitor.Functions.Functions.Admin
         private readonly ILogger<VersionBlockFunction> _logger;
         private readonly BlockedVersionService _blockedVersionService;
         private readonly IMaintenanceRepository _maintenanceRepo;
+        private readonly OpsEventService _opsEventService;
 
         public VersionBlockFunction(
             ILogger<VersionBlockFunction> logger,
             BlockedVersionService blockedVersionService,
-            IMaintenanceRepository maintenanceRepo)
+            IMaintenanceRepository maintenanceRepo,
+            OpsEventService opsEventService)
         {
             _logger = logger;
             _blockedVersionService = blockedVersionService;
             _maintenanceRepo = maintenanceRepo;
+            _opsEventService = opsEventService;
         }
 
         /// <summary>GET /api/versions/blocked — list all active version block rules</summary>
@@ -104,6 +107,8 @@ namespace AutopilotMonitor.Functions.Functions.Admin
                         { "Reason", reason ?? string.Empty }
                     }
                 );
+
+                await _opsEventService.RecordVersionBlockedAsync(versionPattern, userIdentifier);
 
                 _logger.LogWarning(
                     "Global Admin {User} added version {Action} rule: Pattern={Pattern}, Reason={Reason}",

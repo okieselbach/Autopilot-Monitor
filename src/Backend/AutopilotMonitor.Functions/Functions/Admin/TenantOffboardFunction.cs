@@ -1,6 +1,6 @@
 using System.Net;
 using AutopilotMonitor.Functions.Helpers;
-
+using AutopilotMonitor.Functions.Services;
 using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared;
 using Microsoft.AspNetCore.Authorization;
@@ -19,13 +19,16 @@ public class TenantOffboardFunction
 {
     private readonly ILogger<TenantOffboardFunction> _logger;
     private readonly IMaintenanceRepository _maintenanceRepo;
+    private readonly OpsEventService _opsEventService;
 
     public TenantOffboardFunction(
         ILogger<TenantOffboardFunction> logger,
-        IMaintenanceRepository maintenanceRepo)
+        IMaintenanceRepository maintenanceRepo,
+        OpsEventService opsEventService)
     {
         _logger = logger;
         _maintenanceRepo = maintenanceRepo;
+        _opsEventService = opsEventService;
     }
 
     /// <summary>
@@ -83,6 +86,8 @@ public class TenantOffboardFunction
                 requestCtx.TargetTenantId,
                 upn!,
                 details);
+
+            await _opsEventService.RecordTenantOffboardedAsync(requestCtx.TargetTenantId, upn!, deletedCounts);
 
             var okResponse = req.CreateResponse(HttpStatusCode.OK);
             await okResponse.WriteAsJsonAsync(result);

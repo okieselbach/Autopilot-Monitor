@@ -16,6 +16,7 @@ public class AutopilotDeviceValidationConsentFunction
     private readonly IConfiguration _configuration;
     private readonly GraphTokenService _graphTokenService;
     private readonly TelemetryClient _telemetryClient;
+    private readonly OpsEventService _opsEventService;
 
     /// <summary>
     /// Known redirect URIs registered in the Entra ID app registration for the admin consent flow.
@@ -32,12 +33,14 @@ public class AutopilotDeviceValidationConsentFunction
         ILogger<AutopilotDeviceValidationConsentFunction> logger,
         IConfiguration configuration,
         GraphTokenService graphTokenService,
-        TelemetryClient telemetryClient)
+        TelemetryClient telemetryClient,
+        OpsEventService opsEventService)
     {
         _logger = logger;
         _configuration = configuration;
         _graphTokenService = graphTokenService;
         _telemetryClient = telemetryClient;
+        _opsEventService = opsEventService;
     }
 
     [Function("GetAutopilotDeviceValidationConsentUrl")]
@@ -83,6 +86,9 @@ public class AutopilotDeviceValidationConsentFunction
                 ["RedirectUri"] = redirectUri,
                 ["RedirectPath"] = redirectPath,
             });
+
+            await _opsEventService.RecordConsentRedirectUriMismatchAsync(
+                requestCtx.TargetTenantId, requestCtx.UserPrincipalName, redirectUri, redirectPath);
         }
 
         var consentUrl =
@@ -101,6 +107,9 @@ public class AutopilotDeviceValidationConsentFunction
             ["UserId"]      = requestCtx.UserPrincipalName,
             ["RedirectUri"] = redirectUri,
         });
+
+        await _opsEventService.RecordConsentFlowStartedAsync(
+            requestCtx.TargetTenantId, requestCtx.UserPrincipalName, redirectUri);
 
         var response = req.CreateResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new
@@ -174,6 +183,9 @@ public class AutopilotDeviceValidationConsentFunction
             ["Error"]            = errorCode,
             ["ErrorDescription"] = errorDescription.Length > 500 ? errorDescription[..500] : errorDescription,
         });
+
+        await _opsEventService.RecordConsentFlowFailedAsync(
+            requestCtx.TargetTenantId, requestCtx.UserPrincipalName, errorCode, errorDescription);
 
         return req.CreateResponse(HttpStatusCode.OK);
     }

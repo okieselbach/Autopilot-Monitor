@@ -10,6 +10,7 @@ interface AdminConfiguration {
   collectorIdleTimeoutMinutes?: number;
   maxSessionWindowHours?: number;
   maintenanceBlockDurationHours?: number;
+  opsEventRetentionDays?: number;
   diagnosticsGlobalLogPathsJson?: string;
   customSettings?: string;
 }
