@@ -13,6 +13,7 @@ import { SectionGatherRules } from "../sections/SectionGatherRules";
 import { SectionAnalyzeRules } from "../sections/SectionAnalyzeRules";
 import { SectionImeLogPatterns } from "../sections/SectionImeLogPatterns";
 import { SectionFaq } from "../sections/SectionFaq";
+import { SectionAgentChangelog } from "../sections/SectionAgentChangelog";
 
 const SECTION_COMPONENTS: Record<string, React.ComponentType> = {
   "private-preview": SectionPrivatePreview,
@@ -26,6 +27,7 @@ const SECTION_COMPONENTS: Record<string, React.ComponentType> = {
   "analyze-rules":   SectionAnalyzeRules,
   "ime-log-patterns": SectionImeLogPatterns,
   "faq":              SectionFaq,
+  "agent-changelog":  SectionAgentChangelog,
 };
 
 function isMcpSection(id: string): boolean {

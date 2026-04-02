@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 
 interface AgentVersionInfo {
   version?: string;
@@ -71,6 +72,9 @@ export function SectionAgent() {
             <span className="inline-flex items-center px-3 py-1.5 bg-blue-100 text-blue-800 text-lg font-mono font-bold rounded-md">
               v{versionInfo.version}
             </span>
+            <Link href="/docs/agent-changelog" className="text-sm text-blue-600 hover:text-blue-800 hover:underline">
+              View Changelog
+            </Link>
           </div>
         ) : (
           <p className="text-sm text-blue-700">Version information is currently unavailable.</p>

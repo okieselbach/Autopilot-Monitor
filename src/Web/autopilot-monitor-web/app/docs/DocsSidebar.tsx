@@ -41,7 +41,7 @@ export function DocsSidebar({ children }: { children: React.ReactNode }) {
   const docsItems: PageSectionItem[] = useMemo(
     () =>
       NAV_SECTIONS
-        .filter((s) => !s.requiresMcpAccess || user?.hasMcpAccess)
+        .filter((s) => !s.hidden && (!s.requiresMcpAccess || user?.hasMcpAccess))
         .map((s) => ({
           id: s.id,
           label: s.label,
