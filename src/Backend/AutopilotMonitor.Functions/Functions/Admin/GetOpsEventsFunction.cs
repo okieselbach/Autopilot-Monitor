@@ -1,4 +1,5 @@
 using System.Net;
+using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Shared.DataAccess;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -58,15 +59,7 @@ namespace AutopilotMonitor.Functions.Functions.Admin
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error fetching ops events");
-
-                var errorResponse = req.CreateResponse(HttpStatusCode.InternalServerError);
-                await errorResponse.WriteAsJsonAsync(new
-                {
-                    success = false,
-                    message = "Internal server error"
-                });
-                return errorResponse;
+                return await req.InternalServerErrorAsync(_logger, ex, "Get ops events");
             }
         }
     }

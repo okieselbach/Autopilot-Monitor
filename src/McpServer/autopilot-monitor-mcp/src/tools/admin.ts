@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { apiFetch, buildQuery } from '../client.js';
 import { READ_ONLY, READ_ONLY_OPEN } from './shared.js';
+import { toolError } from './error-handler.js';
 
 export function registerAdminTools(server: McpServer): void {
   // Tool 11: get_api_usage
@@ -31,11 +32,7 @@ export function registerAdminTools(server: McpServer): void {
         }
         return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
       } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (message.includes('403')) {
-          return { isError: true, content: [{ type: 'text' as const, text: 'Access denied. This tool requires Global Admin permissions.' }] };
-        }
-        throw error;
+        return toolError('get_api_usage', args, error);
       }
     }
   );
@@ -53,12 +50,17 @@ export function registerAdminTools(server: McpServer): void {
         .describe('Geographic grouping level (default: "city")'),
     },
     READ_ONLY,
-    async ({ tenantId, ...rest }) => {
-      const params: Record<string, string | number | undefined> = { ...rest };
-      if (tenantId) params.tenantId = tenantId;
-      const prefix = tenantId ? '/api/metrics' : '/api/global/metrics';
-      const data = await apiFetch(`${prefix}/geographic${buildQuery(params)}`);
-      return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+    async (args) => {
+      try {
+        const { tenantId, ...rest } = args;
+        const params: Record<string, string | number | undefined> = { ...rest };
+        if (tenantId) params.tenantId = tenantId;
+        const prefix = tenantId ? '/api/metrics' : '/api/global/metrics';
+        const data = await apiFetch(`${prefix}/geographic${buildQuery(params)}`);
+        return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+      } catch (error: unknown) {
+        return toolError('get_geographic_metrics', args, error);
+      }
     }
   );
 
@@ -77,17 +79,22 @@ export function registerAdminTools(server: McpServer): void {
       days: z.coerce.number().optional().default(30).describe('Time range in days (default: 30)'),
     },
     READ_ONLY,
-    async ({ tenantId, country, region, city, ...rest }) => {
-      const params: Record<string, string | number | undefined> = { ...rest };
-      if (tenantId) params.tenantId = tenantId;
-      if (!params.locationKey && country) {
-        const parts = [city, region, country].filter(Boolean);
-        params.locationKey = parts.join(', ');
-        params.groupBy = city ? 'city' : region ? 'region' : 'country';
+    async (args) => {
+      try {
+        const { tenantId, country, region, city, ...rest } = args;
+        const params: Record<string, string | number | undefined> = { ...rest };
+        if (tenantId) params.tenantId = tenantId;
+        if (!params.locationKey && country) {
+          const parts = [city, region, country].filter(Boolean);
+          params.locationKey = parts.join(', ');
+          params.groupBy = city ? 'city' : region ? 'region' : 'country';
+        }
+        const prefix = tenantId ? '/api/metrics' : '/api/global/metrics';
+        const data = await apiFetch(`${prefix}/geographic/sessions${buildQuery(params)}`);
+        return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+      } catch (error: unknown) {
+        return toolError('get_geographic_sessions', args, error);
       }
-      const prefix = tenantId ? '/api/metrics' : '/api/global/metrics';
-      const data = await apiFetch(`${prefix}/geographic/sessions${buildQuery(params)}`);
-      return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
     }
   );
 
@@ -99,68 +106,72 @@ export function registerAdminTools(server: McpServer): void {
     'top sessions by CPU/memory, and per-agent-version breakdown. Global Admin only.',
     {},
     READ_ONLY,
-    async () => {
-      type SessionMetric = {
-        sessionId: string; tenantId: string; deviceName?: string; model?: string; status?: string;
-        agentVersion?: string; snapshotCount: number;
-        avgCpu: number; maxCpu: number; avgWorkingSet: number; maxWorkingSet: number;
-        avgPrivateBytes: number; avgLatency: number;
-        totalBytesUp: number; totalBytesDown: number; totalRequests: number;
-      };
-      const raw = await apiFetch('/api/global/metrics/platform') as { sessions?: SessionMetric[] };
-      const sessions = raw?.sessions ?? [];
-      if (sessions.length === 0) {
-        return { content: [{ type: 'text' as const, text: JSON.stringify({ sessionsAnalyzed: 0, message: 'No performance data available' }) }] };
+    async (args) => {
+      try {
+        type SessionMetric = {
+          sessionId: string; tenantId: string; deviceName?: string; model?: string; status?: string;
+          agentVersion?: string; snapshotCount: number;
+          avgCpu: number; maxCpu: number; avgWorkingSet: number; maxWorkingSet: number;
+          avgPrivateBytes: number; avgLatency: number;
+          totalBytesUp: number; totalBytesDown: number; totalRequests: number;
+        };
+        const raw = await apiFetch('/api/global/metrics/platform') as { sessions?: SessionMetric[] };
+        const sessions = raw?.sessions ?? [];
+        if (sessions.length === 0) {
+          return { content: [{ type: 'text' as const, text: JSON.stringify({ sessionsAnalyzed: 0, message: 'No performance data available' }) }] };
+        }
+
+        const avg = (arr: number[]) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+        const p95 = (arr: number[]) => { const s = [...arr].sort((a, b) => a - b); return s[Math.floor(s.length * 0.95)] ?? 0; };
+        const round = (n: number) => Math.round(n * 100) / 100;
+
+        const cpus = sessions.map(s => s.avgCpu);
+        const maxCpus = sessions.map(s => s.maxCpu);
+        const ws = sessions.map(s => s.avgWorkingSet);
+        const pb = sessions.map(s => s.avgPrivateBytes);
+        const lat = sessions.filter(s => s.avgLatency > 0).map(s => s.avgLatency);
+
+        const topCpu = [...sessions].sort((a, b) => b.maxCpu - a.maxCpu).slice(0, 5).map(s => ({
+          sessionId: s.sessionId, device: s.deviceName, model: s.model, maxCpu: round(s.maxCpu), avgCpu: round(s.avgCpu),
+        }));
+
+        const topMem = [...sessions].sort((a, b) => b.avgWorkingSet - a.avgWorkingSet).slice(0, 5).map(s => ({
+          sessionId: s.sessionId, device: s.deviceName, model: s.model, avgWorkingSetMB: round(s.avgWorkingSet),
+        }));
+
+        const byVersion: Record<string, { count: number; avgCpu: number[]; avgMem: number[] }> = {};
+        for (const s of sessions) {
+          const v = s.agentVersion ?? 'unknown';
+          if (!byVersion[v]) byVersion[v] = { count: 0, avgCpu: [], avgMem: [] };
+          byVersion[v].count++;
+          byVersion[v].avgCpu.push(s.avgCpu);
+          byVersion[v].avgMem.push(s.avgWorkingSet);
+        }
+        const versionBreakdown = Object.entries(byVersion).map(([version, d]) => ({
+          version, sessions: d.count, avgCpu: round(avg(d.avgCpu)), avgMemMB: round(avg(d.avgMem)),
+        })).sort((a, b) => b.sessions - a.sessions);
+
+        const summary = {
+          sessionsAnalyzed: sessions.length,
+          cpu: { avgPercent: round(avg(cpus)), maxPercent: round(Math.max(...maxCpus)), p95Percent: round(p95(maxCpus)) },
+          memory: {
+            avgWorkingSetMB: round(avg(ws)), maxWorkingSetMB: round(Math.max(...ws)), p95WorkingSetMB: round(p95(ws)),
+            avgPrivateBytesMB: round(avg(pb)),
+          },
+          network: {
+            totalBytesUp: sessions.reduce((a, s) => a + s.totalBytesUp, 0),
+            totalBytesDown: sessions.reduce((a, s) => a + s.totalBytesDown, 0),
+            totalRequests: sessions.reduce((a, s) => a + s.totalRequests, 0),
+            avgLatencyMs: round(avg(lat)),
+          },
+          topSessionsByCpu: topCpu,
+          topSessionsByMemory: topMem,
+          agentVersionBreakdown: versionBreakdown,
+        };
+        return { content: [{ type: 'text' as const, text: JSON.stringify(summary, null, 2) }] };
+      } catch (error: unknown) {
+        return toolError('get_platform_metrics', args, error);
       }
-
-      const avg = (arr: number[]) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
-      const p95 = (arr: number[]) => { const s = [...arr].sort((a, b) => a - b); return s[Math.floor(s.length * 0.95)] ?? 0; };
-      const round = (n: number) => Math.round(n * 100) / 100;
-
-      const cpus = sessions.map(s => s.avgCpu);
-      const maxCpus = sessions.map(s => s.maxCpu);
-      const ws = sessions.map(s => s.avgWorkingSet);
-      const pb = sessions.map(s => s.avgPrivateBytes);
-      const lat = sessions.filter(s => s.avgLatency > 0).map(s => s.avgLatency);
-
-      const topCpu = [...sessions].sort((a, b) => b.maxCpu - a.maxCpu).slice(0, 5).map(s => ({
-        sessionId: s.sessionId, device: s.deviceName, model: s.model, maxCpu: round(s.maxCpu), avgCpu: round(s.avgCpu),
-      }));
-
-      const topMem = [...sessions].sort((a, b) => b.avgWorkingSet - a.avgWorkingSet).slice(0, 5).map(s => ({
-        sessionId: s.sessionId, device: s.deviceName, model: s.model, avgWorkingSetMB: round(s.avgWorkingSet),
-      }));
-
-      const byVersion: Record<string, { count: number; avgCpu: number[]; avgMem: number[] }> = {};
-      for (const s of sessions) {
-        const v = s.agentVersion ?? 'unknown';
-        if (!byVersion[v]) byVersion[v] = { count: 0, avgCpu: [], avgMem: [] };
-        byVersion[v].count++;
-        byVersion[v].avgCpu.push(s.avgCpu);
-        byVersion[v].avgMem.push(s.avgWorkingSet);
-      }
-      const versionBreakdown = Object.entries(byVersion).map(([version, d]) => ({
-        version, sessions: d.count, avgCpu: round(avg(d.avgCpu)), avgMemMB: round(avg(d.avgMem)),
-      })).sort((a, b) => b.sessions - a.sessions);
-
-      const summary = {
-        sessionsAnalyzed: sessions.length,
-        cpu: { avgPercent: round(avg(cpus)), maxPercent: round(Math.max(...maxCpus)), p95Percent: round(p95(maxCpus)) },
-        memory: {
-          avgWorkingSetMB: round(avg(ws)), maxWorkingSetMB: round(Math.max(...ws)), p95WorkingSetMB: round(p95(ws)),
-          avgPrivateBytesMB: round(avg(pb)),
-        },
-        network: {
-          totalBytesUp: sessions.reduce((a, s) => a + s.totalBytesUp, 0),
-          totalBytesDown: sessions.reduce((a, s) => a + s.totalBytesDown, 0),
-          totalRequests: sessions.reduce((a, s) => a + s.totalRequests, 0),
-          avgLatencyMs: round(avg(lat)),
-        },
-        topSessionsByCpu: topCpu,
-        topSessionsByMemory: topMem,
-        agentVersionBreakdown: versionBreakdown,
-      };
-      return { content: [{ type: 'text' as const, text: JSON.stringify(summary, null, 2) }] };
     }
   );
 
@@ -173,13 +184,18 @@ export function registerAdminTools(server: McpServer): void {
       tenantId: z.string().optional().describe('Tenant ID for tenant-specific metrics. Omit for platform-wide overview (Global Admin only).'),
     },
     READ_ONLY,
-    async ({ tenantId }) => {
-      if (tenantId) {
-        const data = await apiFetch(`/api/global/metrics/usage${buildQuery({ tenantId })}`);
+    async (args) => {
+      try {
+        const { tenantId } = args;
+        if (tenantId) {
+          const data = await apiFetch(`/api/global/metrics/usage${buildQuery({ tenantId })}`);
+          return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+        }
+        const data = await apiFetch('/api/global/metrics/usage');
         return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+      } catch (error: unknown) {
+        return toolError('get_usage_metrics', args, error);
       }
-      const data = await apiFetch('/api/global/metrics/usage');
-      return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
     }
   );
 
@@ -192,12 +208,17 @@ export function registerAdminTools(server: McpServer): void {
       tenantId: z.string().optional().describe('Tenant ID for tenant-scoped audit log. Omit for cross-tenant view (Global Admin only).'),
     },
     READ_ONLY,
-    async ({ tenantId }) => {
-      const endpoint = tenantId
-        ? `/api/audit/logs${buildQuery({ tenantId })}`
-        : '/api/global/audit/logs';
-      const data = await apiFetch(endpoint);
-      return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+    async (args) => {
+      try {
+        const { tenantId } = args;
+        const endpoint = tenantId
+          ? `/api/audit/logs${buildQuery({ tenantId })}`
+          : '/api/global/audit/logs';
+        const data = await apiFetch(endpoint);
+        return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+      } catch (error: unknown) {
+        return toolError('get_audit_logs', args, error);
+      }
     }
   );
 
@@ -220,11 +241,7 @@ export function registerAdminTools(server: McpServer): void {
         const data = await apiFetch(`/api/global/ops-events${buildQuery(params)}`);
         return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
       } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (message.includes('403')) {
-          return { isError: true, content: [{ type: 'text' as const, text: 'Access denied. This tool requires Global Admin permissions.' }] };
-        }
-        throw error;
+        return toolError('get_ops_events', args, error);
       }
     }
   );
@@ -236,9 +253,13 @@ export function registerAdminTools(server: McpServer): void {
     'Global Admin only — returns reports across all tenants.',
     {},
     READ_ONLY,
-    async () => {
-      const data = await apiFetch('/api/global/session-reports');
-      return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+    async (args) => {
+      try {
+        const data = await apiFetch('/api/global/session-reports');
+        return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+      } catch (error: unknown) {
+        return toolError('list_session_reports', args, error);
+      }
     }
   );
 
@@ -264,10 +285,14 @@ export function registerAdminTools(server: McpServer): void {
     },
     READ_ONLY,
     async (args) => {
-      const { tenantId, ...rest } = args;
-      const params: Record<string, string | number | boolean | undefined | null> = { ...rest, tenantId };
-      const data = await apiFetch(`/api/raw/events${buildQuery(params)}`);
-      return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+      try {
+        const { tenantId, ...rest } = args;
+        const params: Record<string, string | number | boolean | undefined | null> = { ...rest, tenantId };
+        const data = await apiFetch(`/api/raw/events${buildQuery(params)}`);
+        return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+      } catch (error: unknown) {
+        return toolError('query_raw_events', args, error);
+      }
     }
   );
 
@@ -288,12 +313,16 @@ export function registerAdminTools(server: McpServer): void {
     },
     READ_ONLY,
     async (args) => {
-      const { tenantId, ...rest } = args;
-      const params: Record<string, string | number | boolean | undefined | null> = { ...rest };
-      const basePath = tenantId ? '/api/raw/sessions' : '/api/global/raw/sessions';
-      if (tenantId) params.tenantId = tenantId;
-      const data = await apiFetch(`${basePath}${buildQuery(params)}`);
-      return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+      try {
+        const { tenantId, ...rest } = args;
+        const params: Record<string, string | number | boolean | undefined | null> = { ...rest };
+        const basePath = tenantId ? '/api/raw/sessions' : '/api/global/raw/sessions';
+        if (tenantId) params.tenantId = tenantId;
+        const data = await apiFetch(`${basePath}${buildQuery(params)}`);
+        return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+      } catch (error: unknown) {
+        return toolError('query_raw_sessions', args, error);
+      }
     }
   );
 
@@ -309,16 +338,12 @@ export function registerAdminTools(server: McpServer): void {
     'List all available Azure Table Storage tables that can be queried via query_table. Global Admin only.',
     {},
     READ_ONLY,
-    async () => {
+    async (args) => {
       try {
         const data = await apiFetch('/api/global/raw/tables');
         return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
       } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (message.includes('403')) {
-          return { isError: true, content: [{ type: 'text' as const, text: 'Access denied. This tool requires Global Admin permissions.' }] };
-        }
-        throw error;
+        return toolError('list_tables', args, error);
       }
     }
   );
@@ -342,11 +367,7 @@ export function registerAdminTools(server: McpServer): void {
         const data = await apiFetch(`/api/global/raw/tables/${encodeURIComponent(tableName)}${buildQuery(rest)}`);
         return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
       } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (message.includes('403')) {
-          return { isError: true, content: [{ type: 'text' as const, text: 'Access denied. This tool requires Global Admin permissions.' }] };
-        }
-        throw error;
+        return toolError('query_table', args, error);
       }
     }
   );
@@ -369,14 +390,7 @@ export function registerAdminTools(server: McpServer): void {
         });
         return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
       } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (message.includes('403')) {
-          return { isError: true, content: [{ type: 'text' as const, text: 'Access denied. This tool requires Global Admin permissions.' }] };
-        }
-        if (message.includes('503')) {
-          return { isError: true, content: [{ type: 'text' as const, text: 'Application Insights diagnostics is not configured. Set APPINSIGHTS_APP_ID and assign Monitoring Reader role to the Function App Managed Identity.' }] };
-        }
-        throw error;
+        return toolError('query_backend_logs', args, error);
       }
     }
   );

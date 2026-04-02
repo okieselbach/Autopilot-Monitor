@@ -33,10 +33,7 @@ public class MetricsSummaryFunction
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error getting metrics summary");
-            var err = req.CreateResponse(HttpStatusCode.InternalServerError);
-            await err.WriteAsJsonAsync(new { success = false, message = "Internal server error" });
-            return err;
+            return await req.InternalServerErrorAsync(_logger, ex, "Get metrics summary");
         }
     }
 
@@ -54,10 +51,7 @@ public class MetricsSummaryFunction
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error getting global metrics summary");
-            var err = req.CreateResponse(HttpStatusCode.InternalServerError);
-            await err.WriteAsJsonAsync(new { success = false, message = "Internal server error" });
-            return err;
+            return await req.InternalServerErrorAsync(_logger, ex, "Get global metrics summary");
         }
     }
 }

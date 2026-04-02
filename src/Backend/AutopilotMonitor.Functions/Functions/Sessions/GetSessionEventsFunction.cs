@@ -54,19 +54,7 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"Error getting events for session {sessionId}");
-
-                var errorResponse = req.CreateResponse(HttpStatusCode.InternalServerError);
-                await errorResponse.WriteAsJsonAsync(new
-                {
-                    success = false,
-                    message = "Internal server error",
-                    sessionId = sessionId,
-                    count = 0,
-                    events = Array.Empty<object>()
-                });
-
-                return errorResponse;
+                return await req.InternalServerErrorAsync(_logger, ex, $"Get events for session '{sessionId}'");
             }
         }
     }

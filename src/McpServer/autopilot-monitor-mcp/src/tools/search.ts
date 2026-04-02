@@ -4,6 +4,7 @@ import { apiFetch, buildQuery } from '../client.js';
 import type { SearchProvider } from '../search-provider.js';
 import { createSearchProvider } from '../search-factory.js';
 import { READ_ONLY } from './shared.js';
+import { toolError } from './error-handler.js';
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
@@ -88,64 +89,69 @@ export function registerSearchTools(server: McpServer, knowledgeBase?: SearchPro
         .describe('Minimum similarity score (0-1, default 0.35)'),
     },
     READ_ONLY,
-    async ({ query, sessionId, tenantId, topK, minScore }) => {
-      const { events, sessionIds } = await fetchSessionEvents(sessionId, tenantId);
+    async (args) => {
+      try {
+        const { query, sessionId, tenantId, topK, minScore } = args;
+        const { events, sessionIds } = await fetchSessionEvents(sessionId, tenantId);
 
-      const candidates = events.filter((e) => e.message && e.message.length > 5);
+        const candidates = events.filter((e) => e.message && e.message.length > 5);
 
-      if (candidates.length === 0) {
+        if (candidates.length === 0) {
+          return {
+            content: [{
+              type: 'text' as const,
+              text: JSON.stringify({ query, resultCount: 0, results: [], note: 'No events with messages found.' }),
+            }],
+          };
+        }
+
+        const docs = candidates.map((e, i) => {
+          const parts = [e.message];
+          if (e.eventType) parts.push(`Event: ${e.eventType}`);
+          if (e.severity) parts.push(`Severity: ${e.severity}`);
+          if (e.source) parts.push(`Source: ${e.source}`);
+          return {
+            id: `event-${i}`,
+            text: parts.join(' | '),
+            metadata: { index: i } as Record<string, unknown>,
+          };
+        });
+
+        const provider = await createSearchProvider();
+        await provider.index(docs);
+        const searchResults = await provider.search(query, { topK, minScore });
+
+        const results = searchResults.map((r) => {
+          const idx = r.metadata.index as number;
+          const e = candidates[idx];
+          return {
+            score: Math.round(r.score * 1000) / 1000,
+            sessionId: e._sessionId ?? sessionId,
+            eventType: e.eventType,
+            severity: e.severity,
+            source: e.source,
+            phase: e.phase,
+            timestamp: e.timestamp,
+            message: e.message,
+          };
+        });
+
         return {
           content: [{
             type: 'text' as const,
-            text: JSON.stringify({ query, resultCount: 0, results: [], note: 'No events with messages found.' }),
+            text: JSON.stringify({
+              query,
+              searchBackend: provider.name,
+              sessionsSearched: sessionIds,
+              eventsAnalyzed: candidates.length,
+              resultCount: results.length,
+              results,
+            }, null, 2),
           }],
         };
+      } catch (error: unknown) {
+        return toolError('search_events_semantic', args, error);
       }
-
-      const docs = candidates.map((e, i) => {
-        const parts = [e.message];
-        if (e.eventType) parts.push(`Event: ${e.eventType}`);
-        if (e.severity) parts.push(`Severity: ${e.severity}`);
-        if (e.source) parts.push(`Source: ${e.source}`);
-        return {
-          id: `event-${i}`,
-          text: parts.join(' | '),
-          metadata: { index: i } as Record<string, unknown>,
-        };
-      });
-
-      const provider = await createSearchProvider();
-      await provider.index(docs);
-      const searchResults = await provider.search(query, { topK, minScore });
-
-      const results = searchResults.map((r) => {
-        const idx = r.metadata.index as number;
-        const e = candidates[idx];
-        return {
-          score: Math.round(r.score * 1000) / 1000,
-          sessionId: e._sessionId ?? sessionId,
-          eventType: e.eventType,
-          severity: e.severity,
-          source: e.source,
-          phase: e.phase,
-          timestamp: e.timestamp,
-          message: e.message,
-        };
-      });
-
-      return {
-        content: [{
-          type: 'text' as const,
-          text: JSON.stringify({
-            query,
-            searchBackend: provider.name,
-            sessionsSearched: sessionIds,
-            eventsAnalyzed: candidates.length,
-            resultCount: results.length,
-            results,
-          }, null, 2),
-        }],
-      };
     }
   );
 
@@ -165,46 +171,51 @@ export function registerSearchTools(server: McpServer, knowledgeBase?: SearchPro
         .describe('Minimum similarity score threshold (0-1, default 0.3). Lower = more results, higher = stricter matching.'),
     },
     READ_ONLY,
-    async ({ query, topK, type, minScore }) => {
-      if (!knowledgeBase || knowledgeBase.size === 0) {
+    async (args) => {
+      try {
+        const { query, topK, type, minScore } = args;
+        if (!knowledgeBase || knowledgeBase.size === 0) {
+          return {
+            isError: true,
+            content: [{
+              type: 'text' as const,
+              text: JSON.stringify({ error: 'Knowledge base not initialized. The server may still be loading.' }),
+            }],
+          };
+        }
+
+        const fetchK = type === 'all' ? topK : topK * 3;
+        let results = await knowledgeBase.search(query, { topK: fetchK, minScore });
+
+        if (type !== 'all') {
+          results = results.filter((r) => r.metadata.type === type);
+        }
+
+        results = results.slice(0, topK);
+
+        const formatted = results.map((r) => ({
+          id: r.id,
+          score: Math.round(r.score * 1000) / 1000,
+          type: r.metadata.type,
+          title: r.metadata.title ?? r.metadata.description ?? r.id,
+          content: r.text,
+          metadata: r.metadata,
+        }));
+
         return {
-          isError: true,
           content: [{
             type: 'text' as const,
-            text: JSON.stringify({ error: 'Knowledge base not initialized. The server may still be loading.' }),
+            text: JSON.stringify({
+              query,
+              searchBackend: knowledgeBase.name,
+              resultCount: formatted.length,
+              results: formatted,
+            }, null, 2),
           }],
         };
+      } catch (error: unknown) {
+        return toolError('search_knowledge', args, error);
       }
-
-      const fetchK = type === 'all' ? topK : topK * 3;
-      let results = await knowledgeBase.search(query, { topK: fetchK, minScore });
-
-      if (type !== 'all') {
-        results = results.filter((r) => r.metadata.type === type);
-      }
-
-      results = results.slice(0, topK);
-
-      const formatted = results.map((r) => ({
-        id: r.id,
-        score: Math.round(r.score * 1000) / 1000,
-        type: r.metadata.type,
-        title: r.metadata.title ?? r.metadata.description ?? r.id,
-        content: r.text,
-        metadata: r.metadata,
-      }));
-
-      return {
-        content: [{
-          type: 'text' as const,
-          text: JSON.stringify({
-            query,
-            searchBackend: knowledgeBase.name,
-            resultCount: formatted.length,
-            results: formatted,
-          }, null, 2),
-        }],
-      };
     }
   );
 
@@ -233,121 +244,126 @@ export function registerSearchTools(server: McpServer, knowledgeBase?: SearchPro
         .describe('Additional exact keywords for the raw cross-check pass. Auto-extracted from query if omitted.'),
     },
     READ_ONLY,
-    async ({ query, sessionId, tenantId, topK, minScore, keywords }) => {
-      const { events, sessionIds } = await fetchSessionEvents(sessionId, tenantId);
+    async (args) => {
+      try {
+        const { query, sessionId, tenantId, topK, minScore, keywords } = args;
+        const { events, sessionIds } = await fetchSessionEvents(sessionId, tenantId);
 
-      if (events.length === 0) {
+        if (events.length === 0) {
+          return {
+            content: [{
+              type: 'text' as const,
+              text: JSON.stringify({
+                query, resultCount: 0, semanticMatches: 0, keywordMatches: 0,
+                results: [], note: 'No events found.',
+              }),
+            }],
+          };
+        }
+
+        // ── Pass 1: Semantic search (events with meaningful messages) ──
+        const semanticCandidates: EventEntry[] = [];
+        const candidateOriginalIndices: number[] = [];
+        for (let i = 0; i < events.length; i++) {
+          if (events[i].message && events[i].message!.length > 5) {
+            semanticCandidates.push(events[i]);
+            candidateOriginalIndices.push(i);
+          }
+        }
+
+        const semanticMap = new Map<number, { score: number }>();
+        let searchBackend = 'none';
+
+        if (semanticCandidates.length > 0) {
+          const docs = semanticCandidates.map((e, i) => {
+            const parts = [e.message];
+            if (e.eventType) parts.push(`Event: ${e.eventType}`);
+            if (e.severity) parts.push(`Severity: ${e.severity}`);
+            if (e.source) parts.push(`Source: ${e.source}`);
+            return { id: `event-${i}`, text: parts.join(' | '), metadata: { index: i } as Record<string, unknown> };
+          });
+
+          const provider = await createSearchProvider();
+          searchBackend = provider.name;
+          await provider.index(docs);
+          const searchResults = await provider.search(query, { topK, minScore });
+
+          for (const r of searchResults) {
+            const candidateIdx = r.metadata.index as number;
+            const originalIdx = candidateOriginalIndices[candidateIdx];
+            semanticMap.set(originalIdx, { score: Math.round(r.score * 1000) / 1000 });
+          }
+        }
+
+        // ── Pass 2: Keyword cross-check (ALL events, including short/empty messages) ──
+        const queryKeywords = keywords ?? extractKeywords(query);
+        const keywordMap = new Map<number, { matchedKeywords: string[] }>();
+
+        for (let i = 0; i < events.length; i++) {
+          const e = events[i];
+          const searchText = [
+            e.message ?? '', e.eventType ?? '', e.source ?? '',
+            e.severity ?? '', e.phase ?? '',
+            e.data ? JSON.stringify(e.data) : '',
+          ].join(' ').toLowerCase();
+
+          const matched = queryKeywords.filter((kw) => searchText.includes(kw.toLowerCase()));
+          if (matched.length > 0) {
+            keywordMap.set(i, { matchedKeywords: matched });
+          }
+        }
+
+        // ── Merge & deduplicate ──
+        const allIndices = new Set([...semanticMap.keys(), ...keywordMap.keys()]);
+        type DiscoveryMethod = 'both' | 'semantic' | 'keyword';
+        const merged = Array.from(allIndices).map((idx) => {
+          const e = events[idx];
+          const semantic = semanticMap.get(idx);
+          const keyword = keywordMap.get(idx);
+          const discoveryMethod: DiscoveryMethod = semantic && keyword ? 'both' : semantic ? 'semantic' : 'keyword';
+          return {
+            score: semantic?.score ?? 0,
+            discoveryMethod,
+            matchedKeywords: keyword?.matchedKeywords ?? [],
+            sessionId: e._sessionId ?? sessionId,
+            eventType: e.eventType,
+            severity: e.severity,
+            source: e.source,
+            phase: e.phase,
+            timestamp: e.timestamp,
+            message: e.message,
+          };
+        });
+
+        const methodRank: Record<DiscoveryMethod, number> = { both: 0, semantic: 1, keyword: 2 };
+        merged.sort((a, b) => {
+          const rankDiff = methodRank[a.discoveryMethod] - methodRank[b.discoveryMethod];
+          if (rankDiff !== 0) return rankDiff;
+          return b.score - a.score;
+        });
+
+        const results = merged.slice(0, topK);
+
         return {
           content: [{
             type: 'text' as const,
             text: JSON.stringify({
-              query, resultCount: 0, semanticMatches: 0, keywordMatches: 0,
-              results: [], note: 'No events found.',
-            }),
+              query,
+              searchBackend,
+              sessionsSearched: sessionIds,
+              totalEventsScanned: events.length,
+              semanticCandidates: semanticCandidates.length,
+              semanticMatches: semanticMap.size,
+              keywordMatches: keywordMap.size,
+              keywordsUsed: queryKeywords,
+              resultCount: results.length,
+              results,
+            }, null, 2),
           }],
         };
+      } catch (error: unknown) {
+        return toolError('deep_search_events', args, error);
       }
-
-      // ── Pass 1: Semantic search (events with meaningful messages) ──
-      const semanticCandidates: EventEntry[] = [];
-      const candidateOriginalIndices: number[] = [];
-      for (let i = 0; i < events.length; i++) {
-        if (events[i].message && events[i].message!.length > 5) {
-          semanticCandidates.push(events[i]);
-          candidateOriginalIndices.push(i);
-        }
-      }
-
-      const semanticMap = new Map<number, { score: number }>();
-      let searchBackend = 'none';
-
-      if (semanticCandidates.length > 0) {
-        const docs = semanticCandidates.map((e, i) => {
-          const parts = [e.message];
-          if (e.eventType) parts.push(`Event: ${e.eventType}`);
-          if (e.severity) parts.push(`Severity: ${e.severity}`);
-          if (e.source) parts.push(`Source: ${e.source}`);
-          return { id: `event-${i}`, text: parts.join(' | '), metadata: { index: i } as Record<string, unknown> };
-        });
-
-        const provider = await createSearchProvider();
-        searchBackend = provider.name;
-        await provider.index(docs);
-        const searchResults = await provider.search(query, { topK, minScore });
-
-        for (const r of searchResults) {
-          const candidateIdx = r.metadata.index as number;
-          const originalIdx = candidateOriginalIndices[candidateIdx];
-          semanticMap.set(originalIdx, { score: Math.round(r.score * 1000) / 1000 });
-        }
-      }
-
-      // ── Pass 2: Keyword cross-check (ALL events, including short/empty messages) ──
-      const queryKeywords = keywords ?? extractKeywords(query);
-      const keywordMap = new Map<number, { matchedKeywords: string[] }>();
-
-      for (let i = 0; i < events.length; i++) {
-        const e = events[i];
-        const searchText = [
-          e.message ?? '', e.eventType ?? '', e.source ?? '',
-          e.severity ?? '', e.phase ?? '',
-          e.data ? JSON.stringify(e.data) : '',
-        ].join(' ').toLowerCase();
-
-        const matched = queryKeywords.filter((kw) => searchText.includes(kw.toLowerCase()));
-        if (matched.length > 0) {
-          keywordMap.set(i, { matchedKeywords: matched });
-        }
-      }
-
-      // ── Merge & deduplicate ──
-      const allIndices = new Set([...semanticMap.keys(), ...keywordMap.keys()]);
-      type DiscoveryMethod = 'both' | 'semantic' | 'keyword';
-      const merged = Array.from(allIndices).map((idx) => {
-        const e = events[idx];
-        const semantic = semanticMap.get(idx);
-        const keyword = keywordMap.get(idx);
-        const discoveryMethod: DiscoveryMethod = semantic && keyword ? 'both' : semantic ? 'semantic' : 'keyword';
-        return {
-          score: semantic?.score ?? 0,
-          discoveryMethod,
-          matchedKeywords: keyword?.matchedKeywords ?? [],
-          sessionId: e._sessionId ?? sessionId,
-          eventType: e.eventType,
-          severity: e.severity,
-          source: e.source,
-          phase: e.phase,
-          timestamp: e.timestamp,
-          message: e.message,
-        };
-      });
-
-      const methodRank: Record<DiscoveryMethod, number> = { both: 0, semantic: 1, keyword: 2 };
-      merged.sort((a, b) => {
-        const rankDiff = methodRank[a.discoveryMethod] - methodRank[b.discoveryMethod];
-        if (rankDiff !== 0) return rankDiff;
-        return b.score - a.score;
-      });
-
-      const results = merged.slice(0, topK);
-
-      return {
-        content: [{
-          type: 'text' as const,
-          text: JSON.stringify({
-            query,
-            searchBackend,
-            sessionsSearched: sessionIds,
-            totalEventsScanned: events.length,
-            semanticCandidates: semanticCandidates.length,
-            semanticMatches: semanticMap.size,
-            keywordMatches: keywordMap.size,
-            keywordsUsed: queryKeywords,
-            resultCount: results.length,
-            results,
-          }, null, 2),
-        }],
-      };
     }
   );
 }

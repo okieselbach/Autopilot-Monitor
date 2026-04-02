@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { apiFetch, buildQuery } from '../client.js';
 import { READ_ONLY } from './shared.js';
+import { toolError } from './error-handler.js';
 
 // ── Session summary constants ───────────────────────────────────────────
 
@@ -65,17 +66,21 @@ export function registerSessionTools(server: McpServer): void {
     },
     READ_ONLY,
     async (args) => {
-      const { deviceProperties, tenantId, ...rest } = args;
-      const queryParams: Record<string, string | number | boolean | undefined | null> = { ...rest };
-      if (tenantId) queryParams.tenantId = tenantId;
-      if (deviceProperties) {
-        for (const [key, value] of Object.entries(deviceProperties)) {
-          queryParams[`prop.${key}`] = value;
+      try {
+        const { deviceProperties, tenantId, ...rest } = args;
+        const queryParams: Record<string, string | number | boolean | undefined | null> = { ...rest };
+        if (tenantId) queryParams.tenantId = tenantId;
+        if (deviceProperties) {
+          for (const [key, value] of Object.entries(deviceProperties)) {
+            queryParams[`prop.${key}`] = value;
+          }
         }
+        const basePath = tenantId ? '/api/search/sessions' : '/api/global/search/sessions';
+        const data = await apiFetch(`${basePath}${buildQuery(queryParams)}`);
+        return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+      } catch (error: unknown) {
+        return toolError('search_sessions', args, error);
       }
-      const basePath = tenantId ? '/api/search/sessions' : '/api/global/search/sessions';
-      const data = await apiFetch(`${basePath}${buildQuery(queryParams)}`);
-      return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
     }
   );
 
@@ -93,12 +98,16 @@ export function registerSessionTools(server: McpServer): void {
     },
     READ_ONLY,
     async (args) => {
-      const { tenantId, ...rest } = args;
-      const params: Record<string, string | number | boolean | undefined | null> = { ...rest };
-      if (tenantId) params.tenantId = tenantId;
-      const basePath = tenantId ? '/api/search/sessions-by-event' : '/api/global/search/sessions-by-event';
-      const data = await apiFetch(`${basePath}${buildQuery(params)}`);
-      return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+      try {
+        const { tenantId, ...rest } = args;
+        const params: Record<string, string | number | boolean | undefined | null> = { ...rest };
+        if (tenantId) params.tenantId = tenantId;
+        const basePath = tenantId ? '/api/search/sessions-by-event' : '/api/global/search/sessions-by-event';
+        const data = await apiFetch(`${basePath}${buildQuery(params)}`);
+        return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+      } catch (error: unknown) {
+        return toolError('search_sessions_by_event', args, error);
+      }
     }
   );
 
@@ -112,18 +121,23 @@ export function registerSessionTools(server: McpServer): void {
       includeAnalysis: z.boolean().optional().default(false).describe('Include rule analysis results (failure explanations and remediation steps)'),
     },
     READ_ONLY,
-    async ({ sessionId, tenantId, includeAnalysis }) => {
-      const q = buildQuery({ tenantId } as Record<string, string | undefined>);
-      const sessionData = await apiFetch(`/api/sessions/${sessionId}${q}`);
-      let analysisData: unknown = null;
-      if (includeAnalysis) {
-        try {
-          analysisData = await apiFetch(`/api/sessions/${sessionId}/analysis${q}`);
-        } catch {
-          // analysis may not exist yet
+    async (args) => {
+      try {
+        const { sessionId, tenantId, includeAnalysis } = args;
+        const q = buildQuery({ tenantId } as Record<string, string | undefined>);
+        const sessionData = await apiFetch(`/api/sessions/${sessionId}${q}`);
+        let analysisData: unknown = null;
+        if (includeAnalysis) {
+          try {
+            analysisData = await apiFetch(`/api/sessions/${sessionId}/analysis${q}`);
+          } catch {
+            // analysis may not exist yet
+          }
         }
+        return { content: [{ type: 'text' as const, text: JSON.stringify({ session: sessionData, analysis: analysisData }, null, 2) }] };
+      } catch (error: unknown) {
+        return toolError('get_session', args, error);
       }
-      return { content: [{ type: 'text' as const, text: JSON.stringify({ session: sessionData, analysis: analysisData }, null, 2) }] };
     }
   );
 
@@ -143,22 +157,27 @@ export function registerSessionTools(server: McpServer): void {
       source: z.string().optional().describe('Filter by event source/app name (e.g. "MicrosoftTeams")'),
     },
     READ_ONLY,
-    async ({ sessionId, tenantId, ...filters }) => {
-      const q = buildQuery({ tenantId } as Record<string, string | undefined>);
-      const data = await apiFetch(`/api/sessions/${sessionId}/events${q}`) as {
-        events?: Array<{ eventType?: string; severity?: string; source?: string }>;
-        count?: number;
-      };
-      if (data?.events && (filters.eventType || filters.severity || filters.source)) {
-        data.events = data.events.filter((e) => {
-          if (filters.eventType && e.eventType !== filters.eventType) return false;
-          if (filters.severity && e.severity !== filters.severity) return false;
-          if (filters.source && !e.source?.toLowerCase().includes(filters.source.toLowerCase())) return false;
-          return true;
-        });
-        data.count = data.events.length;
+    async (args) => {
+      try {
+        const { sessionId, tenantId, ...filters } = args;
+        const q = buildQuery({ tenantId } as Record<string, string | undefined>);
+        const data = await apiFetch(`/api/sessions/${sessionId}/events${q}`) as {
+          events?: Array<{ eventType?: string; severity?: string; source?: string }>;
+          count?: number;
+        };
+        if (data?.events && (filters.eventType || filters.severity || filters.source)) {
+          data.events = data.events.filter((e) => {
+            if (filters.eventType && e.eventType !== filters.eventType) return false;
+            if (filters.severity && e.severity !== filters.severity) return false;
+            if (filters.source && !e.source?.toLowerCase().includes(filters.source.toLowerCase())) return false;
+            return true;
+          });
+          data.count = data.events.length;
+        }
+        return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+      } catch (error: unknown) {
+        return toolError('get_session_events', args, error);
       }
-      return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
     }
   );
 
@@ -176,118 +195,123 @@ export function registerSessionTools(server: McpServer): void {
       tenantId: z.string().optional().describe('Tenant ID. If omitted, auto-resolved from the session (Global Admin can access any tenant).'),
     },
     READ_ONLY,
-    async ({ sessionId, tenantId }) => {
-      const q = buildQuery({ tenantId } as Record<string, string | undefined>);
-      const fetchOpts = { signal: AbortSignal.timeout(90_000) };
+    async (args) => {
+      try {
+        const { sessionId, tenantId } = args;
+        const q = buildQuery({ tenantId } as Record<string, string | undefined>);
+        const fetchOpts = { signal: AbortSignal.timeout(90_000) };
 
-      const [sessionData, eventsData, analysisData] = await Promise.all([
-        apiFetch(`/api/sessions/${sessionId}${q}`, fetchOpts) as Promise<Record<string, unknown>>,
-        apiFetch(`/api/sessions/${sessionId}/events${q}`, fetchOpts) as Promise<{ events?: Array<Record<string, unknown>>; count?: number }>,
-        apiFetch(`/api/sessions/${sessionId}/analysis${q}`, fetchOpts).catch(() => null) as Promise<Record<string, unknown> | null>,
-      ]);
+        const [sessionData, eventsData, analysisData] = await Promise.all([
+          apiFetch(`/api/sessions/${sessionId}${q}`, fetchOpts) as Promise<Record<string, unknown>>,
+          apiFetch(`/api/sessions/${sessionId}/events${q}`, fetchOpts) as Promise<{ events?: Array<Record<string, unknown>>; count?: number }>,
+          apiFetch(`/api/sessions/${sessionId}/analysis${q}`, fetchOpts).catch(() => null) as Promise<Record<string, unknown> | null>,
+        ]);
 
-      const s = (sessionData.session ?? sessionData) as Record<string, unknown>;
+        const s = (sessionData.session ?? sessionData) as Record<string, unknown>;
 
-      const overview = {
-        sessionId,
-        tenantId: s.tenantId ?? tenantId,
-        status: s.status,
-        failureReason: s.failureReason ?? null,
-        startedAt: s.startedAt,
-        completedAt: s.completedAt ?? null,
-        durationSeconds: s.durationSeconds ?? null,
-        currentPhase: PHASE_NAMES[Number(s.currentPhase)] ?? String(s.currentPhase ?? 'Unknown'),
-        enrollmentType: s.enrollmentType,
-        isPreProvisioned: s.isPreProvisioned ?? false,
-        isHybridJoin: s.isHybridJoin ?? false,
-        isUserDriven: s.isUserDriven ?? false,
-        device: {
-          name: s.deviceName,
-          serialNumber: s.serialNumber,
-          manufacturer: s.manufacturer,
-          model: s.model,
-          osBuild: s.osBuild,
-          osEdition: s.osEdition,
-        },
-        agent: {
-          version: s.agentVersion,
-          imeVersion: s.imeAgentVersion,
-        },
-        location: (s.geoCountry || s.geoRegion || s.geoCity)
-          ? { country: s.geoCountry, region: s.geoRegion, city: s.geoCity }
-          : null,
-      };
-
-      const allEvents = (eventsData?.events ?? []) as Array<Record<string, unknown>>;
-
-      let errorCount = 0;
-      let warningCount = 0;
-      let appTotal = 0;
-      let appSucceeded = 0;
-      let appFailed = 0;
-      let appSkipped = 0;
-      for (const e of allEvents) {
-        const sev = String(e.severity ?? '');
-        if (sev === 'Error' || sev === 'Critical') errorCount++;
-        if (sev === 'Warning') warningCount++;
-        const et = String(e.eventType ?? '');
-        if (et === 'app_install_started') appTotal++;
-        if (et === 'app_install_completed') appSucceeded++;
-        if (et === 'app_install_failed') appFailed++;
-        if (et === 'app_install_skipped') appSkipped++;
-      }
-
-      let keyEvents = allEvents.filter((e) => {
-        const et = String(e.eventType ?? '');
-        if (EXCLUDED_EVENT_TYPES.has(et)) return false;
-        if (KEY_EVENT_TYPES.has(et)) return true;
-        return (SEVERITY_RANK[String(e.severity ?? '')] ?? -1) >= 2;
-      });
-
-      const mappedEvents = keyEvents.map((e) => ({
-        timestamp: e.timestamp,
-        eventType: e.eventType,
-        severity: e.severity,
-        phase: PHASE_NAMES[Number(e.phase)] ?? String(e.phase ?? ''),
-        message: e.message,
-        source: e.source,
-        details: e.data && typeof e.data === 'object' && Object.keys(e.data as object).length > 0
-          ? e.data
-          : (e.dataJson ? (() => { try { return JSON.parse(String(e.dataJson)); } catch { return null; } })() : null),
-      }));
-
-      let analysis = null;
-      if (analysisData) {
-        const a = analysisData as Record<string, unknown>;
-        const results = (a.results ?? []) as Array<Record<string, unknown>>;
-        analysis = {
-          totalIssues: a.totalIssues ?? results.length,
-          criticalCount: a.criticalCount ?? 0,
-          highCount: a.highCount ?? 0,
-          warningCount: a.warningCount ?? 0,
-          issues: results.map((r) => ({
-            ruleTitle: r.ruleTitle ?? r.title,
-            severity: r.severity,
-            explanation: r.explanation,
-            remediation: r.remediation,
-          })),
+        const overview = {
+          sessionId,
+          tenantId: s.tenantId ?? tenantId,
+          status: s.status,
+          failureReason: s.failureReason ?? null,
+          startedAt: s.startedAt,
+          completedAt: s.completedAt ?? null,
+          durationSeconds: s.durationSeconds ?? null,
+          currentPhase: PHASE_NAMES[Number(s.currentPhase)] ?? String(s.currentPhase ?? 'Unknown'),
+          enrollmentType: s.enrollmentType,
+          isPreProvisioned: s.isPreProvisioned ?? false,
+          isHybridJoin: s.isHybridJoin ?? false,
+          isUserDriven: s.isUserDriven ?? false,
+          device: {
+            name: s.deviceName,
+            serialNumber: s.serialNumber,
+            manufacturer: s.manufacturer,
+            model: s.model,
+            osBuild: s.osBuild,
+            osEdition: s.osEdition,
+          },
+          agent: {
+            version: s.agentVersion,
+            imeVersion: s.imeAgentVersion,
+          },
+          location: (s.geoCountry || s.geoRegion || s.geoCity)
+            ? { country: s.geoCountry, region: s.geoRegion, city: s.geoCity }
+            : null,
         };
+
+        const allEvents = (eventsData?.events ?? []) as Array<Record<string, unknown>>;
+
+        let errorCount = 0;
+        let warningCount = 0;
+        let appTotal = 0;
+        let appSucceeded = 0;
+        let appFailed = 0;
+        let appSkipped = 0;
+        for (const e of allEvents) {
+          const sev = String(e.severity ?? '');
+          if (sev === 'Error' || sev === 'Critical') errorCount++;
+          if (sev === 'Warning') warningCount++;
+          const et = String(e.eventType ?? '');
+          if (et === 'app_install_started') appTotal++;
+          if (et === 'app_install_completed') appSucceeded++;
+          if (et === 'app_install_failed') appFailed++;
+          if (et === 'app_install_skipped') appSkipped++;
+        }
+
+        let keyEvents = allEvents.filter((e) => {
+          const et = String(e.eventType ?? '');
+          if (EXCLUDED_EVENT_TYPES.has(et)) return false;
+          if (KEY_EVENT_TYPES.has(et)) return true;
+          return (SEVERITY_RANK[String(e.severity ?? '')] ?? -1) >= 2;
+        });
+
+        const mappedEvents = keyEvents.map((e) => ({
+          timestamp: e.timestamp,
+          eventType: e.eventType,
+          severity: e.severity,
+          phase: PHASE_NAMES[Number(e.phase)] ?? String(e.phase ?? ''),
+          message: e.message,
+          source: e.source,
+          details: e.data && typeof e.data === 'object' && Object.keys(e.data as object).length > 0
+            ? e.data
+            : (e.dataJson ? (() => { try { return JSON.parse(String(e.dataJson)); } catch { return null; } })() : null),
+        }));
+
+        let analysis = null;
+        if (analysisData) {
+          const a = analysisData as Record<string, unknown>;
+          const results = (a.results ?? []) as Array<Record<string, unknown>>;
+          analysis = {
+            totalIssues: a.totalIssues ?? results.length,
+            criticalCount: a.criticalCount ?? 0,
+            highCount: a.highCount ?? 0,
+            warningCount: a.warningCount ?? 0,
+            issues: results.map((r) => ({
+              ruleTitle: r.ruleTitle ?? r.title,
+              severity: r.severity,
+              explanation: r.explanation,
+              remediation: r.remediation,
+            })),
+          };
+        }
+
+        const result = {
+          overview,
+          keyEvents: mappedEvents,
+          analysis,
+          stats: {
+            totalEvents: allEvents.length,
+            keyEventsShown: mappedEvents.length,
+            errorCount,
+            warningCount,
+            appInstalls: { total: appTotal, succeeded: appSucceeded, failed: appFailed, skipped: appSkipped },
+          },
+        };
+
+        return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+      } catch (error: unknown) {
+        return toolError('get_session_summary', args, error);
       }
-
-      const result = {
-        overview,
-        keyEvents: mappedEvents,
-        analysis,
-        stats: {
-          totalEvents: allEvents.length,
-          keyEventsShown: mappedEvents.length,
-          errorCount,
-          warningCount,
-          appInstalls: { total: appTotal, succeeded: appSucceeded, failed: appFailed, skipped: appSkipped },
-        },
-      };
-
-      return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
     }
   );
 
@@ -302,16 +326,20 @@ export function registerSessionTools(server: McpServer): void {
     },
     READ_ONLY,
     async (args) => {
-      const { tenantId, ...rest } = args;
-      const params: Record<string, string | number | undefined> = { ...rest };
-      if (tenantId) params.tenantId = tenantId;
-      const q = buildQuery(params);
-      const prefix = tenantId ? '/api/metrics' : '/api/global/metrics';
-      const [summary, apps] = await Promise.all([
-        apiFetch(`${prefix}/summary${q}`).catch(() => null),
-        apiFetch(`${prefix}/app${q}`).catch(() => null),
-      ]);
-      return { content: [{ type: 'text' as const, text: JSON.stringify({ summary, apps }, null, 2) }] };
+      try {
+        const { tenantId, ...rest } = args;
+        const params: Record<string, string | number | undefined> = { ...rest };
+        if (tenantId) params.tenantId = tenantId;
+        const q = buildQuery(params);
+        const prefix = tenantId ? '/api/metrics' : '/api/global/metrics';
+        const [summary, apps] = await Promise.all([
+          apiFetch(`${prefix}/summary${q}`).catch(() => null),
+          apiFetch(`${prefix}/app${q}`).catch(() => null),
+        ]);
+        return { content: [{ type: 'text' as const, text: JSON.stringify({ summary, apps }, null, 2) }] };
+      } catch (error: unknown) {
+        return toolError('get_metrics', args, error);
+      }
     }
   );
 
@@ -330,12 +358,16 @@ export function registerSessionTools(server: McpServer): void {
     },
     READ_ONLY,
     async (args) => {
-      const { tenantId, ...rest } = args;
-      const params: Record<string, string | number | boolean | undefined | null> = { ...rest };
-      if (tenantId) params.tenantId = tenantId;
-      const basePath = tenantId ? '/api/search/sessions-by-cve' : '/api/global/search/sessions-by-cve';
-      const data = await apiFetch(`${basePath}${buildQuery(params)}`);
-      return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+      try {
+        const { tenantId, ...rest } = args;
+        const params: Record<string, string | number | boolean | undefined | null> = { ...rest };
+        if (tenantId) params.tenantId = tenantId;
+        const basePath = tenantId ? '/api/search/sessions-by-cve' : '/api/global/search/sessions-by-cve';
+        const data = await apiFetch(`${basePath}${buildQuery(params)}`);
+        return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+      } catch (error: unknown) {
+        return toolError('search_sessions_by_cve', args, error);
+      }
     }
   );
 
@@ -348,12 +380,17 @@ export function registerSessionTools(server: McpServer): void {
       tenantId: z.string().optional().describe('Tenant ID to scope results. Omit for cross-tenant listing (Global Admin only).'),
     },
     READ_ONLY,
-    async ({ tenantId }) => {
-      const endpoint = tenantId
-        ? `/api/devices/blocked${buildQuery({ tenantId } as Record<string, string | undefined>)}`
-        : '/api/global/devices/blocked';
-      const data = await apiFetch(endpoint);
-      return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+    async (args) => {
+      try {
+        const { tenantId } = args;
+        const endpoint = tenantId
+          ? `/api/devices/blocked${buildQuery({ tenantId } as Record<string, string | undefined>)}`
+          : '/api/global/devices/blocked';
+        const data = await apiFetch(endpoint);
+        return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+      } catch (error: unknown) {
+        return toolError('list_blocked_devices', args, error);
+      }
     }
   );
 }

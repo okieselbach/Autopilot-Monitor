@@ -40,10 +40,7 @@ namespace AutopilotMonitor.Functions.Functions.Raw
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error querying raw events");
-                var err = req.CreateResponse(HttpStatusCode.InternalServerError);
-                await err.WriteAsJsonAsync(new { error = "Internal server error" });
-                return err;
+                return await req.InternalServerErrorAsync(_logger, ex, "Query raw events");
             }
         }
 
@@ -67,10 +64,7 @@ namespace AutopilotMonitor.Functions.Functions.Raw
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error querying global raw events");
-                var err = req.CreateResponse(HttpStatusCode.InternalServerError);
-                await err.WriteAsJsonAsync(new { error = "Internal server error" });
-                return err;
+                return await req.InternalServerErrorAsync(_logger, ex, "Query global raw events");
             }
         }
 

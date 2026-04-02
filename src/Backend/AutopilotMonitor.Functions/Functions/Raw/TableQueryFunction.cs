@@ -1,7 +1,9 @@
 using System.Net;
+using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Functions.Services;
 using AutopilotMonitor.Shared;
+using Azure;
 using Azure.Data.Tables;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -45,10 +47,7 @@ namespace AutopilotMonitor.Functions.Functions.Raw
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error listing tables");
-                var err = req.CreateResponse(HttpStatusCode.InternalServerError);
-                await err.WriteAsJsonAsync(new { error = "Internal server error" });
-                return err;
+                return await req.InternalServerErrorAsync(_logger, ex, "List tables");
             }
         }
 
@@ -125,12 +124,17 @@ namespace AutopilotMonitor.Functions.Functions.Raw
                 });
                 return response;
             }
+            catch (RequestFailedException rfe)
+            {
+                return await req.InternalServerErrorAsync(_logger, rfe,
+                    $"Query table '{tableName}'",
+                    new { tableName, filter = req.Query["filter"], partitionKey = req.Query["partitionKey"] });
+            }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error querying table {TableName}", tableName);
-                var err = req.CreateResponse(HttpStatusCode.InternalServerError);
-                await err.WriteAsJsonAsync(new { error = "Internal server error" });
-                return err;
+                return await req.InternalServerErrorAsync(_logger, ex,
+                    $"Query table '{tableName}'",
+                    new { tableName });
             }
         }
 

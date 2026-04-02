@@ -6,6 +6,29 @@ const BASE_URL = process.env.AUTOPILOT_API_URL ?? 'https://autopilotmonitor-api.
 const API_TIMEOUT_MS = 30_000;
 
 /**
+ * Structured error thrown when the backend API returns a non-2xx response.
+ * Preserves the HTTP status, raw body, and parsed JSON (when available) so
+ * downstream error handlers can format rich, AI-consumable messages.
+ */
+export class ApiError extends Error {
+  readonly status: number;
+  readonly body: string;
+  readonly parsed: Record<string, unknown> | null;
+
+  constructor(status: number, body: string) {
+    super(`API error ${status}: ${body}`);
+    this.name = 'ApiError';
+    this.status = status;
+    this.body = body;
+    try {
+      this.parsed = JSON.parse(body) as Record<string, unknown>;
+    } catch {
+      this.parsed = null;
+    }
+  }
+}
+
+/**
  * Per-request token store using AsyncLocalStorage.
  *
  * Each incoming MCP request runs inside its own async context (via
@@ -47,7 +70,7 @@ async function apiFetch(path: string, options: RequestInit = {}): Promise<unknow
   const res = await fetch(url, { ...options, headers, signal });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`API error ${res.status}: ${text}`);
+    throw new ApiError(res.status, text);
   }
   return res.json();
 }

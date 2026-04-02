@@ -47,18 +47,7 @@ namespace AutopilotMonitor.Functions.Functions.Admin
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error getting audit logs");
-
-                var errorResponse = req.CreateResponse(HttpStatusCode.InternalServerError);
-                await errorResponse.WriteAsJsonAsync(new
-                {
-                    success = false,
-                    message = "Internal server error",
-                    count = 0,
-                    logs = Array.Empty<object>()
-                });
-
-                return errorResponse;
+                return await req.InternalServerErrorAsync(_logger, ex, "Get audit logs");
             }
         }
     }

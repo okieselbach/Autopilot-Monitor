@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using AutopilotMonitor.Functions.Helpers;
 using Azure.Identity;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -108,10 +109,7 @@ namespace AutopilotMonitor.Functions.Functions.Raw
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error querying Application Insights");
-                var err = req.CreateResponse(HttpStatusCode.InternalServerError);
-                await err.WriteAsJsonAsync(new { error = "Internal server error" });
-                return err;
+                return await req.InternalServerErrorAsync(_logger, ex, "Query Application Insights");
             }
         }
 

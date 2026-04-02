@@ -1,4 +1,6 @@
 using System.Net;
+using Azure;
+using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
 
@@ -59,7 +61,48 @@ public static class ResponseHelper
     }
 
     /// <summary>
-    /// 500 Internal Server Error. Logs the exception and returns <c>{ "error": "Internal server error" }</c>.
+    /// 500 Internal Server Error with structured, AI-consumable error details.
+    /// Returns exception type, sanitized message, correlation ID, and operation context.
+    /// MCP clients (identified by <c>X-Client-Source: mcp</c>) receive richer details
+    /// including recovery hints and request context to help the AI self-correct.
+    /// Stack traces and infrastructure secrets are never exposed.
+    /// </summary>
+    public static async Task<HttpResponseData> InternalServerErrorAsync(
+        this HttpRequestData req,
+        ILogger logger,
+        Exception ex,
+        string operation,
+        object? context = null)
+    {
+        var correlationId = req.FunctionContext.GetCorrelationId();
+        logger.LogError(ex, "{Operation} failed [CorrelationId={CorrelationId}]", operation, correlationId);
+
+        var isMcpClient = IsMcpRequest(req);
+
+        var errorBody = new Dictionary<string, object?>
+        {
+            ["error"] = SanitizeErrorMessage(ex, operation),
+            ["correlationId"] = correlationId,
+            ["exceptionType"] = ex.GetType().Name,
+        };
+
+        // MCP clients get richer details to help the AI self-correct
+        if (isMcpClient)
+        {
+            errorBody["operation"] = operation;
+            if (context != null) errorBody["context"] = context;
+            var hint = GetRecoveryHint(ex);
+            if (hint != null) errorBody["hint"] = hint;
+        }
+
+        var response = req.CreateResponse(HttpStatusCode.InternalServerError);
+        await response.WriteAsJsonAsync(errorBody);
+        return response;
+    }
+
+    /// <summary>
+    /// 500 Internal Server Error (simple overload for backward compatibility).
+    /// Delegates to the enhanced overload using logMessage as the operation name.
     /// </summary>
     public static async Task<HttpResponseData> InternalServerErrorAsync(
         this HttpRequestData req,
@@ -67,9 +110,67 @@ public static class ResponseHelper
         Exception ex,
         string logMessage = "Unhandled error")
     {
-        logger.LogError(ex, logMessage);
-        var response = req.CreateResponse(HttpStatusCode.InternalServerError);
-        await response.WriteAsJsonAsync(new { error = "Internal server error" });
-        return response;
+        return await InternalServerErrorAsync(req, logger, ex, operation: logMessage);
+    }
+
+    /// <summary>Detect MCP clients via the X-Client-Source header set by the MCP server.</summary>
+    internal static bool IsMcpRequest(HttpRequestData req)
+    {
+        var httpContext = req.FunctionContext.GetHttpContext();
+        if (httpContext == null) return false;
+        return string.Equals(
+            httpContext.Request.Headers["X-Client-Source"].FirstOrDefault(),
+            "mcp", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Extract a safe, human-readable error message from known exception types.
+    /// Unknown exceptions get a generic message that points to the correlation ID.
+    /// </summary>
+    internal static string SanitizeErrorMessage(Exception ex, string operation)
+    {
+        return ex switch
+        {
+            RequestFailedException rfe =>
+                $"{operation}: {rfe.ErrorCode ?? $"Azure error (HTTP {rfe.Status})"} — {rfe.Message}",
+            ArgumentException ae =>
+                $"{operation}: Invalid argument — {ae.Message}",
+            InvalidOperationException ioe =>
+                $"{operation}: {ioe.Message}",
+            TimeoutException =>
+                $"{operation}: The operation timed out",
+            TaskCanceledException =>
+                $"{operation}: The operation timed out or was cancelled",
+            HttpRequestException hre =>
+                $"{operation}: External service call failed ({hre.StatusCode})",
+            FormatException fe =>
+                $"{operation}: Invalid format — {fe.Message}",
+            _ =>
+                $"{operation} failed. Use correlationId to investigate in backend logs.",
+        };
+    }
+
+    /// <summary>
+    /// Provide AI-targeted recovery hints based on exception type.
+    /// Returns null when no specific guidance is available.
+    /// </summary>
+    internal static string? GetRecoveryHint(Exception ex)
+    {
+        return ex switch
+        {
+            RequestFailedException { ErrorCode: "InvalidInput" or "BadRequest" } =>
+                "The OData filter expression may be malformed. Check syntax: string values need single quotes, property names are case-sensitive. Example: \"Status eq 'Failed'\".",
+            RequestFailedException { Status: 404 } =>
+                "The requested resource was not found. Verify the table name, partition key, or entity exists.",
+            RequestFailedException { Status: 409 } =>
+                "Conflict — the entity was modified concurrently. Retry the operation.",
+            RequestFailedException { Status: 429 } =>
+                "Rate limited by Azure Storage. Wait a moment and retry with a smaller query.",
+            TimeoutException or TaskCanceledException =>
+                "The backend timed out. Try reducing the query scope (fewer results, narrower time range, more specific filters).",
+            ArgumentException =>
+                "One or more parameters are invalid. Check parameter types and required fields.",
+            _ => null,
+        };
     }
 }

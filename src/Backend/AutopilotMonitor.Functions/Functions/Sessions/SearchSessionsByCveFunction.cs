@@ -67,10 +67,7 @@ public class SearchSessionsByCveFunction
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error searching sessions by CVE");
-            var err = req.CreateResponse(HttpStatusCode.InternalServerError);
-            await err.WriteAsJsonAsync(new { success = false, message = "Internal server error" });
-            return err;
+            return await req.InternalServerErrorAsync(_logger, ex, "Search sessions by CVE");
         }
     }
 }
