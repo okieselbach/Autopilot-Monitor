@@ -51,6 +51,9 @@ namespace AutopilotMonitor.Functions.Services
         private readonly TenantAdminsService _tenantAdminsService;
         private readonly IUserUsageRepository _userUsageRepo;
         private readonly IDistressReportRepository _distressReportRepo;
+        private readonly IOpsEventRepository _opsEventRepo;
+        private readonly OpsEventService _opsEventService;
+        private readonly IHttpClientFactory _httpClientFactory;
         private readonly ILogger<MaintenanceService> _logger;
 
         private const string PlatformStatsAliasFileName = "platform-stats.json";
@@ -68,6 +71,9 @@ namespace AutopilotMonitor.Functions.Services
             TenantAdminsService tenantAdminsService,
             IUserUsageRepository userUsageRepo,
             IDistressReportRepository distressReportRepo,
+            IOpsEventRepository opsEventRepo,
+            OpsEventService opsEventService,
+            IHttpClientFactory httpClientFactory,
             ILogger<MaintenanceService> logger)
         {
             _maintenanceRepo = maintenanceRepo;
@@ -80,6 +86,9 @@ namespace AutopilotMonitor.Functions.Services
             _tenantAdminsService = tenantAdminsService;
             _userUsageRepo = userUsageRepo;
             _distressReportRepo = distressReportRepo;
+            _opsEventRepo = opsEventRepo;
+            _opsEventService = opsEventService;
+            _httpClientFactory = httpClientFactory;
             _logger = logger;
         }
 
@@ -98,6 +107,8 @@ namespace AutopilotMonitor.Functions.Services
                 await AggregateMetricsWithCatchUpAsync();
                 await CleanupOldDataAsync();
                 await CleanupOldDistressReportsAsync();
+                await CleanupOldOpsEventsAsync();
+                await CheckAgentBlobStorageAsync();
                 await RecomputePlatformStatsAsync();
 
                 // Backfill and repair tasks run only via manual trigger (RunManualAsync)
@@ -107,10 +118,12 @@ namespace AutopilotMonitor.Functions.Services
 
                 maintenanceStart.Stop();
                 _logger.LogInformation($"Daily maintenance completed in {maintenanceStart.ElapsedMilliseconds}ms");
+                await _opsEventService.RecordMaintenanceCompletedAsync((int)maintenanceStart.ElapsedMilliseconds, "Timer");
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Daily maintenance failed");
+                await _opsEventService.RecordMaintenanceFailedAsync(ex.Message, "Timer");
             }
         }
 
@@ -160,6 +173,7 @@ namespace AutopilotMonitor.Functions.Services
                 result.Success = true;
 
                 _logger.LogInformation($"Manual maintenance completed in {maintenanceStart.ElapsedMilliseconds}ms");
+                await _opsEventService.RecordMaintenanceCompletedAsync(result.DurationMs, triggeredBy);
                 return result;
             }
             catch (Exception ex)
@@ -169,6 +183,7 @@ namespace AutopilotMonitor.Functions.Services
                 result.Error = ex.Message;
                 maintenanceStart.Stop();
                 result.DurationMs = (int)maintenanceStart.ElapsedMilliseconds;
+                await _opsEventService.RecordMaintenanceFailedAsync(ex.Message, triggeredBy);
                 return result;
             }
         }
@@ -231,6 +246,7 @@ namespace AutopilotMonitor.Functions.Services
                             });
 
                         _logger.LogInformation($"Tenant {tenantId}: Marked {sessionCount} stalled sessions as timed out (timeout: {timeoutHours}h)");
+                        await _opsEventService.RecordSessionTimeoutsAsync(tenantId, sessionCount, timeoutHours);
                     }
                     catch (Exception ex)
                     {
@@ -325,6 +341,7 @@ namespace AutopilotMonitor.Functions.Services
                                 });
 
                             _logger.LogInformation($"Tenant {tenantId}: Blocked {blockedCount} excessive data sender device(s) (window: {adminConfig.MaxSessionWindowHours}h, block: {blockDurationHours}h)");
+                            await _opsEventService.RecordExcessiveDataBlockedAsync(tenantId, blockedCount, adminConfig.MaxSessionWindowHours);
                         }
 
                         totalBlocked += blockedCount;

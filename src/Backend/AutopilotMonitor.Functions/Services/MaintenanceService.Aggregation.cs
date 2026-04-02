@@ -463,6 +463,91 @@ namespace AutopilotMonitor.Functions.Services
                 _logger.LogError(ex, "Distress report cleanup failed");
             }
         }
+
+        /// <summary>
+        /// Verifies that agent binaries and bootstrap script are available on blob storage.
+        /// Records an OpsEvent for each missing item so Global Admins see it in the dashboard.
+        /// </summary>
+        private async Task CheckAgentBlobStorageAsync()
+        {
+            _logger.LogInformation("Checking agent blob storage availability...");
+
+            var zipUrl = $"{AutopilotMonitor.Shared.Constants.AgentBlobBaseUrl}/{AutopilotMonitor.Shared.Constants.AgentZipFileName}";
+            var ps1Url = $"{AutopilotMonitor.Shared.Constants.AgentBlobBaseUrl}/Install-AutopilotMonitor.ps1";
+
+            try
+            {
+                var client = _httpClientFactory.CreateClient();
+                client.Timeout = TimeSpan.FromSeconds(15);
+
+                var zipRequest = new HttpRequestMessage(HttpMethod.Head, zipUrl);
+                var ps1Request = new HttpRequestMessage(HttpMethod.Head, ps1Url);
+
+                var results = await Task.WhenAll(
+                    client.SendAsync(zipRequest),
+                    client.SendAsync(ps1Request)
+                );
+
+                var zipResponse = results[0];
+                var ps1Response = results[1];
+
+                if (!zipResponse.IsSuccessStatusCode)
+                {
+                    _logger.LogError("Agent ZIP not available on blob storage: HTTP {StatusCode}", (int)zipResponse.StatusCode);
+                    await _opsEventService.RecordBlobStorageMissingAsync("Agent ZIP (AutopilotMonitor-Agent.zip)", (int)zipResponse.StatusCode);
+                }
+
+                if (!ps1Response.IsSuccessStatusCode)
+                {
+                    _logger.LogError("Bootstrap script not available on blob storage: HTTP {StatusCode}", (int)ps1Response.StatusCode);
+                    await _opsEventService.RecordBlobStorageMissingAsync("Bootstrap script (Install-AutopilotMonitor.ps1)", (int)ps1Response.StatusCode);
+                }
+
+                if (zipResponse.IsSuccessStatusCode && ps1Response.IsSuccessStatusCode)
+                {
+                    _logger.LogInformation("Agent blob storage check passed: all binaries available");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Agent blob storage check failed — storage unreachable");
+                await _opsEventService.RecordBlobStorageUnreachableAsync(ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Removes operational events older than the configured retention period.
+        /// Retention is controlled by AdminConfiguration.OpsEventRetentionDays (default: 90).
+        /// </summary>
+        private async Task CleanupOldOpsEventsAsync()
+        {
+            try
+            {
+                var adminConfig = await _adminConfigurationService.GetConfigurationAsync();
+                var retentionDays = adminConfig.OpsEventRetentionDays;
+
+                if (retentionDays <= 0)
+                {
+                    _logger.LogInformation("OpsEvents cleanup disabled (OpsEventRetentionDays = 0)");
+                    return;
+                }
+
+                var cutoff = DateTime.UtcNow.AddDays(-retentionDays);
+                _logger.LogInformation("Starting OpsEvents cleanup (retention: {Days} days, cutoff: {Cutoff:yyyy-MM-dd})", retentionDays, cutoff);
+
+                var deleted = await _opsEventRepo.DeleteOpsEventsOlderThanAsync(cutoff);
+                _logger.LogInformation("OpsEvents cleanup complete: {Deleted} events deleted", deleted);
+
+                if (deleted > 0)
+                {
+                    await _opsEventService.RecordOpsEventCleanupAsync(deleted, retentionDays);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "OpsEvents cleanup failed");
+            }
+        }
     }
 }
 

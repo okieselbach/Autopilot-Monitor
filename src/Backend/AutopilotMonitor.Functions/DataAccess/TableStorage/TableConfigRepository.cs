@@ -515,7 +515,8 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                 { "VulnerabilityCorrelationEnabled", config.VulnerabilityCorrelationEnabled },
                 { "VulnerabilityDataLastSyncUtc", config.VulnerabilityDataLastSyncUtc },
                 { "MaxDiagnosticsDownloadSizeMB", config.MaxDiagnosticsDownloadSizeMB },
-                { "DiagnosticsDownloadTimeoutSeconds", config.DiagnosticsDownloadTimeoutSeconds }
+                { "DiagnosticsDownloadTimeoutSeconds", config.DiagnosticsDownloadTimeoutSeconds },
+                { "OpsEventRetentionDays", config.OpsEventRetentionDays }
             };
 
             return entity;
@@ -539,7 +540,8 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                 VulnerabilityCorrelationEnabled = entity.GetBoolean("VulnerabilityCorrelationEnabled") ?? true,
                 VulnerabilityDataLastSyncUtc = entity.GetString("VulnerabilityDataLastSyncUtc"),
                 MaxDiagnosticsDownloadSizeMB = entity.GetInt32("MaxDiagnosticsDownloadSizeMB") ?? 500,
-                DiagnosticsDownloadTimeoutSeconds = entity.GetInt32("DiagnosticsDownloadTimeoutSeconds") ?? 120
+                DiagnosticsDownloadTimeoutSeconds = entity.GetInt32("DiagnosticsDownloadTimeoutSeconds") ?? 120,
+                OpsEventRetentionDays = entity.GetInt32("OpsEventRetentionDays") ?? 90
             };
         }
 

@@ -289,6 +289,9 @@ namespace AutopilotMonitor.Shared
             // User usage tracking (per-user, per-day, per-endpoint)
             public const string UserUsageLog = "UserUsageLog";
 
+            // Operational events (vital infrastructure signals for Global Admin Ops dashboard)
+            public const string OpsEvents = "OpsEvents";
+
             /// <summary>
             /// Returns all table names for initialization
             /// </summary>
@@ -326,7 +329,8 @@ namespace AutopilotMonitor.Shared
                 DeviceSnapshot,
                 CveIndex,
                 DistressReports,
-                UserUsageLog
+                UserUsageLog,
+                OpsEvents
             };
         }
     }

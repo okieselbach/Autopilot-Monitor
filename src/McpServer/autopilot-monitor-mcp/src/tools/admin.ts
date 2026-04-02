@@ -201,7 +201,35 @@ export function registerAdminTools(server: McpServer): void {
     }
   );
 
-  // Tool 17: list_session_reports
+  // Tool 17: get_ops_events
+  server.tool(
+    'get_ops_events',
+    'Get operational events for platform monitoring. Shows consent flow results, maintenance runs, security blocks, ' +
+    'tenant offboards, agent timeouts, and blob storage health. Global Admin only. ' +
+    'Use category filter to narrow results (Consent, Maintenance, Security, Tenant, Agent).',
+    {
+      category: z.string().optional().describe('Filter by category: Consent, Maintenance, Security, Tenant, Agent'),
+      maxResults: z.coerce.number().min(1).max(500).optional().default(200).describe('Max events to return (default: 200)'),
+    },
+    READ_ONLY,
+    async (args) => {
+      try {
+        const params: Record<string, string | number | undefined> = {};
+        if (args.category) params.category = args.category;
+        if (args.maxResults) params.maxResults = args.maxResults;
+        const data = await apiFetch(`/api/global/ops-events${buildQuery(params)}`);
+        return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes('403')) {
+          return { isError: true, content: [{ type: 'text' as const, text: 'Access denied. This tool requires Global Admin permissions.' }] };
+        }
+        throw error;
+      }
+    }
+  );
+
+  // Tool 18: list_session_reports
   server.tool(
     'list_session_reports',
     'List session reports submitted by tenant admins. Reports contain user comments, screenshots, and agent logs for troubleshooting. ' +

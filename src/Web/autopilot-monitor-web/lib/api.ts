@@ -179,6 +179,12 @@ export const api = {
     list: () => `${API_BASE_URL}/api/global/distress-reports`,
   },
 
+  // ── Ops Events ───────────────────────────────────────────────────────────
+  opsEvents: {
+    list: (category?: string, maxResults?: number) =>
+      `${API_BASE_URL}/api/global/ops-events${qs({ category, maxResults: maxResults?.toString() })}`,
+  },
+
   // ── Notifications ─────────────────────────────────────────────────────────
   notifications: {
     list: () => `${API_BASE_URL}/api/global/notifications`,

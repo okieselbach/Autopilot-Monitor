@@ -255,6 +255,7 @@ public static class EndpointAccessPolicyCatalog
         new("GET",    "global/notifications",                            EndpointPolicy.GlobalAdminOnly),
         new("POST",   "global/notifications/dismiss-all",                EndpointPolicy.GlobalAdminOnly),
         new("POST",   "global/notifications/{notificationId}/dismiss",   EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "global/ops-events",                              EndpointPolicy.GlobalAdminOnly),
     };
 
     /// <summary>

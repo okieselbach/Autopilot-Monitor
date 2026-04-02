@@ -17,15 +17,18 @@ namespace AutopilotMonitor.Functions.Functions.Admin
         private readonly ILogger<DeviceBlockFunction> _logger;
         private readonly BlockedDeviceService _blockedDeviceService;
         private readonly IMaintenanceRepository _maintenanceRepo;
+        private readonly OpsEventService _opsEventService;
 
         public DeviceBlockFunction(
             ILogger<DeviceBlockFunction> logger,
             BlockedDeviceService blockedDeviceService,
-            IMaintenanceRepository maintenanceRepo)
+            IMaintenanceRepository maintenanceRepo,
+            OpsEventService opsEventService)
         {
             _logger = logger;
             _blockedDeviceService = blockedDeviceService;
             _maintenanceRepo = maintenanceRepo;
+            _opsEventService = opsEventService;
         }
 
         /// <summary>GET /api/devices/blocked?tenantId={tenantId} — list all active blocks for a tenant</summary>
@@ -108,6 +111,8 @@ namespace AutopilotMonitor.Functions.Functions.Admin
                         { "Reason", reason ?? string.Empty }
                     }
                 );
+
+                await _opsEventService.RecordDeviceBlockedAsync(tenantId, serialNumber, reason ?? "No reason", userIdentifier);
 
                 var isKill = action == "Kill";
                 _logger.LogWarning(
