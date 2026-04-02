@@ -131,12 +131,14 @@ public static class ResponseHelper
     {
         return ex switch
         {
+            RequestFailedException rfe when rfe.ErrorCode != null =>
+                $"{operation}: {rfe.ErrorCode} — {rfe.Message}",
             RequestFailedException rfe =>
-                $"{operation}: {rfe.ErrorCode ?? $"Azure error (HTTP {rfe.Status})"} — {rfe.Message}",
+                $"{operation}: Azure error (HTTP {rfe.Status}). Use correlationId to investigate in backend logs.",
             ArgumentException ae =>
                 $"{operation}: Invalid argument — {ae.Message}",
-            InvalidOperationException ioe =>
-                $"{operation}: {ioe.Message}",
+            InvalidOperationException =>
+                $"{operation}: Invalid operation. Use correlationId to investigate in backend logs.",
             TimeoutException =>
                 $"{operation}: The operation timed out",
             TaskCanceledException =>

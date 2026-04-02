@@ -40,7 +40,9 @@ export function toolError(
     } else if (error.status === 429) {
       parts.push(`**Rate limited in ${toolName}**: Too many requests. Wait a moment and retry.`);
     } else {
-      parts.push(`**Error in ${toolName}** (HTTP ${error.status}): ${error.body || 'No response body'}`);
+      const body = error.body || 'No response body';
+      const truncated = body.length > 500 ? body.slice(0, 500) + '…' : body;
+      parts.push(`**Error in ${toolName}** (HTTP ${error.status}): ${truncated}`);
     }
   } else {
     const message = error instanceof Error ? error.message : String(error);
