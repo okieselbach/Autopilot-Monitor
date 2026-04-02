@@ -610,31 +610,27 @@ export default function SessionDetailPage() {
   const whiteGloveSplitSequence = useMemo(() => {
     if (!isWhiteGloveSession) return -1;
     const wgEvent = events.find(e => e.eventType === "whiteglove_complete");
+    const resumedEvent = events.find(e => e.eventType === "whiteglove_resumed");
 
-    // Anchor the split relative to whiteglove_complete, robust against reboots
-    // in both Part 1 (pre-prov) and Part 2 (user enrollment).
-    const agentStarts = events
-      .filter(e => e.eventType === "agent_started")
-      .sort((a, b) => a.sequence - b.sequence);
-
-    if (wgEvent && agentStarts.length >= 2) {
-      // Normal: first agent_started AFTER whiteglove_complete = Part 2 start
-      const nextStart = agentStarts.find(a => a.sequence > wgEvent.sequence);
-      if (nextStart) return nextStart.sequence - 1;
-
-      // Race condition: whiteglove_complete arrived after the Part 2 boot
-      // (Windows writes Event 62407 after reboot). The LAST agent_started
-      // before wgEvent is the Part 2 start.
-      const preWgStarts = agentStarts.filter(a => a.sequence < wgEvent.sequence);
-      if (preWgStarts.length >= 2) {
-        return preWgStarts[preWgStarts.length - 1].sequence - 1;
-      }
+    // whiteglove_resumed is the definitive Part 2 marker (emitted at Part 2 agent startup).
+    // This handles both normal ordering and the race condition where Windows writes the
+    // whiteglove_complete event (Event 62407) after the Part 2 reboot.
+    if (resumedEvent) {
+      return resumedEvent.sequence - 1;
     }
 
-    // Single boot (pre-prov only, user hasn't enrolled yet).
-    // Include post-whiteglove cleanup events (local_admin_analysis, agent_shutdown)
-    // by extending the split to the agent_shutdown that follows whiteglove_complete.
+    // Fallback for old agents without whiteglove_resumed:
+    // first agent_started AFTER whiteglove_complete = Part 2 start.
+    // NOTE: We do NOT use the "last agent_started before whiteglove_complete" heuristic
+    // because reboots within Part 1 would be misidentified as Part 2.
     if (wgEvent) {
+      const nextStart = events.find(e =>
+        e.eventType === "agent_started" && e.sequence > wgEvent.sequence
+      );
+      if (nextStart) return nextStart.sequence - 1;
+
+      // Pre-provisioning only (no Part 2 yet). Include cleanup events
+      // (local_admin_analysis, agent_shutdown) that follow whiteglove_complete.
       const shutdownAfterWg = events.find(e =>
         e.eventType === "agent_shutdown" && e.sequence > wgEvent.sequence
       );
