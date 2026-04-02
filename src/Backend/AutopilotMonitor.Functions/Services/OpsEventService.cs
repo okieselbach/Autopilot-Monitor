@@ -88,6 +88,16 @@ namespace AutopilotMonitor.Functions.Services
                 $"{sessionCount} session(s) timed out after {timeoutHours}h",
                 tenantId, "System.Maintenance", new { sessionCount, timeoutHours });
 
+        public Task RecordBlobStorageMissingAsync(string missingItem, int statusCode)
+            => WriteAsync(OpsEventCategory.Agent, "BlobStorageMissing", OpsEventSeverity.Critical,
+                $"Agent blob storage check failed: {missingItem} is missing or unreachable (HTTP {statusCode})",
+                null, "System.Maintenance", new { missingItem, statusCode });
+
+        public Task RecordBlobStorageUnreachableAsync(string error)
+            => WriteAsync(OpsEventCategory.Agent, "BlobStorageUnreachable", OpsEventSeverity.Critical,
+                $"Agent blob storage unreachable: {error}",
+                null, "System.Maintenance", new { error });
+
         // ── Core write method ──────────────────────────────────────────────────
 
         private async Task WriteAsync(string category, string eventType, string severity,

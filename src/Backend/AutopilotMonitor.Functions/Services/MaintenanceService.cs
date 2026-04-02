@@ -53,6 +53,7 @@ namespace AutopilotMonitor.Functions.Services
         private readonly IDistressReportRepository _distressReportRepo;
         private readonly IOpsEventRepository _opsEventRepo;
         private readonly OpsEventService _opsEventService;
+        private readonly IHttpClientFactory _httpClientFactory;
         private readonly ILogger<MaintenanceService> _logger;
 
         private const string PlatformStatsAliasFileName = "platform-stats.json";
@@ -72,6 +73,7 @@ namespace AutopilotMonitor.Functions.Services
             IDistressReportRepository distressReportRepo,
             IOpsEventRepository opsEventRepo,
             OpsEventService opsEventService,
+            IHttpClientFactory httpClientFactory,
             ILogger<MaintenanceService> logger)
         {
             _maintenanceRepo = maintenanceRepo;
@@ -86,6 +88,7 @@ namespace AutopilotMonitor.Functions.Services
             _distressReportRepo = distressReportRepo;
             _opsEventRepo = opsEventRepo;
             _opsEventService = opsEventService;
+            _httpClientFactory = httpClientFactory;
             _logger = logger;
         }
 
@@ -105,6 +108,7 @@ namespace AutopilotMonitor.Functions.Services
                 await CleanupOldDataAsync();
                 await CleanupOldDistressReportsAsync();
                 await CleanupOldOpsEventsAsync();
+                await CheckAgentBlobStorageAsync();
                 await RecomputePlatformStatsAsync();
 
                 // Backfill and repair tasks run only via manual trigger (RunManualAsync)
