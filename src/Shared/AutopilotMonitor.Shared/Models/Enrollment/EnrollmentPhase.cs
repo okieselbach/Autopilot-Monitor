@@ -1,7 +1,14 @@
 namespace AutopilotMonitor.Shared.Models
 {
     /// <summary>
-    /// Represents the phases of Autopilot enrollment
+    /// Represents the phases of Autopilot enrollment.
+    ///
+    /// PHASE STRATEGY: Only explicit phase-transition events (esp_phase_changed, agent_started)
+    /// may carry a non-Unknown phase value. All other events (analyzers, lifecycle, telemetry)
+    /// MUST use Phase=Unknown. The UI groups events into phases based solely on these
+    /// phase-declaration events — any event with a non-Unknown phase is treated as starting
+    /// a new phase in the timeline. Violating this causes phantom phases in the UI.
+    /// Context that an event belongs to a phase is conveyed via DataJson, not via this field.
     /// </summary>
     public enum EnrollmentPhase
     {

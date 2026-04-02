@@ -3,6 +3,12 @@ import { EnrollmentEvent } from "@/types";
 // Pure helper — groups a flat event list into phase buckets.
 // Extracted from the useMemo so it can be called multiple times for WhiteGlove split timelines.
 //
+// PHASE STRATEGY: Only a small set of events carry a non-Unknown phase (esp_phase_changed,
+// agent_started). These are "phase-declaration events" that open a new phase in the timeline.
+// All other events use Phase=Unknown and get sorted into the currently active phase.
+// This means the number of phase-declaration events must match the number of distinct phases
+// shown in the timeline — no duplicates, no accidental phase tags on analyzer/lifecycle events.
+//
 // preventPhaseRegression: when true, once the phase advances past a certain point it cannot
 // regress to an earlier phase. Used for WhiteGlove Part 2 (User Enrollment) to absorb
 // mid-enrollment reboots that emit a new agent_started (Phase=Start) without disrupting the

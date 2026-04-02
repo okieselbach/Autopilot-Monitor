@@ -374,22 +374,23 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Analyzers
 
         public void AnalyzeAtShutdown()
         {
-            AnalyzeAtShutdown(EnrollmentPhase.Complete, whiteGlovePart: null);
+            AnalyzeAtShutdown(whiteGlovePart: null);
         }
 
         /// <summary>
-        /// Phase-aware shutdown analysis. Allows callers to tag the emitted events
-        /// with a specific enrollment phase and White Glove part number so the backend
-        /// can distinguish Part 1 (pre-provisioning) from Part 2 (user enrollment).
+        /// Shutdown analysis with optional WhiteGlove part tag.
+        /// Phase is always Unknown — analyzer events are NOT phase-declaration events.
+        /// Only explicit phase-transition events (esp_phase_changed, agent_started) may carry
+        /// a non-Unknown phase. Context is conveyed via DataJson (triggered_at, whiteglove_part).
         /// </summary>
-        public void AnalyzeAtShutdown(EnrollmentPhase phase, int? whiteGlovePart)
+        public void AnalyzeAtShutdown(int? whiteGlovePart)
         {
-            _logger.Info($"{Name}: Running shutdown analysis (delta detection, phase={phase}, whiteGlovePart={whiteGlovePart?.ToString() ?? "none"})");
+            _logger.Info($"{Name}: Running shutdown analysis (delta detection, whiteGlovePart={whiteGlovePart?.ToString() ?? "none"})");
             try
             {
                 var currentInventory = CollectAndNormalize();
                 var newInstalls = ComputeDelta(_startupInventory ?? new List<SoftwareEntry>(), currentInventory);
-                EmitInventoryEvents("shutdown", phase, currentInventory, newInstalls, whiteGlovePart);
+                EmitInventoryEvents("shutdown", EnrollmentPhase.Unknown, currentInventory, newInstalls, whiteGlovePart);
             }
             catch (Exception ex)
             {

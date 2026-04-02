@@ -238,10 +238,17 @@ export default function PhaseTimeline({ currentPhase, completedPhases, events = 
       }
     }
 
-    // WhiteGlove: whiteglove_complete means phases 0-3 are done;
-    // whiteglove_resumed means user enrollment (phase 4+) has started
-    if (hasWhiteGloveResumed && phaseIndex(4) > maxIdx) maxPhase = 4;
-    else if (hasWhiteGloveComplete && phaseIndex(3) > maxIdx) maxPhase = 3;
+    // WhiteGlove phase capping:
+    // Part 1 only (no resume yet): cap at Apps (Device) — post-completion cleanup events
+    // (local_admin_analysis, agent_shutdown) carry Phase=Complete as an artifact, but the
+    // session hasn't actually reached user enrollment phases yet.
+    // Part 2 started: ensure at least AccountSetup is shown as reached.
+    if (hasWhiteGloveComplete && !hasWhiteGloveResumed) {
+      const capIdx = phaseIndex(3); // Apps (Device) = last pre-provisioning phase
+      if (maxIdx > capIdx) { maxIdx = capIdx; maxPhase = 3; }
+    } else if (hasWhiteGloveResumed && phaseIndex(4) > maxIdx) {
+      maxPhase = 4;
+    }
 
     return maxPhase;
   })();

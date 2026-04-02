@@ -631,8 +631,16 @@ export default function SessionDetailPage() {
       }
     }
 
-    // Single boot (pre-prov only, user hasn't enrolled yet): use whiteglove_complete
-    return wgEvent?.sequence ?? -1;
+    // Single boot (pre-prov only, user hasn't enrolled yet).
+    // Include post-whiteglove cleanup events (local_admin_analysis, agent_shutdown)
+    // by extending the split to the agent_shutdown that follows whiteglove_complete.
+    if (wgEvent) {
+      const shutdownAfterWg = events.find(e =>
+        e.eventType === "agent_shutdown" && e.sequence > wgEvent.sequence
+      );
+      return shutdownAfterWg?.sequence ?? wgEvent.sequence;
+    }
+    return -1;
   }, [events, isWhiteGloveSession]);
 
   // For WhiteGlove sessions: split filtered events into pre-provisioning and user-enrollment parts.
