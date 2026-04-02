@@ -128,10 +128,32 @@ app.all('/mcp', async (req, res) => {
   }
 });
 
-app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.error(`Autopilot-Monitor MCP Server running (Streamable HTTP on port ${PORT})`);
   console.error(`API URL: ${process.env.AUTOPILOT_API_URL ?? 'https://autopilotmonitor-api.azurewebsites.net'}`);
   console.error(`Search backend: ${knowledgeBase.name} | Documents: ${knowledgeBase.size} | Rules dir: ${RULES_DIR}`);
   console.error(`Health: http://localhost:${PORT}/health`);
   console.error(`MCP endpoint: http://localhost:${PORT}/mcp`);
 });
+
+// --- Graceful shutdown ---
+
+async function gracefulShutdown(signal: string) {
+  console.error(`[mcp] Received ${signal}, shutting down gracefully…`);
+  for (const [id, entry] of transports) {
+    try {
+      await entry.transport.close();
+      console.error(`[mcp] Closed session ${id}`);
+    } catch (e) {
+      console.error(`[mcp] Error closing session ${id}:`, e);
+    }
+  }
+  transports.clear();
+  server.close(() => {
+    console.error('[mcp] HTTP server closed');
+    process.exit(0);
+  });
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
