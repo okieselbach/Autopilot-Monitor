@@ -25,6 +25,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Analyzers
         /// <summary>
         /// Run analysis at agent shutdown / enrollment completion (delta detection).
         /// Emits a second finding event for end-state comparison against the startup result.
+        /// IMPORTANT: Emitted events MUST use Phase=Unknown. Analyzers are not phase-declaration
+        /// events — see EnrollmentPhase doc for the phase strategy.
         /// </summary>
         void AnalyzeAtShutdown();
     }

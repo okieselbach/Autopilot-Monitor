@@ -95,7 +95,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Analyzers
             // Detect logged-in users via explorer.exe owner (same technique as DesktopArrivalDetector)
             // and add them dynamically so they don't trigger false positives.
             var loggedInUsers = GetLoggedInUserNames();
-            RunAnalysis("shutdown", EnrollmentPhase.Complete, loggedInUsers);
+            // Phase=Unknown: this is an analysis event, not a phase declaration.
+            // Phase-tagged events are reserved for explicit phase transitions (esp_phase_changed etc.).
+            RunAnalysis("shutdown", EnrollmentPhase.Unknown, loggedInUsers);
         }
 
         // -----------------------------------------------------------------------
