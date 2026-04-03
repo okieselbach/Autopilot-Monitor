@@ -60,7 +60,7 @@ export function SectionAgent() {
           <h3 className="text-lg font-semibold text-gray-900">Full Enrollment Timeline &mdash; From the Very First Second</h3>
         </div>
         <p className="text-gray-700 mb-4">
-          Although the agent arrives on the device via the bootstrapper script &mdash; typically a few minutes after
+          Although the agent arrives on the device via the bootstrapper script &mdash; typically a few seconds after
           MDM enrollment begins &mdash; it does not miss any earlier activity. The Intune Management Extension (IME)
           has been writing detailed log files from the very start of enrollment, and the agent reads those logs
           from the beginning on its first launch. This backfill mechanism ensures complete coverage of the entire
