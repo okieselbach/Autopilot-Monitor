@@ -327,6 +327,8 @@ namespace AutopilotMonitor.Functions.Services
                     ["RemediationJson"] = JsonConvert.SerializeObject(rule.Remediation ?? new List<RemediationStep>()),
                     ["RelatedDocsJson"] = JsonConvert.SerializeObject(rule.RelatedDocs ?? new List<RelatedDoc>()),
                     ["TagsJson"] = JsonConvert.SerializeObject(rule.Tags ?? new string[0]),
+                    ["TemplateVariablesJson"] = JsonConvert.SerializeObject(rule.TemplateVariables ?? new List<TemplateVariable>()),
+                    ["DerivedFromTemplateRuleId"] = rule.DerivedFromTemplateRuleId ?? string.Empty,
                     ["CreatedAt"] = rule.CreatedAt,
                     ["UpdatedAt"] = rule.UpdatedAt
                 };
@@ -428,6 +430,7 @@ namespace AutopilotMonitor.Functions.Services
 
         private AnalyzeRule MapToAnalyzeRule(TableEntity entity)
         {
+            var derivedFrom = entity.GetString("DerivedFromTemplateRuleId");
             return new AnalyzeRule
             {
                 RuleId = entity.RowKey,
@@ -449,6 +452,8 @@ namespace AutopilotMonitor.Functions.Services
                 Remediation = DeserializeJson<List<RemediationStep>>(entity.GetString("RemediationJson")),
                 RelatedDocs = DeserializeJson<List<RelatedDoc>>(entity.GetString("RelatedDocsJson")),
                 Tags = DeserializeJsonArray(entity.GetString("TagsJson")),
+                TemplateVariables = DeserializeJson<List<TemplateVariable>>(entity.GetString("TemplateVariablesJson")),
+                DerivedFromTemplateRuleId = string.IsNullOrEmpty(derivedFrom) ? null : derivedFrom,
                 CreatedAt = entity.GetDateTimeOffset("CreatedAt")?.UtcDateTime ?? DateTime.UtcNow,
                 UpdatedAt = entity.GetDateTimeOffset("UpdatedAt")?.UtcDateTime ?? DateTime.UtcNow
             };
