@@ -44,6 +44,17 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
                 // Get events from storage using the resolved tenant ID
                 var events = await _sessionRepo.GetSessionEventsAsync(requestCtx.TargetTenantId, sessionId);
 
+                // Global Admin cross-tenant fallback: if no events found in the effective tenant,
+                // try resolving the actual tenant via SessionsIndex
+                if (events.Count == 0 && requestCtx.IsGlobalAdmin)
+                {
+                    var resolvedTenantId = await _sessionRepo.FindSessionTenantIdAsync(sessionId);
+                    if (resolvedTenantId != null && !string.Equals(resolvedTenantId, requestCtx.TargetTenantId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        events = await _sessionRepo.GetSessionEventsAsync(resolvedTenantId, sessionId);
+                    }
+                }
+
                 return await req.OkAsync(new
                 {
                     success = true,
