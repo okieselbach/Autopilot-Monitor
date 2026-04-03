@@ -690,12 +690,12 @@ export default function SessionDetailPage() {
   // Group events by phase — single timeline for normal sessions, two groups for WhiteGlove
   const { eventsByPhase, orderedPhases } = useMemo(() => {
     if (isWhiteGloveSession) return { eventsByPhase: {} as Record<string, EnrollmentEvent[]>, orderedPhases: [] as string[] };
-    return groupEventsByPhase(filteredEvents, phaseNamesMap, phaseOrder);
+    return groupEventsByPhase(filteredEvents, phaseNamesMap, phaseOrder, { preventPhaseRegression: true });
   }, [filteredEvents, isWhiteGloveSession, phaseNamesMap, phaseOrder]);
 
   const preProvGrouped = useMemo(() =>
     isWhiteGloveSession && preProvEvents.length > 0
-      ? groupEventsByPhase(preProvEvents, phaseNamesMap, phaseOrder)
+      ? groupEventsByPhase(preProvEvents, phaseNamesMap, phaseOrder, { preventPhaseRegression: true })
       : { eventsByPhase: {} as Record<string, EnrollmentEvent[]>, orderedPhases: [] as string[] },
     [preProvEvents, isWhiteGloveSession, phaseNamesMap, phaseOrder]
   );

@@ -14,6 +14,11 @@
 
 ## Common Mistakes
 
+### Timeline sequence must NEVER regress in the curated UI view (2026-04-04)
+**What went wrong:** `groupEventsByPhase` was called without `preventPhaseRegression: true` for normal sessions and WhiteGlove pre-provisioning. A mid-enrollment reboot emits a new `agent_started` (Phase 0 = "Start"), which regressed the active phase back to Start, dumping post-reboot events (seq 173+) into the Start section — breaking the sequential appearance.
+**Rule:** ALL `groupEventsByPhase` calls MUST use `{ preventPhaseRegression: true }`. The curated timeline sequence must appear continuous within each phase section. Reboots and agent restarts must NOT create phase regression — events stay in whatever phase was active before the reboot.
+**Severity:** UX — confuses users, violates core timeline principle.
+
 ### Table Storage mapping defaults must match domain defaults (2026-03-31)
 **What went wrong:** Added `NtpServer` mapping with `?? ""` fallback. Existing tenants had no value stored → got empty string instead of `"time.windows.com"` → agent NTP check broke.
 **Rule:** When adding missing Table Storage read mappings, the `??` fallback MUST match the domain/model default (check `AgentConfigResponse`, `GetAgentConfigFunction`, or the property initializer). Never use empty string as fallback for fields that have a meaningful default.
