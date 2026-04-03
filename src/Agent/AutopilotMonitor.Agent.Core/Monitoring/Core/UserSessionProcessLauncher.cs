@@ -108,6 +108,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 // Retry loop with integrated CXH monitoring.
                 // See WaitForCxhOrSleep for the CXH wake-up strategy.
                 const int retryIntervalSeconds = 10;
+                const string defaultDesktop = "";
+                const string explicitDesktop = "WinSta0\\Default";
+                const int defaultDesktopOnlyAttempts = 3;
                 var retryStopwatch = System.Diagnostics.Stopwatch.StartNew();
                 int attempt = 0;
 
@@ -130,6 +133,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 while (true)
                 {
                     attempt++;
+
+                    // First N attempts use default desktop (""), then alternate with explicit desktop.
+                    // Default works ~90% of the time; explicit fallback catches post-Hello desktop issues.
+                    bool useExplicitDesktop = (attempt > defaultDesktopOnlyAttempts) && (attempt % 2 == 0);
+                    si.lpDesktop = useExplicitDesktop ? explicitDesktop : defaultDesktop;
 
                     // CreateProcessAsUser with session-stamped token.
                     // The duplicated token has TokenSessionId set to the user's session,
@@ -155,7 +163,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     }
 
                     ProcessNativeMethods.CloseHandle(pi.hThread);
-                    logger.Info($"UserSessionProcessLauncher: Attempt {attempt} — created PID {pi.dwProcessId}, verifying startup...");
+                    logger.Info($"UserSessionProcessLauncher: Attempt {attempt} — created PID {pi.dwProcessId}" +
+                               $" [{(useExplicitDesktop ? "explicit" : "default")} desktop], verifying startup...");
 
                     // Wait 3s to verify the process survives DLL init + CLR bootstrap.
                     var waitResult = ProcessNativeMethods.WaitForSingleObject(pi.hProcess, 3000);
@@ -164,6 +173,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                         // Process is still running after 3s — success
                         ProcessNativeMethods.CloseHandle(pi.hProcess);
                         logger.Info($"UserSessionProcessLauncher: Successfully launched PID {pi.dwProcessId} in user session" +
+                                   $" [{(useExplicitDesktop ? "explicit" : "default")} desktop]" +
                                    (attempt > 1 ? $" (after {attempt} attempts, {retryStopwatch.Elapsed.TotalSeconds:F0}s)" : ""));
                         return true;
                     }
@@ -201,6 +211,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     // Non-retryable error, or retry timeout exceeded
                     logger.Warning($"UserSessionProcessLauncher: Process PID {pi.dwProcessId} exited within 3s — " +
                                    $"exit code 0x{exitCode:X8}" +
+                                   $" [{(useExplicitDesktop ? "explicit" : "default")} desktop]" +
                                    (attempt > 1 ? $" (gave up after {attempt} attempts, {retryStopwatch.Elapsed.TotalSeconds:F0}s)" : ""));
                     return false;
                 }
