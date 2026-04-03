@@ -149,7 +149,11 @@ jobs:
 
           # Compute SHA-256 hash of the deployment ZIP for integrity verification
           $sha256Hash = (Get-FileHash $deployZip -Algorithm SHA256).Hash.ToLowerInvariant()
-          Write-Host "SHA-256: $sha256Hash"
+          Write-Host "ZIP SHA-256: $sha256Hash"
+
+          # Compute SHA-256 hash of the agent EXE for post-config binary integrity verification
+          $exeSha256Hash = (Get-FileHash "$stagingDir/AutopilotMonitor.Agent.exe" -Algorithm SHA256).Hash.ToLowerInvariant()
+          Write-Host "EXE SHA-256: $exeSha256Hash"
 
           # Enrich version.json with SHA-256 hash (MSBuild only writes version, we add the hash post-ZIP)
           $versionObj = Get-Content "$agentOutput/version.json" -Raw | ConvertFrom-Json
@@ -160,6 +164,7 @@ jobs:
           "versioned_zip=$versionedZip" >> $env:GITHUB_OUTPUT
           "deploy_zip=$deployZip" >> $env:GITHUB_OUTPUT
           "sha256=$sha256Hash" >> $env:GITHUB_OUTPUT
+          "exe_sha256=$exeSha256Hash" >> $env:GITHUB_OUTPUT
 
       - name: Upload to Azure Blob Storage
         if: inputs.upload_blob
@@ -214,18 +219,20 @@ jobs:
             Write-Host "SKIPPED: Table SAS token not configured — set AZURE_TABLE_ADMIN_SAS_TOKEN secret to enable backend hash-oracle"
           } else {
             $sha256 = "${{ steps.artifact.outputs.sha256 }}"
+            $exeSha256 = "${{ steps.artifact.outputs.exe_sha256 }}"
             $agentVersion = "${{ steps.version.outputs.version }}"
             $tableUrl = "https://autopilotmonitor.table.core.windows.net/AdminConfiguration(PartitionKey='GlobalConfig',RowKey='config')?$tableSasToken"
             $tableBody = @{
-              LatestAgentVersion = $agentVersion
-              LatestAgentSha256  = $sha256
+              LatestAgentVersion    = $agentVersion
+              LatestAgentSha256     = $sha256
+              LatestAgentExeSha256  = $exeSha256
             } | ConvertTo-Json
             Invoke-RestMethod -Uri $tableUrl -Method Merge -Headers @{
               "Content-Type" = "application/json"
               "Accept"       = "application/json;odata=nometadata"
               "If-Match"     = "*"
             } -Body $tableBody
-            Write-Host "AdminConfiguration updated: version=$agentVersion, sha256=$sha256"
+            Write-Host "AdminConfiguration updated: version=$agentVersion, sha256=$sha256, exeSha256=$exeSha256"
           }
 
       - name: Upload build artifact

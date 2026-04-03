@@ -562,7 +562,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 
         /// <summary>
         /// Post-config integrity check: verifies that the running agent binary matches
-        /// the SHA-256 hash provided by the backend (LatestAgentSha256).
+        /// the SHA-256 hash provided by the backend (LatestAgentExeSha256).
         /// Closes the trust gap where the self-update at startup only had the version.json hash
         /// (same blob storage origin as the ZIP — single point of compromise).
         /// </summary>
@@ -570,10 +570,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         {
             try
             {
-                var expectedHash = _remoteConfigService?.CurrentConfig?.LatestAgentSha256;
+                var expectedHash = _remoteConfigService?.CurrentConfig?.LatestAgentExeSha256;
                 if (string.IsNullOrWhiteSpace(expectedHash))
                 {
-                    _logger.Debug("Post-config integrity check: no backend hash available — skipping");
+                    _logger.Debug("Post-config integrity check: no backend EXE hash available — skipping");
                     return;
                 }
 

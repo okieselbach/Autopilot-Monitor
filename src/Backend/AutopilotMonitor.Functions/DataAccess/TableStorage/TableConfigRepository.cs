@@ -527,7 +527,8 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                 { "OpsAlertSlackWebhookUrl", config.OpsAlertSlackWebhookUrl ?? string.Empty },
                 // Agent binary integrity (written by CI/CD pipeline via Merge, but must be round-trippable)
                 { "LatestAgentVersion", config.LatestAgentVersion ?? string.Empty },
-                { "LatestAgentSha256", config.LatestAgentSha256 ?? string.Empty }
+                { "LatestAgentSha256", config.LatestAgentSha256 ?? string.Empty },
+                { "LatestAgentExeSha256", config.LatestAgentExeSha256 ?? string.Empty }
             };
 
             return entity;
@@ -563,7 +564,8 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                 OpsAlertSlackWebhookUrl = entity.GetString("OpsAlertSlackWebhookUrl"),
                 // Agent binary integrity (written by CI/CD pipeline)
                 LatestAgentVersion = entity.GetString("LatestAgentVersion") ?? string.Empty,
-                LatestAgentSha256 = entity.GetString("LatestAgentSha256") ?? string.Empty
+                LatestAgentSha256 = entity.GetString("LatestAgentSha256") ?? string.Empty,
+                LatestAgentExeSha256 = entity.GetString("LatestAgentExeSha256") ?? string.Empty
             };
         }
 

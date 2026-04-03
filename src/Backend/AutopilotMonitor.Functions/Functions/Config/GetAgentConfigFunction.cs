@@ -163,6 +163,7 @@ namespace AutopilotMonitor.Functions.Functions.Config
                     EnableSoftwareInventoryAnalyzer = tenantConfig.EnableSoftwareInventoryAnalyzer ?? false
                 },
                 LatestAgentSha256 = adminConfig.LatestAgentSha256,
+                LatestAgentExeSha256 = adminConfig.LatestAgentExeSha256,
                 NtpServer = string.IsNullOrEmpty(tenantConfig.NtpServer) ? "time.windows.com" : tenantConfig.NtpServer,
                 EnableTimezoneAutoSet = tenantConfig.EnableTimezoneAutoSet ?? false,
                 SendTraceEvents = tenantConfig.SendTraceEvents,

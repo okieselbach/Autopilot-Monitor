@@ -136,19 +136,21 @@ export function SectionAgent() {
           <svg className="w-5 h-5 text-green-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
           </svg>
-          <h3 className="text-lg font-semibold text-gray-900">Download Integrity Verification</h3>
+          <h3 className="text-lg font-semibold text-gray-900">Binary Integrity Verification</h3>
         </div>
         <p className="text-gray-700 mb-4">
-          Every agent download is protected by SHA-256 integrity verification to ensure the binary has not
-          been tampered with or corrupted during transfer.
+          Agent binaries are protected by SHA-256 integrity verification at two stages: during download
+          (package integrity) and at runtime (executable integrity). This ensures the binary has not been
+          tampered with, corrupted during transfer, or modified after installation.
         </p>
         <div className="space-y-3 text-sm text-gray-700">
           <div className="flex items-start gap-3 p-3 bg-green-50 border border-green-100 rounded-lg">
             <span className="text-green-600 font-bold mt-0.5 shrink-0">1</span>
             <div>
               <span className="font-medium text-gray-900">Build-time hash:</span>{" "}
-              When a new agent version is built, the CI/CD pipeline computes the SHA-256 hash of the
-              agent package and publishes it alongside the binary in <span className="font-mono text-xs bg-green-100 px-1 py-0.5 rounded">version.json</span>.
+              When a new agent version is built, the CI/CD pipeline computes two SHA-256 hashes: one
+              for the agent ZIP package (stored in <span className="font-mono text-xs bg-green-100 px-1 py-0.5 rounded">version.json</span>)
+              and one for the agent executable itself (stored in the backend configuration).
             </div>
           </div>
           <div className="flex items-start gap-3 p-3 bg-green-50 border border-green-100 rounded-lg">
@@ -163,9 +165,19 @@ export function SectionAgent() {
             <span className="text-green-600 font-bold mt-0.5 shrink-0">3</span>
             <div>
               <span className="font-medium text-gray-900">Backend cross-check:</span>{" "}
-              The expected hash is also stored in the backend and delivered to the agent via the
+              The expected ZIP hash is also stored in the backend and delivered to the agent via the
               authenticated configuration endpoint — a second, independent trust channel. An attacker
               would need to compromise both the download server and the backend API simultaneously.
+            </div>
+          </div>
+          <div className="flex items-start gap-3 p-3 bg-green-50 border border-green-100 rounded-lg">
+            <span className="text-green-600 font-bold mt-0.5 shrink-0">4</span>
+            <div>
+              <span className="font-medium text-gray-900">Runtime integrity check:</span>{" "}
+              After fetching its configuration from the backend, the running agent computes the SHA-256
+              hash of its own executable and compares it against the EXE hash provided in the
+              configuration response. A mismatch triggers an emergency alert, detecting post-installation
+              tampering or binary corruption on disk.
             </div>
           </div>
         </div>

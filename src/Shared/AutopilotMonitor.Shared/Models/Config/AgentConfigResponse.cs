@@ -169,6 +169,14 @@ namespace AutopilotMonitor.Shared.Models
         public string LatestAgentSha256 { get; set; } = default!;
 
         /// <summary>
+        /// SHA-256 hash (lowercase hex) of the latest published agent EXE, provided by the backend.
+        /// Used for post-config binary integrity verification: the agent compares this against
+        /// the hash of its own running executable.
+        /// null = backend does not have an EXE hash (backward compat with older backend deployments).
+        /// </summary>
+        public string LatestAgentExeSha256 { get; set; } = default!;
+
+        /// <summary>
         /// NTP server address for time check during enrollment.
         /// Default: "time.windows.com"
         /// </summary>

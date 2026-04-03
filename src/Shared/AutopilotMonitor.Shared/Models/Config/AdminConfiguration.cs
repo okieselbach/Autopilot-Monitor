@@ -243,6 +243,14 @@ namespace AutopilotMonitor.Shared.Models
         public string LatestAgentSha256 { get; set; } = default!;
 
         /// <summary>
+        /// SHA-256 hash (lowercase hex) of the latest published agent EXE (AutopilotMonitor.Agent.exe).
+        /// Used for post-config integrity verification: the running agent computes its own EXE hash
+        /// and compares against this value to detect tampering.
+        /// Written by CI/CD pipeline and PS build scripts after agent ZIP upload.
+        /// </summary>
+        public string LatestAgentExeSha256 { get; set; } = default!;
+
+        /// <summary>
         /// Whether vulnerability correlation is globally enabled.
         /// When false, agents still collect inventory but backend skips correlation.
         /// Default: true
