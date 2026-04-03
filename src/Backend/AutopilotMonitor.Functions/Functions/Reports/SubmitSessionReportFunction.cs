@@ -45,10 +45,11 @@ namespace AutopilotMonitor.Functions.Functions.Reports
                 var tenantId = requestCtx.TenantId;
                 var userIdentifier = requestCtx.UserPrincipalName;
 
-                // Request body size limit (1 MB)
+                // Request body size limit (20 MB — must accommodate base64-encoded agent logs,
+                // screenshots, plus CSV/TXT exports; base64 adds ~33% overhead)
                 if (req.Headers.TryGetValues("Content-Length", out var clValues)
                     && long.TryParse(clValues.FirstOrDefault(), out var contentLength)
-                    && contentLength > 1_048_576)
+                    && contentLength > 20_971_520)
                 {
                     var tooLarge = req.CreateResponse(HttpStatusCode.BadRequest);
                     await tooLarge.WriteAsJsonAsync(new { success = false, message = "Request body too large" });
