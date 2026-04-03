@@ -67,10 +67,18 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
-        /// Creates a custom gather rule for a tenant
+        /// Creates a custom gather rule for a tenant.
+        /// Throws if a rule with the same ID already exists (global or tenant partition).
+        /// Uses point queries (O(1)) instead of loading all rules.
         /// </summary>
         public async Task<bool> CreateRuleAsync(string tenantId, GatherRule rule)
         {
+            if (await _ruleRepo.GatherRuleExistsAsync("global", rule.RuleId)
+                || await _ruleRepo.GatherRuleExistsAsync(tenantId, rule.RuleId))
+            {
+                throw new InvalidOperationException($"A rule with ID '{rule.RuleId}' already exists.");
+            }
+
             rule.IsBuiltIn = false;
             rule.IsCommunity = false;
             rule.CreatedAt = DateTime.UtcNow;

@@ -107,6 +107,8 @@ export const api = {
     analyze: () => `${API_BASE_URL}/api/rules/analyze`,
     analyzeRule: (ruleId: string) =>
       `${API_BASE_URL}/api/rules/analyze/${encodeURIComponent(ruleId)}`,
+    analyzeRuleFromTemplate: (ruleId: string) =>
+      `${API_BASE_URL}/api/rules/analyze/${encodeURIComponent(ruleId)}/create-from-template`,
     globalAnalyze: (tenantId?: string) =>
       `${API_BASE_URL}/api/global/rules/analyze${qs({ tenantId })}`,
     gather: (tenantId?: string) =>

@@ -20,6 +20,7 @@ import { useAdminMode } from "@/hooks/useAdminMode";
 import { AnalyzeRule, RuleForm, EMPTY_FORM, EMPTY_CONDITION, ruleToForm } from "./types";
 import AnalyzeRuleFormFields from "./components/AnalyzeRuleFormFields";
 import AnalyzeRuleCard from "./components/AnalyzeRuleCard";
+import TemplateConfigModal from "./components/TemplateConfigModal";
 
 interface TenantInfo {
   tenantId: string;
@@ -70,6 +71,10 @@ export default function AnalyzeRulesPage() {
   // Toggling / deleting state
   const [togglingRuleId, setTogglingRuleId] = useState<string | null>(null);
   const [deletingRuleId, setDeletingRuleId] = useState<string | null>(null);
+
+  // Template modal state
+  const [configureTemplateRule, setConfigureTemplateRule] = useState<AnalyzeRule | null>(null);
+  const [creatingFromTemplate, setCreatingFromTemplate] = useState(false);
 
   // Global admin mode
   const { globalAdminMode } = useAdminMode();
@@ -129,6 +134,12 @@ export default function AnalyzeRulesPage() {
 
   // Toggle rule enabled/disabled
   const handleToggleRule = async (rule: AnalyzeRule) => {
+    // Intercept: if this is a template rule being enabled, open the config modal instead
+    if ((rule.templateVariables?.length ?? 0) > 0 && !rule.enabled) {
+      setConfigureTemplateRule(rule);
+      return;
+    }
+
     setTogglingRuleId(rule.ruleId);
     const result = await mutate(
       api.rules.analyzeRule(rule.ruleId),
@@ -265,7 +276,39 @@ export default function AnalyzeRulesPage() {
     setSaving(false);
   };
 
+  // Create custom rule from template
+  const handleCreateFromTemplate = async (variables: Record<string, string>) => {
+    if (!configureTemplateRule) return;
+    setCreatingFromTemplate(true);
+    const result = await mutate(
+      api.rules.analyzeRuleFromTemplate(configureTemplateRule.ruleId),
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(variables),
+      }
+    );
+    if (result !== null) {
+      const newRuleId = `${configureTemplateRule.ruleId}-CUSTOM`;
+      trackEvent("rule_created_from_template", { ruleType: "analyze", templateRuleId: configureTemplateRule.ruleId });
+      showSuccess(`Rule "${configureTemplateRule.title}" configured and enabled successfully!`);
+      setConfigureTemplateRule(null);
+      await fetchRules();
+      // Auto-expand the newly created custom rule
+      setExpandedRuleId(newRuleId);
+    }
+    setCreatingFromTemplate(false);
+  };
+
   const rulesList = rules || [];
+
+  // Map: templateRuleId -> custom copy ruleId (for template rules that already have a tenant copy)
+  const templateCopyMap = new Map<string, string>();
+  for (const r of rulesList) {
+    if (r.derivedFromTemplateRuleId) {
+      templateCopyMap.set(r.derivedFromTemplateRuleId, r.ruleId);
+    }
+  }
 
   // Filter rules
   const filteredRules = rulesList.filter((rule) => {
@@ -506,7 +549,7 @@ export default function AnalyzeRulesPage() {
                       textareaRows={30}
                       description={<>Edit the rule as JSON. All fields are supported including <code className="bg-gray-100 px-1 rounded text-xs">event_correlation</code> condition properties.</>}
                     >
-                      <AnalyzeRuleFormFields form={newRule} setForm={setNewRule} showRuleId={true} />
+                      <AnalyzeRuleFormFields form={newRule} setForm={setNewRule} showRuleId={true} existingRuleIds={rulesList.map(r => r.ruleId)} />
                     </FormJsonToggle>
                     <div className="flex items-center justify-end space-x-3 pt-4 mt-5 border-t border-gray-200">
                       <button onClick={() => { setShowCreateForm(false); setJsonModeCreate(false); setJsonError(null); setNewRule({ ...EMPTY_FORM, conditions: [{ ...EMPTY_CONDITION }] }); }} disabled={creating} className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-medium">Cancel</button>
@@ -568,6 +611,10 @@ export default function AnalyzeRulesPage() {
                       onSetJsonText={setJsonText}
                       onSetJsonError={setJsonError}
                       readOnly={isReadOnly}
+                      onConfigureTemplate={(r) => setConfigureTemplateRule(r)}
+                      templateCopyExists={templateCopyMap.has(rule.ruleId)}
+                      templateCopyRuleId={templateCopyMap.get(rule.ruleId)}
+                      onScrollToCopy={(copyId) => setExpandedRuleId(copyId)}
                     />
                   ))}
                 </div>
@@ -575,6 +622,16 @@ export default function AnalyzeRulesPage() {
             </div>
           )}
         </main>
+
+        {/* Template Configuration Modal */}
+        {configureTemplateRule && (
+          <TemplateConfigModal
+            rule={configureTemplateRule}
+            saving={creatingFromTemplate}
+            onSave={handleCreateFromTemplate}
+            onCancel={() => setConfigureTemplateRule(null)}
+          />
+        )}
       </div>
     </ProtectedRoute>
   );

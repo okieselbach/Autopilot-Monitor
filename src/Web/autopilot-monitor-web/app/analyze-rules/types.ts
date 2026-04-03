@@ -31,6 +31,16 @@ export interface RuleCondition {
   eventAFilterValue?: string;
 }
 
+export interface TemplateVariable {
+  name: string;
+  label: string;
+  description?: string;
+  conditionIndex: number;
+  field: string;
+  placeholder: string;
+  validation?: string;
+}
+
 export interface AnalyzeRule {
   ruleId: string;
   title: string;
@@ -51,6 +61,8 @@ export interface AnalyzeRule {
   remediation: RemediationStep[];
   relatedDocs: RelatedDoc[];
   tags: string[];
+  templateVariables?: TemplateVariable[];
+  derivedFromTemplateRuleId?: string;
   createdAt: string;
   updatedAt: string;
 }

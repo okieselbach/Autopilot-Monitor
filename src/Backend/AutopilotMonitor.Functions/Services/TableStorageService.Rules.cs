@@ -388,6 +388,44 @@ namespace AutopilotMonitor.Functions.Services
             }
         }
 
+        // ===== RULE EXISTENCE CHECKS (Point Queries) =====
+
+        /// <summary>
+        /// Checks if an analyze rule exists via point query (PartitionKey + RowKey).
+        /// O(1) in Table Storage — no partition scan needed.
+        /// </summary>
+        public async Task<bool> AnalyzeRuleExistsAsync(string partitionKey, string ruleId)
+        {
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.AnalyzeRules);
+                await tableClient.GetEntityAsync<TableEntity>(partitionKey, ruleId, select: new[] { "PartitionKey" });
+                return true;
+            }
+            catch (Azure.RequestFailedException ex) when (ex.Status == 404)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Checks if a gather rule exists via point query (PartitionKey + RowKey).
+        /// O(1) in Table Storage — no partition scan needed.
+        /// </summary>
+        public async Task<bool> GatherRuleExistsAsync(string partitionKey, string ruleId)
+        {
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.GatherRules);
+                await tableClient.GetEntityAsync<TableEntity>(partitionKey, ruleId, select: new[] { "PartitionKey" });
+                return true;
+            }
+            catch (Azure.RequestFailedException ex) when (ex.Status == 404)
+            {
+                return false;
+            }
+        }
+
         private AnalyzeRule MapToAnalyzeRule(TableEntity entity)
         {
             return new AnalyzeRule

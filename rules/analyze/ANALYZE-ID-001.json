@@ -6,7 +6,7 @@
   "severity": "warning",
   "category": "identity",
   "isCommunity": true,
-  "enabled": true,
+  "enabled": false,
   "baseConfidence": 75,
   "conditions": [
     {
@@ -61,5 +61,15 @@
       ]
     }
   ],
-  "tags": ["identity", "certificates", "machine-store", "subject-check"]
+  "tags": ["identity", "certificates", "machine-store", "subject-check"],
+  "templateVariables": [
+    {
+      "name": "cert_subject",
+      "label": "Certificate Subject",
+      "description": "The expected certificate subject in your environment (e.g., 'CN=Contoso Root CA'). Case-insensitive substring match against the local machine certificate store.",
+      "conditionIndex": 1,
+      "field": "value",
+      "placeholder": "CN=YOUR-CERTIFICATE-SUBJECT"
+    }
+  ]
 }

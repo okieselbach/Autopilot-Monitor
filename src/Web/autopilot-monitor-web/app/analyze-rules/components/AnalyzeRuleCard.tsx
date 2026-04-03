@@ -30,6 +30,10 @@ interface AnalyzeRuleCardProps {
   onSetJsonText: (text: string) => void;
   onSetJsonError: (error: string | null) => void;
   readOnly?: boolean;
+  onConfigureTemplate?: (rule: AnalyzeRule) => void;
+  templateCopyExists?: boolean;
+  templateCopyRuleId?: string;
+  onScrollToCopy?: (ruleId: string) => void;
 }
 
 export default function AnalyzeRuleCard({
@@ -40,11 +44,14 @@ export default function AnalyzeRuleCard({
   onDelete, onExport,
   onSetJsonModeEdit, onSetJsonText, onSetJsonError,
   readOnly = false,
+  onConfigureTemplate, templateCopyExists, templateCopyRuleId, onScrollToCopy,
 }: AnalyzeRuleCardProps) {
   const [showJson, setShowJson] = useState(false);
   const sevColor = getSeverityColor(rule.severity);
   const catColor = getCategoryColor(rule.category);
   const canEdit = !rule.isBuiltIn && !rule.isCommunity;
+  const isTemplate = (rule.templateVariables?.length ?? 0) > 0;
+  const isDerived = !!rule.derivedFromTemplateRuleId;
 
   return (
     <div
@@ -59,6 +66,14 @@ export default function AnalyzeRuleCard({
             <span className={`inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full ${rule.enabled ? "bg-green-500" : "bg-gray-300"}`} title={rule.enabled ? "Enabled" : "Disabled"}>
               <span className={`inline-block h-4 w-4 transform rounded-full bg-white ${rule.enabled ? "translate-x-6" : "translate-x-1"}`} />
             </span>
+          ) : isTemplate && templateCopyExists ? (
+            <button onClick={(e) => { e.stopPropagation(); if (templateCopyRuleId && onScrollToCopy) onScrollToCopy(templateCopyRuleId); }} className="relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full bg-gray-300 cursor-pointer" title="Custom copy already exists - click to view">
+              <span className="inline-block h-4 w-4 transform rounded-full bg-white translate-x-1" />
+            </button>
+          ) : isTemplate && !rule.enabled ? (
+            <button onClick={(e) => { e.stopPropagation(); onConfigureTemplate?.(rule); }} className="relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full bg-amber-400 hover:bg-amber-500 cursor-pointer transition-colors" title="Configure and enable this template rule">
+              <span className="inline-block h-4 w-4 transform rounded-full bg-white translate-x-1" />
+            </button>
           ) : (
             <button onClick={(e) => { e.stopPropagation(); onToggleEnabled(rule); }} disabled={togglingRuleId === rule.ruleId} className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${togglingRuleId === rule.ruleId ? "opacity-50 cursor-not-allowed" : "cursor-pointer"} ${rule.enabled ? "bg-green-500" : "bg-gray-300"}`} title={rule.enabled ? "Disable rule" : "Enable rule"}>
               <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${rule.enabled ? "translate-x-6" : "translate-x-1"}`} />
@@ -78,6 +93,16 @@ export default function AnalyzeRuleCard({
           <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium flex-shrink-0 ${rule.isBuiltIn ? "bg-blue-50 text-blue-600 border border-blue-200" : rule.isCommunity ? "bg-green-100 text-green-700" : "bg-purple-50 text-purple-600 border border-purple-200"}`}>
             {rule.isBuiltIn ? "Built-in" : rule.isCommunity ? "Community" : "Custom"}
           </span>
+          {isTemplate && (
+            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium flex-shrink-0 bg-amber-100 text-amber-800 border border-amber-200">
+              Requires Setup
+            </span>
+          )}
+          {isDerived && (
+            <span className="text-xs text-gray-400 flex-shrink-0 hidden lg:inline" title={`Based on template ${rule.derivedFromTemplateRuleId}`}>
+              Based on {rule.derivedFromTemplateRuleId}
+            </span>
+          )}
           <span className="text-xs text-gray-500 flex-shrink-0 hidden md:inline" title="Confidence Threshold">Threshold: {rule.confidenceThreshold}%</span>
           <svg className={`w-5 h-5 text-gray-400 transition-transform flex-shrink-0 ${isExpanded ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
         </div>

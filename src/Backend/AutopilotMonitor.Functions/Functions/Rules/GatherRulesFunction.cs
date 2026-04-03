@@ -64,11 +64,20 @@ namespace AutopilotMonitor.Functions.Functions.Rules
                 return badRequest;
             }
 
-            var success = await _ruleService.CreateRuleAsync(tenantId, rule);
+            try
+            {
+                var success = await _ruleService.CreateRuleAsync(tenantId, rule);
 
-            var response = req.CreateResponse(success ? HttpStatusCode.Created : HttpStatusCode.InternalServerError);
-            await response.WriteAsJsonAsync(new { success, message = success ? "Rule created" : "Failed to create rule" });
-            return response;
+                var response = req.CreateResponse(success ? HttpStatusCode.Created : HttpStatusCode.InternalServerError);
+                await response.WriteAsJsonAsync(new { success, message = success ? "Rule created" : "Failed to create rule" });
+                return response;
+            }
+            catch (InvalidOperationException ex)
+            {
+                var conflict = req.CreateResponse(HttpStatusCode.Conflict);
+                await conflict.WriteAsJsonAsync(new { success = false, message = ex.Message });
+                return conflict;
+            }
         }
 
         [Function("UpdateGatherRule")]

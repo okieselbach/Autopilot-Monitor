@@ -317,6 +317,52 @@ export function SectionAnalyzeRules() {
 
       </div>
 
+      {/* ── Template Rules ── */}
+      <h3 className="text-xl font-semibold text-gray-900 pt-4 border-t border-gray-200">Template Rules</h3>
+
+      <p className="text-gray-700 text-sm">
+        Some community rules contain <strong>placeholder values</strong> that must be customized for your environment before
+        they can work correctly. These rules are marked with a <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800 border border-amber-200">Requires Setup</span> badge.
+      </p>
+
+      <div className="space-y-4">
+        <div className="border border-amber-200 rounded-lg overflow-hidden">
+          <div className="px-4 py-2.5 bg-amber-50 border-b border-amber-200">
+            <p className="font-semibold text-sm text-amber-900">How template rules work</p>
+          </div>
+          <div className="px-4 py-4 space-y-3 text-sm text-gray-700">
+            <ol className="list-decimal list-inside space-y-2">
+              <li>When you click the <strong>enable toggle</strong> on a template rule, a configuration dialog opens instead of directly enabling the rule.</li>
+              <li>The dialog highlights the fields that need your environment-specific values (e.g., a certificate subject name).</li>
+              <li>After you enter your values and click <strong>Save &amp; Enable</strong>, a <strong>custom copy</strong> of the rule is created for your tenant with your values applied.</li>
+              <li>The original template rule remains disabled. Your custom copy is fully editable — you can adjust conditions, confidence, or other settings as needed.</li>
+            </ol>
+            <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-900">
+              <strong>Note:</strong> If you delete the custom copy, the template rule becomes available again and you can re-configure it.
+              Centrally updated templates (via reseed) do not affect your existing custom copies.
+            </div>
+          </div>
+        </div>
+
+        <div className="border border-gray-200 rounded-lg overflow-hidden">
+          <div className="px-4 py-2.5 bg-indigo-50 border-b border-indigo-200">
+            <p className="font-semibold text-sm text-indigo-900">Example — No Machine Certificates Found</p>
+            <p className="text-xs text-indigo-700 mt-0.5">Template rule that checks for a specific certificate subject in the local machine store</p>
+          </div>
+          <div className="px-4 py-4 text-xs space-y-2">
+            <p className="text-gray-600">This rule ships with the placeholder <code className="bg-gray-100 px-1 rounded">CN=YOUR-CERTIFICATE-SUBJECT</code>.
+            When you enable it, you are prompted to enter your actual certificate subject (e.g., <code className="bg-gray-100 px-1 rounded">CN=Contoso Root CA</code>).
+            The system creates a custom rule with your value automatically substituted into the condition.</p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2">
+              <div><p className="text-gray-500">Rule ID</p><p className="font-medium">ANALYZE-ID-001</p></div>
+              <div><p className="text-gray-500">Variable</p><p className="font-medium">Certificate Subject</p></div>
+              <div><p className="text-gray-500">Placeholder</p><p className="font-medium font-mono">CN=YOUR-CERTIFICATE-SUBJECT</p></div>
+              <div><p className="text-gray-500">Custom Copy ID</p><p className="font-medium font-mono">ANALYZE-ID-001-CUSTOM</p></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* ── JSON editing tip ── */}
       <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-700">
         <p className="font-semibold text-gray-900 mb-1">JSON editing</p>

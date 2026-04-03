@@ -158,6 +158,7 @@ public static class EndpointAccessPolicyCatalog
         new("PUT",    "rules/gather/{ruleId}",     EndpointPolicy.TenantAdminOrGA),
         new("DELETE", "rules/gather/{ruleId}",     EndpointPolicy.TenantAdminOrGA),
         new("POST",   "rules/analyze",             EndpointPolicy.TenantAdminOrGA),
+        new("POST",   "rules/analyze/{ruleId}/create-from-template", EndpointPolicy.TenantAdminOrGA),
         new("PUT",    "rules/analyze/{ruleId}",    EndpointPolicy.TenantAdminOrGA),
         new("DELETE", "rules/analyze/{ruleId}",    EndpointPolicy.TenantAdminOrGA),
         new("PUT",    "rules/ime-log-patterns/{patternId}", EndpointPolicy.TenantAdminOrGA),

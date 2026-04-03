@@ -46,6 +46,66 @@ public class BuiltInRulesTests
     }
 
     [Fact]
+    public void BuiltInAnalyzeRules_TemplateVariablesAreValid()
+    {
+        var rules = BuiltInAnalyzeRules.GetAll();
+        var templateRules = rules.Where(r => r.TemplateVariables != null && r.TemplateVariables.Count > 0).ToList();
+
+        foreach (var rule in templateRules)
+        {
+            // Template rules should be disabled by default (they need configuration first)
+            Assert.False(rule.Enabled, $"Template rule {rule.RuleId} should be disabled by default");
+
+            foreach (var tv in rule.TemplateVariables)
+            {
+                Assert.False(string.IsNullOrEmpty(tv.Name), $"Rule {rule.RuleId}: TemplateVariable is missing Name");
+                Assert.False(string.IsNullOrEmpty(tv.Label), $"Rule {rule.RuleId}: TemplateVariable '{tv.Name}' is missing Label");
+                Assert.False(string.IsNullOrEmpty(tv.Placeholder), $"Rule {rule.RuleId}: TemplateVariable '{tv.Name}' is missing Placeholder");
+
+                // conditionIndex must reference a valid condition
+                Assert.True(tv.ConditionIndex >= 0 && tv.ConditionIndex < rule.Conditions.Count,
+                    $"Rule {rule.RuleId}: TemplateVariable '{tv.Name}' has conditionIndex {tv.ConditionIndex} but rule only has {rule.Conditions.Count} conditions");
+
+                // Field must be one of the known fields
+                var validFields = new HashSet<string> { "value", "eventType", "dataField", "eventAFilterValue" };
+                Assert.True(validFields.Contains(tv.Field),
+                    $"Rule {rule.RuleId}: TemplateVariable '{tv.Name}' has unknown field '{tv.Field}'");
+
+                // The placeholder should match the current value in the condition
+                var condition = rule.Conditions[tv.ConditionIndex];
+                var actualValue = tv.Field switch
+                {
+                    "value" => condition.Value,
+                    "eventType" => condition.EventType,
+                    "dataField" => condition.DataField,
+                    "eventAFilterValue" => condition.EventAFilterValue,
+                    _ => null
+                };
+                Assert.Equal(tv.Placeholder, actualValue);
+            }
+        }
+    }
+
+    [Fact]
+    public void BuiltInAnalyzeRules_ANALYZE_ID_001_IsTemplate()
+    {
+        var rules = BuiltInAnalyzeRules.GetAll();
+        var rule = rules.FirstOrDefault(r => r.RuleId == "ANALYZE-ID-001");
+
+        Assert.NotNull(rule);
+        Assert.False(rule.Enabled, "ANALYZE-ID-001 should be disabled (it's a template)");
+        Assert.NotNull(rule.TemplateVariables);
+        Assert.Single(rule.TemplateVariables);
+
+        var tv = rule.TemplateVariables[0];
+        Assert.Equal("cert_subject", tv.Name);
+        Assert.Equal("Certificate Subject", tv.Label);
+        Assert.Equal(1, tv.ConditionIndex);
+        Assert.Equal("value", tv.Field);
+        Assert.Equal("CN=YOUR-CERTIFICATE-SUBJECT", tv.Placeholder);
+    }
+
+    [Fact]
     public void BuiltInImeLogPatterns_LoadsFromEmbeddedResource()
     {
         var patterns = BuiltInImeLogPatterns.GetAll();

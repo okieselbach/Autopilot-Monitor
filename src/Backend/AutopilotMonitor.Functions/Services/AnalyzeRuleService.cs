@@ -1,6 +1,7 @@
 using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Extensions.Logging;
+using Newtonsoft.Json;
 
 namespace AutopilotMonitor.Functions.Services
 {
@@ -66,10 +67,18 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
-        /// Creates a custom analyze rule for a tenant
+        /// Creates a custom analyze rule for a tenant.
+        /// Throws if a rule with the same ID already exists (global or tenant partition).
+        /// Uses point queries (O(1)) instead of loading all rules.
         /// </summary>
         public async Task<bool> CreateRuleAsync(string tenantId, AnalyzeRule rule)
         {
+            if (await _ruleRepo.AnalyzeRuleExistsAsync("global", rule.RuleId)
+                || await _ruleRepo.AnalyzeRuleExistsAsync(tenantId, rule.RuleId))
+            {
+                throw new InvalidOperationException($"A rule with ID '{rule.RuleId}' already exists.");
+            }
+
             rule.IsBuiltIn = false;
             rule.IsCommunity = false;
             rule.CreatedAt = DateTime.UtcNow;
@@ -91,6 +100,94 @@ namespace AutopilotMonitor.Functions.Services
 
             rule.UpdatedAt = DateTime.UtcNow;
             return await _ruleRepo.StoreAnalyzeRuleAsync(rule, tenantId);
+        }
+
+        /// <summary>
+        /// Creates a tenant custom rule from a template rule, substituting template variables
+        /// with tenant-specific values. The original template remains disabled for the tenant.
+        /// </summary>
+        public async Task<AnalyzeRule> CreateFromTemplateAsync(
+            string tenantId,
+            string templateRuleId,
+            Dictionary<string, string> variableValues)
+        {
+            var allRules = await GetAllRulesForTenantAsync(tenantId);
+            var template = allRules.FirstOrDefault(r => r.RuleId == templateRuleId);
+
+            if (template == null)
+                throw new InvalidOperationException($"Rule '{templateRuleId}' not found.");
+
+            if (template.TemplateVariables == null || template.TemplateVariables.Count == 0)
+                throw new InvalidOperationException($"Rule '{templateRuleId}' is not a template rule.");
+
+            // Check if a custom copy already exists for this tenant (by lineage)
+            var existingCopy = allRules.FirstOrDefault(r => r.DerivedFromTemplateRuleId == templateRuleId);
+            if (existingCopy != null)
+                throw new InvalidOperationException($"A custom copy of '{templateRuleId}' already exists: '{existingCopy.RuleId}'.");
+
+            // Check for RuleId collision via point query (e.g., someone manually created a rule with the same ID)
+            var targetRuleId = $"{templateRuleId}-CUSTOM";
+            if (await _ruleRepo.AnalyzeRuleExistsAsync("global", targetRuleId)
+                || await _ruleRepo.AnalyzeRuleExistsAsync(tenantId, targetRuleId))
+                throw new InvalidOperationException($"A rule with ID '{targetRuleId}' already exists. Delete or rename it first.");
+
+            // Validate all template variables have values
+            foreach (var tv in template.TemplateVariables)
+            {
+                if (!variableValues.TryGetValue(tv.Name, out var val) || string.IsNullOrWhiteSpace(val))
+                    throw new ArgumentException($"Missing required value for template variable '{tv.Name}'.");
+            }
+
+            // Deep-clone the template
+            var customRule = JsonConvert.DeserializeObject<AnalyzeRule>(
+                JsonConvert.SerializeObject(template))
+                ?? throw new InvalidOperationException("Failed to clone template rule.");
+
+            customRule.RuleId = $"{templateRuleId}-CUSTOM";
+            customRule.IsBuiltIn = false;
+            customRule.IsCommunity = false;
+            customRule.Enabled = true;
+            customRule.DerivedFromTemplateRuleId = templateRuleId;
+            customRule.TemplateVariables = new List<TemplateVariable>();
+            customRule.CreatedAt = DateTime.UtcNow;
+            customRule.UpdatedAt = DateTime.UtcNow;
+
+            // Substitute variable values into conditions
+            foreach (var tv in template.TemplateVariables)
+            {
+                var userValue = variableValues[tv.Name];
+
+                if (tv.ConditionIndex < 0 || tv.ConditionIndex >= customRule.Conditions.Count)
+                {
+                    _logger.LogWarning("Template variable '{Name}' has invalid conditionIndex {Index}", tv.Name, tv.ConditionIndex);
+                    continue;
+                }
+
+                var condition = customRule.Conditions[tv.ConditionIndex];
+                switch (tv.Field?.ToLowerInvariant())
+                {
+                    case "value": condition.Value = userValue; break;
+                    case "eventtype": condition.EventType = userValue; break;
+                    case "datafield": condition.DataField = userValue; break;
+                    case "eventafiltervalue": condition.EventAFilterValue = userValue; break;
+                    default:
+                        _logger.LogWarning("Template variable '{Name}' has unknown field '{Field}'", tv.Name, tv.Field);
+                        break;
+                }
+            }
+
+            // Store the custom rule in the tenant partition
+            var success = await _ruleRepo.StoreAnalyzeRuleAsync(customRule, tenantId);
+            if (!success)
+                throw new InvalidOperationException("Failed to store custom rule.");
+
+            // Ensure the template rule is disabled for this tenant
+            await _ruleRepo.StoreRuleStateAsync(tenantId, templateRuleId, false);
+
+            _logger.LogInformation("Created custom rule '{CustomRuleId}' from template '{TemplateRuleId}' for tenant '{TenantId}'",
+                customRule.RuleId, templateRuleId, tenantId);
+
+            return customRule;
         }
 
         /// <summary>

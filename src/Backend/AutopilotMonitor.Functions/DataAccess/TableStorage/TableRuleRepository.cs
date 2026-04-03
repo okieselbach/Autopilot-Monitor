@@ -57,6 +57,12 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
         public Task<bool> DeleteAnalyzeRuleAsync(string tenantId, string ruleId)
             => _storage.DeleteAnalyzeRuleAsync(tenantId, ruleId);
 
+        public Task<bool> AnalyzeRuleExistsAsync(string partitionKey, string ruleId)
+            => _storage.AnalyzeRuleExistsAsync(partitionKey, ruleId);
+
+        public Task<bool> GatherRuleExistsAsync(string partitionKey, string ruleId)
+            => _storage.GatherRuleExistsAsync(partitionKey, ruleId);
+
         public Task<bool> StoreImeLogPatternAsync(ImeLogPattern pattern, string tenantId = "global")
             => _storage.StoreImeLogPatternAsync(pattern, tenantId);
 

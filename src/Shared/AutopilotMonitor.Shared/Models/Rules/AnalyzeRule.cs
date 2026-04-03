@@ -112,6 +112,21 @@ namespace AutopilotMonitor.Shared.Models
         /// </summary>
         public List<RelatedDoc> RelatedDocs { get; set; } = new List<RelatedDoc>();
 
+        // ===== TEMPLATE =====
+
+        /// <summary>
+        /// Template variables that must be customized per-tenant before the rule can be used.
+        /// If non-empty, the rule is a template: enabling it creates a tenant custom copy
+        /// with the user's values substituted into the conditions.
+        /// </summary>
+        public List<TemplateVariable> TemplateVariables { get; set; } = new List<TemplateVariable>();
+
+        /// <summary>
+        /// If this custom rule was created from a template, stores the original template rule's ID.
+        /// Used to track lineage and prevent duplicate copies.
+        /// </summary>
+        public string? DerivedFromTemplateRuleId { get; set; }
+
         // ===== METADATA =====
 
         /// <summary>
@@ -267,5 +282,47 @@ namespace AutopilotMonitor.Shared.Models
         /// URL to the documentation
         /// </summary>
         public string Url { get; set; } = default!;
+    }
+
+    /// <summary>
+    /// Defines a template variable in a rule condition that must be customized per-tenant.
+    /// Points at a specific condition field (by index) and describes what value the user needs to provide.
+    /// </summary>
+    public class TemplateVariable
+    {
+        /// <summary>
+        /// Machine name for this variable (e.g., "cert_subject")
+        /// </summary>
+        public string Name { get; set; } = default!;
+
+        /// <summary>
+        /// Human-readable label shown in the configuration UI (e.g., "Certificate Subject")
+        /// </summary>
+        public string Label { get; set; } = default!;
+
+        /// <summary>
+        /// Help text explaining what value the user should provide
+        /// </summary>
+        public string? Description { get; set; }
+
+        /// <summary>
+        /// Zero-based index into the rule's Conditions array where this variable lives
+        /// </summary>
+        public int ConditionIndex { get; set; }
+
+        /// <summary>
+        /// Which field on the condition to customize: "value", "eventType", "dataField", "eventAFilterValue"
+        /// </summary>
+        public string Field { get; set; } = "value";
+
+        /// <summary>
+        /// The placeholder value that ships with the template (e.g., "CN=YOUR-CERTIFICATE-SUBJECT")
+        /// </summary>
+        public string Placeholder { get; set; } = default!;
+
+        /// <summary>
+        /// Optional regex pattern to validate user input
+        /// </summary>
+        public string? Validation { get; set; }
     }
 }

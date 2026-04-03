@@ -29,6 +29,19 @@ namespace AutopilotMonitor.Shared.DataAccess
         Task<List<AnalyzeRule>> GetAnalyzeRulesAsync(string partitionKey);
         Task<bool> DeleteAnalyzeRuleAsync(string tenantId, string ruleId);
 
+        // --- Rule Existence Checks (Point Queries) ---
+        /// <summary>
+        /// Checks if an analyze rule with the given ID exists in the specified partition.
+        /// Uses a point query (O(1)) instead of loading the full partition.
+        /// </summary>
+        Task<bool> AnalyzeRuleExistsAsync(string partitionKey, string ruleId);
+
+        /// <summary>
+        /// Checks if a gather rule with the given ID exists in the specified partition.
+        /// Uses a point query (O(1)) instead of loading the full partition.
+        /// </summary>
+        Task<bool> GatherRuleExistsAsync(string partitionKey, string ruleId);
+
         // --- IME Log Patterns ---
         Task<bool> StoreImeLogPatternAsync(ImeLogPattern pattern, string tenantId = "global");
         Task<List<ImeLogPattern>> GetImeLogPatternsAsync(string partitionKey);

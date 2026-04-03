@@ -10,9 +10,14 @@ interface AnalyzeRuleFormFieldsProps {
   form: RuleForm;
   setForm: (f: RuleForm) => void;
   showRuleId: boolean;
+  existingRuleIds?: string[];
 }
 
-export default function AnalyzeRuleFormFields({ form, setForm, showRuleId }: AnalyzeRuleFormFieldsProps) {
+export default function AnalyzeRuleFormFields({ form, setForm, showRuleId, existingRuleIds }: AnalyzeRuleFormFieldsProps) {
+  const ruleIdTrimmed = form.ruleId.trim().toLowerCase();
+  const isDuplicate = showRuleId && existingRuleIds && ruleIdTrimmed.length > 0
+    && existingRuleIds.some(id => id.toLowerCase() === ruleIdTrimmed);
+
   return (
     <div className="space-y-5">
       {/* Basic Fields */}
@@ -20,7 +25,10 @@ export default function AnalyzeRuleFormFields({ form, setForm, showRuleId }: Ana
         {showRuleId && (
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Rule ID <span className="text-red-500">*</span></label>
-            <input type="text" value={form.ruleId} onChange={(e) => setForm({ ...form, ruleId: e.target.value })} placeholder="e.g., ANALYZE-CUSTOM-001" autoComplete="off" className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" />
+            <input type="text" value={form.ruleId} onChange={(e) => setForm({ ...form, ruleId: e.target.value })} placeholder="e.g., ANALYZE-CUSTOM-001" autoComplete="off" className={`w-full px-4 py-2 border rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 ${isDuplicate ? "border-red-400 focus:ring-red-300 focus:border-red-400" : "border-gray-300 focus:ring-indigo-500 focus:border-indigo-500"}`} />
+            {isDuplicate && (
+              <p className="mt-1 text-xs text-red-600">A rule with this ID already exists. Please choose a unique Rule ID.</p>
+            )}
           </div>
         )}
         <div>

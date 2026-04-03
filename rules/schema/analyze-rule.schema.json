@@ -122,6 +122,16 @@
           "description": "Tags for filtering and categorization.",
           "items": { "type": "string" },
           "default": []
+        },
+        "templateVariables": {
+          "type": "array",
+          "description": "Template variables that must be customized per-tenant. If non-empty, the rule is a template: enabling it creates a tenant custom copy with the user's values substituted.",
+          "items": { "$ref": "#/$defs/templateVariable" },
+          "default": []
+        },
+        "derivedFromTemplateRuleId": {
+          "type": "string",
+          "description": "If this custom rule was created from a template, the original template rule's ID. Used to track lineage and prevent duplicate copies."
         }
       },
       "required": ["ruleId", "title", "severity", "category", "conditions", "explanation"],
@@ -246,6 +256,46 @@
         }
       },
       "required": ["title", "url"],
+      "additionalProperties": false
+    },
+    "templateVariable": {
+      "type": "object",
+      "description": "A variable in a rule condition that must be customized per-tenant before the rule can be used.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Machine name for this variable (e.g., \"cert_subject\")."
+        },
+        "label": {
+          "type": "string",
+          "description": "Human-readable label shown in the configuration UI."
+        },
+        "description": {
+          "type": "string",
+          "description": "Help text explaining what value is expected."
+        },
+        "conditionIndex": {
+          "type": "integer",
+          "description": "Zero-based index into the conditions array where this variable lives.",
+          "minimum": 0
+        },
+        "field": {
+          "type": "string",
+          "description": "Which field on the condition to customize.",
+          "enum": ["value", "eventType", "dataField", "eventAFilterValue"],
+          "default": "value"
+        },
+        "placeholder": {
+          "type": "string",
+          "description": "The placeholder value that ships with the template (e.g., \"CN=YOUR-CERTIFICATE-SUBJECT\")."
+        },
+        "validation": {
+          "type": "string",
+          "description": "Optional regex pattern to validate user input.",
+          "format": "regex"
+        }
+      },
+      "required": ["name", "label", "conditionIndex", "field", "placeholder"],
       "additionalProperties": false
     }
   }
