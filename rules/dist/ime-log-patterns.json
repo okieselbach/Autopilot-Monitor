@@ -551,7 +551,7 @@
     {
       "patternId": "PS-AGENT-ERROR",
       "category": "always",
-      "pattern": "error from script =(?<output>.*)",
+      "pattern": "error from script =(?<output>[\\s\\S]*)",
       "action": "scriptOutput",
       "parameters": {
         "scriptType": "platform",
@@ -574,7 +574,7 @@
     {
       "patternId": "PS-AGENT-OUTPUT",
       "category": "always",
-      "pattern": "write output done\\. output = (?<output>.*), error = (?<error>.*)",
+      "pattern": "write output done\\. output = (?<output>[\\s\\S]*?), error = (?<error>[\\s\\S]*)",
       "action": "scriptOutput",
       "parameters": {
         "scriptType": "platform"
