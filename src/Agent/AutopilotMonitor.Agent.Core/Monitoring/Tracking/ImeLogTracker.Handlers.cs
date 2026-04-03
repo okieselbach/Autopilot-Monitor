@@ -463,14 +463,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             _packageStates.SetCurrent(newId);
         }
 
-        private void UpdateStateWithCallback(string id, AppInstallationState newState, int? progressPercent = null, string errorPatternId = null, string errorDetail = null)
+        private void UpdateStateWithCallback(string id, AppInstallationState newState, int? progressPercent = null, string errorPatternId = null, string errorDetail = null, string errorCode = null)
         {
             var pkg = _packageStates.GetPackage(id);
             if (pkg == null) return;
 
             // Set error context before state change so it's available in ToEventData()
             if (newState == AppInstallationState.Error && !string.IsNullOrEmpty(errorPatternId))
-                pkg.SetErrorContext(errorPatternId, errorDetail);
+                pkg.SetErrorContext(errorPatternId, errorDetail, errorCode);
 
             var oldState = pkg.InstallationState;
             var changed = _packageStates.UpdateState(id, newState, progressPercent);

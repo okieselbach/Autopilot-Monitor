@@ -249,16 +249,23 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                         break;
 
                     case "updatestateerror":
+                        // Extract structured error code from named capture groups (exitCode, hresult, errorCode)
+                        var extractedErrorCode = match.Groups["exitCode"]?.Value;
+                        if (string.IsNullOrEmpty(extractedErrorCode))
+                            extractedErrorCode = match.Groups["hresult"]?.Value;
+                        if (string.IsNullOrEmpty(extractedErrorCode))
+                            extractedErrorCode = match.Groups["errorCode"]?.Value;
+
                         if (pattern.Parameters.ContainsKey("checkTo") && pattern.Parameters["checkTo"] == "true")
                         {
                             // Only apply error if the "to" value is "Error"
                             var toValue = match.Groups["to"]?.Value;
                             if (string.Equals(toValue, "Error", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(id))
-                                UpdateStateWithCallback(id, AppInstallationState.Error, errorPatternId: pattern.PatternId, errorDetail: message);
+                                UpdateStateWithCallback(id, AppInstallationState.Error, errorPatternId: pattern.PatternId, errorDetail: message, errorCode: extractedErrorCode);
                         }
                         else if (!string.IsNullOrEmpty(id))
                         {
-                            UpdateStateWithCallback(id, AppInstallationState.Error, errorPatternId: pattern.PatternId, errorDetail: message);
+                            UpdateStateWithCallback(id, AppInstallationState.Error, errorPatternId: pattern.PatternId, errorDetail: message, errorCode: extractedErrorCode);
                         }
                         break;
 

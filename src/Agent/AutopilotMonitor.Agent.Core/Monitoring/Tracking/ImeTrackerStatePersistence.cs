@@ -123,6 +123,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         public long BytesDownloaded { get; set; }
         public long BytesTotal { get; set; }
 
+        // Error context
+        public string ErrorPatternId { get; set; }
+        public string ErrorDetail { get; set; }
+        public string ErrorCode { get; set; }
+
         // Delivery Optimization telemetry
         public long DoFileSize { get; set; }
         public long DoTotalBytesDownloaded { get; set; }

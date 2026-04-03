@@ -90,6 +90,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         public long BytesTotal { get; private set; } = 0;
         public string ErrorPatternId { get; private set; }
         public string ErrorDetail { get; private set; }
+        public string ErrorCode { get; private set; }
 
         // Delivery Optimization telemetry (populated from [DO TEL] log entries)
         public long DoFileSize { get; private set; }
@@ -136,7 +137,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             HashSet<string> dependsOn,
             AppInstallationState installationState, bool downloadingOrInstallingSeen,
             int? progressPercent, long bytesDownloaded, long bytesTotal,
-            string errorPatternId = null, string errorDetail = null,
+            string errorPatternId = null, string errorDetail = null, string errorCode = null,
             long doFileSize = 0, long doTotalBytesDownloaded = 0,
             long doBytesFromPeers = 0, int doPercentPeerCaching = 0,
             long doBytesFromLanPeers = 0, long doBytesFromGroupPeers = 0,
@@ -158,6 +159,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 BytesTotal = bytesTotal,
                 ErrorPatternId = errorPatternId,
                 ErrorDetail = errorDetail,
+                ErrorCode = errorCode,
                 InstallationStateLastChangedTicks = Stopwatch.GetTimestamp(),
                 DoFileSize = doFileSize,
                 DoTotalBytesDownloaded = doTotalBytesDownloaded,
@@ -234,10 +236,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         /// <summary>
         /// Sets the error context for the app (called when an error pattern is matched).
         /// </summary>
-        public void SetErrorContext(string patternId, string detail)
+        public void SetErrorContext(string patternId, string detail, string errorCode = null)
         {
             ErrorPatternId = patternId;
             ErrorDetail = detail;
+            if (!string.IsNullOrEmpty(errorCode))
+                ErrorCode = errorCode;
         }
 
         /// <summary>
@@ -415,6 +419,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 data["errorPatternId"] = ErrorPatternId;
             if (!string.IsNullOrEmpty(ErrorDetail))
                 data["errorDetail"] = ErrorDetail;
+            if (!string.IsNullOrEmpty(ErrorCode))
+                data["errorCode"] = ErrorCode;
 
             if (HasDoTelemetry)
             {
