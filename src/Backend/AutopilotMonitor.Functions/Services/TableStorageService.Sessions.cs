@@ -1511,11 +1511,21 @@ namespace AutopilotMonitor.Functions.Services
         /// </summary>
         private EnrollmentEvent MapToEnrollmentEvent(TableEntity entity)
         {
+            // Events table uses composite PartitionKey: "{TenantId}_{SessionId}".
+            // Prefer the stored TenantId property; fall back to extracting from the composite key.
+            var partitionKey = entity.PartitionKey ?? string.Empty;
+            var tenantId = entity.GetString("TenantId");
+            if (string.IsNullOrEmpty(tenantId) && partitionKey.Contains('_'))
+            {
+                var separatorIndex = partitionKey.IndexOf('_');
+                tenantId = partitionKey.Substring(0, separatorIndex);
+            }
+
             return new EnrollmentEvent
             {
                 EventId = entity.GetString("EventId") ?? string.Empty,
                 SessionId = entity.GetString("SessionId") ?? string.Empty,
-                TenantId = entity.PartitionKey,
+                TenantId = tenantId ?? partitionKey,
                 Timestamp = DateTime.SpecifyKind(
                     entity.GetDateTimeOffset("Timestamp")?.UtcDateTime
                     ?? entity.GetDateTime("Timestamp")
