@@ -129,5 +129,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         public DateTime? ImePatternSeenUtc { get; set; }
         public DateTime? DeviceSetupProvisioningCompleteUtc { get; set; }
         public List<string> SignalsSeen { get; set; } = new List<string>();
+
+        // ESP provisioning settle wait state (crash recovery)
+        public bool IsWaitingForEspSettle { get; set; }
+        public DateTime? WaitingForEspSettleStartedUtc { get; set; }
     }
 }

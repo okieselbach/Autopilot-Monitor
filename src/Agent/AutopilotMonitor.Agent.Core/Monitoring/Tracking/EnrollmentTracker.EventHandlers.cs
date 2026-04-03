@@ -643,6 +643,61 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 }
             }
 
+            // ESP provisioning settle check: if ESP categories are still resolving in the registry,
+            // wait up to 30s for Windows to finalize the outcomes before completing.
+            // This catches cases where the agent started late and the ESP status hasn't settled yet.
+            if (_espAndHelloTracker != null)
+            {
+                var snapshot = _espAndHelloTracker.GetProvisioningSnapshot();
+                if (snapshot != null && snapshot.CategoriesSeen > 0 && !snapshot.AllResolved)
+                {
+                    var unresolvedCategories = snapshot.CategoryOutcomes
+                        .Where(kvp => kvp.Value == "in_progress")
+                        .Select(kvp => kvp.Key)
+                        .ToList();
+
+                    _logger.Info($"EnrollmentTracker: ESP provisioning categories not yet resolved " +
+                        $"({string.Join(", ", unresolvedCategories)}) — waiting up to {EspSettleTimeoutSeconds}s for settlement");
+
+                    EmitImeTrackerEvent(new EnrollmentEvent
+                    {
+                        SessionId = _sessionId,
+                        TenantId = _tenantId,
+                        EventType = "esp_provisioning_settle_started",
+                        Severity = EventSeverity.Info,
+                        Source = "EnrollmentTracker",
+                        Phase = EnrollmentPhase.Unknown,
+                        Message = $"ESP provisioning settle wait started — {unresolvedCategories.Count} category(ies) unresolved: {string.Join(", ", unresolvedCategories)}",
+                        Data = new Dictionary<string, object>
+                        {
+                            { "unresolvedCategories", unresolvedCategories },
+                            { "settleTimeoutSeconds", EspSettleTimeoutSeconds },
+                            { "categoriesSeen", snapshot.CategoriesSeen },
+                            { "categoriesResolved", snapshot.CategoriesResolved }
+                        },
+                        ImmediateUpload = true
+                    });
+
+                    lock (_stateLock)
+                    {
+                        _isWaitingForEspSettle = true;
+                        _stateData.IsWaitingForEspSettle = true;
+                        _stateData.WaitingForEspSettleStartedUtc = DateTime.UtcNow;
+                        _stateDirty = true;
+                    }
+                    _statePersistence.Save(_stateData);
+
+                    _waitingForEspSettleTimer?.Dispose();
+                    _waitingForEspSettleTimer = new Timer(
+                        OnEspSettleTimerExpired,
+                        null,
+                        TimeSpan.FromSeconds(EspSettleTimeoutSeconds),
+                        TimeSpan.FromMilliseconds(-1));
+
+                    return;
+                }
+            }
+
             TryEmitEnrollmentComplete("ime_pattern");
         }
 

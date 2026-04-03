@@ -937,5 +937,74 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             public static ProvisioningResult Failure(string failureType) => new ProvisioningResult(true, failureType);
         }
 
+        // ===== Public Snapshot API =====
+
+        /// <summary>
+        /// Returns a thread-safe snapshot of the current ESP provisioning category status.
+        /// All data is deep-copied under _stateLock so the caller can use it freely.
+        /// Returns null if no provisioning data has been observed yet.
+        /// </summary>
+        public EspProvisioningSnapshot GetProvisioningSnapshot()
+        {
+            lock (_stateLock)
+            {
+                if (_provisioningCategorySeen == null || _provisioningCategorySeen.Count == 0)
+                    return null;
+
+                var outcomes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var cat in _provisioningCategorySeen)
+                {
+                    var label = cat.Replace("Category.Status", "");
+                    if (_lastCategorySucceeded.TryGetValue(cat, out var succeeded))
+                    {
+                        outcomes[label] = succeeded == true ? "success"
+                                        : succeeded == false ? "failed"
+                                        : "in_progress";
+                    }
+                    else
+                    {
+                        outcomes[label] = "in_progress";
+                    }
+                }
+
+                var subcats = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+                foreach (var kvp in _lastSubcategoryStates)
+                {
+                    var label = kvp.Key.Replace("Category.Status", "");
+                    subcats[label] = new Dictionary<string, string>(kvp.Value, StringComparer.OrdinalIgnoreCase);
+                }
+
+                return new EspProvisioningSnapshot
+                {
+                    CategoryOutcomes = outcomes,
+                    SubcategoryStates = subcats,
+                    CategoriesSeen = _provisioningCategorySeen.Count,
+                    CategoriesResolved = _provisioningCategoriesResolved.Count,
+                    AllResolved = _provisioningCategoriesResolved.Count >= _provisioningCategorySeen.Count
+                };
+            }
+        }
+    }
+
+    /// <summary>
+    /// Immutable snapshot of ESP provisioning category status at a point in time.
+    /// Used to attach to enrollment_complete events and for settle-wait decisions.
+    /// </summary>
+    public class EspProvisioningSnapshot
+    {
+        /// <summary>Per-category outcome: "success", "failed", or "in_progress".</summary>
+        public Dictionary<string, string> CategoryOutcomes { get; set; }
+
+        /// <summary>Per-category subcategory detail: subcategoryName -> state string.</summary>
+        public Dictionary<string, Dictionary<string, string>> SubcategoryStates { get; set; }
+
+        /// <summary>Number of categories seen in the registry.</summary>
+        public int CategoriesSeen { get; set; }
+
+        /// <summary>Number of categories that have a final categorySucceeded value.</summary>
+        public int CategoriesResolved { get; set; }
+
+        /// <summary>True if all seen categories are resolved (or none seen).</summary>
+        public bool AllResolved { get; set; }
     }
 }

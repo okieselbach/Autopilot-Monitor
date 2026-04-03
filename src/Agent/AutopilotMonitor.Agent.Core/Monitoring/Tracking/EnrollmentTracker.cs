@@ -107,6 +107,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         private Timer _waitingForHelloSafetyTimer;
         private const int WaitingForHelloSafetyTimeoutSeconds = 420; // 7 min — longer than Hello chain (330s)
 
+        // ESP provisioning settle wait: when IME pattern fires but ESP categories are still unresolved,
+        // wait up to 30s for Windows to finalize the ESP provisioning status in the registry.
+        private bool _isWaitingForEspSettle = false;
+        private Timer _waitingForEspSettleTimer;
+        private const int EspSettleTimeoutSeconds = 30;
+
         // Safety-net timer for device-only ESP completion (SkipUserStatusPage=true)
         private Timer _deviceOnlyCompletionSafetyTimer;
         private const int DeviceOnlyCompletionSafetyTimeoutSeconds = 420; // 7 min — same as Hello safety

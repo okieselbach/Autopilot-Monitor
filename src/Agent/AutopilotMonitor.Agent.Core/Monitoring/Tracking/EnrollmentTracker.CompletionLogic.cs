@@ -301,6 +301,35 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         }
 
         /// <summary>
+        /// Timer callback: fires after EspSettleTimeoutSeconds (30s) when waiting for ESP provisioning
+        /// categories to resolve. Completes enrollment regardless of whether categories settled.
+        /// The snapshot captured in TryEmitEnrollmentComplete will reflect the final state.
+        /// </summary>
+        private void OnEspSettleTimerExpired(object state)
+        {
+            bool isWaiting, alreadyEmitted;
+            lock (_stateLock)
+            {
+                isWaiting = _isWaitingForEspSettle;
+                alreadyEmitted = _enrollmentCompleteEmitted;
+                if (isWaiting && !alreadyEmitted)
+                    _isWaitingForEspSettle = false;
+            }
+
+            if (!isWaiting || alreadyEmitted)
+            {
+                _logger.Debug($"EnrollmentTracker: ESP settle timer expired but not applicable " +
+                    $"(waiting={isWaiting}, emitted={alreadyEmitted})");
+                return;
+            }
+
+            _logger.Info($"EnrollmentTracker: ESP settle timer expired ({EspSettleTimeoutSeconds}s) " +
+                "— proceeding to completion with current ESP provisioning state");
+            RecordSignal("esp_provisioning_settled");
+            TryEmitEnrollmentComplete("ime_pattern");
+        }
+
+        /// <summary>
         /// Safety-net callback for device-only ESP (SkipUserStatusPage=true) completion.
         /// If the normal Hello timer chain (30s wait + 300s completion) failed for any reason
         /// (exception, timer disposal, race condition), this forces enrollment_complete instead
@@ -560,6 +589,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 _desktopArrived = loaded.DesktopArrived;
                 _lastEspPhase = loaded.LastEspPhase;
                 _isWaitingForHello = loaded.IsWaitingForHello;
+                _isWaitingForEspSettle = loaded.IsWaitingForEspSettle;
                 _enrollmentCompleteEmitted = loaded.EnrollmentCompleteEmitted;
                 _enrollmentType = loaded.EnrollmentType ?? _enrollmentType;
                 _skipUserStatusPage = loaded.SkipUserStatusPage;
@@ -607,6 +637,39 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     _waitingForHelloSafetyTimer?.Dispose();
                     _waitingForHelloSafetyTimer = new Timer(
                         OnWaitingForHelloSafetyTimeout,
+                        null,
+                        TimeSpan.FromSeconds(remaining),
+                        TimeSpan.FromMilliseconds(-1));
+                }
+            }
+
+            // Restart ESP settle timer if we were waiting — use remaining time, not full duration
+            if (_isWaitingForEspSettle && !_enrollmentCompleteEmitted)
+            {
+                var remaining = EspSettleTimeoutSeconds;
+                if (_stateData.WaitingForEspSettleStartedUtc.HasValue)
+                {
+                    var elapsed = (DateTime.UtcNow - _stateData.WaitingForEspSettleStartedUtc.Value).TotalSeconds;
+                    remaining = Math.Max(0, EspSettleTimeoutSeconds - (int)elapsed);
+                }
+
+                if (remaining <= 0)
+                {
+                    _logger.Warning("EnrollmentTracker: ESP settle timeout already expired during crash recovery — completing now");
+                    _isWaitingForEspSettle = false;
+                    _waitingForEspSettleTimer?.Dispose();
+                    _waitingForEspSettleTimer = new Timer(
+                        OnEspSettleTimerExpired,
+                        null,
+                        TimeSpan.Zero,
+                        TimeSpan.FromMilliseconds(-1));
+                }
+                else
+                {
+                    _logger.Info($"EnrollmentTracker: restarting ESP settle timer after state recovery ({remaining}s remaining)");
+                    _waitingForEspSettleTimer?.Dispose();
+                    _waitingForEspSettleTimer = new Timer(
+                        OnEspSettleTimerExpired,
                         null,
                         TimeSpan.FromSeconds(remaining),
                         TimeSpan.FromMilliseconds(-1));
@@ -809,6 +872,24 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     signalTimestamps["deviceSetupProvisioningComplete"] = _stateData.DeviceSetupProvisioningCompleteUtc.Value.ToString("o");
             }
 
+            // Capture ESP provisioning snapshot for the enrollment_complete event (all sources)
+            Dictionary<string, object> espProvisioningData = null;
+            if (_espAndHelloTracker != null)
+            {
+                var espSnapshot = _espAndHelloTracker.GetProvisioningSnapshot();
+                if (espSnapshot != null)
+                {
+                    espProvisioningData = new Dictionary<string, object>
+                    {
+                        { "categoriesSeen", espSnapshot.CategoriesSeen },
+                        { "categoriesResolved", espSnapshot.CategoriesResolved },
+                        { "allResolved", espSnapshot.AllResolved },
+                        { "categoryOutcomes", espSnapshot.CategoryOutcomes },
+                        { "subcategoryStates", espSnapshot.SubcategoryStates }
+                    };
+                }
+            }
+
             _emitEvent(new EnrollmentEvent
             {
                 SessionId = _sessionId,
@@ -827,7 +908,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     { "isDeviceOnlyDeployment", isDeviceOnly },
                     { "signalsSeen", signalsSeen },
                     { "signalTimestamps", signalTimestamps },
-                    { "agentUptimeSeconds", (DateTime.UtcNow - _agentStartTimeUtc).TotalSeconds }
+                    { "agentUptimeSeconds", (DateTime.UtcNow - _agentStartTimeUtc).TotalSeconds },
+                    { "espProvisioningStatus", espProvisioningData }
                 },
                 ImmediateUpload = true
             });
