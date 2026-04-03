@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { zipSync } from "fflate";
 import { Session, EnrollmentEvent, RuleResult } from "@/types";
 
@@ -20,6 +20,12 @@ interface ReportSessionModalProps {
   submitting: boolean;
 }
 
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 export default function ReportSessionModal({
   show, session, events, analysisResults, onSubmit, onCancel, submitting
 }: ReportSessionModalProps) {
@@ -31,6 +37,9 @@ export default function ReportSessionModal({
   const [submitResult, setSubmitResult] = useState<'success' | 'error' | null>(null);
   const [submitErrorMessage, setSubmitErrorMessage] = useState<string | null>(null);
 
+  const agentLogInputRef = useRef<HTMLInputElement>(null);
+  const screenshotInputRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     if (show) {
       setSubmitResult(null);
@@ -40,15 +49,42 @@ export default function ReportSessionModal({
 
   if (!show || !session) return null;
 
-  const handleAgentLogChange = (files: File[]) => {
+  const addAgentLogs = (newFiles: File[]) => {
     setAgentLogError(null);
-    const totalSize = files.reduce((sum, f) => sum + f.size, 0);
+    const merged = [...agentLogFiles];
+    for (const f of newFiles) {
+      if (!merged.some(existing => existing.name === f.name && existing.size === f.size)) {
+        merged.push(f);
+      }
+    }
+    const totalSize = merged.reduce((sum, f) => sum + f.size, 0);
     if (totalSize > MAX_AGENT_LOG_SIZE) {
-      setAgentLogError(`Files too large (${(totalSize / 1024 / 1024).toFixed(1)} MB total). Maximum size is 5 MB.`);
-      setAgentLogFiles([]);
+      setAgentLogError(`Total size (${formatFileSize(totalSize)}) exceeds 5 MB limit. Remove some files or add smaller ones.`);
+      // Keep existing files, don't add the new ones
       return;
     }
-    setAgentLogFiles(files);
+    setAgentLogFiles(merged);
+    if (agentLogInputRef.current) agentLogInputRef.current.value = "";
+  };
+
+  const removeAgentLog = (index: number) => {
+    setAgentLogError(null);
+    setAgentLogFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const addScreenshots = (newFiles: File[]) => {
+    const merged = [...screenshotFiles];
+    for (const f of newFiles) {
+      if (!merged.some(existing => existing.name === f.name && existing.size === f.size)) {
+        merged.push(f);
+      }
+    }
+    setScreenshotFiles(merged);
+    if (screenshotInputRef.current) screenshotInputRef.current.value = "";
+  };
+
+  const removeScreenshot = (index: number) => {
+    setScreenshotFiles(prev => prev.filter((_, i) => i !== index));
   };
 
   const fileToBase64 = async (file: File): Promise<string> => {
@@ -68,7 +104,6 @@ export default function ReportSessionModal({
       screenshotBase64 = await fileToBase64(screenshotFiles[0]);
       screenshotFileName = screenshotFiles[0].name;
     } else if (screenshotFiles.length > 1) {
-      // Zip multiple screenshots client-side
       const entries: Record<string, Uint8Array> = {};
       for (const file of screenshotFiles) {
         const buffer = await file.arrayBuffer();
@@ -115,6 +150,8 @@ export default function ReportSessionModal({
     setSubmitErrorMessage(null);
     onCancel();
   };
+
+  const agentLogTotalSize = agentLogFiles.reduce((sum, f) => sum + f.size, 0);
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={handleClose}>
@@ -205,21 +242,45 @@ export default function ReportSessionModal({
                 </p>
               </div>
 
-              {/* Agent Log File */}
+              {/* Agent Log Files */}
               <div className="mb-4">
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Agent Logs <span className="text-gray-400">(optional, multiple allowed, max 5 MB)</span>
+                  Agent Logs <span className="text-gray-400">(optional, max 5 MB total)</span>
                 </label>
                 <input
+                  ref={agentLogInputRef}
                   type="file"
                   accept=".log,.txt,.zip"
                   multiple
-                  onChange={e => handleAgentLogChange(e.target.files ? Array.from(e.target.files) : [])}
+                  onChange={e => addAgentLogs(e.target.files ? Array.from(e.target.files) : [])}
                   className="w-full text-sm text-gray-500 dark:text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 dark:file:bg-blue-900/40 dark:file:text-blue-300"
                   disabled={submitting}
                 />
                 {agentLogError && (
                   <p className="text-xs text-red-600 dark:text-red-400 mt-1">{agentLogError}</p>
+                )}
+                {agentLogFiles.length > 0 && (
+                  <div className="mt-2 space-y-1">
+                    {agentLogFiles.map((file, i) => (
+                      <div key={`${file.name}-${file.size}`} className="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 rounded px-2 py-1 text-xs text-gray-600 dark:text-gray-300">
+                        <span className="truncate mr-2">{file.name} ({formatFileSize(file.size)})</span>
+                        <button
+                          type="button"
+                          onClick={() => removeAgentLog(i)}
+                          disabled={submitting}
+                          className="flex-shrink-0 text-gray-400 hover:text-red-500 dark:hover:text-red-400 disabled:opacity-50"
+                          title="Remove"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    ))}
+                    <p className="text-xs text-gray-400 dark:text-gray-500">
+                      {agentLogFiles.length} file{agentLogFiles.length !== 1 ? "s" : ""} — {formatFileSize(agentLogTotalSize)} total
+                    </p>
+                  </div>
                 )}
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                   Located at %ProgramData%\AutopilotMonitor\Logs\ on the device.
@@ -232,16 +293,37 @@ export default function ReportSessionModal({
               {/* Screenshots */}
               <div className="mb-6">
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Screenshots <span className="text-gray-400">(optional, multiple allowed)</span>
+                  Screenshots <span className="text-gray-400">(optional)</span>
                 </label>
                 <input
+                  ref={screenshotInputRef}
                   type="file"
                   accept="image/*"
                   multiple
-                  onChange={e => setScreenshotFiles(e.target.files ? Array.from(e.target.files) : [])}
+                  onChange={e => addScreenshots(e.target.files ? Array.from(e.target.files) : [])}
                   className="w-full text-sm text-gray-500 dark:text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 dark:file:bg-blue-900/40 dark:file:text-blue-300"
                   disabled={submitting}
                 />
+                {screenshotFiles.length > 0 && (
+                  <div className="mt-2 space-y-1">
+                    {screenshotFiles.map((file, i) => (
+                      <div key={`${file.name}-${file.size}`} className="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 rounded px-2 py-1 text-xs text-gray-600 dark:text-gray-300">
+                        <span className="truncate mr-2">{file.name} ({formatFileSize(file.size)})</span>
+                        <button
+                          type="button"
+                          onClick={() => removeScreenshot(i)}
+                          disabled={submitting}
+                          className="flex-shrink-0 text-gray-400 hover:text-red-500 dark:hover:text-red-400 disabled:opacity-50"
+                          title="Remove"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Data summary */}
@@ -253,8 +335,8 @@ export default function ReportSessionModal({
                   <li>{analysisResults.length} analysis result{analysisResults.length !== 1 ? "s" : ""}</li>
                   <li>Timeline export (TXT)</li>
                   <li>Table export (CSV)</li>
-                  {agentLogFiles.length === 1 && <li>Agent log: {agentLogFiles[0].name} ({(agentLogFiles[0].size / 1024).toFixed(0)} KB)</li>}
-                  {agentLogFiles.length > 1 && <li>{agentLogFiles.length} agent logs (will be zipped)</li>}
+                  {agentLogFiles.length === 1 && <li>Agent log: {agentLogFiles[0].name} ({formatFileSize(agentLogFiles[0].size)})</li>}
+                  {agentLogFiles.length > 1 && <li>{agentLogFiles.length} agent logs ({formatFileSize(agentLogTotalSize)}, will be zipped)</li>}
                   {screenshotFiles.length === 1 && <li>Screenshot: {screenshotFiles[0].name}</li>}
                   {screenshotFiles.length > 1 && <li>{screenshotFiles.length} screenshots (will be zipped)</li>}
                 </ul>
