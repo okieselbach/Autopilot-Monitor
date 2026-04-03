@@ -13,6 +13,9 @@ export function SectionAgentChangelog() {
 
       {/* ── April 2026 ───────────────────────────────── */}
       <ChangelogBlock title="April 2026">
+        <Li>ESP provisioning status verification before enrollment completion — agent checks category outcomes and waits up to 30s for pending results to settle</Li>
+        <Li>Structured error codes (exit codes, HRESULT) extracted from IME log patterns and included in timeline events</Li>
+        <Li>Post-config binary integrity check — agent verifies its own binary against backend-provided hash after config fetch to detect tampering</Li>
         <Li>Vulnerability matching improvements — confidence levels, platform-aware filtering, and exclude patterns for more accurate reports</Li>
         <Li>Vulnerability reports now available during pre-provisioning (White Glove) sessions</Li>
         <Li>More reliable enrollment summary dialog launch with desktop fallback strategy</Li>
