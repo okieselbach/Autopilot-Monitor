@@ -30,10 +30,14 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
                 var tenantId = TenantHelper.GetTenantId(req);
                 var query = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
                 var cursor = query["cursor"];
+                var daysParam = query["days"];
+                int? days = null;
+                if (!string.IsNullOrEmpty(daysParam) && int.TryParse(daysParam, out var parsedDays) && parsedDays > 0)
+                    days = parsedDays;
 
-                _logger.LogInformation("Fetching sessions for tenant {TenantId} (cursor: {Cursor})", tenantId, cursor ?? "none");
+                _logger.LogInformation("Fetching sessions for tenant {TenantId} (cursor: {Cursor}, days: {Days})", tenantId, cursor ?? "none", days?.ToString() ?? "all");
 
-                var page = await _sessionRepo.GetSessionsAsync(tenantId, maxResults: 100, cursor: cursor);
+                var page = await _sessionRepo.GetSessionsAsync(tenantId, maxResults: 100, cursor: cursor, days: days);
 
                 return await req.OkAsync(new
                 {

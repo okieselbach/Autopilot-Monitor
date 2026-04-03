@@ -21,8 +21,8 @@ export const api = {
 
   // ── Sessions ──────────────────────────────────────────────────────────────
   sessions: {
-    list: (tenantId?: string) =>
-      `${API_BASE_URL}/api/sessions${qs({ tenantId })}`,
+    list: (tenantId?: string, days?: number) =>
+      `${API_BASE_URL}/api/sessions${qs({ tenantId, days: days?.toString() })}`,
     get: (sessionId: string, tenantId?: string) =>
       `${API_BASE_URL}/api/sessions/${sessionId}${qs({ tenantId })}`,
     events: (sessionId: string, tenantId?: string) =>
@@ -45,8 +45,8 @@ export const api = {
 
   // ── Global Sessions (global admin) ────────────────────────────────────────
   globalSessions: {
-    list: (tenantId?: string) =>
-      `${API_BASE_URL}/api/global/sessions${qs({ tenantId })}`,
+    list: (tenantId?: string, days?: number) =>
+      `${API_BASE_URL}/api/global/sessions${qs({ tenantId, days: days?.toString() })}`,
   },
 
   // ── Config ────────────────────────────────────────────────────────────────

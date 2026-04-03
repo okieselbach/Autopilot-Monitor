@@ -65,6 +65,7 @@ export default function FleetHealthPage() {
       isTimeRangeMount.current = false;
       return;
     }
+    fetchSessions(timeRange);
     fetchAppMetrics(timeRange);
   }, [timeRange]);
 
@@ -121,11 +122,12 @@ export default function FleetHealthPage() {
     };
   }, [on, off]);
 
-  const fetchSessions = async () => {
+  const fetchSessions = async (range: "7d" | "30d" | "90d" = timeRange) => {
     try {
+      const days = range === "7d" ? 7 : range === "30d" ? 30 : 90;
       const endpoint = globalAdminMode
-        ? api.globalSessions.list()
-        : api.sessions.list(tenantId);
+        ? api.globalSessions.list(undefined, days)
+        : api.sessions.list(tenantId, days);
       const response = await authenticatedFetch(endpoint, getAccessToken);
       if (response.ok) {
         const data = await response.json();

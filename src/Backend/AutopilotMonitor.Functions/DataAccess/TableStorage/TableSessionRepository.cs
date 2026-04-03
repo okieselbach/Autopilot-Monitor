@@ -33,11 +33,11 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
         public Task<string?> FindSessionTenantIdAsync(string sessionId)
             => _storage.FindSessionTenantIdAsync(sessionId);
 
-        public Task<SessionPage> GetSessionsAsync(string tenantId, int maxResults = 100, string? cursor = null)
-            => _storage.GetSessionsAsync(tenantId, maxResults, cursor);
+        public Task<SessionPage> GetSessionsAsync(string tenantId, int maxResults = 100, string? cursor = null, int? days = null)
+            => _storage.GetSessionsAsync(tenantId, maxResults, cursor, days);
 
-        public Task<SessionPage> GetAllSessionsAsync(int maxResults = 100, string? cursor = null)
-            => _storage.GetAllSessionsAsync(maxResults, cursor);
+        public Task<SessionPage> GetAllSessionsAsync(int maxResults = 100, string? cursor = null, int? days = null)
+            => _storage.GetAllSessionsAsync(maxResults, cursor, days);
 
         public Task<bool> DeleteSessionAsync(string tenantId, string sessionId)
             => _storage.DeleteSessionAsync(tenantId, sessionId);

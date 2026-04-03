@@ -583,7 +583,7 @@ namespace AutopilotMonitor.Functions.Services
         /// so Azure Table Storage returns results in descending time order natively.
         /// Falls back to the Sessions table if SessionsIndex is empty (pre-migration).
         /// </summary>
-        public async Task<SessionPage> GetSessionsAsync(string tenantId, int maxResults = 100, string? cursor = null)
+        public async Task<SessionPage> GetSessionsAsync(string tenantId, int maxResults = 100, string? cursor = null, int? days = null)
         {
             SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
 
@@ -598,24 +598,45 @@ namespace AutopilotMonitor.Functions.Services
                     filter += $" and RowKey gt '{cursor}'";
                 }
 
-                // Fetch maxResults + 1 to determine hasMore
-                var fetchCount = maxResults + 1;
+                // When days is specified, add RowKey upper bound to limit scan to date range.
+                // Inverted-tick ordering: newer sessions have smaller RowKey values.
+                // Sessions older than cutoff have RowKey >= cutoffRowKeyPrefix.
+                if (days.HasValue)
+                {
+                    var cutoffDate = DateTime.UtcNow.AddDays(-days.Value);
+                    var cutoffRowKeyPrefix = $"{(DateTime.MaxValue.Ticks - cutoffDate.Ticks):D19}";
+                    filter += $" and RowKey lt '{cutoffRowKeyPrefix}'";
+                }
+
+                // When days is set, return all matching sessions (no pagination); otherwise paginate.
+                var safetyCap = days.HasValue ? 10000 : maxResults + 1;
                 var query = indexTableClient.QueryAsync<TableEntity>(
                     filter: filter,
-                    maxPerPage: Math.Min(fetchCount, 1000)
+                    maxPerPage: Math.Min(safetyCap, 1000)
                 );
 
                 var sessions = new List<SessionSummary>();
                 await foreach (var entity in query)
                 {
                     sessions.Add(MapIndexEntityToSessionSummary(entity));
-                    if (sessions.Count >= fetchCount) break;
+                    if (sessions.Count >= safetyCap) break;
                 }
 
                 // If SessionsIndex is empty and no cursor, fall back to Sessions table (pre-migration)
                 if (sessions.Count == 0 && string.IsNullOrEmpty(cursor))
                 {
-                    return await GetSessionsFromPrimaryTableAsync(tenantId, maxResults);
+                    return await GetSessionsFromPrimaryTableAsync(tenantId, maxResults, days);
+                }
+
+                if (days.HasValue)
+                {
+                    // Date-bounded query: all matching sessions returned, no pagination
+                    return new SessionPage
+                    {
+                        Sessions = sessions,
+                        HasMore = false,
+                        Cursor = null
+                    };
                 }
 
                 var hasMore = sessions.Count > maxResults;
@@ -648,20 +669,29 @@ namespace AutopilotMonitor.Functions.Services
         /// <summary>
         /// Fallback: queries the Sessions table directly (pre-migration, before SessionsIndex is populated).
         /// </summary>
-        private async Task<SessionPage> GetSessionsFromPrimaryTableAsync(string tenantId, int maxResults)
+        private async Task<SessionPage> GetSessionsFromPrimaryTableAsync(string tenantId, int maxResults, int? days = null)
         {
             var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
             var filter = $"PartitionKey eq '{tenantId}'";
-            var query = tableClient.QueryAsync<TableEntity>(filter: filter, maxPerPage: Math.Min(maxResults + 1, 1000));
+            var safetyCap = days.HasValue ? 10000 : maxResults + 1;
+            var query = tableClient.QueryAsync<TableEntity>(filter: filter, maxPerPage: Math.Min(safetyCap, 1000));
 
             var sessions = new List<SessionSummary>();
             await foreach (var entity in query)
             {
                 sessions.Add(MapToSessionSummary(entity));
-                if (sessions.Count >= maxResults + 1) break;
+                if (sessions.Count >= safetyCap) break;
             }
 
             sessions = sessions.OrderByDescending(s => s.StartedAt).ToList();
+
+            if (days.HasValue)
+            {
+                var cutoffDate = DateTime.UtcNow.AddDays(-days.Value);
+                sessions = sessions.Where(s => s.StartedAt >= cutoffDate).ToList();
+                return new SessionPage { Sessions = sessions, HasMore = false };
+            }
+
             var hasMore = sessions.Count > maxResults;
             if (hasMore)
                 sessions.RemoveAt(sessions.Count - 1);
@@ -674,7 +704,7 @@ namespace AutopilotMonitor.Functions.Services
         /// with cursor-based pagination. Uses per-tenant fan-out to leverage the
         /// inverted-tick RowKey ordering within each partition, then merge-sorts.
         /// </summary>
-        public async Task<SessionPage> GetAllSessionsAsync(int maxResults = 100, string? cursor = null)
+        public async Task<SessionPage> GetAllSessionsAsync(int maxResults = 100, string? cursor = null, int? days = null)
         {
             try
             {
@@ -690,7 +720,7 @@ namespace AutopilotMonitor.Functions.Services
                 }
 
                 if (tenantIds.Count == 0 && string.IsNullOrEmpty(cursor))
-                    return await GetAllSessionsFromPrimaryTableAsync(maxResults);
+                    return await GetAllSessionsFromPrimaryTableAsync(maxResults, days);
 
                 // Step 2: Per-tenant fan-out using RowKey ordering (inverted ticks → newest first).
                 // Parse cursor into invertedTicks prefix for cross-tenant RowKey filtering.
@@ -706,7 +736,16 @@ namespace AutopilotMonitor.Functions.Services
                     }
                 }
 
-                var fetchPerTenant = maxResults + 1;
+                // When days is set, fetch all matching sessions per tenant (with safety cap); otherwise paginate.
+                var fetchPerTenant = days.HasValue ? 5000 : maxResults + 1;
+
+                // Compute RowKey upper bound for date filtering
+                string? cutoffRowKeyPrefix = null;
+                if (days.HasValue)
+                {
+                    var cutoffDate = DateTime.UtcNow.AddDays(-days.Value);
+                    cutoffRowKeyPrefix = $"{(DateTime.MaxValue.Ticks - cutoffDate.Ticks):D19}";
+                }
 
                 // Parallel fan-out: query all tenants concurrently
                 var tasks = tenantIds.Select(async tenantId =>
@@ -714,6 +753,8 @@ namespace AutopilotMonitor.Functions.Services
                     var filter = $"PartitionKey eq '{tenantId}'";
                     if (cursorRowKeyPrefix != null)
                         filter += $" and RowKey ge '{cursorRowKeyPrefix}'";
+                    if (cutoffRowKeyPrefix != null)
+                        filter += $" and RowKey lt '{cutoffRowKeyPrefix}'";
 
                     var tenantSessions = new List<SessionSummary>();
                     await foreach (var entity in indexTableClient.QueryAsync<TableEntity>(
@@ -737,6 +778,17 @@ namespace AutopilotMonitor.Functions.Services
                     var cursorIdx = allSessions.FindIndex(s => s.SessionId == cursorSessionId);
                     if (cursorIdx >= 0)
                         allSessions = allSessions.Skip(cursorIdx + 1).ToList();
+                }
+
+                if (days.HasValue)
+                {
+                    // Date-bounded query: all matching sessions returned, no pagination
+                    return new SessionPage
+                    {
+                        Sessions = allSessions,
+                        HasMore = false,
+                        Cursor = null
+                    };
                 }
 
                 var hasMore = allSessions.Count > maxResults;
@@ -766,19 +818,28 @@ namespace AutopilotMonitor.Functions.Services
         /// <summary>
         /// Fallback: queries the Sessions table directly for global admin (pre-migration).
         /// </summary>
-        private async Task<SessionPage> GetAllSessionsFromPrimaryTableAsync(int maxResults)
+        private async Task<SessionPage> GetAllSessionsFromPrimaryTableAsync(int maxResults, int? days = null)
         {
             var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
-            var query = tableClient.QueryAsync<TableEntity>(maxPerPage: Math.Min(maxResults + 1, 1000));
+            var safetyCap = days.HasValue ? 10000 : maxResults + 1;
+            var query = tableClient.QueryAsync<TableEntity>(maxPerPage: Math.Min(safetyCap, 1000));
 
             var sessions = new List<SessionSummary>();
             await foreach (var entity in query)
             {
                 sessions.Add(MapToSessionSummary(entity));
-                if (sessions.Count >= maxResults + 1) break;
+                if (sessions.Count >= safetyCap) break;
             }
 
             sessions = sessions.OrderByDescending(s => s.StartedAt).ToList();
+
+            if (days.HasValue)
+            {
+                var cutoffDate = DateTime.UtcNow.AddDays(-days.Value);
+                sessions = sessions.Where(s => s.StartedAt >= cutoffDate).ToList();
+                return new SessionPage { Sessions = sessions, HasMore = false };
+            }
+
             var hasMore = sessions.Count > maxResults;
             if (hasMore)
                 sessions.RemoveAt(sessions.Count - 1);

@@ -34,6 +34,10 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
                 var query = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
                 var cursor = query["cursor"];
                 var tenantIdFilter = query["tenantId"];
+                var daysParam = query["days"];
+                int? days = null;
+                if (!string.IsNullOrEmpty(daysParam) && int.TryParse(daysParam, out var parsedDays) && parsedDays > 0)
+                    days = parsedDays;
 
                 SessionPage page;
 
@@ -46,13 +50,13 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
                         return badRequest;
                     }
 
-                    _logger.LogInformation("Fetching sessions for tenant {TenantId} (User: {UserEmail}, cursor: {Cursor})", tenantIdFilter, userEmail, cursor ?? "none");
-                    page = await _sessionRepo.GetSessionsAsync(tenantIdFilter, maxResults: 100, cursor: cursor);
+                    _logger.LogInformation("Fetching sessions for tenant {TenantId} (User: {UserEmail}, cursor: {Cursor}, days: {Days})", tenantIdFilter, userEmail, cursor ?? "none", days?.ToString() ?? "all");
+                    page = await _sessionRepo.GetSessionsAsync(tenantIdFilter, maxResults: 100, cursor: cursor, days: days);
                 }
                 else
                 {
-                    _logger.LogInformation("Fetching all sessions across all tenants (User: {UserEmail}, cursor: {Cursor})", userEmail, cursor ?? "none");
-                    page = await _sessionRepo.GetAllSessionsAsync(maxResults: 100, cursor: cursor);
+                    _logger.LogInformation("Fetching all sessions across all tenants (User: {UserEmail}, cursor: {Cursor}, days: {Days})", userEmail, cursor ?? "none", days?.ToString() ?? "all");
+                    page = await _sessionRepo.GetAllSessionsAsync(maxResults: 100, cursor: cursor, days: days);
                 }
 
                 return await req.OkAsync(new
