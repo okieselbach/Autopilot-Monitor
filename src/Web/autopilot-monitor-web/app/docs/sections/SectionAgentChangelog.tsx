@@ -13,6 +13,11 @@ export function SectionAgentChangelog() {
 
       {/* ── April 2026 ───────────────────────────────── */}
       <ChangelogBlock title="April 2026">
+        <Li>Vulnerability matching improvements — confidence levels, platform-aware filtering, and exclude patterns for more accurate reports</Li>
+        <Li>Vulnerability reports now available during pre-provisioning (White Glove) sessions</Li>
+        <Li>More reliable enrollment summary dialog launch with desktop fallback strategy</Li>
+        <Li>PowerShell script output is now fully captured in the timeline (multi-line output was previously truncated)</Li>
+        <Li>More reliable bootstrap and download handling with improved timeout and rate-limit behavior</Li>
         <Li>Agent reports self-update events so updates are visible in the session timeline</Li>
         <Li>Emergency channel — agent can send distress signals when it detects critical failures</Li>
         <Li>ESP &quot;resumed&quot; event is now only emitted for Hybrid Join scenarios (avoids noise on other paths)</Li>
