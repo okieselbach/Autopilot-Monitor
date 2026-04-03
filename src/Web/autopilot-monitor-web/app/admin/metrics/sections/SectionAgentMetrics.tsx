@@ -629,14 +629,14 @@ export function SectionAgentMetrics() {
 
                 {/* Crash Rate */}
                 <div>
-                  <h3 className="text-sm font-medium text-gray-700 mb-3">Agent Crash Rate</h3>
+                  <h3 className="text-sm font-medium text-gray-700 mb-3">Agent Exit Statistics</h3>
                   {crashRate && crashRate.totalStarts > 0 ? (
                     <div className="space-y-2">
                       <div className="flex items-baseline gap-2">
                         <span className={`text-2xl font-bold ${crashRate.crashRatePercent === 0 ? 'text-green-600' : crashRate.crashRatePercent < 5 ? 'text-yellow-600' : 'text-red-600'}`}>
                           {crashRate.crashRatePercent.toFixed(1)}%
                         </span>
-                        <span className="text-xs text-gray-500">crash rate</span>
+                        <span className="text-xs text-gray-500">exception crash rate</span>
                       </div>
                       <div className="space-y-1 text-sm">
                         <div className="flex justify-between">
@@ -647,16 +647,16 @@ export function SectionAgentMetrics() {
                           <span className="text-gray-500">Exception crashes</span>
                           <span className={`font-mono ${crashRate.exceptionCrashes > 0 ? 'text-red-600' : 'text-gray-400'}`}>{crashRate.exceptionCrashes}</span>
                         </div>
-                        <div className="flex justify-between">
-                          <span className="text-gray-500">Hard kills</span>
-                          <span className={`font-mono ${crashRate.hardKills > 0 ? 'text-orange-600' : 'text-gray-400'}`}>{crashRate.hardKills}</span>
+                        <div className="flex justify-between border-t border-gray-100 pt-1 mt-1">
+                          <span className="text-gray-400">Hard kills (expected)</span>
+                          <span className={`font-mono ${crashRate.hardKills > 0 ? 'text-gray-500' : 'text-gray-400'}`}>{crashRate.hardKills}</span>
                         </div>
                         <div className="flex justify-between">
-                          <span className="text-gray-500">Reboot kills</span>
-                          <span className={`font-mono ${(crashRate.rebootKills ?? 0) > 0 ? 'text-blue-500' : 'text-gray-400'}`}>{crashRate.rebootKills ?? 0}</span>
+                          <span className="text-gray-400">Reboot kills (expected)</span>
+                          <span className={`font-mono ${(crashRate.rebootKills ?? 0) > 0 ? 'text-gray-500' : 'text-gray-400'}`}>{crashRate.rebootKills ?? 0}</span>
                         </div>
                         <div className="flex justify-between">
-                          <span className="text-gray-500">First runs</span>
+                          <span className="text-gray-400">First runs</span>
                           <span className="font-mono text-gray-400">{crashRate.firstRuns}</span>
                         </div>
                       </div>

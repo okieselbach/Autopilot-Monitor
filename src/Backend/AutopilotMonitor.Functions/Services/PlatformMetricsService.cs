@@ -275,10 +275,9 @@ namespace AutopilotMonitor.Functions.Services
                     }
                 }
 
-                var crashCount = metrics.ExceptionCrashes + metrics.HardKills;
                 var nonFirstRuns = metrics.TotalStarts - metrics.FirstRuns;
                 metrics.CrashRatePercent = nonFirstRuns > 0
-                    ? Math.Round((double)crashCount / nonFirstRuns * 100, 1)
+                    ? Math.Round((double)metrics.ExceptionCrashes / nonFirstRuns * 100, 1)
                     : 0;
 
                 metrics.TopExceptions = exceptionCounts
