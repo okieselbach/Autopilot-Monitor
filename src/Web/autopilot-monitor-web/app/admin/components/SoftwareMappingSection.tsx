@@ -24,6 +24,7 @@ interface CpeMappingEntry {
   category: string;
   displayNamePatterns: string[];
   publisherPatterns: string[];
+  excludePatterns: string[];
   source: string;
   createdAt: string;
 }
@@ -70,7 +71,8 @@ export function SoftwareMappingSection({
     category: string;
     displayNamePatterns: string;
     publisherPatterns: string;
-  }>({ cpeUri: "", cpeVendor: "", cpeProduct: "", category: "", displayNamePatterns: "", publisherPatterns: "" });
+    excludePatterns: string;
+  }>({ cpeUri: "", cpeVendor: "", cpeProduct: "", category: "", displayNamePatterns: "", publisherPatterns: "", excludePatterns: "" });
   const [savingEdit, setSavingEdit] = useState(false);
   const [deletingRow, setDeletingRow] = useState<string | null>(null);
 
@@ -259,7 +261,8 @@ export function SoftwareMappingSection({
       m.cpeProduct.toLowerCase().includes(q) ||
       m.category.toLowerCase().includes(q) ||
       m.displayNamePatterns.some((p) => p.toLowerCase().includes(q)) ||
-      m.publisherPatterns.some((p) => p.toLowerCase().includes(q))
+      m.publisherPatterns.some((p) => p.toLowerCase().includes(q)) ||
+      (m.excludePatterns || []).some((p) => p.toLowerCase().includes(q))
     );
   });
 
@@ -295,6 +298,7 @@ export function SoftwareMappingSection({
       category: entry.category,
       displayNamePatterns: entry.displayNamePatterns.join(", "),
       publisherPatterns: entry.publisherPatterns.join(", "),
+      excludePatterns: (entry.excludePatterns || []).join(", "),
     });
   };
 
@@ -314,6 +318,10 @@ export function SoftwareMappingSection({
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean);
+      const excludePatterns = editForm.excludePatterns
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
 
       const response = await authenticatedFetch(
         api.vulnerability.cpeMapping(),
@@ -330,6 +338,7 @@ export function SoftwareMappingSection({
             category: editForm.category.trim() || "custom",
             displayNamePatterns: displayNamePatterns.length > 0 ? displayNamePatterns : entry.displayNamePatterns,
             publisherPatterns: publisherPatterns.length > 0 ? publisherPatterns : entry.publisherPatterns,
+            excludePatterns: excludePatterns,
           }),
         }
       );
@@ -405,6 +414,7 @@ export function SoftwareMappingSection({
         normalizedProduct: m.normalizedProduct,
         displayNamePatterns: m.displayNamePatterns,
         publisherPatterns: m.publisherPatterns,
+        excludePatterns: m.excludePatterns || [],
         cpeVendor: m.cpeVendor,
         cpeProduct: m.cpeProduct,
         cpeUri: m.cpeUri,
@@ -897,6 +907,17 @@ export function SoftwareMappingSection({
                                                 type="text"
                                                 value={editForm.publisherPatterns}
                                                 onChange={(e) => setEditForm((f) => ({ ...f, publisherPatterns: e.target.value }))}
+                                                className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none"
+                                                disabled={savingEdit}
+                                              />
+                                            </div>
+                                            <div className="col-span-2">
+                                              <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Exclude Patterns (comma-separated)</label>
+                                              <input
+                                                type="text"
+                                                value={editForm.excludePatterns}
+                                                onChange={(e) => setEditForm((f) => ({ ...f, excludePatterns: e.target.value }))}
+                                                placeholder="e.g. edge update, webview helper"
                                                 className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none"
                                                 disabled={savingEdit}
                                               />
