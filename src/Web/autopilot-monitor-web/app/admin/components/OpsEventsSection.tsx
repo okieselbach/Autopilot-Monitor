@@ -165,7 +165,7 @@ export function OpsEventsSection({
           </div>
           <div className="flex items-center gap-2">
             <Link
-              href="/admin/settings#alerts"
+              href="/admin/settings/alerts"
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
             >
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
