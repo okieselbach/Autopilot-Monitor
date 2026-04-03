@@ -208,7 +208,7 @@ export default function ReportSessionModal({
               {/* Agent Log File */}
               <div className="mb-4">
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Agent Logs <span className="text-gray-400">(optional, max 5 MB)</span>
+                  Agent Logs <span className="text-gray-400">(optional, multiple allowed, max 5 MB)</span>
                 </label>
                 <input
                   type="file"
