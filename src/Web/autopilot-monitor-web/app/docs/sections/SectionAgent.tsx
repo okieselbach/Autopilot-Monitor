@@ -52,6 +52,56 @@ export function SectionAgent() {
         the backend for live monitoring and analysis.
       </p>
 
+      <div className="mb-6">
+        <div className="flex items-center gap-2 mb-3">
+          <svg className="w-5 h-5 text-indigo-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <h3 className="text-lg font-semibold text-gray-900">Full Enrollment Timeline &mdash; From the Very First Second</h3>
+        </div>
+        <p className="text-gray-700 mb-4">
+          Although the agent arrives on the device via the bootstrapper script &mdash; typically a few minutes after
+          MDM enrollment begins &mdash; it does not miss any earlier activity. The Intune Management Extension (IME)
+          has been writing detailed log files from the very start of enrollment, and the agent reads those logs
+          from the beginning on its first launch. This backfill mechanism ensures complete coverage of the entire
+          enrollment timeline, with no blind spots.
+        </p>
+        <div className="space-y-3 text-sm text-gray-700">
+          <div className="flex items-start gap-3 p-3 bg-indigo-50 border border-indigo-100 rounded-lg">
+            <span className="text-indigo-600 font-bold mt-0.5 shrink-0">1</span>
+            <div>
+              <span className="font-medium text-gray-900">IME logs from the start:</span>{" "}
+              The Intune Management Extension begins logging immediately when enrollment starts &mdash; long before
+              the agent exists on the device. App downloads, installations, ESP phase transitions, and policy
+              processing are all recorded into CMTrace-formatted log files on disk.
+            </div>
+          </div>
+          <div className="flex items-start gap-3 p-3 bg-indigo-50 border border-indigo-100 rounded-lg">
+            <span className="text-indigo-600 font-bold mt-0.5 shrink-0">2</span>
+            <div>
+              <span className="font-medium text-gray-900">Backfill on first launch:</span>{" "}
+              When the agent starts for the first time, it reads the IME log files from byte position zero. Every
+              historical entry &mdash; app state changes, phase transitions, download progress, script executions &mdash; is
+              parsed and processed as if the agent had been running the whole time. Archived (rotated) log files
+              are included and processed before the current log to preserve chronological order.
+            </div>
+          </div>
+          <div className="flex items-start gap-3 p-3 bg-indigo-50 border border-indigo-100 rounded-lg">
+            <span className="text-indigo-600 font-bold mt-0.5 shrink-0">3</span>
+            <div>
+              <span className="font-medium text-gray-900">Real-time from there:</span>{" "}
+              After the initial backfill completes, the agent switches to incremental polling. It tracks the byte
+              position in each log file and reads only new data on each cycle, providing real-time visibility into
+              ongoing enrollment activity without re-processing earlier entries.
+            </div>
+          </div>
+        </div>
+        <p className="mt-3 text-sm text-gray-500">
+          The result is a complete, chronologically accurate record of every app installation, ESP phase, and
+          enrollment signal from T=0 &mdash; regardless of when the agent was installed on the device.
+        </p>
+      </div>
+
       <div className="mb-6 p-5 bg-blue-50 border border-blue-200 rounded-lg">
         <div className="flex items-center gap-3 mb-2">
           <svg className="w-5 h-5 text-blue-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
