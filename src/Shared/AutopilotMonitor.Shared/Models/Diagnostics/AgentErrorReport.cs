@@ -22,6 +22,12 @@ namespace AutopilotMonitor.Shared.Models
         /// POST /api/agent/register-session failed — session may not be tracked correctly.
         /// </summary>
         RegisterSessionFailed = 2,
+
+        /// <summary>
+        /// Post-config integrity check: SHA-256 of the running agent binary does not match
+        /// the hash provided by the backend. Possible tampering or stale blob storage.
+        /// </summary>
+        IntegrityCheckFailed = 3,
     }
 
     /// <summary>

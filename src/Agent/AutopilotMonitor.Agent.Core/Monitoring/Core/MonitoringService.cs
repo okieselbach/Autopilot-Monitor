@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using AutopilotMonitor.Agent.Core.Configuration;
@@ -551,10 +552,62 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 _remoteConfigService = new RemoteConfigService(_apiClient, _configuration.TenantId, _logger, _emergencyReporter, _distressReporter);
                 _remoteConfigService.FetchConfigAsync().Wait(TimeSpan.FromSeconds(15));
                 ApplyRuntimeSettingsFromRemoteConfig();
+                VerifyAgentBinaryIntegrity();
             }
             catch (Exception ex)
             {
                 _logger.Warning($"Failed to fetch remote config (using defaults): {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Post-config integrity check: verifies that the running agent binary matches
+        /// the SHA-256 hash provided by the backend (LatestAgentSha256).
+        /// Closes the trust gap where the self-update at startup only had the version.json hash
+        /// (same blob storage origin as the ZIP — single point of compromise).
+        /// </summary>
+        private void VerifyAgentBinaryIntegrity()
+        {
+            try
+            {
+                var expectedHash = _remoteConfigService?.CurrentConfig?.LatestAgentSha256;
+                if (string.IsNullOrWhiteSpace(expectedHash))
+                {
+                    _logger.Debug("Post-config integrity check: no backend hash available — skipping");
+                    return;
+                }
+
+                var exePath = Process.GetCurrentProcess().MainModule?.FileName;
+                if (string.IsNullOrEmpty(exePath) || !File.Exists(exePath))
+                {
+                    _logger.Warning("Post-config integrity check: could not determine agent exe path");
+                    return;
+                }
+
+                string actualHash;
+                using (var sha256 = SHA256.Create())
+                using (var stream = File.OpenRead(exePath))
+                {
+                    var hashBytes = sha256.ComputeHash(stream);
+                    actualHash = BitConverter.ToString(hashBytes).Replace("-", "").ToLowerInvariant();
+                }
+
+                if (string.Equals(actualHash, expectedHash.ToLowerInvariant(), StringComparison.Ordinal))
+                {
+                    _logger.Info($"Post-config integrity check: SHA-256 verified OK ({actualHash.Substring(0, 12)}...)");
+                }
+                else
+                {
+                    _logger.Error($"Post-config integrity check: SHA-256 MISMATCH — expected={expectedHash.Substring(0, 12)}..., actual={actualHash.Substring(0, 12)}...");
+
+                    _ = _emergencyReporter?.TrySendAsync(
+                        AgentErrorType.IntegrityCheckFailed,
+                        $"Binary hash mismatch: expected={expectedHash.Substring(0, 12)}..., actual={actualHash.Substring(0, 12)}...");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"Post-config integrity check failed: {ex.Message}");
             }
         }
 
