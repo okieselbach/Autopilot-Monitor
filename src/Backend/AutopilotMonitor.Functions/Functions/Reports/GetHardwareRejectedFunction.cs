@@ -30,7 +30,7 @@ namespace AutopilotMonitor.Functions.Functions.Reports
 
         [Function("GetHardwareRejected")]
         public async Task<HttpResponseData> Run(
-            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "distress/hardware-rejected")] HttpRequestData req)
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "audit/hardware-rejected")] HttpRequestData req)
         {
             try
             {
