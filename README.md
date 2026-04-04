@@ -2,6 +2,19 @@
 
 Advanced monitoring and troubleshooting solution for Windows Autopilot deployments.
 
+## Private Preview
+
+Autopilot Monitor is currently running as a **Private Preview**. Visit **[autopilotmonitor.com](https://www.autopilotmonitor.com)** to request access and learn more.
+
+<p align="center">
+  <img src="docs/images/SessionList.png" width="45%" />
+  <img src="docs/images/FleetHealth.png" width="45%" />
+</p>
+<p align="center">
+  <img src="docs/images/SessionDetails.png" width="45%" />
+  <img src="docs/images/SessionTimeline.png" width="45%" />
+</p>
+
 ## Overview
 
 Autopilot Monitor provides real-time tracking, intelligent diagnostics, and automated troubleshooting for Windows Autopilot enrollment processes. It consists of:
