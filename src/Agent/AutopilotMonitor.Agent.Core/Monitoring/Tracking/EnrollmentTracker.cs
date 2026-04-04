@@ -130,6 +130,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
 
         private Collectors.DeviceInfoCollector _deviceInfoCollector;
 
+        // ConfigMgr (SCCM) co-management detection — fire-once guard
+        private bool _configMgrDetected;
+
         /// <summary>
         /// Detects whether the Autopilot profile indicates Hybrid Azure AD Join
         /// by reading CloudAssignedDomainJoinMethod from the AutopilotPolicyCache registry key.
@@ -310,6 +313,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 }
             });
 
+            // Check for ConfigMgr co-management client (separate task, must not delay device info)
+            Task.Run(() =>
+            {
+                try { CheckConfigMgrClient("startup"); }
+                catch (Exception ex) { _logger.Debug($"EnrollmentTracker: startup ConfigMgr check failed: {ex.Message}"); }
+            });
+
             // TODO: Überdenken ob ein 30s timer hier wirklich immer gut ist, hab einen Fall gesehen mit 
             // laaanger Wartephase in WhiteGlove weil ein 24H2 feature update reinkam und installiert wurde
 
@@ -447,6 +457,86 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         /// </summary>
         private void CollectDeviceInfoAtEnd()
             => _deviceInfoCollector.CollectAtEnd();
+
+        /// <summary>
+        /// Checks for ConfigMgr (SCCM) co-management client presence on the device.
+        /// Fire-once: emits <c>configmgr_client_detected</c> event on first detection only.
+        /// Called at startup, DeviceSetup, and AccountSetup — always via Task.Run to avoid blocking.
+        /// </summary>
+        private void CheckConfigMgrClient(string trigger)
+        {
+            if (_configMgrDetected) return;
+
+            try
+            {
+                bool registryFound = false;
+                bool directoryFound = false;
+                string ccmVersion = null;
+                string siteCode = null;
+                string serviceState = "not_found";
+
+                // 1. Registry: HKLM\SOFTWARE\Microsoft\CCM
+                using (var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\CCM"))
+                {
+                    if (key != null)
+                        registryFound = true;
+                }
+
+                // Version from CCMSetup
+                using (var setupKey = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\CCMSetup"))
+                    ccmVersion = setupKey?.GetValue("LastValidVersion")?.ToString();
+
+                // SiteCode from SMS Mobile Client
+                using (var smsKey = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\SMS\Mobile Client"))
+                    siteCode = smsKey?.GetValue("AssignedSiteCode")?.ToString();
+
+                // 2. Directory: C:\Windows\CCM
+                directoryFound = Directory.Exists(@"C:\Windows\CCM");
+
+                // 3. Service: CcmExec (via ServiceController, native .NET Framework 4.8)
+                try
+                {
+                    using (var sc = new System.ServiceProcess.ServiceController("CcmExec"))
+                        serviceState = sc.Status.ToString();
+                }
+                catch (InvalidOperationException) { } // service not installed
+
+                // Nothing found — no event
+                if (!registryFound && !directoryFound && serviceState == "not_found")
+                    return;
+
+                _configMgrDetected = true;
+
+                var versionSuffix = ccmVersion != null ? $" (v{ccmVersion})" : "";
+                var siteSuffix = siteCode != null ? $", site {siteCode}" : "";
+
+                _emitEvent(new EnrollmentEvent
+                {
+                    SessionId = _sessionId,
+                    TenantId = _tenantId,
+                    EventType = "configmgr_client_detected",
+                    Severity = EventSeverity.Info,
+                    Source = "Agent",
+                    Phase = EnrollmentPhase.Unknown,
+                    Message = $"ConfigMgr (SCCM) client detected — co-managed device{versionSuffix}{siteSuffix}",
+                    Data = new Dictionary<string, object>
+                    {
+                        { "ccmRegistryFound", registryFound },
+                        { "ccmDirectoryFound", directoryFound },
+                        { "ccmServiceState", serviceState },
+                        { "ccmVersion", ccmVersion ?? "unknown" },
+                        { "siteCode", siteCode ?? "unknown" },
+                        { "detectedAt", trigger }
+                    }
+                });
+
+                _logger.Info($"ConfigMgr client detected (trigger={trigger}, service={serviceState}, version={ccmVersion ?? "?"})");
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug($"EnrollmentTracker: ConfigMgr check failed: {ex.Message}");
+            }
+        }
 
     }
 }

@@ -568,6 +568,17 @@ export default function SessionDetailPage() {
     };
   }, [events]);
 
+  // Extract ConfigMgr co-management detection (if present)
+  const configMgrDetected = useMemo(() => {
+    const evt = events.find(e => e.eventType === "configmgr_client_detected");
+    if (!evt?.data) return null;
+    return {
+      ccmVersion: evt.data.ccmVersion as string | undefined,
+      ccmServiceState: evt.data.ccmServiceState as string | undefined,
+      siteCode: evt.data.siteCode as string | undefined,
+    };
+  }, [events]);
+
   const isGatherRulesSession = session?.enrollmentType === "gather_rules";
   // For gather_rules sessions: if the completed event is present, derive status as Succeeded
   // (the backend never sets this status automatically for one-shot gather runs).
@@ -931,6 +942,7 @@ export default function SessionDetailPage() {
               displayStatus={displayStatus}
               isGatherRulesSession={isGatherRulesSession}
               ntpOffset={ntpOffset}
+              configMgrDetected={configMgrDetected}
             />
             </div>
           )}

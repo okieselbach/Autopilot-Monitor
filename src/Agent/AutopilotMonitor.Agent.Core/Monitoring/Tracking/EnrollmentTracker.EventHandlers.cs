@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using AutopilotMonitor.Agent.Core.Logging;
 using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.Models;
@@ -166,6 +167,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             // Re-collect enrollment-dependent device info (AAD join, profile, ESP config)
             // that may have been empty at startup (bootstrap / pre-enrollment scenario).
             CollectDeviceInfoAtEnrollmentStart();
+
+            // Check for ConfigMgr client at phase transitions (may arrive after agent startup)
+            Task.Run(() => CheckConfigMgrClient(
+                enrollmentPhase == EnrollmentPhase.AccountSetup ? "account_setup" : "device_setup"));
 
             // Start summary timer when we detect ESP phase
             if (!_summaryTimerActive)
