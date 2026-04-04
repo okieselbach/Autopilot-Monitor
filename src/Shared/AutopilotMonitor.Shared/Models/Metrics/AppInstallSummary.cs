@@ -37,6 +37,12 @@ namespace AutopilotMonitor.Shared.Models
         public DateTime? CompletedAt { get; set; }
 
         // Delivery Optimization telemetry
+        /// <summary>DO: total file size reported by DO</summary>
+        public long DoFileSize { get; set; }
+
+        /// <summary>DO: total bytes actually downloaded (may differ from DoFileSize on partial downloads)</summary>
+        public long DoTotalBytesDownloaded { get; set; }
+
         /// <summary>DO: bytes from all peer sources</summary>
         public long DoBytesFromPeers { get; set; }
 

@@ -117,14 +117,22 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
                 var totalDownloadSecs = locationApps.Sum(a => (double)a.DownloadDurationSeconds);
                 var avgThroughput = totalDownloadSecs > 0 ? totalBytes / totalDownloadSecs : 0;
 
-                // Delivery Optimization metrics (apps with DO telemetry have DoDownloadMode >= 0)
-                var doApps = locationApps.Where(a => a.DoDownloadMode >= 0).ToList();
+                // Delivery Optimization metrics — use ALL apps with DO telemetry, not just those
+                // with DownloadDurationSeconds > 0 (small/fast apps have valid DO data but < 1s duration)
+                var allLocationApps = group
+                    .Where(s => appsBySession.ContainsKey(s.SessionId))
+                    .SelectMany(s => appsBySession[s.SessionId])
+                    .ToList();
+                var doApps = allLocationApps.Where(a => a.DoDownloadMode >= 0).ToList();
                 var doSessionCount = group
                     .Where(s => appsBySession.ContainsKey(s.SessionId))
                     .Count(s => appsBySession[s.SessionId].Any(a => a.DoDownloadMode >= 0));
                 var totalDoPeers = doApps.Sum(a => a.DoBytesFromPeers);
                 var totalDoHttp = doApps.Sum(a => a.DoBytesFromHttp);
-                var totalDoBytes = totalDoPeers + totalDoHttp;
+                // Use DoTotalBytesDownloaded as ground truth denominator (accounts for all sources);
+                // fall back to peers+http sum for old records without the field
+                var totalDoDownloaded = doApps.Sum(a => a.DoTotalBytesDownloaded);
+                var totalDoBytes = totalDoDownloaded > 0 ? totalDoDownloaded : (totalDoPeers + totalDoHttp);
                 var avgDoPct = totalDoBytes > 0 ? (double)totalDoPeers / totalDoBytes * 100 : 0;
 
                 locations.Add(new LocationMetrics

@@ -192,6 +192,8 @@ namespace AutopilotMonitor.Functions.Services
                         var existingDoPeers = existing.GetInt64("DoBytesFromPeers");
                         if (existingDoPeers.HasValue && existingDoPeers.Value > 0)
                         {
+                            summary.DoFileSize = existing.GetInt64("DoFileSize") ?? 0;
+                            summary.DoTotalBytesDownloaded = existing.GetInt64("DoTotalBytesDownloaded") ?? 0;
                             summary.DoBytesFromPeers = existingDoPeers.Value;
                             summary.DoBytesFromHttp = existing.GetInt64("DoBytesFromHttp") ?? 0;
                             summary.DoPercentPeerCaching = existing.GetInt32("DoPercentPeerCaching") ?? 0;
@@ -218,6 +220,8 @@ namespace AutopilotMonitor.Functions.Services
                     ["StartedAt"] = EnsureUtc(summary.StartedAt),
                     ["CompletedAt"] = summary.CompletedAt.HasValue ? EnsureUtc(summary.CompletedAt.Value) : (DateTime?)null,
                     // Delivery Optimization telemetry
+                    ["DoFileSize"] = summary.DoFileSize,
+                    ["DoTotalBytesDownloaded"] = summary.DoTotalBytesDownloaded,
                     ["DoBytesFromPeers"] = summary.DoBytesFromPeers,
                     ["DoBytesFromHttp"] = summary.DoBytesFromHttp,
                     ["DoPercentPeerCaching"] = summary.DoPercentPeerCaching,
@@ -306,6 +310,8 @@ namespace AutopilotMonitor.Functions.Services
                 StartedAt = entity.GetDateTimeOffset("StartedAt")?.UtcDateTime ?? DateTime.MinValue,
                 CompletedAt = entity.GetDateTimeOffset("CompletedAt")?.UtcDateTime,
                 // Delivery Optimization telemetry
+                DoFileSize = entity.GetInt64("DoFileSize") ?? 0,
+                DoTotalBytesDownloaded = entity.GetInt64("DoTotalBytesDownloaded") ?? 0,
                 DoBytesFromPeers = entity.GetInt64("DoBytesFromPeers") ?? 0,
                 DoBytesFromHttp = entity.GetInt64("DoBytesFromHttp") ?? 0,
                 DoPercentPeerCaching = entity.GetInt32("DoPercentPeerCaching") ?? 0,

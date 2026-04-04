@@ -128,7 +128,12 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                     if (evt.Data != null)
                     {
                         if (evt.Data.ContainsKey("doFileSize") && long.TryParse(evt.Data["doFileSize"]?.ToString(), out var doFs))
+                        {
                             summary.DownloadBytes = Math.Max(summary.DownloadBytes, doFs);
+                            summary.DoFileSize = doFs;
+                        }
+                        if (evt.Data.ContainsKey("doTotalBytesDownloaded") && long.TryParse(evt.Data["doTotalBytesDownloaded"]?.ToString(), out var doTotalDl))
+                            summary.DoTotalBytesDownloaded = doTotalDl;
                         if (evt.Data.ContainsKey("doBytesFromPeers") && long.TryParse(evt.Data["doBytesFromPeers"]?.ToString(), out var doPeers))
                             summary.DoBytesFromPeers = doPeers;
                         if (evt.Data.ContainsKey("doBytesFromHttp") && long.TryParse(evt.Data["doBytesFromHttp"]?.ToString(), out var doHttp))
