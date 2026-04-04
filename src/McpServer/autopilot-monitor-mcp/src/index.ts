@@ -58,7 +58,7 @@ app.get('/health', (_req, res) => {
 });
 
 // Track transports by session ID for reuse
-const transports = new Map<string, { transport: StreamableHTTPServerTransport; createdAt: number }>();
+const transports = new Map<string, { transport: StreamableHTTPServerTransport; createdAt: number; lastActivity: number }>();
 
 // Session TTL cleanup — remove abandoned sessions that never sent a DELETE.
 // Currently runs every 12h (cost-effective for single-user on a sleeping container app).
@@ -67,9 +67,10 @@ const SESSION_MAX_AGE_MS = 2 * 60 * 60 * 1000; // 2 hours
 setInterval(() => {
   const now = Date.now();
   for (const [id, entry] of transports) {
-    if (now - entry.createdAt > SESSION_MAX_AGE_MS) {
+    if (now - entry.lastActivity > SESSION_MAX_AGE_MS) {
+      entry.transport.close().catch(() => {});
       transports.delete(id);
-      console.error(`[mcp] Reaped stale session ${id} (age > ${SESSION_MAX_AGE_MS / 1000 / 60}min)`);
+      console.error(`[mcp] Reaped idle session ${id} (idle > ${SESSION_MAX_AGE_MS / 1000 / 60}min)`);
     }
   }
 }, 12 * 60 * 60 * 1000); // 12h interval
@@ -95,6 +96,7 @@ app.all('/mcp', async (req, res) => {
   // POST — existing session: forward to its transport
   if (sessionId && transports.has(sessionId)) {
     const entry = transports.get(sessionId)!;
+    entry.lastActivity = Date.now();
     await entry.transport.handleRequest(req, res, req.body);
     return;
   }
@@ -115,6 +117,10 @@ app.all('/mcp', async (req, res) => {
     }
   };
 
+  transport.onerror = (error: Error) => {
+    console.error(`[mcp] Session ${transport.sessionId ?? 'unknown'} error: ${error.message}`);
+  };
+
   const server = createMcpServer();
   await server.connect(transport);
 
@@ -123,7 +129,8 @@ app.all('/mcp', async (req, res) => {
   // Register AFTER handleRequest — the session ID is only assigned during
   // initialize processing inside handleRequest, not before.
   if (transport.sessionId) {
-    transports.set(transport.sessionId, { transport, createdAt: Date.now() });
+    const now = Date.now();
+    transports.set(transport.sessionId, { transport, createdAt: now, lastActivity: now });
     console.error(`[mcp] Session ${transport.sessionId} registered`);
   }
 });
