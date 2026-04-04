@@ -298,7 +298,7 @@ namespace AutopilotMonitor.Agent
                 try
                 {
                     var regexStr = pattern.Pattern.Replace("{GUID}", GuidPattern);
-                    var regex = new Regex(regexStr, RegexOptions.IgnoreCase | RegexOptions.Compiled, TimeSpan.FromSeconds(1));
+                    var regex = new Regex(regexStr, RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.Singleline, TimeSpan.FromSeconds(1));
                     compiled.Add(new MatchPattern
                     {
                         PatternId = pattern.PatternId,

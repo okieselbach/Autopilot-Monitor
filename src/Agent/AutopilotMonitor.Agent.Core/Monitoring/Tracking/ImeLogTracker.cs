@@ -170,7 +170,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 {
                     // Replace {GUID} placeholder with actual GUID capture regex
                     var regexStr = pattern.Pattern.Replace("{GUID}", GuidPattern);
-                    var regex = new Regex(regexStr, RegexOptions.IgnoreCase | RegexOptions.Compiled, TimeSpan.FromSeconds(1));
+                    // Singleline: make '.' match newlines too — required because multiline CMTrace
+                    // entries are reassembled with '\n' chars (e.g. DO TEL JSON in IME >= 1.101)
+                    var regex = new Regex(regexStr, RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.Singleline, TimeSpan.FromSeconds(1));
 
                     var compiled = new CompiledPattern
                     {
