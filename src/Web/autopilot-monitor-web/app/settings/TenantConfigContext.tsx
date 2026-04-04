@@ -38,6 +38,8 @@ interface TenantConfigContextValue {
   setManufacturerWhitelist: (v: string) => void;
   modelWhitelist: string;
   setModelWhitelist: (v: string) => void;
+  webhookNotifyOnHardwareRejection: boolean;
+  setWebhookNotifyOnHardwareRejection: (v: boolean) => void;
   handleSaveHardwareWhitelist: () => void;
   handleResetHardwareWhitelist: () => void;
 
@@ -219,6 +221,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
   // Form state
   const [manufacturerWhitelist, setManufacturerWhitelist] = useState("Dell*,HP*,Lenovo*,Microsoft Corporation");
   const [modelWhitelist, setModelWhitelist] = useState("*");
+  const [webhookNotifyOnHardwareRejection, setWebhookNotifyOnHardwareRejection] = useState(false);
   const [validateAutopilotDevice, setValidateAutopilotDevice] = useState(false);
   const [validateCorporateIdentifier, setValidateCorporateIdentifier] = useState(false);
   const [dataRetentionDays, setDataRetentionDays] = useState(90);
@@ -308,6 +311,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
         // Update form state
         setManufacturerWhitelist(data.manufacturerWhitelist);
         setModelWhitelist(data.modelWhitelist);
+        setWebhookNotifyOnHardwareRejection(data.webhookNotifyOnHardwareRejection ?? false);
         setValidateAutopilotDevice(data.validateAutopilotDevice);
         setValidateCorporateIdentifier(data.validateCorporateIdentifier ?? false);
         setDataRetentionDays(data.dataRetentionDays ?? 90);
@@ -498,6 +502,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
         ...config,
         manufacturerWhitelist,
         modelWhitelist,
+        webhookNotifyOnHardwareRejection,
         validateAutopilotDevice: autopilotDeviceValidationValue,
         validateCorporateIdentifier: corporateIdentifierValidationValue,
         dataRetentionDays,
@@ -734,6 +739,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
     if (!config) return;
     setManufacturerWhitelist(config.manufacturerWhitelist);
     setModelWhitelist(config.modelWhitelist);
+    setWebhookNotifyOnHardwareRejection(config.webhookNotifyOnHardwareRejection ?? false);
   }, [config]);
 
   const handleSaveAgentSettings = useCallback(() => saveConfiguration("agentSettings"), [saveConfiguration]);
@@ -1067,6 +1073,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
       // Hardware whitelist
       manufacturerWhitelist, setManufacturerWhitelist,
       modelWhitelist, setModelWhitelist,
+      webhookNotifyOnHardwareRejection, setWebhookNotifyOnHardwareRejection,
       handleSaveHardwareWhitelist, handleResetHardwareWhitelist,
 
       // Agent settings

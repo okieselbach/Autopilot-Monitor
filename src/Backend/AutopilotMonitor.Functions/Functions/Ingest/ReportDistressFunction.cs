@@ -5,8 +5,10 @@ using System.Net;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using AutopilotMonitor.Functions.Services;
+using AutopilotMonitor.Functions.Services.Notifications;
 using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
+using AutopilotMonitor.Shared.Models.Notifications;
 using Microsoft.ApplicationInsights;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -33,6 +35,8 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
         private readonly DistressRateLimitService _rateLimitService;
         private readonly IDistressReportRepository _repository;
         private readonly TelemetryClient _telemetryClient;
+        private readonly HardwareRejectionThrottleService _hardwareThrottle;
+        private readonly WebhookNotificationService _webhookNotification;
 
         // Strict limits for the unauthenticated endpoint
         internal const int MaxContentLength = 1024;
@@ -55,13 +59,17 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             TenantConfigurationService tenantConfigService,
             DistressRateLimitService rateLimitService,
             IDistressReportRepository repository,
-            TelemetryClient telemetryClient)
+            TelemetryClient telemetryClient,
+            HardwareRejectionThrottleService hardwareThrottle,
+            WebhookNotificationService webhookNotification)
         {
             _logger = logger;
             _tenantConfigService = tenantConfigService;
             _rateLimitService = rateLimitService;
             _repository = repository;
             _telemetryClient = telemetryClient;
+            _hardwareThrottle = hardwareThrottle;
+            _webhookNotification = webhookNotification;
         }
 
         [Function("ReportDistress")]
@@ -150,6 +158,29 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                 };
 
                 await _repository.SaveDistressReportAsync(tenantId, entry);
+
+                // Notify tenant webhook for hardware whitelist rejections (fire-and-forget, opt-in)
+                if (report.ErrorType == DistressErrorType.HardwareNotAllowed
+                    && _hardwareThrottle.ShouldNotify(tenantId, manufacturer, model))
+                {
+                    try
+                    {
+                        var (config, configExists) = await _tenantConfigService.TryGetConfigurationAsync(tenantId);
+                        if (configExists && config!.WebhookNotifyOnHardwareRejection)
+                        {
+                            var (webhookUrl, providerTypeInt) = config.GetEffectiveWebhookConfig();
+                            if (!string.IsNullOrEmpty(webhookUrl) && providerTypeInt != 0)
+                            {
+                                var alert = NotificationAlertBuilder.BuildHardwareRejectedAlert(manufacturer, model, serialNumber);
+                                _ = _webhookNotification.SendNotificationAsync(webhookUrl, (WebhookProviderType)providerTypeInt, alert);
+                            }
+                        }
+                    }
+                    catch (Exception notifyEx)
+                    {
+                        _logger.LogWarning(notifyEx, "HardwareRejected webhook notification failed for tenant {TenantId}", tenantId);
+                    }
+                }
 
                 // Structured log (Warning, not Critical — data is unverified)
                 _logger.LogWarning(

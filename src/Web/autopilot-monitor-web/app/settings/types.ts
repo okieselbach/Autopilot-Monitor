@@ -38,6 +38,7 @@ export interface TenantConfiguration {
   webhookUrl?: string;
   webhookNotifyOnSuccess?: boolean;
   webhookNotifyOnFailure?: boolean;
+  webhookNotifyOnHardwareRejection?: boolean;
   // Diagnostics package
   diagnosticsBlobSasUrl?: string;
   diagnosticsUploadMode?: string;

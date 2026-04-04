@@ -1,0 +1,90 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Net;
+using AutopilotMonitor.Functions.Helpers;
+using AutopilotMonitor.Shared.DataAccess;
+using Microsoft.Azure.Functions.Worker;
+using Microsoft.Azure.Functions.Worker.Http;
+using Microsoft.Extensions.Logging;
+
+namespace AutopilotMonitor.Functions.Functions.Reports
+{
+    /// <summary>
+    /// Tenant-scoped endpoint: returns hardware whitelist rejections aggregated by manufacturer+model.
+    /// Data comes from distress reports with ErrorType == "HardwareNotAllowed".
+    /// Authentication + MemberRead authorization enforced by PolicyEnforcementMiddleware.
+    /// </summary>
+    public class GetHardwareRejectedFunction
+    {
+        private readonly ILogger<GetHardwareRejectedFunction> _logger;
+        private readonly IDistressReportRepository _repository;
+
+        public GetHardwareRejectedFunction(
+            ILogger<GetHardwareRejectedFunction> logger,
+            IDistressReportRepository repository)
+        {
+            _logger = logger;
+            _repository = repository;
+        }
+
+        [Function("GetHardwareRejected")]
+        public async Task<HttpResponseData> Run(
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "distress/hardware-rejected")] HttpRequestData req)
+        {
+            try
+            {
+                string tenantId = TenantHelper.GetTenantId(req);
+
+                var reports = await _repository.GetDistressReportsAsync(tenantId, maxResults: 200);
+
+                // Filter to HardwareNotAllowed only
+                var hardwareReports = reports
+                    .Where(r => string.Equals(r.ErrorType, "HardwareNotAllowed", StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                // Aggregate by manufacturer+model (case-insensitive grouping)
+                var aggregated = hardwareReports
+                    .GroupBy(r => new
+                    {
+                        Manufacturer = (r.Manufacturer ?? "").ToLowerInvariant(),
+                        Model = (r.Model ?? "").ToLowerInvariant()
+                    })
+                    .Select(g =>
+                    {
+                        var mostRecent = g.OrderByDescending(r => r.IngestedAt).First();
+                        var serials = g
+                            .Where(r => !string.IsNullOrEmpty(r.SerialNumber))
+                            .Select(r => r.SerialNumber!)
+                            .Distinct(StringComparer.OrdinalIgnoreCase)
+                            .ToList();
+
+                        return new
+                        {
+                            manufacturer = mostRecent.Manufacturer ?? "",
+                            model = mostRecent.Model ?? "",
+                            attemptCount = g.Count(),
+                            uniqueSerials = serials.Count,
+                            firstSeen = g.Min(r => r.IngestedAt),
+                            lastSeen = g.Max(r => r.IngestedAt),
+                            sampleSerialNumbers = serials.Take(5).ToList()
+                        };
+                    })
+                    .OrderByDescending(a => a.lastSeen)
+                    .ToList();
+
+                return await req.OkAsync(new
+                {
+                    success = true,
+                    aggregated,
+                    totalRawReports = hardwareReports.Count,
+                    dataQualityNotice = "This data is from pre-authentication distress reports and is UNVERIFIED. Manufacturer, model, and serial number values are self-reported by devices."
+                });
+            }
+            catch (Exception ex)
+            {
+                return await req.InternalServerErrorAsync(_logger, ex, "Get hardware rejections");
+            }
+        }
+    }
+}

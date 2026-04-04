@@ -131,6 +131,7 @@ builder.Services.AddSingleton<MaintenanceService>();
 builder.Services.AddSingleton<OpsAlertDispatchService>();
 builder.Services.AddSingleton<OpsEventService>();
 builder.Services.AddSingleton<BlockedDeviceService>();
+builder.Services.AddSingleton<HardwareRejectionThrottleService>();
 builder.Services.AddSingleton<BlockedVersionService>();
 builder.Services.AddSingleton<BlobStorageService>();
 builder.Services.AddSingleton<SessionReportService>();

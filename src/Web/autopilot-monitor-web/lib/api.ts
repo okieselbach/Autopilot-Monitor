@@ -181,6 +181,11 @@ export const api = {
     list: () => `${API_BASE_URL}/api/global/distress-reports`,
   },
 
+  // ── Distress (tenant-scoped) ─────────────────────────────────────────────
+  distress: {
+    hardwareRejected: () => `${API_BASE_URL}/api/distress/hardware-rejected`,
+  },
+
   // ── Ops Events ───────────────────────────────────────────────────────────
   opsEvents: {
     list: (category?: string, maxResults?: number) =>

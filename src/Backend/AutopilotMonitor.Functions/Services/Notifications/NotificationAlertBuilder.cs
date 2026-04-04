@@ -125,6 +125,27 @@ namespace AutopilotMonitor.Functions.Services.Notifications
             };
         }
 
+        public static NotificationAlert BuildHardwareRejectedAlert(
+            string? manufacturer, string? model, string? serialNumber)
+        {
+            var hardwareText = BuildHardwareText(manufacturer, model);
+
+            return new NotificationAlert
+            {
+                Title = "\u26a0\ufe0f Hardware Not Whitelisted",
+                Summary = $"Device rejected: {hardwareText} is not in your hardware whitelist",
+                Severity = NotificationSeverity.Warning,
+                ThemeColor = "FFA500",
+                Facts = new List<NotificationFact>
+                {
+                    new() { Name = "Manufacturer", Value = manufacturer ?? "\u2013" },
+                    new() { Name = "Model", Value = model ?? "\u2013" },
+                    new() { Name = "Serial", Value = serialNumber ?? "\u2013" },
+                    new() { Name = "Data Quality", Value = "Unverified (pre-auth distress signal)" },
+                },
+            };
+        }
+
         /// <summary>
         /// Appends rule results as notification sections (warning/high/critical only, max 5).
         /// </summary>

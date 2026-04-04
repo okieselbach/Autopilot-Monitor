@@ -448,6 +448,12 @@ namespace AutopilotMonitor.Shared.Models
         /// </summary>
         public bool WebhookNotifyOnFailure { get; set; } = true;
 
+        /// <summary>
+        /// Send a webhook notification when a device is rejected by the hardware whitelist.
+        /// Default: false (opt-in).
+        /// </summary>
+        public bool WebhookNotifyOnHardwareRejection { get; set; } = false;
+
         // ===== HELPER METHODS =====
 
         /// <summary>

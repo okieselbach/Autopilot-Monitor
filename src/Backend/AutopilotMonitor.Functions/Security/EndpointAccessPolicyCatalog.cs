@@ -144,6 +144,7 @@ public static class EndpointAccessPolicyCatalog
         new("GET",    "metrics/mcp-usage/user/{userId}", EndpointPolicy.TenantAdminOrGA),
         new("GET",    "metrics/geographic/sessions", EndpointPolicy.MemberRead),
         new("GET",    "audit/logs",                EndpointPolicy.MemberRead),
+        new("GET",    "distress/hardware-rejected", EndpointPolicy.MemberRead),
         new("GET",    "diagnostics/download-url",  EndpointPolicy.MemberRead),
         new("GET",    "rules/gather",              EndpointPolicy.MemberRead),
         new("GET",    "rules/analyze",             EndpointPolicy.MemberRead),
