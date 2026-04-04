@@ -117,9 +117,17 @@ export function registerSearchTools(server: McpServer, knowledgeBase?: SearchPro
           };
         });
 
+        const timeoutMs = 60_000;
         const provider = await createSearchProvider();
-        await provider.index(docs);
-        const searchResults = await provider.search(query, { topK, minScore });
+        const searchResults = await Promise.race([
+          (async () => {
+            await provider.index(docs);
+            return provider.search(query, { topK, minScore });
+          })(),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error(`Semantic search timed out after ${timeoutMs / 1000}s`)), timeoutMs),
+          ),
+        ]);
 
         const results = searchResults.map((r) => {
           const idx = r.metadata.index as number;
@@ -283,10 +291,18 @@ export function registerSearchTools(server: McpServer, knowledgeBase?: SearchPro
             return { id: `event-${i}`, text: parts.join(' | '), metadata: { index: i } as Record<string, unknown> };
           });
 
+          const timeoutMs = 60_000;
           const provider = await createSearchProvider();
           searchBackend = provider.name;
-          await provider.index(docs);
-          const searchResults = await provider.search(query, { topK, minScore });
+          const searchResults = await Promise.race([
+            (async () => {
+              await provider.index(docs);
+              return provider.search(query, { topK, minScore });
+            })(),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error(`Deep search timed out after ${timeoutMs / 1000}s`)), timeoutMs),
+            ),
+          ]);
 
           for (const r of searchResults) {
             const candidateIdx = r.metadata.index as number;

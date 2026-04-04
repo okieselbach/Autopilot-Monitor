@@ -96,10 +96,16 @@ app.all('/mcp', async (req, res) => {
     return;
   }
 
-  // POST — unknown/stale session ID: strip it so transport treats this as a fresh connection
+  // POST — unknown/stale session ID: tell client to re-initialize.
+  // Previously we stripped the header and created a new transport, but the
+  // request body is a tool call (not "initialize"), causing "Server not initialized" errors.
   if (sessionId) {
-    console.error(`[mcp] Stale session ${sessionId} — creating new session`);
-    delete req.headers['mcp-session-id'];
+    console.error(`[mcp] Stale session ${sessionId} — returning 404 to trigger client re-init`);
+    res.status(404).json({
+      jsonrpc: '2.0',
+      error: { code: -32000, message: 'Session expired. Please re-initialize.' },
+    });
+    return;
   }
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: () => randomUUID(),

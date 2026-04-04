@@ -104,8 +104,8 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
           name: 'mcp-server'
           image: '${acr.properties.loginServer}/${containerAppName}:${imageTag}'
           resources: {
-            cpu: json('0.25')
-            memory: '0.5Gi'
+            cpu: json('1.0')
+            memory: '2.0Gi'
           }
           env: [
             { name: 'AUTOPILOT_API_URL', value: apiUrl }
