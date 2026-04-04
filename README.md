@@ -1,6 +1,6 @@
 # Autopilot Monitor
 
-Advanced monitoring and troubleshooting solution for Windows Autopilot deployments.
+Advanced monitoring and troubleshooting solution for Windows Autopilot deployments. Gain full visibility into every enrollment session with a detailed event timeline, fleet health dashboards, and session reporting. Define custom analysis rules to automatically detect issues and gather rules to collect targeted evidence. Retrieve diagnostics packages on demand, configure agent settings like auto-reboot behavior and automatic timezone adjustment — all managed centrally from the web dashboard.
 
 ## Private Preview
 
