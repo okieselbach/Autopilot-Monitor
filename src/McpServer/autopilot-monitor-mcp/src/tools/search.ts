@@ -2,7 +2,6 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { apiFetch, buildQuery } from '../client.js';
 import type { SearchProvider } from '../search-provider.js';
-import { createSearchProvider } from '../search-factory.js';
 import { READ_ONLY } from './shared.js';
 import { toolError } from './error-handler.js';
 
@@ -68,47 +67,107 @@ function extractKeywords(query: string): string[] {
     .filter((w) => w.length > 2 && !KEYWORD_STOP_WORDS.has(w));
 }
 
-/** Build enriched search text from an event for Fuse indexing.
- *  Includes message, structured fields, and a snippet of DataJson for maximum recall. */
-function enrichEventText(e: EventEntry): string {
-  const parts: string[] = [];
-  if (e.message) parts.push(e.message);
-  if (e.eventType) parts.push(`Event: ${e.eventType}`);
-  if (e.severity) parts.push(`Severity: ${e.severity}`);
-  if (e.source) parts.push(`Source: ${e.source}`);
-  if (e.data) {
-    // Flatten top-level data keys into a compact snippet (max 200 chars)
-    const snippet = Object.entries(e.data)
-      .map(([k, v]) => {
-        const val = typeof v === 'string' ? v : typeof v === 'object' ? '' : String(v);
-        return val ? `${k}=${val}` : '';
-      })
-      .filter(Boolean)
-      .join(' ');
-    if (snippet) parts.push(snippet.slice(0, 200));
+// ── Weighted keyword scoring ────────────────────────────────────────────
+
+const MIN_PREFIX_LEN = 4;
+
+/** Check if keyword matches text via substring or shared prefix (min 4 chars). */
+function prefixAwareMatch(text: string, keyword: string): boolean {
+  if (text.includes(keyword)) return true;
+  // Split text into words and check shared prefix
+  const words = text.split(/[\s_\-.:,/]+/);
+  for (const word of words) {
+    if (word.length < MIN_PREFIX_LEN || keyword.length < MIN_PREFIX_LEN) continue;
+    const prefixLen = Math.min(word.length, keyword.length, MIN_PREFIX_LEN + 2);
+    if (word.slice(0, prefixLen) === keyword.slice(0, prefixLen)) return true;
   }
-  return parts.join(' | ');
+  return false;
+}
+
+/** Field weights for scoring — eventType is the most discriminating field. */
+const FIELD_WEIGHTS = {
+  eventType: 3.0,
+  message: 2.0,
+  source: 1.5,
+  severity: 1.0,
+  data: 0.5,
+} as const;
+
+type ScoredEvent = {
+  index: number;
+  score: number;
+  matchedKeywords: string[];
+  bestFields: string[];
+};
+
+/** Score an event against query keywords with weighted field matching. */
+function scoreEvent(e: EventEntry, queryKeywords: string[]): ScoredEvent | null {
+  const fields: Array<{ name: string; text: string; weight: number }> = [
+    { name: 'eventType', text: (e.eventType ?? '').toLowerCase(), weight: FIELD_WEIGHTS.eventType },
+    { name: 'message', text: (e.message ?? '').toLowerCase(), weight: FIELD_WEIGHTS.message },
+    { name: 'source', text: (e.source ?? '').toLowerCase(), weight: FIELD_WEIGHTS.source },
+    { name: 'severity', text: (e.severity ?? '').toLowerCase(), weight: FIELD_WEIGHTS.severity },
+    { name: 'data', text: e.data ? JSON.stringify(e.data).toLowerCase() : '', weight: FIELD_WEIGHTS.data },
+  ];
+
+  let totalScore = 0;
+  const matched: string[] = [];
+  const bestFields = new Set<string>();
+
+  for (const kw of queryKeywords) {
+    let kwBestWeight = 0;
+    let kwBestField = '';
+    for (const field of fields) {
+      if (field.text && prefixAwareMatch(field.text, kw)) {
+        if (field.weight > kwBestWeight) {
+          kwBestWeight = field.weight;
+          kwBestField = field.name;
+        }
+      }
+    }
+    if (kwBestWeight > 0) {
+      totalScore += kwBestWeight;
+      matched.push(kw);
+      bestFields.add(kwBestField);
+    }
+  }
+
+  if (matched.length === 0) return null;
+
+  // Normalize: max possible = all keywords matching in eventType (weight 3.0)
+  const maxPossible = queryKeywords.length * FIELD_WEIGHTS.eventType;
+  const normalizedScore = totalScore / maxPossible;
+
+  // Bonus for matching MORE keywords (coverage matters)
+  const coverageBonus = (matched.length / queryKeywords.length) * 0.2;
+
+  return {
+    index: 0, // set by caller
+    score: Math.min(normalizedScore + coverageBonus, 1.0),
+    matchedKeywords: matched,
+    bestFields: Array.from(bestFields),
+  };
 }
 
 // ── Registration ────────────────────────────────────────────────────────
 
 export function registerSearchTools(server: McpServer, knowledgeBase?: SearchProvider): void {
-  // Tool 9: search_events_semantic — Fuse-based fuzzy search
+  // Tool 9: search_events_semantic — weighted keyword search
   server.tool(
     'search_events_semantic',
-    'TIER 1 — FAST FUZZY SEARCH (try this first). ' +
-    'Fuzzy text search over enrollment event messages, types, sources, and data within a session or across recent failed sessions. ' +
-    'Matches on keywords and partial text — e.g. "app install" matches events with "Installing", "Installed", "app_install_failed". ' +
-    'Use this when you need to find events matching a description rather than an exact event type. ' +
+    'TIER 1 — FAST EVENT SEARCH (try this first). ' +
+    'Searches enrollment events by matching keywords against event type, message, source, severity, and data fields. ' +
+    'Uses prefix-aware matching (e.g. "install" matches "installation", "installed", "app_install_failed") ' +
+    'and weighted field scoring (matches in eventType rank higher than in data). ' +
     'Provide sessionId to search within one session, or omit to search across recent failed sessions. ' +
-    'If results seem incomplete or you need guaranteed completeness, escalate to deep_search_events.',
+    'If results seem incomplete, escalate to deep_search_events for exhaustive coverage.',
     {
       query: z.string().describe('Natural language description of what to find (e.g. "app download stuck", "certificate error", "disk space low")'),
       sessionId: z.string().optional().describe('Search within a specific session. If omitted, searches across recent failed sessions.'),
       tenantId: z.string().optional().describe('Tenant ID. Required for non-Global Admin users; Global Admin can omit to search across tenants.'),
       topK: z.coerce.number().min(1).max(30).optional().default(10).describe('Number of matching events to return (1-30, default 10)'),
-      minScore: z.coerce.number().min(0).max(1).optional().default(0.25)
-        .describe('Minimum similarity score (0-1, default 0.25). Lower than before for better recall with fuzzy matching.'),
+      minScore: z.coerce.number().min(0).max(1).optional().default(0.1)
+        .describe('Minimum relevance score (0-1, default 0.1). Events matching at least one keyword in any field pass this threshold.'),
     },
     READ_ONLY,
     async (args) => {
@@ -116,50 +175,48 @@ export function registerSearchTools(server: McpServer, knowledgeBase?: SearchPro
         const { query, sessionId, tenantId, topK, minScore } = args;
         const { events, sessionIds } = await fetchSessionEvents(sessionId, tenantId);
 
-        const candidates = events.filter((e) => e.message && e.message.length > 3);
-
-        if (candidates.length === 0) {
+        const queryKeywords = extractKeywords(query);
+        if (queryKeywords.length === 0) {
           return {
             content: [{
               type: 'text' as const,
-              text: JSON.stringify({ query, resultCount: 0, results: [], note: 'No events with messages found.' }),
+              text: JSON.stringify({ query, resultCount: 0, results: [], note: 'No searchable keywords extracted from query.' }),
             }],
           };
         }
 
-        const docs = candidates.map((e, i) => ({
-          id: `event-${i}`,
-          text: enrichEventText(e),
-          metadata: { index: i } as Record<string, unknown>,
+        const scored: Array<ScoredEvent & { event: EventEntry }> = [];
+        for (let i = 0; i < events.length; i++) {
+          const result = scoreEvent(events[i], queryKeywords);
+          if (result && result.score >= minScore) {
+            scored.push({ ...result, index: i, event: events[i] });
+          }
+        }
+
+        scored.sort((a, b) => b.score - a.score);
+        const results = scored.slice(0, topK).map((s) => ({
+          score: Math.round(s.score * 1000) / 1000,
+          matchedKeywords: s.matchedKeywords,
+          bestFields: s.bestFields,
+          sessionId: s.event._sessionId ?? sessionId,
+          eventType: s.event.eventType,
+          severity: s.event.severity,
+          source: s.event.source,
+          phase: s.event.phase,
+          timestamp: s.event.timestamp,
+          message: s.event.message,
         }));
-
-        const provider = await createSearchProvider('fuse');
-        await provider.index(docs);
-        const searchResults = await provider.search(query, { topK, minScore });
-
-        const results = searchResults.map((r) => {
-          const idx = r.metadata.index as number;
-          const e = candidates[idx];
-          return {
-            score: Math.round(r.score * 1000) / 1000,
-            sessionId: e._sessionId ?? sessionId,
-            eventType: e.eventType,
-            severity: e.severity,
-            source: e.source,
-            phase: e.phase,
-            timestamp: e.timestamp,
-            message: e.message,
-          };
-        });
 
         return {
           content: [{
             type: 'text' as const,
             text: JSON.stringify({
               query,
-              searchBackend: provider.name,
+              searchBackend: 'weighted-keyword',
+              keywordsUsed: queryKeywords,
               sessionsSearched: sessionIds,
-              eventsAnalyzed: candidates.length,
+              eventsScanned: events.length,
+              eventsMatched: scored.length,
               resultCount: results.length,
               results,
             }, null, 2),
@@ -235,28 +292,27 @@ export function registerSearchTools(server: McpServer, knowledgeBase?: SearchPro
     }
   );
 
-  // Tool 23: deep_search_events — Fuse + keyword hybrid
+  // Tool 23: deep_search_events — same scoring + exhaustive data scan
   server.tool(
     'deep_search_events',
-    'TIER 3 — DEEP HYBRID SEARCH (thorough, use when accuracy is critical). ' +
-    'Combines fuzzy text search with a complementary keyword cross-check to ensure nothing is missed. ' +
-    'First runs fuzzy search on enriched event text (message + eventType + source + data), then scans ALL events — ' +
-    'including those with short or missing messages — for keyword matches in eventType, source, severity, message, and data fields. ' +
-    'Results are merged, deduplicated, and tagged with their discovery method (fuzzy, keyword, or both). ' +
+    'TIER 3 — DEEP SEARCH (thorough, use when accuracy is critical). ' +
+    'Uses the same weighted keyword scoring as search_events_semantic but with lower thresholds ' +
+    'and higher result limits for maximum recall. Searches ALL event fields including full DataJson content. ' +
+    'Results include matched keywords and which fields they were found in. ' +
     'Use this when: (1) a previous search may have missed events, (2) you need high confidence in completeness, ' +
-    'or (3) the query involves specific technical terms that benefit from exact keyword matching alongside fuzzy matching. ' +
+    'or (3) you want to see which specific fields matched. ' +
     'Provide sessionId to search within one session, or omit to search across recent failed sessions. ' +
     'Omit tenantId for cross-tenant search (Global Admin), or specify tenantId for single-tenant.',
     {
       query: z.string().describe('Natural language description of what to find (e.g. "app download stuck", "certificate error", "disk space low")'),
       sessionId: z.string().optional().describe('Search within a specific session. If omitted, searches across recent failed sessions.'),
       tenantId: z.string().optional().describe('Tenant ID. Required for non-Global Admin users; Global Admin can omit to search across tenants.'),
-      topK: z.coerce.number().min(1).max(50).optional().default(15)
-        .describe('Max results to return (1-50, default 15). Higher default than search_events_semantic for thoroughness.'),
-      minScore: z.coerce.number().min(0).max(1).optional().default(0.2)
-        .describe('Min fuzzy similarity score (0-1, default 0.2). Low threshold for maximum recall.'),
+      topK: z.coerce.number().min(1).max(50).optional().default(20)
+        .describe('Max results to return (1-50, default 20). Higher default for thoroughness.'),
+      minScore: z.coerce.number().min(0).max(1).optional().default(0.05)
+        .describe('Min relevance score (0-1, default 0.05). Very low for maximum recall.'),
       keywords: z.array(z.string()).optional()
-        .describe('Additional exact keywords for the raw cross-check pass. Auto-extracted from query if omitted.'),
+        .describe('Additional exact keywords for matching. Auto-extracted from query if omitted.'),
     },
     READ_ONLY,
     async (args) => {
@@ -269,106 +325,55 @@ export function registerSearchTools(server: McpServer, knowledgeBase?: SearchPro
             content: [{
               type: 'text' as const,
               text: JSON.stringify({
-                query, resultCount: 0, fuzzyMatches: 0, keywordMatches: 0,
+                query, resultCount: 0, eventsMatched: 0,
                 results: [], note: 'No events found.',
               }),
             }],
           };
         }
 
-        // ── Pass 1: Fuse fuzzy search (events with meaningful messages) ──
-        const fuzzyCandidates: EventEntry[] = [];
-        const candidateOriginalIndices: number[] = [];
-        for (let i = 0; i < events.length; i++) {
-          if (events[i].message && events[i].message!.length > 3) {
-            fuzzyCandidates.push(events[i]);
-            candidateOriginalIndices.push(i);
-          }
-        }
-
-        const fuzzyMap = new Map<number, { score: number }>();
-        let searchBackend = 'none';
-
-        if (fuzzyCandidates.length > 0) {
-          const docs = fuzzyCandidates.map((e, i) => ({
-            id: `event-${i}`,
-            text: enrichEventText(e),
-            metadata: { index: i } as Record<string, unknown>,
-          }));
-
-          const provider = await createSearchProvider('fuse');
-          searchBackend = provider.name;
-          await provider.index(docs);
-          const searchResults = await provider.search(query, { topK, minScore });
-
-          for (const r of searchResults) {
-            const candidateIdx = r.metadata.index as number;
-            const originalIdx = candidateOriginalIndices[candidateIdx];
-            fuzzyMap.set(originalIdx, { score: Math.round(r.score * 1000) / 1000 });
-          }
-        }
-
-        // ── Pass 2: Keyword cross-check (ALL events, including short/empty messages) ──
         const queryKeywords = keywords ?? extractKeywords(query);
-        const keywordMap = new Map<number, { matchedKeywords: string[] }>();
+        if (queryKeywords.length === 0) {
+          return {
+            content: [{
+              type: 'text' as const,
+              text: JSON.stringify({ query, resultCount: 0, results: [], note: 'No searchable keywords extracted from query.' }),
+            }],
+          };
+        }
 
+        const scored: Array<ScoredEvent & { event: EventEntry }> = [];
         for (let i = 0; i < events.length; i++) {
-          const e = events[i];
-          const searchText = [
-            e.message ?? '', e.eventType ?? '', e.source ?? '',
-            e.severity ?? '', e.phase ?? '',
-            e.data ? JSON.stringify(e.data) : '',
-          ].join(' ').toLowerCase();
-
-          const matched = queryKeywords.filter((kw) => searchText.includes(kw.toLowerCase()));
-          if (matched.length > 0) {
-            keywordMap.set(i, { matchedKeywords: matched });
+          const result = scoreEvent(events[i], queryKeywords);
+          if (result && result.score >= minScore) {
+            scored.push({ ...result, index: i, event: events[i] });
           }
         }
 
-        // ── Merge & deduplicate ──
-        const allIndices = new Set([...fuzzyMap.keys(), ...keywordMap.keys()]);
-        type DiscoveryMethod = 'both' | 'fuzzy' | 'keyword';
-        const merged = Array.from(allIndices).map((idx) => {
-          const e = events[idx];
-          const fuzzy = fuzzyMap.get(idx);
-          const keyword = keywordMap.get(idx);
-          const discoveryMethod: DiscoveryMethod = fuzzy && keyword ? 'both' : fuzzy ? 'fuzzy' : 'keyword';
-          return {
-            score: fuzzy?.score ?? 0,
-            discoveryMethod,
-            matchedKeywords: keyword?.matchedKeywords ?? [],
-            sessionId: e._sessionId ?? sessionId,
-            eventType: e.eventType,
-            severity: e.severity,
-            source: e.source,
-            phase: e.phase,
-            timestamp: e.timestamp,
-            message: e.message,
-          };
-        });
-
-        const methodRank: Record<DiscoveryMethod, number> = { both: 0, fuzzy: 1, keyword: 2 };
-        merged.sort((a, b) => {
-          const rankDiff = methodRank[a.discoveryMethod] - methodRank[b.discoveryMethod];
-          if (rankDiff !== 0) return rankDiff;
-          return b.score - a.score;
-        });
-
-        const results = merged.slice(0, topK);
+        scored.sort((a, b) => b.score - a.score);
+        const results = scored.slice(0, topK).map((s) => ({
+          score: Math.round(s.score * 1000) / 1000,
+          matchedKeywords: s.matchedKeywords,
+          bestFields: s.bestFields,
+          sessionId: s.event._sessionId ?? sessionId,
+          eventType: s.event.eventType,
+          severity: s.event.severity,
+          source: s.event.source,
+          phase: s.event.phase,
+          timestamp: s.event.timestamp,
+          message: s.event.message,
+        }));
 
         return {
           content: [{
             type: 'text' as const,
             text: JSON.stringify({
               query,
-              searchBackend,
+              searchBackend: 'weighted-keyword',
+              keywordsUsed: queryKeywords,
               sessionsSearched: sessionIds,
               totalEventsScanned: events.length,
-              fuzzyCandidates: fuzzyCandidates.length,
-              fuzzyMatches: fuzzyMap.size,
-              keywordMatches: keywordMap.size,
-              keywordsUsed: queryKeywords,
+              eventsMatched: scored.length,
               resultCount: results.length,
               results,
             }, null, 2),
