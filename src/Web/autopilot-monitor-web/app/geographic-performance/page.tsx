@@ -35,6 +35,14 @@ interface LocationMetric {
   throughputVsGlobalPct: number;
   isOutlier: boolean;
   outlierDirection: string | null;
+  // Delivery Optimization
+  doSessionCount: number;
+  avgDoPercentPeerCaching: number;
+  totalDoBytesFromPeers: number;
+  totalDoBytesFromHttp: number;
+  totalDoBytesFromLanPeers: number;
+  totalDoBytesFromGroupPeers: number;
+  totalDoBytesFromInternetPeers: number;
 }
 
 interface GlobalAverages {
@@ -43,6 +51,9 @@ interface GlobalAverages {
   avgMinutesPerApp: number;
   avgThroughputBytesPerSec: number;
   stdDevDurationMinutes: number;
+  avgDoPercentPeerCaching: number;
+  totalDoBytesFromPeers: number;
+  totalDoBytesFromHttp: number;
 }
 
 interface GeographicMetricsResponse {
@@ -56,7 +67,7 @@ interface GeographicMetricsResponse {
 }
 
 type GroupBy = "city" | "region" | "country";
-type SortBy = "sessionCount" | "avgDurationMinutes" | "appLoadScore" | "avgThroughputBytesPerSec";
+type SortBy = "sessionCount" | "avgDurationMinutes" | "appLoadScore" | "avgThroughputBytesPerSec" | "avgDoPercentPeerCaching";
 type TimeRange = "7d" | "30d" | "90d";
 
 const durationColor = (value: number, globalAvg: number) => {
@@ -283,7 +294,7 @@ export default function GeographicPerformancePage() {
 
           {/* Summary Cards */}
           {geoMetrics && stats && (
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
               <div className="bg-white rounded-lg shadow p-4">
                 <div className="text-sm font-medium text-gray-500">Locations Tracked</div>
                 <div className="text-2xl font-bold text-gray-900">{geoMetrics.locations.length}</div>
@@ -314,6 +325,22 @@ export default function GeographicPerformancePage() {
                   {stats.slowest ? `${Math.round(stats.slowest.avgDurationMinutes)} min avg` : "No data"}
                 </div>
               </div>
+              <div className="bg-white rounded-lg shadow p-4">
+                <div className="text-sm font-medium text-gray-500">DO Peer Efficiency</div>
+                <div className={`text-2xl font-bold ${
+                  geoMetrics.globalAverages.avgDoPercentPeerCaching > 30 ? "text-green-600" :
+                  geoMetrics.globalAverages.avgDoPercentPeerCaching > 0 ? "text-yellow-600" : "text-gray-400"
+                }`}>
+                  {geoMetrics.globalAverages.avgDoPercentPeerCaching > 0
+                    ? `${geoMetrics.globalAverages.avgDoPercentPeerCaching}%`
+                    : "—"}
+                </div>
+                <div className="text-xs text-gray-400">
+                  {geoMetrics.globalAverages.totalDoBytesFromPeers > 0
+                    ? `${formatBytes(geoMetrics.globalAverages.totalDoBytesFromPeers)} from peers / ${formatBytes(geoMetrics.globalAverages.totalDoBytesFromPeers + geoMetrics.globalAverages.totalDoBytesFromHttp)} total`
+                    : "No DO data yet"}
+                </div>
+              </div>
             </div>
           )}
 
@@ -338,7 +365,7 @@ export default function GeographicPerformancePage() {
           {geoMetrics && (
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
               <div className="text-sm font-medium text-blue-800 mb-2">Global Averages (Benchmark)</div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
                 <div>
                   <span className="text-blue-600 font-medium">Avg Duration:</span>{" "}
                   <span className="text-blue-900">{geoMetrics.globalAverages.avgDurationMinutes} min</span>
@@ -354,6 +381,14 @@ export default function GeographicPerformancePage() {
                 <div>
                   <span className="text-blue-600 font-medium">Avg Throughput:</span>{" "}
                   <span className="text-blue-900">{formatThroughput(geoMetrics.globalAverages.avgThroughputBytesPerSec)}</span>
+                </div>
+                <div>
+                  <span className="text-blue-600 font-medium">DO P2P:</span>{" "}
+                  <span className="text-blue-900">
+                    {geoMetrics.globalAverages.avgDoPercentPeerCaching > 0
+                      ? `${geoMetrics.globalAverages.avgDoPercentPeerCaching}% peers`
+                      : "No data"}
+                  </span>
                 </div>
               </div>
             </div>
@@ -406,6 +441,12 @@ export default function GeographicPerformancePage() {
                           onClick={() => handleSort("avgThroughputBytesPerSec")}
                         >
                           Throughput <SortIcon col="avgThroughputBytesPerSec" />
+                        </th>
+                        <th
+                          className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700"
+                          onClick={() => handleSort("avgDoPercentPeerCaching")}
+                        >
+                          P2P % <SortIcon col="avgDoPercentPeerCaching" />
                         </th>
                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           vs Global
@@ -486,6 +527,28 @@ export default function GeographicPerformancePage() {
                           </td>
                           <td className="px-4 py-3 text-sm text-gray-700">
                             {formatThroughput(loc.avgThroughputBytesPerSec)}
+                          </td>
+                          <td className="px-4 py-3 text-sm">
+                            {loc.doSessionCount > 0 ? (
+                              <div title={
+                                loc.totalDoBytesFromPeers > 0
+                                  ? `LAN: ${formatBytes(loc.totalDoBytesFromLanPeers)} | Group: ${formatBytes(loc.totalDoBytesFromGroupPeers)} | Internet: ${formatBytes(loc.totalDoBytesFromInternetPeers)}`
+                                  : `${loc.doSessionCount} session(s) with DO data`
+                              }>
+                                <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                                  loc.avgDoPercentPeerCaching >= 50 ? "bg-green-100 text-green-800" :
+                                  loc.avgDoPercentPeerCaching >= 10 ? "bg-yellow-100 text-yellow-800" :
+                                  "bg-gray-100 text-gray-600"
+                                }`}>
+                                  {loc.avgDoPercentPeerCaching > 0 ? `${loc.avgDoPercentPeerCaching}%` : "0%"}
+                                </span>
+                                <span className="text-xs text-gray-400 ml-1">
+                                  ({loc.doSessionCount})
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-gray-300">—</span>
+                            )}
                           </td>
                           <td className="px-4 py-3 text-sm">
                             <div className="flex items-center justify-between">

@@ -185,6 +185,23 @@ namespace AutopilotMonitor.Functions.Services
                         if (existingDlBytes.HasValue && existingDlBytes.Value > 0)
                             summary.DownloadBytes = existingDlBytes.Value;
                     }
+
+                    // Preserve DO telemetry from prior batch if current has none
+                    if (summary.DoBytesFromPeers == 0 && summary.DoDownloadMode == -1)
+                    {
+                        var existingDoPeers = existing.GetInt64("DoBytesFromPeers");
+                        if (existingDoPeers.HasValue && existingDoPeers.Value > 0)
+                        {
+                            summary.DoBytesFromPeers = existingDoPeers.Value;
+                            summary.DoBytesFromHttp = existing.GetInt64("DoBytesFromHttp") ?? 0;
+                            summary.DoPercentPeerCaching = existing.GetInt32("DoPercentPeerCaching") ?? 0;
+                            summary.DoDownloadMode = existing.GetInt32("DoDownloadMode") ?? -1;
+                            summary.DoDownloadDuration = existing.GetString("DoDownloadDuration") ?? string.Empty;
+                            summary.DoBytesFromLanPeers = existing.GetInt64("DoBytesFromLanPeers") ?? 0;
+                            summary.DoBytesFromGroupPeers = existing.GetInt64("DoBytesFromGroupPeers") ?? 0;
+                            summary.DoBytesFromInternetPeers = existing.GetInt64("DoBytesFromInternetPeers") ?? 0;
+                        }
+                    }
                 }
 
                 var entity = new TableEntity(summary.TenantId, rowKey)
@@ -199,7 +216,16 @@ namespace AutopilotMonitor.Functions.Services
                     ["FailureCode"] = summary.FailureCode ?? string.Empty,
                     ["FailureMessage"] = summary.FailureMessage ?? string.Empty,
                     ["StartedAt"] = EnsureUtc(summary.StartedAt),
-                    ["CompletedAt"] = summary.CompletedAt.HasValue ? EnsureUtc(summary.CompletedAt.Value) : (DateTime?)null
+                    ["CompletedAt"] = summary.CompletedAt.HasValue ? EnsureUtc(summary.CompletedAt.Value) : (DateTime?)null,
+                    // Delivery Optimization telemetry
+                    ["DoBytesFromPeers"] = summary.DoBytesFromPeers,
+                    ["DoBytesFromHttp"] = summary.DoBytesFromHttp,
+                    ["DoPercentPeerCaching"] = summary.DoPercentPeerCaching,
+                    ["DoDownloadMode"] = summary.DoDownloadMode,
+                    ["DoDownloadDuration"] = summary.DoDownloadDuration ?? string.Empty,
+                    ["DoBytesFromLanPeers"] = summary.DoBytesFromLanPeers,
+                    ["DoBytesFromGroupPeers"] = summary.DoBytesFromGroupPeers,
+                    ["DoBytesFromInternetPeers"] = summary.DoBytesFromInternetPeers
                 };
 
                 await tableClient.UpsertEntityAsync(entity);
@@ -278,7 +304,16 @@ namespace AutopilotMonitor.Functions.Services
                 FailureCode = entity.GetString("FailureCode") ?? string.Empty,
                 FailureMessage = entity.GetString("FailureMessage") ?? string.Empty,
                 StartedAt = entity.GetDateTimeOffset("StartedAt")?.UtcDateTime ?? DateTime.MinValue,
-                CompletedAt = entity.GetDateTimeOffset("CompletedAt")?.UtcDateTime
+                CompletedAt = entity.GetDateTimeOffset("CompletedAt")?.UtcDateTime,
+                // Delivery Optimization telemetry
+                DoBytesFromPeers = entity.GetInt64("DoBytesFromPeers") ?? 0,
+                DoBytesFromHttp = entity.GetInt64("DoBytesFromHttp") ?? 0,
+                DoPercentPeerCaching = entity.GetInt32("DoPercentPeerCaching") ?? 0,
+                DoDownloadMode = entity.GetInt32("DoDownloadMode") ?? -1,
+                DoDownloadDuration = entity.GetString("DoDownloadDuration") ?? string.Empty,
+                DoBytesFromLanPeers = entity.GetInt64("DoBytesFromLanPeers") ?? 0,
+                DoBytesFromGroupPeers = entity.GetInt64("DoBytesFromGroupPeers") ?? 0,
+                DoBytesFromInternetPeers = entity.GetInt64("DoBytesFromInternetPeers") ?? 0
             };
         }
 

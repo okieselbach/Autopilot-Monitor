@@ -117,6 +117,16 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
                 var totalDownloadSecs = locationApps.Sum(a => (double)a.DownloadDurationSeconds);
                 var avgThroughput = totalDownloadSecs > 0 ? totalBytes / totalDownloadSecs : 0;
 
+                // Delivery Optimization metrics (apps with DO telemetry have DoDownloadMode >= 0)
+                var doApps = locationApps.Where(a => a.DoDownloadMode >= 0).ToList();
+                var doSessionCount = group
+                    .Where(s => appsBySession.ContainsKey(s.SessionId))
+                    .Count(s => appsBySession[s.SessionId].Any(a => a.DoDownloadMode >= 0));
+                var totalDoPeers = doApps.Sum(a => a.DoBytesFromPeers);
+                var totalDoHttp = doApps.Sum(a => a.DoBytesFromHttp);
+                var totalDoBytes = totalDoPeers + totalDoHttp;
+                var avgDoPct = totalDoBytes > 0 ? (double)totalDoPeers / totalDoBytes * 100 : 0;
+
                 locations.Add(new LocationMetrics
                 {
                     LocationKey = group.Key,
@@ -134,7 +144,15 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
                     AvgAppCount = Math.Round(avgAppCount, 1),
                     MinutesPerApp = Math.Round(minutesPerApp, 2),
                     AvgThroughputBytesPerSec = Math.Round(avgThroughput, 0),
-                    TotalDownloadBytes = totalBytes
+                    TotalDownloadBytes = totalBytes,
+                    // Delivery Optimization
+                    DoSessionCount = doSessionCount,
+                    AvgDoPercentPeerCaching = Math.Round(avgDoPct, 1),
+                    TotalDoBytesFromPeers = totalDoPeers,
+                    TotalDoBytesFromHttp = totalDoHttp,
+                    TotalDoBytesFromLanPeers = doApps.Sum(a => a.DoBytesFromLanPeers),
+                    TotalDoBytesFromGroupPeers = doApps.Sum(a => a.DoBytesFromGroupPeers),
+                    TotalDoBytesFromInternetPeers = doApps.Sum(a => a.DoBytesFromInternetPeers)
                 });
             }
 
@@ -155,6 +173,12 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
             var allThroughputs = locations.Where(l => l.AvgThroughputBytesPerSec > 0)
                 .Select(l => l.AvgThroughputBytesPerSec).ToList();
             var globalAvgThroughput = allThroughputs.Count > 0 ? allThroughputs.Average() : 0;
+
+            // Global DO metrics (weighted by bytes, not simple average)
+            var globalDoPeers = locations.Sum(l => l.TotalDoBytesFromPeers);
+            var globalDoHttp = locations.Sum(l => l.TotalDoBytesFromHttp);
+            var globalDoTotal = globalDoPeers + globalDoHttp;
+            var globalDoPct = globalDoTotal > 0 ? (double)globalDoPeers / globalDoTotal * 100 : 0;
 
             // Compute per-location comparisons and outlier detection
             foreach (var loc in locations)
@@ -190,7 +214,10 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
                     MedianDurationMinutes = Math.Round(globalMedianDuration, 1),
                     AvgMinutesPerApp = Math.Round(globalAvgMinutesPerApp, 2),
                     AvgThroughputBytesPerSec = Math.Round(globalAvgThroughput, 0),
-                    StdDevDurationMinutes = Math.Round(globalStdDev, 1)
+                    StdDevDurationMinutes = Math.Round(globalStdDev, 1),
+                    AvgDoPercentPeerCaching = Math.Round(globalDoPct, 1),
+                    TotalDoBytesFromPeers = globalDoPeers,
+                    TotalDoBytesFromHttp = globalDoHttp
                 },
                 ComputedAt = DateTime.UtcNow,
                 TotalSessions = sessions.Count,

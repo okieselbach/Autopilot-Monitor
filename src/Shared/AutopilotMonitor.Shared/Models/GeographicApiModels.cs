@@ -57,6 +57,22 @@ namespace AutopilotMonitor.Shared.Models
         public bool IsOutlier { get; set; }
         /// <summary>"fast", "slow", or null</summary>
         public string? OutlierDirection { get; set; }
+
+        // Delivery Optimization metrics
+        /// <summary>Sessions at this location that have DO telemetry data</summary>
+        public int DoSessionCount { get; set; }
+        /// <summary>Weighted percentage of bytes from peers (0-100), computed from total peer/total DO bytes</summary>
+        public double AvgDoPercentPeerCaching { get; set; }
+        /// <summary>Total bytes downloaded from all peer sources</summary>
+        public long TotalDoBytesFromPeers { get; set; }
+        /// <summary>Total bytes downloaded from HTTP/CDN</summary>
+        public long TotalDoBytesFromHttp { get; set; }
+        /// <summary>Bytes from LAN peers</summary>
+        public long TotalDoBytesFromLanPeers { get; set; }
+        /// <summary>Bytes from group peers</summary>
+        public long TotalDoBytesFromGroupPeers { get; set; }
+        /// <summary>Bytes from internet peers</summary>
+        public long TotalDoBytesFromInternetPeers { get; set; }
     }
 
     /// <summary>
@@ -69,5 +85,11 @@ namespace AutopilotMonitor.Shared.Models
         public double AvgMinutesPerApp { get; set; }
         public double AvgThroughputBytesPerSec { get; set; }
         public double StdDevDurationMinutes { get; set; }
+        /// <summary>Global weighted average peer caching percentage</summary>
+        public double AvgDoPercentPeerCaching { get; set; }
+        /// <summary>Total peer bytes across all locations with DO data</summary>
+        public long TotalDoBytesFromPeers { get; set; }
+        /// <summary>Total HTTP bytes across all locations with DO data</summary>
+        public long TotalDoBytesFromHttp { get; set; }
     }
 }
