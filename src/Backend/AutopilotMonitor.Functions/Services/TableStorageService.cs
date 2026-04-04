@@ -1,3 +1,4 @@
+using System.Threading;
 using Azure;
 using Azure.Data.Tables;
 using Azure.Identity;
@@ -87,23 +88,27 @@ namespace AutopilotMonitor.Functions.Services
             var successCount = 0;
             var failCount = 0;
 
-            foreach (var tableName in Constants.TableNames.All)
-            {
-                try
+            await Parallel.ForEachAsync(
+                Constants.TableNames.All,
+                new ParallelOptions { MaxDegreeOfParallelism = 8 },
+                async (tableName, ct) =>
                 {
-                    await _tableServiceClient.CreateTableIfNotExistsAsync(tableName);
-                    _logger.LogDebug($"Table '{tableName}' initialized");
-                    successCount++;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, $"Failed to initialize table '{tableName}'");
-                    failCount++;
-                }
-            }
+                    try
+                    {
+                        await _tableServiceClient.CreateTableIfNotExistsAsync(tableName, ct);
+                        _logger.LogDebug("Table '{TableName}' initialized", tableName);
+                        Interlocked.Increment(ref successCount);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to initialize table '{TableName}'", tableName);
+                        Interlocked.Increment(ref failCount);
+                    }
+                });
 
             stopwatch.Stop();
-            _logger.LogInformation($"Table initialization completed in {stopwatch.ElapsedMilliseconds}ms: {successCount} succeeded, {failCount} failed");
+            _logger.LogInformation("Table initialization completed in {ElapsedMs}ms: {Success} succeeded, {Failed} failed",
+                stopwatch.ElapsedMilliseconds, successCount, failCount);
 
             // CPE mapping seed is imported via Admin UI "Re-Seed Mappings" button
             // (pulls from GitHub, not embedded resource). No auto-import at startup.

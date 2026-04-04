@@ -11,11 +11,39 @@ const msalInstance = new PublicClientApplication(msalConfig);
 
 // Track MSAL initialization state so components can wait for it.
 let msalReady = false;
+
+// Prefetch: store auth/me result fetched during MSAL init so fetchUserInfo
+// can use it immediately without an extra network round-trip.
+// Runs as a fire-and-forget side-effect — MUST NOT block msalInitPromise,
+// otherwise a cold backend would keep the UI on a white screen.
+let prefetchedAuthMe: Record<string, unknown> | null = null;
+
 const msalInitPromise = msalInstance
   .initialize()
   .then(() => msalInstance.handleRedirectPromise())
   .then(() => {
     msalReady = true;
+
+    // Fire-and-forget: prefetch auth/me while React is still mounting.
+    // Not awaited — if it finishes before fetchUserInfo runs, great;
+    // if not, fetchUserInfo does its own fetch as before.
+    const accounts = msalInstance.getAllAccounts();
+    if (accounts.length > 0) {
+      msalInstance.acquireTokenSilent({
+        scopes: apiRequest.scopes,
+        account: accounts[0],
+      }).then(async (tokenResponse) => {
+        const res = await fetch(api.auth.me(), {
+          headers: { 'Authorization': `Bearer ${tokenResponse.accessToken}` },
+          signal: AbortSignal.timeout(8000),
+        });
+        if (res.ok) {
+          prefetchedAuthMe = await res.json();
+        }
+      }).catch(() => {
+        // Best-effort; fetchUserInfo will retry normally.
+      });
+    }
   })
   .catch((error) => {
     console.error('[Auth] MSAL initialization/redirect error:', error);
@@ -111,6 +139,24 @@ function AuthProviderInternal({ children }: { children: React.ReactNode }) {
    */
   const fetchUserInfo = useCallback(async (account: AccountInfo): Promise<UserInfo | null> => {
     try {
+      // Use prefetched auth/me result if available (fetched during MSAL init).
+      // Consume it exactly once to avoid stale data on subsequent calls.
+      if (prefetchedAuthMe) {
+        const data = prefetchedAuthMe;
+        prefetchedAuthMe = null;
+        return {
+          displayName: (data.displayName as string) || account.name || '',
+          upn: (data.upn as string) || account.username || '',
+          tenantId: (data.tenantId as string) || account.tenantId || '',
+          objectId: (data.objectId as string) || account.homeAccountId || '',
+          isGlobalAdmin: (data.isGlobalAdmin as boolean) || false,
+          isTenantAdmin: (data.isTenantAdmin as boolean) || false,
+          role: (data.role as 'Admin' | 'Operator' | 'Viewer' | null) || null,
+          canManageBootstrapTokens: (data.canManageBootstrapTokens as boolean) || false,
+          hasMcpAccess: (data.hasMcpAccess as boolean) || false,
+        };
+      }
+
       // Get access token for API
       const tokenResponse = await instance.acquireTokenSilent({
         scopes: apiRequest.scopes,

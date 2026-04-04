@@ -144,10 +144,13 @@ export function SignalRProvider({ children }: { children: React.ReactNode }) {
       }
     };
 
-    startConnection();
+    // Defer SignalR connection to avoid competing with critical API calls
+    // (auth/me, sessions, tenant config) during initial page load.
+    const deferTimer = setTimeout(startConnection, 2000);
 
     // Cleanup only when provider unmounts (app closes)
     return () => {
+      clearTimeout(deferTimer);
       // Clear any pending retry timeout to prevent reconnection after unmount
       if (retryTimeoutRef.current) {
         clearTimeout(retryTimeoutRef.current);

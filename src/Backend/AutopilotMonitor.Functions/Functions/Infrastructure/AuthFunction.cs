@@ -1,7 +1,9 @@
 using System.Net;
 using AutopilotMonitor.Functions.Extensions;
 using AutopilotMonitor.Functions.Services;
+using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.DataAccess;
+using AutopilotMonitor.Shared.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Azure.Functions.Worker;
@@ -79,8 +81,25 @@ public class AuthFunction
             return badRequestResponse;
         }
 
-        // Load tenant configuration
-        var tenantConfig = await _tenantConfigService.GetConfigurationAsync(tenantId);
+        // --- Parallel data fetch: all independent queries run concurrently ---
+        var tenantConfigTask = _tenantConfigService.GetConfigurationAsync(tenantId);
+        var isGlobalAdminTask = _globalAdminService.IsGlobalAdminAsync(upn);
+        var isApprovedTask = _previewWhitelistService.IsApprovedAsync(tenantId);
+        var memberRoleTask = _tenantAdminsService.GetMemberRoleAsync(tenantId, upn);
+        var mcpCheckTask = _mcpUserService.IsAllowedAsync(upn);
+        var existingAdminsTask = _tenantAdminsService.GetTenantAdminsAsync(tenantId);
+
+        await Task.WhenAll(tenantConfigTask, isGlobalAdminTask, isApprovedTask,
+                           memberRoleTask, mcpCheckTask, existingAdminsTask);
+
+        var tenantConfig = tenantConfigTask.Result;
+        var isGlobalAdmin = isGlobalAdminTask.Result;
+        var isApproved = isApprovedTask.Result;
+        var memberRole = memberRoleTask.Result;
+        var mcpCheck = mcpCheckTask.Result;
+        var existingAdmins = existingAdminsTask.Result;
+
+        // --- Side-effects that don't affect the auth decision ---
 
         // Extract and save domain name from first user if not set
         if (string.IsNullOrEmpty(tenantConfig.DomainName) && !string.IsNullOrEmpty(upn))
@@ -88,7 +107,7 @@ public class AuthFunction
             var domain = ExtractDomainFromUpn(upn);
             if (!string.IsNullOrEmpty(domain))
             {
-                _logger.LogInformation($"Setting domain name for tenant {tenantId}: {domain}");
+                _logger.LogInformation("Setting domain name for tenant {TenantId}: {Domain}", tenantId, domain);
                 tenantConfig.DomainName = domain;
                 tenantConfig.UpdatedBy = upn;
                 await _tenantConfigService.SaveConfigurationAsync(tenantConfig);
@@ -107,28 +126,11 @@ public class AuthFunction
             }
         }
 
-        // Check if tenant is disabled/suspended
-        if (tenantConfig.IsCurrentlyDisabled())
-        {
-            _logger.LogWarning($"Login attempt for suspended tenant: {tenantId} by user {upn}");
-
-            var suspendedResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-            await suspendedResponse.WriteAsJsonAsync(new
-            {
-                error = "TenantSuspended",
-                message = !string.IsNullOrEmpty(tenantConfig.DisabledReason)
-                    ? tenantConfig.DisabledReason
-                    : "Your tenant has been suspended. Please contact support for more information.",
-                disabledUntil = tenantConfig.DisabledUntil?.ToString("o"),
-                contactSupport = true
-            });
-            return suspendedResponse;
-        }
-
         // Auto-re-enable: if Disabled was true but DisabledUntil has expired, persist the re-enable
         if (tenantConfig.Disabled && !tenantConfig.IsCurrentlyDisabled())
         {
-            _logger.LogInformation($"Tenant {tenantId} auto-re-enabled: DisabledUntil ({tenantConfig.DisabledUntil:o}) has expired");
+            _logger.LogInformation("Tenant {TenantId} auto-re-enabled: DisabledUntil ({DisabledUntil}) has expired",
+                tenantId, tenantConfig.DisabledUntil?.ToString("o"));
             tenantConfig.Disabled = false;
             tenantConfig.DisabledReason = null;
             tenantConfig.DisabledUntil = null;
@@ -136,67 +138,46 @@ public class AuthFunction
             await _tenantConfigService.SaveConfigurationAsync(tenantConfig);
         }
 
-        // Check if user is global admin (must happen before preview gate)
-        var isGlobalAdmin = await _globalAdminService.IsGlobalAdminAsync(upn);
+        // --- Pure decision logic (tested by AuthFunctionTests) ---
+        var decision = BuildAuthResult(
+            tenantConfig, isGlobalAdmin, isApproved,
+            memberRole, mcpCheck, existingAdmins.Count > 0,
+            tenantId, upn, displayName ?? string.Empty, objectId ?? string.Empty);
 
-        // Preview gate: only approved tenants get full portal access.
-        // Global Admins bypass the gate (they need access to manage the whitelist).
-        if (!isGlobalAdmin && !await _previewWhitelistService.IsApprovedAsync(tenantId))
+        if (!decision.IsSuccess)
         {
-            _logger.LogInformation("Tenant {TenantId} blocked by preview gate (user: {Upn})", tenantId, upn);
-
-            var previewResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-            await previewResponse.WriteAsJsonAsync(new
+            if (decision.StatusCode == HttpStatusCode.Forbidden)
             {
-                error = "PrivatePreview",
-                message = "Autopilot Monitor is currently in Private Preview. Your organization is on the waitlist \u2014 we'll notify you when access is granted."
-            });
-            return previewResponse;
-        }
+                var bodyType = decision.Body.GetType();
+                var errorProp = bodyType.GetProperty("error");
+                var errorValue = errorProp?.GetValue(decision.Body) as string;
 
-        // Check if user is tenant admin
-        bool isTenantAdmin = await _tenantAdminsService.IsTenantAdminAsync(tenantId, upn);
-
-        // Auto-admin logic: First user becomes admin
-        if (!isTenantAdmin)
-        {
-            // Check if tenant has any admins at all
-            var existingAdmins = await _tenantAdminsService.GetTenantAdminsAsync(tenantId);
-            if (existingAdmins.Count == 0)
-            {
-                _logger.LogInformation($"First user login for tenant {tenantId}: {upn} - Auto-assigning as admin");
-                await _tenantAdminsService.AddTenantAdminAsync(tenantId, upn, "System");
-                isTenantAdmin = true;
+                if (errorValue == "TenantSuspended")
+                    _logger.LogWarning("Login attempt for suspended tenant: {TenantId} by user {Upn}", tenantId, upn);
+                else if (errorValue == "PrivatePreview")
+                    _logger.LogInformation("Tenant {TenantId} blocked by preview gate (user: {Upn})", tenantId, upn);
             }
+
+            var blockedResponse = req.CreateResponse(decision.StatusCode);
+            await blockedResponse.WriteAsJsonAsync(decision.Body);
+            return blockedResponse;
         }
 
-        // Get role info for the user (Admin, Operator, Viewer, or null if not a member)
-        var memberRole = await _tenantAdminsService.GetMemberRoleAsync(tenantId, upn);
-        string? role = memberRole?.Role;
-        bool canManageBootstrapTokens = memberRole?.CanManageBootstrapTokens ?? false;
+        // --- Post-decision side-effects ---
+
+        // Auto-admin: first user becomes admin (flagged by BuildAuthResult)
+        if (decision.NeedsAutoAdmin)
+        {
+            _logger.LogInformation("First user login for tenant {TenantId}: {Upn} - Auto-assigning as admin", tenantId, upn);
+            await _tenantAdminsService.AddTenantAdminAsync(tenantId, upn, "System");
+        }
 
         // Record user login activity for metrics tracking
         _ = _metricsRepo.RecordUserLoginAsync(tenantId, upn, displayName, objectId)
             .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException, "Fire-and-forget RecordUserLoginAsync failed"), TaskContinuationOptions.OnlyOnFaulted);
 
-        // Check MCP access (cached, lightweight)
-        var mcpCheck = await _mcpUserService.IsAllowedAsync(upn);
-
-        var userInfo = new
-        {
-            tenantId,
-            upn,
-            displayName,
-            objectId,
-            isGlobalAdmin,
-            isTenantAdmin,
-            role,
-            canManageBootstrapTokens,
-            hasMcpAccess = mcpCheck.IsAllowed
-        };
-
         var response = req.CreateResponse(HttpStatusCode.OK);
-        await response.WriteAsJsonAsync(userInfo);
+        await response.WriteAsJsonAsync(decision.Body);
         return response;
     }
 
@@ -308,9 +289,73 @@ public class AuthFunction
     }
 
     /// <summary>
+    /// Pure decision logic for auth/me — no I/O, fully testable.
+    /// Takes all pre-fetched data and returns the auth decision.
+    /// </summary>
+    internal static AuthDecisionResult BuildAuthResult(
+        TenantConfiguration tenantConfig,
+        bool isGlobalAdmin,
+        bool isPreviewApproved,
+        MemberRoleInfo? memberRole,
+        McpAccessCheckResult mcpCheck,
+        bool hasTenantAdmins,
+        string tenantId, string upn, string displayName, string objectId)
+    {
+        // Gate 1: Suspended tenant
+        if (tenantConfig.IsCurrentlyDisabled())
+        {
+            return AuthDecisionResult.Blocked(HttpStatusCode.Forbidden, new
+            {
+                error = "TenantSuspended",
+                message = !string.IsNullOrEmpty(tenantConfig.DisabledReason)
+                    ? tenantConfig.DisabledReason
+                    : "Your tenant has been suspended. Please contact support for more information.",
+                disabledUntil = tenantConfig.DisabledUntil?.ToString("o"),
+                contactSupport = true
+            });
+        }
+
+        // Gate 2: Preview gate (Global Admins bypass)
+        if (!isGlobalAdmin && !isPreviewApproved)
+        {
+            return AuthDecisionResult.Blocked(HttpStatusCode.Forbidden, new
+            {
+                error = "PrivatePreview",
+                message = "Autopilot Monitor is currently in Private Preview. Your organization is on the waitlist \u2014 we'll notify you when access is granted."
+            });
+        }
+
+        // Determine admin status: auto-admin if first user (no existing admins and no role yet)
+        bool isTenantAdmin = memberRole?.Role == Constants.TenantRoles.Admin;
+        bool needsAutoAdmin = !isTenantAdmin && !hasTenantAdmins;
+        if (needsAutoAdmin)
+        {
+            isTenantAdmin = true;
+        }
+
+        // After auto-admin, re-derive role: the auto-admin gets Admin role,
+        // otherwise use the fetched memberRole.
+        string? role = needsAutoAdmin ? Constants.TenantRoles.Admin : memberRole?.Role;
+        bool canManageBootstrapTokens = needsAutoAdmin || (memberRole?.CanManageBootstrapTokens ?? false);
+
+        return AuthDecisionResult.Success(new
+        {
+            tenantId,
+            upn,
+            displayName,
+            objectId,
+            isGlobalAdmin,
+            isTenantAdmin,
+            role,
+            canManageBootstrapTokens,
+            hasMcpAccess = mcpCheck.IsAllowed
+        }, needsAutoAdmin);
+    }
+
+    /// <summary>
     /// Extracts domain name from UPN (e.g., user@contoso.com -> contoso.com)
     /// </summary>
-    private static string ExtractDomainFromUpn(string upn)
+    internal static string ExtractDomainFromUpn(string upn)
     {
         if (string.IsNullOrEmpty(upn))
             return string.Empty;
@@ -323,6 +368,32 @@ public class AuthFunction
 
         return string.Empty;
     }
+}
+
+/// <summary>
+/// Result of the pure auth decision logic — no HTTP concerns.
+/// </summary>
+internal class AuthDecisionResult
+{
+    public HttpStatusCode StatusCode { get; init; }
+    public object Body { get; init; } = default!;
+    public bool IsSuccess => StatusCode == HttpStatusCode.OK;
+
+    /// <summary>True when the user should be auto-promoted to tenant admin (first user).</summary>
+    public bool NeedsAutoAdmin { get; init; }
+
+    public static AuthDecisionResult Success(object body, bool needsAutoAdmin = false) => new()
+    {
+        StatusCode = HttpStatusCode.OK,
+        Body = body,
+        NeedsAutoAdmin = needsAutoAdmin
+    };
+
+    public static AuthDecisionResult Blocked(HttpStatusCode statusCode, object body) => new()
+    {
+        StatusCode = statusCode,
+        Body = body
+    };
 }
 
 public class AddGlobalAdminRequest
