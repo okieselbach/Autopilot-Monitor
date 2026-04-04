@@ -269,12 +269,12 @@ export function registerAdminTools(server: McpServer): void {
   server.tool(
     'query_raw_events',
     'TIER 2 — RAW CROSS-SESSION EVENT QUERY (fallback for broader scope). ' +
-    'Query raw enrollment events with flexible filters across sessions within a tenant. ' +
-    'tenantId is always required (events are partitioned per tenant). Global Admin can query any tenant. ' +
+    'Query raw enrollment events with flexible filters across sessions. ' +
+    'Omit tenantId for cross-tenant search (Global Admin), or specify tenantId for single-tenant. ' +
     'Use this when search_events_semantic does not cover the time range or session scope you need, ' +
     'or when you need exact event-type filtering across many sessions. Returns raw event data.',
     {
-      tenantId: z.string().describe('Tenant ID to query (required). Global Admin can query any tenant.'),
+      tenantId: z.string().optional().describe('Tenant ID. Omit for cross-tenant search (Global Admin only).'),
       sessionId: z.string().optional().describe('Filter to a specific session'),
       eventType: z.string().optional().describe('Event type filter (e.g. "app_install_failed", "error_detected")'),
       severity: z.enum(['Info', 'Warning', 'Error', 'Critical']).optional(),
@@ -287,8 +287,10 @@ export function registerAdminTools(server: McpServer): void {
     async (args) => {
       try {
         const { tenantId, ...rest } = args;
-        const params: Record<string, string | number | boolean | undefined | null> = { ...rest, tenantId };
-        const data = await apiFetch(`/api/raw/events${buildQuery(params)}`);
+        const params: Record<string, string | number | boolean | undefined | null> = { ...rest };
+        if (tenantId) params.tenantId = tenantId;
+        const basePath = tenantId ? '/api/raw/events' : '/api/global/raw/events';
+        const data = await apiFetch(`${basePath}${buildQuery(params)}`);
         return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
       } catch (error: unknown) {
         return toolError('query_raw_events', args, error);

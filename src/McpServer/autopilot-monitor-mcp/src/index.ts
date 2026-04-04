@@ -47,14 +47,9 @@ app.use(express.urlencoded({ extended: true }));
 // OAuth proxy (must be before auth middleware)
 app.use(createOAuthRouter());
 
-// Health check
+// Health check — minimal response to avoid leaking server internals
 app.get('/health', (_req, res) => {
-  res.json({
-    status: 'healthy',
-    server: 'autopilot-monitor-mcp',
-    version: SERVER_VERSION,
-    search: { backend: knowledgeBase.name, documents: knowledgeBase.size },
-  });
+  res.json({ status: 'healthy' });
 });
 
 // Track transports by session ID for reuse
@@ -136,11 +131,7 @@ app.all('/mcp', async (req, res) => {
 });
 
 const server = app.listen(PORT, '0.0.0.0', () => {
-  console.error(`Autopilot-Monitor MCP Server running (Streamable HTTP on port ${PORT})`);
-  console.error(`API URL: ${process.env.AUTOPILOT_API_URL ?? 'https://autopilotmonitor-api.azurewebsites.net'}`);
-  console.error(`Search backend: ${knowledgeBase.name} | Documents: ${knowledgeBase.size} | Rules dir: ${RULES_DIR}`);
-  console.error(`Health: http://localhost:${PORT}/health`);
-  console.error(`MCP endpoint: http://localhost:${PORT}/mcp`);
+  console.error(`Autopilot-Monitor MCP Server running on port ${PORT}`);
 });
 
 // --- Graceful shutdown ---
