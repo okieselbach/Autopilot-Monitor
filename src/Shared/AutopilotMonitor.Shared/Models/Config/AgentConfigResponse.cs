@@ -240,6 +240,21 @@ namespace AutopilotMonitor.Shared.Models
         public int AgentMaxLifetimeMinutes { get; set; } = 360;
 
         /// <summary>
+        /// Enable OS-level Delivery Optimization status polling via Get-DeliveryOptimizationStatus.
+        /// Captures DO peer caching telemetry for app downloads, especially when newer IME versions
+        /// no longer emit [DO TEL] log entries.
+        /// Default: true
+        /// </summary>
+        public bool EnableDeliveryOptimizationCollector { get; set; } = true;
+
+        /// <summary>
+        /// Interval in seconds for polling Get-DeliveryOptimizationStatus.
+        /// Only polls when active downloads are detected.
+        /// Default: 5 seconds
+        /// </summary>
+        public int DeliveryOptimizationIntervalSeconds { get; set; } = 5;
+
+        /// <summary>
         /// Creates default collector configuration
         /// </summary>
         public static CollectorConfiguration CreateDefault()

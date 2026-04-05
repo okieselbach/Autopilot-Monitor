@@ -43,6 +43,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         // Optional collectors (toggled via remote config)
         private PerformanceCollector _performanceCollector;
         private AgentSelfMetricsCollector _agentSelfMetricsCollector;
+        private DeliveryOptimizationCollector _deliveryOptimizationCollector;
 
         // Smart enrollment tracking (replaces DownloadProgressCollector + EspUiStateCollector)
         private EnrollmentTracker _enrollmentTracker;

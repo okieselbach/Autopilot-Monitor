@@ -107,6 +107,23 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     _logger.Info("EnrollmentTracker started — listening for IME patterns");
                 }
 
+                // Delivery Optimization collector — polls OS-level DO status for peer caching telemetry
+                if (collectors?.EnableDeliveryOptimizationCollector != false && _enrollmentTracker != null)
+                {
+                    var doInterval = collectors?.DeliveryOptimizationIntervalSeconds ?? 15;
+                    _deliveryOptimizationCollector = new DeliveryOptimizationCollector(
+                        _configuration.SessionId,
+                        _configuration.TenantId,
+                        EmitEvent,
+                        _logger,
+                        doInterval,
+                        () => _enrollmentTracker?.ImeTracker?.PackageStates,
+                        Environment.ExpandEnvironmentVariables(Constants.LogDirectory)
+                    );
+                    _deliveryOptimizationCollector.Start();
+                    _logger.Info($"DeliveryOptimizationCollector started (interval={doInterval}s)");
+                }
+
                 // Desktop arrival detector — detects real user desktop for no-ESP completion
                 _desktopArrivalDetector = new DesktopArrivalDetector(_logger);
                 _desktopArrivalDetector.DesktopArrived += OnDesktopArrived;
@@ -189,6 +206,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             _agentSelfMetricsCollector?.Stop();
             _agentSelfMetricsCollector?.Dispose();
             _agentSelfMetricsCollector = null;
+
+            _deliveryOptimizationCollector?.Stop();
+            _deliveryOptimizationCollector?.Dispose();
+            _deliveryOptimizationCollector = null;
 
             _enrollmentTracker?.Stop();
             _enrollmentTracker?.Dispose();
