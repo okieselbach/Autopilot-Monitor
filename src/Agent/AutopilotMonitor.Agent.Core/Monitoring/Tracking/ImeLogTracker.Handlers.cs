@@ -85,7 +85,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         /// Format: ...intunewin-bin_{appGuid}_{number}
         /// Falls back to trying the second-to-last GUID-like segment.
         /// </summary>
-        private static string ExtractAppIdFromDoFileId(string fileId)
+        internal static string ExtractAppIdFromDoFileId(string fileId)
         {
             // Primary: look for "intunewin-bin_" marker
             const string marker = "intunewin-bin_";

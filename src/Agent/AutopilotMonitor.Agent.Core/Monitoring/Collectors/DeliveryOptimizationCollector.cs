@@ -14,8 +14,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 {
     /// <summary>
     /// Polls OS-level Delivery Optimization status via Get-DeliveryOptimizationStatus.
-    /// Phase 1: Captures raw DO data to a local JSONL log file for analysis.
-    /// Only polls when active app downloads are detected.
+    /// Matches DO entries to tracked IME app downloads using the intunewin-bin FileId format
+    /// (same ExtractAppIdFromDoFileId logic as the IME [DO TEL] path).
+    /// Enriches AppPackageState with DO telemetry when IME no longer provides [DO TEL] entries.
+    /// Always-on with dedup guard: skips apps where HasDoTelemetry is already true.
     /// </summary>
     public class DeliveryOptimizationCollector : CollectorBase
     {
@@ -29,9 +31,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             "DownloadDuration, DownloadMode, SourceURL, BytesFromCacheServer | ConvertTo-Json -Compress";
 
         private readonly Func<AppPackageStateList> _getPackageStates;
+        private readonly Action<AppPackageState> _onDoTelemetryReceived;
         private readonly string _logFilePath;
         private bool _permanentlyDisabled;
         private int _consecutiveErrors;
+
+        // Track which apps we already enriched (prevents duplicate callbacks across poll cycles)
+        private readonly HashSet<string> _enrichedAppIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         public DeliveryOptimizationCollector(
             string sessionId,
@@ -40,10 +46,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             AgentLogger logger,
             int intervalSeconds,
             Func<AppPackageStateList> getPackageStates,
+            Action<AppPackageState> onDoTelemetryReceived,
             string logDirectory)
             : base(sessionId, tenantId, emitEvent, logger, intervalSeconds)
         {
             _getPackageStates = getPackageStates ?? throw new ArgumentNullException(nameof(getPackageStates));
+            _onDoTelemetryReceived = onDoTelemetryReceived;
             _logFilePath = Path.Combine(logDirectory, LogFileName);
         }
 
@@ -63,6 +71,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 
             var hasRecentlyCompletedWithoutDo = packageStates.Any(p =>
                 !p.HasDoTelemetry &&
+                !_enrichedAppIds.Contains(p.Id) &&
                 p.DownloadingOrInstallingSeen &&
                 (p.InstallationState == AppInstallationState.Installed ||
                  p.InstallationState == AppInstallationState.Error));
@@ -107,11 +116,106 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             // Write raw snapshot to JSONL log file
             WriteToLogFile(entries);
 
+            // Match DO entries to tracked app downloads and enrich with telemetry
+            var matchCount = MatchAndEnrich(entries, packageStates);
+
             // Log summary to agent log
-            LogSummary(entries, packageStates);
+            LogSummary(entries, packageStates, matchCount);
 
             // Emit lightweight status event
-            EmitStatusEvent(entries, packageStates);
+            EmitStatusEvent(entries, packageStates, matchCount);
+        }
+
+        /// <summary>
+        /// Matches DO entries to tracked IME app downloads using the intunewin-bin FileId format.
+        /// For matched apps where HasDoTelemetry is false, calls UpdateDoTelemetry and fires the callback.
+        /// </summary>
+        private int MatchAndEnrich(JArray entries, AppPackageStateList packageStates)
+        {
+            int matchCount = 0;
+
+            foreach (var entry in entries)
+            {
+                var fileId = entry["FileId"]?.ToString();
+                if (string.IsNullOrEmpty(fileId)) continue;
+
+                // Use the same extraction logic as ImeLogTracker
+                var appId = ImeLogTracker.ExtractAppIdFromDoFileId(fileId);
+                if (string.IsNullOrEmpty(appId)) continue;
+
+                var pkg = packageStates.GetPackage(appId);
+                if (pkg == null) continue;
+
+                // Dedup: skip if already enriched (by IME [DO TEL] path or previous poll cycle)
+                if (pkg.HasDoTelemetry || _enrichedAppIds.Contains(appId))
+                    continue;
+
+                // Extract DO fields
+                long fileSize = entry["FileSize"]?.Value<long>() ?? 0;
+                long totalBytes = entry["TotalBytesDownloaded"]?.Value<long>() ?? 0;
+                long bytesFromPeers = entry["BytesFromPeers"]?.Value<long>() ?? 0;
+                int peerCachingPct = entry["PercentPeerCaching"]?.Value<int>() ?? 0;
+                long bytesLanPeers = entry["BytesFromLanPeers"]?.Value<long>() ?? 0;
+                long bytesGroupPeers = entry["BytesFromGroupPeers"]?.Value<long>() ?? 0;
+                long bytesInternetPeers = entry["BytesFromInternetPeers"]?.Value<long>() ?? 0;
+                int downloadMode = entry["DownloadMode"]?.Value<int>() ?? -1;
+                long bytesFromHttp = entry["BytesFromHttp"]?.Value<long>() ?? 0;
+
+                // DownloadDuration comes as a TimeSpan object from PowerShell (serialized with TotalSeconds etc.)
+                string downloadDuration = ExtractDownloadDuration(entry["DownloadDuration"]);
+
+                pkg.UpdateDoTelemetry(fileSize, totalBytes, bytesFromPeers, peerCachingPct,
+                    bytesLanPeers, bytesGroupPeers, bytesInternetPeers,
+                    downloadMode, downloadDuration, bytesFromHttp);
+
+                _enrichedAppIds.Add(appId);
+                matchCount++;
+
+                Logger.Info($"[DeliveryOptimizationCollector] DO matched: {pkg.Name ?? appId} — " +
+                            $"size={fileSize}, peers={bytesFromPeers} ({peerCachingPct}%), " +
+                            $"http={bytesFromHttp}, mode={downloadMode}, duration={downloadDuration}");
+
+                // Fire callback to trigger do_telemetry + download_progress events via EnrollmentTracker
+                _onDoTelemetryReceived?.Invoke(pkg);
+            }
+
+            return matchCount;
+        }
+
+        /// <summary>
+        /// Extracts a human-readable duration string from the PowerShell TimeSpan JSON object.
+        /// PowerShell serializes TimeSpan as {"Ticks":..., "TotalSeconds":..., "Hours":..., ...}.
+        /// Returns format "HH:mm:ss.fff" matching what IME [DO TEL] provides.
+        /// </summary>
+        private static string ExtractDownloadDuration(JToken durationToken)
+        {
+            if (durationToken == null || durationToken.Type == JTokenType.Null)
+                return null;
+
+            // If it's already a string (unlikely from PS but defensive), return as-is
+            if (durationToken.Type == JTokenType.String)
+                return durationToken.ToString();
+
+            // PowerShell TimeSpan object: extract Ticks and reconstruct
+            if (durationToken.Type == JTokenType.Object)
+            {
+                var ticks = durationToken["Ticks"]?.Value<long>() ?? 0;
+                if (ticks > 0)
+                {
+                    var ts = TimeSpan.FromTicks(ticks);
+                    return ts.ToString(@"hh\:mm\:ss\.fff");
+                }
+
+                // Fallback: use TotalSeconds if Ticks not available
+                var totalSeconds = durationToken["TotalSeconds"]?.Value<double>() ?? 0;
+                if (totalSeconds > 0)
+                {
+                    var ts = TimeSpan.FromSeconds(totalSeconds);
+                    return ts.ToString(@"hh\:mm\:ss\.fff");
+                }
+            }
+
+            return null;
         }
 
         private (string output, string error, int exitCode) RunPowerShellCommand()
@@ -199,49 +303,18 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             }
         }
 
-        private void LogSummary(JArray entries, AppPackageStateList packageStates)
+        private void LogSummary(JArray entries, AppPackageStateList packageStates, int matchCount)
         {
-            // Count entries with Intune-like CDN URLs
-            var intuneEntries = entries.Count(e =>
-            {
-                var url = e["SourceURL"]?.ToString();
-                return !string.IsNullOrEmpty(url) && IsIntuneCdnUrl(url);
-            });
-
             var activeApps = packageStates.Where(p =>
                 p.InstallationState == AppInstallationState.Downloading ||
                 p.InstallationState == AppInstallationState.Installing).ToList();
 
-            Logger.Info($"[DeliveryOptimizationCollector] DO snapshot: {entries.Count} total entries, " +
-                        $"{intuneEntries} with Intune CDN URLs, {activeApps.Count} active app downloads");
-
-            // Log Intune-related entries at Info level for visibility
-            foreach (var entry in entries)
-            {
-                var url = entry["SourceURL"]?.ToString();
-                if (!string.IsNullOrEmpty(url) && IsIntuneCdnUrl(url))
-                {
-                    var fileId = entry["FileId"]?.ToString() ?? "?";
-                    var fileSize = entry["FileSize"]?.Value<long>() ?? 0;
-                    var status = entry["Status"]?.ToString() ?? "?";
-                    var peerPct = entry["PercentPeerCaching"]?.Value<int>() ?? 0;
-                    var mode = entry["DownloadMode"]?.ToString() ?? "?";
-
-                    Logger.Info($"[DeliveryOptimizationCollector] Intune DO entry: " +
-                                $"FileId={fileId}, Size={fileSize}, Status={status}, " +
-                                $"PeerCaching={peerPct}%, Mode={mode}");
-                }
-            }
+            Logger.Info($"[DeliveryOptimizationCollector] DO snapshot: {entries.Count} entries, " +
+                        $"{matchCount} matched to apps, {activeApps.Count} active downloads");
         }
 
-        private void EmitStatusEvent(JArray entries, AppPackageStateList packageStates)
+        private void EmitStatusEvent(JArray entries, AppPackageStateList packageStates, int matchCount)
         {
-            var intuneEntryCount = entries.Count(e =>
-            {
-                var url = e["SourceURL"]?.ToString();
-                return !string.IsNullOrEmpty(url) && IsIntuneCdnUrl(url);
-            });
-
             var activeApps = packageStates
                 .Where(p => p.InstallationState == AppInstallationState.Downloading ||
                             p.InstallationState == AppInstallationState.Installing)
@@ -258,7 +331,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             var data = new Dictionary<string, object>
             {
                 ["doEntryCount"] = entries.Count,
-                ["intuneEntryCount"] = intuneEntryCount,
+                ["matchedCount"] = matchCount,
+                ["totalEnriched"] = _enrichedAppIds.Count,
                 ["activeDownloads"] = activeApps
             };
 
@@ -270,14 +344,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                 Severity = EventSeverity.Debug,
                 Source = "DeliveryOptimizationCollector",
                 Phase = EnrollmentPhase.Unknown,
-                Message = $"DO status: {entries.Count} entries ({intuneEntryCount} Intune), {activeApps.Count} active downloads",
+                Message = $"DO status: {entries.Count} entries, {matchCount} new matches ({_enrichedAppIds.Count} total enriched), {activeApps.Count} active downloads",
                 Data = data
             });
         }
 
         private static bool IsIntuneCdnUrl(string url)
         {
-            // Intune content delivery CDN patterns
             return url.IndexOf(".dl.delivery.mp.microsoft.com", StringComparison.OrdinalIgnoreCase) >= 0 ||
                    url.IndexOf("swda01.azureedge.net", StringComparison.OrdinalIgnoreCase) >= 0 ||
                    url.IndexOf("swda02.azureedge.net", StringComparison.OrdinalIgnoreCase) >= 0 ||

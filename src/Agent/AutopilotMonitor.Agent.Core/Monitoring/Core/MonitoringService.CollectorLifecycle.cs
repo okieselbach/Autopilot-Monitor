@@ -118,6 +118,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                         _logger,
                         doInterval,
                         () => _enrollmentTracker?.ImeTracker?.PackageStates,
+                        app => _enrollmentTracker?.ImeTracker?.OnDoTelemetryReceived?.Invoke(app),
                         Environment.ExpandEnvironmentVariables(Constants.LogDirectory)
                     );
                     _deliveryOptimizationCollector.Start();
