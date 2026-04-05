@@ -18,6 +18,7 @@ import {
   CodeBracketIcon,
   QuestionMarkCircleIcon,
   CommandLineIcon,
+  BellIcon,
 } from "../../lib/sidebarIcons";
 
 const SECTION_ICONS: Record<string, React.ReactNode> = {
@@ -32,6 +33,7 @@ const SECTION_ICONS: Record<string, React.ReactNode> = {
   "analyze-rules": <SparklesIcon />,
   "ime-log-patterns": <CodeBracketIcon />,
   "faq": <QuestionMarkCircleIcon />,
+  "known-issues": <BellIcon />,
   "mcp-integration": <CommandLineIcon />,
 };
 
