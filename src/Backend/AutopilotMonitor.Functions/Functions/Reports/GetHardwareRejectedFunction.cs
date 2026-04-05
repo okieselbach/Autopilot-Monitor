@@ -37,47 +37,13 @@ namespace AutopilotMonitor.Functions.Functions.Reports
                 string tenantId = TenantHelper.GetTenantId(req);
 
                 var reports = await _repository.GetDistressReportsAsync(tenantId, maxResults: 200);
-
-                // Filter to HardwareNotAllowed only
-                var hardwareReports = reports
-                    .Where(r => string.Equals(r.ErrorType, "HardwareNotAllowed", StringComparison.OrdinalIgnoreCase))
-                    .ToList();
-
-                // Aggregate by manufacturer+model (case-insensitive grouping)
-                var aggregated = hardwareReports
-                    .GroupBy(r => new
-                    {
-                        Manufacturer = (r.Manufacturer ?? "").ToLowerInvariant(),
-                        Model = (r.Model ?? "").ToLowerInvariant()
-                    })
-                    .Select(g =>
-                    {
-                        var mostRecent = g.OrderByDescending(r => r.IngestedAt).First();
-                        var serials = g
-                            .Where(r => !string.IsNullOrEmpty(r.SerialNumber))
-                            .Select(r => r.SerialNumber!)
-                            .Distinct(StringComparer.OrdinalIgnoreCase)
-                            .ToList();
-
-                        return new
-                        {
-                            manufacturer = mostRecent.Manufacturer ?? "",
-                            model = mostRecent.Model ?? "",
-                            attemptCount = g.Count(),
-                            uniqueSerials = serials.Count,
-                            firstSeen = g.Min(r => r.IngestedAt),
-                            lastSeen = g.Max(r => r.IngestedAt),
-                            sampleSerialNumbers = serials.Take(5).ToList()
-                        };
-                    })
-                    .OrderByDescending(a => a.lastSeen)
-                    .ToList();
+                var (aggregated, totalRawReports) = BuildAggregatedResult(reports);
 
                 return await req.OkAsync(new
                 {
                     success = true,
                     aggregated,
-                    totalRawReports = hardwareReports.Count,
+                    totalRawReports,
                     dataQualityNotice = "This data is from pre-authentication distress reports and is UNVERIFIED. Manufacturer, model, and serial number values are self-reported by devices."
                 });
             }
@@ -85,6 +51,49 @@ namespace AutopilotMonitor.Functions.Functions.Reports
             {
                 return await req.InternalServerErrorAsync(_logger, ex, "Get hardware rejections");
             }
+        }
+
+        /// <summary>
+        /// Filters distress reports to HardwareNotAllowed and aggregates by manufacturer+model.
+        /// Extracted as public static for testability.
+        /// </summary>
+        public static (List<object> aggregated, int totalRawReports) BuildAggregatedResult(
+            List<DistressReportEntry> reports)
+        {
+            var hardwareReports = reports
+                .Where(r => string.Equals(r.ErrorType, "HardwareNotAllowed", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            var aggregated = hardwareReports
+                .GroupBy(r => new
+                {
+                    Manufacturer = (r.Manufacturer ?? "").ToLowerInvariant(),
+                    Model = (r.Model ?? "").ToLowerInvariant()
+                })
+                .Select(g =>
+                {
+                    var mostRecent = g.OrderByDescending(r => r.IngestedAt).First();
+                    var serials = g
+                        .Where(r => !string.IsNullOrEmpty(r.SerialNumber))
+                        .Select(r => r.SerialNumber!)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+
+                    return new
+                    {
+                        manufacturer = mostRecent.Manufacturer ?? "",
+                        model = mostRecent.Model ?? "",
+                        attemptCount = g.Count(),
+                        uniqueSerials = serials.Count,
+                        firstSeen = g.Min(r => r.IngestedAt),
+                        lastSeen = g.Max(r => r.IngestedAt),
+                        sampleSerialNumbers = serials.Take(5).ToList()
+                    };
+                })
+                .OrderByDescending(a => a.lastSeen)
+                .ToList<object>();
+
+            return (aggregated, hardwareReports.Count);
         }
     }
 }

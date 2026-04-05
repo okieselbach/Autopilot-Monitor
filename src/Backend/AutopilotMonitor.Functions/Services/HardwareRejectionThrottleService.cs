@@ -15,19 +15,21 @@ namespace AutopilotMonitor.Functions.Services
 
         /// <summary>
         /// Returns true if a notification should be sent for this combination.
-        /// Thread-safe: concurrent calls for the same key may both return true on the first call,
-        /// but subsequent calls within 24h will return false.
+        /// Thread-safe: uses AddOrUpdate to atomically check the throttle window and claim
+        /// the notification slot. At most one concurrent caller per key wins.
         /// </summary>
         public bool ShouldNotify(string tenantId, string? manufacturer, string? model)
         {
             var key = $"{tenantId}|{manufacturer ?? ""}|{model ?? ""}";
             var now = DateTime.UtcNow;
 
-            if (_lastNotified.TryGetValue(key, out var lastTime) && (now - lastTime) < ThrottleWindow)
-                return false;
+            var stored = _lastNotified.AddOrUpdate(
+                key,
+                addValueFactory: _ => now,
+                updateValueFactory: (_, existing) =>
+                    (now - existing) >= ThrottleWindow ? now : existing);
 
-            _lastNotified[key] = now;
-            return true;
+            return stored == now;
         }
     }
 }
