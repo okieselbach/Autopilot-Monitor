@@ -32,7 +32,7 @@ public class GlobalAdminService
     /// </summary>
     /// <param name="upn">User Principal Name (e.g., oliver@contoso.com)</param>
     /// <returns>True if the user is a Global Admin</returns>
-    public async Task<bool> IsGlobalAdminAsync(string? upn)
+    public virtual async Task<bool> IsGlobalAdminAsync(string? upn)
     {
         if (string.IsNullOrWhiteSpace(upn))
         {

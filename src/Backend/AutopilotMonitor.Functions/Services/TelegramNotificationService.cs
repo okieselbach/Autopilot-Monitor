@@ -35,7 +35,7 @@ namespace AutopilotMonitor.Functions.Services
         /// Sends a Telegram message to the configured channel when a new tenant signs up for Private Preview.
         /// No-op if the webhook URL is not configured in the PreviewConfig table.
         /// </summary>
-        public async Task SendNewTenantSignupAsync(string tenantId, string upn)
+        public virtual async Task SendNewTenantSignupAsync(string tenantId, string upn)
         {
             try
             {

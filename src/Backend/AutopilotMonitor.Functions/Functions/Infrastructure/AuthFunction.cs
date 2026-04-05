@@ -82,6 +82,8 @@ public class AuthFunction
         }
 
         // --- Parallel data fetch: all independent queries run concurrently ---
+        // Fail-fast: if any fetch throws, AggregateException propagates → Azure Functions returns 500.
+        // This is intentional — all 6 queries are required for the auth decision.
         var tenantConfigTask = _tenantConfigService.GetConfigurationAsync(tenantId);
         var isGlobalAdminTask = _globalAdminService.IsGlobalAdminAsync(upn);
         var isApprovedTask = _previewWhitelistService.IsApprovedAsync(tenantId);
@@ -100,43 +102,8 @@ public class AuthFunction
         var existingAdmins = existingAdminsTask.Result;
 
         // --- Side-effects that don't affect the auth decision ---
-
-        // Extract and save domain name from first user if not set
-        if (string.IsNullOrEmpty(tenantConfig.DomainName) && !string.IsNullOrEmpty(upn))
-        {
-            var domain = ExtractDomainFromUpn(upn);
-            if (!string.IsNullOrEmpty(domain))
-            {
-                _logger.LogInformation("Setting domain name for tenant {TenantId}: {Domain}", tenantId, domain);
-                tenantConfig.DomainName = domain;
-                tenantConfig.UpdatedBy = upn;
-                await _tenantConfigService.SaveConfigurationAsync(tenantConfig);
-
-                // Notify via Telegram that a new tenant has signed up for Private Preview
-                _ = _telegramNotificationService.SendNewTenantSignupAsync(tenantId, upn)
-                    .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException,
-                        "Fire-and-forget Telegram notification failed for tenant {TenantId}", tenantId),
-                        TaskContinuationOptions.OnlyOnFaulted);
-
-                // Persistent in-app notification for Global Admins — best effort
-                _ = _globalNotificationService.CreateNotificationAsync(
-                    "preview_signup",
-                    "New Preview Signup",
-                    $"Tenant {tenantId} ({domain}), UPN: {upn}");
-            }
-        }
-
-        // Auto-re-enable: if Disabled was true but DisabledUntil has expired, persist the re-enable
-        if (tenantConfig.Disabled && !tenantConfig.IsCurrentlyDisabled())
-        {
-            _logger.LogInformation("Tenant {TenantId} auto-re-enabled: DisabledUntil ({DisabledUntil}) has expired",
-                tenantId, tenantConfig.DisabledUntil?.ToString("o"));
-            tenantConfig.Disabled = false;
-            tenantConfig.DisabledReason = null;
-            tenantConfig.DisabledUntil = null;
-            tenantConfig.UpdatedBy = "System (auto-re-enable)";
-            await _tenantConfigService.SaveConfigurationAsync(tenantConfig);
-        }
+        await HandleNewTenantDomainAsync(tenantConfig, tenantId, upn);
+        await HandleAutoReEnableAsync(tenantConfig, tenantId);
 
         // --- Pure decision logic (tested by AuthFunctionTests) ---
         var decision = BuildAuthResult(
@@ -164,17 +131,7 @@ public class AuthFunction
         }
 
         // --- Post-decision side-effects ---
-
-        // Auto-admin: first user becomes admin (flagged by BuildAuthResult)
-        if (decision.NeedsAutoAdmin)
-        {
-            _logger.LogInformation("First user login for tenant {TenantId}: {Upn} - Auto-assigning as admin", tenantId, upn);
-            await _tenantAdminsService.AddTenantAdminAsync(tenantId, upn, "System");
-        }
-
-        // Record user login activity for metrics tracking
-        _ = _metricsRepo.RecordUserLoginAsync(tenantId, upn, displayName, objectId)
-            .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException, "Fire-and-forget RecordUserLoginAsync failed"), TaskContinuationOptions.OnlyOnFaulted);
+        await HandlePostDecisionSideEffectsAsync(decision, tenantId, upn, displayName, objectId);
 
         var response = req.CreateResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(decision.Body);
@@ -286,6 +243,80 @@ public class AuthFunction
         var response = req.CreateResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new { message = "Global Admin removed successfully" });
         return response;
+    }
+
+    /// <summary>
+    /// If the tenant has no domain name yet, extracts it from the UPN, persists it,
+    /// and fires best-effort notifications (Telegram + global notification).
+    /// </summary>
+    internal async Task HandleNewTenantDomainAsync(
+        TenantConfiguration tenantConfig, string tenantId, string upn)
+    {
+        if (!string.IsNullOrEmpty(tenantConfig.DomainName) || string.IsNullOrEmpty(upn))
+            return;
+
+        var domain = ExtractDomainFromUpn(upn);
+        if (string.IsNullOrEmpty(domain))
+            return;
+
+        _logger.LogInformation("Setting domain name for tenant {TenantId}: {Domain}", tenantId, domain);
+        tenantConfig.DomainName = domain;
+        tenantConfig.UpdatedBy = upn;
+        await _tenantConfigService.SaveConfigurationAsync(tenantConfig);
+
+        // Fire-and-forget: Telegram
+        _ = _telegramNotificationService.SendNewTenantSignupAsync(tenantId, upn)
+            .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException,
+                "Fire-and-forget Telegram notification failed for tenant {TenantId}", tenantId),
+                TaskContinuationOptions.OnlyOnFaulted);
+
+        // Fire-and-forget: Global notification
+        _ = _globalNotificationService.CreateNotificationAsync(
+            "preview_signup",
+            "New Preview Signup",
+            $"Tenant {tenantId} ({domain}), UPN: {upn}");
+    }
+
+    /// <summary>
+    /// If the tenant's suspension has expired (Disabled=true but DisabledUntil is past),
+    /// clears the disabled state and persists the change.
+    /// MUST run before BuildAuthResult because it mutates tenantConfig.Disabled.
+    /// </summary>
+    internal async Task HandleAutoReEnableAsync(
+        TenantConfiguration tenantConfig, string tenantId)
+    {
+        if (!tenantConfig.Disabled || tenantConfig.IsCurrentlyDisabled())
+            return;
+
+        _logger.LogInformation(
+            "Tenant {TenantId} auto-re-enabled: DisabledUntil ({DisabledUntil}) has expired",
+            tenantId, tenantConfig.DisabledUntil?.ToString("o"));
+
+        tenantConfig.Disabled = false;
+        tenantConfig.DisabledReason = null;
+        tenantConfig.DisabledUntil = null;
+        tenantConfig.UpdatedBy = "System (auto-re-enable)";
+        await _tenantConfigService.SaveConfigurationAsync(tenantConfig);
+    }
+
+    /// <summary>
+    /// Executes post-decision side-effects: auto-admin assignment (awaited)
+    /// and metrics recording (fire-and-forget).
+    /// </summary>
+    internal async Task HandlePostDecisionSideEffectsAsync(
+        AuthDecisionResult decision, string tenantId, string upn,
+        string? displayName, string? objectId)
+    {
+        if (decision.NeedsAutoAdmin)
+        {
+            _logger.LogInformation("First user login for tenant {TenantId}: {Upn} - Auto-assigning as admin", tenantId, upn);
+            await _tenantAdminsService.AddTenantAdminAsync(tenantId, upn, "System");
+        }
+
+        _ = _metricsRepo.RecordUserLoginAsync(tenantId, upn, displayName, objectId)
+            .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException,
+                "Fire-and-forget RecordUserLoginAsync failed"),
+                TaskContinuationOptions.OnlyOnFaulted);
     }
 
     /// <summary>

@@ -60,7 +60,7 @@ public class GlobalNotificationService
     /// Creates a new persistent notification. Designed to be called fire-and-forget;
     /// failures are logged but never thrown.
     /// </summary>
-    public async Task CreateNotificationAsync(string type, string title, string message, string? href = null)
+    public virtual async Task CreateNotificationAsync(string type, string title, string message, string? href = null)
     {
         try
         {

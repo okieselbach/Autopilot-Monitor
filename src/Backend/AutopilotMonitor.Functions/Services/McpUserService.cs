@@ -39,7 +39,7 @@ public class McpUserService
     /// <summary>
     /// Checks if a user is allowed to access the MCP server based on current policy.
     /// </summary>
-    public async Task<McpAccessCheckResult> IsAllowedAsync(string? upn)
+    public virtual async Task<McpAccessCheckResult> IsAllowedAsync(string? upn)
     {
         if (string.IsNullOrWhiteSpace(upn))
             return McpAccessCheckResult.Denied("Missing UPN");

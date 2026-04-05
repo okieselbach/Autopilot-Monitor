@@ -31,7 +31,7 @@ public class PreviewWhitelistService
     /// <summary>
     /// Checks whether a tenant is approved for Private Preview (cached).
     /// </summary>
-    public async Task<bool> IsApprovedAsync(string tenantId)
+    public virtual async Task<bool> IsApprovedAsync(string tenantId)
     {
         if (string.IsNullOrWhiteSpace(tenantId))
             return false;

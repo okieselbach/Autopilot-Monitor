@@ -30,7 +30,7 @@ namespace AutopilotMonitor.Functions.Services
         /// <summary>
         /// Gets configuration for a tenant (uses cache with 5-minute TTL)
         /// </summary>
-        public async Task<TenantConfiguration> GetConfigurationAsync(string tenantId)
+        public virtual async Task<TenantConfiguration> GetConfigurationAsync(string tenantId)
         {
             if (string.IsNullOrEmpty(tenantId))
             {
@@ -87,7 +87,7 @@ namespace AutopilotMonitor.Functions.Services
         /// <summary>
         /// Saves configuration for a tenant
         /// </summary>
-        public async Task SaveConfigurationAsync(TenantConfiguration config)
+        public virtual async Task SaveConfigurationAsync(TenantConfiguration config)
         {
             if (config == null || string.IsNullOrEmpty(config.TenantId))
             {

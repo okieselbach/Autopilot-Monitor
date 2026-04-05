@@ -75,7 +75,7 @@ public class TenantAdminsService
     /// <param name="tenantId">Tenant ID</param>
     /// <param name="upn">User Principal Name</param>
     /// <param name="addedBy">UPN of the admin who is adding this user</param>
-    public async Task<TenantAdminEntity> AddTenantAdminAsync(string tenantId, string upn, string addedBy)
+    public virtual async Task<TenantAdminEntity> AddTenantAdminAsync(string tenantId, string upn, string addedBy)
     {
         tenantId = tenantId.ToLowerInvariant();
         upn = upn.ToLowerInvariant();
@@ -147,7 +147,7 @@ public class TenantAdminsService
     /// <summary>
     /// Gets all Tenant Admins for a specific tenant
     /// </summary>
-    public async Task<List<TenantAdminEntity>> GetTenantAdminsAsync(string tenantId)
+    public virtual async Task<List<TenantAdminEntity>> GetTenantAdminsAsync(string tenantId)
     {
         SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
 
@@ -189,7 +189,7 @@ public class TenantAdminsService
     /// <summary>
     /// Gets the role info for a tenant member. Returns null if user is not a member.
     /// </summary>
-    public async Task<MemberRoleInfo?> GetMemberRoleAsync(string tenantId, string? upn)
+    public virtual async Task<MemberRoleInfo?> GetMemberRoleAsync(string tenantId, string? upn)
     {
         if (string.IsNullOrWhiteSpace(tenantId) || string.IsNullOrWhiteSpace(upn))
             return null;
