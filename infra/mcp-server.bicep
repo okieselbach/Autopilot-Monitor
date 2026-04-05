@@ -4,7 +4,8 @@
 //   az deployment group create \
 //     --resource-group <rg-name> \
 //     --template-file infra/mcp-server.bicep \
-//     --parameters apiUrl=https://autopilotmonitor-api.azurewebsites.net
+//     --parameters apiUrl=https://autopilotmonitor-api.azurewebsites.net \
+//                  entraClientSecret=<secret-value>
 
 @description('Azure region for all resources')
 param location string = resourceGroup().location
@@ -26,6 +27,10 @@ param apiUrl string = 'https://autopilotmonitor-api.azurewebsites.net'
 
 @description('Container image tag')
 param imageTag string = 'latest'
+
+@secure()
+@description('Entra ID client secret for OAuth token exchange')
+param entraClientSecret string = ''
 
 // --- Azure Container Registry ---
 
@@ -95,6 +100,10 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
           name: 'acr-password'
           value: acr.listCredentials().passwords[0].value
         }
+        {
+          name: 'entra-client-secret'
+          value: entraClientSecret
+        }
       ]
       activeRevisionsMode: 'Single'
     }
@@ -110,7 +119,7 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
           env: [
             { name: 'AUTOPILOT_API_URL', value: apiUrl }
             { name: 'PORT', value: '8080' }
-            { name: 'SEARCH_BACKEND', value: 'vector' }
+            { name: 'AUTOPILOT_ENTRA_CLIENT_SECRET', secretRef: 'entra-client-secret' }
           ]
           probes: [
             {
