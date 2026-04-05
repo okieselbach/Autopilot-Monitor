@@ -58,6 +58,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 
             // Windows Component-Based Servicing
             @"C:\Windows\Logs\CBS",
+
+            // Custom install logs (e.g. app installers writing to C:\Install\Log\)
+            @"C:\Install\Log",
         };
 
         // Hard blocks: never allowed, even in unrestricted mode

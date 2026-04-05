@@ -50,6 +50,16 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         private static readonly string AgentLogFolder =
             Environment.ExpandEnvironmentVariables(Constants.LogDirectory);
 
+        /// <summary>
+        /// File extensions collected from built-in log folders (Agent + IME).
+        /// Covers standard logs, structured data, traces, event logs, and diagnostics archives.
+        /// </summary>
+        private static readonly string[] LogFilePatterns = new[]
+        {
+            "*.log", "*.txt", "*.json", "*.jsonl",
+            "*.etl", "*.evtx", "*.xml", "*.csv", "*.cab"
+        };
+
         public DiagnosticsPackageService(AgentConfiguration configuration, AgentLogger logger, BackendApiClient apiClient)
         {
             _configuration = configuration;
@@ -113,11 +123,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                         AddSessionInfo(archive, enrollmentSucceeded);
 
                         // 2. Agent logs
-                        AddLogFiles(archive, AgentLogFolder, "AgentLogs", "*.log");
+                        foreach (var pattern in LogFilePatterns)
+                            AddLogFiles(archive, AgentLogFolder, "AgentLogs", pattern);
 
-                        // 3. IME logs
-                        AddLogFiles(archive, ImeLogFolder, "ImeLogs", "IntuneManagementExtension*.log");
-                        AddLogFiles(archive, ImeLogFolder, "ImeLogs", "AppWorkload*.log");
+                        // 3. IME logs (all relevant files in the IME log folder)
+                        foreach (var pattern in LogFilePatterns)
+                            AddLogFiles(archive, ImeLogFolder, "ImeLogs", pattern);
 
                         // 4. Configured additional log paths (global + tenant, validated by guards)
                         foreach (var entry in _configuration.DiagnosticsLogPaths ?? new System.Collections.Generic.List<Shared.Models.DiagnosticsLogPath>())

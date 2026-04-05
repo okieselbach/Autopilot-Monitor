@@ -159,7 +159,8 @@
     "C:\\Windows\\CCM\\Logs",
     "C:\\ProgramData\\Microsoft\\DiagnosticLogCSP",
     "C:\\ProgramData\\Microsoft\\Windows\\WER",
-    "C:\\Windows\\Logs\\CBS"
+    "C:\\Windows\\Logs\\CBS",
+    "C:\\Install\\Log"
   ],
   "blockedFilePrefixes": [
     "C:\\Users"
