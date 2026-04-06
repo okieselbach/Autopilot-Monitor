@@ -19,6 +19,7 @@ import {
   QuestionMarkCircleIcon,
   CommandLineIcon,
   BellIcon,
+  CpuChipIcon,
 } from "../../lib/sidebarIcons";
 
 const SECTION_ICONS: Record<string, React.ReactNode> = {
@@ -35,6 +36,7 @@ const SECTION_ICONS: Record<string, React.ReactNode> = {
   "faq": <QuestionMarkCircleIcon />,
   "known-issues": <BellIcon />,
   "mcp-integration": <CommandLineIcon />,
+  "agent-internals": <CpuChipIcon />,
 };
 
 export function DocsSidebar({ children }: { children: React.ReactNode }) {
@@ -43,14 +45,14 @@ export function DocsSidebar({ children }: { children: React.ReactNode }) {
   const docsItems: PageSectionItem[] = useMemo(
     () =>
       NAV_SECTIONS
-        .filter((s) => !s.hidden && (!s.requiresMcpAccess || user?.hasMcpAccess))
+        .filter((s) => !s.hidden && (!s.requiresMcpAccess || user?.hasMcpAccess) && (!s.requiresGlobalAdmin || user?.isGlobalAdmin))
         .map((s) => ({
           id: s.id,
           label: s.label,
           icon: SECTION_ICONS[s.id],
           href: `/docs/${s.id}`,
         })),
-    [user?.hasMcpAccess],
+    [user?.hasMcpAccess, user?.isGlobalAdmin],
   );
 
   usePageSections(docsItems, "Contents", "route");

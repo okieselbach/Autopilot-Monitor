@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { NAV_SECTIONS, type SectionId } from "../docsNavSections";
 import { McpDocsGate } from "../McpDocsGate";
+import { GlobalAdminDocsGate } from "../GlobalAdminDocsGate";
 import { SectionPrivatePreview } from "../sections/SectionPrivatePreview";
 import { SectionGeneral } from "../sections/SectionGeneral";
 import { SectionOverview } from "../sections/SectionOverview";
@@ -34,6 +35,10 @@ const SECTION_COMPONENTS: Record<string, React.ComponentType> = {
 
 function isMcpSection(id: string): boolean {
   return NAV_SECTIONS.some((s) => s.id === id && s.requiresMcpAccess);
+}
+
+function isGlobalAdminSection(id: string): boolean {
+  return NAV_SECTIONS.some((s) => s.id === id && s.requiresGlobalAdmin);
 }
 
 export function generateStaticParams() {
@@ -70,12 +75,13 @@ export default async function DocsSectionPage({ params }: Props) {
   const nav = NAV_SECTIONS.find((s) => s.id === section);
   if (!nav) notFound();
 
-  // MCP-only sections are rendered entirely client-side via McpDocsGate
+  // Gated sections are rendered entirely client-side via their respective gates
   // (dynamic import — no HTML shipped until auth check passes).
   const isMcp = isMcpSection(section);
-  if (!isMcp && !SECTION_COMPONENTS[section]) notFound();
+  const isAdmin = isGlobalAdminSection(section);
+  if (!isMcp && !isAdmin && !SECTION_COMPONENTS[section]) notFound();
 
-  const SectionContent = isMcp ? null : SECTION_COMPONENTS[section]!;
+  const SectionContent = (isMcp || isAdmin) ? null : SECTION_COMPONENTS[section]!;
 
   const breadcrumbJsonLd = {
     "@context": "https://schema.org",
@@ -93,7 +99,7 @@ export default async function DocsSectionPage({ params }: Props) {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
       />
-      {isMcp ? <McpDocsGate sectionId={section} /> : SectionContent && <SectionContent />}
+      {isMcp ? <McpDocsGate sectionId={section} /> : isAdmin ? <GlobalAdminDocsGate sectionId={section} /> : SectionContent && <SectionContent />}
     </>
   );
 }

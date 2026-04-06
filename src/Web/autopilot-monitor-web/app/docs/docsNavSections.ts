@@ -22,6 +22,7 @@ export const NAV_SECTIONS: readonly NavSection[] = [
   { id: "known-issues",    label: "Known Issues",     description: "Documented issues caused by external changes that affect Autopilot Monitor — breaking changes, known limitations, workarounds, and current status." },
   { id: "mcp-integration", label: "MCP Integration",  description: "Connect AI assistants to Autopilot Monitor via Model Context Protocol. Configure MCP clients, explore available tools, and learn how to query enrollment data with natural language.", requiresMcpAccess: true },
   { id: "agent-changelog", label: "Agent Changelog",  description: "Changelog of user-facing changes to the Autopilot Monitor agent — new features, behavior changes, and improvements over time.", hidden: true },
+  { id: "agent-internals", label: "Agent Internals",  description: "Technical deep dive into agent internals — all capabilities, event types, configuration settings, collectors, and architecture details. Global Admin only.", requiresGlobalAdmin: true },
 ] as const;
 
 export type SectionId = NavSection["id"];
