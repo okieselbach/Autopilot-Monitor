@@ -1,4 +1,5 @@
 using System.Net;
+using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Shared.DataAccess;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -9,7 +10,8 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
     /// <summary>
     /// Returns all known IME agent versions with first/last seen dates and session counts.
     /// Permanent archive that survives data retention — tracks Microsoft IME releases over time.
-    /// Access: MemberRead (any tenant member can see global IME version history).
+    /// Access: MemberRead (any tenant member can see version/dates/counts).
+    /// FirstSeenTenantId and FirstSeenSessionId are only visible to Global Admins.
     /// </summary>
     public class GetImeVersionHistoryFunction
     {
@@ -28,10 +30,28 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
         {
             try
             {
+                var requestCtx = req.GetRequestContext();
                 var versions = await _sessionRepo.GetImeVersionHistoryAsync();
 
                 var response = req.CreateResponse(HttpStatusCode.OK);
-                await response.WriteAsJsonAsync(versions);
+
+                if (requestCtx.IsGlobalAdmin)
+                {
+                    await response.WriteAsJsonAsync(versions);
+                }
+                else
+                {
+                    // Strip sensitive cross-tenant data for non-Global Admins
+                    var redacted = versions.Select(v => new
+                    {
+                        v.Version,
+                        v.FirstSeenAt,
+                        v.LastSeenAt,
+                        v.SessionCount
+                    });
+                    await response.WriteAsJsonAsync(redacted);
+                }
+
                 return response;
             }
             catch (Exception ex)
