@@ -569,13 +569,18 @@ export default function SessionDetailPage() {
   }, [events]);
 
   // Extract ConfigMgr co-management detection (if present)
+  // Only show badge when confidence >= 50 (directory-only is too weak).
+  // Default to 100 for backward compat with old agent events that lack confidenceScore.
   const configMgrDetected = useMemo(() => {
     const evt = events.find(e => e.eventType === "configmgr_client_detected");
     if (!evt?.data) return null;
+    const confidence = (evt.data.confidenceScore as number) ?? 100;
+    if (confidence < 50) return null;
     return {
       ccmVersion: evt.data.ccmVersion as string | undefined,
       ccmServiceState: evt.data.ccmServiceState as string | undefined,
       siteCode: evt.data.siteCode as string | undefined,
+      confidenceScore: confidence,
     };
   }, [events]);
 

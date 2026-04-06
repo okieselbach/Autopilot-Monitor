@@ -501,14 +501,24 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 }
                 catch (InvalidOperationException) { } // service not installed
 
+                // Compute confidence score — directory alone is too weak (could be remnant)
+                int confidence = 0;
+                if (directoryFound)              confidence += 10;
+                if (registryFound)               confidence += 20;
+                if (ccmVersion != null)          confidence += 15;
+                if (siteCode != null)            confidence += 15;
+                if (serviceState != "not_found") confidence += 20;
+                if (serviceState == "Running")   confidence += 20;
+
                 // Nothing found — no event
-                if (!registryFound && !directoryFound && serviceState == "not_found")
+                if (confidence == 0)
                     return;
 
                 _configMgrDetected = true;
 
                 var versionSuffix = ccmVersion != null ? $" (v{ccmVersion})" : "";
                 var siteSuffix = siteCode != null ? $", site {siteCode}" : "";
+                var confidenceLabel = confidence >= 50 ? "high" : "low";
 
                 _emitEvent(new EnrollmentEvent
                 {
@@ -518,7 +528,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     Severity = EventSeverity.Info,
                     Source = "Agent",
                     Phase = EnrollmentPhase.Unknown,
-                    Message = $"ConfigMgr (SCCM) client detected — co-managed device{versionSuffix}{siteSuffix}",
+                    Message = $"ConfigMgr (SCCM) client detected ({confidenceLabel} confidence: {confidence}/100) — co-managed device{versionSuffix}{siteSuffix}",
                     Data = new Dictionary<string, object>
                     {
                         { "ccmRegistryFound", registryFound },
@@ -526,11 +536,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                         { "ccmServiceState", serviceState },
                         { "ccmVersion", ccmVersion ?? "unknown" },
                         { "siteCode", siteCode ?? "unknown" },
+                        { "confidenceScore", confidence },
                         { "detectedAt", trigger }
                     }
                 });
 
-                _logger.Info($"ConfigMgr client detected (trigger={trigger}, service={serviceState}, version={ccmVersion ?? "?"})");
+                _logger.Info($"ConfigMgr client detected (trigger={trigger}, confidence={confidence}, service={serviceState}, version={ccmVersion ?? "?"})");
             }
             catch (Exception ex)
             {
