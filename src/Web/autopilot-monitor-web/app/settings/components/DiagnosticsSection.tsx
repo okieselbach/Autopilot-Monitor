@@ -85,7 +85,7 @@ export default function DiagnosticsSection({
         {/* Info */}
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
           <p className="text-sm text-amber-900">
-            The agent requests a short-lived upload URL from the backend <strong>just before uploading</strong>. Your SAS URL is stored securely in the backend and never sent to devices in the agent configuration.
+            The agent requests an upload URL from the backend <strong>just before uploading</strong>. Your SAS URL is stored securely in the backend and never sent to devices in the agent configuration.
           </p>
         </div>
 
@@ -94,7 +94,7 @@ export default function DiagnosticsSection({
           <label className="block">
             <span className="text-gray-700 font-medium">Blob Storage Container SAS URL</span>
             <p className="text-sm text-gray-500 mb-2">
-              Create an Azure Blob Storage container and generate a Container-level SAS URL with Read, Write and Create permissions.
+              Create an Azure Blob Storage container and generate a Container-level SAS URL with <strong className="text-amber-700">Read</strong>, <strong className="text-amber-700">Write</strong> and <strong className="text-amber-700">Create</strong> permissions.
             </p>
             <div className="flex items-center gap-2">
               <input
