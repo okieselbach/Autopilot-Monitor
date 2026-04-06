@@ -530,7 +530,18 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                 // Agent binary integrity (written by CI/CD pipeline via Merge, but must be round-trippable)
                 { "LatestAgentVersion", config.LatestAgentVersion ?? string.Empty },
                 { "LatestAgentSha256", config.LatestAgentSha256 ?? string.Empty },
-                { "LatestAgentExeSha256", config.LatestAgentExeSha256 ?? string.Empty }
+                { "LatestAgentExeSha256", config.LatestAgentExeSha256 ?? string.Empty },
+                // Rate limiting per-role settings
+                { "UserRateLimitRequestsPerMinute", config.UserRateLimitRequestsPerMinute },
+                { "GlobalAdminRateLimitRequestsPerMinute", config.GlobalAdminRateLimitRequestsPerMinute },
+                // Plan tier definitions
+                { "PlanTierDefinitionsJson", config.PlanTierDefinitionsJson ?? string.Empty },
+                // Feedback settings
+                { "FeedbackEnabled", config.FeedbackEnabled },
+                { "FeedbackMinTenantAgeDays", config.FeedbackMinTenantAgeDays },
+                { "FeedbackCooldownDays", config.FeedbackCooldownDays },
+                // MCP access control
+                { "McpAccessPolicy", config.McpAccessPolicy ?? "WhitelistOnly" }
             };
 
             return entity;
@@ -567,7 +578,18 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                 // Agent binary integrity (written by CI/CD pipeline)
                 LatestAgentVersion = entity.GetString("LatestAgentVersion") ?? string.Empty,
                 LatestAgentSha256 = entity.GetString("LatestAgentSha256") ?? string.Empty,
-                LatestAgentExeSha256 = entity.GetString("LatestAgentExeSha256") ?? string.Empty
+                LatestAgentExeSha256 = entity.GetString("LatestAgentExeSha256") ?? string.Empty,
+                // Rate limiting per-role settings
+                UserRateLimitRequestsPerMinute = entity.GetInt32("UserRateLimitRequestsPerMinute") ?? 120,
+                GlobalAdminRateLimitRequestsPerMinute = entity.GetInt32("GlobalAdminRateLimitRequestsPerMinute") ?? 600,
+                // Plan tier definitions
+                PlanTierDefinitionsJson = entity.GetString("PlanTierDefinitionsJson"),
+                // Feedback settings
+                FeedbackEnabled = entity.GetBoolean("FeedbackEnabled") ?? true,
+                FeedbackMinTenantAgeDays = entity.GetInt32("FeedbackMinTenantAgeDays") ?? 14,
+                FeedbackCooldownDays = entity.GetInt32("FeedbackCooldownDays") ?? 60,
+                // MCP access control
+                McpAccessPolicy = entity.GetString("McpAccessPolicy") ?? "WhitelistOnly"
             };
         }
 
