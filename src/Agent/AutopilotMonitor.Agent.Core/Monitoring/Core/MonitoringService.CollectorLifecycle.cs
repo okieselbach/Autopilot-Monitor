@@ -110,7 +110,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 // Delivery Optimization collector — polls OS-level DO status for peer caching telemetry
                 if (collectors?.EnableDeliveryOptimizationCollector != false && _enrollmentTracker != null)
                 {
-                    var doInterval = collectors?.DeliveryOptimizationIntervalSeconds ?? 5;
+                    var doInterval = collectors?.DeliveryOptimizationIntervalSeconds ?? 3;
                     _deliveryOptimizationCollector = new DeliveryOptimizationCollector(
                         _configuration.SessionId,
                         _configuration.TenantId,

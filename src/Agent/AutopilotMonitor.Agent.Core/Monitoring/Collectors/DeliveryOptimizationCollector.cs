@@ -36,6 +36,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         private bool _permanentlyDisabled;
         private int _consecutiveErrors;
         private volatile bool _dormant = true;
+        private int _collecting; // concurrency guard (0 = idle, 1 = collecting)
 
         // Track which apps we already sent final do_telemetry for (prevents duplicate callbacks)
         private readonly HashSet<string> _enrichedAppIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -91,6 +92,25 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         protected override void Collect()
         {
             if (_permanentlyDisabled || _dormant) return;
+
+            // Concurrency guard: Runspace is not thread-safe. Skip if previous poll is still running.
+            if (Interlocked.CompareExchange(ref _collecting, 1, 0) != 0)
+            {
+                Logger.Debug("[DeliveryOptimizationCollector] Skipping poll — previous invocation still running");
+                return;
+            }
+            try
+            {
+                CollectCore();
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _collecting, 0);
+            }
+        }
+
+        private void CollectCore()
+        {
 
             // Guard: check if there's still work to do
             var packageStates = _getPackageStates();
@@ -325,7 +345,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                         Data = new Dictionary<string, object>
                         {
                             ["appId"] = appId,
-                            ["name"] = pkg.Name,
+                            ["appName"] = pkg.Name,
+                            // UI-compatible fields (DownloadProgress.tsx reads these)
+                            ["bytesDownloaded"] = totalBytes,
+                            ["bytesTotal"] = fileSize,
+                            ["progressPercent"] = percentComplete,
+                            // DO-specific fields
                             ["doFileSize"] = fileSize,
                             ["doTotalBytesDownloaded"] = totalBytes,
                             ["doPercentComplete"] = percentComplete,

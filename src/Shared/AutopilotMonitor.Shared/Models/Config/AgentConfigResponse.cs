@@ -249,10 +249,10 @@ namespace AutopilotMonitor.Shared.Models
 
         /// <summary>
         /// Interval in seconds for polling Get-DeliveryOptimizationStatus.
-        /// Only polls when active downloads are detected.
-        /// Default: 5 seconds
+        /// Only polls when active downloads are detected (dormant otherwise).
+        /// Default: 3 seconds
         /// </summary>
-        public int DeliveryOptimizationIntervalSeconds { get; set; } = 5;
+        public int DeliveryOptimizationIntervalSeconds { get; set; } = 3;
 
         /// <summary>
         /// Creates default collector configuration
