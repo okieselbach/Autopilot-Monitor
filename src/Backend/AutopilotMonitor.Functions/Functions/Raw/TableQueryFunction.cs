@@ -17,6 +17,9 @@ namespace AutopilotMonitor.Functions.Functions.Raw
         private readonly TableStorageService _storage;
 
         // Tables that must never be exposed (contain secrets)
+        // NOTE: Intentionally empty during preview — only Global Admin (single user) has access
+        // to this endpoint. Consider adding TenantConfiguration, AdminConfiguration, BootstrapSessions
+        // before GA release when more users may have Global Admin access.
         private static readonly HashSet<string> _blacklistedTables = new(StringComparer.OrdinalIgnoreCase)
         {
         };

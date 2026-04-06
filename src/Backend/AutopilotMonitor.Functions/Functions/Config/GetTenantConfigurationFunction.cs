@@ -37,6 +37,9 @@ namespace AutopilotMonitor.Functions.Functions.Config
 
                 var config = await _configService.GetConfigurationAsync(requestCtx.TargetTenantId);
 
+                // NOTE: Returns full TenantConfiguration including DiagnosticsBlobSasUrl.
+                // Intentional — tenant admins need to view/manage the SAS URL in the Settings UI.
+                // Access restricted to TenantAdminOrGA by PolicyEnforcementMiddleware.
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(config);
                 return response;

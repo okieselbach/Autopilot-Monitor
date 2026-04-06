@@ -61,9 +61,27 @@ const KEYWORD_STOP_WORDS = new Set([
 /** Short domain-specific terms that bypass the length filter. */
 const DOMAIN_SHORT_KEYWORDS = new Set(['do', 'os', 'ad', 'ip', 'id']);
 
+/** Multi-word domain phrases mapped to their technical search terms. */
+const DOMAIN_SYNONYMS: [RegExp, string][] = [
+  [/\bdelivery\s+optimization\b/gi, 'do_telemetry'],
+  [/\bactive\s+directory\b/gi, 'aad'],
+  [/\benrollment\s+status\s+page\b/gi, 'esp'],
+  [/\bwindows\s+installer\b/gi, 'msi'],
+  [/\bintune\s+management\s+extension\b/gi, 'ime'],
+];
+
+/** Expand domain synonyms in the query before keyword extraction. */
+function expandSynonyms(query: string): string {
+  let expanded = query;
+  for (const [pattern, replacement] of DOMAIN_SYNONYMS) {
+    expanded = expanded.replace(pattern, `${replacement} $&`);
+  }
+  return expanded;
+}
+
 /** Extract meaningful keywords from a natural language query. */
 function extractKeywords(query: string): string[] {
-  return query
+  return expandSynonyms(query)
     .toLowerCase()
     .replace(/[^\w\s-]/g, ' ')
     .split(/\s+/)

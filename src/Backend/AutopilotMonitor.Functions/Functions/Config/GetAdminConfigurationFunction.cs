@@ -35,6 +35,9 @@ namespace AutopilotMonitor.Functions.Functions.Config
 
                 var config = await _adminConfigService.GetConfigurationAsync();
 
+                // SECURITY NOTE: Returns full AdminConfiguration including NvdApiKey.
+                // Acceptable because this endpoint is GlobalAdminOnly (single user during preview).
+                // Consider masking NvdApiKey to a write-only sentinel before GA release.
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(config);
                 return response;
