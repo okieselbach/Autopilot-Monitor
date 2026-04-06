@@ -186,18 +186,20 @@ namespace AutopilotMonitor.Functions.Services
                             summary.DownloadBytes = existingDlBytes.Value;
                     }
 
-                    // Preserve DO telemetry from prior batch if current has none
-                    if (summary.DoBytesFromPeers == 0 && summary.DoDownloadMode == -1)
+                    // Preserve DO telemetry from prior batch if current has none.
+                    // Use DoDownloadMode as the indicator (>= 0 means DO data exists),
+                    // NOT DoBytesFromPeers which is 0 when there are no peers (0% peer caching).
+                    if (summary.DoDownloadMode < 0)
                     {
-                        var existingDoPeers = existing.GetInt64("DoBytesFromPeers");
-                        if (existingDoPeers.HasValue && existingDoPeers.Value > 0)
+                        var existingDoMode = existing.GetInt32("DoDownloadMode");
+                        if (existingDoMode.HasValue && existingDoMode.Value >= 0)
                         {
                             summary.DoFileSize = existing.GetInt64("DoFileSize") ?? 0;
                             summary.DoTotalBytesDownloaded = existing.GetInt64("DoTotalBytesDownloaded") ?? 0;
-                            summary.DoBytesFromPeers = existingDoPeers.Value;
+                            summary.DoBytesFromPeers = existing.GetInt64("DoBytesFromPeers") ?? 0;
                             summary.DoBytesFromHttp = existing.GetInt64("DoBytesFromHttp") ?? 0;
                             summary.DoPercentPeerCaching = existing.GetInt32("DoPercentPeerCaching") ?? 0;
-                            summary.DoDownloadMode = existing.GetInt32("DoDownloadMode") ?? -1;
+                            summary.DoDownloadMode = existingDoMode.Value;
                             summary.DoDownloadDuration = existing.GetString("DoDownloadDuration") ?? string.Empty;
                             summary.DoBytesFromLanPeers = existing.GetInt64("DoBytesFromLanPeers") ?? 0;
                             summary.DoBytesFromGroupPeers = existing.GetInt64("DoBytesFromGroupPeers") ?? 0;
