@@ -13,6 +13,14 @@ export function SectionAgentChangelog() {
 
       {/* ── April 2026 ───────────────────────────────── */}
       <ChangelogBlock title="April 2026">
+        <Li>Delivery Optimization monitoring — agent tracks Windows DO download activity (OS level) during app installs and reports download performance metrics per application</Li>
+        <Li>ConfigMgr co-management detection — agent detects Configuration Manager client presence and reports co-management status with confidence scoring</Li>
+        <Li>Non-whitelisted hardware detection with optional admin alerts when devices with unapproved hardware models enroll</Li>
+        <Li>IME version change tracking — Intune Management Extension version updates are recorded</Li>
+        <Li>Hello for Business skip detection — agent now distinguishes between Hello setup being completed, timed out, or explicitly skipped</Li>
+        <Li>User-profile-aware diagnostics — gather rules and diagnostics log paths can reference the logged-on user profile directory</Li>
+        <Li>Improved vulnerability matching accuracy using fuzzy Jaro-Winkler scoring</Li>
+        <Li>Faster agent startup through optimized initialization flow</Li>
         <Li>ESP provisioning status verification before enrollment completion — agent checks category outcomes and waits up to 30s for pending results to settle</Li>
         <Li>Structured error codes (exit codes, HRESULT) extracted from IME log patterns and included in timeline events</Li>
         <Li>Dual-hash integrity verification — ZIP package hash checked at download, separate EXE hash verified at runtime against backend to detect post-installation tampering</Li>
