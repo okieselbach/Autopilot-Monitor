@@ -142,6 +142,22 @@ describe("validateFileTarget", () => {
     const r = validateFileTarget("", false);
     expect(r.allowed).toBe(false);
   });
+
+  it("allows %LOGGED_ON_USER_PROFILE% with AppData\\Local in file target", () => {
+    const r = validateFileTarget(
+      "%LOGGED_ON_USER_PROFILE%\\AppData\\Local\\SomeApp\\data.json",
+      false,
+    );
+    expect(r.allowed).toBe(true);
+  });
+
+  it("blocks %LOGGED_ON_USER_PROFILE% with Desktop in file target", () => {
+    const r = validateFileTarget(
+      "%LOGGED_ON_USER_PROFILE%\\Desktop\\file.txt",
+      false,
+    );
+    expect(r.allowed).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -257,6 +273,47 @@ describe("validateDiagnosticsPath", () => {
     const r = validateDiagnosticsPath("E:\\CustomLogs\\file.log", true);
     expect(r.allowed).toBe(true);
     expect(r.unrestricted).toBe(true);
+  });
+
+  it("allows %LOGGED_ON_USER_PROFILE% with AppData\\Local subpath", () => {
+    const r = validateDiagnosticsPath(
+      "%LOGGED_ON_USER_PROFILE%\\AppData\\Local\\RealmJoin\\Logs\\*.log",
+      false,
+    );
+    expect(r.allowed).toBe(true);
+    expect(r.reason).toContain("%LOGGED_ON_USER_PROFILE%");
+  });
+
+  it("allows %LOGGED_ON_USER_PROFILE% with AppData\\Roaming subpath", () => {
+    const r = validateDiagnosticsPath(
+      "%LOGGED_ON_USER_PROFILE%\\AppData\\Roaming\\SomeApp\\logs\\*.log",
+      false,
+    );
+    expect(r.allowed).toBe(true);
+  });
+
+  it("blocks %LOGGED_ON_USER_PROFILE% with non-AppData subpath", () => {
+    const r = validateDiagnosticsPath(
+      "%LOGGED_ON_USER_PROFILE%\\Desktop\\secret.txt",
+      false,
+    );
+    expect(r.allowed).toBe(false);
+  });
+
+  it("blocks %LOGGED_ON_USER_PROFILE% with Documents subpath", () => {
+    const r = validateDiagnosticsPath(
+      "%LOGGED_ON_USER_PROFILE%\\Documents\\file.log",
+      false,
+    );
+    expect(r.allowed).toBe(false);
+  });
+
+  it("still blocks direct C:\\Users paths (no token)", () => {
+    const r = validateDiagnosticsPath(
+      "C:\\Users\\admin\\AppData\\Local\\RealmJoin\\Logs\\*.log",
+      false,
+    );
+    expect(r.allowed).toBe(false);
   });
 });
 

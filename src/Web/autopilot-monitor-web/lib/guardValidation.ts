@@ -49,13 +49,25 @@ const COMMON_ENV_VARS: Record<string, string> = {
   "%SystemDrive%": "C:",
 };
 
+/**
+ * Custom agent token that resolves at runtime to the logged-on user's profile.
+ * Expanded client-side to a placeholder for validation purposes only.
+ */
+const USER_PROFILE_TOKEN = "%LOGGED_ON_USER_PROFILE%";
+const USER_PROFILE_PLACEHOLDER = "C:\\Users\\__AGENT_RESOLVED__";
+
+/** Allowed subdirectories under a user profile when using the custom token. */
+const ALLOWED_USER_PROFILE_SUBDIRS = ["AppData\\Local", "AppData\\Roaming"];
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Expand known Windows environment variables (case-insensitive). */
+/** Expand known Windows environment variables and custom tokens (case-insensitive). */
 function expandEnvVars(path: string): string {
   let result = path;
+  // Expand custom agent token first
+  result = result.replace(new RegExp(USER_PROFILE_TOKEN.replace(/%/g, "%"), "gi"), USER_PROFILE_PLACEHOLDER);
   for (const [envVar, replacement] of Object.entries(COMMON_ENV_VARS)) {
     const regex = new RegExp(envVar.replace(/%/g, "%"), "gi");
     result = result.replace(regex, replacement);
@@ -127,6 +139,21 @@ function stripRegistryHive(target: string): string {
   return target;
 }
 
+/**
+ * Returns true if the normalized path is under the user-profile placeholder
+ * and within one of the allowed subdirectories (AppData\Local, AppData\Roaming).
+ * This mirrors the agent-side IsUserProfileSubpathAllowed guard logic.
+ */
+function isUserProfileSubpathAllowed(normalizedDir: string): boolean {
+  for (const subdir of ALLOWED_USER_PROFILE_SUBDIRS) {
+    const allowedPrefix = `${USER_PROFILE_PLACEHOLDER}\\${subdir}`;
+    if (matchesPrefix(normalizedDir, allowedPrefix, "\\")) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 // Validation functions
 // ---------------------------------------------------------------------------
@@ -194,8 +221,11 @@ export function validateFileTarget(
     normalizedDir = normalizePath(expanded);
   }
 
-  // Hard block: C:\Users always blocked
+  // Hard block: C:\Users always blocked — except allowed subdirs via %LOGGED_ON_USER_PROFILE% token
   if (matchesPrefix(normalizedDir, BLOCKED_USERS_PREFIX, "\\")) {
+    if (isUserProfileSubpathAllowed(normalizedDir)) {
+      return { allowed: true, reason: "Allowed via %LOGGED_ON_USER_PROFILE% (AppData only)", unrestricted: false };
+    }
     return { allowed: false, reason: "C:\\Users is always blocked (privacy protection)", unrestricted: false };
   }
 
@@ -307,8 +337,11 @@ export function validateDiagnosticsPath(
     normalizedDir = normalizePath(expanded);
   }
 
-  // Hard block: C:\Users always blocked
+  // Hard block: C:\Users always blocked — except allowed subdirs via %LOGGED_ON_USER_PROFILE% token
   if (matchesPrefix(normalizedDir, BLOCKED_USERS_PREFIX, "\\")) {
+    if (isUserProfileSubpathAllowed(normalizedDir)) {
+      return { allowed: true, reason: "Allowed via %LOGGED_ON_USER_PROFILE% (AppData only)", unrestricted: false };
+    }
     return { allowed: false, reason: "C:\\Users is always blocked (privacy protection)", unrestricted: false };
   }
 
