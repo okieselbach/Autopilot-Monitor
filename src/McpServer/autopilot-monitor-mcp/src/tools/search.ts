@@ -58,13 +58,16 @@ const KEYWORD_STOP_WORDS = new Set([
   'event', 'check', 'look', 'see',
 ]);
 
+/** Short domain-specific terms that bypass the length filter. */
+const DOMAIN_SHORT_KEYWORDS = new Set(['do', 'os', 'ad', 'ip', 'id']);
+
 /** Extract meaningful keywords from a natural language query. */
 function extractKeywords(query: string): string[] {
   return query
     .toLowerCase()
     .replace(/[^\w\s-]/g, ' ')
     .split(/\s+/)
-    .filter((w) => w.length > 2 && !KEYWORD_STOP_WORDS.has(w));
+    .filter((w) => (w.length > 2 || DOMAIN_SHORT_KEYWORDS.has(w)) && !KEYWORD_STOP_WORDS.has(w));
 }
 
 // ── Weighted keyword scoring ────────────────────────────────────────────
