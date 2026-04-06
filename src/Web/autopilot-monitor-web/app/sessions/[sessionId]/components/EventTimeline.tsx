@@ -3,6 +3,7 @@
 import { useState, useMemo } from "react";
 import { EnrollmentEvent, Session } from "@/types";
 import { normalizeEventDataForDisplay } from "../utils/eventHelpers";
+import { getErrorCodeEntry, formatErrorCode } from "@/lib/errorCodeMap";
 
 interface EventTimelineProps {
   filteredEvents: EnrollmentEvent[];
@@ -429,6 +430,43 @@ function EventRow({ event, showScriptOutput }: { event: EnrollmentEvent; showScr
             <span className="text-sm font-medium text-gray-900">{event.eventType}</span>
           </div>
           <p className="mt-1 text-sm text-gray-600">{event.message}</p>
+          {/* Exit code / HRESULT badge for app install events */}
+          {(event.eventType === "app_install_failed" || event.eventType === "app_install_completed") && (() => {
+            const ec = event.data?.exitCode ?? event.data?.exit_code;
+            const hr = event.data?.hresultFromWin32 ?? event.data?.hresult_from_win32;
+            const hasNonZero = (ec && String(ec) !== "0") || (hr && String(hr) !== "0");
+            if (!hasNonZero) return null;
+            const ecEntry = ec ? getErrorCodeEntry(String(ec)) : null;
+            const hrEntry = hr ? getErrorCodeEntry(String(hr)) : null;
+            return (
+              <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+                {ec && String(ec) !== "0" && (
+                  <>
+                    <span className="px-1.5 py-0.5 rounded bg-red-100 text-red-800 font-mono font-medium">
+                      Exit: {formatErrorCode(String(ec))}
+                    </span>
+                    {ecEntry && (
+                      <span className="text-red-600" title={`${ecEntry.source} (${ecEntry.confidence} confidence)`}>
+                        {ecEntry.description}
+                      </span>
+                    )}
+                  </>
+                )}
+                {hr && String(hr) !== "0" && (
+                  <>
+                    <span className="px-1.5 py-0.5 rounded bg-red-100 text-red-800 font-mono font-medium">
+                      HRESULT: {formatErrorCode(String(hr))}
+                    </span>
+                    {hrEntry && (
+                      <span className="text-red-600" title={`${hrEntry.source} (${hrEntry.confidence} confidence)`}>
+                        {hrEntry.description}
+                      </span>
+                    )}
+                  </>
+                )}
+              </div>
+            );
+          })()}
           <div className="mt-1 flex items-center gap-3 text-xs text-gray-500">
             <span>Source: {event.source}</span>
             <span>Seq: {event.sequence}</span>

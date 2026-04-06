@@ -1,0 +1,12 @@
+{
+  "$schema": "../schema/ime-log-pattern.schema.json",
+  "patternId": "IME-HRESULT",
+  "category": "currentPhase",
+  "pattern": "\\[Win32App\\] hResultFromWin32 (?<hresult>-?\\d+)$",
+  "action": "captureHResult",
+  "parameters": {
+    "useCurrentApp": "true"
+  },
+  "description": "Captures the Win32 HRESULT for the current app.",
+  "enabled": true
+}

@@ -224,6 +224,7 @@ export const ALLOWED_DIAGNOSTICS_PATH_PREFIXES: readonly string[] = [
   "C:\\ProgramData\\Microsoft\\DiagnosticLogCSP",
   "C:\\ProgramData\\Microsoft\\Windows\\WER",
   "C:\\Windows\\Logs\\CBS",
+  "C:\\Install\\Log",
 ];
 
 export const BLOCKED_FILE_PREFIXES: readonly string[] = [

@@ -128,6 +128,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         public string ErrorDetail { get; set; }
         public string ErrorCode { get; set; }
 
+        // Installer result codes
+        public string ExitCode { get; set; }
+        public string HResultFromWin32 { get; set; }
+
         // Delivery Optimization telemetry
         public long DoFileSize { get; set; }
         public long DoTotalBytesDownloaded { get; set; }

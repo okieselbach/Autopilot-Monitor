@@ -257,6 +257,28 @@
       "enabled": true
     },
     {
+      "patternId": "IME-EXITCODE",
+      "category": "currentPhase",
+      "pattern": "\\[Win32App\\] lpExitCode (?<exitCode>-?\\d+)$",
+      "action": "captureExitCode",
+      "parameters": {
+        "useCurrentApp": "true"
+      },
+      "description": "Captures the installer exit code (lpExitCode) for the current app.",
+      "enabled": true
+    },
+    {
+      "patternId": "IME-HRESULT",
+      "category": "currentPhase",
+      "pattern": "\\[Win32App\\] hResultFromWin32 (?<hresult>-?\\d+)$",
+      "action": "captureHResult",
+      "parameters": {
+        "useCurrentApp": "true"
+      },
+      "description": "Captures the Win32 HRESULT for the current app.",
+      "enabled": true
+    },
+    {
       "patternId": "IME-IMPERSONATION",
       "category": "always",
       "pattern": "After impersonation: (?<user>.*?)$",

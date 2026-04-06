@@ -269,6 +269,18 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                         }
                         break;
 
+                    case "captureexitcode":
+                        var exitCodeVal = match.Groups["exitCode"]?.Value;
+                        if (!string.IsNullOrEmpty(exitCodeVal) && !string.IsNullOrEmpty(_packageStates.CurrentPackageId))
+                            _packageStates.GetPackage(_packageStates.CurrentPackageId)?.UpdateExitCode(exitCodeVal);
+                        break;
+
+                    case "capturehresult":
+                        var hresultVal = match.Groups["hresult"]?.Value;
+                        if (!string.IsNullOrEmpty(hresultVal) && !string.IsNullOrEmpty(_packageStates.CurrentPackageId))
+                            _packageStates.GetPackage(_packageStates.CurrentPackageId)?.UpdateHResult(hresultVal);
+                        break;
+
                     case "updatestatepostponed":
                         if (!string.IsNullOrEmpty(id))
                         {

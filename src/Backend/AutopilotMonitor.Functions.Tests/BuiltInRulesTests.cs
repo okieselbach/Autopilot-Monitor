@@ -136,7 +136,8 @@ public class BuiltInRulesTests
             "espTrackStatus", "updateName", "updateWin32AppState",
             "cancelStuckAndSetCurrent", "imeSessionChange", "imeImpersonation",
             "enrollmentCompleted", "updateDoTelemetry", "scriptStarted",
-            "scriptContext", "scriptExitCode", "scriptOutput", "scriptCompleted"
+            "scriptContext", "scriptExitCode", "scriptOutput", "scriptCompleted",
+            "captureExitCode", "captureHResult"
         };
 
         var patterns = BuiltInImeLogPatterns.GetAll();

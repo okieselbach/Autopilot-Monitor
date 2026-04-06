@@ -92,6 +92,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         public string ErrorDetail { get; private set; }
         public string ErrorCode { get; private set; }
 
+        // Installer result codes (captured from lpExitCode / hResultFromWin32 log lines)
+        public string ExitCode { get; private set; }
+        public string HResultFromWin32 { get; private set; }
+
         // Delivery Optimization telemetry (populated from [DO TEL] log entries)
         public long DoFileSize { get; private set; }
         public long DoTotalBytesDownloaded { get; private set; }
@@ -138,6 +142,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             AppInstallationState installationState, bool downloadingOrInstallingSeen,
             int? progressPercent, long bytesDownloaded, long bytesTotal,
             string errorPatternId = null, string errorDetail = null, string errorCode = null,
+            string exitCode = null, string hresultFromWin32 = null,
             long doFileSize = 0, long doTotalBytesDownloaded = 0,
             long doBytesFromPeers = 0, int doPercentPeerCaching = 0,
             long doBytesFromLanPeers = 0, long doBytesFromGroupPeers = 0,
@@ -160,6 +165,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 ErrorPatternId = errorPatternId,
                 ErrorDetail = errorDetail,
                 ErrorCode = errorCode,
+                ExitCode = exitCode,
+                HResultFromWin32 = hresultFromWin32,
                 InstallationStateLastChangedTicks = Stopwatch.GetTimestamp(),
                 DoFileSize = doFileSize,
                 DoTotalBytesDownloaded = doTotalBytesDownloaded,
@@ -242,6 +249,22 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             ErrorDetail = detail;
             if (!string.IsNullOrEmpty(errorCode))
                 ErrorCode = errorCode;
+        }
+
+        /// <summary>
+        /// Captures the installer exit code (lpExitCode) for the app.
+        /// </summary>
+        public void UpdateExitCode(string code)
+        {
+            ExitCode = code;
+        }
+
+        /// <summary>
+        /// Captures the Win32 HRESULT (hResultFromWin32) for the app.
+        /// </summary>
+        public void UpdateHResult(string code)
+        {
+            HResultFromWin32 = code;
         }
 
         /// <summary>
@@ -421,6 +444,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 data["errorDetail"] = ErrorDetail;
             if (!string.IsNullOrEmpty(ErrorCode))
                 data["errorCode"] = ErrorCode;
+
+            if (!string.IsNullOrEmpty(ExitCode))
+                data["exitCode"] = ExitCode;
+            if (!string.IsNullOrEmpty(HResultFromWin32))
+                data["hresultFromWin32"] = HResultFromWin32;
 
             if (HasDoTelemetry)
             {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { getErrorCodeEntry, formatErrorCode } from "@/lib/errorCodeMap";
 
 interface InstallEvent {
   timestamp: string;
@@ -31,6 +32,8 @@ interface InstallItem {
   isError: boolean;
   errorDetail?: string;
   errorPatternId?: string;
+  exitCode?: string;
+  hresultFromWin32?: string;
   firstSeenIndex: number;
   eventData?: Record<string, any>;
 }
@@ -99,6 +102,8 @@ export default function InstallProgress({ events, summaryStats }: InstallProgres
           durationMs: duration,
           isCompleted: true,
           isError: false,
+          exitCode: d.exitCode ?? d.exit_code,
+          hresultFromWin32: d.hresultFromWin32 ?? d.hresult_from_win32,
           firstSeenIndex: existing?.firstSeenIndex ?? insertionIndex++,
           eventData: d,
         });
@@ -120,6 +125,8 @@ export default function InstallProgress({ events, summaryStats }: InstallProgres
           isError: true,
           errorDetail: d.errorDetail ?? d.error_detail,
           errorPatternId: d.errorPatternId ?? d.error_pattern_id,
+          exitCode: d.exitCode ?? d.exit_code,
+          hresultFromWin32: d.hresultFromWin32 ?? d.hresult_from_win32,
           firstSeenIndex: existing?.firstSeenIndex ?? insertionIndex++,
           eventData: d,
         });
@@ -336,12 +343,44 @@ function InstallItemRow({ item }: { item: InstallItem }) {
         </div>
       </div>
 
-      {/* Error detail */}
-      {item.isError && item.errorDetail && (
-        <div className="mt-1 text-xs text-red-600">
-          {item.errorDetail}
+      {/* Exit code / HRESULT display — only when non-zero */}
+      {(item.exitCode && item.exitCode !== "0") || (item.hresultFromWin32 && item.hresultFromWin32 !== "0") || (item.isError && item.errorDetail) ? (
+        <div className="mt-1 space-y-0.5">
+          {item.exitCode && item.exitCode !== "0" && (() => {
+            const entry = getErrorCodeEntry(item.exitCode);
+            return (
+              <div className="flex items-center gap-2 text-xs">
+                <span className="px-1.5 py-0.5 rounded bg-red-100 text-red-800 font-mono font-medium">
+                  Exit: {formatErrorCode(item.exitCode)}
+                </span>
+                {entry && (
+                  <span className="text-red-600" title={`${entry.source} (${entry.confidence} confidence)`}>
+                    {entry.description}
+                  </span>
+                )}
+              </div>
+            );
+          })()}
+          {item.hresultFromWin32 && item.hresultFromWin32 !== "0" && (() => {
+            const entry = getErrorCodeEntry(item.hresultFromWin32);
+            return (
+              <div className="flex items-center gap-2 text-xs">
+                <span className="px-1.5 py-0.5 rounded bg-red-100 text-red-800 font-mono font-medium">
+                  HRESULT: {formatErrorCode(item.hresultFromWin32)}
+                </span>
+                {entry && (
+                  <span className="text-red-600" title={`${entry.source} (${entry.confidence} confidence)`}>
+                    {entry.description}
+                  </span>
+                )}
+              </div>
+            );
+          })()}
+          {item.isError && item.errorDetail && (
+            <div className="text-xs text-red-600">{item.errorDetail}</div>
+          )}
         </div>
-      )}
+      ) : null}
 
       {/* Event details (expandable) */}
       {showDetails && item.eventData && (
