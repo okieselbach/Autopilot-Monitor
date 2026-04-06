@@ -37,6 +37,10 @@ namespace AutopilotMonitor.Shared.DataAccess
             string? country, string? region, string? city, string? loc);
         Task UpdateSessionImeAgentVersionAsync(string tenantId, string sessionId, string version);
 
+        // --- IME Version History ---
+        Task<bool> RecordImeVersionAsync(string version, string tenantId, string sessionId);
+        Task<List<ImeVersionHistoryEntry>> GetImeVersionHistoryAsync();
+
         // --- Events ---
         Task<bool> StoreEventAsync(EnrollmentEvent evt);
         Task<List<EnrollmentEvent>> StoreEventsBatchAsync(List<EnrollmentEvent> events);

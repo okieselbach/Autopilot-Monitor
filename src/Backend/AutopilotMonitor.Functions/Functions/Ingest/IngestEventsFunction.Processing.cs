@@ -160,6 +160,23 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                         _ = _sessionRepo.UpdateSessionImeAgentVersionAsync(request.TenantId, request.SessionId, imeVersion)
                             .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException,
                                 "ImeAgentVersion update failed (non-fatal)"), TaskContinuationOptions.OnlyOnFaulted);
+
+                        // Track IME version in permanent history (fire-and-forget, non-blocking)
+                        _ = _sessionRepo.RecordImeVersionAsync(imeVersion, request.TenantId, request.SessionId)
+                            .ContinueWith(async t =>
+                            {
+                                if (t.IsFaulted)
+                                {
+                                    _logger.LogWarning(t.Exception?.InnerException,
+                                        "ImeVersionHistory update failed (non-fatal)");
+                                }
+                                else if (t.Result)
+                                {
+                                    // New version discovered — log OpsEvent
+                                    await _opsEventService.RecordNewImeVersionDetectedAsync(
+                                        imeVersion, request.TenantId, request.SessionId);
+                                }
+                            }, TaskScheduler.Default);
                     }
                 }
 

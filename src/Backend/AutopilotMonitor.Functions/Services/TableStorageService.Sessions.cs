@@ -1721,5 +1721,95 @@ namespace AutopilotMonitor.Functions.Services
 
             return null;
         }
+
+        #region IME Version History
+
+        /// <summary>
+        /// Records an IME version sighting. If the version is new, inserts it with FirstSeenAt.
+        /// If already known, updates LastSeenAt and increments SessionCount via Merge.
+        /// Returns true if this was a newly discovered version.
+        /// </summary>
+        public async Task<bool> RecordImeVersionAsync(string version, string tenantId, string sessionId)
+        {
+            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.ImeVersionHistory);
+            var now = DateTime.UtcNow;
+
+            // Try insert first — succeeds only for genuinely new versions
+            var newEntity = new TableEntity("Global", version)
+            {
+                ["FirstSeenAt"] = now,
+                ["FirstSeenSessionId"] = sessionId,
+                ["FirstSeenTenantId"] = tenantId,
+                ["LastSeenAt"] = now,
+                ["SessionCount"] = 1
+            };
+
+            try
+            {
+                await tableClient.AddEntityAsync(newEntity);
+                return true; // New version discovered
+            }
+            catch (RequestFailedException ex) when (ex.Status == 409)
+            {
+                // Version already known — update LastSeenAt and increment SessionCount
+            }
+
+            // Merge-update for known versions: bump LastSeenAt + SessionCount
+            try
+            {
+                var existing = await tableClient.GetEntityAsync<TableEntity>("Global", version,
+                    select: new[] { "SessionCount" });
+                var currentCount = existing.Value.GetInt32("SessionCount") ?? 0;
+
+                var mergeEntity = new TableEntity("Global", version)
+                {
+                    ["LastSeenAt"] = now,
+                    ["SessionCount"] = currentCount + 1
+                };
+                await tableClient.UpsertEntityAsync(mergeEntity, TableUpdateMode.Merge);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to update ImeVersionHistory for version {Version}", version);
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Returns all known IME versions ordered by FirstSeenAt descending.
+        /// </summary>
+        public async Task<List<ImeVersionHistoryEntry>> GetImeVersionHistoryAsync()
+        {
+            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.ImeVersionHistory);
+            var results = new List<ImeVersionHistoryEntry>();
+
+            try
+            {
+                var query = tableClient.QueryAsync<TableEntity>(
+                    filter: $"PartitionKey eq 'Global'");
+
+                await foreach (var entity in query)
+                {
+                    results.Add(new ImeVersionHistoryEntry
+                    {
+                        Version = entity.RowKey,
+                        FirstSeenAt = entity.GetDateTime("FirstSeenAt") ?? DateTime.MinValue,
+                        FirstSeenSessionId = entity.GetString("FirstSeenSessionId") ?? string.Empty,
+                        FirstSeenTenantId = entity.GetString("FirstSeenTenantId") ?? string.Empty,
+                        LastSeenAt = entity.GetDateTime("LastSeenAt") ?? DateTime.MinValue,
+                        SessionCount = entity.GetInt32("SessionCount") ?? 0
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to query ImeVersionHistory");
+            }
+
+            return results.OrderByDescending(e => e.FirstSeenAt).ToList();
+        }
+
+        #endregion
     }
 }

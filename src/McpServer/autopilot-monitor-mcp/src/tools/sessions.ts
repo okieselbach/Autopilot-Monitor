@@ -393,4 +393,23 @@ export function registerSessionTools(server: McpServer): void {
       }
     }
   );
+
+  // Tool: get_ime_version_history
+  server.tool(
+    'get_ime_version_history',
+    'Get the history of all IME (Intune Management Extension) agent versions seen across enrollments. ' +
+    'Shows when each version was first and last seen, and how many sessions reported it. ' +
+    'This is a permanent archive that survives data retention — useful for tracking Microsoft IME release rollouts over time. ' +
+    'Available to all tenant members (no tenantId needed, data is global).',
+    {},
+    READ_ONLY,
+    async (args) => {
+      try {
+        const data = await apiFetch('/api/metrics/ime-versions');
+        return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+      } catch (error: unknown) {
+        return toolError('get_ime_version_history', args, error);
+      }
+    }
+  );
 }

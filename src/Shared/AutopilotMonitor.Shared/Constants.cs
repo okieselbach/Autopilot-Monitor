@@ -292,6 +292,9 @@ namespace AutopilotMonitor.Shared
             // Operational events (vital infrastructure signals for Global Admin Ops dashboard)
             public const string OpsEvents = "OpsEvents";
 
+            // IME version history (permanent archive, survives data retention)
+            public const string ImeVersionHistory = "ImeVersionHistory";
+
             /// <summary>
             /// Returns all table names for initialization
             /// </summary>
@@ -330,7 +333,8 @@ namespace AutopilotMonitor.Shared
                 CveIndex,
                 DistressReports,
                 UserUsageLog,
-                OpsEvents
+                OpsEvents,
+                ImeVersionHistory
             };
         }
     }

@@ -73,6 +73,12 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
         public Task UpdateSessionImeAgentVersionAsync(string tenantId, string sessionId, string version)
             => _storage.UpdateSessionImeAgentVersionAsync(tenantId, sessionId, version);
 
+        public Task<bool> RecordImeVersionAsync(string version, string tenantId, string sessionId)
+            => _storage.RecordImeVersionAsync(version, tenantId, sessionId);
+
+        public Task<List<ImeVersionHistoryEntry>> GetImeVersionHistoryAsync()
+            => _storage.GetImeVersionHistoryAsync();
+
         public async Task<bool> StoreEventAsync(EnrollmentEvent evt)
         {
             var result = await _storage.StoreEventAsync(evt);

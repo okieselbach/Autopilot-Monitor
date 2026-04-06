@@ -91,6 +91,11 @@ namespace AutopilotMonitor.Functions.Services
                 $"{sessionCount} session(s) timed out after {timeoutHours}h",
                 tenantId, "System.Maintenance", new { sessionCount, timeoutHours });
 
+        public Task RecordNewImeVersionDetectedAsync(string version, string tenantId, string sessionId)
+            => WriteAsync(OpsEventCategory.Agent, "NewImeVersionDetected", OpsEventSeverity.Info,
+                $"New IME agent version detected: {version}",
+                tenantId, "System.Ingest", new { version, sessionId });
+
         public Task RecordBlobStorageMissingAsync(string missingItem, int statusCode)
             => WriteAsync(OpsEventCategory.Agent, "BlobStorageMissing", OpsEventSeverity.Critical,
                 $"Agent blob storage check failed: {missingItem} is missing or unreachable (HTTP {statusCode})",

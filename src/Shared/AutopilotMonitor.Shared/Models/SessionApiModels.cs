@@ -250,4 +250,17 @@ namespace AutopilotMonitor.Shared.Models
         Failed,
         Unknown
     }
+
+    /// <summary>
+    /// A tracked IME version sighting. Permanent archive that survives data retention.
+    /// </summary>
+    public class ImeVersionHistoryEntry
+    {
+        public string Version { get; set; } = default!;
+        public DateTime FirstSeenAt { get; set; }
+        public string FirstSeenSessionId { get; set; } = string.Empty;
+        public string FirstSeenTenantId { get; set; } = string.Empty;
+        public DateTime LastSeenAt { get; set; }
+        public int SessionCount { get; set; }
+    }
 }
