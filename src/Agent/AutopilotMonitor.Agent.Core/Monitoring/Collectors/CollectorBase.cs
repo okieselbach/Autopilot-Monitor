@@ -75,6 +75,20 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         /// <summary>Optional hook called after the timer stops (e.g. to dispose counters).</summary>
         protected virtual void OnAfterStop() { }
 
+        /// <summary>Pauses the collection timer without stopping/disposing the collector.</summary>
+        protected void PauseTimer()
+        {
+            _timer?.Change(Timeout.Infinite, Timeout.Infinite);
+        }
+
+        /// <summary>Resumes the collection timer after a pause.</summary>
+        protected void ResumeTimer()
+        {
+            if (_disposed || _timer == null) return;
+            var interval = TimeSpan.FromSeconds(_intervalSeconds);
+            _timer.Change(TimeSpan.Zero, interval);
+        }
+
         private void CollectSafe()
         {
             try { Collect(); }

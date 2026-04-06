@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Management.Automation;
+using System.Management.Automation.Runspaces;
 using System.Text;
+using System.Threading;
 using AutopilotMonitor.Agent.Core.Logging;
 using AutopilotMonitor.Agent.Core.Monitoring.Tracking;
 using AutopilotMonitor.Shared.Models;
@@ -13,33 +15,35 @@ using Newtonsoft.Json.Linq;
 namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 {
     /// <summary>
-    /// Polls OS-level Delivery Optimization status via Get-DeliveryOptimizationStatus.
-    /// Matches DO entries to tracked IME app downloads using the intunewin-bin FileId format
-    /// (same ExtractAppIdFromDoFileId logic as the IME [DO TEL] path).
-    /// Enriches AppPackageState with DO telemetry when IME no longer provides [DO TEL] entries.
-    /// Always-on with dedup guard: skips apps where HasDoTelemetry is already true.
+    /// Polls OS-level Delivery Optimization status via a persistent PowerShell Runspace.
+    /// Matches DO entries to tracked IME app downloads using the intunewin-bin FileId format.
+    /// Emits download_progress events on every poll (for live UI) and do_telemetry once per app
+    /// when the download completes.
+    ///
+    /// Lifecycle: starts dormant, wakes up when ImeLogTracker detects a download,
+    /// goes dormant again when all downloads are enriched.
     /// </summary>
     public class DeliveryOptimizationCollector : CollectorBase
     {
         private const string LogFileName = "do-status.jsonl";
-        private const int ProcessTimeoutMs = 30000;
-
-        private static readonly string PsCommand =
-            "Get-DeliveryOptimizationStatus | Select-Object FileId, FileSize, TotalBytesDownloaded, " +
-            "PercentPeerCaching, BytesFromPeers, BytesFromHttp, Status, Priority, " +
-            "BytesFromLanPeers, BytesFromGroupPeers, BytesFromInternetPeers, " +
-            "DownloadDuration, DownloadMode, SourceURL, BytesFromCacheServer | ConvertTo-Json -Compress";
+        private const int InvokeTimeoutMs = 10000;
 
         private readonly Func<AppPackageStateList> _getPackageStates;
         private readonly Action<AppPackageState> _onDoTelemetryReceived;
         private readonly string _logFilePath;
+
+        private Runspace _runspace;
         private bool _permanentlyDisabled;
         private int _consecutiveErrors;
+        private volatile bool _dormant = true;
 
-        // Track which apps we already enriched (prevents duplicate callbacks across poll cycles)
+        // Track which apps we already sent final do_telemetry for (prevents duplicate callbacks)
         private readonly HashSet<string> _enrichedAppIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        // Change detection: only emit events and write log when DO state actually changed
+        // Change detection per app: only emit download_progress when bytes actually changed
+        private readonly Dictionary<string, long> _lastBytesPerApp = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+
+        // Change detection for JSONL log: only write when overall state changed
         private long _lastSnapshotFingerprint;
 
         public DeliveryOptimizationCollector(
@@ -58,258 +62,380 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             _logFilePath = Path.Combine(logDirectory, LogFileName);
         }
 
-        protected override TimeSpan GetInitialDelay() => TimeSpan.FromSeconds(10);
+        /// <summary>Start dormant — timer does not fire until WakeUp() is called.</summary>
+        protected override TimeSpan GetInitialDelay() => Timeout.InfiniteTimeSpan;
 
-        protected override void Collect()
+        protected override void OnBeforeStart()
         {
-            if (_permanentlyDisabled) return;
+            EnsureRunspace();
+        }
 
-            // Guard: only poll when there are active downloads or recently completed apps without DO data
-            var packageStates = _getPackageStates();
-            if (packageStates == null || packageStates.Count == 0) return;
-
-            var hasActiveDownloads = packageStates.Any(p =>
-                p.InstallationState == AppInstallationState.Downloading ||
-                p.InstallationState == AppInstallationState.Installing);
-
-            var hasRecentlyCompletedWithoutDo = packageStates.Any(p =>
-                !p.HasDoTelemetry &&
-                !_enrichedAppIds.Contains(p.Id) &&
-                p.DownloadingOrInstallingSeen &&
-                (p.InstallationState == AppInstallationState.Installed ||
-                 p.InstallationState == AppInstallationState.Error));
-
-            if (!hasActiveDownloads && !hasRecentlyCompletedWithoutDo)
-            {
-                Logger.Debug("[DeliveryOptimizationCollector] No active downloads or pending DO enrichment, skipping poll");
-                return;
-            }
-
-            // Execute PowerShell command
-            var (output, error, exitCode) = RunPowerShellCommand();
-
-            if (exitCode != 0 || output == null)
-            {
-                HandleError(error, exitCode);
-                return;
-            }
-
-            _consecutiveErrors = 0;
-
-            // Parse JSON output
-            JArray entries;
-            try
-            {
-                var token = JToken.Parse(output);
-                // ConvertTo-Json returns a single object (not array) when there's only one result
-                entries = token is JArray arr ? arr : new JArray(token);
-            }
-            catch (JsonReaderException ex)
-            {
-                Logger.Warning($"[DeliveryOptimizationCollector] Failed to parse DO JSON: {ex.Message}");
-                return;
-            }
-
-            if (entries.Count == 0)
-            {
-                Logger.Debug("[DeliveryOptimizationCollector] No DO entries returned");
-                return;
-            }
-
-            // Change detection: compute fingerprint from entry count + sum of TotalBytesDownloaded
-            // Only write log / emit event when something actually changed
-            var fingerprint = ComputeFingerprint(entries);
-            var changed = fingerprint != _lastSnapshotFingerprint;
-            _lastSnapshotFingerprint = fingerprint;
-
-            // Match DO entries to tracked app downloads and enrich with telemetry
-            // (always attempt — a new app may have appeared even if bytes didn't change)
-            var matchCount = MatchAndEnrich(entries, packageStates);
-
-            if (!changed && matchCount == 0)
-            {
-                Logger.Debug("[DeliveryOptimizationCollector] No DO changes since last poll, skipping event/log");
-                return;
-            }
-
-            // Write raw snapshot to JSONL log file (only on change)
-            WriteToLogFile(entries);
-
-            // Log summary to agent log
-            LogSummary(entries, packageStates, matchCount);
-
-            // Emit lightweight status event
-            EmitStatusEvent(entries, packageStates, matchCount);
+        protected override void OnAfterStop()
+        {
+            DisposeRunspace();
         }
 
         /// <summary>
-        /// Matches DO entries to tracked IME app downloads using the intunewin-bin FileId format.
-        /// For matched apps where HasDoTelemetry is false, calls UpdateDoTelemetry and fires the callback.
+        /// Wakes the collector from dormant state. Called by MonitoringService when
+        /// ImeLogTracker detects an app entering the Downloading state.
+        /// Safe to call multiple times / from any thread.
         /// </summary>
-        private int MatchAndEnrich(JArray entries, AppPackageStateList packageStates)
+        public void WakeUp()
         {
+            if (_permanentlyDisabled || !_dormant) return;
+            _dormant = false;
+            Logger.Info("[DeliveryOptimizationCollector] Waking up — download activity detected");
+            ResumeTimer();
+        }
+
+        protected override void Collect()
+        {
+            if (_permanentlyDisabled || _dormant) return;
+
+            // Guard: check if there's still work to do
+            var packageStates = _getPackageStates();
+            if (packageStates == null || packageStates.Count == 0) return;
+
+            var hasActiveDownloads = false;
+            var hasPendingEnrichment = false;
+            for (int i = 0; i < packageStates.Count; i++)
+            {
+                var p = packageStates[i];
+                if (p.InstallationState == AppInstallationState.Downloading ||
+                    p.InstallationState == AppInstallationState.Installing)
+                    hasActiveDownloads = true;
+
+                if (!p.HasDoTelemetry && !_enrichedAppIds.Contains(p.Id) &&
+                    p.DownloadingOrInstallingSeen &&
+                    (p.InstallationState == AppInstallationState.Installed ||
+                     p.InstallationState == AppInstallationState.Error))
+                    hasPendingEnrichment = true;
+            }
+
+            if (!hasActiveDownloads && !hasPendingEnrichment)
+            {
+                Logger.Info("[DeliveryOptimizationCollector] Going dormant — no active downloads or pending enrichment");
+                _dormant = true;
+                PauseTimer();
+                return;
+            }
+
+            // Invoke PowerShell via persistent Runspace
+            var results = InvokeDoStatus();
+            if (results == null) return;
+
+            _consecutiveErrors = 0;
+
+            // Process results: emit progress events and match completed downloads
+            ProcessResults(results, packageStates);
+        }
+
+        // -----------------------------------------------------------------------
+        // PowerShell Runspace management
+        // -----------------------------------------------------------------------
+
+        private void EnsureRunspace()
+        {
+            if (_runspace != null && _runspace.RunspaceStateInfo.State == RunspaceState.Opened)
+                return;
+
+            DisposeRunspace();
+
+            try
+            {
+                _runspace = RunspaceFactory.CreateRunspace();
+                _runspace.Open();
+                Logger.Info("[DeliveryOptimizationCollector] PowerShell Runspace opened");
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning($"[DeliveryOptimizationCollector] Failed to open Runspace: {ex.Message}");
+                _runspace = null;
+            }
+        }
+
+        private void DisposeRunspace()
+        {
+            if (_runspace == null) return;
+            try
+            {
+                _runspace.Close();
+                _runspace.Dispose();
+            }
+            catch { /* best effort */ }
+            _runspace = null;
+        }
+
+        /// <summary>
+        /// Invokes Get-DeliveryOptimizationStatus in the persistent Runspace.
+        /// Returns a list of PSObject results, or null on error.
+        /// Self-heals: recreates the Runspace on failure.
+        /// </summary>
+        private List<PSObject> InvokeDoStatus()
+        {
+            EnsureRunspace();
+            if (_runspace == null)
+            {
+                HandleError("Runspace not available");
+                return null;
+            }
+
+            try
+            {
+                using (var ps = PowerShell.Create())
+                {
+                    ps.Runspace = _runspace;
+                    ps.AddCommand("Get-DeliveryOptimizationStatus");
+
+                    // Invoke with timeout protection
+                    var asyncResult = ps.BeginInvoke();
+                    if (!asyncResult.AsyncWaitHandle.WaitOne(InvokeTimeoutMs))
+                    {
+                        ps.Stop();
+                        Logger.Warning("[DeliveryOptimizationCollector] PS invoke timed out after 10s, stopping");
+                        HandleError("timeout");
+                        return null;
+                    }
+
+                    var results = new List<PSObject>(ps.EndInvoke(asyncResult));
+
+                    // Check for errors in the PS error stream
+                    if (ps.HadErrors && ps.Streams.Error.Count > 0)
+                    {
+                        var firstError = ps.Streams.Error[0].ToString();
+                        if (firstError.Contains("is not recognized as the name of a cmdlet") ||
+                            firstError.Contains("CommandNotFoundException"))
+                        {
+                            Logger.Warning("[DeliveryOptimizationCollector] Get-DeliveryOptimizationStatus not available, disabling permanently");
+                            _permanentlyDisabled = true;
+                            return null;
+                        }
+                        Logger.Debug($"[DeliveryOptimizationCollector] PS error stream: {firstError}");
+                    }
+
+                    return results;
+                }
+            }
+            catch (PSInvalidOperationException ex)
+            {
+                Logger.Warning($"[DeliveryOptimizationCollector] Runspace error, self-healing: {ex.Message}");
+                DisposeRunspace();
+                HandleError(ex.Message);
+                return null;
+            }
+            catch (RuntimeException ex)
+            {
+                // Catches command-not-found and other PS runtime errors
+                if (ex.ErrorRecord?.FullyQualifiedErrorId?.Contains("CommandNotFoundException") == true)
+                {
+                    Logger.Warning("[DeliveryOptimizationCollector] Get-DeliveryOptimizationStatus not available, disabling permanently");
+                    _permanentlyDisabled = true;
+                    return null;
+                }
+                Logger.Warning($"[DeliveryOptimizationCollector] PS runtime error: {ex.Message}");
+                HandleError(ex.Message);
+                return null;
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning($"[DeliveryOptimizationCollector] Invoke failed: {ex.Message}");
+                DisposeRunspace();
+                HandleError(ex.Message);
+                return null;
+            }
+        }
+
+        // -----------------------------------------------------------------------
+        // Result processing: progress events + final DO telemetry
+        // -----------------------------------------------------------------------
+
+        private void ProcessResults(List<PSObject> results, AppPackageStateList packageStates)
+        {
+            if (results.Count == 0)
+            {
+                Logger.Verbose("[DeliveryOptimizationCollector] No DO entries returned");
+                return;
+            }
+
+            int progressCount = 0;
             int matchCount = 0;
 
-            foreach (var entry in entries)
+            // Build JSONL snapshot for log (only if fingerprint changes)
+            var logEntries = new JArray();
+
+            foreach (var result in results)
             {
-                var fileId = entry["FileId"]?.ToString();
+                var fileId = GetPropString(result, "FileId");
                 if (string.IsNullOrEmpty(fileId)) continue;
 
-                // Use the same extraction logic as ImeLogTracker
+                long fileSize = GetPropLong(result, "FileSize");
+                long totalBytes = GetPropLong(result, "TotalBytesDownloaded");
+                long bytesFromPeers = GetPropLong(result, "BytesFromPeers");
+                int peerCachingPct = GetPropInt(result, "PercentPeerCaching");
+                long bytesLanPeers = GetPropLong(result, "BytesFromLanPeers");
+                long bytesGroupPeers = GetPropLong(result, "BytesFromGroupPeers");
+                long bytesInternetPeers = GetPropLong(result, "BytesFromInternetPeers");
+                int downloadMode = GetPropInt(result, "DownloadMode", -1);
+                long bytesFromHttp = GetPropLong(result, "BytesFromHttp");
+                long bytesFromCacheServer = GetPropLong(result, "BytesFromCacheServer");
+                var downloadDuration = GetPropTimeSpan(result, "DownloadDuration");
+                var sourceUrl = GetPropString(result, "SourceURL");
+
+                // Build log entry for JSONL
+                logEntries.Add(new JObject
+                {
+                    ["FileId"] = fileId,
+                    ["FileSize"] = fileSize,
+                    ["TotalBytesDownloaded"] = totalBytes,
+                    ["PercentPeerCaching"] = peerCachingPct,
+                    ["BytesFromPeers"] = bytesFromPeers,
+                    ["BytesFromHttp"] = bytesFromHttp,
+                    ["DownloadMode"] = downloadMode,
+                    ["SourceURL"] = sourceUrl,
+                    ["BytesFromCacheServer"] = bytesFromCacheServer
+                });
+
+                // Try to match to an IME-tracked app
                 var appId = ImeLogTracker.ExtractAppIdFromDoFileId(fileId);
                 if (string.IsNullOrEmpty(appId)) continue;
 
                 var pkg = packageStates.GetPackage(appId);
                 if (pkg == null) continue;
 
-                // Dedup: skip if already enriched (by IME [DO TEL] path or previous poll cycle)
-                if (pkg.HasDoTelemetry || _enrichedAppIds.Contains(appId))
-                    continue;
+                // --- Live download_progress (every poll where bytes changed) ---
+                long lastBytes;
+                _lastBytesPerApp.TryGetValue(appId, out lastBytes);
 
-                // Extract DO fields
-                long fileSize = entry["FileSize"]?.Value<long>() ?? 0;
-                long totalBytes = entry["TotalBytesDownloaded"]?.Value<long>() ?? 0;
-                long bytesFromPeers = entry["BytesFromPeers"]?.Value<long>() ?? 0;
-                int peerCachingPct = entry["PercentPeerCaching"]?.Value<int>() ?? 0;
-                long bytesLanPeers = entry["BytesFromLanPeers"]?.Value<long>() ?? 0;
-                long bytesGroupPeers = entry["BytesFromGroupPeers"]?.Value<long>() ?? 0;
-                long bytesInternetPeers = entry["BytesFromInternetPeers"]?.Value<long>() ?? 0;
-                int downloadMode = entry["DownloadMode"]?.Value<int>() ?? -1;
-                long bytesFromHttp = entry["BytesFromHttp"]?.Value<long>() ?? 0;
+                if (totalBytes != lastBytes)
+                {
+                    _lastBytesPerApp[appId] = totalBytes;
+                    progressCount++;
 
-                // DownloadDuration comes as a TimeSpan object from PowerShell (serialized with TotalSeconds etc.)
-                string downloadDuration = ExtractDownloadDuration(entry["DownloadDuration"]);
+                    int percentComplete = fileSize > 0 ? (int)((totalBytes * 100) / fileSize) : 0;
 
-                pkg.UpdateDoTelemetry(fileSize, totalBytes, bytesFromPeers, peerCachingPct,
-                    bytesLanPeers, bytesGroupPeers, bytesInternetPeers,
-                    downloadMode, downloadDuration, bytesFromHttp);
+                    EmitEvent(new EnrollmentEvent
+                    {
+                        SessionId = SessionId,
+                        TenantId = TenantId,
+                        EventType = "download_progress",
+                        Severity = EventSeverity.Debug,
+                        Source = "DeliveryOptimizationCollector",
+                        Phase = EnrollmentPhase.Unknown,
+                        Message = $"{pkg.Name ?? appId}: {percentComplete}% ({totalBytes}/{fileSize}) peers={peerCachingPct}% mode={downloadMode}",
+                        Data = new Dictionary<string, object>
+                        {
+                            ["appId"] = appId,
+                            ["name"] = pkg.Name,
+                            ["doFileSize"] = fileSize,
+                            ["doTotalBytesDownloaded"] = totalBytes,
+                            ["doPercentComplete"] = percentComplete,
+                            ["doBytesFromPeers"] = bytesFromPeers,
+                            ["doBytesFromHttp"] = bytesFromHttp,
+                            ["doPercentPeerCaching"] = peerCachingPct,
+                            ["doDownloadMode"] = downloadMode,
+                            ["doBytesFromCacheServer"] = bytesFromCacheServer,
+                            ["doSource"] = "os_cmdlet"
+                        },
+                        ImmediateUpload = true
+                    });
+                }
 
-                _enrichedAppIds.Add(appId);
-                matchCount++;
+                // --- Final DO telemetry (once per app when download is complete) ---
+                if (!pkg.HasDoTelemetry && !_enrichedAppIds.Contains(appId) &&
+                    totalBytes >= fileSize && fileSize > 0)
+                {
+                    var durationStr = downloadDuration?.ToString(@"hh\:mm\:ss\.fff");
 
-                Logger.Info($"[DeliveryOptimizationCollector] DO matched: {pkg.Name ?? appId} — " +
-                            $"size={fileSize}, peers={bytesFromPeers} ({peerCachingPct}%), " +
-                            $"http={bytesFromHttp}, mode={downloadMode}, duration={downloadDuration}");
+                    pkg.UpdateDoTelemetry(fileSize, totalBytes, bytesFromPeers, peerCachingPct,
+                        bytesLanPeers, bytesGroupPeers, bytesInternetPeers,
+                        downloadMode, durationStr, bytesFromHttp);
 
-                // Fire callback to trigger do_telemetry + download_progress events via EnrollmentTracker
-                _onDoTelemetryReceived?.Invoke(pkg);
+                    _enrichedAppIds.Add(appId);
+                    matchCount++;
+
+                    Logger.Info($"[DeliveryOptimizationCollector] DO matched: {pkg.Name ?? appId} — " +
+                                $"size={fileSize}, peers={bytesFromPeers} ({peerCachingPct}%), " +
+                                $"http={bytesFromHttp}, mode={downloadMode}, duration={durationStr}");
+
+                    // Fire callback → EnrollmentTracker emits do_telemetry + download_progress events
+                    _onDoTelemetryReceived?.Invoke(pkg);
+                }
             }
 
-            return matchCount;
+            // Write JSONL log only when overall state changed
+            var fingerprint = ComputeFingerprint(logEntries);
+            if (fingerprint != _lastSnapshotFingerprint)
+            {
+                _lastSnapshotFingerprint = fingerprint;
+                WriteToLogFile(logEntries);
+            }
+
+            Logger.Verbose($"[DeliveryOptimizationCollector] Poll: {results.Count} entries, " +
+                           $"{progressCount} progress updates, {matchCount} new matches ({_enrichedAppIds.Count} total enriched)");
         }
 
-        /// <summary>
-        /// Extracts a human-readable duration string from the PowerShell TimeSpan JSON object.
-        /// PowerShell serializes TimeSpan as {"Ticks":..., "TotalSeconds":..., "Hours":..., ...}.
-        /// Returns format "HH:mm:ss.fff" matching what IME [DO TEL] provides.
-        /// </summary>
-        private static string ExtractDownloadDuration(JToken durationToken)
+        // -----------------------------------------------------------------------
+        // PSObject property helpers (safe extraction, no exceptions on missing props)
+        // -----------------------------------------------------------------------
+
+        private static string GetPropString(PSObject obj, string name)
         {
-            if (durationToken == null || durationToken.Type == JTokenType.Null)
-                return null;
+            return obj.Properties[name]?.Value?.ToString();
+        }
 
-            // If it's already a string (unlikely from PS but defensive), return as-is
-            if (durationToken.Type == JTokenType.String)
-                return durationToken.ToString();
+        private static long GetPropLong(PSObject obj, string name, long defaultValue = 0)
+        {
+            var val = obj.Properties[name]?.Value;
+            if (val == null) return defaultValue;
+            try { return Convert.ToInt64(val); }
+            catch { return defaultValue; }
+        }
 
-            // PowerShell TimeSpan object: extract Ticks and reconstruct
-            if (durationToken.Type == JTokenType.Object)
-            {
-                var ticks = durationToken["Ticks"]?.Value<long>() ?? 0;
-                if (ticks > 0)
-                {
-                    var ts = TimeSpan.FromTicks(ticks);
-                    return ts.ToString(@"hh\:mm\:ss\.fff");
-                }
+        private static int GetPropInt(PSObject obj, string name, int defaultValue = 0)
+        {
+            var val = obj.Properties[name]?.Value;
+            if (val == null) return defaultValue;
+            try { return Convert.ToInt32(val); }
+            catch { return defaultValue; }
+        }
 
-                // Fallback: use TotalSeconds if Ticks not available
-                var totalSeconds = durationToken["TotalSeconds"]?.Value<double>() ?? 0;
-                if (totalSeconds > 0)
-                {
-                    var ts = TimeSpan.FromSeconds(totalSeconds);
-                    return ts.ToString(@"hh\:mm\:ss\.fff");
-                }
-            }
-
+        private static TimeSpan? GetPropTimeSpan(PSObject obj, string name)
+        {
+            var val = obj.Properties[name]?.Value;
+            if (val is TimeSpan ts) return ts;
             return null;
         }
 
-        /// <summary>
-        /// Computes a lightweight fingerprint from DO entries to detect changes between polls.
-        /// Uses entry count XOR'd with sum of TotalBytesDownloaded — changes when any download progresses,
-        /// completes, or a new entry appears.
-        /// </summary>
+        // -----------------------------------------------------------------------
+        // Helpers
+        // -----------------------------------------------------------------------
+
+        private void HandleError(string error)
+        {
+            _consecutiveErrors++;
+
+            if (_consecutiveErrors >= 5)
+            {
+                Logger.Warning($"[DeliveryOptimizationCollector] {_consecutiveErrors} consecutive errors, disabling permanently. Last: {error}");
+                _permanentlyDisabled = true;
+                return;
+            }
+
+            Logger.Warning($"[DeliveryOptimizationCollector] Error ({_consecutiveErrors}/5): {error}");
+        }
+
         private static long ComputeFingerprint(JArray entries)
         {
             long sum = entries.Count;
             foreach (var e in entries)
+            {
                 sum += e["TotalBytesDownloaded"]?.Value<long>() ?? 0;
+                // Include FileId hash to detect entry additions/removals
+                var fileId = e["FileId"]?.ToString();
+                if (fileId != null)
+                    sum += fileId.GetHashCode();
+            }
             return sum;
-        }
-
-        private (string output, string error, int exitCode) RunPowerShellCommand()
-        {
-            try
-            {
-                var encodedCommand = Convert.ToBase64String(Encoding.Unicode.GetBytes(PsCommand));
-                var psi = new ProcessStartInfo
-                {
-                    FileName = "powershell.exe",
-                    Arguments = $"-NoProfile -ExecutionPolicy RemoteSigned -EncodedCommand {encodedCommand}",
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    CreateNoWindow = true
-                };
-
-                using (var process = Process.Start(psi))
-                {
-                    var output = process.StandardOutput.ReadToEnd();
-                    var error = process.StandardError.ReadToEnd();
-
-                    if (!process.WaitForExit(ProcessTimeoutMs))
-                    {
-                        try { process.Kill(); } catch { /* best effort */ }
-                        Logger.Warning("[DeliveryOptimizationCollector] PowerShell process timed out after 30s, killed");
-                        return (null, "timeout", -1);
-                    }
-
-                    return (
-                        string.IsNullOrWhiteSpace(output) ? null : output.Trim(),
-                        string.IsNullOrWhiteSpace(error) ? null : error.Trim(),
-                        process.ExitCode
-                    );
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.Warning($"[DeliveryOptimizationCollector] Failed to execute PowerShell: {ex.Message}");
-                return (null, ex.Message, -1);
-            }
-        }
-
-        private void HandleError(string error, int exitCode)
-        {
-            _consecutiveErrors++;
-
-            // Detect cmdlet not available (older OS or Server SKU without DO module)
-            if (error != null && (
-                error.Contains("is not recognized as the name of a cmdlet") ||
-                error.Contains("CommandNotFoundException")))
-            {
-                Logger.Warning("[DeliveryOptimizationCollector] Get-DeliveryOptimizationStatus not available on this OS, disabling collector permanently");
-                _permanentlyDisabled = true;
-                return;
-            }
-
-            if (_consecutiveErrors >= 5)
-            {
-                Logger.Warning($"[DeliveryOptimizationCollector] {_consecutiveErrors} consecutive errors, disabling collector permanently. Last error: {error}");
-                _permanentlyDisabled = true;
-                return;
-            }
-
-            Logger.Warning($"[DeliveryOptimizationCollector] PowerShell exited with code {exitCode}: {error ?? "(no error output)"}");
         }
 
         private void WriteToLogFile(JArray entries)
@@ -330,69 +456,6 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             {
                 Logger.Warning($"[DeliveryOptimizationCollector] Failed to write DO log: {ex.Message}");
             }
-        }
-
-        private void LogSummary(JArray entries, AppPackageStateList packageStates, int matchCount)
-        {
-            var activeApps = packageStates.Where(p =>
-                p.InstallationState == AppInstallationState.Downloading ||
-                p.InstallationState == AppInstallationState.Installing).ToList();
-
-            Logger.Info($"[DeliveryOptimizationCollector] DO snapshot: {entries.Count} entries, " +
-                        $"{matchCount} matched to apps, {activeApps.Count} active downloads");
-        }
-
-        private void EmitStatusEvent(JArray entries, AppPackageStateList packageStates, int matchCount)
-        {
-            var activeApps = packageStates
-                .Where(p => p.InstallationState == AppInstallationState.Downloading ||
-                            p.InstallationState == AppInstallationState.Installing)
-                .Select(p => new Dictionary<string, object>
-                {
-                    ["appId"] = p.Id,
-                    ["name"] = p.Name,
-                    ["bytesTotal"] = p.BytesTotal,
-                    ["bytesDownloaded"] = p.BytesDownloaded,
-                    ["hasDoTelemetry"] = p.HasDoTelemetry
-                })
-                .ToList();
-
-            var data = new Dictionary<string, object>
-            {
-                ["doEntryCount"] = entries.Count,
-                ["matchedCount"] = matchCount,
-                ["totalEnriched"] = _enrichedAppIds.Count,
-                ["activeDownloads"] = activeApps
-            };
-
-            EmitEvent(new EnrollmentEvent
-            {
-                SessionId = SessionId,
-                TenantId = TenantId,
-                EventType = "do_status_snapshot",
-                Severity = EventSeverity.Debug,
-                Source = "DeliveryOptimizationCollector",
-                Phase = EnrollmentPhase.Unknown,
-                Message = $"DO status: {entries.Count} entries, {matchCount} new matches ({_enrichedAppIds.Count} total enriched), {activeApps.Count} active downloads",
-                Data = data
-            });
-        }
-
-        private static bool IsIntuneCdnUrl(string url)
-        {
-            return url.IndexOf(".dl.delivery.mp.microsoft.com", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                   url.IndexOf("swda01.azureedge.net", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                   url.IndexOf("swda02.azureedge.net", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                   url.IndexOf("swdb01.azureedge.net", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                   url.IndexOf("swdb02.azureedge.net", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                   url.IndexOf("swdc01.azureedge.net", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                   url.IndexOf("swdc02.azureedge.net", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                   url.IndexOf("swdd01.azureedge.net", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                   url.IndexOf("swdd02.azureedge.net", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                   url.IndexOf("naprodimedatapri", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                   url.IndexOf("naprodimedatasec", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                   url.IndexOf("euprodimedatapri", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                   url.IndexOf("euprodimedatasec", StringComparison.OrdinalIgnoreCase) >= 0;
         }
     }
 }

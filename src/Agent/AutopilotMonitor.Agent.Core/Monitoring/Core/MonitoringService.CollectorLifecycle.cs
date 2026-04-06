@@ -110,7 +110,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 // Delivery Optimization collector — polls OS-level DO status for peer caching telemetry
                 if (collectors?.EnableDeliveryOptimizationCollector != false && _enrollmentTracker != null)
                 {
-                    var doInterval = collectors?.DeliveryOptimizationIntervalSeconds ?? 15;
+                    var doInterval = collectors?.DeliveryOptimizationIntervalSeconds ?? 5;
                     _deliveryOptimizationCollector = new DeliveryOptimizationCollector(
                         _configuration.SessionId,
                         _configuration.TenantId,
@@ -122,7 +122,19 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                         Environment.ExpandEnvironmentVariables(Constants.LogDirectory)
                     );
                     _deliveryOptimizationCollector.Start();
-                    _logger.Info($"DeliveryOptimizationCollector started (interval={doInterval}s)");
+                    _logger.Info($"DeliveryOptimizationCollector started dormant (interval={doInterval}s, wakes on download)");
+
+                    // Wake DO collector when ImeLogTracker detects a download starting.
+                    // OnAppStateChanged is an Action (not event), already set by EnrollmentTracker.
+                    // Wrap the existing handler to chain our wake-up logic.
+                    var existingHandler = _enrollmentTracker.ImeTracker.OnAppStateChanged;
+                    var doCollector = _deliveryOptimizationCollector;
+                    _enrollmentTracker.ImeTracker.OnAppStateChanged = (pkg, oldState, newState) =>
+                    {
+                        existingHandler?.Invoke(pkg, oldState, newState);
+                        if (newState >= AppInstallationState.Downloading && newState <= AppInstallationState.Installing)
+                            doCollector?.WakeUp();
+                    };
                 }
 
                 // Desktop arrival detector — detects real user desktop for no-ESP completion

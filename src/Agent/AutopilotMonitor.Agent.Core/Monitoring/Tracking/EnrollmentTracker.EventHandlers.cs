@@ -447,7 +447,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 Source = "ImeLogTracker",
                 Phase = phase,
                 Message = $"{app.Name ?? app.Id}: DO complete - {app.DoPercentPeerCaching}% peers, mode={app.DoDownloadMode}",
-                Data = app.ToEventData()
+                Data = app.ToEventData(),
+                ImmediateUpload = true
             });
 
             // Also emit download_progress so the UI picks up DO stats
@@ -460,7 +461,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 Source = "ImeLogTracker",
                 Phase = phase,
                 Message = $"{app.Name ?? app.Id}: DO telemetry received",
-                Data = app.ToEventData()
+                Data = app.ToEventData(),
+                ImmediateUpload = true
             });
         }
 
