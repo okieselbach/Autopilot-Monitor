@@ -188,13 +188,13 @@ export function IgnoredSoftwareTab({
           </div>
 
           {/* Table */}
-          <div className="overflow-x-auto">
+          <div>
             <table className="w-full table-fixed divide-y divide-gray-200 dark:divide-gray-700">
               <colgroup>
                 <col />
-                <col style={{ width: "22%" }} />
+                <col style={{ width: "20%" }} />
                 <col className="w-24" />
-                <col style={{ width: "190px" }} />
+                <col style={{ width: "210px" }} />
               </colgroup>
               <thead className="bg-gray-50 dark:bg-gray-700/50">
                 <tr>
