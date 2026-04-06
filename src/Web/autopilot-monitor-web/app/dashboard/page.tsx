@@ -591,7 +591,14 @@ export default function Home() {
                 href="/changelog"
                 className="underline font-medium hover:text-blue-600 dark:hover:text-blue-200"
               >
-                Private Preview Changelog/Known Issues
+                Private Preview Changelog
+              </Link>{" "}
+              or{" "}
+              <Link
+                href="/docs/known-issues"
+                className="underline font-medium hover:text-blue-600 dark:hover:text-blue-200"
+              >
+                Known Issues
               </Link>
               .{" "}
               Feedback or bug report?{" "}
