@@ -15,7 +15,7 @@ namespace AutopilotMonitor.Shared.DataAccess
         Task<List<BlockedDeviceEntry>> GetBlockedDevicesAsync(string tenantId);
         Task<List<BlockedDeviceEntry>> GetAllBlockedDevicesAsync();
         Task BlockDeviceAsync(string tenantId, string serialNumber, int durationHours,
-            string blockedByEmail, string? reason = null, string action = "Block");
+            string blockedByEmail, string? reason = null, string action = "Block", string? blockedSessionId = null);
         Task UnblockDeviceAsync(string tenantId, string serialNumber);
 
         // --- Blocked Versions ---
@@ -35,6 +35,12 @@ namespace AutopilotMonitor.Shared.DataAccess
         public int DurationHours { get; set; }
         public string? Reason { get; set; }
         public string Action { get; set; } = "Block";
+        /// <summary>
+        /// Comma-separated session IDs that triggered this block (maintenance auto-block).
+        /// Null = whole-device block (manual or legacy). When set, only these specific sessions are blocked;
+        /// a new session on the same device will auto-unblock.
+        /// </summary>
+        public string? BlockedSessionIds { get; set; }
     }
 
     public class BlockedVersionEntry

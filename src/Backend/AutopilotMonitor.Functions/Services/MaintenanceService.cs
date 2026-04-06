@@ -307,7 +307,7 @@ namespace AutopilotMonitor.Functions.Services
                             if (string.IsNullOrEmpty(session.SerialNumber))
                                 continue;
 
-                            var (isBlocked, _, _) = await _blockedDeviceService.IsBlockedAsync(tenantId, session.SerialNumber);
+                            var (isBlocked, _, _, _) = await _blockedDeviceService.IsBlockedAsync(tenantId, session.SerialNumber);
                             if (isBlocked)
                                 continue;
 
@@ -320,7 +320,8 @@ namespace AutopilotMonitor.Functions.Services
                                 session.SerialNumber,
                                 durationHours: blockDurationHours,
                                 blockedByEmail: "System.Maintenance",
-                                reason: reason);
+                                reason: reason,
+                                blockedSessionId: session.SessionId);
 
                             blockedCount++;
                         }

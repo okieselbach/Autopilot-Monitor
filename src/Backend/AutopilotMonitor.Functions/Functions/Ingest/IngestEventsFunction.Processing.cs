@@ -30,38 +30,64 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                 // Check if this device has been administratively blocked (e.g. rogue device sending excessive data).
                 // We read the serial number from the header (same header used by AutopilotDeviceValidator).
                 // Using HTTP 200 with DeviceBlocked=true so the agent does not trigger its auth-failure circuit breaker.
+                //
+                // Session-aware blocking: maintenance auto-blocks store BlockedSessionIds. If the current
+                // ingest is from a DIFFERENT session (new enrollment), the device is auto-unblocked.
+                // Kill actions and manual (whole-device) blocks are never auto-unblocked.
                 var serialNumberHeader = req.Headers.Contains("X-Device-SerialNumber")
                     ? req.Headers.GetValues("X-Device-SerialNumber").FirstOrDefault()
                     : null;
 
+                IngestEventsRequest? earlyParsedRequest = null;
+
                 if (!string.IsNullOrEmpty(serialNumberHeader))
                 {
-                    var (isBlocked, unblockAt, blockAction) = await _blockedDeviceService.IsBlockedAsync(tenantId, serialNumberHeader);
+                    var (isBlocked, unblockAt, blockAction, blockedSessionIds) = await _blockedDeviceService.IsBlockedAsync(tenantId, serialNumberHeader);
                     if (isBlocked)
                     {
-                        var isKill = string.Equals(blockAction, "Kill", StringComparison.OrdinalIgnoreCase);
-
-                        _logger.LogWarning(
-                            "{Action} ingest from device: TenantId={TenantId}, SerialNumber={SerialNumber}, UnblockAt={UnblockAt}",
-                            isKill ? "KILL signal for" : "Rejected", tenantId, serialNumberHeader, unblockAt);
-
-                        var blockedHttpResponse = req.CreateResponse(System.Net.HttpStatusCode.OK);
-                        await blockedHttpResponse.WriteAsJsonAsync(new IngestEventsResponse
+                        // Session-aware block: parse body to check if this is a different (new) session
+                        if (!string.IsNullOrEmpty(blockedSessionIds))
                         {
-                            Success = false,
-                            DeviceBlocked = true,
-                            DeviceKillSignal = isKill,
-                            UnblockAt = unblockAt,
-                            Message = isKill
-                                ? "Device has been issued a remote kill signal."
-                                : "Device is temporarily blocked by an administrator.",
-                            ProcessedAt = DateTime.UtcNow
-                        });
-                        return new IngestEventsOutput
+                            earlyParsedRequest = await ParseNdjsonGzipRequest(req.Body, tenantId);
+                            if (earlyParsedRequest != null && !string.IsNullOrEmpty(earlyParsedRequest.SessionId))
+                            {
+                                var (stillBlocked, _, _, _) = await _blockedDeviceService.IsBlockedAsync(
+                                    tenantId, serialNumberHeader, earlyParsedRequest.SessionId);
+
+                                if (!stillBlocked)
+                                {
+                                    // Auto-unblocked — fall through to normal processing with already-parsed request
+                                    isBlocked = false;
+                                }
+                            }
+                        }
+
+                        if (isBlocked)
                         {
-                            HttpResponse = blockedHttpResponse,
-                            SignalRMessages = Array.Empty<SignalRMessageAction>()
-                        };
+                            var isKill = string.Equals(blockAction, "Kill", StringComparison.OrdinalIgnoreCase);
+
+                            _logger.LogWarning(
+                                "{Action} ingest from device: TenantId={TenantId}, SerialNumber={SerialNumber}, UnblockAt={UnblockAt}",
+                                isKill ? "KILL signal for" : "Rejected", tenantId, serialNumberHeader, unblockAt);
+
+                            var blockedHttpResponse = req.CreateResponse(System.Net.HttpStatusCode.OK);
+                            await blockedHttpResponse.WriteAsJsonAsync(new IngestEventsResponse
+                            {
+                                Success = false,
+                                DeviceBlocked = true,
+                                DeviceKillSignal = isKill,
+                                UnblockAt = unblockAt,
+                                Message = isKill
+                                    ? "Device has been issued a remote kill signal."
+                                    : "Device is temporarily blocked by an administrator.",
+                                ProcessedAt = DateTime.UtcNow
+                            });
+                            return new IngestEventsOutput
+                            {
+                                HttpResponse = blockedHttpResponse,
+                                SignalRMessages = Array.Empty<SignalRMessageAction>()
+                            };
+                        }
                     }
                 }
 
@@ -101,7 +127,8 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                 }
 
                 // --- Parse NDJSON+gzip request body (only after security is cleared) ---
-                var request = await ParseNdjsonGzipRequest(req.Body, tenantId);
+                // If session-aware block check already parsed the body, reuse that result (stream is consumed)
+                var request = earlyParsedRequest ?? await ParseNdjsonGzipRequest(req.Body, tenantId);
 
                 if (request?.Events == null || request.Events.Count == 0)
                 {

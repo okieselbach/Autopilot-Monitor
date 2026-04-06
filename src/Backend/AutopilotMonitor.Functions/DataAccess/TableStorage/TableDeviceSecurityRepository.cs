@@ -118,10 +118,37 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
         }
 
         public async Task BlockDeviceAsync(string tenantId, string serialNumber, int durationHours,
-            string blockedByEmail, string? reason = null, string action = "Block")
+            string blockedByEmail, string? reason = null, string action = "Block", string? blockedSessionId = null)
         {
             var now = DateTime.UtcNow;
             var unblockAt = now.AddHours(durationHours);
+
+            // If a session-aware block already exists, merge session IDs
+            string? blockedSessionIds = blockedSessionId;
+            if (!string.IsNullOrEmpty(blockedSessionId))
+            {
+                try
+                {
+                    var existing = await _blockedDevicesTable.GetEntityAsync<TableEntity>(tenantId, EncodeRowKey(serialNumber));
+                    var existingSessionIds = existing?.Value?.GetString("BlockedSessionIds");
+
+                    if (existingSessionIds == null)
+                    {
+                        // Existing whole-device block takes precedence — don't downgrade to session-aware
+                        if (existing?.Value != null)
+                            blockedSessionIds = null;
+                    }
+                    else
+                    {
+                        // Merge: append new session ID if not already present
+                        blockedSessionIds = MergeSessionId(existingSessionIds, blockedSessionId);
+                    }
+                }
+                catch (RequestFailedException ex) when (ex.Status == 404)
+                {
+                    // No existing record — use single session ID
+                }
+            }
 
             var entity = new TableEntity(tenantId, EncodeRowKey(serialNumber))
             {
@@ -134,8 +161,29 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                 ["Action"] = action ?? "Block"
             };
 
+            if (blockedSessionIds != null)
+                entity["BlockedSessionIds"] = blockedSessionIds;
+
             await _blockedDevicesTable.UpsertEntityAsync(entity);
             await _publisher.PublishAsync("device.blocked", new { tenantId, serialNumber, action, durationHours }, tenantId);
+        }
+
+        internal static string MergeSessionId(string? existingList, string newSessionId)
+        {
+            if (string.IsNullOrEmpty(existingList)) return newSessionId;
+            if (SessionIdListContains(existingList, newSessionId)) return existingList;
+            return $"{existingList},{newSessionId}";
+        }
+
+        internal static bool SessionIdListContains(string? sessionIdList, string sessionId)
+        {
+            if (string.IsNullOrEmpty(sessionIdList)) return false;
+            foreach (var id in sessionIdList.Split(','))
+            {
+                if (string.Equals(id.Trim(), sessionId, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
         }
 
         public async Task UnblockDeviceAsync(string tenantId, string serialNumber)
@@ -333,7 +381,8 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                 BlockedByEmail = entity.GetString("BlockedByEmail"),
                 DurationHours = entity.GetInt32("DurationHours") ?? 12,
                 Reason = entity.GetString("Reason"),
-                Action = entity.GetString("Action") ?? "Block"
+                Action = entity.GetString("Action") ?? "Block",
+                BlockedSessionIds = entity.GetString("BlockedSessionIds")
             };
         }
 
