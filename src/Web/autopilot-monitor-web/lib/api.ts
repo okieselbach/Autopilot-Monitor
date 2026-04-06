@@ -231,7 +231,9 @@ export const api = {
       `${API_BASE_URL}/api/vulnerability/sync${qs({ reseed: type })}`,
     cpeMappings: () => `${API_BASE_URL}/api/vulnerability/cpe-mappings`,
     cpeMapping: () => `${API_BASE_URL}/api/vulnerability/cpe-mapping`,
+    cpeAutoResolve: () => `${API_BASE_URL}/api/vulnerability/cpe-mapping/auto-resolve`,
     unmatchedSoftware: () => `${API_BASE_URL}/api/vulnerability/unmatched-software`,
+    ignoredSoftware: () => `${API_BASE_URL}/api/vulnerability/ignored-software`,
   },
 
   // ── MCP Users ─────────────────────────────────────────────────────────────

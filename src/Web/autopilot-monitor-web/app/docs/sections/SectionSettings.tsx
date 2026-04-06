@@ -328,6 +328,7 @@ export function SectionSettings() {
                 <p>C:\ProgramData\Microsoft\DiagnosticLogCSP</p>
                 <p>C:\ProgramData\Microsoft\Windows\WER</p>
                 <p>C:\Windows\Logs\CBS</p>
+                <p>C:\Install\Log</p>
               </div>
             )}
           </span>
