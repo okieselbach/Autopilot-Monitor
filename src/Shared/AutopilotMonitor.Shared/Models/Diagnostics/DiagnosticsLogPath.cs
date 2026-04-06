@@ -23,5 +23,12 @@ namespace AutopilotMonitor.Shared.Models
         /// False when added by the tenant itself.
         /// </summary>
         public bool IsBuiltIn { get; set; }
+
+        /// <summary>
+        /// When true, the agent also collects matching files from subdirectories recursively.
+        /// Subdirectory structure is preserved in the ZIP (e.g. AdditionalLogs/Logs/subfolder/file.log).
+        /// Default is false (top-level only).
+        /// </summary>
+        public bool IncludeSubfolders { get; set; }
     }
 }

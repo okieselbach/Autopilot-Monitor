@@ -23,7 +23,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors.GatherCollectors
             if (string.IsNullOrEmpty(filePath))
                 return null;
 
-            filePath = Environment.ExpandEnvironmentVariables(filePath);
+            // Expand custom tokens (%LOGGED_ON_USER_PROFILE%) and standard environment variables
+            var userProfilePath = UserProfileResolver.ContainsUserProfileToken(filePath)
+                ? UserProfileResolver.GetLoggedOnUserProfilePath() : null;
+            filePath = UserProfileResolver.ExpandCustomTokens(filePath);
+            if (filePath == null)
+                return null; // Token present but no user logged on — skip silently
 
             // Apply IME log path override if set
             if (!string.IsNullOrEmpty(context.ImeLogPathOverride))

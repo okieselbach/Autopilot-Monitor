@@ -18,11 +18,15 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors.GatherCollectors
             if (string.IsNullOrEmpty(filePath))
                 return data;
 
-            // Expand environment variables
-            filePath = Environment.ExpandEnvironmentVariables(filePath);
+            // Expand custom tokens (%LOGGED_ON_USER_PROFILE%) and standard environment variables
+            var userProfilePath = UserProfileResolver.ContainsUserProfileToken(filePath)
+                ? UserProfileResolver.GetLoggedOnUserProfilePath() : null;
+            filePath = UserProfileResolver.ExpandCustomTokens(filePath);
+            if (filePath == null)
+                return data; // Token present but no user logged on — skip silently
 
             // Guard: only allow enrollment-relevant file paths
-            if (!GatherRuleGuards.IsFilePathAllowed(filePath, context.UnrestrictedMode))
+            if (!GatherRuleGuards.IsFilePathAllowed(filePath, context.UnrestrictedMode, userProfilePath))
                 return context.EmitSecurityWarning(rule, "file", filePath);
 
             // Optional conditional severity based on existence

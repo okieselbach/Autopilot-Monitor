@@ -133,18 +133,27 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                         // 4. Configured additional log paths (global + tenant, validated by guards)
                         foreach (var entry in _configuration.DiagnosticsLogPaths ?? new System.Collections.Generic.List<Shared.Models.DiagnosticsLogPath>())
                         {
-                            if (!Collectors.DiagnosticsPathGuards.IsDiagnosticsPathAllowed(entry.Path, _configuration.UnrestrictedMode))
+                            // Resolve %LOGGED_ON_USER_PROFILE% token and get profile path for guard exception
+                            var userProfilePath = Collectors.UserProfileResolver.ContainsUserProfileToken(entry.Path)
+                                ? Collectors.UserProfileResolver.GetLoggedOnUserProfilePath() : null;
+
+                            if (!Collectors.DiagnosticsPathGuards.IsDiagnosticsPathAllowed(entry.Path, _configuration.UnrestrictedMode, userProfilePath))
                             {
                                 _logger.Warning($"Diagnostics path blocked by guard: {entry.Path}");
                                 continue;
                             }
-                            var expandedPath = Environment.ExpandEnvironmentVariables(entry.Path);
+                            var expandedPath = Collectors.UserProfileResolver.ExpandCustomTokens(entry.Path);
+                            if (expandedPath == null)
+                            {
+                                _logger.Warning($"Diagnostics path skipped (no user session for token): {entry.Path}");
+                                continue;
+                            }
                             var folder = Path.GetDirectoryName(expandedPath);
                             var pattern = Path.GetFileName(expandedPath);
                             if (string.IsNullOrEmpty(folder)) continue;
                             if (string.IsNullOrEmpty(pattern) || !pattern.Contains(".")) pattern = "*";
                             var zipFolder = $"AdditionalLogs/{Path.GetFileName(folder)}";
-                            AddLogFiles(archive, folder, zipFolder, pattern);
+                            AddLogFiles(archive, folder, zipFolder, pattern, entry.IncludeSubfolders);
                         }
                     }
 
@@ -228,7 +237,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             writer.Write(sb.ToString());
         }
 
-        private void AddLogFiles(ZipArchive archive, string sourceFolder, string zipFolder, string searchPattern)
+        private void AddLogFiles(ZipArchive archive, string sourceFolder, string zipFolder, string searchPattern,
+            bool includeSubfolders = false)
         {
             if (!Directory.Exists(sourceFolder))
             {
@@ -238,13 +248,15 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 
             try
             {
-                var files = Directory.GetFiles(sourceFolder, searchPattern);
+                var searchOption = includeSubfolders ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
+                var files = Directory.GetFiles(sourceFolder, searchPattern, searchOption);
                 foreach (var file in files)
                 {
                     try
                     {
-                        var fileName = Path.GetFileName(file);
-                        var entryName = $"{zipFolder}/{fileName}";
+                        // Preserve subfolder structure in the ZIP when includeSubfolders is enabled
+                        var relativePath = file.Substring(sourceFolder.Length).TrimStart(Path.DirectorySeparatorChar);
+                        var entryName = $"{zipFolder}/{relativePath.Replace(Path.DirectorySeparatorChar, '/')}";
 
                         // Read with FileShare.ReadWrite to avoid locking conflicts with active log writers
                         byte[] content;

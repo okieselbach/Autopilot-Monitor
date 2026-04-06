@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { DiagnosticsLogPath } from "../types";
 import { validateDiagnosticsPath } from "@/lib/guardValidation";
 import { ValidationIndicator } from "@/components/ValidationIndicator";
@@ -56,6 +56,8 @@ export default function DiagnosticsSection({
   onReset,
   saving,
 }: DiagnosticsSectionProps) {
+  const [newDiagSubfolders, setNewDiagSubfolders] = useState(false);
+
   // Compute SAS expiry directly from the current URL value so feedback is instant
   const diagnosticsSasExpiry = parseSasExpiry(diagnosticsBlobSasUrl);
 
@@ -179,6 +181,9 @@ export default function DiagnosticsSection({
                       <div className="flex items-center gap-2 flex-wrap">
                         <p className="font-mono text-xs text-gray-700 break-all">{entry.path}</p>
                         <ValidationIndicator result={validateDiagnosticsPath(entry.path, false)} />
+                        {entry.includeSubfolders && (
+                          <span className="text-xs bg-gray-200 text-gray-600 rounded-full px-1.5 py-0.5">+subfolders</span>
+                        )}
                       </div>
                       {entry.description && <p className="text-xs text-gray-500 mt-0.5">{entry.description}</p>}
                     </div>
@@ -200,8 +205,24 @@ export default function DiagnosticsSection({
                       <div className="flex items-center gap-2 flex-wrap">
                         <p className="font-mono text-xs text-amber-900 break-all">{entry.path}</p>
                         <ValidationIndicator result={validateDiagnosticsPath(entry.path, unrestrictedMode)} />
+                        {entry.includeSubfolders && (
+                          <span className="text-xs bg-amber-200 text-amber-700 rounded-full px-1.5 py-0.5">+subfolders</span>
+                        )}
                       </div>
                       {entry.description && <p className="text-xs text-amber-600 mt-0.5">{entry.description}</p>}
+                      <label className="flex items-center gap-1.5 mt-1 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={entry.includeSubfolders || false}
+                          onChange={() => {
+                            const updated = [...tenantDiagPaths];
+                            updated[idx] = { ...entry, includeSubfolders: !entry.includeSubfolders };
+                            setTenantDiagPaths(updated);
+                          }}
+                          className="w-3.5 h-3.5 rounded border-amber-400 text-amber-600 focus:ring-amber-500"
+                        />
+                        <span className="text-xs text-amber-600">Include subfolders</span>
+                      </label>
                     </div>
                     <button
                       onClick={() => setTenantDiagPaths(tenantDiagPaths.filter((_, i) => i !== idx))}
@@ -238,9 +259,10 @@ export default function DiagnosticsSection({
               onClick={() => {
                 const p = newDiagPath.trim().replace(/^["']+|["']+$/g, "");
                 if (!p) return;
-                setTenantDiagPaths([...tenantDiagPaths, { path: p, description: newDiagDesc.trim(), isBuiltIn: false }]);
+                setTenantDiagPaths([...tenantDiagPaths, { path: p, description: newDiagDesc.trim(), isBuiltIn: false, includeSubfolders: newDiagSubfolders }]);
                 setNewDiagPath("");
                 setNewDiagDesc("");
+                setNewDiagSubfolders(false);
               }}
               disabled={!newDiagPath.trim()}
               className="px-4 py-1.5 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
@@ -248,6 +270,15 @@ export default function DiagnosticsSection({
               Add
             </button>
           </div>
+          <label className="flex items-center gap-1.5 mt-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={newDiagSubfolders}
+              onChange={() => setNewDiagSubfolders(!newDiagSubfolders)}
+              className="w-3.5 h-3.5 rounded border-gray-400 text-amber-600 focus:ring-amber-500"
+            />
+            <span className="text-xs text-gray-500">Include subfolders</span>
+          </label>
           <div className="flex items-center gap-2 mt-2">
             <p className="text-xs text-gray-400">
               Paths are validated on the agent against an allowlist of safe prefixes. Wildcards are only allowed in the last segment.

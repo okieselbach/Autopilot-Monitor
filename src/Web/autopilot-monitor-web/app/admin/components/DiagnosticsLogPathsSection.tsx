@@ -8,6 +8,7 @@ export interface DiagnosticsLogPath {
   path: string;
   description: string;
   isBuiltIn: boolean;
+  includeSubfolders?: boolean;
 }
 
 interface DiagnosticsLogPathsSectionProps {
@@ -29,6 +30,7 @@ export function DiagnosticsLogPathsSection({
 }: DiagnosticsLogPathsSectionProps) {
   const [newDiagPath, setNewDiagPath] = useState("");
   const [newDiagDesc, setNewDiagDesc] = useState("");
+  const [newDiagSubfolders, setNewDiagSubfolders] = useState(false);
 
   const newPathValidation = useMemo(
     () => newDiagPath.trim() ? validateDiagnosticsPath(newDiagPath, false) : null,
@@ -75,10 +77,26 @@ export function DiagnosticsLogPathsSection({
                   <div className="flex items-center gap-2 flex-wrap">
                     <p className="font-mono text-sm text-teal-900 dark:text-teal-100 break-all">{entry.path}</p>
                     <ValidationIndicator result={validateDiagnosticsPath(entry.path, false)} />
+                    {entry.includeSubfolders && (
+                      <span className="text-xs bg-teal-200 dark:bg-teal-800 text-teal-800 dark:text-teal-200 rounded-full px-1.5 py-0.5">+subfolders</span>
+                    )}
                   </div>
                   {entry.description && (
                     <p className="text-xs text-teal-600 dark:text-teal-400 mt-0.5">{entry.description}</p>
                   )}
+                  <label className="flex items-center gap-1.5 mt-1 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={entry.includeSubfolders || false}
+                      onChange={() => {
+                        const updated = [...globalDiagPaths];
+                        updated[idx] = { ...entry, includeSubfolders: !entry.includeSubfolders };
+                        setGlobalDiagPaths(updated);
+                      }}
+                      className="w-3.5 h-3.5 rounded border-teal-400 text-teal-600 focus:ring-teal-500"
+                    />
+                    <span className="text-xs text-teal-600 dark:text-teal-400">Include subfolders</span>
+                  </label>
                 </div>
                 <button
                   onClick={() => {
@@ -117,9 +135,10 @@ export function DiagnosticsLogPathsSection({
             onClick={() => {
               const p = newDiagPath.trim().replace(/^["']+|["']+$/g, "");
               if (!p) return;
-              setGlobalDiagPaths([...globalDiagPaths, { path: p, description: newDiagDesc.trim(), isBuiltIn: true }]);
+              setGlobalDiagPaths([...globalDiagPaths, { path: p, description: newDiagDesc.trim(), isBuiltIn: true, includeSubfolders: newDiagSubfolders }]);
               setNewDiagPath("");
               setNewDiagDesc("");
+              setNewDiagSubfolders(false);
             }}
             disabled={!newDiagPath.trim()}
             className="px-4 py-2 bg-teal-600 text-white rounded-lg text-sm font-medium hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
@@ -127,6 +146,15 @@ export function DiagnosticsLogPathsSection({
             Add
           </button>
         </div>
+        <label className="flex items-center gap-1.5 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={newDiagSubfolders}
+            onChange={() => setNewDiagSubfolders(!newDiagSubfolders)}
+            className="w-3.5 h-3.5 rounded border-gray-400 text-teal-600 focus:ring-teal-500"
+          />
+          <span className="text-xs text-gray-600 dark:text-gray-400">Include subfolders</span>
+        </label>
         {newPathValidation && (
           <div className="mt-1">
             <ValidationIndicator result={newPathValidation} />

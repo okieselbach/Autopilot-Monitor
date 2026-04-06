@@ -295,6 +295,18 @@ export function SectionSettings() {
             Wildcards are only supported in the <strong>last path segment</strong> (e.g.{" "}
             <span className="font-mono bg-gray-100 px-1 rounded">C:\Windows\Panther\*.log</span>).
           </span>
+          <span className="block mt-2 text-xs text-gray-500">
+            To collect logs from the logged-on user&apos;s profile, use the{" "}
+            <span className="font-mono bg-gray-100 px-1 rounded">%LOGGED_ON_USER_PROFILE%</span> token.
+            Only <span className="font-mono bg-gray-100 px-1 rounded">AppData\Local</span> and{" "}
+            <span className="font-mono bg-gray-100 px-1 rounded">AppData\Roaming</span> subdirectories are allowed.
+            Example: <span className="font-mono bg-gray-100 px-1 rounded">%LOGGED_ON_USER_PROFILE%\AppData\Local\RealmJoin\Logs\*.log</span>.
+            During SYSTEM-context phases (before user logon), paths with this token are skipped automatically.
+          </span>
+          <span className="block mt-2 text-xs text-gray-500">
+            Enable <strong>Include Subfolders</strong> to recursively collect matching log files from all subdirectories.
+            The subfolder structure is preserved in the diagnostics ZIP package.
+          </span>
           <span className="block mt-2">
             <button
               onClick={() => setShowDiagGuards(v => !v)}

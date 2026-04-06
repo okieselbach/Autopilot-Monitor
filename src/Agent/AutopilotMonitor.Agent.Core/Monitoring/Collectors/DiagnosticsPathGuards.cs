@@ -70,13 +70,20 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             @"C:\Windows\System32\config",  // SAM, SECURITY, SYSTEM hives
         };
 
+        // Allowed subdirectories under a user profile (used with %LOGGED_ON_USER_PROFILE% token)
+        private static readonly string[] AllowedUserProfileSubdirs = new[]
+        {
+            @"AppData\Local",
+            @"AppData\Roaming",
+        };
+
         /// <summary>
         /// Returns true if the given path is allowed for diagnostics collection.
         /// Expands environment variables and normalises to a full path before checking.
         /// Wildcards in the last path segment are supported.
         /// </summary>
         public static bool IsDiagnosticsPathAllowed(string rawPath)
-            => IsDiagnosticsPathAllowed(rawPath, unrestrictedMode: false);
+            => IsDiagnosticsPathAllowed(rawPath, unrestrictedMode: false, userProfilePath: null);
 
         /// <summary>
         /// Returns true if the given path is allowed for diagnostics collection.
@@ -84,6 +91,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         /// Path normalization and traversal protection always apply regardless of mode.
         /// </summary>
         public static bool IsDiagnosticsPathAllowed(string rawPath, bool unrestrictedMode)
+            => IsDiagnosticsPathAllowed(rawPath, unrestrictedMode, userProfilePath: null);
+
+        /// <summary>
+        /// Returns true if the given path is allowed for diagnostics collection.
+        /// When userProfilePath is provided (from %LOGGED_ON_USER_PROFILE% token), paths under
+        /// the user's AppData\Local and AppData\Roaming are additionally allowed.
+        /// </summary>
+        public static bool IsDiagnosticsPathAllowed(string rawPath, bool unrestrictedMode, string userProfilePath)
         {
             if (string.IsNullOrWhiteSpace(rawPath))
                 return false;
@@ -114,11 +129,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     return false;
 
                 // C:\Users block always applies (even in unrestricted mode)
+                // Exception: paths under <userProfilePath>\AppData\Local or AppData\Roaming
+                // are allowed when the %LOGGED_ON_USER_PROFILE% token was used.
                 if (normalizedDir.StartsWith(BlockedUsersPrefix, StringComparison.OrdinalIgnoreCase) &&
                     (normalizedDir.Length == BlockedUsersPrefix.Length ||
                      normalizedDir[BlockedUsersPrefix.Length] == Path.DirectorySeparatorChar))
                 {
-                    return false;
+                    if (!IsUserProfileSubpathAllowed(normalizedDir, userProfilePath))
+                        return false;
                 }
 
                 // Additional hard-blocked paths (even in unrestricted mode)
@@ -158,6 +176,38 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                 // Any path normalization failure → deny
                 return false;
             }
+        }
+
+        /// <summary>
+        /// Returns true if the normalized path falls under one of the allowed subdirectories
+        /// of the detected user profile (AppData\Local, AppData\Roaming).
+        /// Only applies when %LOGGED_ON_USER_PROFILE% was used to resolve the path.
+        /// </summary>
+        internal static bool IsUserProfileSubpathAllowed(string normalizedPath, string userProfilePath)
+        {
+            if (string.IsNullOrEmpty(userProfilePath))
+                return false;
+
+            try
+            {
+                var normalizedProfile = Path.GetFullPath(userProfilePath);
+                foreach (var subdir in AllowedUserProfileSubdirs)
+                {
+                    var allowedPrefix = Path.GetFullPath(Path.Combine(normalizedProfile, subdir));
+                    if (normalizedPath.StartsWith(allowedPrefix, StringComparison.OrdinalIgnoreCase) &&
+                        (normalizedPath.Length == allowedPrefix.Length ||
+                         normalizedPath[allowedPrefix.Length] == Path.DirectorySeparatorChar))
+                    {
+                        return true;
+                    }
+                }
+            }
+            catch
+            {
+                // Path normalization failure — deny
+            }
+
+            return false;
         }
 
         /// <summary>

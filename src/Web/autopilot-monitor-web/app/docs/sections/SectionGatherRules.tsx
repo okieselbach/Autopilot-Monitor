@@ -171,8 +171,17 @@ export function SectionGatherRules() {
           <p>Checks file or directory existence and optionally reads file content. Environment variables are expanded.</p>
           <div>
             <p className="font-medium text-gray-900">Target</p>
-            <p>File or directory path. Environment variables like <code className="bg-gray-100 px-1 rounded">%ProgramData%</code> are supported.</p>
+            <p>File or directory path. Environment variables like <code className="bg-gray-100 px-1 rounded">%ProgramData%</code> are supported.
+            The custom token <code className="bg-gray-100 px-1 rounded">%LOGGED_ON_USER_PROFILE%</code> resolves to the logged-on user&apos;s profile path (e.g. <code className="bg-gray-100 px-1 rounded">C:\Users\JohnDoe</code>).
+            Only <code className="bg-gray-100 px-1 rounded">AppData\Local</code> and <code className="bg-gray-100 px-1 rounded">AppData\Roaming</code> subdirectories are allowed.</p>
             <code className="block mt-1 bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs">C:\Windows\Panther\UnattendGC\setupact.log</code>
+          </div>
+          <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900">
+            <p className="font-semibold mb-1">%LOGGED_ON_USER_PROFILE% token</p>
+            <p>The agent runs as SYSTEM — standard variables like <code className="bg-amber-100 px-1 rounded">%USERPROFILE%</code> or <code className="bg-amber-100 px-1 rounded">%LOCALAPPDATA%</code> resolve to the SYSTEM profile, not the logged-on user.
+            Use <code className="bg-amber-100 px-1 rounded">%LOGGED_ON_USER_PROFILE%</code> instead to target user-specific log files.</p>
+            <p className="mt-1">Example: <code className="bg-amber-100 px-1 rounded">%LOGGED_ON_USER_PROFILE%\AppData\Local\RealmJoin\Logs\*.log</code></p>
+            <p className="mt-1 text-amber-700">During SYSTEM-context phases (before user logon), rules using this token are skipped automatically until a user session is detected.</p>
           </div>
           <div>
             <p className="font-medium text-gray-900">Parameters</p>
@@ -256,12 +265,14 @@ export function SectionGatherRules() {
           Supports position tracking to resume from the last read position.</p>
           <div>
             <p className="font-medium text-gray-900">Target</p>
-            <p>Path to a log file. Environment variables are expanded. Supports <strong>wildcards</strong> (<code className="bg-gray-100 px-1 rounded">*</code> and <code className="bg-gray-100 px-1 rounded">?</code>) in the filename to match multiple files.</p>
+            <p>Path to a log file. Environment variables and the <code className="bg-gray-100 px-1 rounded">%LOGGED_ON_USER_PROFILE%</code> token are expanded. Supports <strong>wildcards</strong> (<code className="bg-gray-100 px-1 rounded">*</code> and <code className="bg-gray-100 px-1 rounded">?</code>) in the filename to match multiple files.</p>
             <div className="mt-1 bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs font-mono space-y-0.5">
               <p>%ProgramData%\Microsoft\IntuneManagementExtension\Logs\AppWorkload.log</p>
               <p className="text-gray-400"># Wildcard examples:</p>
               <p>%ProgramData%\Microsoft\IntuneManagementExtension\Logs\AppWorkload*.log</p>
               <p>C:\Windows\Logs\CBS\CBS-??????.log</p>
+              <p className="text-gray-400"># User profile example:</p>
+              <p>%LOGGED_ON_USER_PROFILE%\AppData\Local\RealmJoin\Logs\*.log</p>
             </div>
             <p className="text-xs text-gray-400 mt-1">Wildcard matches are sorted by last write time (newest first), capped at 20 files. Position tracking works per file.</p>
           </div>

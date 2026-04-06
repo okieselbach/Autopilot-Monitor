@@ -41,6 +41,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             Path.GetFullPath(@"C:\Windows\System32\config"),  // SAM, SECURITY, SYSTEM hives
         };
 
+        // Allowed subdirectories under a user profile (used with %LOGGED_ON_USER_PROFILE% token)
+        private static readonly string[] AllowedUserProfileSubdirs = new[]
+        {
+            @"AppData\Local",
+            @"AppData\Roaming",
+        };
+
         // Hard limit: maximum command length (even in unrestricted mode)
         private const int MaxCommandLength = 2000;
 
@@ -165,7 +172,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         /// with segment-bounded matching and path normalization to prevent traversal.
         /// </summary>
         public static bool IsFilePathAllowed(string expandedPath)
-            => IsFilePathAllowed(expandedPath, unrestrictedMode: false);
+            => IsFilePathAllowed(expandedPath, unrestrictedMode: false, userProfilePath: null);
 
         /// <summary>
         /// Returns true if the expanded file path is allowed.
@@ -173,6 +180,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         /// Path normalization and traversal protection always apply regardless of mode.
         /// </summary>
         public static bool IsFilePathAllowed(string expandedPath, bool unrestrictedMode)
+            => IsFilePathAllowed(expandedPath, unrestrictedMode, userProfilePath: null);
+
+        /// <summary>
+        /// Returns true if the expanded file path is allowed.
+        /// When userProfilePath is provided (from %LOGGED_ON_USER_PROFILE% token), paths under
+        /// the user's AppData\Local and AppData\Roaming are additionally allowed.
+        /// </summary>
+        public static bool IsFilePathAllowed(string expandedPath, bool unrestrictedMode, string userProfilePath)
         {
             if (string.IsNullOrEmpty(expandedPath))
                 return false;
@@ -188,11 +203,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             }
 
             // C:\Users block always applies (even in unrestricted mode)
+            // Exception: paths under <userProfilePath>\AppData\Local or AppData\Roaming
+            // are allowed when the %LOGGED_ON_USER_PROFILE% token was used.
             if (normalizedPath.StartsWith(BlockedUsersPrefix, StringComparison.OrdinalIgnoreCase) &&
                 (normalizedPath.Length == BlockedUsersPrefix.Length ||
                  normalizedPath[BlockedUsersPrefix.Length] == Path.DirectorySeparatorChar))
             {
-                return false;
+                if (!DiagnosticsPathGuards.IsUserProfileSubpathAllowed(normalizedPath, userProfilePath))
+                    return false;
             }
 
             // Additional hard-blocked paths (even in unrestricted mode)
