@@ -3,6 +3,7 @@ interface NavSection {
   readonly label: string;
   readonly description: string;
   readonly requiresMcpAccess?: true;
+  readonly requiresGlobalAdmin?: true;
   readonly hidden?: true;
 }
 

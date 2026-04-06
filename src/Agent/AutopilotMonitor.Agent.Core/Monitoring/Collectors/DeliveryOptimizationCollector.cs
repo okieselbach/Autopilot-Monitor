@@ -39,6 +39,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         // Track which apps we already enriched (prevents duplicate callbacks across poll cycles)
         private readonly HashSet<string> _enrichedAppIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+        // Change detection: only emit events and write log when DO state actually changed
+        private long _lastSnapshotFingerprint;
+
         public DeliveryOptimizationCollector(
             string sessionId,
             string tenantId,
@@ -113,11 +116,24 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                 return;
             }
 
-            // Write raw snapshot to JSONL log file
-            WriteToLogFile(entries);
+            // Change detection: compute fingerprint from entry count + sum of TotalBytesDownloaded
+            // Only write log / emit event when something actually changed
+            var fingerprint = ComputeFingerprint(entries);
+            var changed = fingerprint != _lastSnapshotFingerprint;
+            _lastSnapshotFingerprint = fingerprint;
 
             // Match DO entries to tracked app downloads and enrich with telemetry
+            // (always attempt — a new app may have appeared even if bytes didn't change)
             var matchCount = MatchAndEnrich(entries, packageStates);
+
+            if (!changed && matchCount == 0)
+            {
+                Logger.Debug("[DeliveryOptimizationCollector] No DO changes since last poll, skipping event/log");
+                return;
+            }
+
+            // Write raw snapshot to JSONL log file (only on change)
+            WriteToLogFile(entries);
 
             // Log summary to agent log
             LogSummary(entries, packageStates, matchCount);
@@ -216,6 +232,19 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// Computes a lightweight fingerprint from DO entries to detect changes between polls.
+        /// Uses entry count XOR'd with sum of TotalBytesDownloaded — changes when any download progresses,
+        /// completes, or a new entry appears.
+        /// </summary>
+        private static long ComputeFingerprint(JArray entries)
+        {
+            long sum = entries.Count;
+            foreach (var e in entries)
+                sum += e["TotalBytesDownloaded"]?.Value<long>() ?? 0;
+            return sum;
         }
 
         private (string output, string error, int exitCode) RunPowerShellCommand()
