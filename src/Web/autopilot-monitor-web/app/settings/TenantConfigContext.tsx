@@ -534,9 +534,9 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
         teamsNotifyOnFailure: webhookNotifyOnFailure,
         diagnosticsBlobSasUrl: diagnosticsBlobSasUrl || undefined,
         diagnosticsUploadMode,
-        diagnosticsLogPathsJson: tenantDiagPaths.length > 0 ? JSON.stringify(tenantDiagPaths) : undefined,
+        diagnosticsLogPathsJson: tenantDiagPaths.length > 0 ? JSON.stringify(tenantDiagPaths) : "",
         enableLocalAdminAnalyzer,
-        localAdminAllowedAccountsJson: localAdminAllowedAccounts.length > 0 ? JSON.stringify(localAdminAllowedAccounts) : undefined,
+        localAdminAllowedAccountsJson: localAdminAllowedAccounts.length > 0 ? JSON.stringify(localAdminAllowedAccounts) : "",
         enableSoftwareInventoryAnalyzer,
         unrestrictedMode,
       };

@@ -59,7 +59,7 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
             try
             {
                 var entity = ConvertToTenantTableEntity(config);
-                await _tenantConfigTableClient.UpsertEntityAsync(entity);
+                await _tenantConfigTableClient.UpsertEntityAsync(entity, TableUpdateMode.Replace);
                 return true;
             }
             catch (Exception ex)
@@ -115,7 +115,7 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
             try
             {
                 var entity = ConvertToAdminTableEntity(config);
-                await _adminConfigTableClient.UpsertEntityAsync(entity);
+                await _adminConfigTableClient.UpsertEntityAsync(entity, TableUpdateMode.Replace);
                 return true;
             }
             catch (Exception ex)
