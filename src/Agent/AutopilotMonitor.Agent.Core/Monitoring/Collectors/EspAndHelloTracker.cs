@@ -25,6 +25,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
     ///   62407 - CloudExperienceHost Web App Event 2:
     ///           CommercialOOBE_ESPProgress_Page_Exiting      — normal ESP exit
     ///           CommercialOOBE_ESPProgress_WhiteGlove_Success — WhiteGlove (Pre-Provisioning) complete
+    ///
+    /// Key Event IDs (Microsoft-Windows-HelloForBusiness/Operational):
+    ///   3024 - Hello processing started (informational confirmation)
+    ///   6045 - Hello processing stopped (may contain skip/cancel HRESULT like 0x801C044F)
     /// </summary>
     public partial class EspAndHelloTracker : IDisposable
     {
@@ -34,6 +38,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         private readonly Action<EnrollmentEvent> _onEventCollected;
         private System.Diagnostics.Eventing.Reader.EventLogWatcher _watcher;
         private System.Diagnostics.Eventing.Reader.EventLogWatcher _shellCoreWatcher;
+        private System.Diagnostics.Eventing.Reader.EventLogWatcher _helloForBusinessWatcher;
         private System.Threading.Timer _policyCheckTimer;
         private System.Threading.Timer _helloWaitTimer;
         private System.Threading.Timer _helloCompletionTimer;
@@ -87,12 +92,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 
         /// <summary>
         /// Outcome of Hello provisioning. Set when Hello resolves (via events, timeout, or not configured).
-        /// Values: "completed", "timeout", "not_configured", "wizard_not_started", null (not yet resolved).
+        /// Values: "completed", "skipped", "timeout", "not_configured", "wizard_not_started", null (not yet resolved).
         /// </summary>
         public string HelloOutcome { get; private set; }
 
         private const string EventLogChannel = "Microsoft-Windows-User Device Registration/Admin";
         private const string ShellCoreEventLogChannel = "Microsoft-Windows-Shell-Core/Operational";
+        private const string HelloForBusinessEventLogChannel = "Microsoft-Windows-HelloForBusiness/Operational";
 
         // WHfB policy registry paths
         private const string CspPolicyBasePath = @"SOFTWARE\Microsoft\Policies\PassportForWork";
@@ -110,6 +116,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         private const int EventId_ShellCore_WebAppStarted = 62404;
         private const int EventId_ShellCore_WebAppEvent = 62407;
 
+        // Tracked event IDs (HelloForBusiness/Operational)
+        private const int EventId_HelloForBusiness_ProcessingStarted = 3024;
+        private const int EventId_HelloForBusiness_ProcessingStopped = 6045;
+
+        // Known HRESULT codes from event 6045
+        private const string HResult_UserSkippedHello = "0x801C044F";
+
         private static readonly HashSet<int> TrackedEventIds = new HashSet<int>
         {
             EventId_NgcKeyRegistered,
@@ -124,6 +137,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         {
             EventId_ShellCore_WebAppStarted,
             EventId_ShellCore_WebAppEvent
+        };
+
+        private static readonly HashSet<int> TrackedHelloForBusinessEventIds = new HashSet<int>
+        {
+            EventId_HelloForBusiness_ProcessingStarted,
+            EventId_HelloForBusiness_ProcessingStopped
         };
 
         public EspAndHelloTracker(string sessionId, string tenantId, Action<EnrollmentEvent> onEventCollected, AgentLogger logger, int helloWaitTimeoutSeconds = 30)
@@ -188,8 +207,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             // Subscribe to Shell-Core/Operational event log for ESP exit and Hello wizard detection
             StartShellCoreEventLogWatcher();
 
+            // Subscribe to HelloForBusiness/Operational event log for Hello processing signals
+            StartHelloForBusinessEventLogWatcher();
+
             // Safety net: backfill recent terminal events in case watcher started late or event delivery lagged.
             BackfillRecentTerminalHelloEvents();
+            BackfillRecentHelloForBusinessEvents();
 
             // Watch ESP provisioning category status from registry via RegNotifyChangeKeyValue
             // (catches failures that Shell-Core event 62407 patterns miss, e.g. Certificate failures)
@@ -260,6 +283,22 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 
             // Stop provisioning status registry watcher
             StopProvisioningStatusWatcher("tracker_stopped");
+
+            // Stop HelloForBusiness/Operational watcher
+            if (_helloForBusinessWatcher != null)
+            {
+                try
+                {
+                    _helloForBusinessWatcher.Enabled = false;
+                    _helloForBusinessWatcher.EventRecordWritten -= OnHelloForBusinessEventRecordWritten;
+                    _helloForBusinessWatcher.Dispose();
+                    _helloForBusinessWatcher = null;
+                }
+                catch (Exception ex)
+                {
+                    _logger.Error("Error stopping HelloForBusiness event watcher", ex);
+                }
+            }
 
             // Stop Shell-Core/Operational watcher
             if (_shellCoreWatcher != null)
