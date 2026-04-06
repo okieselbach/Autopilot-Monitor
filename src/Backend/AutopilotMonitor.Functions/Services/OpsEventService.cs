@@ -92,7 +92,7 @@ namespace AutopilotMonitor.Functions.Services
                 tenantId, "System.Maintenance", new { sessionCount, timeoutHours });
 
         public Task RecordNewImeVersionDetectedAsync(string version, string tenantId, string sessionId)
-            => WriteAsync(OpsEventCategory.Agent, "NewImeVersionDetected", OpsEventSeverity.Info,
+            => WriteAsync(OpsEventCategory.Agent, "NewImeVersionDetected", OpsEventSeverity.Warning,
                 $"New IME agent version detected: {version}",
                 tenantId, "System.Ingest", new { version, sessionId });
 
