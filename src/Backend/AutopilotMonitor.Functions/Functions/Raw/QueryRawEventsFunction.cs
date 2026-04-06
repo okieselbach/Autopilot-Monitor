@@ -46,6 +46,7 @@ namespace AutopilotMonitor.Functions.Functions.Raw
 
         /// <summary>
         /// GET /api/global/raw/events — Cross-tenant raw event query (GlobalAdminOnly)
+        /// Omit tenantId to query across all tenants.
         /// </summary>
         [Function("QueryRawEventsGlobal")]
         public async Task<HttpResponseData> RunGlobal(
@@ -54,13 +55,7 @@ namespace AutopilotMonitor.Functions.Functions.Raw
             try
             {
                 var tenantId = req.Query["tenantId"];
-                if (string.IsNullOrEmpty(tenantId))
-                {
-                    var bad = req.CreateResponse(HttpStatusCode.BadRequest);
-                    await bad.WriteAsJsonAsync(new { error = "tenantId query parameter is required for global raw event queries" });
-                    return bad;
-                }
-                return await QueryEvents(req, tenantId);
+                return await QueryEvents(req, string.IsNullOrEmpty(tenantId) ? null : tenantId);
             }
             catch (Exception ex)
             {
@@ -68,7 +63,7 @@ namespace AutopilotMonitor.Functions.Functions.Raw
             }
         }
 
-        private async Task<HttpResponseData> QueryEvents(HttpRequestData req, string tenantId)
+        private async Task<HttpResponseData> QueryEvents(HttpRequestData req, string? tenantId)
         {
             var sessionId = req.Query["sessionId"];
             var eventType = req.Query["eventType"];
@@ -83,6 +78,12 @@ namespace AutopilotMonitor.Functions.Functions.Raw
 
             if (!string.IsNullOrEmpty(sessionId))
             {
+                if (string.IsNullOrEmpty(tenantId))
+                {
+                    var bad = req.CreateResponse(HttpStatusCode.BadRequest);
+                    await bad.WriteAsJsonAsync(new { error = "tenantId is required when querying by sessionId" });
+                    return bad;
+                }
                 // Single session query — use existing repo method
                 events = await _sessionRepo.GetSessionEventsAsync(tenantId, sessionId, limit);
             }
@@ -102,7 +103,7 @@ namespace AutopilotMonitor.Functions.Functions.Raw
                 events = new List<EnrollmentEvent>();
                 foreach (var session in sessions)
                 {
-                    var sessionEvents = await _sessionRepo.GetSessionEventsAsync(tenantId, session.SessionId, 200);
+                    var sessionEvents = await _sessionRepo.GetSessionEventsAsync(session.TenantId, session.SessionId, 200);
                     events.AddRange(sessionEvents.Where(e =>
                         (string.IsNullOrEmpty(eventType) || e.EventType == eventType) &&
                         (string.IsNullOrEmpty(severity) || e.Severity.ToString().Equals(severity, StringComparison.OrdinalIgnoreCase)) &&

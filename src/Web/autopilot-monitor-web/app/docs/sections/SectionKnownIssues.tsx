@@ -13,6 +13,28 @@ export function SectionKnownIssues() {
       </p>
 
       <AnnouncementCard
+        date="2026-04-06"
+        title="Delivery Optimization Data Restored via OS-Level Collection"
+        type="resolved"
+      >
+        <p>
+          Autopilot Monitor now collects Delivery Optimization data directly from the OS
+          using <code className="text-xs bg-gray-100 px-1 py-0.5 rounded">Get-DeliveryOptimizationStatus</code>,
+          bypassing the IME log entirely. This restores DO metrics
+          (<strong>BytesFromPeers</strong>, <strong>PeerCaching %</strong>, download progress)
+          for all devices &mdash; including those running IME &ge; 1.101.
+        </p>
+        <p>
+          The new OS-level collector works alongside existing IME log parsing. If both sources
+          provide data for the same app, the IME log path takes priority (dedup logic).
+        </p>
+        <p>
+          No action needed &mdash; devices running the latest agent version automatically
+          benefit from this change.
+        </p>
+      </AnnouncementCard>
+
+      <AnnouncementCard
         date="2026-04-05"
         title="IME 1.101.x Removes Delivery Optimization Telemetry from Logs"
         type="breaking"

@@ -154,12 +154,14 @@ Partial class files: `Program.Configuration.cs`, `Program.InstallMode.cs`, `Prog
 5. Check session age emergency break (zombie agent kill-switch)
 6. Detect previous exit type: `clean` / `exception_crash` / `hard_kill` / `reboot_kill` / `first_run`
 7. `FetchRemoteConfig()` – Backend config with 15s timeout, disk cache fallback
-8. `RegisterSessionAsync()` – Register session (5 retries, exponential backoff)
-9. `StartWatching()` – Enable FileSystemWatcher for event spool
-10. `StartEventCollectors()` – EspAndHelloTracker (always on)
-11. `StartOptionalCollectors()` – PerformanceCollector, AgentSelfMetrics, EnrollmentTracker, DesktopArrivalDetector
-12. `StartGatherRuleExecutor()` – Backend-defined data collection rules
-13. `InitializeAnalyzers()` + `RunStartupAnalyzers()` – Security baseline
+8. `VerifyAgentBinaryIntegrity()` – Computes SHA-256 of running EXE, compares against backend `LatestAgentSha256`, sends emergency signal on mismatch
+9. `CheckConfigMgrClient()` – Detects co-management (registry/service/directory probes), emits `configmgr_client_detected`
+10. `RegisterSessionAsync()` – Register session (5 retries, exponential backoff)
+11. `StartWatching()` – Enable FileSystemWatcher for event spool
+12. `StartEventCollectors()` – EspAndHelloTracker (always on)
+13. `StartOptionalCollectors()` – PerformanceCollector, AgentSelfMetrics, EnrollmentTracker, DesktopArrivalDetector, DeliveryOptimizationCollector
+14. `StartGatherRuleExecutor()` – Backend-defined data collection rules
+15. `InitializeAnalyzers()` + `RunStartupAnalyzers()` – Security baseline
 
 ### Key Services
 
@@ -170,8 +172,11 @@ Partial class files: `Program.Configuration.cs`, `Program.InstallMode.cs`, `Prog
 | `EventSpool` | `Core/Monitoring/Core/` | Offline event storage (JSON files), FileSystemWatcher-based |
 | `EnrollmentTracker` | `Core/Monitoring/Tracking/` | Central enrollment state machine, 3 completion paths (4 partial files) |
 | `ImeLogTracker` | `Core/Monitoring/Tracking/` | Parses IME logs with backend-provided regex patterns (3 partial files) |
-| `EspAndHelloTracker` | `Core/Monitoring/Collectors/` | ESP state + Hello provisioning monitoring (4 partial files) |
+| `EspAndHelloTracker` | `Core/Monitoring/Collectors/` | ESP state + Hello provisioning monitoring + ESP provisioning status tracking (5 partial files) |
 | `DesktopArrivalDetector` | `Core/Monitoring/Collectors/` | Polls for explorer.exe under real user (non-SYSTEM, non-DefaultUser*) |
+| `DeliveryOptimizationCollector` | `Core/Monitoring/Collectors/` | Polls OS-level DO status via persistent PowerShell Runspace, matches to IME app downloads, emits `download_progress` + `do_telemetry` events |
+| `NetworkChangeDetector` | `Core/Monitoring/Collectors/` | Detects network connectivity changes |
+| `ImeProcessWatcher` | `Core/Monitoring/Collectors/` | Monitors IntuneManagementExtension process lifecycle |
 | `PerformanceCollector` | `Core/Monitoring/Collectors/` | CPU/Memory/Disk/Network metrics |
 | `AgentSelfMetricsCollector` | `Core/Monitoring/Collectors/` | Agent process self-telemetry |
 | `GatherRuleExecutor` | `Core/Monitoring/Collectors/` | Executes backend-defined data collection rules |
@@ -316,7 +321,8 @@ Registered in this order:
 | **Versions** | `POST /versions/block`, `GET /versions/blocked`, `DELETE /versions/block/{pattern}` |
 | **Reports** | `POST /sessions/{id}/report`, `GET/POST /global/session-reports`, distress reports |
 | **Metrics** | `GET /metrics/usage`, `GET /metrics/app`, `GET /metrics/summary`, `GET /metrics/geographic`, `GET /metrics/geographic/sessions`, `GET /stats/platform` |
-| **Global** | `/global/metrics/*`, `/global/audit/logs`, `/global/session-reports`, `/global/notifications` (CRUD + dismiss), `/global/mcp-users` |
+| **Global** | `/global/metrics/*`, `/global/audit/logs`, `/global/session-reports`, `/global/notifications` (CRUD + dismiss), `/global/mcp-users`, `/global/ops-events` |
+| **Audit** | `GET /audit/hardware-rejected` — hardware whitelist rejection aggregation (manufacturer+model grouping, attempt counts, unique serials) |
 | **Vulnerability** | `GET /sessions/{id}/vulnerability-report`, CPE mapping CRUD, `POST /vulnerability/sync`, software inventory |
 | **Progress** | `GET /progress/sessions` |
 | **Diagnostics** | `GET /diagnostics/download-url` |
@@ -335,7 +341,7 @@ Registered in this order:
 
 | Service | Responsibility |
 |---------|----------------|
-| `TableStorageService` | Core data access for all 33 Azure Tables (split across 5 partial files) |
+| `TableStorageService` | Core data access for all 34 Azure Tables (split across 5 partial files) |
 | `TenantConfigurationService` | Per-tenant config with 5-min cache |
 | `AdminConfigurationService` | Global config with 5-min cache, syncs rate limits to tenants |
 | `RateLimitService` | In-memory sliding window rate limiting (1-min window) |
@@ -352,6 +358,7 @@ Registered in this order:
 | `AutopilotDeviceValidator` | Validates serial against Intune Autopilot device list |
 | `CorporateIdentifierValidator` | Validates against Intune Corporate Device Identifiers |
 | `GlobalNotificationService` | Persistent in-app notifications for Global Admins |
+| `OpsAlertDispatchService` | Evaluates ops alert rules and dispatches notifications for infrastructure events |
 | `HealthCheckService` | Health checks for Storage, Processing, and Agent binary availability |
 | `PreviewWhitelistService` | Private Preview tenant whitelist with 5-min cache |
 | `McpUserService` | MCP API user management + access control |
@@ -381,6 +388,7 @@ Repository pattern via interfaces in `AutopilotMonitor.Shared/DataAccess/`:
 | `TableBootstrapRepository` | Bootstrap sessions |
 | `TableDeviceSecurityRepository` | Blocked devices, blocked versions |
 | `TableDistressReportRepository` | Distress reports |
+| `TableOpsEventRepository` | Operational infrastructure events (consent, maintenance, security, tenant, agent) |
 | `TableMaintenanceRepository` | Maintenance operations |
 | `TableNotificationRepository` | Global notifications |
 | `TableUserUsageRepository` | Per-user API usage tracking |
@@ -557,13 +565,13 @@ React Context API (no Redux/Zustand):
 - **`EnrollmentPhase`**: Unknown(-1), Start(0), DevicePreparation(1), DeviceSetup(2), AppsDevice(3), AccountSetup(4), AppsUser(5), FinalizingSetup(6), Complete(7), Failed(99)
 - **`EventSeverity`**: Trace(-1), Debug(0), Info(1), Warning(2), Error(3), Critical(4)
 - **`WebhookProviderType`**: None(0), TeamsLegacyConnector(1), TeamsWorkflowWebhook(2), Slack(10)
-- **50+ Event Types**: `phase_transition`, `app_install_completed`, `enrollment_complete`, `enrollment_failed`, `esp_state_change`, `performance_snapshot`, `script_completed`, `gather_result`, `software_inventory_analysis`, etc.
+- **50+ Event Types**: `phase_transition`, `app_install_completed`, `enrollment_complete`, `enrollment_failed`, `esp_state_change`, `performance_snapshot`, `script_completed`, `gather_result`, `software_inventory_analysis`, `download_progress`, `do_telemetry`, `configmgr_client_detected`, `esp_provisioning_status`, etc.
 
 ---
 
 ## Data Model
 
-### Azure Table Storage (33 Tables)
+### Azure Table Storage (34 Tables)
 
 | Table | PartitionKey | RowKey | Purpose |
 |-------|-------------|--------|---------|
@@ -600,6 +608,7 @@ React Context API (no Redux/Zustand):
 | `VulnerabilityReports` | TenantId | SessionId | Per-session vulnerability findings |
 | `SoftwareInventory` | TenantId | SoftwareName | Aggregated software inventory |
 | `CveIndex` | CveId | TenantId_SessionId | CVE → session cross-reference |
+| `OpsEvents` | Category | InvertedTicks | Operational infrastructure events (consent, maintenance, security, tenant, agent) |
 
 ### Azure Blob Storage
 
@@ -696,6 +705,13 @@ Bootstrapper:
   2. Download ZIP
   3. Verify SHA-256: version.json hash > legacy Content-MD5 header > skip (backward compat)
 ```
+
+**Channel 3: Post-Config EXE Integrity Check (Runtime)**
+- After config fetch, agent computes SHA-256 of the running EXE (`Process.GetCurrentProcess().MainModule`)
+- Compares against `LatestAgentSha256` from backend config (case-insensitive)
+- On mismatch: sends emergency signal with `AgentErrorType.IntegrityCheckFailed`
+- Closes trust gap: ZIP hash verifies download integrity, EXE hash verifies running binary wasn't tampered post-extraction
+- Gracefully handles missing hash (skips) and file access errors (warns, continues)
 
 ### Authorization Model
 
@@ -833,6 +849,7 @@ Path 3: Desktop Arrival (No-ESP / WDP v2)
 - **Hello Wait:** 30s for wizard start → 300s for completion → timeout
 - **HelloOutcome:** Tracked property recording Hello result
 - **Policy Check:** WHfB policy registry poll every 10s; skip Hello wait if not configured
+- **Provisioning Status:** Registry-based ESP category status monitoring (`GetProvisioningSnapshot()`): DevicePreparation, DeviceSetup, AccountSetup. Settle delay before completion; 30s fallback timer for builds without `categorySucceeded` (e.g. 25H2/26200)
 
 ### Failure Detection
 
@@ -1016,6 +1033,8 @@ Configuration per tenant via `TenantConfiguration.WebhookUrl` + `WebhookProvider
 | `CrossTenantAccessTests` | Validates tenant-scoped endpoints reject cross-tenant access |
 | `ODataSanitizerTests` | OData query sanitization |
 | `SsrfGuardTests` | SSRF protection validation |
+| `AuthFunctionTests` | Auth decision logic (roles, MCP access, bootstrap, auto-admin, preview gates) |
+| `GetHardwareRejectedFunctionTests` | Hardware rejection aggregation logic |
 
 ### Agent Tests (`src/Agent/AutopilotMonitor.Agent.Core.Tests/`)
 
@@ -1041,7 +1060,7 @@ Configuration per tenant via `TenantConfiguration.WebhookUrl` + `WebhookProvider
 | Resource | Purpose |
 |----------|---------|
 | Azure Functions (Isolated Worker) | REST API, event processing, timer triggers |
-| Azure Table Storage | 33 tables for sessions, events, config, rules, metrics, vulnerability data |
+| Azure Table Storage | 34 tables for sessions, events, config, rules, metrics, vulnerability data, ops events |
 | Azure Blob Storage | Diagnostics ZIPs, session reports, platform stats cache, agent binaries |
 | Azure SignalR Service | WebSocket hub for real-time updates |
 | Azure Static Web Apps | Next.js frontend hosting |
@@ -1052,7 +1071,29 @@ Configuration per tenant via `TenantConfiguration.WebhookUrl` + `WebhookProvider
 
 ### MCP Server
 
-Provisioned via Bicep (`infra/mcp-server.bicep`):
+**Technology:** Node.js/TypeScript, Model Context Protocol (MCP) over HTTP/SSE transport.
+
+**Architecture:**
+- Session-based protocol with per-session transport isolation
+- JWT auth + backend whitelist via `McpUserService`
+- Access control middleware (`access-guard.ts`) with rate limiting
+- Graceful shutdown: SIGTERM/SIGINT handlers close all active session transports, then HTTP server
+- Idle session reaping: 2h TTL, checked every 12h
+
+**Event Search Architecture:**
+- **Weighted keyword scoring** (replaced earlier Fuse fuzzy / vector embedding approaches that failed on structured data)
+- Field weights: `eventType` (3.0), `message` (2.0), `source` (1.5), `severity` (1.0), `data` (0.5)
+- Prefix-aware matching (handles morphological variants like "install" / "installation", min 4-char prefix)
+- Stop-word filtering (50+ common words)
+- Score normalization: `(weighted_matches / max_possible) + coverage_bonus`, capped at 1.0
+- Knowledge base search still uses vector/Fuse search (pre-indexed at startup)
+
+**Structured Error Handler:**
+- Formats any tool error into MCP-compliant `{ isError: true }` response with AI-consumable details
+- Categorized hints: auth errors (403) → "requires higher permissions"; not found (404) → "verify IDs/filters"; rate limit (429) → "wait and retry"; timeout → "narrow the query"
+- Always includes parameter summary for debugging
+
+**Provisioned via Bicep** (`infra/mcp-server.bicep`):
 - Azure Container Registry (Basic SKU)
 - Log Analytics Workspace
 - Container App Environment
