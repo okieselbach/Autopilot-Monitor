@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Text;
+using AutopilotMonitor.Agent.Core.Security;
 using AutopilotMonitor.Shared.Models;
 
 namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors.GatherCollectors
@@ -56,7 +57,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors.GatherCollectors
                     var encodedCommand = Convert.ToBase64String(Encoding.Unicode.GetBytes(command));
                     psi = new ProcessStartInfo
                     {
-                        FileName = "powershell.exe",
+                        FileName = SystemPaths.PowerShell,
                         Arguments = $"-NoProfile -ExecutionPolicy RemoteSigned -EncodedCommand {encodedCommand}",
                         UseShellExecute = false,
                         RedirectStandardOutput = true,
@@ -68,7 +69,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors.GatherCollectors
                 {
                     psi = new ProcessStartInfo
                     {
-                        FileName = "cmd.exe",
+                        FileName = SystemPaths.Cmd,
                         Arguments = $"/c {command}",
                         UseShellExecute = false,
                         RedirectStandardOutput = true,

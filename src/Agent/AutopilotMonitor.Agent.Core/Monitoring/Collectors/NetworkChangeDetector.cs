@@ -8,6 +8,7 @@ using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 using AutopilotMonitor.Agent.Core.Logging;
+using AutopilotMonitor.Agent.Core.Security;
 using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.Models;
 
@@ -401,7 +402,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             {
                 var psi = new ProcessStartInfo
                 {
-                    FileName = "netsh.exe",
+                    FileName = SystemPaths.Netsh,
                     Arguments = "wlan show interfaces",
                     UseShellExecute = false,
                     RedirectStandardOutput = true,

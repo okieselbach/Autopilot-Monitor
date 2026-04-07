@@ -12,6 +12,7 @@ using AutopilotMonitor.Agent.Core.Logging;
 using AutopilotMonitor.Agent.Core.Monitoring.Collectors;
 using AutopilotMonitor.Agent.Core.Monitoring.Network;
 using AutopilotMonitor.Agent.Core.Monitoring.Tracking;
+using AutopilotMonitor.Agent.Core.Security;
 using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.Models;
 
@@ -635,7 +636,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 
                     var psi = new ProcessStartInfo
                     {
-                        FileName = "shutdown.exe",
+                        FileName = SystemPaths.Shutdown,
                         Arguments = $"/r /t {_configuration.RebootDelaySeconds} /c \"Autopilot enrollment completed - rebooting\"",
                         UseShellExecute = false,
                         CreateNoWindow = true

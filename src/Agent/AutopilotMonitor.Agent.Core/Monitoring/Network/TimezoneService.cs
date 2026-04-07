@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using AutopilotMonitor.Agent.Core.Logging;
+using AutopilotMonitor.Agent.Core.Security;
 
 namespace AutopilotMonitor.Agent.Core.Monitoring.Network
 {
@@ -50,7 +51,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
 
                 var psi = new ProcessStartInfo
                 {
-                    FileName = "tzutil",
+                    FileName = SystemPaths.TzUtil,
                     Arguments = $"/s \"{windowsId}\"",
                     UseShellExecute = false,
                     RedirectStandardOutput = true,

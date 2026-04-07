@@ -105,9 +105,7 @@ namespace AutopilotMonitor.Agent
             bool   enableGeoLocationConfig = true;
             bool   useClientCertAuthConfig = true;
 
-            // Environment variable overrides built-in default
-            apiBaseUrl = Environment.GetEnvironmentVariable("AUTOPILOT_MONITOR_API") ?? apiBaseUrl;
-            // CLI override wins over environment variable/default
+            // CLI override wins over built-in default
             if (!string.IsNullOrWhiteSpace(apiBaseUrlOverride))
                 apiBaseUrl = apiBaseUrlOverride;
 

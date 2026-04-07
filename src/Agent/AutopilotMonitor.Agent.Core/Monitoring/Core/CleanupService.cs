@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using AutopilotMonitor.Agent.Core.Configuration;
 using AutopilotMonitor.Agent.Core.Logging;
+using AutopilotMonitor.Agent.Core.Security;
 
 namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 {
@@ -101,8 +102,10 @@ Remove-Item -Path $scriptPath -Force -ErrorAction SilentlyContinue
                 // creates a new process group that breaks job inheritance, even under SYSTEM.
                 var psi = new ProcessStartInfo
                 {
-                    FileName = "cmd.exe",
-                    Arguments = $"/c start \"\" /b powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"{tempScriptPath}\"",
+                    FileName = SystemPaths.Cmd,
+                    // Absolute path to powershell.exe is passed to `start` to prevent PATH hijacking
+                    // (the `start` builtin does its own PATH resolution for the target command).
+                    Arguments = $"/c start \"\" /b \"{SystemPaths.PowerShell}\" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"{tempScriptPath}\"",
                     UseShellExecute = false,
                     CreateNoWindow = true,
                     WorkingDirectory = Path.GetTempPath()

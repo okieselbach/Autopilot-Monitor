@@ -6,6 +6,7 @@ using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
+using AutopilotMonitor.Agent.Core.Security;
 using AutopilotMonitor.Shared;
 using Newtonsoft.Json.Linq;
 
@@ -451,7 +452,7 @@ namespace AutopilotMonitor.Agent
 
             var psi = new ProcessStartInfo
             {
-                FileName = "powershell.exe",
+                FileName = SystemPaths.PowerShell,
                 Arguments = $"-NoProfile -NonInteractive -EncodedCommand {encoded}",
                 WindowStyle = ProcessWindowStyle.Hidden,
                 CreateNoWindow = true,
