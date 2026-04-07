@@ -180,6 +180,7 @@ export const EXPANDABLE_NAV_GROUPS: ExpandableNavGroup[] = [
           { id: "cfg-autopilot", label: "Autopilot Validation", href: "/settings/tenant/autopilot" },
           { id: "cfg-hardware", label: "Hardware Whitelist", href: "/settings/tenant/hardware-whitelist" },
           { id: "cfg-notifications", label: "Notifications", href: "/settings/tenant/notifications" },
+          { id: "cfg-bootstrap-sessions", label: "Bootstrap Sessions", href: "/settings/tenant/bootstrap-sessions" },
         ],
       },
       {
@@ -188,6 +189,7 @@ export const EXPANDABLE_NAV_GROUPS: ExpandableNavGroup[] = [
           { id: "cfg-agent-settings", label: "Agent Settings", href: "/settings/agent/settings" },
           { id: "cfg-agent-analyzers", label: "Agent Analyzers", href: "/settings/agent/analyzers" },
           { id: "cfg-diagnostics", label: "Diagnostics Package", href: "/settings/agent/diagnostics" },
+          { id: "cfg-agent-unrestricted", label: "Unrestricted Mode", href: "/settings/agent/unrestricted-mode" },
         ],
       },
       {

@@ -379,7 +379,9 @@ public class AuthFunction
             isTenantAdmin,
             role,
             canManageBootstrapTokens,
-            hasMcpAccess = mcpCheck.IsAllowed
+            hasMcpAccess = mcpCheck.IsAllowed,
+            bootstrapTokenEnabled = tenantConfig.BootstrapTokenEnabled,
+            unrestrictedModeEnabled = tenantConfig.UnrestrictedModeEnabled
         }, needsAutoAdmin);
     }
 

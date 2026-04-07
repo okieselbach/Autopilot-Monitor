@@ -97,6 +97,8 @@ interface UserInfo {
   role: 'Admin' | 'Operator' | 'Viewer' | null;
   canManageBootstrapTokens: boolean;
   hasMcpAccess: boolean;
+  bootstrapTokenEnabled: boolean;
+  unrestrictedModeEnabled: boolean;
 }
 
 interface AuthContextType {
@@ -154,6 +156,8 @@ function AuthProviderInternal({ children }: { children: React.ReactNode }) {
           role: (data.role as 'Admin' | 'Operator' | 'Viewer' | null) || null,
           canManageBootstrapTokens: (data.canManageBootstrapTokens as boolean) || false,
           hasMcpAccess: (data.hasMcpAccess as boolean) || false,
+          bootstrapTokenEnabled: (data.bootstrapTokenEnabled as boolean) || false,
+          unrestrictedModeEnabled: (data.unrestrictedModeEnabled as boolean) || false,
         };
       }
 
@@ -205,6 +209,8 @@ function AuthProviderInternal({ children }: { children: React.ReactNode }) {
               role: null,
               canManageBootstrapTokens: false,
               hasMcpAccess: false,
+              bootstrapTokenEnabled: false,
+              unrestrictedModeEnabled: false,
             };
           }
         }
@@ -223,6 +229,8 @@ function AuthProviderInternal({ children }: { children: React.ReactNode }) {
         role: data.role || null,
         canManageBootstrapTokens: data.canManageBootstrapTokens || false,
         hasMcpAccess: data.hasMcpAccess || false,
+        bootstrapTokenEnabled: data.bootstrapTokenEnabled || false,
+        unrestrictedModeEnabled: data.unrestrictedModeEnabled || false,
       };
     } catch (error) {
       // If the refresh token is expired or consent is required, redirect to
@@ -253,6 +261,8 @@ function AuthProviderInternal({ children }: { children: React.ReactNode }) {
         role: null,
         canManageBootstrapTokens: false,
         hasMcpAccess: false,
+        bootstrapTokenEnabled: false,
+        unrestrictedModeEnabled: false,
       };
     }
   }, [instance]);

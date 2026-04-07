@@ -189,19 +189,39 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
 
   // Visible expandable groups (with item-level filtering for feature-gated items)
   const hasMcpAccess = user?.hasMcpAccess ?? false;
+  const isAdminLike = isTenantAdmin || isGlobalAdmin;
+  const canManageBootstrapTokens = user?.canManageBootstrapTokens ?? false;
+  const bootstrapTokenEnabled = user?.bootstrapTokenEnabled ?? false;
+  const unrestrictedModeEnabled = user?.unrestrictedModeEnabled ?? false;
   const visibleExpandableGroups = useMemo(() => {
     return EXPANDABLE_NAV_GROUPS
       .filter(isGroupVisible)
       .map((group) => {
         // Filter out MCP item if user doesn't have MCP access
-        const filteredItems = group.items.filter((item) => {
-          if (item.id === "cfg-reporting") return hasMcpAccess;
-          return true;
-        });
+        const filteredItems = group.items
+          .filter((item) => {
+            if (item.id === "cfg-reporting") return hasMcpAccess;
+            return true;
+          })
+          .map((item) => {
+            // Sub-item gating for feature-flagged entries (tenant feature flags)
+            const filteredSubs = item.items.filter((sub) => {
+              if (sub.id === "cfg-bootstrap-sessions") {
+                return bootstrapTokenEnabled && (isAdminLike || canManageBootstrapTokens);
+              }
+              if (sub.id === "cfg-agent-unrestricted") {
+                return isAdminLike && unrestrictedModeEnabled;
+              }
+              return true;
+            });
+            return { ...item, items: filteredSubs };
+          })
+          // Drop items whose sub-items have all been filtered out
+          .filter((item) => item.items.length > 0);
         return { ...group, items: filteredItems };
       });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAdminOrOperator, isGlobalAdmin, globalAdminMode, hasMcpAccess]);
+  }, [isAdminOrOperator, isGlobalAdmin, globalAdminMode, hasMcpAccess, isAdminLike, canManageBootstrapTokens, bootstrapTokenEnabled, unrestrictedModeEnabled]);
 
   // Auto-expand the group containing the current pathname
   useEffect(() => {
