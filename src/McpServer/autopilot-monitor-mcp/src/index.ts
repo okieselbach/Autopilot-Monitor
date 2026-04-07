@@ -1,7 +1,6 @@
 import { resolve, dirname } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { randomUUID } from 'node:crypto';
 import express from 'express';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -52,87 +51,60 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'healthy' });
 });
 
-// Track transports by session ID for reuse
-const transports = new Map<string, { transport: StreamableHTTPServerTransport; createdAt: number; lastActivity: number }>();
-
-// Session TTL cleanup — remove abandoned sessions that never sent a DELETE.
-// Currently runs every 12h (cost-effective for single-user on a sleeping container app).
-// TODO: Reduce interval (e.g. 30min) when scaling to multiple concurrent users.
-const SESSION_MAX_AGE_MS = 2 * 60 * 60 * 1000; // 2 hours
-setInterval(() => {
-  const now = Date.now();
-  for (const [id, entry] of transports) {
-    if (now - entry.lastActivity > SESSION_MAX_AGE_MS) {
-      entry.transport.close().catch(() => {});
-      transports.delete(id);
-      console.error(`[mcp] Reaped idle session ${id} (idle > ${SESSION_MAX_AGE_MS / 1000 / 60}min)`);
-    }
-  }
-}, 12 * 60 * 60 * 1000); // 12h interval
-
 // Access guard for /mcp — validates JWT, checks backend whitelist, enforces rate limits
 app.use('/mcp', accessGuard);
 
-// MCP Streamable HTTP endpoint
+// MCP Streamable HTTP endpoint — STATELESS mode.
+//
+// Sessions are intentionally NOT tracked server-side. Rationale:
+//   - The Container App runs with minReplicas=0 and scales to zero on idle
+//     (KEDA HTTP scaler cooldown ~300s). Any in-memory session Map is wiped
+//     on SIGTERM, so clients that paused between tool calls would see
+//     "Session expired" errors on their next POST — even though they were
+//     still actively using the server.
+//   - This MCP server exposes only request/response tool calls; it emits no
+//     server→client notifications, resource subscriptions, or log streams,
+//     so per-connection state has no purpose.
+//   - Stateless mode (sessionIdGenerator: undefined) makes every POST a
+//     self-contained request. No Mcp-Session-Id header is issued, no state
+//     survives the response, scale-to-zero is free of side effects.
+//
+// GET/DELETE on /mcp have no meaning without sessions → respond 405.
 app.all('/mcp', async (req, res) => {
-  const sessionId = req.headers['mcp-session-id'] as string | undefined;
-
-  // GET (SSE stream) or DELETE (session termination) — need existing session
-  if (req.method === 'GET' || req.method === 'DELETE') {
-    const entry = sessionId ? transports.get(sessionId) : undefined;
-    if (!entry) {
-      res.status(400).json({ error: 'No valid session. Send an initialize request first.' });
-      return;
-    }
-    await entry.transport.handleRequest(req, res);
-    return;
-  }
-
-  // POST — existing session: forward to its transport
-  if (sessionId && transports.has(sessionId)) {
-    const entry = transports.get(sessionId)!;
-    entry.lastActivity = Date.now();
-    await entry.transport.handleRequest(req, res, req.body);
-    return;
-  }
-
-  // POST — unknown/stale session ID: tell client to re-initialize.
-  // Previously we stripped the header and created a new transport, but the
-  // request body is a tool call (not "initialize"), causing "Server not initialized" errors.
-  if (sessionId) {
-    console.error(`[mcp] Stale session ${sessionId} — returning 404 to trigger client re-init`);
-    res.status(404).json({
+  if (req.method !== 'POST') {
+    res.status(405).json({
       jsonrpc: '2.0',
-      error: { code: -32000, message: 'Session expired. Please re-initialize.' },
+      error: { code: -32000, message: 'Method Not Allowed. Stateless MCP server accepts POST only.' },
     });
     return;
   }
+
   const transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: () => randomUUID(),
+    sessionIdGenerator: undefined, // stateless: no session tracking
+  });
+  const server = createMcpServer();
+
+  // Guarantee cleanup once the response is done, even on client disconnect.
+  res.on('close', () => {
+    transport.close().catch(() => {});
+    server.close().catch(() => {});
   });
 
-  transport.onclose = () => {
-    if (transport.sessionId) {
-      transports.delete(transport.sessionId);
-      console.error(`[mcp] Session ${transport.sessionId} closed`);
-    }
-  };
-
   transport.onerror = (error: Error) => {
-    console.error(`[mcp] Session ${transport.sessionId ?? 'unknown'} error: ${error.message}`);
+    console.error(`[mcp] Transport error: ${error.message}`);
   };
 
-  const server = createMcpServer();
-  await server.connect(transport);
-
-  await transport.handleRequest(req, res, req.body);
-
-  // Register AFTER handleRequest — the session ID is only assigned during
-  // initialize processing inside handleRequest, not before.
-  if (transport.sessionId) {
-    const now = Date.now();
-    transports.set(transport.sessionId, { transport, createdAt: now, lastActivity: now });
-    console.error(`[mcp] Session ${transport.sessionId} registered`);
+  try {
+    await server.connect(transport);
+    await transport.handleRequest(req, res, req.body);
+  } catch (err) {
+    console.error('[mcp] Request handling failed:', err);
+    if (!res.headersSent) {
+      res.status(500).json({
+        jsonrpc: '2.0',
+        error: { code: -32603, message: 'Internal server error' },
+      });
+    }
   }
 });
 
@@ -144,15 +116,8 @@ const server = app.listen(PORT, '0.0.0.0', () => {
 
 async function gracefulShutdown(signal: string) {
   console.error(`[mcp] Received ${signal}, shutting down gracefully…`);
-  for (const [id, entry] of transports) {
-    try {
-      await entry.transport.close();
-      console.error(`[mcp] Closed session ${id}`);
-    } catch (e) {
-      console.error(`[mcp] Error closing session ${id}:`, e);
-    }
-  }
-  transports.clear();
+  // Stateless mode: no long-lived transports to close. Just stop accepting
+  // new connections and let in-flight requests drain via their own res.on('close').
   server.close(() => {
     console.error('[mcp] HTTP server closed');
     process.exit(0);
