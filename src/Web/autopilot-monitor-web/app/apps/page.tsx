@@ -62,9 +62,12 @@ export default function AppsPage() {
   const { addNotification } = useNotifications();
   const { globalAdminMode } = useAdminMode();
 
-  // Global admin: tenant selector state
+  // Global admin: tenant selector state.
+  // Default for GAs is their own tenant (set once tenantId loads), not aggregated —
+  // gives the standard "view your tenant first, opt-in to aggregated/override".
   const [tenants, setTenants] = useState<TenantInfo[]>([]);
   const [selectedTenantId, setSelectedTenantId] = useState<string>("");
+  const [scopeInitialized, setScopeInitialized] = useState(false);
 
   const isGlobalAdmin = globalAdminMode && user?.isGlobalAdmin;
   // "aggregated" = GA view across all tenants (no tenant selected)
@@ -75,7 +78,6 @@ export default function AppsPage() {
   );
   const effectiveTenantId = isGlobalAdmin ? selectedTenantId : tenantId;
 
-  const hasInitialFetch = useRef(false);
   const isTimeRangeMount = useRef(true);
 
   // Fetch tenant list for Global Admin selector
@@ -146,22 +148,30 @@ export default function AppsPage() {
     }
   };
 
+  // Initialize the scope once tenantId is available.
+  // - Regular users: scope is implicitly their own tenant; just mark initialized.
+  // - GAs: default selectedTenantId to their own tenant (not aggregated).
+  // This runs exactly once and never again — user choices afterwards stand on their own.
   useEffect(() => {
-    if (!isGlobalAdmin && !tenantId) return;
-    if (hasInitialFetch.current) return;
-    hasInitialFetch.current = true;
-    fetchApps(timeRange);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tenantId, isGlobalAdmin]);
+    if (scopeInitialized) return;
+    if (!tenantId) return;
+    if (isGlobalAdmin) {
+      setSelectedTenantId(tenantId);
+    }
+    setScopeInitialized(true);
+  }, [tenantId, isGlobalAdmin, scopeInitialized]);
 
+  // Fetch whenever the effective scope or time range changes — gated on
+  // scopeInitialized so we don't do an initial aggregated-fetch before the
+  // GA default-to-own-tenant kicks in (would otherwise cause a wasted backend hit).
   useEffect(() => {
+    if (!scopeInitialized) return;
     if (isTimeRangeMount.current) {
       isTimeRangeMount.current = false;
-      return;
     }
     fetchApps(timeRange);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [timeRange, selectedTenantId]);
+  }, [scopeInitialized, timeRange, selectedTenantId]);
 
   const filteredAndSorted = useMemo<AppRow[]>(() => {
     if (!data?.apps) return [];

@@ -198,11 +198,9 @@ export default function AppDetailPage() {
   const { globalAdminMode } = useAdminMode();
 
   const isGlobalAdmin = globalAdminMode && user?.isGlobalAdmin;
-  // URL-flag takes priority for initial scope; if the global banner is active
-  // but URL didn't specify, we default to aggregated (empty string).
-  const [selectedTenantId, setSelectedTenantId] = useState<string>(
-    isGlobalAdmin ? urlTenantId : ""
-  );
+  // selectedTenantId source of truth, see scope-init effect below for the rules.
+  const [selectedTenantId, setSelectedTenantId] = useState<string>("");
+  const [scopeInitialized, setScopeInitialized] = useState(false);
   const [tenants, setTenants] = useState<TenantInfo[]>([]);
 
   const useGlobalEndpoint = Boolean(isGlobalAdmin && (urlGlobal || selectedTenantId !== tenantId || !tenantId));
@@ -287,7 +285,26 @@ export default function AppDetailPage() {
     [isGlobalAdmin]
   );
 
-  const hasInitialFetch = useRef(false);
+  // Initialize the scope once tenantId is available.
+  // Three cases for GAs:
+  //   1. URL carries ?global=1&tenantId=X → use X (came from list with explicit tenant)
+  //   2. URL carries ?global=1 (no tenantId) → aggregated (came from "All tenants" view)
+  //   3. No ?global flag (direct nav, bookmark, deep link) → default to own tenant
+  // Regular users always use their own tenant; selectedTenantId stays empty.
+  useEffect(() => {
+    if (scopeInitialized) return;
+    if (!tenantId) return;
+    if (isGlobalAdmin) {
+      if (urlGlobal) {
+        // Came from list — honor whatever the list propagated (specific tenant or aggregated)
+        setSelectedTenantId(urlTenantId);
+      } else {
+        // Direct navigation — default to own tenant
+        setSelectedTenantId(tenantId);
+      }
+    }
+    setScopeInitialized(true);
+  }, [tenantId, isGlobalAdmin, urlGlobal, urlTenantId, scopeInitialized]);
 
   // Fetch tenant list once in global mode.
   useEffect(() => {
@@ -370,22 +387,16 @@ export default function AppDetailPage() {
     }
   };
 
+  // Single fetch effect: re-runs when scope, app, days, or tenant selection change.
+  // Gated on scopeInitialized so we don't waste a backend hit fetching the
+  // wrong scope before the GA default-to-own-tenant has settled.
   useEffect(() => {
-    if (!isGlobalAdmin && !tenantId) return;
-    if (hasInitialFetch.current) return;
-    hasInitialFetch.current = true;
-    fetchAnalytics();
-    fetchSessions(0, statusFilter);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tenantId, isGlobalAdmin]);
-
-  useEffect(() => {
-    if (!hasInitialFetch.current) return;
+    if (!scopeInitialized) return;
     fetchAnalytics();
     setSessionsOffset(0);
     fetchSessions(0, statusFilter);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [days, selectedTenantId]);
+  }, [scopeInitialized, days, selectedTenantId]);
 
   function formatDuration(s: number) {
     if (!s) return "—";
