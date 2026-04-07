@@ -145,6 +145,15 @@ export default function SessionDetailPage() {
     if (hasInitialFetch.current) return;
     hasInitialFetch.current = true;
 
+    // Performance: eager-set sessionTenantId if we already know it from TenantContext.
+    // This lets the second useEffect kick off fetchEvents/analysis/vulns/config in parallel
+    // with fetchSessionDetails instead of waiting for its roundtrip — eliminates a waterfall.
+    // Global Admins in all-tenant view fall through with null and keep the old behavior.
+    const knownTenantId = resolveEffectiveTenantId();
+    if (knownTenantId && isGuid(knownTenantId)) {
+      setSessionTenantId(knownTenantId);
+    }
+
     fetchSessionDetails();
     // fetchEvents will be called after sessionTenantId is set
   }, [sessionId, tenantId, globalAdminMode, user]);
