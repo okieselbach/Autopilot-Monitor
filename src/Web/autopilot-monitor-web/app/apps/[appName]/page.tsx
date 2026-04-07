@@ -28,6 +28,10 @@ const AppBarChart = dynamic(() => import("../../../components/charts/AppBarChart
   ssr: false,
   loading: () => <div className="h-60 flex items-center justify-center text-gray-400 text-sm">Loading chart…</div>,
 });
+const AppStackedBarChart = dynamic(() => import("../../../components/charts/AppStackedBarChart"), {
+  ssr: false,
+  loading: () => <div className="h-64 flex items-center justify-center text-gray-400 text-sm">Loading chart…</div>,
+});
 
 interface TimeSeriesPoint {
   bucketStart: string;
@@ -543,18 +547,17 @@ export default function AppDetailPage() {
                 </div>
               )}
 
-              {/* Charts row 1: failure rate + duration over time */}
+              {/* Charts row 1: installs (success vs failure) + duration over time */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <Card title="Failure Rate over time">
+                <Card title="Installs over time (success vs failure)">
                   {analytics.timeSeries.length > 0 ? (
-                    <AppLineChart
+                    <AppStackedBarChart
                       data={analytics.timeSeries as unknown as Array<Record<string, unknown>>}
                       xKey="bucketStart"
-                      series={[
-                        { dataKey: "failureRate", label: "Failure rate", color: chartColors.danger },
+                      stacks={[
+                        { dataKey: "succeeded", label: "Succeeded", color: chartColors.success },
+                        { dataKey: "failed", label: "Failed", color: chartColors.danger },
                       ]}
-                      yUnit="%"
-                      yDomain={[0, "auto"]}
                       formatXTick={formatBucketTick}
                     />
                   ) : (
@@ -579,38 +582,39 @@ export default function AppDetailPage() {
                 </Card>
               </div>
 
-              {/* Charts row 2: version breakdown + phase breakdown */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <Card title="Failure Rate by Version">
-                  {analytics.versionBreakdown.length > 0 ? (
-                    <AppBarChart
-                      data={analytics.versionBreakdown as unknown as Array<Record<string, unknown>>}
-                      categoryKey="appVersion"
-                      valueKey="failureRate"
-                      valueFormatter={(v) => `${v}%`}
-                      barColor={(row) => {
-                        const r = Number(row.failureRate);
-                        return r >= 20 ? chartColors.danger : r >= 5 ? chartColors.warning : chartColors.success;
-                      }}
-                    />
-                  ) : (
-                    <EmptyState text="No version data captured yet" />
+              {/* Charts row 2: version breakdown + phase breakdown.
+                  Each card is hidden when empty so the row collapses gracefully:
+                  - Version: will appear once new agents emit AppVersion data
+                  - Phase: deferred feature, only shows once we have failure-log samples */}
+              {(analytics.versionBreakdown.length > 0 || analytics.installerPhaseBreakdown.length > 0) && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {analytics.versionBreakdown.length > 0 && (
+                    <Card title="Failure Rate by Version">
+                      <AppBarChart
+                        data={analytics.versionBreakdown as unknown as Array<Record<string, unknown>>}
+                        categoryKey="appVersion"
+                        valueKey="failureRate"
+                        valueFormatter={(v) => `${v}%`}
+                        barColor={(row) => {
+                          const r = Number(row.failureRate);
+                          return r >= 20 ? chartColors.danger : r >= 5 ? chartColors.warning : chartColors.success;
+                        }}
+                      />
+                    </Card>
                   )}
-                </Card>
-                <Card title="Installer Phase (failures only)">
-                  {analytics.installerPhaseBreakdown.length > 0 ? (
-                    <AppBarChart
-                      data={analytics.installerPhaseBreakdown as unknown as Array<Record<string, unknown>>}
-                      categoryKey="phase"
-                      valueKey="failed"
-                      horizontal
-                      barColor={chartColors.danger}
-                    />
-                  ) : (
-                    <EmptyState text="No failure phases recorded" />
+                  {analytics.installerPhaseBreakdown.length > 0 && (
+                    <Card title="Installer Phase (failures only)">
+                      <AppBarChart
+                        data={analytics.installerPhaseBreakdown as unknown as Array<Record<string, unknown>>}
+                        categoryKey="phase"
+                        valueKey="failed"
+                        horizontal
+                        barColor={chartColors.danger}
+                      />
+                    </Card>
                   )}
-                </Card>
-              </div>
+                </div>
+              )}
 
               {/* Top failure codes table */}
               <Card title="Top Failure Codes">
