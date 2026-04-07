@@ -94,6 +94,7 @@ interface AnalyticsResponse {
 
 interface SessionRow {
   sessionId: string;
+  tenantId: string;
   deviceName: string;
   manufacturer: string;
   model: string;
@@ -105,6 +106,42 @@ interface SessionRow {
   attemptNumber: number;
   startedAt: string;
   durationSeconds: number;
+}
+
+// ── Affected Sessions: column metadata (for the column picker) ─────────────
+interface SessionColumn {
+  key: string;
+  label: string;
+  defaultVisible: boolean;
+  /** Only available in Global Admin mode (column hidden for normal users). */
+  globalOnly?: boolean;
+  /** Right-aligned numeric column. */
+  numeric?: boolean;
+}
+
+const SESSIONS_COLUMNS: SessionColumn[] = [
+  { key: "device", label: "Device", defaultVisible: true },
+  { key: "tenant", label: "Tenant", defaultVisible: false, globalOnly: true },
+  { key: "model", label: "Model", defaultVisible: true },
+  { key: "version", label: "Version", defaultVisible: true },
+  { key: "status", label: "Status", defaultVisible: true },
+  { key: "attempts", label: "Attempts", defaultVisible: true, numeric: true },
+  { key: "failureCode", label: "Failure Code", defaultVisible: true },
+  { key: "duration", label: "Duration", defaultVisible: true, numeric: true },
+];
+
+const SESSIONS_COLUMNS_STORAGE_KEY = "appHealthSessions_visibleColumns";
+
+function loadInitialSessionColumns(): Set<string> {
+  if (typeof window !== "undefined") {
+    try {
+      const stored = window.localStorage.getItem(SESSIONS_COLUMNS_STORAGE_KEY);
+      if (stored) return new Set(JSON.parse(stored));
+    } catch {
+      /* ignore */
+    }
+  }
+  return new Set(SESSIONS_COLUMNS.filter((c) => c.defaultVisible).map((c) => c.key));
 }
 
 interface SessionsResponse {
@@ -173,6 +210,77 @@ export default function AppDetailPage() {
   const selectedTenantName = useMemo(
     () => tenants.find((t) => t.tenantId === selectedTenantId)?.domainName,
     [tenants, selectedTenantId]
+  );
+
+  // Build a tid → friendly name lookup once for the Tenant column.
+  const tenantLookup = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const t of tenants) {
+      map.set(t.tenantId, t.domainName || t.tenantId);
+    }
+    return map;
+  }, [tenants]);
+
+  // ── Affected Sessions: column picker state ──────────────────────────────
+  const [visibleSessionColumns, setVisibleSessionColumns] = useState<Set<string>>(
+    loadInitialSessionColumns
+  );
+  const [showColumnSelector, setShowColumnSelector] = useState(false);
+  const columnSelectorRef = useRef<HTMLDivElement>(null);
+
+  // Persist visible columns
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        SESSIONS_COLUMNS_STORAGE_KEY,
+        JSON.stringify([...visibleSessionColumns])
+      );
+    } catch {
+      /* ignore */
+    }
+  }, [visibleSessionColumns]);
+
+  // Close picker on outside click
+  useEffect(() => {
+    if (!showColumnSelector) return;
+    const handler = (e: MouseEvent) => {
+      if (columnSelectorRef.current && !columnSelectorRef.current.contains(e.target as Node)) {
+        setShowColumnSelector(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showColumnSelector]);
+
+  const toggleSessionColumn = (key: string) => {
+    setVisibleSessionColumns((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const resetSessionColumns = () => {
+    setVisibleSessionColumns(
+      new Set(SESSIONS_COLUMNS.filter((c) => c.defaultVisible).map((c) => c.key))
+    );
+  };
+
+  // Columns visible right now: filter out globalOnly when not in GA mode.
+  const activeSessionColumns = useMemo(
+    () =>
+      SESSIONS_COLUMNS.filter((col) => {
+        if (col.globalOnly && !isGlobalAdmin) return false;
+        return visibleSessionColumns.has(col.key);
+      }),
+    [visibleSessionColumns, isGlobalAdmin]
+  );
+
+  // Columns selectable in the picker (hide globalOnly entries for non-GA users)
+  const selectableSessionColumns = useMemo(
+    () => SESSIONS_COLUMNS.filter((col) => !col.globalOnly || isGlobalAdmin),
+    [isGlobalAdmin]
   );
 
   const hasInitialFetch = useRef(false);
@@ -623,7 +731,7 @@ export default function AppDetailPage() {
 
               {/* Affected sessions panel */}
               <Card title="Affected Sessions">
-                <div className="flex items-center space-x-2 mb-3">
+                <div className="flex items-center gap-2 mb-3">
                   {(["failed", "all", "succeeded"] as const).map((s) => (
                     <button
                       key={s}
@@ -646,6 +754,51 @@ export default function AppDetailPage() {
                       {sessions.total} session{sessions.total === 1 ? "" : "s"}
                     </span>
                   )}
+                  {/* Column picker */}
+                  <div className="relative" ref={columnSelectorRef}>
+                    <button
+                      onClick={() => setShowColumnSelector((v) => !v)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 border border-gray-200"
+                      title="Configure visible columns"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
+                      </svg>
+                      Columns
+                    </button>
+                    {showColumnSelector && (
+                      <div className="absolute right-0 top-full mt-1 w-56 bg-white rounded-lg shadow-lg border border-gray-200 z-50 py-2">
+                        <div className="px-3 py-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center justify-between">
+                          <span>Toggle Columns</span>
+                          <button
+                            onClick={resetSessionColumns}
+                            className="text-blue-500 hover:text-blue-700 normal-case font-medium tracking-normal"
+                          >
+                            Reset
+                          </button>
+                        </div>
+                        <div className="border-t border-gray-100 mt-1 pt-1">
+                          {selectableSessionColumns.map((col) => (
+                            <label
+                              key={col.key}
+                              className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 cursor-pointer text-sm text-gray-700"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={visibleSessionColumns.has(col.key)}
+                                onChange={() => toggleSessionColumn(col.key)}
+                                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 h-3.5 w-3.5"
+                              />
+                              <span className="flex-1">{col.label}</span>
+                              {col.globalOnly && (
+                                <span className="text-[10px] uppercase tracking-wider text-purple-600">GA</span>
+                              )}
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
                 {sessionsLoading ? (
                   <div className="text-center text-gray-500 p-4">Loading sessions…</div>
@@ -654,13 +807,14 @@ export default function AppDetailPage() {
                     <table className="min-w-full text-sm">
                       <thead className="text-left text-xs text-gray-500 uppercase tracking-wider border-b">
                         <tr>
-                          <th className="px-3 py-2">Device</th>
-                          <th className="px-3 py-2">Model</th>
-                          <th className="px-3 py-2">Version</th>
-                          <th className="px-3 py-2">Status</th>
-                          <th className="px-3 py-2 text-right">Attempts</th>
-                          <th className="px-3 py-2">Failure Code</th>
-                          <th className="px-3 py-2 text-right">Duration</th>
+                          {activeSessionColumns.map((col) => (
+                            <th
+                              key={col.key}
+                              className={`px-3 py-2 ${col.numeric ? "text-right" : ""}`}
+                            >
+                              {col.label}
+                            </th>
+                          ))}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
@@ -668,45 +822,86 @@ export default function AppDetailPage() {
                           const entry = row.failureCode ? getErrorCodeEntry(row.failureCode) : null;
                           return (
                             <tr
-                              key={row.sessionId}
+                              key={`${row.tenantId}-${row.sessionId}`}
                               onClick={() => router.push(`/sessions/${row.sessionId}`)}
                               className="hover:bg-gray-50 cursor-pointer"
                             >
-                              <td className="px-3 py-2 text-gray-900">{row.deviceName || "—"}</td>
-                              <td className="px-3 py-2 text-gray-700 text-xs">
-                                {row.manufacturer} {row.model}
-                              </td>
-                              <td className="px-3 py-2 text-gray-700 font-mono text-xs">
-                                {row.appVersion || "—"}
-                              </td>
-                              <td className="px-3 py-2">
-                                <span
-                                  className={`px-2 py-0.5 rounded text-xs ${
-                                    row.status === "Failed"
-                                      ? "bg-red-100 text-red-800"
-                                      : row.status === "Succeeded"
-                                      ? "bg-emerald-100 text-emerald-800"
-                                      : "bg-gray-100 text-gray-700"
-                                  }`}
-                                >
-                                  {row.status}
-                                </span>
-                              </td>
-                              <td className="px-3 py-2 text-right text-gray-700">
-                                {row.attemptNumber || "—"}
-                              </td>
-                              <td className="px-3 py-2 font-mono text-xs">
-                                {row.failureCode ? (
-                                  <span title={entry?.description ?? ""}>
-                                    {formatErrorCode(row.failureCode)}
-                                  </span>
-                                ) : (
-                                  <span className="text-gray-400">—</span>
-                                )}
-                              </td>
-                              <td className="px-3 py-2 text-right text-gray-700">
-                                {formatDuration(row.durationSeconds)}
-                              </td>
+                              {activeSessionColumns.map((col) => {
+                                switch (col.key) {
+                                  case "device":
+                                    return (
+                                      <td key={col.key} className="px-3 py-2 text-gray-900">
+                                        {row.deviceName || "—"}
+                                      </td>
+                                    );
+                                  case "tenant": {
+                                    const friendly = tenantLookup.get(row.tenantId);
+                                    return (
+                                      <td
+                                        key={col.key}
+                                        className="px-3 py-2 text-gray-700 text-xs"
+                                        title={row.tenantId}
+                                      >
+                                        {friendly || `${row.tenantId.substring(0, 8)}…`}
+                                      </td>
+                                    );
+                                  }
+                                  case "model":
+                                    return (
+                                      <td key={col.key} className="px-3 py-2 text-gray-700 text-xs">
+                                        {row.manufacturer} {row.model}
+                                      </td>
+                                    );
+                                  case "version":
+                                    return (
+                                      <td key={col.key} className="px-3 py-2 text-gray-700 font-mono text-xs">
+                                        {row.appVersion || "—"}
+                                      </td>
+                                    );
+                                  case "status":
+                                    return (
+                                      <td key={col.key} className="px-3 py-2">
+                                        <span
+                                          className={`px-2 py-0.5 rounded text-xs ${
+                                            row.status === "Failed"
+                                              ? "bg-red-100 text-red-800"
+                                              : row.status === "Succeeded"
+                                              ? "bg-emerald-100 text-emerald-800"
+                                              : "bg-gray-100 text-gray-700"
+                                          }`}
+                                        >
+                                          {row.status}
+                                        </span>
+                                      </td>
+                                    );
+                                  case "attempts":
+                                    return (
+                                      <td key={col.key} className="px-3 py-2 text-right text-gray-700">
+                                        {row.attemptNumber || "—"}
+                                      </td>
+                                    );
+                                  case "failureCode":
+                                    return (
+                                      <td key={col.key} className="px-3 py-2 font-mono text-xs">
+                                        {row.failureCode ? (
+                                          <span title={entry?.description ?? ""}>
+                                            {formatErrorCode(row.failureCode)}
+                                          </span>
+                                        ) : (
+                                          <span className="text-gray-400">—</span>
+                                        )}
+                                      </td>
+                                    );
+                                  case "duration":
+                                    return (
+                                      <td key={col.key} className="px-3 py-2 text-right text-gray-700">
+                                        {formatDuration(row.durationSeconds)}
+                                      </td>
+                                    );
+                                  default:
+                                    return null;
+                                }
+                              })}
                             </tr>
                           );
                         })}
