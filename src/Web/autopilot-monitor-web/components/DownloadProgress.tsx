@@ -233,6 +233,26 @@ export default function DownloadProgress({ events, summaryStats }: DownloadProgr
     return hasAny ? sum : null;
   }, [downloads]);
 
+  // Aggregate P2P usage across all downloads (peers vs HTTP).
+  // Returns null when no DO telemetry is available (e.g. WinGet/Store-only sessions).
+  const totalP2P = useMemo(() => {
+    let peers = 0;
+    let http = 0;
+    for (const dl of downloads) {
+      if (dl.doStats) {
+        peers += dl.doStats.bytesFromPeers || 0;
+        http += dl.doStats.bytesFromHttp || 0;
+      }
+    }
+    const total = peers + http;
+    if (total <= 0) return null;
+    return {
+      peers,
+      total,
+      percent: Math.round((peers / total) * 100),
+    };
+  }, [downloads]);
+
   const filteredDownloads = useMemo(() => {
     return showSkipped ? downloads : downloads.filter(d => !d.isSkipped);
   }, [downloads, showSkipped]);
@@ -270,6 +290,14 @@ export default function DownloadProgress({ events, summaryStats }: DownloadProgr
           {totalDuration != null && (
             <span className="text-xs text-gray-400">
               — Total: {formatDuration(totalDuration)}
+            </span>
+          )}
+          {totalP2P != null && (
+            <span
+              className="text-xs text-gray-400"
+              title={`${formatBytes(totalP2P.peers)} from peers of ${formatBytes(totalP2P.total)} total`}
+            >
+              — P2P: {totalP2P.percent}%
             </span>
           )}
           <div className="flex items-center space-x-2 text-xs">
