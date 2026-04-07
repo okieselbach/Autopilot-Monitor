@@ -8,18 +8,21 @@ using Microsoft.Extensions.Logging;
 namespace AutopilotMonitor.Functions.Functions.Apps
 {
     /// <summary>
-    /// GET /api/apps/{appName}/analytics?days=30
-    /// Per-tenant drill-down for a single app: time series, version breakdown,
-    /// installer phase breakdown, top failure codes, device-model correlation.
+    /// GET /api/global/apps/{appName}/sessions?days=30&amp;status=failed[&amp;tenantId=GUID][&amp;model=X][&amp;version=Y][&amp;offset=N][&amp;limit=N]
+    /// Global Admin variant of <see cref="GetAppSessionsFunction"/>.
+    /// Authorization: GlobalAdminOnly.
     /// </summary>
-    public class GetAppAnalyticsFunction
+    public class GetGlobalAppSessionsFunction
     {
-        private readonly ILogger<GetAppAnalyticsFunction> _logger;
+        private const int DefaultLimit = 50;
+        private const int MaxLimit = 200;
+
+        private readonly ILogger<GetGlobalAppSessionsFunction> _logger;
         private readonly IMetricsRepository _metricsRepo;
         private readonly ISessionRepository _sessionRepo;
 
-        public GetAppAnalyticsFunction(
-            ILogger<GetAppAnalyticsFunction> logger,
+        public GetGlobalAppSessionsFunction(
+            ILogger<GetGlobalAppSessionsFunction> logger,
             IMetricsRepository metricsRepo,
             ISessionRepository sessionRepo)
         {
@@ -28,15 +31,14 @@ namespace AutopilotMonitor.Functions.Functions.Apps
             _sessionRepo = sessionRepo;
         }
 
-        [Function("GetAppAnalytics")]
+        [Function("GetGlobalAppSessions")]
         public async Task<HttpResponseData> Run(
-            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "apps/{appName}/analytics")] HttpRequestData req,
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "global/apps/{appName}/sessions")] HttpRequestData req,
             string appName)
         {
             try
             {
-                var tenantId = TenantHelper.GetTenantId(req);
-
+                var userEmail = TenantHelper.GetUserIdentifier(req);
                 var decodedAppName = Uri.UnescapeDataString(appName ?? string.Empty);
                 if (string.IsNullOrWhiteSpace(decodedAppName))
                 {
@@ -46,13 +48,31 @@ namespace AutopilotMonitor.Functions.Functions.Apps
                 }
 
                 var query = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
+                var scopedTenantId = query["tenantId"];
                 int days = 30;
                 if (int.TryParse(query["days"], out var parsedDays) && parsedDays > 0 && parsedDays <= 365)
                     days = parsedDays;
 
-                var summaries = await AppsAnalyticsHelper.LoadSummariesAsync(_metricsRepo, tenantId);
-                var body = await AppsAnalyticsHelper.BuildAnalyticsResponseAsync(
-                    summaries, _sessionRepo, decodedAppName, days);
+                var statusFilter = (query["status"] ?? "all").Trim().ToLowerInvariant();
+                var modelFilter = query["model"];
+                var versionFilter = query["version"];
+
+                int offset = 0;
+                if (int.TryParse(query["offset"], out var parsedOffset) && parsedOffset >= 0)
+                    offset = parsedOffset;
+
+                int limit = DefaultLimit;
+                if (int.TryParse(query["limit"], out var parsedLimit) && parsedLimit > 0)
+                    limit = Math.Min(parsedLimit, MaxLimit);
+
+                _logger.LogInformation(
+                    "Global apps/{App}/sessions requested (user: {User}, tenantId: {TenantId})",
+                    decodedAppName, userEmail, scopedTenantId ?? "<all>");
+
+                var summaries = await AppsAnalyticsHelper.LoadSummariesAsync(_metricsRepo, scopedTenantId);
+                var body = await AppsAnalyticsHelper.BuildSessionsResponseAsync(
+                    summaries, _sessionRepo, decodedAppName, days,
+                    statusFilter, modelFilter, versionFilter, offset, limit);
 
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(body);
@@ -60,14 +80,14 @@ namespace AutopilotMonitor.Functions.Functions.Apps
             }
             catch (UnauthorizedAccessException ex)
             {
-                _logger.LogWarning(ex, "Unauthorized apps/analytics request");
+                _logger.LogWarning(ex, "Unauthorized global/apps/sessions request");
                 var unauth = req.CreateResponse(HttpStatusCode.Unauthorized);
                 await unauth.WriteAsJsonAsync(new { success = false, message = "Unauthorized" });
                 return unauth;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error fetching app analytics");
+                _logger.LogError(ex, "Error fetching global app sessions");
                 var errorResponse = req.CreateResponse(HttpStatusCode.InternalServerError);
                 await errorResponse.WriteAsJsonAsync(new { success = false, message = "Internal server error" });
                 return errorResponse;

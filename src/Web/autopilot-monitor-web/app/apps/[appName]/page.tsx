@@ -10,7 +10,13 @@ import { useNotifications } from "../../../contexts/NotificationContext";
 import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 import { getErrorCodeEntry, formatErrorCode } from "@/lib/errorCodeMap";
+import { useAdminMode } from "@/hooks/useAdminMode";
 import { chartColors } from "../../../components/charts/chartTheme";
+
+interface TenantInfo {
+  tenantId: string;
+  domainName: string;
+}
 
 // Lazy-load recharts on the detail page only — keeps the rest of the app's
 // initial bundle untouched.
@@ -130,6 +136,11 @@ export default function AppDetailPage() {
     return d === 7 || d === 30 || d === 90 ? d : 30;
   })();
 
+  // Initial global-admin scope from URL: ?global=1[&tenantId=...]
+  // We mirror this into selectedTenantId; "" means aggregated across all tenants.
+  const urlGlobal = searchParams?.get("global") === "1";
+  const urlTenantId = searchParams?.get("tenantId") ?? "";
+
   const [days, setDays] = useState<7 | 30 | 90>(initialDays as 7 | 30 | 90);
   const [analytics, setAnalytics] = useState<AnalyticsResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -141,18 +152,64 @@ export default function AppDetailPage() {
   const [sessionsOffset, setSessionsOffset] = useState(0);
 
   const { tenantId } = useTenant();
-  const { getAccessToken } = useAuth();
+  const { getAccessToken, user } = useAuth();
   const { addNotification } = useNotifications();
+  const { globalAdminMode } = useAdminMode();
+
+  const isGlobalAdmin = globalAdminMode && user?.isGlobalAdmin;
+  // URL-flag takes priority for initial scope; if the global banner is active
+  // but URL didn't specify, we default to aggregated (empty string).
+  const [selectedTenantId, setSelectedTenantId] = useState<string>(
+    isGlobalAdmin ? urlTenantId : ""
+  );
+  const [tenants, setTenants] = useState<TenantInfo[]>([]);
+
+  const useGlobalEndpoint = Boolean(isGlobalAdmin && (urlGlobal || selectedTenantId !== tenantId || !tenantId));
+  const isAggregatedGlobalView = Boolean(isGlobalAdmin && !selectedTenantId);
+  const isGlobalOverride = Boolean(
+    isGlobalAdmin && selectedTenantId && selectedTenantId !== tenantId
+  );
+
+  const selectedTenantName = useMemo(
+    () => tenants.find((t) => t.tenantId === selectedTenantId)?.domainName,
+    [tenants, selectedTenantId]
+  );
+
   const hasInitialFetch = useRef(false);
 
+  // Fetch tenant list once in global mode.
+  useEffect(() => {
+    if (!isGlobalAdmin) return;
+    const loadTenants = async () => {
+      try {
+        const response = await authenticatedFetch(api.config.all(), getAccessToken);
+        if (response.ok) {
+          const data = await response.json();
+          const mapped: TenantInfo[] = data.map((t: { tenantId: string; domainName: string }) => ({
+            tenantId: t.tenantId,
+            domainName: t.domainName || "",
+          }));
+          mapped.sort((a, b) =>
+            (a.domainName || a.tenantId).localeCompare(b.domainName || b.tenantId)
+          );
+          setTenants(mapped);
+        }
+      } catch (err) {
+        console.error("Error fetching tenant list:", err);
+      }
+    };
+    loadTenants();
+  }, [isGlobalAdmin, getAccessToken]);
+
   const fetchAnalytics = async () => {
-    if (!tenantId || !appName) return;
+    if (!appName) return;
+    if (!isGlobalAdmin && !tenantId) return;
     try {
       setLoading(true);
-      const response = await authenticatedFetch(
-        api.apps.analytics(tenantId, appName, days),
-        getAccessToken
-      );
+      const url = useGlobalEndpoint
+        ? api.apps.globalAnalytics(appName, days, selectedTenantId || undefined)
+        : api.apps.analytics(tenantId, appName, days);
+      const response = await authenticatedFetch(url, getAccessToken);
       if (response.ok) {
         setAnalytics((await response.json()) as AnalyticsResponse);
       } else {
@@ -181,13 +238,14 @@ export default function AppDetailPage() {
   };
 
   const fetchSessions = async (offset: number, status: typeof statusFilter) => {
-    if (!tenantId || !appName) return;
+    if (!appName) return;
+    if (!isGlobalAdmin && !tenantId) return;
     try {
       setSessionsLoading(true);
-      const response = await authenticatedFetch(
-        api.apps.sessions(tenantId, appName, days, status, offset, SESSIONS_PAGE_SIZE),
-        getAccessToken
-      );
+      const url = useGlobalEndpoint
+        ? api.apps.globalSessions(appName, days, status, offset, SESSIONS_PAGE_SIZE, selectedTenantId || undefined)
+        : api.apps.sessions(tenantId, appName, days, status, offset, SESSIONS_PAGE_SIZE);
+      const response = await authenticatedFetch(url, getAccessToken);
       if (response.ok) {
         setSessions((await response.json()) as SessionsResponse);
       }
@@ -201,13 +259,13 @@ export default function AppDetailPage() {
   };
 
   useEffect(() => {
-    if (!tenantId) return;
+    if (!isGlobalAdmin && !tenantId) return;
     if (hasInitialFetch.current) return;
     hasInitialFetch.current = true;
     fetchAnalytics();
     fetchSessions(0, statusFilter);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tenantId]);
+  }, [tenantId, isGlobalAdmin]);
 
   useEffect(() => {
     if (!hasInitialFetch.current) return;
@@ -215,7 +273,7 @@ export default function AppDetailPage() {
     setSessionsOffset(0);
     fetchSessions(0, statusFilter);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [days]);
+  }, [days, selectedTenantId]);
 
   function formatDuration(s: number) {
     if (!s) return "—";
@@ -238,10 +296,35 @@ export default function AppDetailPage() {
   return (
     <ProtectedRoute>
       <div className="min-h-screen bg-gray-50">
+        {isGlobalAdmin && (
+          <div className="bg-purple-700 text-white text-sm px-4 py-2 flex items-center justify-center space-x-2">
+            <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span className="font-medium">Global Admin View</span>
+            <span className="text-purple-300">
+              &mdash;{" "}
+              {isAggregatedGlobalView
+                ? "aggregating across all tenants"
+                : isGlobalOverride
+                ? `viewing tenant ${selectedTenantName ?? selectedTenantId}`
+                : "access to all tenants"}
+            </span>
+          </div>
+        )}
         <header className="bg-white shadow">
           <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
             <button
-              onClick={() => router.push("/apps")}
+              onClick={() => {
+                // Preserve global scope when navigating back to the list
+                const params = new URLSearchParams();
+                if (isGlobalAdmin) {
+                  params.set("global", "1");
+                  if (selectedTenantId) params.set("tenantId", selectedTenantId);
+                }
+                const qs = params.toString();
+                router.push(`/apps${qs ? `?${qs}` : ""}`);
+              }}
               className="text-sm text-blue-600 hover:underline mb-2 inline-flex items-center"
             >
               ← Back to all apps
@@ -262,7 +345,26 @@ export default function AppDetailPage() {
                     : ""}
                 </p>
               </div>
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center gap-3">
+                {isGlobalAdmin && tenants.length > 0 && (
+                  <>
+                    <label className="text-sm text-gray-500 hidden sm:inline">Tenant:</label>
+                    <select
+                      value={selectedTenantId}
+                      onChange={(e) => setSelectedTenantId(e.target.value)}
+                      className="text-sm border border-gray-300 rounded-md px-2 py-1.5 max-w-[220px] sm:max-w-xs"
+                    >
+                      <option value="">All tenants (aggregated)</option>
+                      {tenants.map((t) => (
+                        <option key={t.tenantId} value={t.tenantId}>
+                          {t.domainName
+                            ? `${t.domainName} (${t.tenantId.substring(0, 8)}…)`
+                            : t.tenantId}
+                        </option>
+                      ))}
+                    </select>
+                  </>
+                )}
                 {([7, 30, 90] as const).map((d) => (
                   <button
                     key={d}

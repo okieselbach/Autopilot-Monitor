@@ -10,6 +10,11 @@ import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 import { useAdminMode } from "@/hooks/useAdminMode";
 
+interface TenantInfo {
+  tenantId: string;
+  domainName: string;
+}
+
 interface AppRow {
   appName: string;
   appType: string;
@@ -53,19 +58,66 @@ export default function AppsPage() {
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
   const { tenantId } = useTenant();
-  const { getAccessToken } = useAuth();
+  const { getAccessToken, user } = useAuth();
   const { addNotification } = useNotifications();
   const { globalAdminMode } = useAdminMode();
+
+  // Global admin: tenant selector state
+  const [tenants, setTenants] = useState<TenantInfo[]>([]);
+  const [selectedTenantId, setSelectedTenantId] = useState<string>("");
+
+  const isGlobalAdmin = globalAdminMode && user?.isGlobalAdmin;
+  // "aggregated" = GA view across all tenants (no tenant selected)
+  const isAggregatedGlobalView = Boolean(isGlobalAdmin && !selectedTenantId);
+  // "override" = GA viewing a specific tenant that isn't their home tenant
+  const isGlobalOverride = Boolean(
+    isGlobalAdmin && selectedTenantId && selectedTenantId !== tenantId
+  );
+  const effectiveTenantId = isGlobalAdmin ? selectedTenantId : tenantId;
 
   const hasInitialFetch = useRef(false);
   const isTimeRangeMount = useRef(true);
 
+  // Fetch tenant list for Global Admin selector
+  useEffect(() => {
+    if (!isGlobalAdmin) return;
+    const loadTenants = async () => {
+      try {
+        const response = await authenticatedFetch(api.config.all(), getAccessToken);
+        if (response.ok) {
+          const data = await response.json();
+          const mapped: TenantInfo[] = data.map((t: { tenantId: string; domainName: string }) => ({
+            tenantId: t.tenantId,
+            domainName: t.domainName || "",
+          }));
+          mapped.sort((a, b) =>
+            (a.domainName || a.tenantId).localeCompare(b.domainName || b.tenantId)
+          );
+          setTenants(mapped);
+        }
+      } catch (err) {
+        console.error("Error fetching tenant list:", err);
+      }
+    };
+    loadTenants();
+  }, [isGlobalAdmin, getAccessToken]);
+
+  const selectedTenantName = useMemo(
+    () => tenants.find((t) => t.tenantId === selectedTenantId)?.domainName,
+    [tenants, selectedTenantId]
+  );
+
   const fetchApps = async (range: "7d" | "30d" | "90d" = timeRange) => {
-    if (!tenantId) return;
+    // Global admin can fetch aggregated view without selecting a tenant;
+    // regular users must wait for their own tenantId.
+    if (!isGlobalAdmin && !tenantId) return;
     try {
       setLoading(true);
       const days = range === "7d" ? 7 : range === "30d" ? 30 : 90;
-      const response = await authenticatedFetch(api.apps.list(tenantId, days), getAccessToken);
+      const url = isGlobalAdmin
+        ? api.apps.globalList(days, selectedTenantId || undefined)
+        : api.apps.list(tenantId, days);
+      const response = await authenticatedFetch(url, getAccessToken);
       if (response.ok) {
         const json = (await response.json()) as AppsListResponse;
         setData(json);
@@ -95,12 +147,12 @@ export default function AppsPage() {
   };
 
   useEffect(() => {
-    if (!globalAdminMode && !tenantId) return;
+    if (!isGlobalAdmin && !tenantId) return;
     if (hasInitialFetch.current) return;
     hasInitialFetch.current = true;
     fetchApps(timeRange);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tenantId, globalAdminMode]);
+  }, [tenantId, isGlobalAdmin]);
 
   useEffect(() => {
     if (isTimeRangeMount.current) {
@@ -109,7 +161,7 @@ export default function AppsPage() {
     }
     fetchApps(timeRange);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [timeRange]);
+  }, [timeRange, selectedTenantId]);
 
   const filteredAndSorted = useMemo<AppRow[]>(() => {
     if (!data?.apps) return [];
@@ -204,16 +256,51 @@ export default function AppsPage() {
   return (
     <ProtectedRoute>
       <div className="min-h-screen bg-gray-50">
+        {isGlobalAdmin && (
+          <div className="bg-purple-700 text-white text-sm px-4 py-2 flex items-center justify-center space-x-2">
+            <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span className="font-medium">Global Admin View</span>
+            <span className="text-purple-300">
+              &mdash;{" "}
+              {isAggregatedGlobalView
+                ? "aggregating across all tenants"
+                : isGlobalOverride
+                ? `viewing tenant ${selectedTenantName ?? selectedTenantId}`
+                : "access to all tenants"}
+            </span>
+          </div>
+        )}
         <header className="bg-white shadow">
           <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
             <div className="flex items-center justify-between">
               <div>
-                <h1 className="text-2xl font-normal text-gray-900">App Dashboard</h1>
+                <h1 className="text-2xl font-normal text-gray-900">App Health</h1>
                 <p className="text-sm text-gray-500 mt-1">
                   All apps observed across enrollments, sortable by failure rate, duration, and trend.
                 </p>
               </div>
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center gap-3">
+                {isGlobalAdmin && tenants.length > 0 && (
+                  <>
+                    <label className="text-sm text-gray-500 hidden sm:inline">Tenant:</label>
+                    <select
+                      value={selectedTenantId}
+                      onChange={(e) => setSelectedTenantId(e.target.value)}
+                      className="text-sm border border-gray-300 rounded-md px-2 py-1.5 max-w-[220px] sm:max-w-xs"
+                    >
+                      <option value="">All tenants (aggregated)</option>
+                      {tenants.map((t) => (
+                        <option key={t.tenantId} value={t.tenantId}>
+                          {t.domainName
+                            ? `${t.domainName} (${t.tenantId.substring(0, 8)}…)`
+                            : t.tenantId}
+                        </option>
+                      ))}
+                    </select>
+                  </>
+                )}
                 {(["7d", "30d", "90d"] as const).map((range) => (
                   <button
                     key={range}
@@ -322,9 +409,18 @@ export default function AppsPage() {
                   {filteredAndSorted.map((row) => (
                     <tr
                       key={row.appName}
-                      onClick={() =>
-                        router.push(`/apps/${encodeURIComponent(row.appName)}?days=${timeRange === "7d" ? 7 : timeRange === "30d" ? 30 : 90}`)
-                      }
+                      onClick={() => {
+                        const days = timeRange === "7d" ? 7 : timeRange === "30d" ? 30 : 90;
+                        const params = new URLSearchParams({ days: String(days) });
+                        // In Global Admin mode, propagate scope:
+                        // - aggregated view → ?global=1
+                        // - specific tenant → ?global=1&tenantId=...
+                        if (isGlobalAdmin) {
+                          params.set("global", "1");
+                          if (selectedTenantId) params.set("tenantId", selectedTenantId);
+                        }
+                        router.push(`/apps/${encodeURIComponent(row.appName)}?${params.toString()}`);
+                      }}
                       className="hover:bg-gray-50 cursor-pointer text-sm"
                     >
                       <td className="px-4 py-3 text-gray-900">

@@ -8,18 +8,18 @@ using Microsoft.Extensions.Logging;
 namespace AutopilotMonitor.Functions.Functions.Apps
 {
     /// <summary>
-    /// GET /api/apps/{appName}/analytics?days=30
-    /// Per-tenant drill-down for a single app: time series, version breakdown,
-    /// installer phase breakdown, top failure codes, device-model correlation.
+    /// GET /api/global/apps/{appName}/analytics?days=30[&amp;tenantId=GUID]
+    /// Global Admin variant of <see cref="GetAppAnalyticsFunction"/>.
+    /// Authorization: GlobalAdminOnly.
     /// </summary>
-    public class GetAppAnalyticsFunction
+    public class GetGlobalAppAnalyticsFunction
     {
-        private readonly ILogger<GetAppAnalyticsFunction> _logger;
+        private readonly ILogger<GetGlobalAppAnalyticsFunction> _logger;
         private readonly IMetricsRepository _metricsRepo;
         private readonly ISessionRepository _sessionRepo;
 
-        public GetAppAnalyticsFunction(
-            ILogger<GetAppAnalyticsFunction> logger,
+        public GetGlobalAppAnalyticsFunction(
+            ILogger<GetGlobalAppAnalyticsFunction> logger,
             IMetricsRepository metricsRepo,
             ISessionRepository sessionRepo)
         {
@@ -28,15 +28,14 @@ namespace AutopilotMonitor.Functions.Functions.Apps
             _sessionRepo = sessionRepo;
         }
 
-        [Function("GetAppAnalytics")]
+        [Function("GetGlobalAppAnalytics")]
         public async Task<HttpResponseData> Run(
-            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "apps/{appName}/analytics")] HttpRequestData req,
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "global/apps/{appName}/analytics")] HttpRequestData req,
             string appName)
         {
             try
             {
-                var tenantId = TenantHelper.GetTenantId(req);
-
+                var userEmail = TenantHelper.GetUserIdentifier(req);
                 var decodedAppName = Uri.UnescapeDataString(appName ?? string.Empty);
                 if (string.IsNullOrWhiteSpace(decodedAppName))
                 {
@@ -46,11 +45,16 @@ namespace AutopilotMonitor.Functions.Functions.Apps
                 }
 
                 var query = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
+                var scopedTenantId = query["tenantId"];
                 int days = 30;
                 if (int.TryParse(query["days"], out var parsedDays) && parsedDays > 0 && parsedDays <= 365)
                     days = parsedDays;
 
-                var summaries = await AppsAnalyticsHelper.LoadSummariesAsync(_metricsRepo, tenantId);
+                _logger.LogInformation(
+                    "Global apps/{App}/analytics requested (user: {User}, tenantId: {TenantId}, days: {Days})",
+                    decodedAppName, userEmail, scopedTenantId ?? "<all>", days);
+
+                var summaries = await AppsAnalyticsHelper.LoadSummariesAsync(_metricsRepo, scopedTenantId);
                 var body = await AppsAnalyticsHelper.BuildAnalyticsResponseAsync(
                     summaries, _sessionRepo, decodedAppName, days);
 
@@ -60,14 +64,14 @@ namespace AutopilotMonitor.Functions.Functions.Apps
             }
             catch (UnauthorizedAccessException ex)
             {
-                _logger.LogWarning(ex, "Unauthorized apps/analytics request");
+                _logger.LogWarning(ex, "Unauthorized global/apps/analytics request");
                 var unauth = req.CreateResponse(HttpStatusCode.Unauthorized);
                 await unauth.WriteAsJsonAsync(new { success = false, message = "Unauthorized" });
                 return unauth;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error fetching app analytics");
+                _logger.LogError(ex, "Error fetching global app analytics");
                 var errorResponse = req.CreateResponse(HttpStatusCode.InternalServerError);
                 await errorResponse.WriteAsJsonAsync(new { success = false, message = "Internal server error" });
                 return errorResponse;

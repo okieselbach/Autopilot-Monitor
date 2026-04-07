@@ -138,7 +138,7 @@ export const NAV_GROUPS: NavGroup[] = [
     visibility: "adminOrOperator",
     items: [
       { id: "fleet-health", label: "Fleet Health", href: "/fleet-health", icon: <ChartBarIcon /> },
-      { id: "apps", label: "Apps", href: "/apps", icon: <CubeIcon /> },
+      { id: "apps", label: "App Health", href: "/apps", icon: <CubeIcon /> },
       { id: "usage-metrics", label: "Usage Metrics", href: "/usage-metrics", icon: <TrendingUpIcon /> },
       { id: "geographic-performance", label: "Geographic Perf.", href: "/geographic-performance", icon: <GlobeAltIcon /> },
       { id: "progress", label: "Progress Portal", href: "/progress", icon: <MonitorIcon /> },

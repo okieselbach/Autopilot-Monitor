@@ -170,6 +170,33 @@ export const api = {
         model,
         version,
       })}`,
+
+    // Global Admin variants — tenantId is optional:
+    //   - undefined → aggregates across ALL tenants
+    //   - provided → returns per-tenant view for any tenant (GA override)
+    globalList: (days: number, tenantId?: string) =>
+      `${API_BASE_URL}/api/global/apps/list${qs({ days: String(days), tenantId })}`,
+    globalAnalytics: (appName: string, days: number, tenantId?: string) =>
+      `${API_BASE_URL}/api/global/apps/${encodeURIComponent(appName)}/analytics${qs({ days: String(days), tenantId })}`,
+    globalSessions: (
+      appName: string,
+      days: number,
+      status: "all" | "failed" | "succeeded" = "all",
+      offset = 0,
+      limit = 50,
+      tenantId?: string,
+      model?: string,
+      version?: string
+    ) =>
+      `${API_BASE_URL}/api/global/apps/${encodeURIComponent(appName)}/sessions${qs({
+        days: String(days),
+        status,
+        offset: String(offset),
+        limit: String(limit),
+        tenantId,
+        model,
+        version,
+      })}`,
   },
 
   // ── Diagnostics ───────────────────────────────────────────────────────────

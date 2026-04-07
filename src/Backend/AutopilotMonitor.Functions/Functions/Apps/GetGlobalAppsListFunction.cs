@@ -8,37 +8,42 @@ using Microsoft.Extensions.Logging;
 namespace AutopilotMonitor.Functions.Functions.Apps
 {
     /// <summary>
-    /// GET /api/apps/list?days=30
-    /// Returns ALL apps observed for the caller's tenant in the window.
-    /// Delegates aggregation to <see cref="AppsAnalyticsHelper"/> so the
-    /// response shape stays identical to the global variant.
+    /// GET /api/global/apps/list?days=30[&amp;tenantId=GUID]
+    /// Global Admin variant of <see cref="GetAppsListFunction"/>.
+    /// - Without tenantId: aggregates all apps across all tenants.
+    /// - With tenantId: returns the same data as the per-tenant endpoint, but for any tenant.
+    /// Authorization: GlobalAdminOnly (enforced by PolicyEnforcementMiddleware).
     /// </summary>
-    public class GetAppsListFunction
+    public class GetGlobalAppsListFunction
     {
-        private readonly ILogger<GetAppsListFunction> _logger;
+        private readonly ILogger<GetGlobalAppsListFunction> _logger;
         private readonly IMetricsRepository _metricsRepo;
 
-        public GetAppsListFunction(ILogger<GetAppsListFunction> logger, IMetricsRepository metricsRepo)
+        public GetGlobalAppsListFunction(ILogger<GetGlobalAppsListFunction> logger, IMetricsRepository metricsRepo)
         {
             _logger = logger;
             _metricsRepo = metricsRepo;
         }
 
-        [Function("GetAppsList")]
+        [Function("GetGlobalAppsList")]
         public async Task<HttpResponseData> Run(
-            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "apps/list")] HttpRequestData req)
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "global/apps/list")] HttpRequestData req)
         {
             try
             {
-                // Authentication + MemberRead authorization enforced by PolicyEnforcementMiddleware
-                var tenantId = TenantHelper.GetTenantId(req);
-
+                var userEmail = TenantHelper.GetUserIdentifier(req);
                 var query = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
+
+                var scopedTenantId = query["tenantId"];
                 int days = 30;
                 if (int.TryParse(query["days"], out var parsedDays) && parsedDays > 0 && parsedDays <= 365)
                     days = parsedDays;
 
-                var summaries = await AppsAnalyticsHelper.LoadSummariesAsync(_metricsRepo, tenantId);
+                _logger.LogInformation(
+                    "Global apps/list requested (user: {User}, tenantId: {TenantId}, days: {Days})",
+                    userEmail, scopedTenantId ?? "<all>", days);
+
+                var summaries = await AppsAnalyticsHelper.LoadSummariesAsync(_metricsRepo, scopedTenantId);
                 var body = AppsAnalyticsHelper.BuildAppsListResponse(summaries, days);
 
                 var response = req.CreateResponse(HttpStatusCode.OK);
@@ -47,14 +52,14 @@ namespace AutopilotMonitor.Functions.Functions.Apps
             }
             catch (UnauthorizedAccessException ex)
             {
-                _logger.LogWarning(ex, "Unauthorized apps/list request");
+                _logger.LogWarning(ex, "Unauthorized global/apps/list request");
                 var unauth = req.CreateResponse(HttpStatusCode.Unauthorized);
                 await unauth.WriteAsJsonAsync(new { success = false, message = "Unauthorized" });
                 return unauth;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error fetching apps list");
+                _logger.LogError(ex, "Error fetching global apps list");
                 var errorResponse = req.CreateResponse(HttpStatusCode.InternalServerError);
                 await errorResponse.WriteAsJsonAsync(new { success = false, message = "Internal server error" });
                 return errorResponse;
