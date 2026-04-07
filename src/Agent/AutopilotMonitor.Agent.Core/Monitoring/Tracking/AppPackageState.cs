@@ -96,6 +96,16 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         public string ExitCode { get; private set; }
         public string HResultFromWin32 { get; private set; }
 
+        // App metadata (captured from IME log patterns — used by App Dashboard / reports)
+        /// <summary>Product version detected after install (e.g. "11.2.1787.0"). From ReportingManager DetectedIdentityVersion.</summary>
+        public string AppVersion { get; private set; }
+        /// <summary>App installer type: "Win32", "MSI", "WinGet", "Store", "LOB". Derived from [WinGetApp]/MSI markers.</summary>
+        public string AppType { get; private set; }
+        /// <summary>Install attempt number (1 = first try). Increments on each "Execute retry N" line per check-in cycle.</summary>
+        public int AttemptNumber { get; private set; }
+        /// <summary>Detection rule result: "Detected" or "NotDetected". From DetectionActionHandler log lines.</summary>
+        public string DetectionResult { get; private set; }
+
         // Delivery Optimization telemetry (populated from [DO TEL] log entries)
         public long DoFileSize { get; private set; }
         public long DoTotalBytesDownloaded { get; private set; }
@@ -148,7 +158,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             long doBytesFromLanPeers = 0, long doBytesFromGroupPeers = 0,
             long doBytesFromInternetPeers = 0, int doDownloadMode = -1,
             string doDownloadDuration = null, long doBytesFromHttp = 0,
-            bool hasDoTelemetry = false)
+            bool hasDoTelemetry = false,
+            string appVersion = null, string appType = null,
+            int attemptNumber = 0, string detectionResult = null)
         {
             var pkg = new AppPackageState(id, listPos)
             {
@@ -178,7 +190,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 DoDownloadMode = doDownloadMode,
                 DoDownloadDuration = doDownloadDuration,
                 DoBytesFromHttp = doBytesFromHttp,
-                HasDoTelemetry = hasDoTelemetry
+                HasDoTelemetry = hasDoTelemetry,
+                AppVersion = appVersion,
+                AppType = appType,
+                AttemptNumber = attemptNumber,
+                DetectionResult = detectionResult
             };
             return pkg;
         }
@@ -265,6 +281,58 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         public void UpdateHResult(string code)
         {
             HResultFromWin32 = code;
+        }
+
+        /// <summary>
+        /// Updates the product version detected for this app (e.g. "11.2.1787.0").
+        /// Only applies non-empty values so a later detection without version cannot wipe it.
+        /// </summary>
+        public bool UpdateAppVersion(string version)
+        {
+            if (string.IsNullOrWhiteSpace(version)) return false;
+            if (AppVersion == version) return false;
+            AppVersion = version.Trim();
+            return true;
+        }
+
+        /// <summary>
+        /// Updates the app installer type. Only sets when current is empty OR
+        /// when the incoming value is more specific than the existing one
+        /// (e.g. "WinGet"/"MSI" override the "Win32" default).
+        /// </summary>
+        public bool UpdateAppType(string type)
+        {
+            if (string.IsNullOrWhiteSpace(type)) return false;
+            if (AppType == type) return false;
+            // Do not let a generic "Win32" downgrade a previously determined "WinGet"/"MSI".
+            if (!string.IsNullOrEmpty(AppType) && type == "Win32"
+                && (AppType == "WinGet" || AppType == "MSI" || AppType == "Store" || AppType == "LOB"))
+                return false;
+            AppType = type;
+            return true;
+        }
+
+        /// <summary>
+        /// Updates the install attempt number. Keeps the highest observed value
+        /// so it is monotonic across log batches.
+        /// </summary>
+        public bool UpdateAttemptNumber(int attempt)
+        {
+            if (attempt <= AttemptNumber) return false;
+            AttemptNumber = attempt;
+            return true;
+        }
+
+        /// <summary>
+        /// Updates the detection rule result ("Detected" / "NotDetected").
+        /// Applies any non-empty value so the latest detection wins.
+        /// </summary>
+        public bool UpdateDetectionResult(string result)
+        {
+            if (string.IsNullOrWhiteSpace(result)) return false;
+            if (DetectionResult == result) return false;
+            DetectionResult = result.Trim();
+            return true;
         }
 
         /// <summary>
@@ -449,6 +517,16 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 data["exitCode"] = ExitCode;
             if (!string.IsNullOrEmpty(HResultFromWin32))
                 data["hresultFromWin32"] = HResultFromWin32;
+
+            // App metadata fields (emitted whenever available so ingest can merge them).
+            if (!string.IsNullOrEmpty(AppVersion))
+                data["appVersion"] = AppVersion;
+            if (!string.IsNullOrEmpty(AppType))
+                data["appType"] = AppType;
+            if (AttemptNumber > 0)
+                data["attemptNumber"] = AttemptNumber;
+            if (!string.IsNullOrEmpty(DetectionResult))
+                data["detectionResult"] = DetectionResult;
 
             if (HasDoTelemetry)
             {

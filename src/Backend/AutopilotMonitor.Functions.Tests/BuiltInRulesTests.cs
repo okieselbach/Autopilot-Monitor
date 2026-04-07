@@ -137,7 +137,9 @@ public class BuiltInRulesTests
             "cancelStuckAndSetCurrent", "imeSessionChange", "imeImpersonation",
             "enrollmentCompleted", "updateDoTelemetry", "scriptStarted",
             "scriptContext", "scriptExitCode", "scriptOutput", "scriptCompleted",
-            "captureExitCode", "captureHResult"
+            "captureExitCode", "captureHResult",
+            "captureAppVersion", "captureAppTypeWinGet", "captureAppTypeMsi",
+            "captureAttemptNumber", "captureDetectionResult"
         };
 
         var patterns = BuiltInImeLogPatterns.GetAll();

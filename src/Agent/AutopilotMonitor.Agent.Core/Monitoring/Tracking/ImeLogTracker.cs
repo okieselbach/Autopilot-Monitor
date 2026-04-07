@@ -329,7 +329,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                         doBytesFromLanPeers: p.DoBytesFromLanPeers, doBytesFromGroupPeers: p.DoBytesFromGroupPeers,
                         doBytesFromInternetPeers: p.DoBytesFromInternetPeers, doDownloadMode: p.DoDownloadMode,
                         doDownloadDuration: p.DoDownloadDuration, doBytesFromHttp: p.DoBytesFromHttp,
-                        hasDoTelemetry: p.HasDoTelemetry);
+                        hasDoTelemetry: p.HasDoTelemetry,
+                        appVersion: p.AppVersion, appType: p.AppType,
+                        attemptNumber: p.AttemptNumber, detectionResult: p.DetectionResult);
                     _packageStates.Add(pkg);
                 }
             }
@@ -399,7 +401,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     DoDownloadMode = p.DoDownloadMode,
                     DoDownloadDuration = p.DoDownloadDuration,
                     DoBytesFromHttp = p.DoBytesFromHttp,
-                    HasDoTelemetry = p.HasDoTelemetry
+                    HasDoTelemetry = p.HasDoTelemetry,
+                    AppVersion = p.AppVersion,
+                    AppType = p.AppType,
+                    AttemptNumber = p.AttemptNumber,
+                    DetectionResult = p.DetectionResult
                 }).ToList(),
                 FilePositions = new Dictionary<string, FilePositionData>()
             };

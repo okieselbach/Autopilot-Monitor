@@ -1,0 +1,12 @@
+{
+  "$schema": "../schema/ime-log-pattern.schema.json",
+  "patternId": "IME-ATTEMPT-NUMBER",
+  "category": "currentPhase",
+  "pattern": "\\[Win32App\\] ===Step=== Execute retry (?<attempt>\\d+)$",
+  "action": "captureAttemptNumber",
+  "parameters": {
+    "useCurrentApp": "true"
+  },
+  "description": "Captures the install attempt number for the current app. IME logs 'Execute retry 0' for the first attempt and increments on each retry. Reported as attempt+1 so retry 0 becomes AttemptNumber=1 (human-friendly: first attempt).",
+  "enabled": true
+}

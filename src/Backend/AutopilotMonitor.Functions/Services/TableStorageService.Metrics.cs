@@ -206,6 +206,48 @@ namespace AutopilotMonitor.Functions.Services
                             summary.DoBytesFromInternetPeers = existing.GetInt64("DoBytesFromInternetPeers") ?? 0;
                         }
                     }
+
+                    // Preserve app metadata fields: AppVersion, AppType, AttemptNumber come from app_install_started
+                    // and must not be wiped by a later _completed/_failed batch that doesn't re-emit them.
+                    if (string.IsNullOrEmpty(summary.AppVersion))
+                    {
+                        var existingAppVersion = existing.GetString("AppVersion");
+                        if (!string.IsNullOrEmpty(existingAppVersion))
+                            summary.AppVersion = existingAppVersion;
+                    }
+                    if (string.IsNullOrEmpty(summary.AppType))
+                    {
+                        var existingAppType = existing.GetString("AppType");
+                        if (!string.IsNullOrEmpty(existingAppType))
+                            summary.AppType = existingAppType;
+                    }
+                    if (summary.AttemptNumber == 0)
+                    {
+                        var existingAttempt = existing.GetInt32("AttemptNumber");
+                        if (existingAttempt.HasValue && existingAttempt.Value > 0)
+                            summary.AttemptNumber = existingAttempt.Value;
+                    }
+                    // InstallerPhase only makes sense on failure — preserve if current batch didn't set one.
+                    if (string.IsNullOrEmpty(summary.InstallerPhase))
+                    {
+                        var existingPhase = existing.GetString("InstallerPhase");
+                        if (!string.IsNullOrEmpty(existingPhase))
+                            summary.InstallerPhase = existingPhase;
+                    }
+                    // ExitCode: preserve prior value if current batch didn't emit one (nullable).
+                    if (!summary.ExitCode.HasValue)
+                    {
+                        var existingExitCode = existing.GetInt32("ExitCode");
+                        if (existingExitCode.HasValue)
+                            summary.ExitCode = existingExitCode.Value;
+                    }
+                    // DetectionResult: preserve prior value.
+                    if (string.IsNullOrEmpty(summary.DetectionResult))
+                    {
+                        var existingDetection = existing.GetString("DetectionResult");
+                        if (!string.IsNullOrEmpty(existingDetection))
+                            summary.DetectionResult = existingDetection;
+                    }
                 }
 
                 var entity = new TableEntity(summary.TenantId, rowKey)
@@ -231,7 +273,14 @@ namespace AutopilotMonitor.Functions.Services
                     ["DoDownloadDuration"] = summary.DoDownloadDuration ?? string.Empty,
                     ["DoBytesFromLanPeers"] = summary.DoBytesFromLanPeers,
                     ["DoBytesFromGroupPeers"] = summary.DoBytesFromGroupPeers,
-                    ["DoBytesFromInternetPeers"] = summary.DoBytesFromInternetPeers
+                    ["DoBytesFromInternetPeers"] = summary.DoBytesFromInternetPeers,
+                    // App metadata (from IME log parsing)
+                    ["AppVersion"] = summary.AppVersion ?? string.Empty,
+                    ["AppType"] = summary.AppType ?? string.Empty,
+                    ["AttemptNumber"] = summary.AttemptNumber,
+                    ["InstallerPhase"] = summary.InstallerPhase ?? string.Empty,
+                    ["ExitCode"] = summary.ExitCode,
+                    ["DetectionResult"] = summary.DetectionResult ?? string.Empty
                 };
 
                 await tableClient.UpsertEntityAsync(entity);
@@ -321,7 +370,14 @@ namespace AutopilotMonitor.Functions.Services
                 DoDownloadDuration = entity.GetString("DoDownloadDuration") ?? string.Empty,
                 DoBytesFromLanPeers = entity.GetInt64("DoBytesFromLanPeers") ?? 0,
                 DoBytesFromGroupPeers = entity.GetInt64("DoBytesFromGroupPeers") ?? 0,
-                DoBytesFromInternetPeers = entity.GetInt64("DoBytesFromInternetPeers") ?? 0
+                DoBytesFromInternetPeers = entity.GetInt64("DoBytesFromInternetPeers") ?? 0,
+                // App metadata (from IME log parsing)
+                AppVersion = entity.GetString("AppVersion") ?? string.Empty,
+                AppType = entity.GetString("AppType") ?? string.Empty,
+                AttemptNumber = entity.GetInt32("AttemptNumber") ?? 0,
+                InstallerPhase = entity.GetString("InstallerPhase") ?? string.Empty,
+                ExitCode = entity.GetInt32("ExitCode"),
+                DetectionResult = entity.GetString("DetectionResult") ?? string.Empty
             };
         }
 

@@ -66,5 +66,24 @@ namespace AutopilotMonitor.Shared.Models
 
         /// <summary>DO: bytes from internet peers</summary>
         public long DoBytesFromInternetPeers { get; set; }
+
+        // App metadata (extracted from IME logs by ImeLogTracker)
+        /// <summary>App version string (e.g. "1.7.00.4472"). Emitted in app_install_started.</summary>
+        public string AppVersion { get; set; } = string.Empty;
+
+        /// <summary>App type: Win32, MSI, WinGet, Store, LOB. Emitted in app_install_started.</summary>
+        public string AppType { get; set; } = string.Empty;
+
+        /// <summary>Install attempt number (1 = first try, 2+ = retry). Emitted in app_install_started.</summary>
+        public int AttemptNumber { get; set; }
+
+        /// <summary>Installer phase where failure occurred: Download, PreInstall, Install, PostInstall, Detection. Emitted in app_install_failed.</summary>
+        public string InstallerPhase { get; set; } = string.Empty;
+
+        /// <summary>Installer exit code (nullable – not every app type emits one). Emitted in app_install_completed/failed.</summary>
+        public int? ExitCode { get; set; }
+
+        /// <summary>Detection rule result after install: Detected, NotDetected. Emitted in app_install_completed/failed.</summary>
+        public string DetectionResult { get; set; } = string.Empty;
     }
 }

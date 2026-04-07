@@ -69,7 +69,12 @@
             "scriptOutput",
             "scriptCompleted",
             "captureExitCode",
-            "captureHResult"
+            "captureHResult",
+            "captureAppVersion",
+            "captureAppTypeWinGet",
+            "captureAppTypeMsi",
+            "captureAttemptNumber",
+            "captureDetectionResult"
           ]
         },
         "parameters": {

@@ -145,6 +145,33 @@ export const api = {
     platform: () => `${API_BASE_URL}/api/global/metrics/platform`,
   },
 
+  // ── Apps Dashboard ────────────────────────────────────────────────────────
+  apps: {
+    list: (tenantId: string, days: number) =>
+      `${API_BASE_URL}/api/apps/list${qs({ tenantId, days: String(days) })}`,
+    analytics: (tenantId: string, appName: string, days: number) =>
+      `${API_BASE_URL}/api/apps/${encodeURIComponent(appName)}/analytics${qs({ tenantId, days: String(days) })}`,
+    sessions: (
+      tenantId: string,
+      appName: string,
+      days: number,
+      status: "all" | "failed" | "succeeded" = "all",
+      offset = 0,
+      limit = 50,
+      model?: string,
+      version?: string
+    ) =>
+      `${API_BASE_URL}/api/apps/${encodeURIComponent(appName)}/sessions${qs({
+        tenantId,
+        days: String(days),
+        status,
+        offset: String(offset),
+        limit: String(limit),
+        model,
+        version,
+      })}`,
+  },
+
   // ── Diagnostics ───────────────────────────────────────────────────────────
   diagnostics: {
     downloadUrl: (tenantId: string, blobName: string) =>

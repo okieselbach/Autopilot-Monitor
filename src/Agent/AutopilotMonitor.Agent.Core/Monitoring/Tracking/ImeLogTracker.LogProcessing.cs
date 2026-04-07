@@ -281,6 +281,39 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                             _packageStates.GetPackage(_packageStates.CurrentPackageId)?.UpdateHResult(hresultVal);
                         break;
 
+                    case "captureappversion":
+                        var appVersionVal = match.Groups["appVersion"]?.Value;
+                        if (!string.IsNullOrEmpty(id) && !string.IsNullOrEmpty(appVersionVal))
+                            _packageStates.GetPackage(id)?.UpdateAppVersion(appVersionVal);
+                        break;
+
+                    case "captureapptypewinget":
+                        if (!string.IsNullOrEmpty(id))
+                            _packageStates.GetPackage(id)?.UpdateAppType("WinGet");
+                        break;
+
+                    case "captureapptypemsi":
+                        if (!string.IsNullOrEmpty(id))
+                            _packageStates.GetPackage(id)?.UpdateAppType("MSI");
+                        break;
+
+                    case "captureattemptnumber":
+                        // IME logs "Execute retry 0" for the first attempt. We report attempt+1 so
+                        // the human-friendly value starts at 1 (first attempt).
+                        var attemptVal = match.Groups["attempt"]?.Value;
+                        if (!string.IsNullOrEmpty(attemptVal) && int.TryParse(attemptVal, out var attemptIdx)
+                            && !string.IsNullOrEmpty(_packageStates.CurrentPackageId))
+                        {
+                            _packageStates.GetPackage(_packageStates.CurrentPackageId)?.UpdateAttemptNumber(attemptIdx + 1);
+                        }
+                        break;
+
+                    case "capturedetectionresult":
+                        var detectionVal = match.Groups["detection"]?.Value;
+                        if (!string.IsNullOrEmpty(id) && !string.IsNullOrEmpty(detectionVal))
+                            _packageStates.GetPackage(id)?.UpdateDetectionResult(detectionVal);
+                        break;
+
                     case "updatestatepostponed":
                         if (!string.IsNullOrEmpty(id))
                         {

@@ -95,6 +95,41 @@
       "enabled": true
     },
     {
+      "patternId": "IME-APP-TYPE-MSI",
+      "category": "always",
+      "pattern": "\\[Win32App\\].*?\\bMSI App (?<id>{GUID})",
+      "action": "captureAppTypeMsi",
+      "description": "Detects an MSI-based Win32 app via the 'MSI App <guid>' phrase in the ESP retry configuration line. Marks AppType as 'MSI' for that app id.",
+      "enabled": true
+    },
+    {
+      "patternId": "IME-APP-TYPE-WINGET",
+      "category": "always",
+      "pattern": "\\[Win32App\\]\\[WinGetApp\\].*?app with id: (?<id>{GUID})",
+      "action": "captureAppTypeWinGet",
+      "description": "Detects a WinGet-backed Store app by any [Win32App][WinGetApp] handler log line (Detection/Applicability/Operation). Marks AppType as 'WinGet' for that app id.",
+      "enabled": true
+    },
+    {
+      "patternId": "IME-APP-VERSION",
+      "category": "always",
+      "pattern": "\\[Win32App\\]\\[ReportingManager\\] Detection state for app with id: (?<id>{GUID}).*?\"DetectedIdentityVersion\":\\{[^}]*?\"NewValue\":\"(?<appVersion>[^\"]+)\"",
+      "action": "captureAppVersion",
+      "description": "Captures the product version IME detected after an app install (e.g. \"11.2.1787.0\"). Source: [ReportingManager] Detection state update with DetectedIdentityVersion.NewValue. Used by App Dashboard to show version-level failure breakdowns.",
+      "enabled": true
+    },
+    {
+      "patternId": "IME-ATTEMPT-NUMBER",
+      "category": "currentPhase",
+      "pattern": "\\[Win32App\\] ===Step=== Execute retry (?<attempt>\\d+)$",
+      "action": "captureAttemptNumber",
+      "parameters": {
+        "useCurrentApp": "true"
+      },
+      "description": "Captures the install attempt number for the current app. IME logs 'Execute retry 0' for the first attempt and increments on each retry. Reported as attempt+1 so retry 0 becomes AttemptNumber=1 (human-friendly: first attempt).",
+      "enabled": true
+    },
+    {
       "patternId": "IME-DECRYPT-FAILED",
       "category": "currentPhase",
       "pattern": "Decryption is failed for appId {GUID}",
@@ -124,6 +159,14 @@
       "pattern": "\\[Win32App\\] Detected app {GUID} ",
       "action": "updateStateInstalled",
       "description": "Detects when an app is detected as installed (old log format).",
+      "enabled": true
+    },
+    {
+      "patternId": "IME-DETECTION-RESULT",
+      "category": "always",
+      "pattern": "\\[Win32App\\]\\[DetectionActionHandler\\] Detection for policy with id: (?<id>{GUID}) resulted in action status: Success and detection state: (?<detection>Detected|NotDetected)",
+      "action": "captureDetectionResult",
+      "description": "Captures the detection rule result after IME runs detection for an app. 'Detected' means the detection rule matched (app is installed), 'NotDetected' means it did not. Excludes [SimulatedDetectionActionHandler] which fires during applicability pre-checks.",
       "enabled": true
     },
     {

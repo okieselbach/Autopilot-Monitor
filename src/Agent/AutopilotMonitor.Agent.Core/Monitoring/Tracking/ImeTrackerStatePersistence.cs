@@ -144,6 +144,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         public string DoDownloadDuration { get; set; }
         public long DoBytesFromHttp { get; set; }
         public bool HasDoTelemetry { get; set; }
+
+        // App metadata (captured from IME logs for App Dashboard reporting)
+        public string AppVersion { get; set; }
+        public string AppType { get; set; }
+        public int AttemptNumber { get; set; }
+        public string DetectionResult { get; set; }
     }
 
     public class FilePositionData

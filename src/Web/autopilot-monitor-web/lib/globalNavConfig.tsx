@@ -63,6 +63,14 @@ function HeartIcon({ className = "w-5 h-5" }: { className?: string }) {
   );
 }
 
+function CubeIcon({ className = "w-5 h-5" }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" />
+    </svg>
+  );
+}
+
 function WrenchIcon({ className = "w-5 h-5" }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -130,6 +138,7 @@ export const NAV_GROUPS: NavGroup[] = [
     visibility: "adminOrOperator",
     items: [
       { id: "fleet-health", label: "Fleet Health", href: "/fleet-health", icon: <ChartBarIcon /> },
+      { id: "apps", label: "Apps", href: "/apps", icon: <CubeIcon /> },
       { id: "usage-metrics", label: "Usage Metrics", href: "/usage-metrics", icon: <TrendingUpIcon /> },
       { id: "geographic-performance", label: "Geographic Perf.", href: "/geographic-performance", icon: <GlobeAltIcon /> },
       { id: "progress", label: "Progress Portal", href: "/progress", icon: <MonitorIcon /> },

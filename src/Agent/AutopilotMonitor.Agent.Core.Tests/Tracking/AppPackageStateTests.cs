@@ -305,5 +305,120 @@ namespace AutopilotMonitor.Agent.Core.Tests.Tracking
             Assert.Equal("ERR-001", pkg.ErrorPatternId);
             Assert.Equal("Something failed", pkg.ErrorDetail);
         }
+
+        // -- App metadata (App Dashboard feature) --
+
+        [Fact]
+        public void UpdateAppVersion_EmptyIgnored()
+        {
+            var pkg = CreatePackage();
+            Assert.False(pkg.UpdateAppVersion(null));
+            Assert.False(pkg.UpdateAppVersion(""));
+            Assert.False(pkg.UpdateAppVersion("   "));
+            Assert.Null(pkg.AppVersion);
+        }
+
+        [Fact]
+        public void UpdateAppVersion_TrimsAndStores()
+        {
+            var pkg = CreatePackage();
+            Assert.True(pkg.UpdateAppVersion("  11.2.1787.0  "));
+            Assert.Equal("11.2.1787.0", pkg.AppVersion);
+        }
+
+        [Fact]
+        public void UpdateAppVersion_SameValueReturnsFalse()
+        {
+            var pkg = CreatePackage();
+            pkg.UpdateAppVersion("1.0.0");
+            Assert.False(pkg.UpdateAppVersion("1.0.0"));
+        }
+
+        [Fact]
+        public void UpdateAppType_FromEmptySetsValue()
+        {
+            var pkg = CreatePackage();
+            Assert.True(pkg.UpdateAppType("WinGet"));
+            Assert.Equal("WinGet", pkg.AppType);
+        }
+
+        [Fact]
+        public void UpdateAppType_Win32DoesNotDowngradeWinGet()
+        {
+            // A generic "Win32" mustn't overwrite a previously determined specific type.
+            var pkg = CreatePackage();
+            pkg.UpdateAppType("WinGet");
+            Assert.False(pkg.UpdateAppType("Win32"));
+            Assert.Equal("WinGet", pkg.AppType);
+        }
+
+        [Fact]
+        public void UpdateAppType_MsiOverridesWin32()
+        {
+            var pkg = CreatePackage();
+            pkg.UpdateAppType("Win32");
+            Assert.True(pkg.UpdateAppType("MSI"));
+            Assert.Equal("MSI", pkg.AppType);
+        }
+
+        [Fact]
+        public void UpdateAttemptNumber_KeepsHighest()
+        {
+            var pkg = CreatePackage();
+            Assert.True(pkg.UpdateAttemptNumber(1));
+            Assert.True(pkg.UpdateAttemptNumber(3));
+            Assert.False(pkg.UpdateAttemptNumber(2)); // cannot go back
+            Assert.Equal(3, pkg.AttemptNumber);
+        }
+
+        [Fact]
+        public void UpdateAttemptNumber_IgnoresZeroAndNegative()
+        {
+            var pkg = CreatePackage();
+            pkg.UpdateAttemptNumber(2);
+            Assert.False(pkg.UpdateAttemptNumber(0));
+            Assert.False(pkg.UpdateAttemptNumber(-1));
+            Assert.Equal(2, pkg.AttemptNumber);
+        }
+
+        [Fact]
+        public void UpdateDetectionResult_StoresLatest()
+        {
+            var pkg = CreatePackage();
+            Assert.True(pkg.UpdateDetectionResult("NotDetected"));
+            Assert.Equal("NotDetected", pkg.DetectionResult);
+            Assert.True(pkg.UpdateDetectionResult("Detected"));
+            Assert.Equal("Detected", pkg.DetectionResult);
+        }
+
+        [Fact]
+        public void ToEventData_EmitsMetadataWhenSet()
+        {
+            var pkg = CreatePackage();
+            pkg.UpdateAppVersion("11.2.1787.0");
+            pkg.UpdateAppType("WinGet");
+            pkg.UpdateAttemptNumber(2);
+            pkg.UpdateDetectionResult("Detected");
+
+            var data = pkg.ToEventData();
+
+            Assert.Equal("11.2.1787.0", data["appVersion"]);
+            Assert.Equal("WinGet", data["appType"]);
+            Assert.Equal(2, data["attemptNumber"]);
+            Assert.Equal("Detected", data["detectionResult"]);
+        }
+
+        [Fact]
+        public void ToEventData_OmitsMetadataWhenEmpty()
+        {
+            var pkg = CreatePackage();
+
+            var data = pkg.ToEventData();
+
+            Assert.False(data.ContainsKey("appVersion"));
+            Assert.False(data.ContainsKey("appType"));
+            Assert.False(data.ContainsKey("attemptNumber"));
+            Assert.False(data.ContainsKey("detectionResult"));
+        }
     }
 }

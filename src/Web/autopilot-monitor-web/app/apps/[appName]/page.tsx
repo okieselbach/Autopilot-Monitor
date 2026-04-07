@@ -1,0 +1,699 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+import dynamic from "next/dynamic";
+import { ProtectedRoute } from "../../../components/ProtectedRoute";
+import { useTenant } from "../../../contexts/TenantContext";
+import { useAuth } from "../../../contexts/AuthContext";
+import { useNotifications } from "../../../contexts/NotificationContext";
+import { api } from "@/lib/api";
+import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
+import { getErrorCodeEntry, formatErrorCode } from "@/lib/errorCodeMap";
+import { chartColors } from "../../../components/charts/chartTheme";
+
+// Lazy-load recharts on the detail page only — keeps the rest of the app's
+// initial bundle untouched.
+const AppLineChart = dynamic(() => import("../../../components/charts/AppLineChart"), {
+  ssr: false,
+  loading: () => <div className="h-64 flex items-center justify-center text-gray-400 text-sm">Loading chart…</div>,
+});
+const AppBarChart = dynamic(() => import("../../../components/charts/AppBarChart"), {
+  ssr: false,
+  loading: () => <div className="h-60 flex items-center justify-center text-gray-400 text-sm">Loading chart…</div>,
+});
+
+interface TimeSeriesPoint {
+  bucketStart: string;
+  installs: number;
+  succeeded: number;
+  failed: number;
+  failureRate: number;
+  avgDurationSeconds: number;
+}
+
+interface VersionRow {
+  appVersion: string;
+  installs: number;
+  failed: number;
+  failureRate: number;
+}
+
+interface PhaseRow {
+  phase: string;
+  failed: number;
+}
+
+interface FailureCodeRow {
+  code: string;
+  exitCode: number | null;
+  count: number;
+  sampleMessage: string;
+}
+
+interface DeviceModelRow {
+  manufacturer: string;
+  model: string;
+  installs: number;
+  failed: number;
+  failureRate: number;
+  liftVsBaseline: number;
+}
+
+interface AnalyticsResponse {
+  success: boolean;
+  appName: string;
+  appType: string;
+  windowDays: number;
+  bucket: "day" | "week";
+  summary: {
+    totalInstalls: number;
+    succeeded: number;
+    failed: number;
+    failureRate: number;
+    avgDurationSeconds: number;
+    p95DurationSeconds: number;
+    avgDownloadBytes: number;
+    trend: "improving" | "worsening" | "stable";
+    trendDelta: number | null;
+    flakinessScore: number;
+  };
+  timeSeries: TimeSeriesPoint[];
+  versionBreakdown: VersionRow[];
+  installerPhaseBreakdown: PhaseRow[];
+  topFailureCodes: FailureCodeRow[];
+  detectionLiesCount: number;
+  deviceModelBreakdown: DeviceModelRow[];
+}
+
+interface SessionRow {
+  sessionId: string;
+  deviceName: string;
+  manufacturer: string;
+  model: string;
+  appVersion: string;
+  status: string;
+  installerPhase: string;
+  failureCode: string;
+  exitCode: number | null;
+  attemptNumber: number;
+  startedAt: string;
+  durationSeconds: number;
+}
+
+interface SessionsResponse {
+  success: boolean;
+  total: number;
+  offset: number;
+  limit: number;
+  items: SessionRow[];
+}
+
+const SESSIONS_PAGE_SIZE = 50;
+
+export default function AppDetailPage() {
+  const params = useParams();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  const rawAppName = (params?.appName as string) ?? "";
+  const appName = useMemo(() => {
+    try {
+      return decodeURIComponent(rawAppName);
+    } catch {
+      return rawAppName;
+    }
+  }, [rawAppName]);
+
+  const initialDays = (() => {
+    const d = parseInt(searchParams?.get("days") ?? "30", 10);
+    return d === 7 || d === 30 || d === 90 ? d : 30;
+  })();
+
+  const [days, setDays] = useState<7 | 30 | 90>(initialDays as 7 | 30 | 90);
+  const [analytics, setAnalytics] = useState<AnalyticsResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  // Sessions panel state
+  const [sessions, setSessions] = useState<SessionsResponse | null>(null);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<"all" | "failed" | "succeeded">("failed");
+  const [sessionsOffset, setSessionsOffset] = useState(0);
+
+  const { tenantId } = useTenant();
+  const { getAccessToken } = useAuth();
+  const { addNotification } = useNotifications();
+  const hasInitialFetch = useRef(false);
+
+  const fetchAnalytics = async () => {
+    if (!tenantId || !appName) return;
+    try {
+      setLoading(true);
+      const response = await authenticatedFetch(
+        api.apps.analytics(tenantId, appName, days),
+        getAccessToken
+      );
+      if (response.ok) {
+        setAnalytics((await response.json()) as AnalyticsResponse);
+      } else {
+        addNotification(
+          "error",
+          "Backend Error",
+          `Failed to load app analytics: ${response.statusText}`,
+          "app-analytics-error"
+        );
+      }
+    } catch (err) {
+      if (err instanceof TokenExpiredError) {
+        addNotification("error", "Session Expired", err.message, "session-expired-error");
+      } else {
+        console.error("Failed to fetch app analytics", err);
+        addNotification(
+          "error",
+          "Backend Not Reachable",
+          "Unable to load app analytics.",
+          "app-analytics-error"
+        );
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchSessions = async (offset: number, status: typeof statusFilter) => {
+    if (!tenantId || !appName) return;
+    try {
+      setSessionsLoading(true);
+      const response = await authenticatedFetch(
+        api.apps.sessions(tenantId, appName, days, status, offset, SESSIONS_PAGE_SIZE),
+        getAccessToken
+      );
+      if (response.ok) {
+        setSessions((await response.json()) as SessionsResponse);
+      }
+    } catch (err) {
+      if (!(err instanceof TokenExpiredError)) {
+        console.error("Failed to fetch sessions", err);
+      }
+    } finally {
+      setSessionsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!tenantId) return;
+    if (hasInitialFetch.current) return;
+    hasInitialFetch.current = true;
+    fetchAnalytics();
+    fetchSessions(0, statusFilter);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tenantId]);
+
+  useEffect(() => {
+    if (!hasInitialFetch.current) return;
+    fetchAnalytics();
+    setSessionsOffset(0);
+    fetchSessions(0, statusFilter);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [days]);
+
+  function formatDuration(s: number) {
+    if (!s) return "—";
+    if (s < 60) return `${Math.round(s)}s`;
+    if (s < 3600) return `${Math.round(s / 60)}m`;
+    return `${(s / 3600).toFixed(1)}h`;
+  }
+
+  function formatBucketTick(value: unknown) {
+    const d = new Date(String(value));
+    if (isNaN(d.getTime())) return String(value);
+    return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
+  }
+
+  const failureCodeBarColor = (row: Record<string, unknown>): string => {
+    const c = Number(row.count);
+    return c >= 5 ? chartColors.danger : c >= 2 ? chartColors.warning : chartColors.muted;
+  };
+
+  return (
+    <ProtectedRoute>
+      <div className="min-h-screen bg-gray-50">
+        <header className="bg-white shadow">
+          <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+            <button
+              onClick={() => router.push("/apps")}
+              className="text-sm text-blue-600 hover:underline mb-2 inline-flex items-center"
+            >
+              ← Back to all apps
+            </button>
+            <div className="flex items-center justify-between">
+              <div>
+                <h1 className="text-2xl font-normal text-gray-900 inline-flex items-center">
+                  {appName}
+                  {analytics?.appType && (
+                    <span className="ml-3 px-2 py-0.5 text-xs rounded bg-blue-100 text-blue-800">
+                      {analytics.appType}
+                    </span>
+                  )}
+                </h1>
+                <p className="text-sm text-gray-500 mt-1">
+                  {analytics
+                    ? `${analytics.windowDays} day window · ${analytics.bucket === "day" ? "daily" : "weekly"} buckets`
+                    : ""}
+                </p>
+              </div>
+              <div className="flex items-center space-x-2">
+                {([7, 30, 90] as const).map((d) => (
+                  <button
+                    key={d}
+                    onClick={() => setDays(d)}
+                    className={`px-4 py-2 text-sm rounded-md transition-colors ${
+                      days === d
+                        ? "bg-blue-600 text-white"
+                        : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                    }`}
+                  >
+                    {d} Days
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <main className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8 space-y-6">
+          {loading || !analytics ? (
+            <div className="text-center text-gray-500 p-8">Loading…</div>
+          ) : (
+            <>
+              {/* Summary cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+                <SummaryCard label="Total" value={analytics.summary.totalInstalls.toString()} />
+                <SummaryCard
+                  label="Succeeded"
+                  value={analytics.summary.succeeded.toString()}
+                  color="text-emerald-700"
+                />
+                <SummaryCard
+                  label="Failed"
+                  value={analytics.summary.failed.toString()}
+                  color="text-red-700"
+                />
+                <SummaryCard
+                  label="Failure Rate"
+                  value={`${analytics.summary.failureRate.toFixed(1)}%`}
+                  color={
+                    analytics.summary.failureRate >= 20
+                      ? "text-red-700"
+                      : analytics.summary.failureRate >= 5
+                      ? "text-amber-700"
+                      : "text-gray-900"
+                  }
+                />
+                <SummaryCard
+                  label="Avg Duration"
+                  value={formatDuration(analytics.summary.avgDurationSeconds)}
+                />
+                <SummaryCard label="Trend" value={trendText(analytics.summary.trend, analytics.summary.trendDelta)} />
+                <SummaryCard
+                  label="Flakiness"
+                  value={`${(analytics.summary.flakinessScore * 100).toFixed(0)}%`}
+                  hint="% of installs with retries"
+                />
+              </div>
+
+              {/* Detection lies warning */}
+              {analytics.detectionLiesCount > 0 && (
+                <div className="bg-amber-50 border-l-4 border-amber-400 p-4 rounded">
+                  <p className="text-sm text-amber-800">
+                    <strong>Heads up:</strong> {analytics.detectionLiesCount} install
+                    {analytics.detectionLiesCount === 1 ? " was" : "s were"} reported as Succeeded
+                    but the detection rule did not find the app afterwards. Check the detection rule.
+                  </p>
+                </div>
+              )}
+
+              {/* Charts row 1: failure rate + duration over time */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <Card title="Failure Rate over time">
+                  {analytics.timeSeries.length > 0 ? (
+                    <AppLineChart
+                      data={analytics.timeSeries as unknown as Array<Record<string, unknown>>}
+                      xKey="bucketStart"
+                      series={[
+                        { dataKey: "failureRate", label: "Failure rate", color: chartColors.danger },
+                      ]}
+                      yUnit="%"
+                      yDomain={[0, "auto"]}
+                      formatXTick={formatBucketTick}
+                    />
+                  ) : (
+                    <EmptyState />
+                  )}
+                </Card>
+                <Card title="Avg Install Duration over time">
+                  {analytics.timeSeries.length > 0 ? (
+                    <AppLineChart
+                      data={analytics.timeSeries as unknown as Array<Record<string, unknown>>}
+                      xKey="bucketStart"
+                      series={[
+                        { dataKey: "avgDurationSeconds", label: "Avg duration (s)", color: chartColors.primary },
+                      ]}
+                      yUnit="s"
+                      yDomain={[0, "auto"]}
+                      formatXTick={formatBucketTick}
+                    />
+                  ) : (
+                    <EmptyState />
+                  )}
+                </Card>
+              </div>
+
+              {/* Charts row 2: version breakdown + phase breakdown */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <Card title="Failure Rate by Version">
+                  {analytics.versionBreakdown.length > 0 ? (
+                    <AppBarChart
+                      data={analytics.versionBreakdown as unknown as Array<Record<string, unknown>>}
+                      categoryKey="appVersion"
+                      valueKey="failureRate"
+                      valueFormatter={(v) => `${v}%`}
+                      barColor={(row) => {
+                        const r = Number(row.failureRate);
+                        return r >= 20 ? chartColors.danger : r >= 5 ? chartColors.warning : chartColors.success;
+                      }}
+                    />
+                  ) : (
+                    <EmptyState text="No version data captured yet" />
+                  )}
+                </Card>
+                <Card title="Installer Phase (failures only)">
+                  {analytics.installerPhaseBreakdown.length > 0 ? (
+                    <AppBarChart
+                      data={analytics.installerPhaseBreakdown as unknown as Array<Record<string, unknown>>}
+                      categoryKey="phase"
+                      valueKey="failed"
+                      horizontal
+                      barColor={chartColors.danger}
+                    />
+                  ) : (
+                    <EmptyState text="No failure phases recorded" />
+                  )}
+                </Card>
+              </div>
+
+              {/* Top failure codes table */}
+              <Card title="Top Failure Codes">
+                {analytics.topFailureCodes.length > 0 ? (
+                  <table className="min-w-full text-sm">
+                    <thead className="text-left text-xs text-gray-500 uppercase tracking-wider border-b">
+                      <tr>
+                        <th className="px-3 py-2">Code</th>
+                        <th className="px-3 py-2">Description</th>
+                        <th className="px-3 py-2">Exit Code</th>
+                        <th className="px-3 py-2 text-right">Count</th>
+                        <th className="px-3 py-2">Sample Message</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {analytics.topFailureCodes.map((row) => {
+                        const entry = getErrorCodeEntry(row.code);
+                        return (
+                          <tr key={row.code}>
+                            <td className="px-3 py-2 font-mono text-xs text-gray-900">
+                              {formatErrorCode(row.code)}
+                            </td>
+                            <td className="px-3 py-2 text-gray-700">
+                              {entry ? (
+                                <>
+                                  {entry.description}
+                                  <span
+                                    className={`ml-2 px-1.5 py-0.5 rounded text-xs ${
+                                      entry.confidence === "high"
+                                        ? "bg-emerald-100 text-emerald-800"
+                                        : entry.confidence === "medium"
+                                        ? "bg-amber-100 text-amber-800"
+                                        : "bg-gray-100 text-gray-700"
+                                    }`}
+                                    title={`Source: ${entry.source}`}
+                                  >
+                                    {entry.confidence}
+                                  </span>
+                                </>
+                              ) : (
+                                <span className="text-gray-400">Unknown code</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 font-mono text-xs">
+                              {row.exitCode != null ? (
+                                (() => {
+                                  const ec = getErrorCodeEntry(row.exitCode);
+                                  return (
+                                    <span title={ec?.description ?? ""}>
+                                      {row.exitCode}
+                                      {ec ? ` (${ec.description.slice(0, 24)}${ec.description.length > 24 ? "…" : ""})` : ""}
+                                    </span>
+                                  );
+                                })()
+                              ) : (
+                                <span className="text-gray-400">—</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 text-right text-gray-900">{row.count}</td>
+                            <td className="px-3 py-2 text-gray-500 text-xs truncate max-w-md" title={row.sampleMessage}>
+                              {row.sampleMessage || "—"}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                ) : (
+                  <EmptyState text="No failures recorded" />
+                )}
+              </Card>
+
+              {/* Device model breakdown */}
+              <Card title="Device Model Correlation">
+                {analytics.deviceModelBreakdown.length > 0 ? (
+                  <table className="min-w-full text-sm">
+                    <thead className="text-left text-xs text-gray-500 uppercase tracking-wider border-b">
+                      <tr>
+                        <th className="px-3 py-2">Manufacturer</th>
+                        <th className="px-3 py-2">Model</th>
+                        <th className="px-3 py-2 text-right">Installs</th>
+                        <th className="px-3 py-2 text-right">Failed</th>
+                        <th className="px-3 py-2 text-right">Failure Rate</th>
+                        <th className="px-3 py-2 text-right">Lift vs baseline</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {analytics.deviceModelBreakdown.map((row, i) => (
+                        <tr key={`${row.manufacturer}-${row.model}-${i}`}>
+                          <td className="px-3 py-2 text-gray-700">{row.manufacturer}</td>
+                          <td className="px-3 py-2 text-gray-900">{row.model}</td>
+                          <td className="px-3 py-2 text-right text-gray-700">{row.installs}</td>
+                          <td className="px-3 py-2 text-right text-red-700">{row.failed}</td>
+                          <td className="px-3 py-2 text-right text-gray-900">
+                            {row.failureRate.toFixed(1)}%
+                          </td>
+                          <td className="px-3 py-2 text-right">
+                            <span
+                              className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                row.liftVsBaseline >= 2
+                                  ? "bg-red-100 text-red-800"
+                                  : row.liftVsBaseline >= 1.2
+                                  ? "bg-amber-100 text-amber-800"
+                                  : "bg-emerald-100 text-emerald-800"
+                              }`}
+                            >
+                              {row.liftVsBaseline.toFixed(2)}×
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  <EmptyState text="Not enough installs per device model to compute correlation" />
+                )}
+              </Card>
+
+              {/* Affected sessions panel */}
+              <Card title="Affected Sessions">
+                <div className="flex items-center space-x-2 mb-3">
+                  {(["failed", "all", "succeeded"] as const).map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => {
+                        setStatusFilter(s);
+                        setSessionsOffset(0);
+                        fetchSessions(0, s);
+                      }}
+                      className={`px-3 py-1 text-xs rounded-md ${
+                        statusFilter === s
+                          ? "bg-blue-600 text-white"
+                          : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                      }`}
+                    >
+                      {s === "failed" ? "Failed only" : s === "succeeded" ? "Succeeded" : "All"}
+                    </button>
+                  ))}
+                  {sessions && (
+                    <span className="text-xs text-gray-500 ml-auto">
+                      {sessions.total} session{sessions.total === 1 ? "" : "s"}
+                    </span>
+                  )}
+                </div>
+                {sessionsLoading ? (
+                  <div className="text-center text-gray-500 p-4">Loading sessions…</div>
+                ) : sessions && sessions.items.length > 0 ? (
+                  <>
+                    <table className="min-w-full text-sm">
+                      <thead className="text-left text-xs text-gray-500 uppercase tracking-wider border-b">
+                        <tr>
+                          <th className="px-3 py-2">Device</th>
+                          <th className="px-3 py-2">Model</th>
+                          <th className="px-3 py-2">Version</th>
+                          <th className="px-3 py-2">Status</th>
+                          <th className="px-3 py-2 text-right">Attempts</th>
+                          <th className="px-3 py-2">Failure Code</th>
+                          <th className="px-3 py-2 text-right">Duration</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {sessions.items.map((row) => {
+                          const entry = row.failureCode ? getErrorCodeEntry(row.failureCode) : null;
+                          return (
+                            <tr
+                              key={row.sessionId}
+                              onClick={() => router.push(`/sessions/${row.sessionId}`)}
+                              className="hover:bg-gray-50 cursor-pointer"
+                            >
+                              <td className="px-3 py-2 text-gray-900">{row.deviceName || "—"}</td>
+                              <td className="px-3 py-2 text-gray-700 text-xs">
+                                {row.manufacturer} {row.model}
+                              </td>
+                              <td className="px-3 py-2 text-gray-700 font-mono text-xs">
+                                {row.appVersion || "—"}
+                              </td>
+                              <td className="px-3 py-2">
+                                <span
+                                  className={`px-2 py-0.5 rounded text-xs ${
+                                    row.status === "Failed"
+                                      ? "bg-red-100 text-red-800"
+                                      : row.status === "Succeeded"
+                                      ? "bg-emerald-100 text-emerald-800"
+                                      : "bg-gray-100 text-gray-700"
+                                  }`}
+                                >
+                                  {row.status}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2 text-right text-gray-700">
+                                {row.attemptNumber || "—"}
+                              </td>
+                              <td className="px-3 py-2 font-mono text-xs">
+                                {row.failureCode ? (
+                                  <span title={entry?.description ?? ""}>
+                                    {formatErrorCode(row.failureCode)}
+                                  </span>
+                                ) : (
+                                  <span className="text-gray-400">—</span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2 text-right text-gray-700">
+                                {formatDuration(row.durationSeconds)}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                    {/* Pagination */}
+                    {sessions.total > SESSIONS_PAGE_SIZE && (
+                      <div className="flex items-center justify-between mt-3 text-xs text-gray-600">
+                        <span>
+                          {sessions.offset + 1}–
+                          {Math.min(sessions.offset + sessions.items.length, sessions.total)} of{" "}
+                          {sessions.total}
+                        </span>
+                        <div className="space-x-2">
+                          <button
+                            disabled={sessions.offset === 0}
+                            onClick={() => {
+                              const next = Math.max(0, sessionsOffset - SESSIONS_PAGE_SIZE);
+                              setSessionsOffset(next);
+                              fetchSessions(next, statusFilter);
+                            }}
+                            className="px-3 py-1 rounded bg-gray-100 hover:bg-gray-200 disabled:opacity-40"
+                          >
+                            Previous
+                          </button>
+                          <button
+                            disabled={sessions.offset + sessions.items.length >= sessions.total}
+                            onClick={() => {
+                              const next = sessionsOffset + SESSIONS_PAGE_SIZE;
+                              setSessionsOffset(next);
+                              fetchSessions(next, statusFilter);
+                            }}
+                            className="px-3 py-1 rounded bg-gray-100 hover:bg-gray-200 disabled:opacity-40"
+                          >
+                            Next
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <EmptyState text="No sessions match this filter" />
+                )}
+              </Card>
+            </>
+          )}
+        </main>
+      </div>
+    </ProtectedRoute>
+  );
+}
+
+function SummaryCard({
+  label,
+  value,
+  color,
+  hint,
+}: {
+  label: string;
+  value: string;
+  color?: string;
+  hint?: string;
+}) {
+  return (
+    <div className="bg-white rounded-lg shadow p-3">
+      <div className="text-xs text-gray-500 uppercase tracking-wide" title={hint}>
+        {label}
+      </div>
+      <div className={`text-xl font-semibold mt-1 ${color ?? "text-gray-900"}`}>{value}</div>
+    </div>
+  );
+}
+
+function Card({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="bg-white rounded-lg shadow p-4">
+      <h2 className="text-sm font-semibold text-gray-700 mb-3">{title}</h2>
+      {children}
+    </div>
+  );
+}
+
+function EmptyState({ text = "No data" }: { text?: string }) {
+  return <div className="h-32 flex items-center justify-center text-gray-400 text-sm">{text}</div>;
+}
+
+function trendText(trend: string, delta: number | null) {
+  if (delta == null) return "—";
+  if (trend === "improving") return `↓ ${Math.abs(delta).toFixed(1)} pp`;
+  if (trend === "worsening") return `↑ ${Math.abs(delta).toFixed(1)} pp`;
+  return "stable";
+}

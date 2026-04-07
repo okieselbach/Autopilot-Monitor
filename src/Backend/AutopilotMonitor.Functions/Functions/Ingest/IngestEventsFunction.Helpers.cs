@@ -73,6 +73,48 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
 
             var summary = state.Summary;
 
+            // App metadata fields (may appear on any app_install_* event).
+            // Only overwrite if the incoming value is non-empty so earlier values
+            // from app_install_started aren't wiped by later _completed/_failed events.
+            if (evt.Data != null)
+            {
+                if (evt.Data.TryGetValue("appVersion", out var appVersionObj))
+                {
+                    var appVersion = appVersionObj?.ToString();
+                    if (!string.IsNullOrWhiteSpace(appVersion))
+                        summary.AppVersion = appVersion.Trim();
+                }
+                if (evt.Data.TryGetValue("appType", out var appTypeObj))
+                {
+                    var appType = appTypeObj?.ToString();
+                    if (!string.IsNullOrWhiteSpace(appType))
+                        summary.AppType = appType.Trim();
+                }
+                if (evt.Data.TryGetValue("attemptNumber", out var attemptObj) &&
+                    int.TryParse(attemptObj?.ToString(), out var attempt) && attempt > 0)
+                {
+                    // Keep highest observed attempt (monotonic within a session)
+                    summary.AttemptNumber = Math.Max(summary.AttemptNumber, attempt);
+                }
+                if (evt.Data.TryGetValue("installerPhase", out var phaseObj))
+                {
+                    var phase = phaseObj?.ToString();
+                    if (!string.IsNullOrWhiteSpace(phase))
+                        summary.InstallerPhase = phase.Trim();
+                }
+                if (evt.Data.TryGetValue("exitCode", out var exitCodeObj) &&
+                    int.TryParse(exitCodeObj?.ToString(), out var exitCode))
+                {
+                    summary.ExitCode = exitCode;
+                }
+                if (evt.Data.TryGetValue("detectionResult", out var detectionObj))
+                {
+                    var detection = detectionObj?.ToString();
+                    if (!string.IsNullOrWhiteSpace(detection))
+                        summary.DetectionResult = detection.Trim();
+                }
+            }
+
             switch (evt.EventType)
             {
                 case "app_install_started":
