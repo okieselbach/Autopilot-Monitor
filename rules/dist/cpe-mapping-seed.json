@@ -179,8 +179,8 @@
       "displayNamePatterns": ["microsoft visual c++ 2015-2022", "microsoft visual c++ 2015-2019", "visual c++ redistributable", "microsoft visual c++"],
       "publisherPatterns": ["microsoft", "microsoft corporation"],
       "cpeVendor": "microsoft",
-      "cpeProduct": "visual_c%2b%2b",
-      "cpeUri": "cpe:2.3:a:microsoft:visual_c%2b%2b",
+      "cpeProduct": "visual_c\\+\\+",
+      "cpeUri": "cpe:2.3:a:microsoft:visual_c\\+\\+",
       "category": "runtime"
     },
     {
