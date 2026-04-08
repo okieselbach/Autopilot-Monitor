@@ -36,6 +36,14 @@ namespace AutopilotMonitor.Shared
         public const string SelfUpdateMarkerFile = @"%ProgramData%\AutopilotMonitor\State\self-update-info.json";
 
         /// <summary>
+        /// Marker file written by SelfUpdater when the startup update path is skipped (network timeout,
+        /// download failure, integrity mismatch, etc.); read by MonitoringService on next startup to emit
+        /// an agent_self_update_skipped event. Only written on the startup trigger path — runtime-triggered
+        /// failures are logged normally because the full logger is already up.
+        /// </summary>
+        public const string SelfUpdateSkippedMarkerFile = @"%ProgramData%\AutopilotMonitor\State\self-update-skipped.json";
+
+        /// <summary>
         /// Default path for the IME pattern match log file (debugging/diagnostics)
         /// </summary>
         public const string ImeMatchLogPath = @"%ProgramData%\AutopilotMonitor\Logs\ime_pattern_matches.log";
@@ -168,6 +176,7 @@ namespace AutopilotMonitor.Shared
             public const string SoftwareInventoryAnalysis = "software_inventory_analysis";
             public const string VulnerabilityReport       = "vulnerability_report";
             public const string AgentSelfUpdated          = "agent_self_updated";
+            public const string AgentSelfUpdateSkipped    = "agent_self_update_skipped";
         }
 
         // -----------------------------------------------------------------------

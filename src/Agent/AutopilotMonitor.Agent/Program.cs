@@ -325,6 +325,24 @@ namespace AutopilotMonitor.Agent
 
                 using (var service = new MonitoringService(config, logger, agentVersion, previousExitType, previousCrashException, lastBootUtc))
                 {
+                    // Wire the runtime self-update trigger: on hash mismatch, MonitoringService
+                    // invokes SelfUpdater with forceUpdate=true and a longer download timeout
+                    // (60s, vs. 10s at startup) because monitoring is already running and we
+                    // know an update is required.
+                    service.RuntimeSelfUpdateTriggerAsync = zipHash =>
+                    {
+                        if (!string.IsNullOrEmpty(zipHash))
+                            SelfUpdater.BackendExpectedSha256 = zipHash;
+
+                        return SelfUpdater.CheckAndApplyUpdateAsync(
+                            currentVersion: agentVersion,
+                            agentDir: agentDir,
+                            consoleMode: consoleMode,
+                            forceUpdate: true,
+                            triggerReason: "runtime_hash_mismatch",
+                            downloadTimeoutMsOverride: 60000);
+                    };
+
                     service.Start();
 
                     if (consoleMode)

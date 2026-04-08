@@ -91,7 +91,26 @@ namespace AutopilotMonitor.Agent
         /// On success, restarts the process and never returns.
         /// On any failure, returns normally so the current version continues.
         /// </summary>
-        public static async Task CheckAndApplyUpdateAsync(string currentVersion, string agentDir, bool consoleMode)
+        /// <param name="forceUpdate">
+        /// When true, bypasses the IsNewerVersion check — used by the runtime-hash-mismatch trigger
+        /// to cover hotfixes that reuse the same version number.
+        /// </param>
+        /// <param name="triggerReason">
+        /// "startup" (default) or "runtime_hash_mismatch". Recorded in the marker file so the
+        /// agent_self_updated event can distinguish the two paths.
+        /// </param>
+        /// <param name="downloadTimeoutMsOverride">
+        /// Overrides the ZIP download timeout. Startup path leaves null (fast-fail, 10s) to preserve
+        /// Autopilot boot speed. Runtime trigger passes 60000 because monitoring is already running
+        /// and we know an update is required.
+        /// </param>
+        public static async Task CheckAndApplyUpdateAsync(
+            string currentVersion,
+            string agentDir,
+            bool consoleMode,
+            bool forceUpdate = false,
+            string triggerReason = "startup",
+            int? downloadTimeoutMsOverride = null)
         {
             Action<string> log = msg =>
             {
@@ -99,26 +118,54 @@ namespace AutopilotMonitor.Agent
                 if (consoleMode) Console.WriteLine(msg);
             };
 
+            var isStartupTrigger = string.Equals(triggerReason, "startup", StringComparison.Ordinal);
+            var downloadTimeoutMs = downloadTimeoutMsOverride ?? DownloadTimeoutMs;
+            var totalSw = Stopwatch.StartNew();
+            long versionCheckMs = 0, downloadMs = 0, verifyMs = 0, extractMs = 0, swapMs = 0;
+            long zipSizeBytes = 0;
+            string latestVersion = null;
+
             try
             {
                 // Step 1: Fetch version.json (1s timeout)
-                var (latestVersion, manifestSha256) = await GetLatestVersionAsync(log);
-                if (latestVersion == null)
-                    return; // Could not determine latest version — continue with current
+                var versionSw = Stopwatch.StartNew();
+                string manifestSha256;
+                (latestVersion, manifestSha256) = await GetLatestVersionAsync(log);
+                versionSw.Stop();
+                versionCheckMs = versionSw.ElapsedMilliseconds;
 
-                // Step 2: Compare versions
-                if (!IsNewerVersion(currentVersion, latestVersion))
+                if (latestVersion == null)
                 {
-                    log($"Self-update: current version {currentVersion} is up to date (latest: {latestVersion})");
-                    return;
+                    if (isStartupTrigger)
+                        WriteSkipMarker("version_check_failed", currentVersion, null, "version.json fetch failed or timed out", log);
+                    return; // Could not determine latest version — continue with current
                 }
 
-                log($"Self-update: newer version available — current={currentVersion}, latest={latestVersion}");
+                // Step 2: Compare versions (skipped when forceUpdate=true)
+                if (!forceUpdate && !IsNewerVersion(currentVersion, latestVersion))
+                {
+                    log($"Self-update: current version {currentVersion} is up to date (latest: {latestVersion})");
+                    return; // happy path — no skip marker
+                }
 
-                // Step 3: Download ZIP (10s timeout)
+                if (forceUpdate)
+                    log($"Self-update: FORCE mode (trigger={triggerReason}) — current={currentVersion}, latest={latestVersion}, skipping version check");
+                else
+                    log($"Self-update: newer version available — current={currentVersion}, latest={latestVersion}");
+
+                // Step 3: Download ZIP (timeout = downloadTimeoutMs)
                 var zipPath = Path.Combine(Path.GetTempPath(), "AutopilotMonitor-Agent-Update.zip");
-                if (!await DownloadZipAsync(zipPath, log))
+                var downloadTimerSw = Stopwatch.StartNew();
+                var downloadOk = await DownloadZipAsync(zipPath, downloadTimeoutMs, log);
+                downloadTimerSw.Stop();
+                downloadMs = downloadTimerSw.ElapsedMilliseconds;
+                if (!downloadOk)
+                {
+                    if (isStartupTrigger)
+                        WriteSkipMarker("download_failed", currentVersion, latestVersion, $"ZIP download failed within {downloadTimeoutMs}ms", log);
                     return;
+                }
+                try { zipSizeBytes = new FileInfo(zipPath).Length; } catch { /* best-effort */ }
 
                 // Step 3b: Verify SHA-256 integrity (backend hash has priority over version.json hash)
                 string expectedSha256;
@@ -137,16 +184,31 @@ namespace AutopilotMonitor.Agent
                     expectedSha256 = null;
                 }
 
-                if (!VerifyZipIntegrity(zipPath, expectedSha256, log))
+                var verifySw = Stopwatch.StartNew();
+                var integrityOk = VerifyZipIntegrity(zipPath, expectedSha256, log);
+                verifySw.Stop();
+                verifyMs = verifySw.ElapsedMilliseconds;
+
+                if (!integrityOk)
                 {
                     CleanupStaging(null, zipPath);
+                    if (isStartupTrigger)
+                        WriteSkipMarker("integrity_mismatch", currentVersion, latestVersion, "SHA-256 mismatch on downloaded ZIP", log);
                     return;
                 }
 
                 // Step 4: Extract to staging directory
                 var stagingDir = Environment.ExpandEnvironmentVariables(Constants.AgentUpdateStagingDir);
-                if (!ExtractToStaging(zipPath, stagingDir, log))
+                var extractSw = Stopwatch.StartNew();
+                var extractOk = ExtractToStaging(zipPath, stagingDir, log);
+                extractSw.Stop();
+                extractMs = extractSw.ElapsedMilliseconds;
+                if (!extractOk)
+                {
+                    if (isStartupTrigger)
+                        WriteSkipMarker("extract_failed", currentVersion, latestVersion, "ZIP extraction failed", log);
                     return;
+                }
 
                 // Step 5: Validate staging
                 var stagedExe = Path.Combine(stagingDir, "AutopilotMonitor.Agent.exe");
@@ -154,13 +216,21 @@ namespace AutopilotMonitor.Agent
                 {
                     log("Self-update: staging validation failed — AutopilotMonitor.Agent.exe not found in ZIP");
                     CleanupStaging(stagingDir, zipPath);
+                    if (isStartupTrigger)
+                        WriteSkipMarker("extract_failed", currentVersion, latestVersion, "AutopilotMonitor.Agent.exe not found in ZIP", log);
                     return;
                 }
 
                 // Step 6: Swap files (rename locked → .old, copy new)
-                if (!SwapFiles(agentDir, stagingDir, log))
+                var swapTimerSw = Stopwatch.StartNew();
+                var swapOk = SwapFiles(agentDir, stagingDir, log);
+                swapTimerSw.Stop();
+                swapMs = swapTimerSw.ElapsedMilliseconds;
+                if (!swapOk)
                 {
                     CleanupStaging(stagingDir, zipPath);
+                    if (isStartupTrigger)
+                        WriteSkipMarker("swap_failed", currentVersion, latestVersion, "file swap failed", log);
                     return;
                 }
 
@@ -168,7 +238,19 @@ namespace AutopilotMonitor.Agent
                 CleanupStaging(stagingDir, zipPath);
 
                 // Step 8: Write marker file so the new agent can emit an event on next startup
-                WriteSelfUpdateMarker(currentVersion, latestVersion, log);
+                totalSw.Stop();
+                WriteSelfUpdateMarker(
+                    previousVersion: currentVersion,
+                    newVersion: latestVersion,
+                    triggerReason: triggerReason,
+                    versionCheckMs: versionCheckMs,
+                    downloadMs: downloadMs,
+                    zipSizeBytes: zipSizeBytes,
+                    verifyMs: verifyMs,
+                    extractMs: extractMs,
+                    swapMs: swapMs,
+                    totalUpdateMs: totalSw.ElapsedMilliseconds,
+                    log: log);
 
                 // Step 9: Restart via PowerShell Wait-Process
                 log($"Self-update: files swapped successfully, restarting agent (v{latestVersion})...");
@@ -179,6 +261,10 @@ namespace AutopilotMonitor.Agent
             catch (Exception ex)
             {
                 log($"Self-update: unexpected error — {ex.Message}. Continuing with current version.");
+                if (isStartupTrigger)
+                {
+                    try { WriteSkipMarker("unexpected_error", currentVersion, latestVersion, ex.Message, log); } catch { }
+                }
             }
         }
 
@@ -300,7 +386,7 @@ namespace AutopilotMonitor.Agent
         /// <summary>
         /// Downloads the agent ZIP to a temp path. Returns false on failure.
         /// </summary>
-        private static async Task<bool> DownloadZipAsync(string zipPath, Action<string> log)
+        private static async Task<bool> DownloadZipAsync(string zipPath, int timeoutMs, Action<string> log)
         {
             try
             {
@@ -311,7 +397,7 @@ namespace AutopilotMonitor.Agent
                     File.Delete(zipPath);
 
                 using (var handler = new HttpClientHandler())
-                using (var client = new HttpClient(handler) { Timeout = TimeSpan.FromMilliseconds(DownloadTimeoutMs) })
+                using (var client = new HttpClient(handler) { Timeout = TimeSpan.FromMilliseconds(timeoutMs) })
                 {
                     using (var response = await client.GetAsync(zipUrl))
                     {
@@ -328,7 +414,7 @@ namespace AutopilotMonitor.Agent
             }
             catch (TaskCanceledException)
             {
-                log("Self-update: ZIP download timed out (10s) — aborting update");
+                log($"Self-update: ZIP download timed out ({timeoutMs}ms) — aborting update");
                 try { File.Delete(zipPath); } catch { }
                 return false;
             }
@@ -467,8 +553,21 @@ namespace AutopilotMonitor.Agent
         /// <summary>
         /// Writes a small JSON marker so the next agent startup can emit an agent_self_updated event.
         /// Best-effort — failure here must not block the update.
+        /// Includes phase timings, trigger reason, and exit timestamp so the downstream event
+        /// can carry aggregable telemetry (downtime, total update duration, etc.).
         /// </summary>
-        private static void WriteSelfUpdateMarker(string previousVersion, string newVersion, Action<string> log)
+        private static void WriteSelfUpdateMarker(
+            string previousVersion,
+            string newVersion,
+            string triggerReason,
+            long versionCheckMs,
+            long downloadMs,
+            long zipSizeBytes,
+            long verifyMs,
+            long extractMs,
+            long swapMs,
+            long totalUpdateMs,
+            Action<string> log)
         {
             try
             {
@@ -477,13 +576,66 @@ namespace AutopilotMonitor.Agent
                 if (!Directory.Exists(dir))
                     Directory.CreateDirectory(dir);
 
-                var json = $"{{\"previousVersion\":\"{previousVersion}\",\"newVersion\":\"{newVersion}\",\"updatedAtUtc\":\"{DateTime.UtcNow:O}\"}}";
-                File.WriteAllText(markerPath, json);
+                var now = DateTime.UtcNow;
+                var payload = new JObject
+                {
+                    ["previousVersion"] = previousVersion ?? "unknown",
+                    ["newVersion"]      = newVersion ?? "unknown",
+                    ["triggerReason"]   = triggerReason ?? "startup",
+                    ["updatedAtUtc"]    = now.ToString("O"),
+                    // exitAtUtc is written here — actual Environment.Exit happens a few hundred ms later
+                    // via PowerShell Wait-Process, which is close enough for downtime telemetry.
+                    ["exitAtUtc"]       = now.ToString("O"),
+                    ["versionCheckMs"]  = versionCheckMs,
+                    ["downloadMs"]      = downloadMs,
+                    ["zipSizeBytes"]    = zipSizeBytes,
+                    ["verifyMs"]        = verifyMs,
+                    ["extractMs"]       = extractMs,
+                    ["swapMs"]          = swapMs,
+                    ["totalUpdateMs"]   = totalUpdateMs
+                };
+
+                File.WriteAllText(markerPath, payload.ToString(Newtonsoft.Json.Formatting.None));
                 log("Self-update: marker file written for next-startup event");
             }
             catch (Exception ex)
             {
                 log($"Self-update: could not write marker file — {ex.Message} (non-critical)");
+            }
+        }
+
+        /// <summary>
+        /// Writes a small JSON marker so the next agent startup can emit an agent_self_update_skipped
+        /// event. Only called on the startup trigger path (runtime-triggered failures are logged
+        /// normally because the full logger is already up). Best-effort — never throws.
+        /// </summary>
+        private static void WriteSkipMarker(string reason, string currentVersion, string latestVersion, string errorDetail, Action<string> log)
+        {
+            try
+            {
+                var markerPath = Environment.ExpandEnvironmentVariables(Constants.SelfUpdateSkippedMarkerFile);
+                var dir = Path.GetDirectoryName(markerPath);
+                if (!Directory.Exists(dir))
+                    Directory.CreateDirectory(dir);
+
+                var detail = errorDetail ?? string.Empty;
+                if (detail.Length > 200) detail = detail.Substring(0, 200);
+
+                var payload = new JObject
+                {
+                    ["reason"]         = reason ?? "unknown",
+                    ["currentVersion"] = currentVersion ?? "unknown",
+                    ["latestVersion"]  = latestVersion,   // may be null if version check failed
+                    ["skippedAtUtc"]   = DateTime.UtcNow.ToString("O"),
+                    ["errorDetail"]    = detail
+                };
+
+                File.WriteAllText(markerPath, payload.ToString(Newtonsoft.Json.Formatting.None));
+                log($"Self-update: skip marker written (reason={reason})");
+            }
+            catch (Exception ex)
+            {
+                log($"Self-update: could not write skip marker — {ex.Message} (non-critical)");
             }
         }
 
