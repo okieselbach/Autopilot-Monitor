@@ -241,11 +241,19 @@ namespace AutopilotMonitor.Functions.Services
                 var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
 
                 // OData pre-filter: narrow to sessions that straddle the cutoff boundary.
+                // Status eq 'InProgress' → only block devices whose session is still actively
+                //   sending data. Completed sessions (Succeeded/Failed) must NOT be re-blocked
+                //   even if their LastEventAt is still within the window — they cannot continue
+                //   to abuse data transfer. This also defends against ghost-blocks caused by
+                //   devices with bad clocks: an agent that submits events with timestamps from
+                //   weeks in the past pushes StartedAt back, making the session look long-lived;
+                //   but once the session is Succeeded/Failed, no further data flows from it.
                 // IsPreProvisioned ne true → exclude WhiteGlove sessions: a pre-provisioned device
                 //   that resumes after weeks in storage looks like an excessive sender (StartedAt old,
                 //   LastEventAt recent) but is a legitimate resumption, not abuse.
                 var cutoffStr = windowCutoff.ToString("yyyy-MM-ddTHH:mm:ss");
                 var filter = $"PartitionKey eq '{tenantId}' " +
+                             $"and Status eq 'InProgress' " +
                              $"and LastEventAt gt datetime'{cutoffStr}Z' " +
                              $"and StartedAt lt datetime'{cutoffStr}Z' " +
                              $"and IsPreProvisioned ne true";

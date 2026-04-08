@@ -621,6 +621,16 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                             _logger.Warning($"Session already marked as {response.AdminAction} by administrator — will run cleanup after startup");
                             _pendingAdminAction = response.AdminAction;
                         }
+
+                        // H-2: Promote from bootstrap-token to cert auth by verifying the MDM
+                        // client cert works against an authenticated endpoint, then deleting
+                        // bootstrap-config.json so the persisted token stops lingering on disk.
+                        // Safe no-op when not in bootstrap mode, cert not yet ready, or probe fails.
+                        await Security.BootstrapConfigCleanup.TryDeleteIfCertReadyAsync(
+                            _configuration,
+                            _logger,
+                            _agentVersion).ConfigureAwait(false);
+
                         return;
                     }
 
