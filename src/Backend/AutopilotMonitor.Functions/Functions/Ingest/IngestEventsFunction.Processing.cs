@@ -157,7 +157,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
 
                 // Sanitize agent-side timestamps: clamp out-of-range values to prevent storage/sorting issues.
                 // Original timestamps are preserved in OriginalTimestamp for troubleshooting.
-                SanitizeEventTimestamps(request.Events, receivedAt);
+                SanitizeEventTimestamps(request.Events, receivedAt, _logger);
 
                 // Store events in Azure Table Storage (batch write for efficiency)
                 var storedEvents = await _sessionRepo.StoreEventsBatchAsync(request.Events);
@@ -850,19 +850,69 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
         /// When a timestamp is clamped, the original value is preserved in OriginalTimestamp
         /// and TimestampClamped is set to true — keeping the raw data available for
         /// troubleshooting and root-cause analysis of clock issues on devices.
+        ///
+        /// Emits structured logs for observability:
+        /// - Debug level per clamped event (TenantId/SessionId/EventType/drift) — opt-in via log level
+        /// - One Warning per ingest batch that had any clamping, with aggregate counts and max drifts.
+        ///   This is what to query in App Insights to find bad-clock devices:
+        ///     traces | where message startswith "Agent clock skew"
+        ///
         /// Exposed as internal for unit testing.
         /// </summary>
-        internal static void SanitizeEventTimestamps(List<EnrollmentEvent> events, DateTime utcNow)
+        internal static void SanitizeEventTimestamps(List<EnrollmentEvent> events, DateTime utcNow, ILogger? logger = null)
         {
+            int clampedPast = 0;
+            int clampedFuture = 0;
+            double maxPastDriftHours = 0;
+            double maxFutureDriftHours = 0;
+
             foreach (var evt in events)
             {
-                var sanitized = EventTimestampValidator.SanitizeTimestamp(evt.Timestamp, utcNow);
-                if (sanitized != evt.Timestamp)
+                var original = evt.Timestamp;
+                var sanitized = EventTimestampValidator.SanitizeTimestamp(original, utcNow);
+                if (sanitized == original)
+                    continue;
+
+                evt.OriginalTimestamp = original;
+                evt.TimestampClamped = true;
+                evt.Timestamp = sanitized;
+
+                // Classify the clamping direction (for aggregate stats) and track max drift.
+                // Compare in UTC so Local/Unspecified Kinds don't skew the direction check.
+                // Note: catastrophic values like DateTime.MinValue fall into the "past" bucket
+                // with a very large drift — this is intentional and makes them easy to spot in logs.
+                var originalUtc = EventTimestampValidator.EnsureUtc(original);
+                if (originalUtc > utcNow)
                 {
-                    evt.OriginalTimestamp = evt.Timestamp;
-                    evt.TimestampClamped = true;
-                    evt.Timestamp = sanitized;
+                    clampedFuture++;
+                    var drift = (originalUtc - utcNow).TotalHours;
+                    if (drift > maxFutureDriftHours) maxFutureDriftHours = drift;
                 }
+                else
+                {
+                    clampedPast++;
+                    var drift = (utcNow - originalUtc).TotalHours;
+                    if (drift > maxPastDriftHours) maxPastDriftHours = drift;
+                }
+
+                logger?.LogDebug(
+                    "Event timestamp clamped: TenantId={TenantId}, SessionId={SessionId}, EventType={EventType}, Original={Original:O}, Sanitized={Sanitized:O}",
+                    evt.TenantId, evt.SessionId, evt.EventType, original, sanitized);
+            }
+
+            if (clampedPast + clampedFuture > 0 && logger != null)
+            {
+                // Pull tenant/session from the first clamped event (all events in a batch share the same context).
+                var firstClamped = events.Find(e => e.TimestampClamped);
+                logger.LogWarning(
+                    "Agent clock skew detected: TenantId={TenantId}, SessionId={SessionId}, TotalEvents={TotalEvents}, ClampedPast={ClampedPast}, ClampedFuture={ClampedFuture}, MaxPastDriftHours={MaxPastDriftHours:F1}, MaxFutureDriftHours={MaxFutureDriftHours:F1}",
+                    firstClamped?.TenantId,
+                    firstClamped?.SessionId,
+                    events.Count,
+                    clampedPast,
+                    clampedFuture,
+                    maxPastDriftHours,
+                    maxFutureDriftHours);
             }
         }
     }

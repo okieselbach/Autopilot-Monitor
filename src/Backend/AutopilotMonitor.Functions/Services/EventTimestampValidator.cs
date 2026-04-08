@@ -11,15 +11,28 @@ namespace AutopilotMonitor.Functions.Services
     internal static class EventTimestampValidator
     {
         /// <summary>
-        /// Earliest reasonable timestamp — the product did not exist before this date.
-        /// </summary>
-        internal static readonly DateTime MinReasonableTimestamp = new(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-
-        /// <summary>
         /// Maximum clock skew tolerance for agent-side timestamps ahead of server time.
         /// Agents may have slightly fast clocks; 24 hours covers timezone misconfiguration too.
         /// </summary>
         internal const int MaxFutureToleranceHours = 24;
+
+        /// <summary>
+        /// Maximum clock skew tolerance for agent-side timestamps BEHIND server time, relative
+        /// to the ingest receive time. Anything older than this is treated as a clock-skew bug
+        /// and clamped to the server's receive time. 7 days (168h) covers legitimate spool replay
+        /// after short outages while still catching devices whose hardware clock is weeks in the
+        /// past (observed in field: 18-day drift causing ghost "excessive data sender" blocks).
+        ///
+        /// Rationale for 168h (not tighter):
+        /// - EventSpool has no max-age and could theoretically hold events from earlier sessions.
+        /// - WhiteGlove Part-2 events are freshly stamped by the restarted agent → not affected.
+        /// - Pre-provisioned sessions are already excluded from excessive-data detection.
+        ///
+        /// This constant is also the effective lower bound for sanitized timestamps: any value
+        /// older than utcNow − 168h (including catastrophic cases like DateTime.MinValue) is
+        /// clamped to utcNow. There is no separate "floor" constant — past-drift subsumes it.
+        /// </summary>
+        internal const int MaxPastToleranceHours = 168;
 
         /// <summary>
         /// Default maximum duration in seconds (7 days) for SafeDurationSeconds clamping.
@@ -38,26 +51,31 @@ namespace AutopilotMonitor.Functions.Services
         };
 
         /// <summary>
-        /// Checks whether a timestamp falls within the reasonable range [MinReasonableTimestamp, utcNow + 24h].
+        /// Checks whether a timestamp falls within the reasonable range.
+        /// Valid range: [utcNow − 168h, utcNow + 24h].
         /// </summary>
         internal static bool IsReasonableTimestamp(DateTime timestamp, DateTime utcNow)
         {
             var utcTs = EnsureUtc(timestamp);
-            return utcTs >= MinReasonableTimestamp && utcTs <= utcNow.AddHours(MaxFutureToleranceHours);
+            return utcTs >= utcNow.AddHours(-MaxPastToleranceHours)
+                && utcTs <= utcNow.AddHours(MaxFutureToleranceHours);
         }
 
         /// <summary>
         /// Sanitizes a timestamp by ensuring UTC kind and clamping to the valid range.
-        /// - Below MinReasonableTimestamp → clamped to MinReasonableTimestamp
-        /// - Above utcNow + 24h → clamped to utcNow (server receive time as best-effort fallback)
+        /// Clamping rules:
+        /// - Below utcNow − 168h → clamped to utcNow (past-drift from bad device clock; server receive
+        ///   time is the best fallback because the event definitely arrived "now"). This also catches
+        ///   catastrophic values like DateTime.MinValue.
+        /// - Above utcNow + 24h → clamped to utcNow (future-drift, same rationale).
         /// Returns the original value unchanged if it is within the valid range.
         /// </summary>
         internal static DateTime SanitizeTimestamp(DateTime timestamp, DateTime utcNow)
         {
             var utcTs = EnsureUtc(timestamp);
 
-            if (utcTs < MinReasonableTimestamp)
-                return MinReasonableTimestamp;
+            if (utcTs < utcNow.AddHours(-MaxPastToleranceHours))
+                return EnsureUtc(utcNow);
 
             if (utcTs > utcNow.AddHours(MaxFutureToleranceHours))
                 return EnsureUtc(utcNow);
