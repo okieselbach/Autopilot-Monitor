@@ -11,6 +11,22 @@ namespace AutopilotMonitor.Functions.Functions.Apps
     /// </summary>
     internal static class AppsAnalyticsHelper
     {
+        // ── Query param validation ──────────────────────────────────────────
+
+        /// <summary>
+        /// Validates the optional <c>?tenantId=</c> query parameter shared by all
+        /// three <c>global/apps/*</c> endpoints. Null / empty is allowed (means
+        /// "aggregate across all tenants"); any non-empty value must parse as a GUID.
+        /// Returns <c>true</c> when the value is acceptable; otherwise <c>false</c>
+        /// (caller should emit a 400).
+        /// </summary>
+        public static bool IsValidOptionalTenantIdQueryParam(string? raw)
+        {
+            if (string.IsNullOrEmpty(raw))
+                return true;
+            return Guid.TryParse(raw, out _);
+        }
+
         // ── Data loaders ────────────────────────────────────────────────────
 
         /// <summary>

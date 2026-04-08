@@ -221,6 +221,27 @@ public class EndpointPolicyCatalogCompletenessTests
     }
 
     /// <summary>
+    /// The three global/apps/* routes must be locked to GlobalAdminOnly with
+    /// TenantScoping.None (the optional ?tenantId= query param is intentional cross-tenant
+    /// scoping, enforced inside the function — not by the middleware).
+    /// A future accidental downgrade of the policy tier would be caught here, whereas
+    /// the generic completeness test only guarantees that *some* entry exists.
+    /// </summary>
+    [Theory]
+    [InlineData("GET", "/api/global/apps/list",                       "global/apps/list")]
+    [InlineData("GET", "/api/global/apps/Company%20Portal/analytics", "global/apps/{appName}/analytics")]
+    [InlineData("GET", "/api/global/apps/Company%20Portal/sessions",  "global/apps/{appName}/sessions")]
+    public void GlobalAppsRoutes_AreGlobalAdminOnly(string method, string path, string expectedTemplate)
+    {
+        var entry = EndpointAccessPolicyCatalog.FindPolicy(method, path);
+
+        Assert.NotNull(entry);
+        Assert.Equal(expectedTemplate, entry!.RouteTemplate);
+        Assert.Equal(EndpointPolicy.GlobalAdminOnly, entry.Policy);
+        Assert.Equal(TenantScoping.None, entry.TenantScoping);
+    }
+
+    /// <summary>
     /// Named capture group for {tenantId} correctly extracts the value from request paths.
     /// </summary>
     [Theory]

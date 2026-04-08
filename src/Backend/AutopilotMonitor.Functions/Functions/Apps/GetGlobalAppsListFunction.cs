@@ -35,6 +35,12 @@ namespace AutopilotMonitor.Functions.Functions.Apps
                 var query = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
 
                 var scopedTenantId = query["tenantId"];
+                if (!AppsAnalyticsHelper.IsValidOptionalTenantIdQueryParam(scopedTenantId))
+                {
+                    var bad = req.CreateResponse(HttpStatusCode.BadRequest);
+                    await bad.WriteAsJsonAsync(new { success = false, message = "tenantId must be a valid GUID" });
+                    return bad;
+                }
                 int days = 30;
                 if (int.TryParse(query["days"], out var parsedDays) && parsedDays > 0 && parsedDays <= 365)
                     days = parsedDays;

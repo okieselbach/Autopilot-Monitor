@@ -61,6 +61,9 @@ yarn-error.log*
 .npm
 .eslintcache
 
+# TypeScript incremental build cache
+*.tsbuildinfo
+
 # Environment variables
 .env
 .env*.local
