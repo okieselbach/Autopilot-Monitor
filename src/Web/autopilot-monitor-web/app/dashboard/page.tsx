@@ -470,10 +470,11 @@ export default function Home() {
   const avgDuration = effectiveSessions.length > 0
     ? Math.round(effectiveSessions.reduce((sum, s) => sum + s.durationSeconds, 0) / effectiveSessions.length / 60)
     : 0;
-  const failedToday = effectiveSessions.filter(s =>
-    s.status === "Failed" &&
+  const sessionsToday = effectiveSessions.filter(s =>
     new Date(s.startedAt).toDateString() === new Date().toDateString()
-  ).length;
+  );
+  const totalToday = sessionsToday.length;
+  const failedToday = sessionsToday.filter(s => s.status === "Failed").length;
 
   // Filter sessions based on status filter, column filters, and search query
   const filteredSessions = effectiveSessions.filter(session => {
@@ -652,7 +653,7 @@ export default function Home() {
           )}
 
           {/* Stats cards */}
-          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4 mb-2">
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-5 mb-2">
             <StatsCard
               title="Active Sessions"
               value={loading ? "..." : activeSessions.length.toString()}
@@ -670,6 +671,12 @@ export default function Home() {
               value={loading ? "..." : `${avgDuration} min`}
               description="Last 7 days"
               color="purple"
+            />
+            <StatsCard
+              title="Total Today"
+              value={loading ? "..." : totalToday.toString()}
+              description="Started today"
+              color="indigo"
             />
             <StatsCard
               title="Failed Today"
