@@ -18,6 +18,9 @@ interface DistressReport {
   sourceIp: string | null;
 }
 
+type SortKey = "ingestedAt" | "errorType" | "tenantId" | "manufacturer" | "model" | "serialNumber" | "httpStatusCode";
+type SortDir = "asc" | "desc";
+
 interface DistressReportsSectionProps {
   getAccessToken: () => Promise<string | null>;
   setError: (error: string | null) => void;
@@ -40,6 +43,35 @@ function ErrorTypeBadge({ errorType }: { errorType: string }) {
     <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${info.color}`}>
       {info.label}
     </span>
+  );
+}
+
+function SortableTh({
+  sortKey,
+  currentKey,
+  currentDir,
+  onSort,
+  children,
+}: {
+  sortKey: SortKey;
+  currentKey: SortKey;
+  currentDir: SortDir;
+  onSort: (key: SortKey) => void;
+  children: React.ReactNode;
+}) {
+  const active = currentKey === sortKey;
+  return (
+    <th
+      onClick={() => onSort(sortKey)}
+      className="px-3 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer select-none hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+    >
+      <span className="inline-flex items-center gap-1">
+        {children}
+        <span className={`text-[10px] ${active ? "text-amber-600 dark:text-amber-400" : "text-gray-300 dark:text-gray-600"}`}>
+          {active ? (currentDir === "asc" ? "▲" : "▼") : "↕"}
+        </span>
+      </span>
+    </th>
   );
 }
 
@@ -79,7 +111,37 @@ export function DistressReportsSection({
   const [loading, setLoading] = useState(false);
   const [selectedReport, setSelectedReport] = useState<DistressReport | null>(null);
   const [currentPage, setCurrentPage] = useState(0);
+  const [sortKey, setSortKey] = useState<SortKey>("ingestedAt");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
   const pageSize = 15;
+
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDir(d => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir(key === "ingestedAt" ? "desc" : "asc");
+    }
+    setCurrentPage(0);
+  };
+
+  const sortedReports = [...reports].sort((a, b) => {
+    const av = a[sortKey];
+    const bv = b[sortKey];
+    // nulls last
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    let cmp: number;
+    if (sortKey === "ingestedAt") {
+      cmp = new Date(av as string).getTime() - new Date(bv as string).getTime();
+    } else if (sortKey === "httpStatusCode") {
+      cmp = (av as number) - (bv as number);
+    } else {
+      cmp = String(av).localeCompare(String(bv));
+    }
+    return sortDir === "asc" ? cmp : -cmp;
+  });
 
   useEffect(() => {
     fetchReports();
@@ -188,17 +250,17 @@ export function DistressReportsSection({
             <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
               <thead className="bg-gray-50 dark:bg-gray-700/50">
                 <tr>
-                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Time</th>
-                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Error Type</th>
-                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Tenant</th>
-                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Manufacturer</th>
-                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Model</th>
-                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">S/N</th>
-                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">HTTP</th>
+                  <SortableTh sortKey="ingestedAt" currentKey={sortKey} currentDir={sortDir} onSort={handleSort}>Time</SortableTh>
+                  <SortableTh sortKey="errorType" currentKey={sortKey} currentDir={sortDir} onSort={handleSort}>Error Type</SortableTh>
+                  <SortableTh sortKey="tenantId" currentKey={sortKey} currentDir={sortDir} onSort={handleSort}>Tenant</SortableTh>
+                  <SortableTh sortKey="manufacturer" currentKey={sortKey} currentDir={sortDir} onSort={handleSort}>Manufacturer</SortableTh>
+                  <SortableTh sortKey="model" currentKey={sortKey} currentDir={sortDir} onSort={handleSort}>Model</SortableTh>
+                  <SortableTh sortKey="serialNumber" currentKey={sortKey} currentDir={sortDir} onSort={handleSort}>S/N</SortableTh>
+                  <SortableTh sortKey="httpStatusCode" currentKey={sortKey} currentDir={sortDir} onSort={handleSort}>HTTP</SortableTh>
                 </tr>
               </thead>
               <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                {reports.slice(currentPage * pageSize, (currentPage + 1) * pageSize).map((r, idx) => (
+                {sortedReports.slice(currentPage * pageSize, (currentPage + 1) * pageSize).map((r, idx) => (
                   <tr
                     key={`${r.tenantId}-${r.ingestedAt}-${idx}`}
                     onClick={() => setSelectedReport(r)}
