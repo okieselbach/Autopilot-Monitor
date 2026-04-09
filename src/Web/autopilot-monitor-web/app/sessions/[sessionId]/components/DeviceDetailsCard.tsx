@@ -3,8 +3,9 @@
 import { useState, useMemo } from "react";
 import { EnrollmentEvent } from "@/types";
 import OobeConfigModal from "./OobeConfigModal";
+import { compareVersions, stripGitHashSuffix } from "@/lib/bootstrapVersion";
 
-export default function DeviceDetailsCard({ events }: { events: EnrollmentEvent[] }) {
+export default function DeviceDetailsCard({ events, latestAgentVersion }: { events: EnrollmentEvent[]; latestAgentVersion?: string | null }) {
   const [expanded, setExpanded] = useState(false);
   const [showIpv6, setShowIpv6] = useState<Record<number, boolean>>({});
   const [showOobeModal, setShowOobeModal] = useState(false);
@@ -333,9 +334,27 @@ export default function DeviceDetailsCard({ events }: { events: EnrollmentEvent[
                   <DetailRow label="Boot Time" value={estimatedBootTime.toLocaleString([], { dateStyle: "short", timeStyle: "medium" })} />
                 )}
                 {uptimeUntilEnrollment && <DetailRow label="Uptime until enrollment starts" value={uptimeUntilEnrollment} />}
-                {agentStarted?.agentVersion && typeof agentStarted.agentVersion === 'string' && (
-                  <DetailRow label="Monitor Agent Version" value={agentStarted.agentVersion.replace(/\+([0-9a-f]{7})[0-9a-f]+$/, '+$1')} />
-                )}
+                {agentStarted?.agentVersion && typeof agentStarted.agentVersion === 'string' && (() => {
+                  const displayVersion = agentStarted.agentVersion.replace(/\+([0-9a-f]{7})[0-9a-f]+$/, '+$1');
+                  const installedCleaned = stripGitHashSuffix(agentStarted.agentVersion);
+                  const isOutdated = !!latestAgentVersion && compareVersions(installedCleaned, latestAgentVersion) < 0;
+                  return (
+                    <div className="flex justify-between text-xs py-0.5">
+                      <span className="text-gray-500">Monitor Agent Version</span>
+                      <span className="text-gray-900 font-mono ml-2 text-right break-all flex items-center justify-end gap-1" title={displayVersion}>
+                        <span>{displayVersion}</span>
+                        {isOutdated && (
+                          <span
+                            className="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-amber-100 text-amber-800 border border-amber-200"
+                            title={`latest: v${latestAgentVersion}`}
+                          >
+                            outdated
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                  );
+                })()}
                 {imeVersion && <DetailRow label="IME Agent Version" value={imeVersion.version ?? imeVersion.agentVersion ?? "Unknown"} />}
                 {(deviceLocation?.country || deviceLocation?.Country) && (
                   <DetailRow label="Country" value={deviceLocation.country ?? deviceLocation.Country} />

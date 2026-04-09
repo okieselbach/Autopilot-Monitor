@@ -62,6 +62,8 @@ export const api = {
       `${API_BASE_URL}/api/config/${tenantId}/autopilot-device-validation/consent-failure`,
     testNotification: (tenantId: string) =>
       `${API_BASE_URL}/api/config/${tenantId}/test-notification`,
+    latestVersions: (opts?: { refresh?: boolean }) =>
+      `${API_BASE_URL}/api/config/latest-versions${qs({ refresh: opts?.refresh ? "true" : undefined })}`,
   },
 
   // ── Global Config (global admin) ──────────────────────────────────────────

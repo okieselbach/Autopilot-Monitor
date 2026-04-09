@@ -17,6 +17,40 @@ export function MaintenanceTriggerSection({
 }: MaintenanceTriggerSectionProps) {
   const [triggeringMaintenance, setTriggeringMaintenance] = useState(false);
   const [maintenanceDate, setMaintenanceDate] = useState<string>("");
+  const [refreshingVersions, setRefreshingVersions] = useState(false);
+
+  const handleRefreshLatestVersions = async () => {
+    try {
+      setRefreshingVersions(true);
+      setError(null);
+      setSuccessMessage(null);
+
+      const response = await authenticatedFetch(api.config.latestVersions({ refresh: true }), getAccessToken, {
+        method: "GET",
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to refresh latest versions: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      const agentVer = data.latestAgentVersion ?? "unknown";
+      const bootstrapVer = data.latestBootstrapScriptVersion ?? "unknown";
+      const fetchedAt = data.fetchedAtUtc ? new Date(data.fetchedAtUtc).toISOString().replace("T", " ").substring(0, 19) + " UTC" : "now";
+      setSuccessMessage(`Version cache refreshed: agent=${agentVer}, bootstrap=${bootstrapVer} (fetched ${fetchedAt})`);
+
+      setTimeout(() => setSuccessMessage(null), 8000);
+    } catch (err) {
+      if (err instanceof TokenExpiredError) {
+        console.error("Session expired while refreshing versions");
+      } else {
+        console.error("Error refreshing latest versions:", err);
+      }
+      setError(err instanceof Error ? err.message : "Failed to refresh latest versions");
+    } finally {
+      setRefreshingVersions(false);
+    }
+  };
 
   const handleTriggerMaintenance = async () => {
     try {
@@ -126,6 +160,38 @@ export function MaintenanceTriggerSection({
               <strong>Warning:</strong> This operation runs across all tenants and may take several minutes to complete.
               Use this only for testing or when immediate cleanup is needed.
             </p>
+          </div>
+        </div>
+        <div className="bg-white dark:bg-gray-700 border border-purple-300 dark:border-purple-600 rounded-lg p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-purple-900 dark:text-purple-100 mb-1">
+                Refresh Latest Agent / Bootstrap Version Cache
+              </p>
+              <p className="text-xs text-gray-600 dark:text-gray-400">
+                Bypasses the 12h in-memory cache and re-fetches <code className="text-xs bg-purple-50 dark:bg-gray-800 px-1 py-0.5 rounded">version.json</code> from blob storage.
+                Use this immediately after publishing a new agent or bootstrap script build to see the new version in session badges.
+              </p>
+            </div>
+            <button
+              onClick={handleRefreshLatestVersions}
+              disabled={refreshingVersions}
+              className="flex-shrink-0 px-4 py-2 bg-white dark:bg-gray-600 border border-purple-400 dark:border-purple-500 text-purple-700 dark:text-purple-200 rounded-lg hover:bg-purple-50 dark:hover:bg-gray-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all text-sm font-medium flex items-center space-x-2"
+            >
+              {refreshingVersions ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-purple-600"></div>
+                  <span>Reloading...</span>
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  <span>Reload Now</span>
+                </>
+              )}
+            </button>
           </div>
         </div>
         <div className="flex justify-end pt-2">

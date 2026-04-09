@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { compareVersions, extractBootstrapVersion } from "@/lib/bootstrapVersion";
 
 interface ScriptEvent {
   timestamp: string;
@@ -11,6 +12,7 @@ interface ScriptEvent {
 interface ScriptExecutionsProps {
   events: ScriptEvent[];
   showScriptOutput?: boolean;
+  latestBootstrapVersion?: string | null;
 }
 
 interface ScriptItem {
@@ -26,9 +28,10 @@ interface ScriptItem {
   state: "Success" | "Failed";
   timestamp: string;
   firstSeenIndex: number;
+  bootstrapVersion?: string | null; // Parsed from stdout if this is the Autopilot-Monitor bootstrap script
 }
 
-export default function ScriptExecutions({ events, showScriptOutput }: ScriptExecutionsProps) {
+export default function ScriptExecutions({ events, showScriptOutput, latestBootstrapVersion }: ScriptExecutionsProps) {
   const scripts = useMemo(() => {
     if (events.length === 0) return [];
 
@@ -68,6 +71,7 @@ export default function ScriptExecutions({ events, showScriptOutput }: ScriptExe
         state: isSuccess ? "Success" : "Failed",
         timestamp: evt.timestamp,
         firstSeenIndex: items.length,
+        bootstrapVersion: scriptType === "platform" ? extractBootstrapVersion(d.stdout) : null,
       });
     }
 
@@ -129,6 +133,7 @@ export default function ScriptExecutions({ events, showScriptOutput }: ScriptExe
               key={`${item.policyId}-${item.scriptPart ?? ""}-${item.firstSeenIndex}`}
               item={item}
               showScriptOutput={showScriptOutput}
+              latestBootstrapVersion={latestBootstrapVersion}
             />
           ))}
         </div>
@@ -144,7 +149,7 @@ function getIntuneScriptUrl(policyId: string, scriptType: string): string | null
   return `https://intune.microsoft.com/#view/Microsoft_Intune_DeviceSettings/ConfigureWMPolicyMenuBlade/~/overview/policyId/${policyId}/policyType/0`;
 }
 
-function ScriptItemRow({ item, showScriptOutput }: { item: ScriptItem; showScriptOutput?: boolean }) {
+function ScriptItemRow({ item, showScriptOutput, latestBootstrapVersion }: { item: ScriptItem; showScriptOutput?: boolean; latestBootstrapVersion?: string | null }) {
   const [showDetails, setShowDetails] = useState(false);
 
   const containerClass = item.state === "Failed"
@@ -200,6 +205,22 @@ function ScriptItemRow({ item, showScriptOutput }: { item: ScriptItem; showScrip
           }`}>
             {item.scriptType}
           </span>
+          {item.bootstrapVersion && (
+            <span
+              className="text-xs px-2 py-0.5 rounded-full font-medium bg-indigo-100 text-indigo-700"
+              title="Detected Autopilot-Monitor bootstrap script"
+            >
+              bootstrap v{item.bootstrapVersion}
+            </span>
+          )}
+          {item.bootstrapVersion && latestBootstrapVersion && compareVersions(item.bootstrapVersion, latestBootstrapVersion) < 0 && (
+            <span
+              className="text-xs px-2 py-0.5 rounded-full font-medium bg-amber-100 text-amber-800 border border-amber-200"
+              title={`latest: v${latestBootstrapVersion}`}
+            >
+              outdated
+            </span>
+          )}
           {item.runContext && (
             <span className="text-xs text-gray-500">{item.runContext}</span>
           )}

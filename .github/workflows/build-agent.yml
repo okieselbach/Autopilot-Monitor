@@ -155,9 +155,22 @@ jobs:
           $exeSha256Hash = (Get-FileHash "$stagingDir/AutopilotMonitor.Agent.exe" -Algorithm SHA256).Hash.ToLowerInvariant()
           Write-Host "EXE SHA-256: $exeSha256Hash"
 
-          # Enrich version.json with SHA-256 hash (MSBuild only writes version, we add the hash post-ZIP)
+          # Parse bootstrap script version from Install-AutopilotMonitor.ps1
+          $bootstrapVersion = $null
+          $bootstrapContent = Get-Content "scripts/Bootstrap/Install-AutopilotMonitor.ps1" -Raw
+          if ($bootstrapContent -match '\$ScriptVersion\s*=\s*"([\d\.]+)"') {
+            $bootstrapVersion = $Matches[1]
+            Write-Host "Bootstrap script version: $bootstrapVersion"
+          } else {
+            Write-Warning "Could not parse bootstrap `$ScriptVersion from Install-AutopilotMonitor.ps1"
+          }
+
+          # Enrich version.json with SHA-256 hash + bootstrap version (MSBuild only writes version, we add the rest post-ZIP)
           $versionObj = Get-Content "$agentOutput/version.json" -Raw | ConvertFrom-Json
           $versionObj | Add-Member -NotePropertyName "sha256" -NotePropertyValue $sha256Hash -Force
+          if ($bootstrapVersion) {
+            $versionObj | Add-Member -NotePropertyName "bootstrapVersion" -NotePropertyValue $bootstrapVersion -Force
+          }
           $versionObj | ConvertTo-Json -Compress | Set-Content "version.json" -Encoding UTF8
           Write-Host "version.json content: $(Get-Content version.json)"
 
@@ -165,6 +178,7 @@ jobs:
           "deploy_zip=$deployZip" >> $env:GITHUB_OUTPUT
           "sha256=$sha256Hash" >> $env:GITHUB_OUTPUT
           "exe_sha256=$exeSha256Hash" >> $env:GITHUB_OUTPUT
+          "bootstrap_version=$bootstrapVersion" >> $env:GITHUB_OUTPUT
 
       - name: Upload to Azure Blob Storage
         if: inputs.upload_blob
@@ -221,18 +235,23 @@ jobs:
             $sha256 = "${{ steps.artifact.outputs.sha256 }}"
             $exeSha256 = "${{ steps.artifact.outputs.exe_sha256 }}"
             $agentVersion = "${{ steps.version.outputs.version }}"
+            $bootstrapVersion = "${{ steps.artifact.outputs.bootstrap_version }}"
             $tableUrl = "https://autopilotmonitor.table.core.windows.net/AdminConfiguration(PartitionKey='GlobalConfig',RowKey='config')?$tableSasToken"
-            $tableBody = @{
+            $tableBodyHash = @{
               LatestAgentVersion    = $agentVersion
               LatestAgentSha256     = $sha256
               LatestAgentExeSha256  = $exeSha256
-            } | ConvertTo-Json
+            }
+            if ($bootstrapVersion) {
+              $tableBodyHash["LatestBootstrapScriptVersion"] = $bootstrapVersion
+            }
+            $tableBody = $tableBodyHash | ConvertTo-Json
             Invoke-RestMethod -Uri $tableUrl -Method Merge -Headers @{
               "Content-Type" = "application/json"
               "Accept"       = "application/json;odata=nometadata"
               "If-Match"     = "*"
             } -Body $tableBody
-            Write-Host "AdminConfiguration updated: version=$agentVersion, sha256=$sha256, exeSha256=$exeSha256"
+            Write-Host "AdminConfiguration updated: version=$agentVersion, sha256=$sha256, exeSha256=$exeSha256, bootstrapVersion=$bootstrapVersion"
           }
 
       - name: Upload build artifact

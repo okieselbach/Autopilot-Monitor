@@ -13,6 +13,7 @@ import PerformanceChart from '../../../components/PerformanceChart';
 import DownloadProgress from '../../../components/DownloadProgress';
 import InstallProgress from '../../../components/InstallProgress';
 import ScriptExecutions from '../../../components/ScriptExecutions';
+import { useLatestVersions } from '@/lib/useLatestVersions';
 import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 
@@ -80,6 +81,7 @@ export default function SessionDetailPage() {
   const { tenantId } = useTenant();
   const { getAccessToken, user } = useAuth();
   const { addNotification } = useNotifications();
+  const { latestAgentVersion, latestBootstrapVersion } = useLatestVersions(getAccessToken);
 
   const {
     analysisResults,
@@ -962,7 +964,7 @@ export default function SessionDetailPage() {
           )}
 
           {/* Device Details Card (from enrollment tracker events) */}
-          {!isGatherRulesSession && <div id="section-device-details"><DeviceDetailsCard events={events} /></div>}
+          {!isGatherRulesSession && <div id="section-device-details"><DeviceDetailsCard events={events} latestAgentVersion={latestAgentVersion} /></div>}
 
           {/* Phase Timeline */}
           {!isGatherRulesSession && session && (
@@ -1036,6 +1038,7 @@ export default function SessionDetailPage() {
                 e => e.eventType === "script_completed" || e.eventType === "script_failed"
               )}
               showScriptOutput={showScriptOutput}
+              latestBootstrapVersion={latestBootstrapVersion}
             />
             </div>
           )}

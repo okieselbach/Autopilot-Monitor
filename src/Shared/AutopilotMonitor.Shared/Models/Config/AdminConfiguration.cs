@@ -251,6 +251,13 @@ namespace AutopilotMonitor.Shared.Models
         public string LatestAgentExeSha256 { get; set; } = default!;
 
         /// <summary>
+        /// Version string of the latest published bootstrap script (Install-AutopilotMonitor.ps1).
+        /// Written by CI/CD pipeline and PS build scripts after bootstrap script upload.
+        /// Used by the web UI to flag outdated bootstrap scripts in session views.
+        /// </summary>
+        public string LatestBootstrapScriptVersion { get; set; } = default!;
+
+        /// <summary>
         /// Whether vulnerability correlation is globally enabled.
         /// When false, agents still collect inventory but backend skips correlation.
         /// Default: true

@@ -113,6 +113,7 @@ builder.Services.AddHostedService<TableInitializerService>(); // Initialize all 
 builder.Services.AddTableStorageDataAccess();
 builder.Services.AddSingleton<TenantConfigurationService>();
 builder.Services.AddSingleton<AdminConfigurationService>();
+builder.Services.AddSingleton<ILatestVersionsService, LatestVersionsService>();
 builder.Services.AddSingleton<RateLimitService>();
 builder.Services.AddSingleton<DistressRateLimitService>();
 builder.Services.AddSingleton<UsageMetricsService>();

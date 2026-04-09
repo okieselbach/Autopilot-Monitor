@@ -6,6 +6,7 @@ import Link from "next/link";
 interface AgentVersionInfo {
   version?: string;
   url?: string;
+  bootstrapVersion?: string;
 }
 
 const AGENT_VERSION_URL =
@@ -102,33 +103,61 @@ export function SectionAgent() {
         </p>
       </div>
 
-      <div className="mb-6 p-5 bg-blue-50 border border-blue-200 rounded-lg">
-        <div className="flex items-center gap-3 mb-2">
-          <svg className="w-5 h-5 text-blue-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
-          </svg>
-          <span className="font-semibold text-blue-900">Latest Agent Version</span>
-        </div>
-        {loading ? (
-          <div className="flex items-center gap-2 text-sm text-blue-700">
-            <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+      <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="p-5 bg-blue-50 border border-blue-200 rounded-lg">
+          <div className="flex items-center gap-3 mb-2">
+            <svg className="w-5 h-5 text-blue-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
             </svg>
-            Loading version info...
+            <span className="font-semibold text-blue-900">Latest Agent Version</span>
           </div>
-        ) : versionInfo?.version ? (
-          <div className="flex items-center gap-3">
-            <span className="inline-flex items-center px-3 py-1.5 bg-blue-100 text-blue-800 text-lg font-mono font-bold rounded-md">
-              v{versionInfo.version}
-            </span>
-            <Link href="/docs/agent-changelog" className="text-sm text-blue-600 hover:text-blue-800 hover:underline">
-              View Changelog
-            </Link>
+          {loading ? (
+            <div className="flex items-center gap-2 text-sm text-blue-700">
+              <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              Loading version info...
+            </div>
+          ) : versionInfo?.version ? (
+            <div className="flex items-center gap-3">
+              <span className="inline-flex items-center px-3 py-1.5 bg-blue-100 text-blue-800 text-lg font-mono font-bold rounded-md">
+                v{versionInfo.version}
+              </span>
+              <Link href="/docs/agent-changelog" className="text-sm text-blue-600 hover:text-blue-800 hover:underline">
+                View Changelog
+              </Link>
+            </div>
+          ) : (
+            <p className="text-sm text-blue-700">Version information is currently unavailable.</p>
+          )}
+        </div>
+
+        <div className="p-5 bg-blue-50 border border-blue-200 rounded-lg">
+          <div className="flex items-center gap-3 mb-2">
+            <svg className="w-5 h-5 text-blue-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+            </svg>
+            <span className="font-semibold text-blue-900">Latest Bootstrapper Script Version</span>
           </div>
-        ) : (
-          <p className="text-sm text-blue-700">Version information is currently unavailable.</p>
-        )}
+          {loading ? (
+            <div className="flex items-center gap-2 text-sm text-blue-700">
+              <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              Loading version info...
+            </div>
+          ) : versionInfo?.bootstrapVersion ? (
+            <div className="flex items-center gap-3">
+              <span className="inline-flex items-center px-3 py-1.5 bg-blue-100 text-blue-800 text-lg font-mono font-bold rounded-md">
+                v{versionInfo.bootstrapVersion}
+              </span>
+            </div>
+          ) : (
+            <p className="text-sm text-blue-700">Version information is currently unavailable.</p>
+          )}
+        </div>
       </div>
 
       <div className="mb-6">

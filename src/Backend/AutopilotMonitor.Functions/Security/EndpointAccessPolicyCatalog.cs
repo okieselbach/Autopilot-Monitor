@@ -124,6 +124,7 @@ public static class EndpointAccessPolicyCatalog
         new("PUT",    "preview/notification-email", EndpointPolicy.AuthenticatedUser),
         new("GET",    "feedback/status",           EndpointPolicy.AuthenticatedUser),
         new("POST",   "feedback",                  EndpointPolicy.AuthenticatedUser),
+        new("GET",    "config/latest-versions",    EndpointPolicy.AuthenticatedUser),
 
         // ── MemberRead (Admin + Operator, later + Viewer) ───────────────
         new("GET",    "raw/sessions",                        EndpointPolicy.MemberRead),

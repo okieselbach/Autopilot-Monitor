@@ -531,6 +531,7 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                 { "LatestAgentVersion", config.LatestAgentVersion ?? string.Empty },
                 { "LatestAgentSha256", config.LatestAgentSha256 ?? string.Empty },
                 { "LatestAgentExeSha256", config.LatestAgentExeSha256 ?? string.Empty },
+                { "LatestBootstrapScriptVersion", config.LatestBootstrapScriptVersion ?? string.Empty },
                 // Rate limiting per-role settings
                 { "UserRateLimitRequestsPerMinute", config.UserRateLimitRequestsPerMinute },
                 { "GlobalAdminRateLimitRequestsPerMinute", config.GlobalAdminRateLimitRequestsPerMinute },
@@ -579,6 +580,7 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                 LatestAgentVersion = entity.GetString("LatestAgentVersion") ?? string.Empty,
                 LatestAgentSha256 = entity.GetString("LatestAgentSha256") ?? string.Empty,
                 LatestAgentExeSha256 = entity.GetString("LatestAgentExeSha256") ?? string.Empty,
+                LatestBootstrapScriptVersion = entity.GetString("LatestBootstrapScriptVersion") ?? string.Empty,
                 // Rate limiting per-role settings
                 UserRateLimitRequestsPerMinute = entity.GetInt32("UserRateLimitRequestsPerMinute") ?? 120,
                 GlobalAdminRateLimitRequestsPerMinute = entity.GetInt32("GlobalAdminRateLimitRequestsPerMinute") ?? 600,
