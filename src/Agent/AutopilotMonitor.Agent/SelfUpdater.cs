@@ -21,7 +21,7 @@ namespace AutopilotMonitor.Agent
     /// </summary>
     static class SelfUpdater
     {
-        private const int VersionCheckTimeoutMs = 1000;  // 1s — aggressive, skip if slow
+        private const int VersionCheckTimeoutMs = 2500;  // 2.5s — covers cold DNS/TLS on fresh Autopilot boot
         private const int DownloadTimeoutMs = 10000;     // 10s — abort if too slow
         private const string OldFileSuffix = ".old";
 
@@ -300,7 +300,7 @@ namespace AutopilotMonitor.Agent
             }
             catch (TaskCanceledException)
             {
-                log("Self-update: version check timed out (1s) — skipping update");
+                log($"Self-update: version check timed out ({VersionCheckTimeoutMs}ms) — skipping update");
                 return (null, null);
             }
             catch (HttpRequestException ex) when (ex.Message.Contains("404"))
