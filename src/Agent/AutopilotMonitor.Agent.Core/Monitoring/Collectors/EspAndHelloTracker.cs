@@ -56,6 +56,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         private readonly object _stateLock = new object();
 
         private readonly int _helloWaitTimeoutSeconds;
+        private readonly bool _modernDeploymentWatcherEnabled;
+        private readonly int _modernDeploymentLogLevelMax;
         private const int HelloCompletionTimeoutSeconds = 300;
         private const int BackfillLookbackMinutes = 5;
 
@@ -145,13 +147,22 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             EventId_HelloForBusiness_ProcessingStopped
         };
 
-        public EspAndHelloTracker(string sessionId, string tenantId, Action<EnrollmentEvent> onEventCollected, AgentLogger logger, int helloWaitTimeoutSeconds = 30)
+        public EspAndHelloTracker(
+            string sessionId,
+            string tenantId,
+            Action<EnrollmentEvent> onEventCollected,
+            AgentLogger logger,
+            int helloWaitTimeoutSeconds = 30,
+            bool modernDeploymentWatcherEnabled = true,
+            int modernDeploymentLogLevelMax = 3)
         {
             _sessionId = sessionId ?? throw new ArgumentNullException(nameof(sessionId));
             _tenantId = tenantId ?? throw new ArgumentNullException(nameof(tenantId));
             _onEventCollected = onEventCollected ?? throw new ArgumentNullException(nameof(onEventCollected));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _helloWaitTimeoutSeconds = helloWaitTimeoutSeconds;
+            _modernDeploymentWatcherEnabled = modernDeploymentWatcherEnabled;
+            _modernDeploymentLogLevelMax = modernDeploymentLogLevelMax;
         }
 
         /// <summary>
@@ -209,6 +220,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 
             // Subscribe to HelloForBusiness/Operational event log for Hello processing signals
             StartHelloForBusinessEventLogWatcher();
+
+            // Subscribe to ModernDeployment-Diagnostics-Provider channels (Autopilot + ManagementService)
+            // for live capture of ESP/Autopilot events that Shell-Core/Registry watchers may miss.
+            if (_modernDeploymentWatcherEnabled)
+            {
+                StartModernDeploymentEventLogWatchers();
+            }
 
             // Safety net: backfill recent terminal events in case watcher started late or event delivery lagged.
             BackfillRecentTerminalHelloEvents();
@@ -315,6 +333,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     _logger.Error("Error stopping Shell-Core event watcher", ex);
                 }
             }
+
+            // Stop ModernDeployment-Diagnostics-Provider watchers
+            StopModernDeploymentEventLogWatchers();
         }
 
         public void Dispose()

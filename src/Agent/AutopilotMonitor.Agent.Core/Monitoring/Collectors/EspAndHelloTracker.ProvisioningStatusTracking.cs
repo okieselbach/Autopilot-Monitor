@@ -64,6 +64,57 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         private const int DeviceSetupFallbackDelaySeconds = 30;
         private const int ProvisioningDebounceMilliseconds = 1000;
 
+        /// <summary>
+        /// Snapshot of current provisioning-category state for consumers like the signal-correlated
+        /// WhiteGlove detection. Thread-safe: copies the underlying dictionary under the state lock.
+        /// </summary>
+        public Dictionary<string, bool?> GetProvisioningCategorySnapshot()
+        {
+            lock (_stateLock)
+            {
+                return _lastCategorySucceeded == null
+                    ? new Dictionary<string, bool?>(StringComparer.OrdinalIgnoreCase)
+                    : new Dictionary<string, bool?>(_lastCategorySucceeded, StringComparer.OrdinalIgnoreCase);
+            }
+        }
+
+        /// <summary>
+        /// True when DeviceSetupCategory.Status has resolved categorySucceeded=true OR when the
+        /// fallback (all subcategories succeeded, categorySucceeded null) has been confirmed.
+        /// </summary>
+        public bool DeviceSetupCategorySucceeded
+        {
+            get
+            {
+                lock (_stateLock)
+                {
+                    if (_deviceSetupProvisioningCompleteFired)
+                        return true;
+                    return _lastCategorySucceeded != null
+                        && _lastCategorySucceeded.TryGetValue("DeviceSetupCategory.Status", out var v)
+                        && v == true;
+                }
+            }
+        }
+
+        /// <summary>
+        /// True when any AccountSetup subcategory has been tracked (resolved or in progress).
+        /// </summary>
+        public bool HasAccountSetupActivity
+        {
+            get
+            {
+                lock (_stateLock)
+                {
+                    if (_lastSubcategoryStates == null)
+                        return false;
+                    return _lastSubcategoryStates.TryGetValue("AccountSetupCategory.Status", out var subs)
+                        && subs != null
+                        && subs.Count > 0;
+                }
+            }
+        }
+
         private void StartProvisioningStatusWatcher()
         {
             _lastProvisioningJson = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);

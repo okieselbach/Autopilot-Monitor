@@ -219,6 +219,7 @@ namespace AutopilotMonitor.Functions.Services
                 IsPreProvisioned = entity.GetBoolean("IsPreProvisioned") ?? false,
                 IsHybridJoin = entity.GetBoolean("IsHybridJoin") ?? false,
                 ResumedAt = SafeGetDateTime(entity, "ResumedAt"),
+                StalledAt = SafeGetDateTime(entity, "StalledAt"),
                 OsName = entity.GetString("OsName") ?? string.Empty,
                 OsBuild = entity.GetString("OsBuild") ?? string.Empty,
                 OsDisplayVersion = entity.GetString("OsDisplayVersion") ?? string.Empty,
@@ -291,6 +292,7 @@ namespace AutopilotMonitor.Functions.Services
                 int? durationSeconds = null;
                 string? diagnosticsBlobName = null;
                 DateTime? resumedAt = null;
+                DateTime? stalledAt = null;
                 string geoCountry = string.Empty;
                 string geoRegion = string.Empty;
                 string geoCity = string.Empty;
@@ -321,6 +323,7 @@ namespace AutopilotMonitor.Functions.Services
                     durationSeconds = existingEntity.GetInt32("DurationSeconds");
                     diagnosticsBlobName = existingEntity.GetString("DiagnosticsBlobName");
                     resumedAt = existingEntity.GetDateTimeOffset("ResumedAt")?.UtcDateTime;
+                    stalledAt = existingEntity.GetDateTimeOffset("StalledAt")?.UtcDateTime;
                     geoCountry = existingEntity.GetString("GeoCountry") ?? string.Empty;
                     geoRegion = existingEntity.GetString("GeoRegion") ?? string.Empty;
                     geoCity = existingEntity.GetString("GeoCity") ?? string.Empty;
@@ -400,6 +403,9 @@ namespace AutopilotMonitor.Functions.Services
 
                 if (resumedAt.HasValue)
                     entity["ResumedAt"] = EnsureUtc(resumedAt.Value);
+
+                if (stalledAt.HasValue)
+                    entity["StalledAt"] = EnsureUtc(stalledAt.Value);
 
                 if (!string.IsNullOrEmpty(geoCountry))
                     entity["GeoCountry"] = geoCountry;
@@ -901,7 +907,7 @@ namespace AutopilotMonitor.Functions.Services
         /// Event count is maintained atomically by IncrementSessionEventCountAsync and is not
         /// recounted here — avoiding an expensive full-partition scan on every status change.
         /// </summary>
-        public async Task<bool> UpdateSessionStatusAsync(string tenantId, string sessionId, SessionStatus status, EnrollmentPhase? currentPhase = null, string? failureReason = null, DateTime? completedAt = null, DateTime? earliestEventTimestamp = null, DateTime? latestEventTimestamp = null, bool? isPreProvisioned = null, bool? isUserDriven = null, DateTime? resumedAt = null)
+        public async Task<bool> UpdateSessionStatusAsync(string tenantId, string sessionId, SessionStatus status, EnrollmentPhase? currentPhase = null, string? failureReason = null, DateTime? completedAt = null, DateTime? earliestEventTimestamp = null, DateTime? latestEventTimestamp = null, bool? isPreProvisioned = null, bool? isUserDriven = null, DateTime? resumedAt = null, DateTime? stalledAt = null, bool clearStalledAt = false, bool clearFailureReason = false)
         {
             SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
             SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
@@ -934,11 +940,24 @@ namespace AutopilotMonitor.Functions.Services
                     // Build a Merge update with only the fields that actually change
                     var update = new TableEntity(tenantId, sessionId);
 
-                    // InProgress is never passed here from IngestEventsFunction — status transitions
-                    // are limited to Succeeded, Failed, Pending. The Pending→InProgress regression is
-                    // structurally impossible because phase_changed events use IncrementSessionEventCountAsync
-                    // (which never touches Status). Only StoreSessionAsync (re-registration) transitions
-                    // Pending→InProgress for WhiteGlove Part 2.
+                    // Status transitions from IngestEventsFunction: Succeeded, Failed, Pending, Stalled,
+                    // and InProgress (the last one only for healing a Stalled session back to active).
+                    // Guard: never regress a Pending (WhiteGlove) session to Stalled via the ingest
+                    // path — WhiteGlove sessions are deliberately long-lived and handled via re-registration.
+                    if (status == SessionStatus.Stalled && existingStatusStr == SessionStatus.Pending.ToString())
+                    {
+                        _logger.LogInformation($"Session {sessionId} is in Pending (WhiteGlove) state, skipping Stalled transition");
+                        return false;
+                    }
+
+                    // Guard: only allow InProgress transition if the current state is Stalled (healing).
+                    // Other callers must not regress terminal or Pending state via this path.
+                    if (status == SessionStatus.InProgress && existingStatusStr != SessionStatus.Stalled.ToString())
+                    {
+                        _logger.LogInformation($"Session {sessionId} is in state '{existingStatusStr}', not Stalled — InProgress heal no-op");
+                        return false;
+                    }
+
                     update["Status"] = status.ToString();
 
                     // Update current phase if provided
@@ -1037,6 +1056,26 @@ namespace AutopilotMonitor.Functions.Services
                     if (resumedAt.HasValue)
                     {
                         update["ResumedAt"] = EnsureUtc(resumedAt.Value);
+                    }
+
+                    // Stalled-state bookkeeping: the agent emits session_stalled after 60 min idle,
+                    // or the 2h maintenance sweep sets the state for completely silent agents.
+                    if (stalledAt.HasValue)
+                    {
+                        update["StalledAt"] = EnsureUtc(stalledAt.Value);
+                        if (!string.IsNullOrEmpty(failureReason))
+                            update["FailureReason"] = failureReason;
+                    }
+
+                    // Heal: clear StalledAt + Stalled-phase FailureReason when the session goes
+                    // back to InProgress (a new real event proved the agent is alive again).
+                    if (clearStalledAt)
+                    {
+                        update["StalledAt"] = (DateTime?)null;
+                    }
+                    if (clearFailureReason)
+                    {
+                        update["FailureReason"] = string.Empty;
                     }
 
                     // Merge mode: only the fields set above are written; all other fields remain untouched.
@@ -1646,6 +1685,7 @@ namespace AutopilotMonitor.Functions.Services
                 IsPreProvisioned = entity.GetBoolean("IsPreProvisioned") ?? false,
                 IsHybridJoin = entity.GetBoolean("IsHybridJoin") ?? false,
                 ResumedAt = SafeGetDateTime(entity, "ResumedAt"),
+                StalledAt = SafeGetDateTime(entity, "StalledAt"),
                 OsName = entity.GetString("OsName") ?? string.Empty,
                 OsBuild = entity.GetString("OsBuild") ?? string.Empty,
                 OsDisplayVersion = entity.GetString("OsDisplayVersion") ?? string.Empty,

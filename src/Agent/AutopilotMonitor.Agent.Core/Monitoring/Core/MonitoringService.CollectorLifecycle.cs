@@ -66,20 +66,45 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 _collectorIdleTimeoutMinutes = collectors?.CollectorIdleTimeoutMinutes ?? 15;
                 _lastRealEventTime = DateTime.UtcNow;
                 _collectorsIdleStopped = false;
-                if (_collectorIdleTimeoutMinutes > 0)
+
+                // Stall probe collector (Ebene 2) — event-driven deep probes at 2/15/30/60/180 min idle
+                if (collectors?.StallProbeEnabled != false)
                 {
-                    _idleCheckTimer = new Timer(
-                        IdleCheckCallback,
-                        null,
-                        TimeSpan.FromSeconds(60),
-                        TimeSpan.FromSeconds(60)
-                    );
-                    _logger.Info($"Collector idle timeout enabled: {_collectorIdleTimeoutMinutes} min");
+                    var probeThresholds = collectors?.StallProbeThresholdsMinutes ?? new[] { 2, 15, 30, 60, 180 };
+                    var probeTraceIndices = collectors?.StallProbeTraceIndices ?? new[] { 2 };
+                    var probeSources = collectors?.StallProbeSources ?? new[]
+                    {
+                        "provisioning_registry", "diagnostics_registry", "eventlog", "appworkload_log"
+                    };
+                    var stalledAfterIndex = collectors?.SessionStalledAfterProbeIndex ?? 4;
+                    _stallProbeCollector = new StallProbeCollector(
+                        _configuration.SessionId,
+                        _configuration.TenantId,
+                        EmitEvent,
+                        _logger,
+                        probeThresholds,
+                        probeTraceIndices,
+                        probeSources,
+                        stalledAfterIndex);
+                    _logger.Info($"StallProbeCollector enabled: thresholds=[{string.Join(",", probeThresholds)}]min, traces=[{string.Join(",", probeTraceIndices)}], sources={probeSources.Length}");
                 }
                 else
                 {
-                    _logger.Info("Collector idle timeout disabled (0)");
+                    _logger.Info("StallProbeCollector disabled via config");
                 }
+
+                // The idle check timer drives BOTH the legacy collector idle timeout AND the stall probes.
+                // It runs every 60s for the entire agent lifetime (not stopped when collectors pause).
+                _idleCheckTimer = new Timer(
+                    IdleCheckCallback,
+                    null,
+                    TimeSpan.FromSeconds(60),
+                    TimeSpan.FromSeconds(60)
+                );
+                if (_collectorIdleTimeoutMinutes > 0)
+                    _logger.Info($"Collector idle timeout enabled: {_collectorIdleTimeoutMinutes} min");
+                else
+                    _logger.Info("Collector idle timeout disabled (0)");
 
                 // EnrollmentTracker: smart enrollment tracking with IME log parsing
                 // (replaces DownloadProgressCollector + EspUiStateCollector)
@@ -105,6 +130,32 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     );
                     _enrollmentTracker.Start();
                     _logger.Info("EnrollmentTracker started — listening for IME patterns");
+
+                    // Forward the previously-detected system reboot signal into the tracker so
+                    // the signal-correlated WhiteGlove heuristic can see it. (The reboot event
+                    // was already emitted from EmitStartupEvents before the tracker existed.)
+                    if (_previousExitType == "reboot_kill" && _lastBootTimeUtc.HasValue)
+                    {
+                        _enrollmentTracker.NotifySystemRebootDetected();
+                    }
+
+                    // Wire up the stall probe's terminal-failure signal into the existing
+                    // EnrollmentTracker failure pathway so downstream logic (grace period,
+                    // enrollment_failed emission) stays unified.
+                    if (_stallProbeCollector != null)
+                    {
+                        _stallProbeCollector.EspFailureDetected += (sender, failureType) =>
+                        {
+                            try
+                            {
+                                _enrollmentTracker?.ReportEspFailureFromExternalSource(failureType);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.Error("Failed to forward stall probe failure to EnrollmentTracker", ex);
+                            }
+                        };
+                    }
                 }
 
                 // Delivery Optimization collector — polls OS-level DO status for peer caching telemetry
@@ -293,27 +344,48 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         }
 
         /// <summary>
-        /// Returns true for events generated by periodic timers (not real enrollment activity)
+        /// Returns true for events generated by periodic timers (not real enrollment activity).
+        /// These events do NOT reset _lastRealEventTime and do NOT restart periodic collectors —
+        /// the enrollment is considered "still idle" even if one of these events was emitted.
+        /// Stall-probe self-reports are classified periodic so the probe cannot unmark itself
+        /// as stalled (only a genuine enrollment signal can).
         /// </summary>
         private static bool IsPeriodicEvent(string eventType)
         {
             return eventType == "performance_snapshot" ||
                    eventType == "agent_metrics_snapshot" ||
                    eventType == "performance_collector_stopped" ||
-                   eventType == "agent_metrics_collector_stopped";
+                   eventType == "agent_metrics_collector_stopped" ||
+                   eventType == Constants.EventTypes.StallProbeCheck ||
+                   eventType == Constants.EventTypes.StallProbeResult ||
+                   eventType == Constants.EventTypes.SessionStalled;
         }
 
         /// <summary>
         /// Periodic check (every 60s) whether enrollment has gone idle.
-        /// When no real event has arrived within the configured timeout window,
-        /// periodic collectors are stopped to prevent session bloat.
+        /// Two responsibilities:
+        /// 1. Stop telemetry collectors after the configured idle window to prevent session bloat.
+        /// 2. Invoke the StallProbeCollector to check probe thresholds (2/15/30/60/180 min) and
+        ///    scan for stuck ESP/IME state when silence persists. The timer keeps running even
+        ///    after collectors are stopped so probe thresholds beyond the idle window are reachable.
         /// </summary>
         private void IdleCheckCallback(object state)
         {
+            var idleMinutes = (DateTime.UtcNow - _lastRealEventTime).TotalMinutes;
+
+            // Delegate to stall probe first — it reads _lastRealEventTime and decides which probe to run.
+            try
+            {
+                _stallProbeCollector?.CheckAndRunProbes(idleMinutes);
+            }
+            catch (Exception ex)
+            {
+                _logger.Error("StallProbeCollector.CheckAndRunProbes threw", ex);
+            }
+
             if (_collectorsIdleStopped)
                 return;
 
-            var idleMinutes = (DateTime.UtcNow - _lastRealEventTime).TotalMinutes;
             if (idleMinutes < _collectorIdleTimeoutMinutes)
                 return;
 
@@ -373,8 +445,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 
             _collectorsIdleStopped = true;
 
-            // Stop the idle check timer — it will be restarted if collectors resume
-            _idleCheckTimer?.Change(Timeout.Infinite, Timeout.Infinite);
+            // NOTE: The idle check timer keeps running (previously stopped here) so the
+            // StallProbeCollector can still reach the higher probe thresholds (60/180 min).
+            // The early-return guard above prevents re-entry of the collector-stop logic.
         }
 
         /// <summary>

@@ -96,6 +96,29 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         // Detected via CollectAadJoinStatus() in DeviceInfoCollector.
         private bool _aadJoinedWithUser;
 
+        // Signal-correlated WhiteGlove detection (Ebene 2.6):
+        // Feeds the bestehenden OnWhiteGloveCompleted() callback when the Shell-Core detector
+        // does not match but the session shows the WhiteGlove sealing pattern (all Device-apps done,
+        // DeviceSetup category succeeded, system reboot observed, AAD Not Joined, no AccountSetup
+        // progress, no desktop arrival). Requires ≥10 min stability to avoid false-positives.
+        private DateTime? _signalCorrelatedWhiteGloveStableSince;
+        private bool _signalCorrelatedWhiteGloveTriggered;
+        private bool _systemRebootObserved;
+        private const int SignalCorrelatedWhiteGloveStabilityMinutes = 10;
+
+        /// <summary>
+        /// Called by MonitoringService when a system_reboot_detected event is emitted
+        /// (agent restart after an unclean exit / machine reboot). Used as an input signal
+        /// for the signal-correlated WhiteGlove detection heuristic.
+        /// </summary>
+        public void NotifySystemRebootDetected()
+        {
+            lock (_stateLock)
+            {
+                _systemRebootObserved = true;
+            }
+        }
+
         // True when no interactive user session is expected.
         // Self-Deploying (AutopilotMode=1) is always device-only.
         // SkipUserStatusPage=true alone does NOT mean device-only — admins commonly skip

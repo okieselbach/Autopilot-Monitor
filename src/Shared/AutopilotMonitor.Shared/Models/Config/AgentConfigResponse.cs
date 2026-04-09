@@ -254,6 +254,75 @@ namespace AutopilotMonitor.Shared.Models
         /// </summary>
         public int DeliveryOptimizationIntervalSeconds { get; set; } = 3;
 
+        // -----------------------------------------------------------------------
+        // Stall detection (Ebene 2 — StallProbeCollector)
+        // -----------------------------------------------------------------------
+
+        /// <summary>
+        /// Master switch for the stall probe mechanism. When enabled, probes run at
+        /// idle-time thresholds (see StallProbeThresholdsMinutes) to detect stuck
+        /// enrollments via registry, EventLog and AppWorkload log scans.
+        /// Default: true
+        /// </summary>
+        public bool StallProbeEnabled { get; set; } = true;
+
+        /// <summary>
+        /// Idle-time thresholds in minutes at which probes run. Each probe is fire-once
+        /// per idle window; the counter resets on any real (non-periodic) event.
+        /// Default: [2, 15, 30, 60, 180]
+        /// Probe 1 (2 min): early quick-response, silent unless anomaly found.
+        /// Probe 2 (15 min): main gate with guaranteed trace heartbeat.
+        /// Probe 3 (30 min): silent unless found.
+        /// Probe 4 (60 min): fires session_stalled event → backend sets status to Stalled.
+        /// Probe 5 (180 min): last-chance scan before 5h backend timeout, silent unless found.
+        /// </summary>
+        public int[] StallProbeThresholdsMinutes { get; set; } = new[] { 2, 15, 30, 60, 180 };
+
+        /// <summary>
+        /// Probe indices (1-based) that emit a stall_probe_check trace event even when
+        /// no anomaly is found. Default: [2] — only Probe 2 (15 min) sends a heartbeat.
+        /// Set to [1, 2] for more observability at the cost of extra trace events.
+        /// </summary>
+        public int[] StallProbeTraceIndices { get; set; } = new[] { 2 };
+
+        /// <summary>
+        /// Which sources to scan per probe. Any source can be removed from the list
+        /// to disable it individually without affecting the others.
+        /// Default: all four sources enabled.
+        /// </summary>
+        public string[] StallProbeSources { get; set; } = new[]
+        {
+            "provisioning_registry",
+            "diagnostics_registry",
+            "eventlog",
+            "appworkload_log"
+        };
+
+        /// <summary>
+        /// After which probe index (1-based) the fire-once session_stalled event is emitted.
+        /// Default: 4 → after Probe 4 (60 min idle).
+        /// </summary>
+        public int SessionStalledAfterProbeIndex { get; set; } = 4;
+
+        // -----------------------------------------------------------------------
+        // ModernDeployment EventLog Watcher (Ebene 1 — live capture)
+        // -----------------------------------------------------------------------
+
+        /// <summary>
+        /// Master switch for the ModernDeployment EventLog watcher. When enabled, the agent
+        /// subscribes to two Windows event channels and forwards matching events as
+        /// modern_deployment_log events to the backend.
+        /// Default: true
+        /// </summary>
+        public bool ModernDeploymentWatcherEnabled { get; set; } = true;
+
+        /// <summary>
+        /// Maximum Windows event level to capture from ModernDeployment channels.
+        /// Windows levels: 1=Critical, 2=Error, 3=Warning, 4=Information, 5=Verbose.
+        /// Default: 3 → captures Critical, Error and Warning.
+        /// </summary>
+        public int ModernDeploymentLogLevelMax { get; set; } = 3;
+
         /// <summary>
         /// Creates default collector configuration
         /// </summary>

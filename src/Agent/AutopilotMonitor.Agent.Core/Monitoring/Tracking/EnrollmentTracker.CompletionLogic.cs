@@ -168,10 +168,22 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         /// Called when WhiteGlove (Pre-Provisioning) completes successfully.
         /// Emits the whiteglove_complete event. The MonitoringService handles
         /// the actual agent shutdown upon seeing this event type.
+        /// Idempotent: fire-once per session instance. A second invocation (e.g. Shell-Core
+        /// watcher fires after the signal-correlated detector already matched) is a no-op.
         /// </summary>
         private void OnWhiteGloveCompleted(object sender, EventArgs e)
         {
-            _logger.Info("EnrollmentTracker: WhiteGlove pre-provisioning completed");
+            lock (_stateLock)
+            {
+                if (_signalCorrelatedWhiteGloveTriggered)
+                {
+                    _logger.Debug("EnrollmentTracker: whiteglove_complete already emitted, skipping duplicate");
+                    return;
+                }
+                _signalCorrelatedWhiteGloveTriggered = true;
+            }
+
+            _logger.Info($"EnrollmentTracker: WhiteGlove pre-provisioning completed (source: {sender?.GetType().Name ?? "unknown"})");
 
             // Stop summary timer — no more app tracking needed
             _summaryTimer?.Change(System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite);
@@ -196,10 +208,115 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         }
 
         /// <summary>
+        /// Signal-correlated WhiteGlove detection (Ebene 2.6). Called periodically from the
+        /// summary timer (every 30 s). Evaluates the sealing pattern and, on a stable match
+        /// lasting ≥10 min, triggers the existing OnWhiteGloveCompleted pipeline — which emits
+        /// whiteglove_complete, persists the Part 1 marker, and starts graceful shutdown.
+        ///
+        /// Pattern (ALL required):
+        ///   - All device-targeted apps installed, no errors (via PackageStates)
+        ///   - DeviceSetupCategory.Status is succeeded
+        ///   - A system reboot has been observed since session start
+        ///   - AAD join status shows Not Joined
+        ///   - AccountSetup category has no activity (no resolved subcategories)
+        ///   - No desktop arrival event has been seen
+        ///   - No Hello signals (Hello not completed, wizard not started)
+        /// </summary>
+        public void CheckSignalCorrelatedWhiteGlove()
+        {
+            // Fast-exit: guards that don't require I/O.
+            lock (_stateLock)
+            {
+                if (_signalCorrelatedWhiteGloveTriggered)
+                    return;
+                if (_desktopArrived || _enrollmentCompleteEmitted)
+                    return;
+                // Reboot observation is required — without it we are still in Part 1 pre-reboot.
+                if (!_systemRebootObserved)
+                    return;
+                // AAD Not Joined is required — if the user already signed in, this is not sealing.
+                if (_aadJoinedWithUser)
+                    return;
+            }
+
+            // EspAndHelloTracker provides the authoritative provisioning signals.
+            if (_espAndHelloTracker == null)
+                return;
+
+            bool deviceSetupOk = _espAndHelloTracker.DeviceSetupCategorySucceeded;
+            bool hasAccountSetupActivity = _espAndHelloTracker.HasAccountSetupActivity;
+            bool helloInFlight = _espAndHelloTracker.IsHelloCompleted; // true once Hello resolved (either success or skip)
+
+            // ImeLogTracker provides the app-tracking state.
+            var packageStates = _imeLogTracker?.PackageStates;
+            bool appsDone = packageStates != null
+                && packageStates.CountAll > 0
+                && packageStates.CountCompleted >= packageStates.CountAll
+                && packageStates.ErrorCount == 0;
+
+            bool allConditionsMet = deviceSetupOk && appsDone && !hasAccountSetupActivity && !helloInFlight;
+
+            DateTime? triggerAt = null;
+            bool shouldTrigger = false;
+
+            lock (_stateLock)
+            {
+                if (!allConditionsMet)
+                {
+                    // Stability window broken — reset.
+                    if (_signalCorrelatedWhiteGloveStableSince != null)
+                    {
+                        _logger.Debug("EnrollmentTracker: signal-correlated WhiteGlove conditions no longer stable, resetting stability window");
+                        _signalCorrelatedWhiteGloveStableSince = null;
+                    }
+                    return;
+                }
+
+                if (_signalCorrelatedWhiteGloveStableSince == null)
+                {
+                    _signalCorrelatedWhiteGloveStableSince = DateTime.UtcNow;
+                    _logger.Info($"EnrollmentTracker: signal-correlated WhiteGlove conditions met — starting {SignalCorrelatedWhiteGloveStabilityMinutes}min stability window");
+                    return;
+                }
+
+                var stableDuration = DateTime.UtcNow - _signalCorrelatedWhiteGloveStableSince.Value;
+                if (stableDuration.TotalMinutes >= SignalCorrelatedWhiteGloveStabilityMinutes)
+                {
+                    shouldTrigger = true;
+                    triggerAt = _signalCorrelatedWhiteGloveStableSince.Value;
+                }
+            }
+
+            if (shouldTrigger)
+            {
+                _logger.Info($"EnrollmentTracker: signal-correlated WhiteGlove stable since {triggerAt:HH:mm:ss} UTC — invoking OnWhiteGloveCompleted");
+                try
+                {
+                    OnWhiteGloveCompleted(this, EventArgs.Empty);
+                }
+                catch (Exception ex)
+                {
+                    _logger.Error("Signal-correlated WhiteGlove invocation failed", ex);
+                }
+            }
+        }
+
+        /// <summary>
         /// Called when an ESP failure is detected (ESPProgress_Failure, _Timeout, _Abort, WhiteGlove_Failed, etc.).
         /// Terminal failures emit enrollment_failed immediately.
         /// Recoverable failures (e.g. ESPProgress_Timeout) get a grace period before failure.
         /// </summary>
+        /// <summary>
+        /// Public entry point for secondary ESP-failure detectors (StallProbeCollector) to report
+        /// a terminal failure finding. Reuses the same OnEspFailureDetected pathway as the
+        /// Shell-Core watcher so the downstream logic (grace period, enrollment_failed emission)
+        /// stays unified.
+        /// </summary>
+        public void ReportEspFailureFromExternalSource(string failureType)
+        {
+            OnEspFailureDetected(this, failureType);
+        }
+
         private void OnEspFailureDetected(object sender, string failureType)
         {
             _logger.Info($"EnrollmentTracker: ESP failure detected: {failureType}");

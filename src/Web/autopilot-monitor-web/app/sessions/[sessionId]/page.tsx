@@ -910,7 +910,7 @@ export default function SessionDetailPage() {
                 Diagnosis
               </button>
             )}
-            {adminMode && (session?.status === 'InProgress' || session?.status === 'Pending') && (
+            {adminMode && (session?.status === 'InProgress' || session?.status === 'Pending' || session?.status === 'Stalled') && (
               <>
                 <button
                   onClick={markAsSucceeded}

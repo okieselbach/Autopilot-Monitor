@@ -528,6 +528,7 @@ export function SessionTable({
                 Failed: "text-red-600",
                 InProgress: "text-blue-600",
                 Pending: "text-amber-600",
+                Stalled: "text-orange-600",
               };
               return (
                 <button
@@ -596,11 +597,12 @@ export function SessionTable({
 
       {/* Status Filter Badges */}
       <div className="mb-4 flex items-center gap-2 flex-wrap">
-        {(["Succeeded", "InProgress", "Pending", "Failed"] as const).map((status) => {
+        {(["Succeeded", "InProgress", "Pending", "Stalled", "Failed"] as const).map((status) => {
           const config: Record<string, { bg: string; bgActive: string; text: string; label: string }> = {
             Succeeded: { bg: "bg-green-50 text-green-700 border-green-200 hover:bg-green-100", bgActive: "bg-green-600 text-white border-green-600", text: "text-green-600", label: "Succeeded" },
             InProgress: { bg: "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100", bgActive: "bg-blue-600 text-white border-blue-600", text: "text-blue-600", label: "In Progress" },
             Pending: { bg: "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100", bgActive: "bg-amber-500 text-white border-amber-500", text: "text-amber-600", label: "Pending" },
+            Stalled: { bg: "bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100", bgActive: "bg-orange-600 text-white border-orange-600", text: "text-orange-600", label: "Stalled" },
             Failed: { bg: "bg-red-50 text-red-700 border-red-200 hover:bg-red-100", bgActive: "bg-red-600 text-white border-red-600", text: "text-red-600", label: "Failed" },
           };
           const c = config[status];
@@ -1129,6 +1131,7 @@ function StatusBadge({ status, failureReason }: { status: string; failureReason?
   const statusConfig = {
     InProgress: { color: "bg-blue-100 text-blue-800", text: "In Progress" },
     Pending: { color: "bg-amber-100 text-amber-800", text: "Pending" },
+    Stalled: { color: "bg-orange-100 text-orange-800", text: "Stalled" },
     Succeeded: { color: "bg-green-100 text-green-800", text: "Succeeded" },
     Failed: { color: "bg-red-100 text-red-800", text: "Failed" },
     Unknown: { color: "bg-gray-100 text-gray-800", text: "Unknown" },

@@ -189,7 +189,14 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
-        /// Marks sessions that have been in "InProgress" status for too long as "Failed - Timed Out"
+        /// Two-stage sweep for stuck sessions:
+        /// 1. **Agent-silent Stalled marker** (2h fixed): Sessions still InProgress but with no events
+        ///    for more than 2h are marked as Stalled (non-terminal). Picks up agents that cannot emit
+        ///    session_stalled themselves (bluescreen, network loss, power off). Excludes WhiteGlove.
+        /// 2. **Session timeout Failed** (5h default): Sessions that exceed the full SessionTimeoutHours
+        ///    window (InProgress or Stalled) graduate to terminal Failed state.
+        /// Both stages run in the same 2h maintenance pass so no new timers are introduced
+        /// (preserving Container App scale-to-zero).
         /// </summary>
         private async Task MarkStalledSessionsAsTimedOutAsync()
         {
@@ -200,6 +207,7 @@ namespace AutopilotMonitor.Functions.Services
             {
                 var tenantIds = await _maintenanceRepo.GetAllTenantIdsAsync();
                 int totalSessionsTimedOut = 0;
+                int totalSessionsMarkedStalled = 0;
 
                 foreach (var tenantId in tenantIds)
                 {
@@ -207,8 +215,50 @@ namespace AutopilotMonitor.Functions.Services
                     {
                         var config = await _tenantConfigService.GetConfigurationAsync(tenantId);
                         var timeoutHours = config?.SessionTimeoutHours ?? 5;
-                        var cutoffTime = DateTime.UtcNow.AddHours(-timeoutHours);
+                        const int agentSilenceHours = 2; // fixed policy: 2h silence → Stalled intermediate
+                        var now = DateTime.UtcNow;
+                        var cutoffTime = now.AddHours(-timeoutHours);
+                        var silenceCutoff = now.AddHours(-agentSilenceHours);
 
+                        // -------- Stage 1: Agent-silent Stalled marker --------
+                        // InProgress sessions with no events in > 2h but not yet older than 5h
+                        // (otherwise Stage 2 picks them up directly as Failed).
+                        var silentSessions = await _maintenanceRepo.GetAgentSilentSessionsAsync(
+                            tenantId, silenceCutoff, hardCutoff: cutoffTime);
+
+                        int silentMarked = 0;
+                        foreach (var silent in silentSessions)
+                        {
+                            var lastEventAt = silent.LastEventAt ?? silent.StartedAt;
+                            var silentMinutes = (int)(now - lastEventAt).TotalMinutes;
+                            await _sessionRepo.UpdateSessionStatusAsync(
+                                silent.TenantId,
+                                silent.SessionId,
+                                SessionStatus.Stalled,
+                                stalledAt: now,
+                                failureReason: $"Agent silent for {silentMinutes}min (detected by maintenance sweep)");
+                            silentMarked++;
+                        }
+
+                        if (silentMarked > 0)
+                        {
+                            totalSessionsMarkedStalled += silentMarked;
+                            _logger.LogInformation($"Tenant {tenantId}: Marked {silentMarked} agent-silent sessions as Stalled (silence threshold: {agentSilenceHours}h)");
+                            await _maintenanceRepo.LogAuditEntryAsync(
+                                tenantId,
+                                "SessionStalled",
+                                "Session",
+                                $"{silentMarked} sessions",
+                                "System.Maintenance",
+                                new Dictionary<string, string>
+                                {
+                                    { "SessionsMarkedStalled", silentMarked.ToString() },
+                                    { "AgentSilenceHours", agentSilenceHours.ToString() },
+                                    { "SilenceCutoff", silenceCutoff.ToString("yyyy-MM-ddTHH:mm:ss") }
+                                });
+                        }
+
+                        // -------- Stage 2: Terminal timeout (5h default) --------
                         var stalledSessions = await _maintenanceRepo.GetStalledSessionsAsync(tenantId, cutoffTime);
 
                         if (stalledSessions.Count == 0)
@@ -255,7 +305,7 @@ namespace AutopilotMonitor.Functions.Services
                 }
 
                 stalledStart.Stop();
-                _logger.LogInformation($"Stalled session check completed: {totalSessionsTimedOut} sessions timed out in {stalledStart.ElapsedMilliseconds}ms");
+                _logger.LogInformation($"Stalled session check completed: {totalSessionsMarkedStalled} marked Stalled, {totalSessionsTimedOut} timed out in {stalledStart.ElapsedMilliseconds}ms");
             }
             catch (Exception ex)
             {

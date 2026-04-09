@@ -12,6 +12,7 @@ import {
   TARGET_HINTS,
   formatTrigger,
 } from "../types";
+import { KNOWN_EVENT_TYPES, findEventType } from "../eventTypes";
 import { validateGatherRuleTarget } from "@/lib/guardValidation";
 import { ValidationIndicator } from "@/components/ValidationIndicator";
 
@@ -438,15 +439,36 @@ export function GatherRuleFormFields({ form, setForm, showRuleId, unrestrictedMo
 
       {form.trigger === "on_event" && (
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Trigger Event Type</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Trigger Event Type
+            <span className="ml-2 text-xs text-gray-500 font-normal">
+              ({KNOWN_EVENT_TYPES.length} known event types — start typing to filter)
+            </span>
+          </label>
           <input
             type="text"
+            list="gather-rule-event-types"
             value={form.triggerEventType}
             onChange={(e) => setForm({ ...form, triggerEventType: e.target.value })}
-            placeholder="e.g., enrollment_complete, enrollment_failed, app_install_failed"
+            placeholder="e.g., session_stalled, enrollment_failed, modern_deployment_error"
             autoComplete="off"
             className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
           />
+          <datalist id="gather-rule-event-types">
+            {KNOWN_EVENT_TYPES.map((et) => (
+              <option key={et.value} value={et.value}>{et.description}</option>
+            ))}
+          </datalist>
+          {form.triggerEventType && findEventType(form.triggerEventType) && (
+            <p className="text-xs text-gray-500 mt-1">
+              {findEventType(form.triggerEventType)!.description}
+            </p>
+          )}
+          {form.triggerEventType && !findEventType(form.triggerEventType) && (
+            <p className="text-xs text-amber-600 mt-1">
+              Custom event type — make sure the agent actually emits this value.
+            </p>
+          )}
         </div>
       )}
 

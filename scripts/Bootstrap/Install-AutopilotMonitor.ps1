@@ -38,6 +38,8 @@
       PowerShell 5.1 (IME) reads scripts without BOM as ANSI, corrupting multi-byte chars.
 
 .CHANGELOG
+    2026-04-09  v1.1  Introduced explicit script version and log it on startup
+    (all entries above were v1.0)
     2026-03-31  Replaced OS age + MDM pre-flight checks with multi-signal guard:
                 registry deployment marker, WMI/filesystem user profile detection,
                 lastloggedonUser set, and 12h bootstrap window. 
@@ -60,6 +62,9 @@ param(
     [Parameter(Mandatory = $false)]
     [int]$MaxBootstrapWindowHours = 12
 )
+
+# Script version (bump on meaningful changes; see .CHANGELOG above)
+$ScriptVersion = "1.1"
 
 # Configuration - Everything in ProgramData for easy cleanup
 $AgentBasePath = "$env:ProgramData\AutopilotMonitor"
@@ -105,6 +110,7 @@ function Get-FileMd5Base64 {
 
 try {
     Write-Log "===== Autopilot Monitor Bootstrap Started ====="
+    Write-Log "Bootstrap script version: v$ScriptVersion"
 
     # -- Pre-flight: Multi-signal guard to prevent installation on non-provisioning devices --
     # Layered approach: each guard catches a different scenario.

@@ -567,13 +567,41 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                     case "device_location":
                         classification.DeviceLocationEvent = evt;
                         break;
+                    case "session_stalled":
+                        classification.SessionStalledEvent = evt;
+                        break;
                 }
+
+                // Track whether this batch contains any non-periodic real event (used for
+                // Stalled→InProgress healing). Exclude telemetry snapshots and stall-probe
+                // self-reports which should not count as "agent is productively working".
+                if (!IsPeriodicOrStallEvent(evt.EventType))
+                    classification.HasNonPeriodicRealEvent = true;
 
                 AggregateAppInstallEvent(evt, storedEvents[0].TenantId!, storedEvents[0].SessionId!, classification.AppInstallUpdates);
             }
 
             return classification;
         }
+
+        /// <summary>
+        /// Classifies whether an event type should count as "real enrollment activity" for
+        /// Stalled→InProgress healing. Periodic telemetry and stall-probe self-reports are
+        /// excluded so that a silent agent that only emits heartbeats cannot unmark itself
+        /// as stalled without real progress.
+        /// </summary>
+        private static bool IsPeriodicOrStallEvent(string? eventType) => eventType switch
+        {
+            "performance_snapshot" => true,
+            "agent_metrics_snapshot" => true,
+            "performance_collector_stopped" => true,
+            "agent_metrics_collector_stopped" => true,
+            "stall_probe_check" => true,
+            "stall_probe_result" => true,
+            "session_stalled" => true,
+            "modern_deployment_log" => true,
+            _ => false
+        };
 
         /// <summary>
         /// Updates session status based on classified events.
@@ -662,6 +690,36 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                 else
                 {
                     _logger.LogInformation("{SessionPrefix} WhiteGlove resumed skipped, session already {Status}", sessionPrefix, currentSession?.Status);
+                }
+            }
+
+            // Stalled-status transitions are independent of Succeeded/Failed/Pending/WhiteGlove paths.
+            // They can coexist with normal processing: if a batch contains session_stalled, mark Stalled;
+            // if a batch contains any real (non-periodic) event while the session is currently Stalled,
+            // heal it back to InProgress.
+            if (c.SessionStalledEvent != null)
+            {
+                var stalledReason = "Agent reported stall after 60min without progress (stall_probe)";
+                var stalledTransitioned = await _sessionRepo.UpdateSessionStatusAsync(
+                    request.TenantId, request.SessionId, SessionStatus.Stalled,
+                    earliestEventTimestamp: c.EarliestEventTimestamp, latestEventTimestamp: c.LatestEventTimestamp,
+                    stalledAt: c.SessionStalledEvent.Timestamp, failureReason: stalledReason);
+                if (stalledTransitioned)
+                    _logger.LogWarning("{SessionPrefix} Status: Stalled (agent-reported via session_stalled event)", sessionPrefix);
+            }
+            else if (c.HasNonPeriodicRealEvent && !statusTransitioned && !whiteGloveStatusTransitioned)
+            {
+                // Only attempt healing if the current session is actually Stalled (one read).
+                // The repository guard will no-op this call when the session is in any other state.
+                var currentSession = await _sessionRepo.GetSessionAsync(request.TenantId, request.SessionId);
+                if (currentSession?.Status == SessionStatus.Stalled)
+                {
+                    var healed = await _sessionRepo.UpdateSessionStatusAsync(
+                        request.TenantId, request.SessionId, SessionStatus.InProgress,
+                        earliestEventTimestamp: c.EarliestEventTimestamp, latestEventTimestamp: c.LatestEventTimestamp,
+                        clearStalledAt: true, clearFailureReason: true);
+                    if (healed)
+                        _logger.LogInformation("{SessionPrefix} Status: InProgress (healed from Stalled by new real event)", sessionPrefix);
                 }
             }
 
@@ -930,6 +988,8 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
         public EnrollmentEvent? WhiteGloveEvent { get; set; }
         public EnrollmentEvent? WhiteGloveResumedEvent { get; set; }
         public EnrollmentEvent? EspFailureEvent { get; set; }
+        public EnrollmentEvent? SessionStalledEvent { get; set; }
+        public bool HasNonPeriodicRealEvent { get; set; }
         public EnrollmentEvent? DeviceLocationEvent { get; set; }
         public DateTime? EarliestEventTimestamp { get; set; }
         public DateTime? LatestEventTimestamp { get; set; }

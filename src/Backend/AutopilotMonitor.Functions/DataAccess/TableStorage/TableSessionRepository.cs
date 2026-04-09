@@ -47,10 +47,12 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
             EnrollmentPhase? currentPhase = null, string? failureReason = null,
             DateTime? completedAt = null, DateTime? earliestEventTimestamp = null,
             DateTime? latestEventTimestamp = null, bool? isPreProvisioned = null,
-            bool? isUserDriven = null, DateTime? resumedAt = null)
+            bool? isUserDriven = null, DateTime? resumedAt = null,
+            DateTime? stalledAt = null, bool clearStalledAt = false, bool clearFailureReason = false)
             => _storage.UpdateSessionStatusAsync(tenantId, sessionId, status,
                 currentPhase, failureReason, completedAt, earliestEventTimestamp,
-                latestEventTimestamp, isPreProvisioned, isUserDriven, resumedAt);
+                latestEventTimestamp, isPreProvisioned, isUserDriven, resumedAt,
+                stalledAt, clearStalledAt, clearFailureReason);
 
         public Task IncrementSessionEventCountAsync(
             string tenantId, string sessionId, int increment,

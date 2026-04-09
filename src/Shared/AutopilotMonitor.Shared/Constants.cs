@@ -177,6 +177,16 @@ namespace AutopilotMonitor.Shared
             public const string VulnerabilityReport       = "vulnerability_report";
             public const string AgentSelfUpdated          = "agent_self_updated";
             public const string AgentSelfUpdateSkipped    = "agent_self_update_skipped";
+
+            // Stall detection (Ebene 2 — StallProbeCollector)
+            public const string StallProbeCheck           = "stall_probe_check";   // Trace heartbeat from Probe 2 (15 min) when no anomaly found
+            public const string StallProbeResult          = "stall_probe_result";  // Warning when a probe found an anomaly
+            public const string SessionStalled            = "session_stalled";     // Fire-once after Probe 4 (60 min) — triggers backend Stalled status
+
+            // ModernDeployment EventLog Watcher (Ebene 1 — live capture)
+            public const string ModernDeploymentLog       = "modern_deployment_log";      // Info-level live capture
+            public const string ModernDeploymentWarning   = "modern_deployment_warning";  // Level 3 (Warning)
+            public const string ModernDeploymentError     = "modern_deployment_error";    // Level 1-2 (Critical/Error)
         }
 
         // -----------------------------------------------------------------------

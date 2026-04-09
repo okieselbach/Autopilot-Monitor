@@ -69,6 +69,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             // Only emit if state-breakdown counters changed since last emission (backstop for missed events)
             EmitAppTrackingSummaryIfChanged();
 
+            // Signal-correlated WhiteGlove detection (Ebene 2.6) — event-driven in the sense
+            // that it only triggers when the observed signal set matches; zero-cost when the
+            // session does not look like a sealing candidate.
+            try { CheckSignalCorrelatedWhiteGlove(); }
+            catch (Exception ex) { _logger.Error("CheckSignalCorrelatedWhiteGlove failed", ex); }
+
             // Periodic state save (piggybacks on the existing 30s timer)
             bool dirty;
             EnrollmentStateData stateSnapshot;

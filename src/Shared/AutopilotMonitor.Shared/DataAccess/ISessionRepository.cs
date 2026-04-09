@@ -25,7 +25,8 @@ namespace AutopilotMonitor.Shared.DataAccess
             EnrollmentPhase? currentPhase = null, string? failureReason = null,
             DateTime? completedAt = null, DateTime? earliestEventTimestamp = null,
             DateTime? latestEventTimestamp = null, bool? isPreProvisioned = null,
-            bool? isUserDriven = null, DateTime? resumedAt = null);
+            bool? isUserDriven = null, DateTime? resumedAt = null,
+            DateTime? stalledAt = null, bool clearStalledAt = false, bool clearFailureReason = false);
         Task IncrementSessionEventCountAsync(
             string tenantId, string sessionId, int increment,
             DateTime? earliestEventTimestamp = null, DateTime? latestEventTimestamp = null,

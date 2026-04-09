@@ -44,6 +44,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         private PerformanceCollector _performanceCollector;
         private AgentSelfMetricsCollector _agentSelfMetricsCollector;
         private DeliveryOptimizationCollector _deliveryOptimizationCollector;
+        private StallProbeCollector _stallProbeCollector;
 
         // Smart enrollment tracking (replaces DownloadProgressCollector + EspUiStateCollector)
         private EnrollmentTracker _enrollmentTracker;
@@ -525,12 +526,16 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 // Start ESP and Hello tracker (ESP exit, WhiteGlove, and WHfB provisioning tracking)
                 var helloTimeout = _remoteConfigService?.CurrentConfig?.Collectors?.HelloWaitTimeoutSeconds
                     ?? _configuration.HelloWaitTimeoutSeconds;
+                var modernDeploymentEnabled = _remoteConfigService?.CurrentConfig?.Collectors?.ModernDeploymentWatcherEnabled ?? true;
+                var modernDeploymentLevelMax = _remoteConfigService?.CurrentConfig?.Collectors?.ModernDeploymentLogLevelMax ?? 3;
                 _espAndHelloTracker = new EspAndHelloTracker(
                     _configuration.SessionId,
                     _configuration.TenantId,
                     EmitEvent,
                     _logger,
-                    helloTimeout
+                    helloTimeout,
+                    modernDeploymentWatcherEnabled: modernDeploymentEnabled,
+                    modernDeploymentLogLevelMax: modernDeploymentLevelMax
                 );
                 _espAndHelloTracker.Start();
 

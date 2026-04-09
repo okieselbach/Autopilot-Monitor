@@ -151,6 +151,8 @@ export default function GlobalSearch() {
       case 'Succeeded': return 'text-green-600';
       case 'Failed': return 'text-red-600';
       case 'InProgress': return 'text-blue-600';
+      case 'Pending': return 'text-amber-600';
+      case 'Stalled': return 'text-orange-600';
       default: return 'text-gray-500';
     }
   };

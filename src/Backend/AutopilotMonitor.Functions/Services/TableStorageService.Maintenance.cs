@@ -202,7 +202,15 @@ namespace AutopilotMonitor.Functions.Services
             {
                 var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
 
-                var filter = $"PartitionKey eq '{tenantId}' and Status eq 'InProgress' and StartedAt lt datetime'{cutoffTime:yyyy-MM-ddTHH:mm:ss}Z'";
+                // Eligible for the 5h-timeout sweep: InProgress or Stalled sessions (Stalled is a
+                // non-terminal intermediate state set earlier by either the agent or the 2h sweep;
+                // when the 5h mark is reached without healing, the session graduates to Failed).
+                // IsPreProvisioned ne true → WhiteGlove sessions are intentionally long-lived and
+                // must never be timed out, even after months in storage.
+                var filter = $"PartitionKey eq '{tenantId}' " +
+                             $"and (Status eq 'InProgress' or Status eq 'Stalled') " +
+                             $"and StartedAt lt datetime'{cutoffTime:yyyy-MM-ddTHH:mm:ss}Z' " +
+                             $"and IsPreProvisioned ne true";
                 var query = tableClient.QueryAsync<TableEntity>(filter: filter);
 
                 var sessions = new List<SessionSummary>();
@@ -216,6 +224,51 @@ namespace AutopilotMonitor.Functions.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, $"Failed to get stalled sessions for tenant {tenantId}");
+                return new List<SessionSummary>();
+            }
+        }
+
+        /// <summary>
+        /// Gets sessions where the agent has gone completely silent for longer than the configured
+        /// agent-silence window (default 2h). These are candidates for the intermediate Stalled status.
+        /// Used by the 2h maintenance sweep as a backstop for agents that cannot send session_stalled
+        /// themselves (bluescreen, network loss, power off).
+        ///
+        /// Filter criteria:
+        /// - Status eq 'InProgress' — do not re-mark already-Stalled sessions
+        /// - LastEventAt &lt; silenceCutoff — at least the configured window of agent silence
+        /// - StartedAt ge hardCutoff — do not catch sessions that will be picked up by the 5h timeout sweep
+        /// - IsPreProvisioned ne true — exclude sealed WhiteGlove sessions (intentionally long-lived)
+        /// </summary>
+        public async Task<List<SessionSummary>> GetAgentSilentSessionsAsync(string tenantId, DateTime silenceCutoff, DateTime hardCutoff)
+        {
+            SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
+
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
+
+                var silenceCutoffStr = silenceCutoff.ToString("yyyy-MM-ddTHH:mm:ss");
+                var hardCutoffStr = hardCutoff.ToString("yyyy-MM-ddTHH:mm:ss");
+                var filter = $"PartitionKey eq '{tenantId}' " +
+                             $"and Status eq 'InProgress' " +
+                             $"and LastEventAt lt datetime'{silenceCutoffStr}Z' " +
+                             $"and StartedAt ge datetime'{hardCutoffStr}Z' " +
+                             $"and IsPreProvisioned ne true";
+
+                var query = tableClient.QueryAsync<TableEntity>(filter: filter);
+
+                var sessions = new List<SessionSummary>();
+                await foreach (var entity in query)
+                {
+                    sessions.Add(MapToSessionSummary(entity));
+                }
+
+                return sessions;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to get agent-silent sessions for tenant {tenantId}");
                 return new List<SessionSummary>();
             }
         }

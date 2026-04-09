@@ -264,6 +264,13 @@ export default function EventTimeline({
                 Pre-provisioning is complete. The timeline will continue when the user powers on the device.
               </p>
             </div>
+          ) : session?.status === 'Stalled' ? (
+            <div className="bg-orange-50 border border-orange-200 rounded-lg p-6 text-center">
+              <p className="text-orange-800 font-medium mb-1">Session Stalled</p>
+              <p className="text-orange-600 text-sm">
+                {session.failureReason || 'No progress detected. The session will heal automatically when new events arrive, or expire after the timeout window.'}
+              </p>
+            </div>
           ) : null}
         </>
       ) : (

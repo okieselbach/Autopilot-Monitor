@@ -192,6 +192,14 @@ namespace AutopilotMonitor.Shared.Models
         public DateTime? ResumedAt { get; set; }
 
         /// <summary>
+        /// Timestamp when the session was marked as Stalled.
+        /// Set when the agent sends a session_stalled event (after 60 min without progress)
+        /// or when the backend 2h maintenance sweep detects agent silence.
+        /// Cleared (null) when the session heals back to InProgress via a new real event.
+        /// </summary>
+        public DateTime? StalledAt { get; set; }
+
+        /// <summary>
         /// Whether the Autopilot profile indicates Hybrid Azure AD Join.
         /// Derived from CloudAssignedDomainJoinMethod == 1 in the Autopilot profile.
         /// </summary>
@@ -246,6 +254,7 @@ namespace AutopilotMonitor.Shared.Models
     {
         InProgress,
         Pending,      // WhiteGlove pre-provisioning complete, awaiting user enrollment
+        Stalled,      // Agent reported no progress for >60 min, or backend sweep detected >2h silence. Non-terminal, can heal back to InProgress.
         Succeeded,
         Failed,
         Unknown

@@ -133,6 +133,7 @@ function StatusBadge({ status, failureReason }: { status: string; failureReason?
   const statusConfig = {
     InProgress: { color: "bg-blue-100 text-blue-800", text: "In Progress" },
     Pending: { color: "bg-amber-100 text-amber-800", text: "Pending" },
+    Stalled: { color: "bg-orange-100 text-orange-800", text: "Stalled" },
     Succeeded: { color: "bg-green-100 text-green-800", text: "Succeeded" },
     Failed: { color: "bg-red-100 text-red-800", text: "Failed" },
     Unknown: { color: "bg-gray-100 text-gray-800", text: "Unknown" },

@@ -38,6 +38,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             {
                 _lastRealEventTime = DateTime.UtcNow;
 
+                // Reset stall probes — a real event proves the enrollment is still making progress,
+                // so the probe window starts fresh from 0.
+                try { _stallProbeCollector?.ResetProbes(); }
+                catch (Exception ex) { _logger.Verbose($"StallProbeCollector.ResetProbes failed: {ex.Message}"); }
+
                 // Restart periodic collectors if they were stopped due to idle
                 if (_collectorsIdleStopped)
                 {
