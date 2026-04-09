@@ -98,6 +98,20 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         //   - EnforcementState: Failed + specific HRESULT ranges (0x87D1... Win32 app failures)
         //   - DetectionState: Error that persists across multiple tail samples
         //   - Explicit "Required app failed" lines from the ESP required-app enforcer
+        //
+        // TODO(stall-probe-imelog-scan): Also scan IntuneManagementExtension.log (not just
+        // AppWorkload.log). Learning from the Oriflame session b4b5d37e-a993-453e-b16b-9b75098022e4
+        // (MS Intune AAD token service outage 2026-04-08): the ESP blocker was
+        //   "Failed to get AAD token. errorCode = 3399548929"  (= 0xCAA90001 AADSTS_SERVER_ERROR)
+        // and this string lives in IntuneManagementExtension.log, NOT AppWorkload.log. Add a third
+        // tail-scan source for `C:\ProgramData\Microsoft\IntuneManagementExtension\Logs\IntuneManagementExtension.log`
+        // with a regex that catches repeated "Failed to get AAD token.*errorCode" lines (decimal or
+        // hex) as a strong "IME is blocked by service issue" signal. Watch out: IME retries every
+        // ~1h, so requiring at least 2 occurrences within the 15-min probe window dedup's single
+        // transient blips. The errorCode is DECIMAL in IME logs (3399548929), NOT hex, so the regex
+        // must handle both formats. A non-terminal Warning is probably the right severity — a
+        // service outage is recoverable and Windows ESP will eventually time out on its own if the
+        // outage persists, and at that point the ModernDeployment watcher (Ebene 1) should pick it up.
         private static readonly Regex FailureRegex = new Regex(
             @"EnforcementState\s*[:=]\s*Failed|Error\s+0x[0-9A-Fa-f]+|DetectionState\s*[:=]\s*Error",
             RegexOptions.Compiled);
