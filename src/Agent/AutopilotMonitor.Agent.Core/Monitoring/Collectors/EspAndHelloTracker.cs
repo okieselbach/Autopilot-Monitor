@@ -52,6 +52,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         private bool _espExitDetected = false;
         private bool _helloWizardStarted = false;
         private bool _whiteGloveDetected = false;
+        private bool _whiteGloveStartDetected = false;
         private string _detectedEspFailureType; // set during Shell-Core event processing, consumed after event emission
         private readonly object _stateLock = new object();
 
@@ -223,6 +224,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 
             // Subscribe to ModernDeployment-Diagnostics-Provider channels (Autopilot + ManagementService)
             // for live capture of ESP/Autopilot events that Shell-Core/Registry watchers may miss.
+            // The ManagementService watcher includes targeted event IDs (e.g. Event 509 for WhiteGlove
+            // start detection) that bypass the general Level≤3 filter via combined XPath.
             if (_modernDeploymentWatcherEnabled)
             {
                 StartModernDeploymentEventLogWatchers();
