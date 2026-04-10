@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Azure.Data.Tables;
+using AutopilotMonitor.Functions.DataAccess.TableStorage;
 using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Functions.Services.Vulnerability;
 using AutopilotMonitor.Shared;
@@ -580,7 +581,6 @@ namespace AutopilotMonitor.Functions.Services
             {
                 ["SessionId"] = sessionId,
                 ["TenantId"] = tenantId,
-                ["ReportJson"] = JsonConvert.SerializeObject(reportData),
                 ["CreatedAt"] = DateTime.UtcNow.ToString("o"),
                 ["OverallRisk"] = scanSummary?.GetValueOrDefault("overall_risk")?.ToString() ?? "none",
                 ["TotalCvesFound"] = Convert.ToInt32(scanSummary?.GetValueOrDefault("total_cves_found") ?? 0),
@@ -590,6 +590,11 @@ namespace AutopilotMonitor.Functions.Services
                 ["TotalScanned"] = Convert.ToInt32(scanSummary?.GetValueOrDefault("total_software_scanned") ?? 0),
                 ["TotalMatched"] = Convert.ToInt32(scanSummary?.GetValueOrDefault("matched_to_cpe") ?? 0),
             };
+
+            // Chunk ReportJson across multiple properties if it exceeds 30K chars
+            var reportJson = JsonConvert.SerializeObject(reportData);
+            foreach (var chunk in TableStorageChunking.ChunkProperty("ReportJson", reportJson))
+                entity[chunk.Key] = chunk.Value;
 
             await tableClient.UpsertEntityAsync(entity);
             _logger.LogInformation("Stored vulnerability report for session {SessionId} (risk={Risk})", sessionId,
@@ -646,7 +651,7 @@ namespace AutopilotMonitor.Functions.Services
                 var entity = response?.Value;
                 if (entity == null) return null;
 
-                var reportJson = entity.GetString("ReportJson");
+                var reportJson = TableStorageChunking.ReassembleProperty(entity, "ReportJson");
                 return string.IsNullOrEmpty(reportJson) ? null : reportJson;
             }
             catch (Azure.RequestFailedException ex) when (ex.Status == 404)
