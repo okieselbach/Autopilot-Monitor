@@ -1,0 +1,40 @@
+{
+  "$schema": "../schema/analyze-rule.schema.json",
+  "ruleId": "ANALYZE-APP-012",
+  "title": "Enforcement Error Resolved by Successful Detection",
+  "description": "Detects when an app reported an enforcement error (unmapped exit code) but was subsequently detected as installed. The error is informational — the app installed despite the unmapped exit code.",
+  "severity": "warning",
+  "category": "apps",
+  "enabled": true,
+  "trigger": "correlation",
+  "baseConfidence": 80,
+  "conditions": [
+    {
+      "signal": "enforcement_error_resolved",
+      "source": "event_correlation",
+      "eventType": "app_install_failed",
+      "correlateEventType": "app_install_completed",
+      "joinField": "appId",
+      "eventAFilterField": "errorPatternId",
+      "eventAFilterOperator": "regex",
+      "eventAFilterValue": "IME-ERROR-ENFORCEMENT|IME-ERROR-UNMAPPED-EXIT",
+      "required": true
+    }
+  ],
+  "explanation": "An app installation initially reported an **enforcement error** (unmapped exit code), but the IME detection check subsequently found the app **is installed**.\n\nThis happens when the MSI/EXE installer returns a non-standard exit code (e.g., 1603) that has no mapping configured in the Intune app definition. The IME treats unmapped exit codes as errors in its enforcement state, but when detection runs afterward, it confirms the app is present on the device.\n\n**The app is installed and functional.** The enforcement error is an Intune app model artifact, not a real installation failure.",
+  "remediation": [
+    {
+      "title": "Configure exit code mapping in Intune",
+      "steps": [
+        "Open the Intune portal > Apps > [affected app] > Properties > Edit",
+        "In the Return codes section, add a mapping for the reported exit code",
+        "Map the exit code to 'Success' or 'Soft reboot' depending on the installer behavior",
+        "This prevents the enforcement error from appearing in future deployments"
+      ]
+    }
+  ],
+  "relatedDocs": [
+    { "title": "Win32 app return codes in Intune", "url": "https://learn.microsoft.com/en-us/mem/intune/apps/apps-win32-app-management#step-4-return-codes" }
+  ],
+  "tags": ["apps", "enforcement", "exit-code", "unmapped", "resolved"]
+}

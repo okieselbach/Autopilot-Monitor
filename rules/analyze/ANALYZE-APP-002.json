@@ -15,7 +15,11 @@
       "dataField": "message",
       "operator": "regex",
       "value": "16[0-9]{2}|0x80070[0-9a-fA-F]+|lpExitCode|unmapped.*exit",
-      "required": true
+      "required": true,
+      "suppressByEvent": {
+        "eventType": "app_install_completed",
+        "joinField": "appId"
+      }
     }
   ],
   "explanation": "An app installation failed with a specific error code. Common MSI exit codes: 1603 (Fatal error during installation), 1618 (Another installation already in progress), 1619 (Package could not be opened), 1625 (Installation prohibited by policy). Common HRESULT codes are also captured.",

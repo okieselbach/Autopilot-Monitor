@@ -52,6 +52,10 @@ namespace AutopilotMonitor.Functions.Services
                     var fieldValue = GetDataFieldValue(evt, condition.DataField);
                     if (fieldValue != null && MatchesOperator(fieldValue, condition.Operator, condition.Value))
                     {
+                        // Check suppressByEvent: skip this match if a resolving event exists
+                        if (IsSuppressedByEvent(evt, condition.SuppressByEvent, events))
+                            continue;
+
                         return (true, new Dictionary<string, object>
                         {
                             ["eventId"] = evt.EventId,
@@ -67,6 +71,14 @@ namespace AutopilotMonitor.Functions.Services
             }
 
             // Just check if event type exists — return first matching event for reference
+            // Filter out suppressed events
+            if (condition.SuppressByEvent != null)
+            {
+                matchingEvents = matchingEvents.Where(e => !IsSuppressedByEvent(e, condition.SuppressByEvent, events)).ToList();
+                if (!matchingEvents.Any())
+                    return (false, "all matches suppressed by resolving events");
+            }
+
             var first = matchingEvents[0];
             return (true, new Dictionary<string, object>
             {
@@ -261,6 +273,24 @@ namespace AutopilotMonitor.Functions.Services
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// Checks if a matched event is suppressed by a resolving event (e.g., app_install_completed
+        /// suppresses app_install_failed when both share the same appId).
+        /// </summary>
+        private bool IsSuppressedByEvent(EnrollmentEvent matchedEvent, SuppressByEventConfig? config, List<EnrollmentEvent> allEvents)
+        {
+            if (config == null || string.IsNullOrEmpty(config.EventType) || string.IsNullOrEmpty(config.JoinField))
+                return false;
+
+            var joinValue = GetDataFieldValue(matchedEvent, config.JoinField);
+            if (string.IsNullOrEmpty(joinValue))
+                return false;
+
+            return allEvents.Any(e =>
+                MatchesEventType(e, config.EventType) &&
+                string.Equals(GetDataFieldValue(e, config.JoinField), joinValue, StringComparison.OrdinalIgnoreCase));
         }
 
         // ===== HELPERS =====

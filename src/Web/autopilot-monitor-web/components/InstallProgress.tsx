@@ -348,13 +348,15 @@ function InstallItemRow({ item }: { item: InstallItem }) {
         <div className="mt-1 space-y-0.5">
           {item.exitCode && item.exitCode !== "0" && (() => {
             const entry = getErrorCodeEntry(item.exitCode);
+            const badgeBg = item.isError ? "bg-red-100 text-red-800" : "bg-amber-100 text-amber-800";
+            const descColor = item.isError ? "text-red-600" : "text-amber-600";
             return (
               <div className="flex items-center gap-2 text-xs">
-                <span className="px-1.5 py-0.5 rounded bg-red-100 text-red-800 font-mono font-medium">
+                <span className={`px-1.5 py-0.5 rounded font-mono font-medium ${badgeBg}`}>
                   Exit: {formatErrorCode(item.exitCode)}
                 </span>
                 {entry && (
-                  <span className="text-red-600" title={`${entry.source} (${entry.confidence} confidence)`}>
+                  <span className={descColor} title={`${entry.source} (${entry.confidence} confidence)`}>
                     {entry.description}
                   </span>
                 )}
@@ -363,13 +365,15 @@ function InstallItemRow({ item }: { item: InstallItem }) {
           })()}
           {item.hresultFromWin32 && item.hresultFromWin32 !== "0" && (() => {
             const entry = getErrorCodeEntry(item.hresultFromWin32);
+            const badgeBg = item.isError ? "bg-red-100 text-red-800" : "bg-amber-100 text-amber-800";
+            const descColor = item.isError ? "text-red-600" : "text-amber-600";
             return (
               <div className="flex items-center gap-2 text-xs">
-                <span className="px-1.5 py-0.5 rounded bg-red-100 text-red-800 font-mono font-medium">
+                <span className={`px-1.5 py-0.5 rounded font-mono font-medium ${badgeBg}`}>
                   HRESULT: {formatErrorCode(item.hresultFromWin32)}
                 </span>
                 {entry && (
-                  <span className="text-red-600" title={`${entry.source} (${entry.confidence} confidence)`}>
+                  <span className={descColor} title={`${entry.source} (${entry.confidence} confidence)`}>
                     {entry.description}
                   </span>
                 )}

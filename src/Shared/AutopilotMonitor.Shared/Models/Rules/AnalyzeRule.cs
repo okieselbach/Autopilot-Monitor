@@ -214,6 +214,14 @@ namespace AutopilotMonitor.Shared.Models
         public int? TimeWindowSeconds { get; set; }
 
         /// <summary>
+        /// Optional suppression: if an event of SuppressByEvent.EventType exists
+        /// with the same SuppressByEvent.JoinField value as the matched event,
+        /// the match is skipped (the "resolving" event suppresses the finding).
+        /// Used to prevent rules from firing when a subsequent event resolved the issue.
+        /// </summary>
+        public SuppressByEventConfig? SuppressByEvent { get; set; }
+
+        /// <summary>
         /// Optional filter field on Event A (the first event).
         /// Combined with EventAFilterOperator and EventAFilterValue.
         /// </summary>
@@ -282,6 +290,24 @@ namespace AutopilotMonitor.Shared.Models
         /// URL to the documentation
         /// </summary>
         public string Url { get; set; } = default!;
+    }
+
+    /// <summary>
+    /// Configuration for suppressing a condition match when a "resolving" event exists.
+    /// Example: suppress an app_install_failed match when app_install_completed exists for the same appId.
+    /// </summary>
+    public class SuppressByEventConfig
+    {
+        /// <summary>
+        /// The event type that resolves/suppresses the matched event (e.g., "app_install_completed").
+        /// </summary>
+        public string EventType { get; set; } = default!;
+
+        /// <summary>
+        /// The data field to join on — must have the same value in both the matched event
+        /// and the suppressing event (e.g., "appId").
+        /// </summary>
+        public string JoinField { get; set; } = default!;
     }
 
     /// <summary>

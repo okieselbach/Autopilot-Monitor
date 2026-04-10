@@ -185,6 +185,22 @@
           "description": "Maximum time in seconds between Event A and Event B. Null or 0 means no time limit.",
           "minimum": 0
         },
+        "suppressByEvent": {
+          "type": "object",
+          "description": "Optional suppression: if an event of the specified type exists with the same joinField value as the matched event, the match is skipped. Used to prevent rules from firing when a subsequent event resolved the issue (e.g., app_install_completed suppresses app_install_failed for the same appId).",
+          "properties": {
+            "eventType": {
+              "type": "string",
+              "description": "The event type that resolves/suppresses the matched event (e.g., \"app_install_completed\")."
+            },
+            "joinField": {
+              "type": "string",
+              "description": "The data field to join on — must have the same value in both the matched event and the suppressing event (e.g., \"appId\")."
+            }
+          },
+          "required": ["eventType", "joinField"],
+          "additionalProperties": false
+        },
         "eventAFilterField": {
           "type": "string",
           "description": "Optional filter field on Event A (the first event)."
