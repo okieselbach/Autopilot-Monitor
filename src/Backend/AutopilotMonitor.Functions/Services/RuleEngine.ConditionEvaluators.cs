@@ -56,7 +56,7 @@ namespace AutopilotMonitor.Functions.Services
                         if (IsSuppressedByEvent(evt, condition.SuppressByEvent, events))
                             continue;
 
-                        return (true, new Dictionary<string, object>
+                        var evidence = new Dictionary<string, object>
                         {
                             ["eventId"] = evt.EventId,
                             ["sequence"] = evt.Sequence,
@@ -64,7 +64,9 @@ namespace AutopilotMonitor.Functions.Services
                             ["eventType"] = evt.EventType,
                             ["field"] = condition.DataField,
                             ["value"] = fieldValue
-                        });
+                        };
+                        AddDataFieldsToEvidence(evidence, evt, "", "");
+                        return (true, evidence);
                     }
                 }
                 return (false, "data field not matched");
@@ -80,14 +82,16 @@ namespace AutopilotMonitor.Functions.Services
             }
 
             var first = matchingEvents[0];
-            return (true, new Dictionary<string, object>
+            var existsEvidence = new Dictionary<string, object>
             {
                 ["eventId"] = first.EventId,
                 ["sequence"] = first.Sequence,
                 ["timestamp"] = first.Timestamp,
                 ["eventType"] = condition.EventType,
                 ["count"] = matchingEvents.Count
-            });
+            };
+            AddDataFieldsToEvidence(existsEvidence, first, "", "");
+            return (true, existsEvidence);
         }
 
         private (bool matched, object evidence) EvaluateEventDataCondition(RuleCondition condition, List<EnrollmentEvent> events)
@@ -99,14 +103,16 @@ namespace AutopilotMonitor.Functions.Services
                 var fieldValue = GetDataFieldValue(evt, condition.DataField);
                 if (fieldValue != null && MatchesOperator(fieldValue, condition.Operator, condition.Value))
                 {
-                    return (true, new Dictionary<string, object>
+                    var evidence = new Dictionary<string, object>
                     {
                         ["eventId"] = evt.EventId,
                         ["sequence"] = evt.Sequence,
                         ["timestamp"] = evt.Timestamp,
                         ["field"] = condition.DataField,
                         ["value"] = fieldValue
-                    });
+                    };
+                    AddDataFieldsToEvidence(evidence, evt, "", "");
+                    return (true, evidence);
                 }
             }
 
@@ -572,7 +578,7 @@ namespace AutopilotMonitor.Functions.Services
         {
             if (evt.Data == null) return;
 
-            var knownFields = new[] { "appId", "appName", "errorPatternId", "errorDetail", "errorCode", "status" };
+            var knownFields = new[] { "appId", "appName", "errorPatternId", "errorDetail", "errorCode", "exitCode", "status" };
 
             foreach (var field in knownFields)
             {
