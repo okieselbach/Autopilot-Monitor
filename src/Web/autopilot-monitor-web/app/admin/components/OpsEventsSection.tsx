@@ -101,6 +101,7 @@ export function OpsEventsSection({
   const [loading, setLoading] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<OpsEvent | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<string>("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(0);
   const pageSize = 15;
 
@@ -134,13 +135,29 @@ export function OpsEventsSection({
     }
   };
 
+  // Search filter (client-side across key fields)
+  const filteredEvents = searchQuery.trim()
+    ? events.filter((e) => {
+        const q = searchQuery.toLowerCase();
+        return (
+          e.eventType.toLowerCase().includes(q) ||
+          e.message.toLowerCase().includes(q) ||
+          (e.details?.toLowerCase().includes(q) ?? false) ||
+          (e.tenantId?.toLowerCase().includes(q) ?? false) ||
+          (e.userId?.toLowerCase().includes(q) ?? false) ||
+          e.severity.toLowerCase().includes(q) ||
+          e.category.toLowerCase().includes(q)
+        );
+      })
+    : events;
+
   // Summary stats
-  const categoryCounts = events.reduce<Record<string, number>>((acc, e) => {
+  const categoryCounts = filteredEvents.reduce<Record<string, number>>((acc, e) => {
     acc[e.category] = (acc[e.category] ?? 0) + 1;
     return acc;
   }, {});
 
-  const severityCounts = events.reduce<Record<string, number>>((acc, e) => {
+  const severityCounts = filteredEvents.reduce<Record<string, number>>((acc, e) => {
     acc[e.severity] = (acc[e.severity] ?? 0) + 1;
     return acc;
   }, {});
@@ -185,11 +202,11 @@ export function OpsEventsSection({
       </div>
 
       {/* Summary Cards */}
-      {!loading && events.length > 0 && (
+      {!loading && filteredEvents.length > 0 && (
         <div className="p-4 border-b border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-gray-800/50">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <div className="bg-white dark:bg-gray-700 rounded-lg p-3 border border-gray-200 dark:border-gray-600">
-              <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">{events.length}</div>
+              <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">{filteredEvents.length}</div>
               <div className="text-xs text-gray-500 dark:text-gray-400">Total Events</div>
             </div>
             <div className={`bg-white dark:bg-gray-700 rounded-lg p-3 border ${errorCount > 0 ? 'border-red-300 dark:border-red-600' : 'border-gray-200 dark:border-gray-600'}`}>
@@ -239,8 +256,31 @@ export function OpsEventsSection({
         </div>
       </div>
 
-      {/* Category Filter */}
+      {/* Search & Category Filter */}
       <div className="px-6 pt-4 pb-2 flex items-center gap-2 flex-wrap">
+        <div className="relative">
+          <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <input
+            type="text"
+            placeholder="Search events..."
+            value={searchQuery}
+            onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(0); }}
+            className="w-52 pl-8 pr-7 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:ring-2 focus:ring-slate-500 focus:border-slate-500"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => { setSearchQuery(""); setCurrentPage(0); }}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
+        </div>
+        <div className="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1" />
         <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Filter:</span>
         <button
           onClick={() => setCategoryFilter("")}
@@ -274,12 +314,14 @@ export function OpsEventsSection({
             <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-slate-600"></div>
             <span className="ml-3 text-sm text-gray-500 dark:text-gray-400">Loading ops events...</span>
           </div>
-        ) : events.length === 0 ? (
+        ) : filteredEvents.length === 0 ? (
           <div className="text-center py-8 text-gray-500 dark:text-gray-400">
             <svg className="w-12 h-12 mx-auto mb-3 text-gray-300 dark:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            <p className="text-sm">No operational events recorded yet.</p>
+            <p className="text-sm">
+              {searchQuery ? `No events matching "${searchQuery}".` : "No operational events recorded yet."}
+            </p>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -295,7 +337,7 @@ export function OpsEventsSection({
                 </tr>
               </thead>
               <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                {events.slice(currentPage * pageSize, (currentPage + 1) * pageSize).map((evt, idx) => {
+                {filteredEvents.slice(currentPage * pageSize, (currentPage + 1) * pageSize).map((evt, idx) => {
                   const rowStyle = SEVERITY_STYLES[evt.severity]?.row ?? "";
                   return (
                     <tr
@@ -328,10 +370,10 @@ export function OpsEventsSection({
             </table>
 
             {/* Pagination */}
-            {events.length > pageSize && (
+            {filteredEvents.length > pageSize && (
               <div className="flex items-center justify-between border-t border-gray-200 dark:border-gray-700 px-4 py-3 bg-gray-50 dark:bg-gray-700/50 rounded-b-md">
                 <span className="text-xs text-gray-500 dark:text-gray-400">
-                  {currentPage * pageSize + 1}&ndash;{Math.min((currentPage + 1) * pageSize, events.length)} of {events.length}
+                  {currentPage * pageSize + 1}&ndash;{Math.min((currentPage + 1) * pageSize, filteredEvents.length)} of {filteredEvents.length}{searchQuery && ` (filtered)`}
                 </span>
                 <div className="flex items-center gap-2">
                   <button
@@ -342,11 +384,11 @@ export function OpsEventsSection({
                     Previous
                   </button>
                   <span className="text-xs text-gray-500 dark:text-gray-400">
-                    {currentPage + 1} / {Math.ceil(events.length / pageSize)}
+                    {currentPage + 1} / {Math.ceil(filteredEvents.length / pageSize)}
                   </span>
                   <button
                     onClick={() => setCurrentPage(p => p + 1)}
-                    disabled={(currentPage + 1) * pageSize >= events.length}
+                    disabled={(currentPage + 1) * pageSize >= filteredEvents.length}
                     className="px-2.5 py-1 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                   >
                     Next
