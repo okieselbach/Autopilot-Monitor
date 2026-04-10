@@ -42,17 +42,19 @@ export default function ScriptExecutions({ events, showScriptOutput, latestBoots
     const items: ScriptItem[] = [];
     const seen = new Set<string>();
 
-    for (const evt of sorted) {
+    for (let idx = 0; idx < sorted.length; idx++) {
+      const evt = sorted[idx];
       const d = evt.data;
       if (!d) continue;
 
       const policyId = d.policyId ?? d.policy_id ?? "";
-      if (!policyId) continue;
 
       const scriptType = d.scriptType ?? d.script_type ?? "platform";
       const scriptPart = d.scriptPart ?? d.script_part;
-      // Dedupe key includes scriptPart for remediation (detection vs remediation phase)
-      const key = `${policyId}-${scriptType}-${scriptPart ?? ""}`;
+      // Dedupe key includes scriptPart for remediation (detection vs remediation phase).
+      // Use eventId as fallback when policyId is missing to avoid collapsing unrelated scripts.
+      const dedupeId = policyId || `_noid_${idx}`;
+      const key = `${dedupeId}-${scriptType}-${scriptPart ?? ""}`;
       if (seen.has(key)) continue;
       seen.add(key);
 
@@ -156,7 +158,9 @@ function ScriptItemRow({ item, showScriptOutput, latestBootstrapVersion }: { ite
     ? "bg-red-50 border border-red-200"
     : "bg-green-50 border border-green-200";
 
-  const shortId = item.policyId.length >= 8 ? item.policyId.substring(0, 8) : item.policyId;
+  const shortId = item.policyId
+    ? (item.policyId.length >= 8 ? item.policyId.substring(0, 8) : item.policyId)
+    : "unknown";
   const intuneUrl = getIntuneScriptUrl(item.policyId, item.scriptType);
 
   // Build label: "Platform Script" or "Remediation Detection" / "Remediation"

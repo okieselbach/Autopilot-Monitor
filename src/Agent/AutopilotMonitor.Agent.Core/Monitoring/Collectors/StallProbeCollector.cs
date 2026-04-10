@@ -79,6 +79,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             // Kept empty intentionally — live-capture mode (Etappe 3) collects the raw events first.
         };
 
+        // ModernDeployment EventIDs that are known to be harmless and should NOT count as anomalies
+        // in the stall probe scan. EventID 100 Level 3 = "Die Autopilot-Richtlinie [X] wurde nicht
+        // gefunden" — fires when optional ESP sync policies are not configured; no real impact.
+        private static readonly HashSet<int> HarmlessModernDeploymentEventIds = new HashSet<int>
+        {
+            100 // "Autopilot policy not found" — optional ESP sync policy configuration warnings
+        };
+
         // AppWorkload.log active-install markers (positive signals)
         private static readonly Regex ActiveInstallRegex = new Regex(
             @"EnforcementState\s*[:=]\s*(Downloading|Installing|InProgress)",
@@ -355,6 +363,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                         {
                             using (record)
                             {
+                                // Skip known harmless events — they are normal operational noise
+                                // and should not be counted as stall anomalies.
+                                if (HarmlessModernDeploymentEventIds.Contains(record.Id))
+                                    continue;
+
                                 foundCount++;
                                 if (result.RawSamples.Count < 5)
                                 {

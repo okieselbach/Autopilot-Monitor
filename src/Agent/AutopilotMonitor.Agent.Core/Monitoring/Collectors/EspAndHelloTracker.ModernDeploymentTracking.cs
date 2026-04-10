@@ -132,6 +132,15 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                         break;
                 }
 
+                // Downgrade known harmless warnings to Debug.
+                // EventID 100 Level 3 = "Autopilot policy not found" — fires when optional
+                // ESP sync policies are not configured; no real impact on enrollment.
+                if (level == 3 && record.Id == 100)
+                {
+                    eventType = Constants.EventTypes.ModernDeploymentLog;
+                    severity = EventSeverity.Debug;
+                }
+
                 string description = null;
                 try { description = record.FormatDescription(); }
                 catch { /* some events lack formatting resources */ }

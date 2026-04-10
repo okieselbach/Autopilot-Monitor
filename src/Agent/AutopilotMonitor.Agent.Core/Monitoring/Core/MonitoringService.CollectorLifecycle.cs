@@ -71,7 +71,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 if (collectors?.StallProbeEnabled != false)
                 {
                     var probeThresholds = collectors?.StallProbeThresholdsMinutes ?? new[] { 2, 15, 30, 60, 180 };
-                    var probeTraceIndices = collectors?.StallProbeTraceIndices ?? new[] { 2 };
+                    var probeTraceIndices = collectors?.StallProbeTraceIndices ?? new[] { 2, 3, 4 };
                     var probeSources = collectors?.StallProbeSources ?? new[]
                     {
                         "provisioning_registry", "diagnostics_registry", "eventlog", "appworkload_log"
