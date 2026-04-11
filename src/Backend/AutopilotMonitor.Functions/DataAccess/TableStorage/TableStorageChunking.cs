@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 using Azure.Data.Tables;
+using Microsoft.Extensions.Logging;
 
 namespace AutopilotMonitor.Functions.DataAccess.TableStorage
 {
@@ -26,11 +27,19 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
 
             var result = new Dictionary<string, string>();
             int chunkIndex = 0;
-            for (int offset = 0; offset < value.Length; offset += maxChunkSize)
+            int offset = 0;
+            while (offset < value.Length)
             {
                 int length = Math.Min(maxChunkSize, value.Length - offset);
+                // Avoid splitting a UTF-16 surrogate pair across chunks: if the last
+                // char of this slice is a high surrogate, push it into the next chunk.
+                // (No-op when length already covers the remainder.)
+                if (length < value.Length - offset && char.IsHighSurrogate(value[offset + length - 1]))
+                    length--;
+
                 result[$"{propertyName}_{chunkIndex}"] = value.Substring(offset, length);
                 chunkIndex++;
+                offset += length;
             }
             result[$"{propertyName}_ChunkCount"] = chunkIndex.ToString();
             return result;
@@ -39,8 +48,14 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
         /// <summary>
         /// Reassembles a potentially chunked property from a dictionary entity.
         /// Handles both old (single property) and new (chunked) formats.
+        /// When <paramref name="logger"/> is supplied, emits warnings on detected corruption
+        /// (unparseable ChunkCount, zero chunks present, or missing chunks in the middle).
         /// </summary>
-        public static string? ReassembleProperty(IDictionary<string, object> entity, string propertyName)
+        public static string? ReassembleProperty(
+            IDictionary<string, object> entity,
+            string propertyName,
+            ILogger? logger = null,
+            string? context = null)
         {
             // Backward compat: single non-chunked property
             if (entity.TryGetValue(propertyName, out var single) && single != null)
@@ -54,23 +69,37 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
             if (!entity.TryGetValue($"{propertyName}_ChunkCount", out var countObj))
                 return null;
 
-            if (!int.TryParse(countObj?.ToString(), out var count) || count <= 0)
+            var rawCount = countObj?.ToString();
+            if (!int.TryParse(rawCount, out var count) || count <= 0)
+            {
+                LogInvalidChunkCount(logger, propertyName, rawCount, context);
                 return null;
+            }
 
             var sb = new StringBuilder();
+            int foundChunks = 0;
             for (int i = 0; i < count; i++)
             {
                 if (entity.TryGetValue($"{propertyName}_{i}", out var chunk) && chunk != null)
+                {
                     sb.Append(chunk.ToString());
+                    foundChunks++;
+                }
             }
-            return sb.Length > 0 ? sb.ToString() : null;
+
+            return FinalizeReassembly(sb, foundChunks, count, propertyName, logger, context);
         }
 
         /// <summary>
         /// Reassembles a potentially chunked property from a TableEntity.
         /// Handles both old (single property) and new (chunked) formats.
+        /// When <paramref name="logger"/> is supplied, emits warnings on detected corruption.
         /// </summary>
-        public static string? ReassembleProperty(TableEntity entity, string propertyName)
+        public static string? ReassembleProperty(
+            TableEntity entity,
+            string propertyName,
+            ILogger? logger = null,
+            string? context = null)
         {
             // Backward compat: single non-chunked property
             var single = entity.GetString(propertyName);
@@ -78,18 +107,65 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                 return single;
 
             // Chunked format
-            var countStr = entity.GetString($"{propertyName}_ChunkCount");
-            if (!int.TryParse(countStr, out var count) || count <= 0)
+            if (!entity.ContainsKey($"{propertyName}_ChunkCount"))
                 return null;
 
+            var countStr = entity.GetString($"{propertyName}_ChunkCount");
+            if (!int.TryParse(countStr, out var count) || count <= 0)
+            {
+                LogInvalidChunkCount(logger, propertyName, countStr, context);
+                return null;
+            }
+
             var sb = new StringBuilder();
+            int foundChunks = 0;
             for (int i = 0; i < count; i++)
             {
                 var chunk = entity.GetString($"{propertyName}_{i}");
                 if (chunk != null)
+                {
                     sb.Append(chunk);
+                    foundChunks++;
+                }
             }
-            return sb.Length > 0 ? sb.ToString() : null;
+
+            return FinalizeReassembly(sb, foundChunks, count, propertyName, logger, context);
         }
+
+        private static string? FinalizeReassembly(
+            StringBuilder sb,
+            int foundChunks,
+            int expectedCount,
+            string propertyName,
+            ILogger? logger,
+            string? context)
+        {
+            if (foundChunks == 0)
+            {
+                logger?.LogWarning(
+                    "Chunked property {PropertyName} has ChunkCount={Expected} but no chunks found{Context}",
+                    propertyName, expectedCount, FormatContext(context));
+                return null;
+            }
+
+            if (foundChunks < expectedCount)
+            {
+                logger?.LogWarning(
+                    "Chunked property {PropertyName} incomplete: expected {Expected} chunks, got {Actual}{Context}. Returning partial value of {Length} chars.",
+                    propertyName, expectedCount, foundChunks, FormatContext(context), sb.Length);
+            }
+
+            return sb.ToString();
+        }
+
+        private static void LogInvalidChunkCount(ILogger? logger, string propertyName, string? rawValue, string? context)
+        {
+            logger?.LogWarning(
+                "Chunked property {PropertyName} has invalid ChunkCount value '{RawValue}'{Context}",
+                propertyName, rawValue ?? "<null>", FormatContext(context));
+        }
+
+        private static string FormatContext(string? context)
+            => string.IsNullOrEmpty(context) ? string.Empty : $" [{context}]";
     }
 }

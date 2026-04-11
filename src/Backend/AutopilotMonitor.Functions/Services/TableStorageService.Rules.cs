@@ -651,7 +651,7 @@ namespace AutopilotMonitor.Functions.Services
                 var entity = response?.Value;
                 if (entity == null) return null;
 
-                var reportJson = TableStorageChunking.ReassembleProperty(entity, "ReportJson");
+                var reportJson = TableStorageChunking.ReassembleProperty(entity, "ReportJson", _logger, $"{partitionKey}/report");
                 return string.IsNullOrEmpty(reportJson) ? null : reportJson;
             }
             catch (Azure.RequestFailedException ex) when (ex.Status == 404)
