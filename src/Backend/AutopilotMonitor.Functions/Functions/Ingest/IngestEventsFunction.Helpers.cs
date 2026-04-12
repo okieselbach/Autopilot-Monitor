@@ -53,7 +53,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
 
             if (!isRelevant) return;
 
-            var appName = evt.Data?.ContainsKey("appName") == true ? evt.Data["appName"]?.ToString() : null;
+            var appName = evt.Data?.ContainsKey("appName") == true ? evt.Data["appName"]?.ToString()?.Trim() : null;
             if (string.IsNullOrEmpty(appName)) return;
 
             if (!summaries.TryGetValue(appName, out var state))

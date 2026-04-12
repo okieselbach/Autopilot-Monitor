@@ -151,7 +151,7 @@ namespace AutopilotMonitor.Functions.Services
             try
             {
                 var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.AppInstallSummaries);
-                var rowKey = $"{summary.SessionId}_{summary.AppName}";
+                var rowKey = SanitizeTableKey($"{summary.SessionId}_{summary.AppName}");
 
                 // Merge with existing record to preserve StartedAt from a prior batch
                 var existingResult = await tableClient.GetEntityIfExistsAsync<TableEntity>(summary.TenantId, rowKey);
