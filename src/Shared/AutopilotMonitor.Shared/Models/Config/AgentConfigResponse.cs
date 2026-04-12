@@ -324,6 +324,23 @@ namespace AutopilotMonitor.Shared.Models
         public int ModernDeploymentLogLevelMax { get; set; } = 3;
 
         /// <summary>
+        /// Enable backfill for targeted ModernDeployment events (e.g. Event 509 / WhiteGlove start)
+        /// that may have been written before the agent started during OOBE.
+        /// Uses EventLogReader to scan the event log for recent occurrences on startup.
+        /// Default: true
+        /// </summary>
+        public bool ModernDeploymentBackfillEnabled { get; set; } = true;
+
+        /// <summary>
+        /// Lookback window in minutes for the ModernDeployment backfill scan.
+        /// Only events within this window are considered. Set generously because the
+        /// gap between WhiteGlove initiation and MDM enroll (when the agent starts)
+        /// can be 5–15 minutes depending on TPM attestation and disk encryption setup.
+        /// Default: 30 minutes.
+        /// </summary>
+        public int ModernDeploymentBackfillLookbackMinutes { get; set; } = 30;
+
+        /// <summary>
         /// Creates default collector configuration
         /// </summary>
         public static CollectorConfiguration CreateDefault()

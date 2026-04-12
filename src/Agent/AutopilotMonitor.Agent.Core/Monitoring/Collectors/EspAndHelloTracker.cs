@@ -59,6 +59,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         private readonly int _helloWaitTimeoutSeconds;
         private readonly bool _modernDeploymentWatcherEnabled;
         private readonly int _modernDeploymentLogLevelMax;
+        private readonly bool _modernDeploymentBackfillEnabled;
+        private readonly int _modernDeploymentBackfillLookbackMinutes;
+        private readonly string _stateDirectory;
         private const int HelloCompletionTimeoutSeconds = 300;
         private const int BackfillLookbackMinutes = 5;
 
@@ -155,7 +158,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             AgentLogger logger,
             int helloWaitTimeoutSeconds = 30,
             bool modernDeploymentWatcherEnabled = true,
-            int modernDeploymentLogLevelMax = 3)
+            int modernDeploymentLogLevelMax = 3,
+            bool modernDeploymentBackfillEnabled = true,
+            int modernDeploymentBackfillLookbackMinutes = 30,
+            string stateDirectory = null)
         {
             _sessionId = sessionId ?? throw new ArgumentNullException(nameof(sessionId));
             _tenantId = tenantId ?? throw new ArgumentNullException(nameof(tenantId));
@@ -164,6 +170,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             _helloWaitTimeoutSeconds = helloWaitTimeoutSeconds;
             _modernDeploymentWatcherEnabled = modernDeploymentWatcherEnabled;
             _modernDeploymentLogLevelMax = modernDeploymentLogLevelMax;
+            _modernDeploymentBackfillEnabled = modernDeploymentBackfillEnabled;
+            _modernDeploymentBackfillLookbackMinutes = modernDeploymentBackfillLookbackMinutes;
+            _stateDirectory = stateDirectory != null ? Environment.ExpandEnvironmentVariables(stateDirectory) : null;
         }
 
         /// <summary>
@@ -229,6 +238,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             if (_modernDeploymentWatcherEnabled)
             {
                 StartModernDeploymentEventLogWatchers();
+
+                // Backfill targeted events (e.g. Event 509 / WhiteGlove start) that may have been
+                // written before the agent started. Uses EventLogReader to scan the event log for
+                // recent occurrences. Must run AFTER watcher subscription so no gap exists between
+                // backfill scan and live capture. Fire-once guards prevent duplicate emissions.
+                BackfillTargetedModernDeploymentEvents();
             }
 
             // Safety net: backfill recent terminal events in case watcher started late or event delivery lagged.
