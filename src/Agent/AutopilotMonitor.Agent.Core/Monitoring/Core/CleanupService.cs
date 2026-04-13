@@ -25,7 +25,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         /// <summary>
         /// Executes full self-destruct: removes scheduled task and deletes all files
         /// </summary>
-        public void ExecuteSelfDestruct()
+        public virtual void ExecuteSelfDestruct()
         {
             try
             {

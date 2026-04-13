@@ -44,6 +44,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
         /// </summary>
         public X509Certificate2 ClientCertificate => _clientCertificate;
 
+        /// <summary>
+        /// Protected constructor for testability (Moq proxy creation).
+        /// </summary>
+        protected BackendApiClient() { }
+
         public BackendApiClient(string baseUrl, AgentConfiguration configuration = null, Logging.AgentLogger logger = null, string agentVersion = null)
         {
             _baseUrl = baseUrl.TrimEnd('/');
@@ -126,7 +131,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
         /// <summary>
         /// Ingests a batch of events using NDJSON + gzip compression for bandwidth optimization
         /// </summary>
-        public async Task<IngestEventsResponse> IngestEventsAsync(IngestEventsRequest request)
+        public virtual async Task<IngestEventsResponse> IngestEventsAsync(IngestEventsRequest request)
         {
             var ingestEndpoint = _useBootstrapTokenAuth
                 ? Constants.ApiEndpoints.BootstrapIngestEvents

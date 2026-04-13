@@ -83,7 +83,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
         /// All anti-flood checks are applied synchronously before the async HTTP call,
         /// so repeated calls are cheap when suppressed.
         /// </summary>
-        public async Task TrySendAsync(
+        public virtual async Task TrySendAsync(
             DistressErrorType errorType,
             string message,
             int? httpStatusCode = null)

@@ -185,7 +185,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 
                     _configuration.SelfDestructOnComplete = true;
                     _cleanupService.ExecuteSelfDestruct();
-                    Environment.Exit(0);
+                    ExitProcess(0);
                     return;
                 }
 
@@ -308,7 +308,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                         { "shutdownTrigger", "max_attempts" },
                         { "maxAuthFailures", _configuration.MaxAuthFailures }
                     });
-                Environment.Exit(1);
+                ExitProcess(1);
             }
 
             if (_configuration.AuthFailureTimeoutMinutes > 0 && _firstAuthFailureTime.HasValue)
@@ -331,10 +331,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                             { "authFailureTimeoutMinutes", _configuration.AuthFailureTimeoutMinutes },
                             { "elapsedMinutes", Math.Round(elapsed.TotalMinutes, 1) }
                         });
-                    Environment.Exit(1);
+                    ExitProcess(1);
                 }
             }
         }
+
+        internal virtual void ExitProcess(int code) => Environment.Exit(code);
 
         public void Dispose()
         {

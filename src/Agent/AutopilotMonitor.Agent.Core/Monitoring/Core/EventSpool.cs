@@ -21,6 +21,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         /// </summary>
         public event EventHandler EventsAvailable;
 
+        /// <summary>
+        /// Protected constructor for testability (Moq proxy creation).
+        /// </summary>
+        protected EventSpool() { }
+
         public EventSpool(string spoolDirectory)
         {
             _spoolDirectory = spoolDirectory;
@@ -52,7 +57,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         /// <summary>
         /// Stops watching for new events
         /// </summary>
-        public void StopWatching()
+        public virtual void StopWatching()
         {
             _fileWatcher.EnableRaisingEvents = false;
         }
@@ -81,7 +86,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         /// <summary>
         /// Gets a batch of events from the spool (oldest first, sorted by sequence)
         /// </summary>
-        public List<EnrollmentEvent> GetBatch(int maxBatchSize)
+        public virtual List<EnrollmentEvent> GetBatch(int maxBatchSize)
         {
             lock (_lockObject)
             {
@@ -140,7 +145,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         /// <summary>
         /// Removes events from the spool after successful upload
         /// </summary>
-        public void RemoveEvents(List<EnrollmentEvent> events)
+        public virtual void RemoveEvents(List<EnrollmentEvent> events)
         {
             lock (_lockObject)
             {
@@ -165,7 +170,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         /// <summary>
         /// Gets the count of events in the spool
         /// </summary>
-        public int GetCount()
+        public virtual int GetCount()
         {
             lock (_lockObject)
             {

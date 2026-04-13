@@ -83,7 +83,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         /// Example: "preprov" → AgentDiagnostics-{sessionId}-{timestamp}-preprov.zip
         /// Null (default) → AgentDiagnostics-{sessionId}-{timestamp}.zip
         /// </param>
-        public async Task<DiagnosticsUploadResult> CreateAndUploadAsync(bool enrollmentSucceeded, string fileNameSuffix = null)
+        public virtual async Task<DiagnosticsUploadResult> CreateAndUploadAsync(bool enrollmentSucceeded, string fileNameSuffix = null)
         {
             try
             {

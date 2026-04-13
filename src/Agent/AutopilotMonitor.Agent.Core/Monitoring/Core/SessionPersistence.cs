@@ -22,6 +22,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         private readonly string _sessionCreatedPath;
         private readonly object _lockObject = new object();
 
+        /// <summary>
+        /// Protected constructor for testability (Moq proxy creation).
+        /// </summary>
+        protected SessionPersistence() { }
+
         public SessionPersistence(string dataDirectory)
         {
             if (string.IsNullOrWhiteSpace(dataDirectory))
@@ -109,7 +114,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         /// Deletes the persisted session ID file
         /// This should be called when enrollment is complete
         /// </summary>
-        public void DeleteSession()
+        public virtual void DeleteSession()
         {
             lock (_lockObject)
             {
@@ -169,7 +174,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         /// Persists the current sequence counter to disk.
         /// Called periodically and before graceful shutdown (WhiteGlove).
         /// </summary>
-        public void SaveSequence(long sequence)
+        public virtual void SaveSequence(long sequence)
         {
             lock (_lockObject)
             {
@@ -197,7 +202,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         /// event, and clears it — giving the backend an explicit signal to transition
         /// the session from Pending to InProgress for Part 2.
         /// </summary>
-        public void SaveWhiteGloveComplete()
+        public virtual void SaveWhiteGloveComplete()
         {
             lock (_lockObject)
             {

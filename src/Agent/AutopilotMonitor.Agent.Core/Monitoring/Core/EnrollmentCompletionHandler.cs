@@ -116,14 +116,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 
                     await _uploadEventsAsync();
 
-                    var psi = new ProcessStartInfo
-                    {
-                        FileName = SystemPaths.Shutdown,
-                        Arguments = $"/r /t {_configuration.RebootDelaySeconds} /c \"Autopilot enrollment completed - rebooting\"",
-                        UseShellExecute = false,
-                        CreateNoWindow = true
-                    };
-                    Process.Start(psi);
+                    StartReboot(_configuration.RebootDelaySeconds);
                 }
 
                 _emitShutdownEvent(
@@ -138,12 +131,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 await _uploadEventsAsync();
 
                 _logger.Info("Shutdown sequence complete. Agent will now exit.");
-                Environment.Exit(0);
+                ExitProcess(0);
             }
             catch (Exception ex)
             {
                 _logger.Error("Error during self-destruct sequence", ex);
-                Environment.Exit(1);
+                ExitProcess(1);
             }
         }
 
@@ -194,13 +187,27 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 _logger.Info($"Sequence counter persisted at {finalSequence} for next boot");
 
                 _logger.Info("WhiteGlove graceful shutdown complete. Agent exiting.");
-                Environment.Exit(0);
+                ExitProcess(0);
             }
             catch (Exception ex)
             {
                 _logger.Error("Error during WhiteGlove shutdown sequence", ex);
-                Environment.Exit(0);
+                ExitProcess(0);
             }
+        }
+
+        internal virtual void ExitProcess(int code) => Environment.Exit(code);
+
+        internal virtual void StartReboot(int delaySeconds)
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = SystemPaths.Shutdown,
+                Arguments = $"/r /t {delaySeconds} /c \"Autopilot enrollment completed - rebooting\"",
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            Process.Start(psi);
         }
 
         /// <summary>
