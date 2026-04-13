@@ -81,6 +81,9 @@ namespace AutopilotMonitor.Functions.Services
                     await _metricsRepo.SaveUsageMetricsSnapshotAsync(tenantMetrics);
                 }
 
+                // Aggregate rule stats from RuleResults table for this date
+                await AggregateRuleStatsForDateAsync(targetDate, targetDateSessions);
+
                 aggregateStart.Stop();
                 _logger.LogInformation($"Aggregated metrics for {targetDateSessions.Count} sessions from {targetDateStr} in {aggregateStart.ElapsedMilliseconds}ms");
             }
@@ -257,6 +260,68 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
+        /// Reconciles rule stats for a given date by computing global aggregate rows
+        /// from per-tenant rows. This ensures consistency even if real-time global
+        /// increments were missed (e.g. during transient failures).
+        /// </summary>
+        private async Task AggregateRuleStatsForDateAsync(DateTime targetDate, List<SessionSummary> sessions)
+        {
+            try
+            {
+                var dateStr = targetDate.ToString("yyyy-MM-dd");
+                // Fetch all tenant-specific rows for this date (excluding existing global rows)
+                var allEntries = await _metricsRepo.GetRuleStatsAsync(startDate: dateStr, endDate: dateStr);
+                var tenantEntries = allEntries.Where(e => e.TenantId != "global").ToList();
+
+                if (tenantEntries.Count == 0)
+                {
+                    _logger.LogInformation("No tenant rule stats for {Date}, skipping rule stats aggregation", dateStr);
+                    return;
+                }
+
+                // Group by RuleId to compute global aggregates
+                var groups = tenantEntries.GroupBy(e => e.RuleId);
+                int written = 0;
+
+                foreach (var group in groups)
+                {
+                    var first = group.First();
+                    var totalFire = group.Sum(e => e.FireCount);
+                    var totalEval = group.Sum(e => e.EvaluationCount);
+                    var totalSessions = group.Sum(e => e.SessionsEvaluated);
+                    var totalConfSum = group.Sum(e => e.ConfidenceScoreSum);
+
+                    var globalEntry = new RuleStatsEntry
+                    {
+                        Date = dateStr,
+                        TenantId = "global",
+                        RuleId = first.RuleId,
+                        RuleType = first.RuleType,
+                        RuleTitle = first.RuleTitle,
+                        Category = first.Category,
+                        Severity = first.Severity,
+                        FireCount = totalFire,
+                        EvaluationCount = totalEval,
+                        SessionsEvaluated = totalSessions,
+                        ConfidenceScoreSum = totalConfSum,
+                        AvgConfidenceScore = totalFire > 0 ? Math.Round((double)totalConfSum / totalFire, 1) : 0,
+                        UpdatedAt = DateTime.UtcNow
+                    };
+
+                    await _metricsRepo.SaveRuleStatsEntryAsync(globalEntry);
+                    written++;
+                }
+
+                _logger.LogInformation("Rule stats aggregation for {Date}: reconciled {Count} global rule entries from {TenantEntries} tenant entries",
+                    dateStr, written, tenantEntries.Count);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to aggregate rule stats for {Date} (non-fatal)", targetDate.ToString("yyyy-MM-dd"));
+            }
+        }
+
+        /// <summary>
         /// Deletes usage tracking records older than 90 days from UserUsageLog.
         /// </summary>
         private async Task CleanupOldUsageDataAsync()
@@ -272,6 +337,20 @@ namespace AutopilotMonitor.Functions.Services
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to cleanup old usage data");
+            }
+
+            // Rule stats retention: delete entries older than 90 days
+            try
+            {
+                var ruleStatsCutoff = DateTime.UtcNow.AddDays(-90);
+                var deletedRuleStats = await _metricsRepo.DeleteRuleStatsOlderThanAsync(ruleStatsCutoff);
+
+                if (deletedRuleStats > 0)
+                    _logger.LogInformation("Rule stats cleanup: deleted {Count} entries older than 90 days", deletedRuleStats);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to cleanup old rule stats");
             }
         }
 

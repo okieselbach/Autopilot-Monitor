@@ -266,30 +266,33 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                         try
                         {
                             var ruleEngine = new RuleEngine(_analyzeRuleService, _ruleRepo, _sessionRepo, _logger);
-                            var results = await ruleEngine.AnalyzeSessionAsync(ruleTenantId, ruleSessionId);
+                            var outcome = await ruleEngine.AnalyzeSessionAsync(ruleTenantId, ruleSessionId);
 
-                            foreach (var result in results)
+                            foreach (var result in outcome.Results)
                             {
                                 await _ruleRepo.StoreRuleResultAsync(result);
                             }
 
-                            if (results.Count > 0)
+                            if (outcome.Results.Count > 0)
                             {
                                 _logger.LogInformation("{Prefix} Enrollment-end analysis (async): {Count} issue(s) detected",
-                                    rulePrefix, results.Count);
+                                    rulePrefix, outcome.Results.Count);
 
                                 // Push SignalR notification so the UI fetches results immediately
                                 await _signalRNotification.NotifyRuleResultsAvailableAsync(
-                                    ruleTenantId, ruleSessionId, results.Count);
+                                    ruleTenantId, ruleSessionId, outcome.Results.Count);
                             }
 
                             // Increment platform stats for detected issues
-                            if (results.Count > 0)
+                            if (outcome.Results.Count > 0)
                             {
-                                _ = _metricsRepo.IncrementPlatformStatAsync("IssuesDetected", results.Count)
+                                _ = _metricsRepo.IncrementPlatformStatAsync("IssuesDetected", outcome.Results.Count)
                                     .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException,
                                         "Fire-and-forget IncrementPlatformStatAsync failed"), TaskContinuationOptions.OnlyOnFaulted);
                             }
+
+                            // Record rule telemetry: increment stats for every evaluated rule
+                            _ = RecordAnalyzeRuleStatsAsync(ruleTenantId, outcome);
                         }
                         catch (Exception ruleEx)
                         {
@@ -446,6 +449,9 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                 if (classification.CompletionEvent != null)
                     _ = _metricsRepo.IncrementPlatformStatAsync("SuccessfulEnrollments")
                         .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException, "Fire-and-forget IncrementPlatformStatAsync failed"), TaskContinuationOptions.OnlyOnFaulted);
+
+                // Record gather rule telemetry for events that carry ruleId in their data
+                _ = RecordGatherRuleStatsAsync(request.TenantId, storedEvents);
 
                 // Store diagnostics blob name on session (if agent uploaded a diagnostics package)
                 if (classification.DiagnosticsUploadedEvent != null)
@@ -971,6 +977,93 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                     clampedFuture,
                     maxPastDriftHours,
                     maxFutureDriftHours);
+            }
+        }
+
+        /// <summary>
+        /// Records gather rule telemetry for events that carry a ruleId in their data.
+        /// Fire-and-forget — failures are logged but never propagated.
+        /// Gather rules have no evaluation count (they run on the agent); we only track fires.
+        /// </summary>
+        private async Task RecordGatherRuleStatsAsync(string tenantId, List<EnrollmentEvent> events)
+        {
+            try
+            {
+                var today = DateTime.UtcNow.ToString("yyyy-MM-dd");
+
+                // Gather rule results carry ruleId in their event data
+                var gatherEvents = events.Where(e =>
+                    e.Data != null &&
+                    e.Data.ContainsKey("ruleId") &&
+                    e.Source == "GatherRuleExecutor").ToList();
+
+                if (gatherEvents.Count == 0) return;
+
+                // Deduplicate: count each unique ruleId once per ingest batch
+                var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var evt in gatherEvents)
+                {
+                    var ruleId = evt.Data!["ruleId"]?.ToString();
+                    if (string.IsNullOrEmpty(ruleId) || !seen.Add(ruleId)) continue;
+
+                    var ruleTitle = evt.Data.ContainsKey("ruleTitle") ? evt.Data["ruleTitle"]?.ToString() ?? "" : "";
+
+                    // Tenant-specific row
+                    await _metricsRepo.IncrementRuleStatAsync(
+                        today, tenantId, ruleId, "gather",
+                        ruleTitle, "", "",
+                        fired: true, confidenceScore: null);
+
+                    // Global aggregate row
+                    await _metricsRepo.IncrementRuleStatAsync(
+                        today, "global", ruleId, "gather",
+                        ruleTitle, "", "",
+                        fired: true, confidenceScore: null);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to record gather rule stats (non-fatal)");
+            }
+        }
+
+        /// <summary>
+        /// Records rule telemetry for all evaluated analyze rules.
+        /// Fire-and-forget — failures are logged but never propagated.
+        /// </summary>
+        private async Task RecordAnalyzeRuleStatsAsync(string tenantId, AnalysisOutcome outcome)
+        {
+            try
+            {
+                var today = DateTime.UtcNow.ToString("yyyy-MM-dd");
+                var firedRuleIds = new HashSet<string>(outcome.Results.Select(r => r.RuleId));
+
+                foreach (var rule in outcome.EvaluatedRules)
+                {
+                    var fired = firedRuleIds.Contains(rule.RuleId);
+                    int? confidence = null;
+                    if (fired)
+                    {
+                        var result = outcome.Results.FirstOrDefault(r => r.RuleId == rule.RuleId);
+                        confidence = result?.ConfidenceScore;
+                    }
+
+                    // Tenant-specific row
+                    await _metricsRepo.IncrementRuleStatAsync(
+                        today, tenantId, rule.RuleId, "analyze",
+                        rule.Title, rule.Category, rule.Severity,
+                        fired, confidence);
+
+                    // Global aggregate row
+                    await _metricsRepo.IncrementRuleStatAsync(
+                        today, "global", rule.RuleId, "analyze",
+                        rule.Title, rule.Category, rule.Severity,
+                        fired, confidence);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to record analyze rule stats (non-fatal)");
             }
         }
     }

@@ -260,6 +260,9 @@ namespace AutopilotMonitor.Shared
             public const string AppInstallSummaries = "AppInstallSummaries";
             public const string PlatformStats       = "PlatformStats";
 
+            // Rule telemetry (daily per-rule fire/evaluation counters)
+            public const string RuleStats           = "RuleStats";
+
             // Configuration tables
             public const string TenantConfiguration = "TenantConfiguration";
             public const string AdminConfiguration  = "AdminConfiguration";
@@ -353,7 +356,8 @@ namespace AutopilotMonitor.Shared
                 DistressReports,
                 UserUsageLog,
                 OpsEvents,
-                ImeVersionHistory
+                ImeVersionHistory,
+                RuleStats
             };
         }
     }

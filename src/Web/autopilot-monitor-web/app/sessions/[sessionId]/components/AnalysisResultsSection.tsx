@@ -1,8 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { RuleResult } from "@/types";
 import { formatInlineMarkdown } from "@/lib/formatInlineMarkdown";
+import { api } from "@/lib/api";
+import { authenticatedFetch } from "@/lib/authenticatedFetch";
+import { useAuth } from "@/contexts/AuthContext";
+import { useTenant } from "@/contexts/TenantContext";
 
 interface AnalysisResultsSectionProps {
   analysisResults: RuleResult[];
@@ -19,6 +23,35 @@ export default function AnalysisResultsSection({
   setAnalysisExpanded,
   onReanalyze,
 }: AnalysisResultsSectionProps) {
+  const { getAccessToken } = useAuth();
+  const { tenantId } = useTenant();
+  const [ruleHitRates, setRuleHitRates] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    if (!tenantId || analysisResults.length === 0) return;
+    const fetchStats = async () => {
+      try {
+        const response = await authenticatedFetch(
+          api.metrics.ruleStats(undefined, undefined, "analyze"),
+          getAccessToken
+        );
+        if (response.ok) {
+          const data = await response.json();
+          const map: Record<string, number> = {};
+          if (data.rules && Array.isArray(data.rules)) {
+            for (const r of data.rules) {
+              if (r.hitRate > 0) map[r.ruleId] = r.hitRate;
+            }
+          }
+          setRuleHitRates(map);
+        }
+      } catch {
+        // Non-critical
+      }
+    };
+    fetchStats();
+  }, [tenantId, analysisResults.length, getAccessToken]);
+
   return (
     <div className="bg-white shadow rounded-lg p-6 mb-6">
       <div
@@ -94,7 +127,7 @@ export default function AnalysisResultsSection({
           ) : (
             <div className="space-y-3">
               {analysisResults.map((result) => (
-                <AnalysisResultCard key={result.ruleId} result={result} />
+                <AnalysisResultCard key={result.ruleId} result={result} hitRate={ruleHitRates[result.ruleId]} />
               ))}
             </div>
           )}
@@ -104,7 +137,7 @@ export default function AnalysisResultsSection({
   );
 }
 
-function AnalysisResultCard({ result }: { result: RuleResult }) {
+function AnalysisResultCard({ result, hitRate }: { result: RuleResult; hitRate?: number }) {
   const [expanded, setExpanded] = useState(false);
 
   const severityColors: Record<string, string> = {
@@ -151,6 +184,11 @@ function AnalysisResultCard({ result }: { result: RuleResult }) {
               </div>
               <span className="text-xs font-medium text-gray-700">{result.confidenceScore}%</span>
             </div>
+            {hitRate != null && hitRate > 0 && (
+              <span className="text-xs text-gray-500 italic" title="Based on rule telemetry from the last 30 days">
+                Fires on {hitRate}% of enrollments in your tenant
+              </span>
+            )}
           </div>
         </div>
         <svg className={`w-5 h-5 text-gray-400 ml-2 transition-transform duration-200 flex-shrink-0 ${expanded ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">

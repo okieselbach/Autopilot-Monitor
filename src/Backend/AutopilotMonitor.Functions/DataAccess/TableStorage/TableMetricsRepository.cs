@@ -61,5 +61,19 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
 
         public Task<List<object>> GetMetricsSummaryAsync(string? tenantId)
             => _storage.GetMetricsSummaryAsync(tenantId);
+
+        public Task IncrementRuleStatAsync(string date, string tenantId, string ruleId, string ruleType,
+            string ruleTitle, string category, string severity, bool fired, int? confidenceScore)
+            => _storage.IncrementRuleStatAsync(date, tenantId, ruleId, ruleType, ruleTitle, category, severity, fired, confidenceScore);
+
+        public Task<bool> SaveRuleStatsEntryAsync(RuleStatsEntry entry)
+            => _storage.SaveRuleStatsEntryAsync(entry);
+
+        public Task<List<RuleStatsEntry>> GetRuleStatsAsync(string? tenantId = null, string? startDate = null,
+            string? endDate = null, string? ruleType = null, int maxResults = 500)
+            => _storage.GetRuleStatsAsync(tenantId, startDate, endDate, ruleType, maxResults);
+
+        public Task<int> DeleteRuleStatsOlderThanAsync(DateTime cutoffDate)
+            => _storage.DeleteRuleStatsOlderThanAsync(cutoffDate);
     }
 }

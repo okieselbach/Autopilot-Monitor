@@ -688,5 +688,220 @@ namespace AutopilotMonitor.Functions.Services
                 return (0, 0);
             }
         }
+
+        // ===== RULE STATS METHODS =====
+
+        /// <summary>
+        /// Increments rule stats counters atomically for a single rule evaluation.
+        /// Creates the row if it doesn't exist. Uses read-modify-write pattern.
+        /// Called once per rule per session evaluation (for both tenant-specific and global rows).
+        /// </summary>
+        public async Task IncrementRuleStatAsync(
+            string date, string tenantId, string ruleId, string ruleType,
+            string ruleTitle, string category, string severity,
+            bool fired, int? confidenceScore)
+        {
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.RuleStats);
+                var rowKey = $"{tenantId}_{ruleId}";
+
+                TableEntity entity;
+                try
+                {
+                    var response = await tableClient.GetEntityAsync<TableEntity>(date, rowKey);
+                    entity = response.Value;
+                }
+                catch (RequestFailedException ex) when (ex.Status == 404)
+                {
+                    entity = new TableEntity(date, rowKey)
+                    {
+                        ["RuleId"] = ruleId,
+                        ["RuleType"] = ruleType,
+                        ["RuleTitle"] = ruleTitle,
+                        ["Category"] = category,
+                        ["Severity"] = severity,
+                        ["FireCount"] = 0,
+                        ["EvaluationCount"] = 0,
+                        ["SessionsEvaluated"] = 0,
+                        ["ConfidenceScoreSum"] = 0L,
+                        ["AvgConfidenceScore"] = 0.0,
+                        ["UpdatedAt"] = DateTime.UtcNow
+                    };
+                }
+
+                // Always increment evaluation and session counters
+                entity["EvaluationCount"] = (entity.GetInt32("EvaluationCount") ?? 0) + 1;
+                entity["SessionsEvaluated"] = (entity.GetInt32("SessionsEvaluated") ?? 0) + 1;
+
+                if (fired)
+                {
+                    var newFireCount = (entity.GetInt32("FireCount") ?? 0) + 1;
+                    entity["FireCount"] = newFireCount;
+
+                    if (confidenceScore.HasValue)
+                    {
+                        var newSum = (entity.GetInt64("ConfidenceScoreSum") ?? 0) + confidenceScore.Value;
+                        entity["ConfidenceScoreSum"] = newSum;
+                        entity["AvgConfidenceScore"] = newFireCount > 0 ? (double)newSum / newFireCount : 0.0;
+                    }
+                }
+
+                // Keep metadata fresh
+                entity["RuleTitle"] = ruleTitle;
+                entity["Category"] = category;
+                entity["Severity"] = severity;
+                entity["UpdatedAt"] = DateTime.UtcNow;
+
+                await tableClient.UpsertEntityAsync(entity);
+            }
+            catch (Exception ex)
+            {
+                // Non-fatal: don't break the caller if stats update fails
+                _logger.LogWarning(ex, "Failed to increment rule stat for {RuleId} / {TenantId}", ruleId, tenantId);
+            }
+        }
+
+        /// <summary>
+        /// Saves a fully computed rule stats entry (used by daily aggregation).
+        /// </summary>
+        public async Task<bool> SaveRuleStatsEntryAsync(RuleStatsEntry entry)
+        {
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.RuleStats);
+                var rowKey = $"{entry.TenantId}_{entry.RuleId}";
+
+                var entity = new TableEntity(entry.Date, rowKey)
+                {
+                    ["RuleId"] = entry.RuleId,
+                    ["RuleType"] = entry.RuleType,
+                    ["RuleTitle"] = entry.RuleTitle,
+                    ["Category"] = entry.Category,
+                    ["Severity"] = entry.Severity,
+                    ["FireCount"] = entry.FireCount,
+                    ["EvaluationCount"] = entry.EvaluationCount,
+                    ["SessionsEvaluated"] = entry.SessionsEvaluated,
+                    ["AvgConfidenceScore"] = entry.AvgConfidenceScore,
+                    ["ConfidenceScoreSum"] = entry.ConfidenceScoreSum,
+                    ["UpdatedAt"] = entry.UpdatedAt
+                };
+
+                await tableClient.UpsertEntityAsync(entity);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to save rule stats entry for {RuleId} / {TenantId} / {Date}",
+                    entry.RuleId, entry.TenantId, entry.Date);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Gets rule stats entries for a date range, optionally filtered by tenant and/or rule type.
+        /// </summary>
+        public async Task<List<RuleStatsEntry>> GetRuleStatsAsync(
+            string? tenantId = null, string? startDate = null, string? endDate = null,
+            string? ruleType = null, int maxResults = 500)
+        {
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.RuleStats);
+
+                var filters = new List<string>();
+
+                if (!string.IsNullOrEmpty(startDate))
+                    filters.Add($"PartitionKey ge '{startDate}'");
+                if (!string.IsNullOrEmpty(endDate))
+                    filters.Add($"PartitionKey le '{endDate}'");
+
+                // Filter by tenant via RowKey prefix
+                if (!string.IsNullOrEmpty(tenantId))
+                {
+                    filters.Add($"RowKey ge '{tenantId}_'");
+                    filters.Add($"RowKey lt '{tenantId}_~'");  // ~ is after all printable ASCII
+                }
+
+                if (!string.IsNullOrEmpty(ruleType))
+                    filters.Add($"RuleType eq '{ruleType}'");
+
+                var filter = filters.Count > 0 ? string.Join(" and ", filters) : null;
+                var query = tableClient.QueryAsync<TableEntity>(filter: filter);
+
+                var results = new List<RuleStatsEntry>();
+                await foreach (var entity in query)
+                {
+                    results.Add(MapToRuleStatsEntry(entity));
+                    if (results.Count >= maxResults) break;
+                }
+
+                return results;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to get rule stats");
+                return new List<RuleStatsEntry>();
+            }
+        }
+
+        /// <summary>
+        /// Deletes rule stats entries older than a given date (retention cleanup).
+        /// </summary>
+        public async Task<int> DeleteRuleStatsOlderThanAsync(DateTime cutoffDate)
+        {
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.RuleStats);
+                var cutoffStr = cutoffDate.ToString("yyyy-MM-dd");
+                var filter = $"PartitionKey lt '{cutoffStr}'";
+                var query = tableClient.QueryAsync<TableEntity>(filter: filter, select: new[] { "PartitionKey", "RowKey" });
+
+                int deleted = 0;
+                await foreach (var entity in query)
+                {
+                    await tableClient.DeleteEntityAsync(entity.PartitionKey, entity.RowKey);
+                    deleted++;
+                }
+
+                if (deleted > 0)
+                    _logger.LogInformation("Deleted {Count} rule stats entries older than {Cutoff}", deleted, cutoffStr);
+
+                return deleted;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to delete old rule stats entries");
+                return 0;
+            }
+        }
+
+        private static RuleStatsEntry MapToRuleStatsEntry(TableEntity entity)
+        {
+            var rowKey = entity.RowKey ?? string.Empty;
+            var separatorIndex = rowKey.IndexOf('_');
+            var tenantId = separatorIndex > 0 ? rowKey.Substring(0, separatorIndex) : rowKey;
+            // RuleId may contain underscores, so take everything after the first underscore
+            var ruleId = separatorIndex > 0 && separatorIndex < rowKey.Length - 1
+                ? rowKey.Substring(separatorIndex + 1)
+                : entity.GetString("RuleId") ?? string.Empty;
+
+            return new RuleStatsEntry
+            {
+                Date = entity.PartitionKey ?? string.Empty,
+                TenantId = tenantId,
+                RuleId = entity.GetString("RuleId") ?? ruleId,
+                RuleType = entity.GetString("RuleType") ?? string.Empty,
+                RuleTitle = entity.GetString("RuleTitle") ?? string.Empty,
+                Category = entity.GetString("Category") ?? string.Empty,
+                Severity = entity.GetString("Severity") ?? string.Empty,
+                FireCount = entity.GetInt32("FireCount") ?? 0,
+                EvaluationCount = entity.GetInt32("EvaluationCount") ?? 0,
+                SessionsEvaluated = entity.GetInt32("SessionsEvaluated") ?? 0,
+                AvgConfidenceScore = entity.GetDouble("AvgConfidenceScore") ?? 0,
+                ConfidenceScoreSum = entity.GetInt64("ConfidenceScoreSum") ?? 0,
+                UpdatedAt = entity.GetDateTimeOffset("UpdatedAt")?.UtcDateTime ?? DateTime.UtcNow
+            };
+        }
     }
 }

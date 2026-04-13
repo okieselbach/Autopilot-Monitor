@@ -62,17 +62,17 @@ namespace AutopilotMonitor.Functions.Functions.Rules
                 try
                 {
                     var ruleEngine = new RuleEngine(_analyzeRuleService, _ruleRepo, _sessionRepo, _logger);
-                    var freshResults = await ruleEngine.AnalyzeSessionAsync(effectiveTenantId, sessionId, reanalyze: true);
+                    var outcome = await ruleEngine.AnalyzeSessionAsync(effectiveTenantId, sessionId, reanalyze: true);
 
                     // Delete existing results so stale entries don't persist after re-analysis
                     await _maintenanceRepo.DeleteSessionRuleResultsAsync(effectiveTenantId, sessionId);
 
-                    foreach (var result in freshResults)
+                    foreach (var result in outcome.Results)
                     {
                         await _ruleRepo.StoreRuleResultAsync(result);
                     }
 
-                    _logger.LogInformation($"On-demand re-analysis for session {sessionId}: {freshResults.Count} issue(s) detected");
+                    _logger.LogInformation($"On-demand re-analysis for session {sessionId}: {outcome.Results.Count} issue(s) detected");
                 }
                 catch (Exception ex)
                 {

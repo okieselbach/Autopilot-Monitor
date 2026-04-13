@@ -34,6 +34,8 @@ interface AnalyzeRuleCardProps {
   templateCopyExists?: boolean;
   templateCopyRuleId?: string;
   onScrollToCopy?: (ruleId: string) => void;
+  hitRate?: number | null;
+  fireCount?: number | null;
 }
 
 export default function AnalyzeRuleCard({
@@ -45,6 +47,7 @@ export default function AnalyzeRuleCard({
   onSetJsonModeEdit, onSetJsonText, onSetJsonError,
   readOnly = false,
   onConfigureTemplate, templateCopyExists, templateCopyRuleId, onScrollToCopy,
+  hitRate, fireCount,
 }: AnalyzeRuleCardProps) {
   const [showJson, setShowJson] = useState(false);
   const sevColor = getSeverityColor(rule.severity);
@@ -104,6 +107,18 @@ export default function AnalyzeRuleCard({
             </span>
           )}
           <span className="text-xs text-gray-500 flex-shrink-0 hidden md:inline" title="Confidence Threshold">Threshold: {rule.confidenceThreshold}%</span>
+          {hitRate != null && hitRate > 0 && (
+            <span
+              className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium flex-shrink-0 ${
+                hitRate >= 20 ? "bg-red-50 text-red-700 border border-red-200" :
+                hitRate >= 5 ? "bg-amber-50 text-amber-700 border border-amber-200" :
+                "bg-gray-50 text-gray-600 border border-gray-200"
+              }`}
+              title={`Fires on ${hitRate}% of evaluated sessions (${fireCount ?? 0} total fires in last 30 days)`}
+            >
+              {hitRate}% hit rate
+            </span>
+          )}
           <svg className={`w-5 h-5 text-gray-400 transition-transform flex-shrink-0 ${isExpanded ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
         </div>
       </div>

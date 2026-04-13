@@ -29,10 +29,11 @@ namespace AutopilotMonitor.Functions.Services
         /// Evaluates ALL active analyze rules against the full session event stream.
         /// Called once at enrollment end or on-demand. Fetches events internally.
         /// When reanalyze=true, all rules are re-evaluated regardless of existing results.
+        /// Returns both the fired results and metadata about all rules that were evaluated (for telemetry).
         /// </summary>
-        public async Task<List<RuleResult>> AnalyzeSessionAsync(string tenantId, string sessionId, bool reanalyze = false)
+        public async Task<AnalysisOutcome> AnalyzeSessionAsync(string tenantId, string sessionId, bool reanalyze = false)
         {
-            var results = new List<RuleResult>();
+            var outcome = new AnalysisOutcome();
 
             try
             {
@@ -42,7 +43,7 @@ namespace AutopilotMonitor.Functions.Services
                 if (allEvents.Count == 0)
                 {
                     _logger.LogInformation($"No events found for session {sessionId}, skipping analysis");
-                    return results;
+                    return outcome;
                 }
 
                 // On reanalyze: skip deduplication so all rules are re-evaluated from scratch
@@ -68,12 +69,15 @@ namespace AutopilotMonitor.Functions.Services
                         if (existingRuleIds.Contains(rule.RuleId))
                             continue;
 
+                        // Track that this rule was evaluated (for telemetry)
+                        outcome.EvaluatedRules.Add(rule);
+
                         var result = EvaluateRule(rule, allEvents);
                         if (result != null)
                         {
                             result.SessionId = sessionId;
                             result.TenantId = tenantId;
-                            results.Add(result);
+                            outcome.Results.Add(result);
                             _logger.LogInformation($"Rule {rule.RuleId} ({rule.Trigger}) fired for session {sessionId} with confidence {result.ConfidenceScore}%");
                         }
                     }
@@ -88,7 +92,7 @@ namespace AutopilotMonitor.Functions.Services
                 _logger.LogError(ex, "Error analyzing session");
             }
 
-            return results;
+            return outcome;
         }
 
         /// <summary>
@@ -160,5 +164,17 @@ namespace AutopilotMonitor.Functions.Services
         /// <summary>
         /// Evaluates a single condition against the event stream
         /// </summary>
+    }
+
+    /// <summary>
+    /// Return type for AnalyzeSessionAsync — includes both fired results and evaluation metadata for telemetry.
+    /// </summary>
+    public class AnalysisOutcome
+    {
+        /// <summary>Rules that fired (produced a result)</summary>
+        public List<RuleResult> Results { get; set; } = new List<RuleResult>();
+
+        /// <summary>All rules that were evaluated in this pass (includes rules that didn't fire)</summary>
+        public List<AnalyzeRule> EvaluatedRules { get; set; } = new List<AnalyzeRule>();
     }
 }

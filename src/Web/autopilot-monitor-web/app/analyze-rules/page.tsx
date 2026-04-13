@@ -76,6 +76,9 @@ export default function AnalyzeRulesPage() {
   const [configureTemplateRule, setConfigureTemplateRule] = useState<AnalyzeRule | null>(null);
   const [creatingFromTemplate, setCreatingFromTemplate] = useState(false);
 
+  // Rule telemetry stats (hit rates)
+  const [ruleStatsMap, setRuleStatsMap] = useState<Record<string, { hitRate: number; fireCount: number }>>({});
+
   // Global admin mode
   const { globalAdminMode } = useAdminMode();
   const [tenants, setTenants] = useState<TenantInfo[]>([]);
@@ -131,6 +134,32 @@ export default function AnalyzeRulesPage() {
   useEffect(() => {
     fetchRules();
   }, [fetchRules]);
+
+  // Fetch rule telemetry stats (hit rates for last 30 days)
+  useEffect(() => {
+    if (!effectiveTenantId) return;
+    const fetchStats = async () => {
+      try {
+        const statsUrl = globalAdminMode && user?.isGlobalAdmin
+          ? api.metrics.globalRuleStats(undefined, undefined, "analyze")
+          : api.metrics.ruleStats(undefined, undefined, "analyze");
+        const response = await authenticatedFetch(statsUrl, getAccessToken);
+        if (response.ok) {
+          const data = await response.json();
+          const map: Record<string, { hitRate: number; fireCount: number }> = {};
+          if (data.rules && Array.isArray(data.rules)) {
+            for (const r of data.rules) {
+              map[r.ruleId] = { hitRate: r.hitRate ?? 0, fireCount: r.fireCount ?? 0 };
+            }
+          }
+          setRuleStatsMap(map);
+        }
+      } catch {
+        // Non-critical: don't break the page if stats fail to load
+      }
+    };
+    fetchStats();
+  }, [effectiveTenantId, globalAdminMode, user?.isGlobalAdmin, getAccessToken]);
 
   // Toggle rule enabled/disabled
   const handleToggleRule = async (rule: AnalyzeRule) => {
@@ -456,6 +485,25 @@ export default function AnalyzeRulesPage() {
                 <StatCard label="Info" value={infoCount} borderColor="border-blue-400" valueColor="text-blue-600" />
               </div>
 
+              {/* Telemetry Stats (only shown when data is available) */}
+              {Object.keys(ruleStatsMap).length > 0 && (() => {
+                const stats = Object.values(ruleStatsMap);
+                const totalFires = stats.reduce((sum, s) => sum + s.fireCount, 0);
+                const rulesWithHits = stats.filter(s => s.fireCount > 0).length;
+                const highHitRules = stats.filter(s => s.hitRate >= 20).length;
+                const avgHitRate = stats.length > 0
+                  ? Math.round(stats.reduce((sum, s) => sum + s.hitRate, 0) / stats.length * 10) / 10
+                  : 0;
+                return (
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <StatCard label="Total Fires (30d)" value={totalFires} borderColor="border-indigo-400" valueColor="text-indigo-600" />
+                    <StatCard label="Rules Firing" value={rulesWithHits} borderColor="border-indigo-400" valueColor="text-indigo-600" />
+                    <StatCard label="Avg Hit Rate" value={`${avgHitRate}%`} borderColor="border-indigo-400" valueColor="text-indigo-600" />
+                    <StatCard label="High Hit Rate (>20%)" value={highHitRules} borderColor="border-red-400" valueColor="text-red-600" />
+                  </div>
+                );
+              })()}
+
               {/* Filter Bar + Create Button */}
               <RuleFilterBar
                 searchQuery={searchQuery}
@@ -615,6 +663,8 @@ export default function AnalyzeRulesPage() {
                       templateCopyExists={templateCopyMap.has(rule.ruleId)}
                       templateCopyRuleId={templateCopyMap.get(rule.ruleId)}
                       onScrollToCopy={(copyId) => setExpandedRuleId(copyId)}
+                      hitRate={ruleStatsMap[rule.ruleId]?.hitRate ?? null}
+                      fireCount={ruleStatsMap[rule.ruleId]?.fireCount ?? null}
                     />
                   ))}
                 </div>

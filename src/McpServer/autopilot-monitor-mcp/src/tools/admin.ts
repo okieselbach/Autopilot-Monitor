@@ -396,4 +396,36 @@ export function registerAdminTools(server: McpServer): void {
       }
     }
   );
+
+  // Tool: get_rule_stats
+  server.tool(
+    'get_rule_stats',
+    'Get rule firing statistics for analyze and gather rules. Shows which rules fire most often, ' +
+    'their hit rates (fires/evaluations), and daily trends. Use to identify commonly triggered rules, ' +
+    'optimize rule definitions, or understand tenant-specific failure patterns. ' +
+    'Without tenantId returns global stats (cross-tenant). With tenantId returns tenant-specific stats.',
+    {
+      tenantId: z.string().optional().describe('Filter by tenant ID. Omit for global (cross-tenant) stats.'),
+      ruleType: z.enum(['analyze', 'gather']).optional().describe('Filter by rule type'),
+      startDate: z.string().optional().describe('Start date (YYYY-MM-DD). Defaults to 30 days ago.'),
+      endDate: z.string().optional().describe('End date (YYYY-MM-DD). Defaults to today.'),
+    },
+    READ_ONLY,
+    async (args) => {
+      try {
+        const params = buildQuery({
+          startDate: args.startDate,
+          endDate: args.endDate,
+          ruleType: args.ruleType,
+        });
+        const path = args.tenantId
+          ? `/api/metrics/rule-stats${params}`
+          : `/api/global/metrics/rule-stats${params}`;
+        const data = await apiFetch(path);
+        return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+      } catch (error: unknown) {
+        return toolError('get_rule_stats', args, error);
+      }
+    }
+  );
 }

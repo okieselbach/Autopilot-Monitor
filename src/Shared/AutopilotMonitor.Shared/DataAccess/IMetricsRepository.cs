@@ -35,6 +35,14 @@ namespace AutopilotMonitor.Shared.DataAccess
 
         // --- Metrics Summary (Agent API) ---
         Task<List<object>> GetMetricsSummaryAsync(string? tenantId);
+
+        // --- Rule Stats ---
+        Task IncrementRuleStatAsync(string date, string tenantId, string ruleId, string ruleType,
+            string ruleTitle, string category, string severity, bool fired, int? confidenceScore);
+        Task<bool> SaveRuleStatsEntryAsync(RuleStatsEntry entry);
+        Task<List<RuleStatsEntry>> GetRuleStatsAsync(string? tenantId = null, string? startDate = null,
+            string? endDate = null, string? ruleType = null, int maxResults = 500);
+        Task<int> DeleteRuleStatsOlderThanAsync(DateTime cutoffDate);
     }
 
     public class UserActivityMetrics
