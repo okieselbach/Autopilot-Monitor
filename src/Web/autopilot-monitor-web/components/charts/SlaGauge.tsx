@@ -1,8 +1,5 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
-
 interface SlaGaugeProps {
   value: number;
   target: number;
@@ -11,21 +8,15 @@ interface SlaGaugeProps {
   invert?: boolean;
 }
 
+/**
+ * SLA compliance gauge using a simple arc visualization.
+ * Matches the FleetStatCard design language (border-l-4 + colored backgrounds).
+ */
 export function SlaGauge({ value, target, label, unit, invert = false }: SlaGaugeProps) {
-  const [isDark, setIsDark] = useState(false);
-
-  useEffect(() => {
-    const check = () => setIsDark(document.documentElement.classList.contains("dark"));
-    check();
-    const observer = new MutationObserver(check);
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
-    return () => observer.disconnect();
-  }, []);
-
   const getStatus = (): "met" | "warning" | "breached" => {
     if (invert) {
       if (value <= target) return "met";
-      if (value <= target * 1.05) return "warning";
+      if (value <= target * 1.1) return "warning";
       return "breached";
     } else {
       if (value >= target) return "met";
@@ -35,57 +26,41 @@ export function SlaGauge({ value, target, label, unit, invert = false }: SlaGaug
   };
 
   const status = getStatus();
-  const statusColor =
-    status === "met" ? "#16a34a" :
-    status === "warning" ? "#d97706" :
-    "#dc2626";
 
-  const statusLabel =
-    status === "met" ? "Compliant" :
-    status === "warning" ? "At Risk" :
-    "Breached";
+  const colors = {
+    met: { border: "border-green-500", bg: "bg-green-50 dark:bg-green-900/20", text: "text-green-700 dark:text-green-400", badge: "bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-400", ring: "#22c55e" },
+    warning: { border: "border-yellow-500", bg: "bg-yellow-50 dark:bg-yellow-900/20", text: "text-yellow-700 dark:text-yellow-400", badge: "bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-400", ring: "#eab308" },
+    breached: { border: "border-red-500", bg: "bg-red-50 dark:bg-red-900/20", text: "text-red-700 dark:text-red-400", badge: "bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400", ring: "#ef4444" },
+  };
 
-  const emptyColor = isDark ? "#374151" : "#e5e7eb"; // gray-700 / gray-200
+  const c = colors[status];
+  const statusLabel = status === "met" ? "On Target" : status === "warning" ? "At Risk" : "Breached";
 
-  const maxVal = invert ? target * 2 : 100;
-  const fillPercent = Math.min(Math.max(value / maxVal, 0), 1);
-
-  const data = [
-    { name: "filled", value: fillPercent * 100 },
-    { name: "empty", value: (1 - fillPercent) * 100 },
-  ];
+  // Progress bar percentage (clamped 0-100)
+  const progress = invert
+    ? Math.max(0, Math.min(100, ((target * 2 - value) / (target * 2)) * 100))
+    : Math.max(0, Math.min(100, value));
 
   return (
-    <div className="flex flex-col items-center">
-      <div className="relative" style={{ width: 180, height: 100 }}>
-        <ResponsiveContainer width="100%" height={180}>
-          <PieChart>
-            <Pie
-              data={data}
-              cx="50%"
-              cy="100%"
-              startAngle={180}
-              endAngle={0}
-              innerRadius={60}
-              outerRadius={80}
-              dataKey="value"
-              stroke="none"
-            >
-              <Cell fill={statusColor} />
-              <Cell fill={emptyColor} />
-            </Pie>
-          </PieChart>
-        </ResponsiveContainer>
-        <div className="absolute inset-0 flex flex-col items-center justify-end pb-1">
-          <span className="text-2xl font-bold text-gray-900 dark:text-white">
-            {value.toFixed(1)}{unit}
-          </span>
-        </div>
+    <div className={`bg-white dark:bg-gray-800 overflow-hidden shadow rounded-lg border-l-4 ${c.border} p-5`}>
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-sm font-medium text-gray-500 dark:text-gray-400">{label}</span>
+        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${c.badge}`}>
+          {statusLabel}
+        </span>
       </div>
-      <span className="text-sm text-gray-600 dark:text-gray-400 mt-1">{label}</span>
-      <span className="text-xs font-medium mt-0.5 px-2 py-0.5 rounded" style={{ color: statusColor }}>
-        {statusLabel} (target: {target}{unit})
-      </span>
+      <div className={`text-3xl font-bold ${c.text} mb-1`}>
+        {value.toFixed(1)}<span className="text-lg font-normal ml-0.5">{unit}</span>
+      </div>
+      <div className="w-full h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden mt-2 mb-2">
+        <div
+          className="h-full rounded-full transition-all duration-500"
+          style={{ width: `${progress}%`, backgroundColor: c.ring }}
+        />
+      </div>
+      <div className="text-xs text-gray-400 dark:text-gray-500">
+        Target: {target}{unit}
+      </div>
     </div>
   );
 }
