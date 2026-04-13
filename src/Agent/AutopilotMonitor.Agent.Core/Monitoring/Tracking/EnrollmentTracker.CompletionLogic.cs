@@ -59,6 +59,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             {
                 _logger.Debug("EnrollmentTracker: HelloCompleted event received but no completion trigger active yet");
             }
+
+            // Shadow state machine: track hello_completed trigger
+            ShadowProcessTrigger("hello_completed");
         }
 
         /// <summary>
@@ -162,6 +165,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
 
             // Attempt completion — Hello guard is bypassed for device-only deployments (IsDeviceOnlyDeployment)
             TryEmitEnrollmentComplete("self_deploying_provisioning_complete");
+
+            // Shadow state machine: track device_setup_provisioning_complete trigger
+            ShadowProcessTrigger("device_setup_provisioning_complete");
         }
 
         /// <summary>
@@ -205,6 +211,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             // Das Marker-File wuerde verhindern, dass der Agent beim naechsten Start wieder laeuft.
             // WICHTIG: Kein _imeLogTracker?.DeleteState()!
             // Der State wird fuer Part 2 benoetigt falls der Tracker weiterlaufen muss.
+
+            // Shadow state machine: track whiteglove_complete trigger
+            ShadowProcessTrigger("whiteglove_complete");
         }
 
         /// <summary>
@@ -348,6 +357,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 // Terminal failure — emit enrollment_failed immediately
                 _logger.Info($"EnrollmentTracker: '{failureType}' is terminal — emitting enrollment_failed immediately");
                 EmitEnrollmentFailed(failureType, "esp_failure");
+
+                // Shadow state machine: track terminal ESP failure
+                var ctx = SnapshotCompletionContext();
+                ctx.Source = failureType;
+                ShadowProcessTrigger("esp_failure_terminal", ctx);
             }
         }
 
@@ -366,6 +380,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             _logger.Warning($"EnrollmentTracker: ESP failure grace period ({EspFailureGracePeriodSeconds}s) expired for '{failureType}' — emitting enrollment_failed");
 
             EmitEnrollmentFailed(failureType, "esp_failure_grace_expired");
+
+            // Shadow state machine: track grace period expiry
+            var ctx = SnapshotCompletionContext();
+            ctx.Source = failureType;
+            ShadowProcessTrigger("esp_failure_grace_expired", ctx);
         }
 
         /// <summary>
@@ -415,6 +434,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             }
 
             TryEmitEnrollmentComplete("ime_hello_safety_timeout");
+
+            // Shadow state machine: track hello safety timeout
+            ShadowProcessTrigger("hello_safety_timeout");
         }
 
         /// <summary>
@@ -444,6 +466,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 "— proceeding to completion with current ESP provisioning state");
             RecordSignal("esp_provisioning_settled");
             TryEmitEnrollmentComplete("ime_pattern");
+
+            // Shadow state machine: track ESP settle timeout
+            ShadowProcessTrigger("esp_settle_timeout");
         }
 
         /// <summary>
@@ -479,6 +504,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             {
                 _logger.Error("EnrollmentTracker: device-only ESP safety timeout — TryEmitEnrollmentComplete still did not fire (unexpected guard block)");
             }
+
+            // Shadow state machine: track device-only safety timeout
+            ShadowProcessTrigger("device_only_safety_timeout");
         }
 
         /// <summary>
@@ -686,6 +714,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 try { CollectDeviceInfoAtFinalizingSetup(reason); }
                 catch (Exception ex) { _logger.Warning($"EnrollmentTracker: final device info collection failed (hello_wizard_started): {ex.Message}"); }
             }
+
+            // Shadow state machine: track esp_exiting trigger (covers all branches above)
+            if (reason == "esp_exiting")
+                ShadowProcessTrigger("esp_exiting");
         }
 
         // ===== State Persistence =====
@@ -716,6 +748,36 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 // Restore hybrid join flag from persisted state; re-detect as fallback
                 _isHybridJoin = loaded.IsHybridJoin || DetectHybridJoinStatic();
                 _stateData = loaded;
+            }
+
+            // Shadow state machine: restore state from persistence
+            try
+            {
+                EnrollmentCompletionState smState;
+                if (!string.IsNullOrEmpty(loaded.CompletionState)
+                    && Enum.TryParse(loaded.CompletionState, out smState))
+                {
+                    // New format: explicit state stored
+                    _logger.Verbose($"EnrollmentTracker [SHADOW]: restoring explicit state '{loaded.CompletionState}' from persistence");
+                }
+                else
+                {
+                    // Old format: reconstruct from boolean flags
+                    bool isDeviceOnly = CompletionGuards.IsDeviceOnlyDeployment(
+                        loaded.AutopilotMode, loaded.SkipUserStatusPage, loaded.AadJoinedWithUser);
+                    smState = CompletionStateMachine.ReconstructStateFromFlags(
+                        loaded.EnrollmentCompleteEmitted, loaded.IsWaitingForHello,
+                        loaded.IsWaitingForEspSettle, loaded.EspFinalExitSeen,
+                        loaded.DesktopArrived, loaded.EspEverSeen, isDeviceOnly);
+                    _logger.Verbose($"EnrollmentTracker [SHADOW]: reconstructed state '{smState}' from boolean flags");
+                }
+                _completionSm.RestoreState(smState,
+                    loaded.EspEverSeen, loaded.EspFinalExitSeen, loaded.DesktopArrived,
+                    loaded.IsWaitingForHello, loaded.IsWaitingForEspSettle, deferredSource: null);
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug($"EnrollmentTracker [SHADOW ERROR]: state restoration failed: {ex.Message}");
             }
 
             _logger.Info($"EnrollmentTracker: state restored — espEverSeen={_espEverSeen}, espFinalExitSeen={_espFinalExitSeen}, desktopArrived={_desktopArrived}, lastEspPhase={_lastEspPhase}, enrollmentCompleteEmitted={_enrollmentCompleteEmitted}");
@@ -1222,6 +1284,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             }
 
             TryEmitEnrollmentComplete("desktop_arrival");
+
+            // Shadow state machine: track desktop_arrived trigger
+            ShadowProcessTrigger("desktop_arrived");
         }
 
         /// <summary>
@@ -1262,6 +1327,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             {
                 _logger.Info($"EnrollmentTracker: No AccountSetup phase after {DeviceOnlyEspTimerMinutes}min and no desktop yet — waiting for Desktop Arrival or Lifetime Timer");
             }
+
+            // Shadow state machine: track device-only ESP timer expiry
+            ShadowProcessTrigger("device_only_esp_timer_expired");
         }
     }
 }

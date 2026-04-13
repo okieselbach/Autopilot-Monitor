@@ -90,6 +90,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     },
                     ImmediateUpload = true
                 });
+
+                // Shadow state machine: track ESP resumed
+                ShadowProcessTrigger("esp_resumed");
                 return;
             }
 
@@ -183,6 +186,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 _debugStateTimerActive = true;
                 _debugStateTimer?.Change(TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(60));
             }
+
+            // Shadow state machine: track ESP phase change
+            ShadowProcessTrigger("esp_phase_changed");
         }
 
         private void HandleImeAgentVersion(string version)
@@ -595,6 +601,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             {
                 _logger.Info($"EnrollmentTracker: Device-only deployment (autopilotMode={autopilotModeSnap}, skipUserStatusPage={skipUserSnap}) — skipping Hello wait, proceeding to completion");
                 TryEmitEnrollmentComplete("ime_pattern");
+                ShadowProcessTrigger("ime_user_session_completed");
                 return;
             }
 
@@ -646,6 +653,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                         TimeSpan.FromSeconds(WaitingForHelloSafetyTimeoutSeconds),
                         TimeSpan.FromMilliseconds(-1));
 
+                    ShadowProcessTrigger("ime_user_session_completed");
                     return;
                 }
             }
@@ -701,11 +709,15 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                         TimeSpan.FromSeconds(EspSettleTimeoutSeconds),
                         TimeSpan.FromMilliseconds(-1));
 
+                    ShadowProcessTrigger("ime_user_session_completed");
                     return;
                 }
             }
 
             TryEmitEnrollmentComplete("ime_pattern");
+
+            // Shadow state machine: track IME user session completed
+            ShadowProcessTrigger("ime_user_session_completed");
         }
 
         /// <summary>

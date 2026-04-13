@@ -133,5 +133,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         // ESP provisioning settle wait state (crash recovery)
         public bool IsWaitingForEspSettle { get; set; }
         public DateTime? WaitingForEspSettleStartedUtc { get; set; }
+
+        /// <summary>
+        /// Explicit completion state machine state (dual-write).
+        /// When present, used to restore the state machine directly.
+        /// When absent (old format), the state is reconstructed from boolean flags.
+        /// Serialized as string (enum name) for forward compatibility.
+        /// </summary>
+        public string CompletionState { get; set; }
     }
 }

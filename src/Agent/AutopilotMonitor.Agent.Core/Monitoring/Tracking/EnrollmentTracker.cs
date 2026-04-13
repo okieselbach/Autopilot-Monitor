@@ -126,6 +126,79 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         // SkipUserStatusPage=true AND no user has AAD-joined (no aad_join_status with userEmail).
         private bool IsDeviceOnlyDeployment => IsSelfDeploying || (_skipUserStatusPage == true && !_aadJoinedWithUser);
 
+        /// <summary>
+        /// Creates a read-only snapshot of current state for the shadow state machine.
+        /// Must be called OUTSIDE _stateLock (takes its own lock internally).
+        /// </summary>
+        private CompletionContext SnapshotCompletionContext()
+        {
+            lock (_stateLock)
+            {
+                return new CompletionContext
+                {
+                    EnrollmentType = _enrollmentType,
+                    IsHybridJoin = _isHybridJoin,
+                    AutopilotMode = _autopilotMode,
+                    SkipUserStatusPage = _skipUserStatusPage,
+                    AadJoinedWithUser = _aadJoinedWithUser,
+                    EspEverSeen = _espEverSeen,
+                    EspFinalExitSeen = _espFinalExitSeen,
+                    DesktopArrived = _desktopArrived,
+                    LastEspPhase = _lastEspPhase,
+                    DeviceInfoCollected = _deviceInfoCollected,
+                    HasHelloTracker = _espAndHelloTracker != null,
+                    IsHelloCompleted = _espAndHelloTracker?.IsHelloCompleted ?? false,
+                    IsHelloPolicyConfigured = _espAndHelloTracker?.IsPolicyConfigured ?? false,
+                    HasUnresolvedEspCategories = false, // Will be set by caller when available
+                    AgentStartTimeUtc = _agentStartTimeUtc,
+                    EspFinalExitUtc = _stateData.EspFinalExitUtc,
+                    ImePatternSeenUtc = _stateData.ImePatternSeenUtc
+                };
+            }
+        }
+
+        /// <summary>
+        /// Fires the shadow state machine trigger and compares the result with the actual state.
+        /// Logs discrepancies as warnings. Does NOT change actual behavior.
+        /// Also dual-writes the CompletionState to _stateData for persistence.
+        /// </summary>
+        private void ShadowProcessTrigger(string trigger, CompletionContext ctx = null)
+        {
+            try
+            {
+                ctx = ctx ?? SnapshotCompletionContext();
+                var result = _completionSm.ProcessTrigger(trigger, ctx);
+
+                // Dual-write: persist the explicit state alongside the boolean flags
+                lock (_stateLock)
+                {
+                    _stateData.CompletionState = _completionSm.CurrentState.ToString();
+                }
+
+                // Compare terminal state: shadow SM reached terminal vs actual _enrollmentCompleteEmitted
+                bool actualTerminal;
+                lock (_stateLock) { actualTerminal = _enrollmentCompleteEmitted; }
+                bool shadowTerminal = _completionSm.CurrentState == EnrollmentCompletionState.Completed;
+
+                if (actualTerminal != shadowTerminal)
+                {
+                    _logger.Warning($"EnrollmentTracker [SHADOW DISCREPANCY]: trigger='{trigger}', " +
+                        $"shadowState={_completionSm.CurrentState}, actualEmitted={actualTerminal}, " +
+                        $"shadowCompleted={shadowTerminal}");
+                }
+                else if (result.Transitioned)
+                {
+                    _logger.Verbose($"EnrollmentTracker [SHADOW]: trigger='{trigger}', " +
+                        $"{result.PreviousState} -> {result.NewState}");
+                }
+            }
+            catch (Exception ex)
+            {
+                // Shadow mode must never crash the agent
+                _logger.Debug($"EnrollmentTracker [SHADOW ERROR]: trigger='{trigger}', error={ex.Message}");
+            }
+        }
+
         // Safety-net timer for waiting_for_hello state
         private Timer _waitingForHelloSafetyTimer;
         private const int WaitingForHelloSafetyTimeoutSeconds = 420; // 7 min — longer than Hello chain (330s)
@@ -147,6 +220,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
 
         // Completion check throttling (max 1x/min per source)
         private readonly Dictionary<string, DateTime> _lastCompletionCheckBySource = new Dictionary<string, DateTime>();
+
+        // Shadow state machine: runs in parallel with existing logic for behavioral verification.
+        // Logs discrepancies but does NOT affect actual enrollment completion.
+        private readonly CompletionStateMachine _completionSm = new CompletionStateMachine();
 
         // Default IME log folder
         private const string DefaultImeLogFolder = @"%ProgramData%\Microsoft\IntuneManagementExtension\Logs";
@@ -472,6 +549,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 else
                     TryEmitEnrollmentComplete(pendingSource);
             }
+
+            // Shadow state machine: track device info collected
+            ShadowProcessTrigger("device_info_collected");
         }
 
         /// <summary>
