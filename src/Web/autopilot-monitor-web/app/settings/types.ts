@@ -40,6 +40,17 @@ export interface TenantConfiguration {
   webhookNotifyOnSuccess?: boolean;
   webhookNotifyOnFailure?: boolean;
   webhookNotifyOnHardwareRejection?: boolean;
+  // SLA targets
+  slaTargetSuccessRate?: number;
+  slaTargetMaxDurationMinutes?: number;
+  slaTargetAppInstallSuccessRate?: number;
+  // SLA notification subscriptions (granular)
+  slaNotifyOnSuccessRateBreach?: boolean;
+  slaSuccessRateNotifyThreshold?: number;
+  slaNotifyOnDurationBreach?: boolean;
+  slaNotifyOnAppInstallBreach?: boolean;
+  slaNotifyOnConsecutiveFailures?: boolean;
+  slaConsecutiveFailureThreshold?: number;
   // Diagnostics package
   diagnosticsBlobSasUrl?: string;
   diagnosticsUploadMode?: string;

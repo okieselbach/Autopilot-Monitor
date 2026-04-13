@@ -8,11 +8,13 @@ import { SectionHardwareWhitelist } from "../sections/SectionHardwareWhitelist";
 import { SectionNotifications } from "../sections/SectionNotifications";
 import { SectionAccessManagement } from "../sections/SectionAccessManagement";
 import { SectionBootstrapSessions } from "../sections/SectionBootstrapSessions";
+import { SectionSlaTargets } from "../sections/SectionSlaTargets";
 
 const SECTION_COMPONENTS: Record<TenantSectionId, React.ComponentType> = {
   "autopilot": SectionAutopilotValidation,
   "hardware-whitelist": SectionHardwareWhitelist,
   "notifications": SectionNotifications,
+  "sla-targets": SectionSlaTargets,
   "access-management": SectionAccessManagement,
   "bootstrap-sessions": SectionBootstrapSessions,
 };

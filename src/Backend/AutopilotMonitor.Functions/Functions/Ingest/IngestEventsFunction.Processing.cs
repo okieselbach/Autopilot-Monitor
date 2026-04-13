@@ -499,6 +499,12 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                     request, sessionPrefix, classification, updatedSession,
                     statusTransitioned, whiteGloveStatusTransitioned, failureReason, newRuleResults);
 
+                // SLA consecutive failure check (fire-and-forget, configurable threshold)
+                if (statusTransitioned && updatedSession?.Status == SessionStatus.Failed)
+                {
+                    _ = _slaBreachService.EvaluateSessionCompletionAsync(request.TenantId, updatedSession);
+                }
+
                 // Check if an admin has externally marked the session as terminal.
                 // Only signal the agent when this batch did NOT contain the terminal event itself
                 // (i.e., the agent didn't just report completion — the admin did it out-of-band).

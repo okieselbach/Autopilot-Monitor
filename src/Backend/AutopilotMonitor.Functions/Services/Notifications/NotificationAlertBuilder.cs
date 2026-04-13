@@ -184,6 +184,85 @@ namespace AutopilotMonitor.Functions.Services.Notifications
             }
         }
 
+        /// <summary>
+        /// Builds a notification alert for an SLA breach (success rate or duration).
+        /// </summary>
+        public static NotificationAlert BuildSlaBreachAlert(
+            string tenantId, double currentRate, double targetRate,
+            int totalSessions, int failedSessions, string breachType, string? dashboardUrl = null)
+        {
+            var isSuccessRate = breachType == "SuccessRate";
+            var title = isSuccessRate
+                ? $"\u26a0\ufe0f SLA Breach: Success Rate {currentRate:F1}%"
+                : $"\u26a0\ufe0f SLA Breach: P95 Duration Exceeds Target";
+            var themeColor = "FFA500"; // warning orange
+
+            var facts = new List<NotificationFact>
+            {
+                new() { Name = "Tenant", Value = tenantId },
+                new() { Name = "Breach Type", Value = isSuccessRate ? "Success Rate" : "Duration (P95)" },
+            };
+
+            if (isSuccessRate)
+            {
+                facts.Add(new NotificationFact { Name = "Current Rate", Value = $"{currentRate:F1}%" });
+                facts.Add(new NotificationFact { Name = "Target Rate", Value = $"{targetRate:F1}%" });
+                facts.Add(new NotificationFact { Name = "Total Sessions", Value = totalSessions.ToString() });
+                facts.Add(new NotificationFact { Name = "Failed Sessions", Value = failedSessions.ToString() });
+            }
+            else
+            {
+                facts.Add(new NotificationFact { Name = "Current P95", Value = $"{currentRate:F1} min" });
+                facts.Add(new NotificationFact { Name = "Target Max", Value = $"{targetRate:F0} min" });
+            }
+
+            facts.Add(new NotificationFact { Name = "Period", Value = "Current Month" });
+
+            var alert = new NotificationAlert
+            {
+                Title = title,
+                Summary = isSuccessRate
+                    ? $"SLA breach: success rate {currentRate:F1}% is below target {targetRate:F1}%"
+                    : $"SLA breach: P95 duration {currentRate:F1}min exceeds target {targetRate:F0}min",
+                Severity = NotificationSeverity.Warning,
+                ThemeColor = themeColor,
+                Facts = facts,
+            };
+
+            if (!string.IsNullOrEmpty(dashboardUrl))
+                alert.Actions.Add(new NotificationAction { Type = "openUrl", Title = "Open SLA Dashboard", Url = dashboardUrl });
+
+            return alert;
+        }
+
+        /// <summary>
+        /// Builds a notification alert for consecutive enrollment failures.
+        /// </summary>
+        public static NotificationAlert BuildConsecutiveFailuresAlert(
+            string tenantId, int consecutiveFailures,
+            string? lastDeviceName, string? lastFailureReason, string? dashboardUrl = null)
+        {
+            var alert = new NotificationAlert
+            {
+                Title = $"\ud83d\udea8 {consecutiveFailures} Consecutive Enrollment Failures",
+                Summary = $"Alert: {consecutiveFailures} enrollments failed in a row for tenant {tenantId}",
+                Severity = NotificationSeverity.Error,
+                ThemeColor = "FF0000",
+                Facts = new List<NotificationFact>
+                {
+                    new() { Name = "Tenant", Value = tenantId },
+                    new() { Name = "Consecutive Failures", Value = consecutiveFailures.ToString() },
+                    new() { Name = "Last Device", Value = lastDeviceName ?? "\u2013" },
+                    new() { Name = "Last Failure", Value = lastFailureReason ?? "\u2013" },
+                },
+            };
+
+            if (!string.IsNullOrEmpty(dashboardUrl))
+                alert.Actions.Add(new NotificationAction { Type = "openUrl", Title = "Open SLA Dashboard", Url = dashboardUrl });
+
+            return alert;
+        }
+
         private static string BuildHardwareText(string? manufacturer, string? model)
         {
             var parts = new[]

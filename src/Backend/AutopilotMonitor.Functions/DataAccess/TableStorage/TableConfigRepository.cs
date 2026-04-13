@@ -428,7 +428,18 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                 { "UnrestrictedModeEnabled", config.UnrestrictedModeEnabled },
                 { "UnrestrictedMode", config.UnrestrictedMode },
                 { "OnboardedAt", config.OnboardedAt },
-                { "PlanTier", config.PlanTier }
+                { "PlanTier", config.PlanTier },
+                // SLA targets
+                { "SlaTargetSuccessRate", config.SlaTargetSuccessRate.HasValue ? (double)config.SlaTargetSuccessRate.Value : (double?)null },
+                { "SlaTargetMaxDurationMinutes", config.SlaTargetMaxDurationMinutes },
+                { "SlaTargetAppInstallSuccessRate", config.SlaTargetAppInstallSuccessRate.HasValue ? (double)config.SlaTargetAppInstallSuccessRate.Value : (double?)null },
+                // SLA notification subscriptions
+                { "SlaNotifyOnSuccessRateBreach", config.SlaNotifyOnSuccessRateBreach },
+                { "SlaSuccessRateNotifyThreshold", config.SlaSuccessRateNotifyThreshold.HasValue ? (double)config.SlaSuccessRateNotifyThreshold.Value : (double?)null },
+                { "SlaNotifyOnDurationBreach", config.SlaNotifyOnDurationBreach },
+                { "SlaNotifyOnAppInstallBreach", config.SlaNotifyOnAppInstallBreach },
+                { "SlaNotifyOnConsecutiveFailures", config.SlaNotifyOnConsecutiveFailures },
+                { "SlaConsecutiveFailureThreshold", config.SlaConsecutiveFailureThreshold }
             };
 
             return entity;
@@ -495,7 +506,18 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                 UnrestrictedModeEnabled = entity.GetBoolean("UnrestrictedModeEnabled") ?? false,
                 UnrestrictedMode = entity.GetBoolean("UnrestrictedMode") ?? false,
                 OnboardedAt = entity.GetDateTime("OnboardedAt"),
-                PlanTier = entity.GetString("PlanTier") ?? "free"
+                PlanTier = entity.GetString("PlanTier") ?? "free",
+                // SLA targets
+                SlaTargetSuccessRate = entity.GetDouble("SlaTargetSuccessRate") != null ? (decimal)entity.GetDouble("SlaTargetSuccessRate")! : null,
+                SlaTargetMaxDurationMinutes = entity.GetInt32("SlaTargetMaxDurationMinutes"),
+                SlaTargetAppInstallSuccessRate = entity.GetDouble("SlaTargetAppInstallSuccessRate") != null ? (decimal)entity.GetDouble("SlaTargetAppInstallSuccessRate")! : null,
+                // SLA notification subscriptions
+                SlaNotifyOnSuccessRateBreach = entity.GetBoolean("SlaNotifyOnSuccessRateBreach") ?? false,
+                SlaSuccessRateNotifyThreshold = entity.GetDouble("SlaSuccessRateNotifyThreshold") != null ? (decimal)entity.GetDouble("SlaSuccessRateNotifyThreshold")! : null,
+                SlaNotifyOnDurationBreach = entity.GetBoolean("SlaNotifyOnDurationBreach") ?? false,
+                SlaNotifyOnAppInstallBreach = entity.GetBoolean("SlaNotifyOnAppInstallBreach") ?? false,
+                SlaNotifyOnConsecutiveFailures = entity.GetBoolean("SlaNotifyOnConsecutiveFailures") ?? false,
+                SlaConsecutiveFailureThreshold = entity.GetInt32("SlaConsecutiveFailureThreshold") ?? 5
             };
         }
 

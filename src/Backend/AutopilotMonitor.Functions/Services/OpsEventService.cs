@@ -106,6 +106,27 @@ namespace AutopilotMonitor.Functions.Services
                 $"Agent blob storage unreachable: {error}",
                 null, "System.Maintenance", new { error });
 
+        // ── SLA ────────────────────────────────────────────────────────────────
+
+        public Task RecordSlaBreachNotificationAsync(string tenantId, string breachType,
+            double currentRate, double targetRate, int totalSessions, int failedSessions)
+            => WriteAsync(OpsEventCategory.Sla, "SlaBreachNotification", OpsEventSeverity.Warning,
+                $"SLA breach notification sent for tenant {tenantId}: {breachType} {currentRate:F1}% (target {targetRate:F1}%)",
+                tenantId, "System.SlaEvaluation",
+                new { breachType, currentRate, targetRate, totalSessions, failedSessions });
+
+        public Task RecordSlaConsecutiveFailuresAsync(string tenantId, int count, string? lastDevice, string? lastReason)
+            => WriteAsync(OpsEventCategory.Sla, "SlaConsecutiveFailures", OpsEventSeverity.Error,
+                $"Consecutive failure alert for tenant {tenantId}: {count} failures in a row",
+                tenantId, "System.SlaEvaluation",
+                new { count, lastDevice, lastReason });
+
+        public Task RecordSlaEvaluationCompletedAsync(int tenantsEvaluated, int breachesDetected, int notificationsSent, int durationMs)
+            => WriteAsync(OpsEventCategory.Sla, "SlaEvaluationCompleted", OpsEventSeverity.Info,
+                $"SLA evaluation: {tenantsEvaluated} tenants checked, {breachesDetected} breaches, {notificationsSent} notifications sent",
+                null, "System.SlaEvaluation",
+                new { tenantsEvaluated, breachesDetected, notificationsSent, durationMs });
+
         // ── Core write method ──────────────────────────────────────────────────
 
         private async Task WriteAsync(string category, string eventType, string severity,

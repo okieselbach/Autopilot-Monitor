@@ -111,6 +111,28 @@ interface TenantConfigContextValue {
   handleSaveNotifications: () => void;
   handleResetNotifications: () => void;
 
+  // SLA Targets
+  slaTargetSuccessRate: number | null;
+  setSlaTargetSuccessRate: (v: number | null) => void;
+  slaTargetMaxDurationMinutes: number | null;
+  setSlaTargetMaxDurationMinutes: (v: number | null) => void;
+  slaTargetAppInstallSuccessRate: number | null;
+  setSlaTargetAppInstallSuccessRate: (v: number | null) => void;
+  slaNotifyOnSuccessRateBreach: boolean;
+  setSlaNotifyOnSuccessRateBreach: (v: boolean) => void;
+  slaSuccessRateNotifyThreshold: number | null;
+  setSlaSuccessRateNotifyThreshold: (v: number | null) => void;
+  slaNotifyOnDurationBreach: boolean;
+  setSlaNotifyOnDurationBreach: (v: boolean) => void;
+  slaNotifyOnAppInstallBreach: boolean;
+  setSlaNotifyOnAppInstallBreach: (v: boolean) => void;
+  slaNotifyOnConsecutiveFailures: boolean;
+  setSlaNotifyOnConsecutiveFailures: (v: boolean) => void;
+  slaConsecutiveFailureThreshold: number;
+  setSlaConsecutiveFailureThreshold: (v: number) => void;
+  handleSaveSlaTargets: () => void;
+  handleResetSlaTargets: () => void;
+
   // Diagnostics
   diagnosticsBlobSasUrl: string;
   setDiagnosticsBlobSasUrl: (v: string) => void;
@@ -256,6 +278,17 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
   const [testingWebhook, setTestingWebhook] = useState(false);
   const [testWebhookResult, setTestWebhookResult] = useState<{ success: boolean; message: string } | null>(null);
 
+  // SLA Targets
+  const [slaTargetSuccessRate, setSlaTargetSuccessRate] = useState<number | null>(null);
+  const [slaTargetMaxDurationMinutes, setSlaTargetMaxDurationMinutes] = useState<number | null>(null);
+  const [slaTargetAppInstallSuccessRate, setSlaTargetAppInstallSuccessRate] = useState<number | null>(null);
+  const [slaNotifyOnSuccessRateBreach, setSlaNotifyOnSuccessRateBreach] = useState(false);
+  const [slaSuccessRateNotifyThreshold, setSlaSuccessRateNotifyThreshold] = useState<number | null>(null);
+  const [slaNotifyOnDurationBreach, setSlaNotifyOnDurationBreach] = useState(false);
+  const [slaNotifyOnAppInstallBreach, setSlaNotifyOnAppInstallBreach] = useState(false);
+  const [slaNotifyOnConsecutiveFailures, setSlaNotifyOnConsecutiveFailures] = useState(false);
+  const [slaConsecutiveFailureThreshold, setSlaConsecutiveFailureThreshold] = useState(5);
+
   // Diagnostics
   const [diagnosticsBlobSasUrl, setDiagnosticsBlobSasUrl] = useState("");
   const [diagnosticsUploadMode, setDiagnosticsUploadMode] = useState("Off");
@@ -349,6 +382,16 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
           setWebhookNotifyOnSuccess(true);
           setWebhookNotifyOnFailure(true);
         }
+        // SLA Targets
+        setSlaTargetSuccessRate(data.slaTargetSuccessRate ?? null);
+        setSlaTargetMaxDurationMinutes(data.slaTargetMaxDurationMinutes ?? null);
+        setSlaTargetAppInstallSuccessRate(data.slaTargetAppInstallSuccessRate ?? null);
+        setSlaNotifyOnSuccessRateBreach(data.slaNotifyOnSuccessRateBreach ?? false);
+        setSlaSuccessRateNotifyThreshold(data.slaSuccessRateNotifyThreshold ?? null);
+        setSlaNotifyOnDurationBreach(data.slaNotifyOnDurationBreach ?? false);
+        setSlaNotifyOnAppInstallBreach(data.slaNotifyOnAppInstallBreach ?? false);
+        setSlaNotifyOnConsecutiveFailures(data.slaNotifyOnConsecutiveFailures ?? false);
+        setSlaConsecutiveFailureThreshold(data.slaConsecutiveFailureThreshold ?? 5);
         const sasUrl = data.diagnosticsBlobSasUrl ?? "";
         setDiagnosticsBlobSasUrl(sasUrl);
         setDiagnosticsUploadMode(data.diagnosticsUploadMode ?? "Off");
@@ -532,6 +575,16 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
         teamsWebhookUrl: webhookProviderType === 1 ? (webhookUrl || undefined) : undefined,
         teamsNotifyOnSuccess: webhookNotifyOnSuccess,
         teamsNotifyOnFailure: webhookNotifyOnFailure,
+        // SLA targets
+        slaTargetSuccessRate: slaTargetSuccessRate ?? undefined,
+        slaTargetMaxDurationMinutes: slaTargetMaxDurationMinutes ?? undefined,
+        slaTargetAppInstallSuccessRate: slaTargetAppInstallSuccessRate ?? undefined,
+        slaNotifyOnSuccessRateBreach,
+        slaSuccessRateNotifyThreshold: slaSuccessRateNotifyThreshold ?? undefined,
+        slaNotifyOnDurationBreach,
+        slaNotifyOnAppInstallBreach,
+        slaNotifyOnConsecutiveFailures,
+        slaConsecutiveFailureThreshold,
         diagnosticsBlobSasUrl: diagnosticsBlobSasUrl || undefined,
         diagnosticsUploadMode,
         diagnosticsLogPathsJson: tenantDiagPaths.length > 0 ? JSON.stringify(tenantDiagPaths) : "",
@@ -580,6 +633,9 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
     enableGeoLocation, enableTimezoneAutoSet, enableImeMatchLog, logLevel, showScriptOutput, showEnrollmentSummary,
     enrollmentSummaryTimeoutSeconds, enrollmentSummaryBrandingImageUrl, enrollmentSummaryLaunchRetrySeconds,
     webhookProviderType, webhookUrl, webhookNotifyOnSuccess, webhookNotifyOnFailure,
+    slaTargetSuccessRate, slaTargetMaxDurationMinutes, slaTargetAppInstallSuccessRate,
+    slaNotifyOnSuccessRateBreach, slaSuccessRateNotifyThreshold, slaNotifyOnDurationBreach,
+    slaNotifyOnAppInstallBreach, slaNotifyOnConsecutiveFailures, slaConsecutiveFailureThreshold,
     diagnosticsBlobSasUrl, diagnosticsUploadMode, tenantDiagPaths,
     enableLocalAdminAnalyzer, localAdminAllowedAccounts, enableSoftwareInventoryAnalyzer, unrestrictedMode,
   ]);
@@ -793,6 +849,20 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
       setWebhookNotifyOnSuccess(true);
       setWebhookNotifyOnFailure(true);
     }
+  }, [config]);
+
+  const handleSaveSlaTargets = useCallback(() => saveConfiguration("slaTargets"), [saveConfiguration]);
+  const handleResetSlaTargets = useCallback(() => {
+    if (!config) return;
+    setSlaTargetSuccessRate(config.slaTargetSuccessRate ?? null);
+    setSlaTargetMaxDurationMinutes(config.slaTargetMaxDurationMinutes ?? null);
+    setSlaTargetAppInstallSuccessRate(config.slaTargetAppInstallSuccessRate ?? null);
+    setSlaNotifyOnSuccessRateBreach(config.slaNotifyOnSuccessRateBreach ?? false);
+    setSlaSuccessRateNotifyThreshold(config.slaSuccessRateNotifyThreshold ?? null);
+    setSlaNotifyOnDurationBreach(config.slaNotifyOnDurationBreach ?? false);
+    setSlaNotifyOnAppInstallBreach(config.slaNotifyOnAppInstallBreach ?? false);
+    setSlaNotifyOnConsecutiveFailures(config.slaNotifyOnConsecutiveFailures ?? false);
+    setSlaConsecutiveFailureThreshold(config.slaConsecutiveFailureThreshold ?? 5);
   }, [config]);
 
   const handleSaveDiagnostics = useCallback(() => saveConfiguration("diagnostics"), [saveConfiguration]);
@@ -1113,6 +1183,18 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
       webhookNotifyOnFailure, setWebhookNotifyOnFailure,
       testingWebhook, testWebhookResult,
       handleTestWebhook, handleSaveNotifications, handleResetNotifications,
+
+      // SLA Targets
+      slaTargetSuccessRate, setSlaTargetSuccessRate,
+      slaTargetMaxDurationMinutes, setSlaTargetMaxDurationMinutes,
+      slaTargetAppInstallSuccessRate, setSlaTargetAppInstallSuccessRate,
+      slaNotifyOnSuccessRateBreach, setSlaNotifyOnSuccessRateBreach,
+      slaSuccessRateNotifyThreshold, setSlaSuccessRateNotifyThreshold,
+      slaNotifyOnDurationBreach, setSlaNotifyOnDurationBreach,
+      slaNotifyOnAppInstallBreach, setSlaNotifyOnAppInstallBreach,
+      slaNotifyOnConsecutiveFailures, setSlaNotifyOnConsecutiveFailures,
+      slaConsecutiveFailureThreshold, setSlaConsecutiveFailureThreshold,
+      handleSaveSlaTargets, handleResetSlaTargets,
 
       // Diagnostics
       diagnosticsBlobSasUrl, setDiagnosticsBlobSasUrl,

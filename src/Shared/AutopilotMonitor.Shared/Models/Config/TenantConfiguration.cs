@@ -454,6 +454,61 @@ namespace AutopilotMonitor.Shared.Models
         /// </summary>
         public bool WebhookNotifyOnHardwareRejection { get; set; } = false;
 
+        // ===== SLA TARGETS =====
+
+        /// <summary>
+        /// Target enrollment success rate as a percentage (e.g. 95.0 = 95%).
+        /// null = SLA tracking disabled for this tenant.
+        /// </summary>
+        public decimal? SlaTargetSuccessRate { get; set; }
+
+        /// <summary>
+        /// Target maximum enrollment duration in minutes (P95 threshold).
+        /// Sessions exceeding this are considered SLA violators.
+        /// </summary>
+        public int? SlaTargetMaxDurationMinutes { get; set; }
+
+        /// <summary>
+        /// Target app install success rate as a percentage (e.g. 98.0 = 98%).
+        /// Only evaluated when enough installs exist (20+).
+        /// </summary>
+        public decimal? SlaTargetAppInstallSuccessRate { get; set; }
+
+        // ===== SLA NOTIFICATION SUBSCRIPTIONS (granular) =====
+
+        /// <summary>
+        /// Send notification when enrollment success rate drops below threshold.
+        /// </summary>
+        public bool SlaNotifyOnSuccessRateBreach { get; set; } = false;
+
+        /// <summary>
+        /// Warning threshold for success rate notifications.
+        /// Defaults to SlaTargetSuccessRate when null.
+        /// Allows a separate warning level (e.g. target 99%, notify at 95%).
+        /// </summary>
+        public decimal? SlaSuccessRateNotifyThreshold { get; set; }
+
+        /// <summary>
+        /// Send notification when P95 enrollment duration exceeds SlaTargetMaxDurationMinutes.
+        /// </summary>
+        public bool SlaNotifyOnDurationBreach { get; set; } = false;
+
+        /// <summary>
+        /// Send notification when app install success rate drops below SlaTargetAppInstallSuccessRate.
+        /// </summary>
+        public bool SlaNotifyOnAppInstallBreach { get; set; } = false;
+
+        /// <summary>
+        /// Send notification when consecutive enrollment failures reach the threshold.
+        /// </summary>
+        public bool SlaNotifyOnConsecutiveFailures { get; set; } = false;
+
+        /// <summary>
+        /// Number of consecutive enrollment failures that triggers a notification.
+        /// Default: 5.
+        /// </summary>
+        public int SlaConsecutiveFailureThreshold { get; set; } = 5;
+
         // ===== HELPER METHODS =====
 
         /// <summary>

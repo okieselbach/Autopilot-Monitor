@@ -26,6 +26,7 @@ namespace AutopilotMonitor.Shared.DataAccess
         public const string Security = "Security";
         public const string Tenant = "Tenant";
         public const string Agent = "Agent";
+        public const string Sla = "SLA";
     }
 
     /// <summary>

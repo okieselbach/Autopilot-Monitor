@@ -33,6 +33,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
         private readonly AdminConfigurationService _adminConfigService;
         private readonly SignalRNotificationService _signalRNotification;
         private readonly OpsEventService _opsEventService;
+        private readonly SlaBreachEvaluationService _slaBreachService;
 
         public IngestEventsFunction(
             ILogger<IngestEventsFunction> logger,
@@ -53,7 +54,8 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             VulnerabilityCorrelationService vulnerabilityCorrelation,
             AdminConfigurationService adminConfigService,
             SignalRNotificationService signalRNotification,
-            OpsEventService opsEventService)
+            OpsEventService opsEventService,
+            SlaBreachEvaluationService slaBreachService)
         {
             _logger = logger;
             _sessionRepo = sessionRepo;
@@ -74,6 +76,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             _adminConfigService = adminConfigService;
             _signalRNotification = signalRNotification;
             _opsEventService = opsEventService;
+            _slaBreachService = slaBreachService;
         }
 
         [Function("IngestEvents")]

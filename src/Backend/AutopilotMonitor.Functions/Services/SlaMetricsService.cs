@@ -1,0 +1,294 @@
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Threading.Tasks;
+using AutopilotMonitor.Shared.DataAccess;
+using AutopilotMonitor.Shared.Models;
+using AutopilotMonitor.Shared.Models.Metrics;
+using Microsoft.Extensions.Logging;
+
+namespace AutopilotMonitor.Functions.Services
+{
+    /// <summary>
+    /// Computes SLA compliance metrics for a given tenant.
+    /// Per-tenant cache with 5-minute TTL (same pattern as UsageMetricsService).
+    /// </summary>
+    public class SlaMetricsService
+    {
+        private readonly IMaintenanceRepository _maintenanceRepo;
+        private readonly IMetricsRepository _metricsRepo;
+        private readonly TenantConfigurationService _configService;
+        private readonly ILogger<SlaMetricsService> _logger;
+
+        // Per-tenant cache: key = "tenantId:months"
+        private static readonly ConcurrentDictionary<string, (SlaMetricsResponse Metrics, DateTime Expiry)> _cache = new();
+        private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(5);
+
+        public SlaMetricsService(
+            IMaintenanceRepository maintenanceRepo,
+            IMetricsRepository metricsRepo,
+            TenantConfigurationService configService,
+            ILogger<SlaMetricsService> logger)
+        {
+            _maintenanceRepo = maintenanceRepo;
+            _metricsRepo = metricsRepo;
+            _configService = configService;
+            _logger = logger;
+        }
+
+        /// <summary>
+        /// Computes SLA metrics for a tenant over the requested number of months.
+        /// </summary>
+        /// <param name="tenantId">Tenant to compute metrics for.</param>
+        /// <param name="months">Number of months to include (default 3, max 6).</param>
+        public async Task<SlaMetricsResponse> ComputeSlaMetricsAsync(string tenantId, int months = 3)
+        {
+            months = Math.Clamp(months, 1, 6);
+
+            var cacheKey = $"{tenantId}:{months}";
+            if (_cache.TryGetValue(cacheKey, out var cached) && DateTime.UtcNow < cached.Expiry)
+            {
+                _logger.LogInformation("Returning cached SLA metrics for {TenantId} (expires in {Seconds}s)",
+                    tenantId, (cached.Expiry - DateTime.UtcNow).TotalSeconds);
+                cached.Metrics.FromCache = true;
+                return cached.Metrics;
+            }
+
+            _logger.LogInformation("Computing SLA metrics for {TenantId}, months={Months}", tenantId, months);
+            var sw = Stopwatch.StartNew();
+
+            var config = await _configService.GetConfigurationAsync(tenantId);
+            var metrics = await ComputeInternalAsync(tenantId, months, config);
+
+            sw.Stop();
+            metrics.ComputeDurationMs = (int)sw.ElapsedMilliseconds;
+            metrics.ComputedAt = DateTime.UtcNow;
+            metrics.FromCache = false;
+
+            _cache[cacheKey] = (metrics, DateTime.UtcNow.Add(CacheDuration));
+            _logger.LogInformation("SLA metrics computed for {TenantId} in {Ms}ms", tenantId, metrics.ComputeDurationMs);
+
+            return metrics;
+        }
+
+        private async Task<SlaMetricsResponse> ComputeInternalAsync(
+            string tenantId, int months, Shared.Models.TenantConfiguration? config)
+        {
+            var now = DateTime.UtcNow;
+            var startDate = new DateTime(now.Year, now.Month, 1).AddMonths(-(months - 1));
+            var endDate = now.AddDays(1);
+
+            var sessions = await _maintenanceRepo.GetSessionsByDateRangeAsync(startDate, endDate, tenantId);
+
+            // Only consider terminal sessions for SLA computation
+            var terminal = sessions
+                .Where(s => s.Status == SessionStatus.Succeeded || s.Status == SessionStatus.Failed)
+                .ToList();
+
+            var response = new SlaMetricsResponse
+            {
+                TargetSuccessRate = config?.SlaTargetSuccessRate,
+                TargetMaxDurationMinutes = config?.SlaTargetMaxDurationMinutes,
+                TargetAppInstallSuccessRate = config?.SlaTargetAppInstallSuccessRate,
+            };
+
+            // Current month snapshot
+            var currentMonthKey = now.ToString("yyyy-MM");
+            var currentMonthSessions = terminal.Where(s => s.StartedAt.ToString("yyyy-MM") == currentMonthKey).ToList();
+            response.CurrentMonth = BuildSnapshot(currentMonthSessions, currentMonthKey, config);
+
+            // Monthly trend (newest first)
+            var monthGroups = terminal
+                .GroupBy(s => s.StartedAt.ToString("yyyy-MM"))
+                .OrderByDescending(g => g.Key)
+                .ToList();
+
+            // Fetch app install summaries for app install SLA (if target configured)
+            List<AppInstallSummary>? appInstalls = null;
+            if (config?.SlaTargetAppInstallSuccessRate != null)
+            {
+                appInstalls = await _metricsRepo.GetAppInstallSummariesByTenantAsync(tenantId);
+                // Filter to the time window
+                appInstalls = appInstalls
+                    .Where(a => a.StartedAt >= startDate && a.StartedAt <= endDate)
+                    .ToList();
+            }
+
+            foreach (var group in monthGroups)
+            {
+                var monthSessions = group.ToList();
+                var snapshot = BuildSnapshot(monthSessions, group.Key, config);
+
+                // App install rate for this month
+                double appInstallRate = 0;
+                bool appInstallMet = true;
+                if (appInstalls != null)
+                {
+                    var monthApps = appInstalls
+                        .Where(a => a.StartedAt.ToString("yyyy-MM") == group.Key &&
+                                    (a.Status == "Succeeded" || a.Status == "Failed"))
+                        .ToList();
+                    if (monthApps.Count >= 20)
+                    {
+                        var appSucceeded = monthApps.Count(a => a.Status == "Succeeded");
+                        appInstallRate = Math.Round((appSucceeded / (double)monthApps.Count) * 100, 1);
+                        appInstallMet = config?.SlaTargetAppInstallSuccessRate == null ||
+                                        appInstallRate >= (double)config.SlaTargetAppInstallSuccessRate;
+                    }
+                }
+
+                response.MonthlyTrend.Add(new SlaMonthlyTrend
+                {
+                    Month = group.Key,
+                    SuccessRate = snapshot.SuccessRate,
+                    P95DurationMinutes = snapshot.P95DurationMinutes,
+                    AppInstallSuccessRate = appInstallRate,
+                    TotalCompleted = snapshot.TotalCompleted,
+                    SuccessRateMet = snapshot.SuccessRateMet,
+                    DurationTargetMet = snapshot.DurationTargetMet,
+                    AppInstallTargetMet = appInstallMet,
+                });
+            }
+
+            // App install SLA snapshot (current month)
+            if (appInstalls != null)
+            {
+                var currentMonthApps = appInstalls
+                    .Where(a => a.StartedAt.ToString("yyyy-MM") == currentMonthKey &&
+                                (a.Status == "Succeeded" || a.Status == "Failed"))
+                    .ToList();
+
+                if (currentMonthApps.Count >= 20)
+                {
+                    var appSucceeded = currentMonthApps.Count(a => a.Status == "Succeeded");
+                    var appFailed = currentMonthApps.Count(a => a.Status == "Failed");
+                    var appRate = Math.Round((appSucceeded / (double)currentMonthApps.Count) * 100, 1);
+
+                    var topFailing = currentMonthApps
+                        .Where(a => a.Status == "Failed")
+                        .GroupBy(a => a.AppName)
+                        .Select(g =>
+                        {
+                            var totalForApp = currentMonthApps.Count(a => a.AppName == g.Key);
+                            return new TopFailingApp
+                            {
+                                AppName = g.Key,
+                                FailCount = g.Count(),
+                                TotalCount = totalForApp,
+                                SuccessRate = totalForApp > 0
+                                    ? Math.Round(((totalForApp - g.Count()) / (double)totalForApp) * 100, 1)
+                                    : 0,
+                            };
+                        })
+                        .OrderByDescending(x => x.FailCount)
+                        .Take(10)
+                        .ToList();
+
+                    response.AppInstallSla = new AppInstallSlaSnapshot
+                    {
+                        TotalInstalls = currentMonthApps.Count,
+                        Succeeded = appSucceeded,
+                        Failed = appFailed,
+                        SuccessRate = appRate,
+                        TargetMet = config?.SlaTargetAppInstallSuccessRate == null ||
+                                    appRate >= (double)config.SlaTargetAppInstallSuccessRate,
+                        TopFailingApps = topFailing,
+                    };
+                }
+            }
+
+            // Violator sessions (failed or duration-exceeded, limited to 100)
+            var durationThresholdSeconds = config?.SlaTargetMaxDurationMinutes != null
+                ? config.SlaTargetMaxDurationMinutes.Value * 60
+                : (int?)null;
+
+            response.Violators = terminal
+                .Where(s =>
+                {
+                    var isFailed = s.Status == SessionStatus.Failed;
+                    var isDurationExceeded = durationThresholdSeconds.HasValue &&
+                                            s.DurationSeconds.HasValue &&
+                                            s.DurationSeconds.Value > durationThresholdSeconds.Value;
+                    return isFailed || isDurationExceeded;
+                })
+                .OrderByDescending(s => s.StartedAt)
+                .Take(100)
+                .Select(s =>
+                {
+                    var isFailed = s.Status == SessionStatus.Failed;
+                    var isDurationExceeded = durationThresholdSeconds.HasValue &&
+                                            s.DurationSeconds.HasValue &&
+                                            s.DurationSeconds.Value > durationThresholdSeconds.Value;
+                    return new SlaViolatorSession
+                    {
+                        SessionId = s.SessionId,
+                        TenantId = s.TenantId,
+                        DeviceName = s.DeviceName ?? "",
+                        SerialNumber = s.SerialNumber ?? "",
+                        StartedAt = s.StartedAt,
+                        CompletedAt = s.CompletedAt,
+                        DurationSeconds = s.DurationSeconds,
+                        Status = (int)s.Status,
+                        FailureReason = s.FailureReason,
+                        ViolationType = isFailed && isDurationExceeded ? "Both"
+                            : isFailed ? "Failed"
+                            : "DurationExceeded",
+                    };
+                })
+                .ToList();
+
+            return response;
+        }
+
+        private static SlaSnapshot BuildSnapshot(
+            List<SessionSummary> sessions, string monthKey,
+            Shared.Models.TenantConfiguration? config)
+        {
+            var total = sessions.Count;
+            var succeeded = sessions.Count(s => s.Status == SessionStatus.Succeeded);
+            var failed = sessions.Count(s => s.Status == SessionStatus.Failed);
+            var successRate = total > 0 ? Math.Round((succeeded / (double)total) * 100, 1) : 0;
+
+            var completed = sessions
+                .Where(s => s.DurationSeconds.HasValue && s.DurationSeconds.Value > 0)
+                .ToList();
+            var durations = completed
+                .Select(s => s.DurationSeconds!.Value / 60.0)
+                .OrderBy(d => d)
+                .ToList();
+
+            var avgDuration = durations.Count > 0 ? Math.Round(durations.Average(), 1) : 0;
+            var p95Duration = CalculatePercentile(durations, 95);
+
+            var durationTarget = config?.SlaTargetMaxDurationMinutes;
+            var durationViolations = durationTarget.HasValue
+                ? completed.Count(s => s.DurationSeconds!.Value > durationTarget.Value * 60)
+                : 0;
+
+            return new SlaSnapshot
+            {
+                Month = monthKey,
+                TotalCompleted = total,
+                Succeeded = succeeded,
+                Failed = failed,
+                SuccessRate = successRate,
+                AvgDurationMinutes = avgDuration,
+                P95DurationMinutes = p95Duration,
+                DurationViolationCount = durationViolations,
+                SuccessRateMet = config?.SlaTargetSuccessRate == null || successRate >= (double)config.SlaTargetSuccessRate,
+                DurationTargetMet = durationTarget == null || p95Duration <= durationTarget.Value,
+            };
+        }
+
+        private static double CalculatePercentile(List<double> sortedValues, int percentile)
+        {
+            if (sortedValues.Count == 0) return 0;
+
+            var index = (int)Math.Ceiling((percentile / 100.0) * sortedValues.Count) - 1;
+            index = Math.Max(0, Math.Min(index, sortedValues.Count - 1));
+            return Math.Round(sortedValues[index], 1);
+        }
+    }
+}

@@ -149,6 +149,8 @@ export const api = {
       `${API_BASE_URL}/api/metrics/rule-stats${qs({ startDate, endDate, ruleType })}`,
     globalRuleStats: (startDate?: string, endDate?: string, ruleType?: string, tenantId?: string) =>
       `${API_BASE_URL}/api/global/metrics/rule-stats${qs({ startDate, endDate, ruleType, tenantId })}`,
+    sla: (tenantId?: string, months?: number) =>
+      `${API_BASE_URL}/api/metrics/sla${qs({ tenantId, months: months?.toString() })}`,
   },
 
   // ── Apps Dashboard ────────────────────────────────────────────────────────
