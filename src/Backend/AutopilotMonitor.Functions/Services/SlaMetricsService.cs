@@ -43,11 +43,25 @@ namespace AutopilotMonitor.Functions.Services
         /// </summary>
         /// <param name="tenantId">Tenant to compute metrics for.</param>
         /// <param name="months">Number of months to include (default 3, max 6).</param>
-        public async Task<SlaMetricsResponse> ComputeSlaMetricsAsync(string tenantId, int months = 3)
+        /// <summary>
+        /// Invalidates the SLA metrics cache for a tenant (all month windows).
+        /// </summary>
+        public void InvalidateCache(string tenantId)
+        {
+            var keysToRemove = _cache.Keys.Where(k => k.StartsWith($"{tenantId}:")).ToList();
+            foreach (var key in keysToRemove)
+                _cache.TryRemove(key, out _);
+        }
+
+        public async Task<SlaMetricsResponse> ComputeSlaMetricsAsync(string tenantId, int months = 3, bool fresh = false)
         {
             months = Math.Clamp(months, 1, 6);
 
             var cacheKey = $"{tenantId}:{months}";
+
+            if (fresh)
+                _cache.TryRemove(cacheKey, out _);
+
             if (_cache.TryGetValue(cacheKey, out var cached) && DateTime.UtcNow < cached.Expiry)
             {
                 _logger.LogInformation("Returning cached SLA metrics for {TenantId} (expires in {Seconds}s)",

@@ -35,15 +35,16 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
             {
                 string tenantId = TenantHelper.GetTenantId(req);
 
-                // Parse optional months query parameter (default 3, max 6)
+                // Parse query parameters
+                var qs = System.Web.HttpUtility.ParseQueryString(req.Url.Query ?? "");
+
                 int months = 3;
-                var monthsParam = req.Url.Query?.Contains("months=") == true
-                    ? System.Web.HttpUtility.ParseQueryString(req.Url.Query).Get("months")
-                    : null;
-                if (int.TryParse(monthsParam, out var parsedMonths))
+                if (int.TryParse(qs.Get("months"), out var parsedMonths))
                     months = parsedMonths;
 
-                var metrics = await _slaMetricsService.ComputeSlaMetricsAsync(tenantId, months);
+                bool fresh = qs.Get("fresh") == "1";
+
+                var metrics = await _slaMetricsService.ComputeSlaMetricsAsync(tenantId, months, fresh);
 
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(metrics);

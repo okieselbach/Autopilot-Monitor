@@ -103,6 +103,7 @@ export default function SlaPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [months, setMonths] = useState(3);
+  const [initialLoad, setInitialLoad] = useState(true);
 
   const fetchMetrics = useCallback(async (showRefreshing = false) => {
     if (!tenantId) return;
@@ -112,8 +113,13 @@ export default function SlaPage() {
       } else {
         setLoading(true);
       }
+
+      // First load always bypasses cache (user may have just changed SLA config)
+      const useFresh = initialLoad;
+      if (initialLoad) setInitialLoad(false);
+
       const response = await authenticatedFetch(
-        api.metrics.sla(tenantId, months),
+        api.metrics.sla(tenantId, months, useFresh),
         getAccessToken
       );
       if (!response.ok) {
