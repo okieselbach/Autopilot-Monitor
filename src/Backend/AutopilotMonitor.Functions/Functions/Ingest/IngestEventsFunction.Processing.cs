@@ -453,7 +453,9 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                         .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException, "Fire-and-forget IncrementPlatformStatAsync failed"), TaskContinuationOptions.OnlyOnFaulted);
 
                 // Record gather rule telemetry for events that carry ruleId in their data
-                _ = RecordGatherRuleStatsAsync(request.TenantId, storedEvents);
+                _ = RecordGatherRuleStatsAsync(request.TenantId, storedEvents)
+                    .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException,
+                        "Fire-and-forget RecordGatherRuleStatsAsync failed"), TaskContinuationOptions.OnlyOnFaulted);
 
                 // Store diagnostics blob name on session (if agent uploaded a diagnostics package)
                 if (classification.DiagnosticsUploadedEvent != null)
@@ -795,7 +797,9 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                         sessionUrl: sessionUrl);
                     NotificationAlertBuilder.AddRuleResultSections(alert, ruleResults);
 
-                    _ = _webhookNotificationService.SendNotificationAsync(webhookUrl, providerType, alert);
+                    _ = _webhookNotificationService.SendNotificationAsync(webhookUrl, providerType, alert)
+                        .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException,
+                            "Fire-and-forget webhook notification failed"), TaskContinuationOptions.OnlyOnFaulted);
                 }
             }
 
@@ -816,7 +820,9 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                     sessionUrl: sessionUrl);
                 NotificationAlertBuilder.AddRuleResultSections(alert, ruleResults);
 
-                _ = _webhookNotificationService.SendNotificationAsync(webhookUrl, providerType, alert);
+                _ = _webhookNotificationService.SendNotificationAsync(webhookUrl, providerType, alert)
+                    .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException,
+                        "Fire-and-forget webhook notification failed"), TaskContinuationOptions.OnlyOnFaulted);
             }
 
             // WhiteGlove pre-provisioning failure via esp_failure
@@ -836,7 +842,9 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                     sessionUrl: sessionUrl);
                 NotificationAlertBuilder.AddRuleResultSections(alert, ruleResults);
 
-                _ = _webhookNotificationService.SendNotificationAsync(webhookUrl, providerType, alert);
+                _ = _webhookNotificationService.SendNotificationAsync(webhookUrl, providerType, alert)
+                    .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException,
+                        "Fire-and-forget webhook notification failed"), TaskContinuationOptions.OnlyOnFaulted);
             }
         }
 
