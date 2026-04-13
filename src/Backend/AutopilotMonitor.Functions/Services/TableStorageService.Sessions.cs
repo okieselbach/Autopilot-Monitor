@@ -231,7 +231,9 @@ namespace AutopilotMonitor.Functions.Services
                 GeoCountry = entity.GetString("GeoCountry") ?? string.Empty,
                 GeoRegion = entity.GetString("GeoRegion") ?? string.Empty,
                 GeoCity = entity.GetString("GeoCity") ?? string.Empty,
-                GeoLoc = entity.GetString("GeoLoc") ?? string.Empty
+                GeoLoc = entity.GetString("GeoLoc") ?? string.Empty,
+                PlatformScriptCount = SafeGetInt32(entity, "PlatformScriptCount") ?? 0,
+                RemediationScriptCount = SafeGetInt32(entity, "RemediationScriptCount") ?? 0
             };
         }
 
@@ -1282,7 +1284,7 @@ namespace AutopilotMonitor.Functions.Services
         /// The caller provides earliestEventTimestamp from the current batch;
         /// no redundant Events-table scan is performed here.
         /// </summary>
-        public async Task IncrementSessionEventCountAsync(string tenantId, string sessionId, int increment, DateTime? earliestEventTimestamp = null, DateTime? latestEventTimestamp = null, EnrollmentPhase? currentPhase = null)
+        public async Task IncrementSessionEventCountAsync(string tenantId, string sessionId, int increment, DateTime? earliestEventTimestamp = null, DateTime? latestEventTimestamp = null, EnrollmentPhase? currentPhase = null, int platformScriptIncrement = 0, int remediationScriptIncrement = 0)
         {
             SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
             SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
@@ -1328,6 +1330,18 @@ namespace AutopilotMonitor.Functions.Services
                         var currentLastEventAt = entity.GetDateTimeOffset("LastEventAt")?.UtcDateTime;
                         if (!currentLastEventAt.HasValue || latestEventTimestamp.Value > currentLastEventAt.Value)
                             update["LastEventAt"] = EnsureUtc(latestEventTimestamp.Value);
+                    }
+
+                    // Increment script execution counters
+                    if (platformScriptIncrement > 0)
+                    {
+                        var current = entity.GetInt32("PlatformScriptCount") ?? 0;
+                        update["PlatformScriptCount"] = current + platformScriptIncrement;
+                    }
+                    if (remediationScriptIncrement > 0)
+                    {
+                        var current = entity.GetInt32("RemediationScriptCount") ?? 0;
+                        update["RemediationScriptCount"] = current + remediationScriptIncrement;
                     }
 
                     await tableClient.UpdateEntityAsync(update, entity.ETag, TableUpdateMode.Merge);
@@ -1697,7 +1711,9 @@ namespace AutopilotMonitor.Functions.Services
                 GeoCountry = entity.GetString("GeoCountry") ?? string.Empty,
                 GeoRegion = entity.GetString("GeoRegion") ?? string.Empty,
                 GeoCity = entity.GetString("GeoCity") ?? string.Empty,
-                GeoLoc = entity.GetString("GeoLoc") ?? string.Empty
+                GeoLoc = entity.GetString("GeoLoc") ?? string.Empty,
+                PlatformScriptCount = SafeGetInt32(entity, "PlatformScriptCount") ?? 0,
+                RemediationScriptCount = SafeGetInt32(entity, "RemediationScriptCount") ?? 0
             };
         }
 

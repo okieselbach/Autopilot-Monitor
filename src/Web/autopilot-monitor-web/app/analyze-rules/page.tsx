@@ -510,7 +510,12 @@ export default function AnalyzeRulesPage() {
                           return (
                             <button
                               key={ruleId}
-                              onClick={() => setExpandedRuleId(expandedRuleId === ruleId ? null : ruleId)}
+                              onClick={() => {
+                                setExpandedRuleId(ruleId);
+                                setTimeout(() => {
+                                  document.getElementById(`rule-card-${ruleId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+                                }, 100);
+                              }}
                               className="w-full text-left group"
                             >
                               <div className="flex items-center gap-3">
@@ -679,8 +684,8 @@ export default function AnalyzeRulesPage() {
               ) : (
                 <div className="space-y-3">
                   {filteredRules.map((rule) => (
+                    <div key={rule.ruleId} id={`rule-card-${rule.ruleId}`}>
                     <AnalyzeRuleCard
-                      key={rule.ruleId}
                       rule={rule}
                       isExpanded={expandedRuleId === rule.ruleId}
                       isEditing={editingRuleId === rule.ruleId}
@@ -714,6 +719,7 @@ export default function AnalyzeRulesPage() {
                       hitRate={ruleStatsMap[rule.ruleId]?.hitRate ?? null}
                       fireCount={ruleStatsMap[rule.ruleId]?.fireCount ?? null}
                     />
+                    </div>
                   ))}
                 </div>
               )}

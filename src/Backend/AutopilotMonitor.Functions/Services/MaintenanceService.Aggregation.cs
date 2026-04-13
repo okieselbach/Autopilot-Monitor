@@ -135,6 +135,25 @@ namespace AutopilotMonitor.Functions.Services
             var (uniqueUsers, loginCount) = await _metricsRepo.GetUserActivityForDateAsync(
                 tenantId == "global" ? null : tenantId, targetDate);
 
+            // App metrics: count apps per session from AppInstallSummaries table
+            var sessionIdSet = new HashSet<string>(sessions.Select(s => s.SessionId));
+            List<AppInstallSummary> appSummaries;
+            if (tenantId == "global")
+                appSummaries = await _metricsRepo.GetAllAppInstallSummariesAsync();
+            else
+                appSummaries = await _metricsRepo.GetAppInstallSummariesByTenantAsync(tenantId);
+
+            var relevantApps = appSummaries.Where(a => sessionIdSet.Contains(a.SessionId)).ToList();
+            var appsPerSession = relevantApps.GroupBy(a => a.SessionId).Select(g => g.Count()).ToList();
+            var avgAppsPerSession = appsPerSession.Count > 0 ? Math.Round(appsPerSession.Average(), 1) : 0;
+            var totalUniqueApps = relevantApps.Select(a => a.AppName).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+
+            // Script metrics: computed from session-level counters (zero extra queries)
+            var totalPlatformScripts = sessions.Sum(s => s.PlatformScriptCount);
+            var totalRemediationScripts = sessions.Sum(s => s.RemediationScriptCount);
+            var avgPlatformScripts = sessions.Count > 0 ? Math.Round(sessions.Average(s => (double)s.PlatformScriptCount), 1) : 0;
+            var avgRemediationScripts = sessions.Count > 0 ? Math.Round(sessions.Average(s => (double)s.RemediationScriptCount), 1) : 0;
+
             computeStart.Stop();
 
             return new UsageMetricsSnapshot
@@ -158,7 +177,13 @@ namespace AutopilotMonitor.Functions.Services
                 UniqueUsers = uniqueUsers,
                 LoginCount = loginCount,
                 TopManufacturers = JsonConvert.SerializeObject(manufacturers),
-                TopModels = JsonConvert.SerializeObject(models)
+                TopModels = JsonConvert.SerializeObject(models),
+                AvgAppsPerSession = avgAppsPerSession,
+                TotalUniqueApps = totalUniqueApps,
+                AvgPlatformScriptsPerSession = avgPlatformScripts,
+                AvgRemediationScriptsPerSession = avgRemediationScripts,
+                TotalPlatformScripts = totalPlatformScripts,
+                TotalRemediationScripts = totalRemediationScripts
             };
         }
 

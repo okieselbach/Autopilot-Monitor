@@ -40,6 +40,11 @@ namespace AutopilotMonitor.Shared.Models
         public DeploymentTypeMetrics DeploymentTypes { get; set; } = new();
 
         /// <summary>
+        /// App and script count metrics
+        /// </summary>
+        public AppScriptMetrics AppScripts { get; set; } = new();
+
+        /// <summary>
         /// Platform statistics (cumulative since release)
         /// </summary>
         public PlatformStats? PlatformStats { get; set; }
@@ -134,5 +139,15 @@ namespace AutopilotMonitor.Shared.Models
         public int WhiteGlove { get; set; }
         public double UserDrivenPercentage { get; set; }
         public double WhiteGlovePercentage { get; set; }
+    }
+
+    public class AppScriptMetrics
+    {
+        public double AvgAppsPerSession { get; set; }
+        public int TotalUniqueApps { get; set; }
+        public double AvgPlatformScriptsPerSession { get; set; }
+        public double AvgRemediationScriptsPerSession { get; set; }
+        public int TotalPlatformScripts { get; set; }
+        public int TotalRemediationScripts { get; set; }
     }
 }

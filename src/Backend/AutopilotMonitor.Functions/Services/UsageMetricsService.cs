@@ -199,6 +199,22 @@ namespace AutopilotMonitor.Functions.Services
                 WhiteGlovePercentage = totalCount > 0 ? Math.Round((whiteGloveCount / (double)totalCount) * 100, 1) : 0
             };
 
+            // App & Script Metrics
+            var allAppSummaries = await _metricsRepo.GetAllAppInstallSummariesAsync();
+            var sessionIdSet = new HashSet<string>(allSessions.Select(s => s.SessionId));
+            var relevantApps = allAppSummaries.Where(a => sessionIdSet.Contains(a.SessionId)).ToList();
+            var appsPerSessionList = relevantApps.GroupBy(a => a.SessionId).Select(g => g.Count()).ToList();
+
+            var appScriptMetrics = new AppScriptMetrics
+            {
+                AvgAppsPerSession = appsPerSessionList.Count > 0 ? Math.Round(appsPerSessionList.Average(), 1) : 0,
+                TotalUniqueApps = relevantApps.Select(a => a.AppName).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+                TotalPlatformScripts = allSessions.Sum(s => s.PlatformScriptCount),
+                TotalRemediationScripts = allSessions.Sum(s => s.RemediationScriptCount),
+                AvgPlatformScriptsPerSession = allSessions.Count > 0 ? Math.Round(allSessions.Average(s => (double)s.PlatformScriptCount), 1) : 0,
+                AvgRemediationScriptsPerSession = allSessions.Count > 0 ? Math.Round(allSessions.Average(s => (double)s.RemediationScriptCount), 1) : 0
+            };
+
             // Platform Stats (cumulative since release)
             var platformStats = await _metricsRepo.GetPlatformStatsAsync();
 
@@ -210,6 +226,7 @@ namespace AutopilotMonitor.Functions.Services
                 Performance = performanceMetrics,
                 Hardware = hardwareMetrics,
                 DeploymentTypes = deploymentTypeMetrics,
+                AppScripts = appScriptMetrics,
                 PlatformStats = platformStats != null ? new PlatformStats
                 {
                     TotalEnrollments = platformStats.TotalEnrollments,
@@ -321,6 +338,22 @@ namespace AutopilotMonitor.Functions.Services
                 WhiteGlovePercentage = totalCount > 0 ? Math.Round((whiteGloveCount / (double)totalCount) * 100, 1) : 0
             };
 
+            // App & Script Metrics
+            var tenantAppSummaries = await _metricsRepo.GetAppInstallSummariesByTenantAsync(tenantId);
+            var tenantSessionIdSet = new HashSet<string>(tenantSessions.Select(s => s.SessionId));
+            var relevantTenantApps = tenantAppSummaries.Where(a => tenantSessionIdSet.Contains(a.SessionId)).ToList();
+            var tenantAppsPerSession = relevantTenantApps.GroupBy(a => a.SessionId).Select(g => g.Count()).ToList();
+
+            var tenantAppScriptMetrics = new AppScriptMetrics
+            {
+                AvgAppsPerSession = tenantAppsPerSession.Count > 0 ? Math.Round(tenantAppsPerSession.Average(), 1) : 0,
+                TotalUniqueApps = relevantTenantApps.Select(a => a.AppName).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+                TotalPlatformScripts = tenantSessions.Sum(s => s.PlatformScriptCount),
+                TotalRemediationScripts = tenantSessions.Sum(s => s.RemediationScriptCount),
+                AvgPlatformScriptsPerSession = tenantSessions.Count > 0 ? Math.Round(tenantSessions.Average(s => (double)s.PlatformScriptCount), 1) : 0,
+                AvgRemediationScriptsPerSession = tenantSessions.Count > 0 ? Math.Round(tenantSessions.Average(s => (double)s.RemediationScriptCount), 1) : 0
+            };
+
             return new PlatformUsageMetrics
             {
                 Sessions = sessionMetrics,
@@ -328,7 +361,8 @@ namespace AutopilotMonitor.Functions.Services
                 Users = userMetrics,
                 Performance = performanceMetrics,
                 Hardware = hardwareMetrics,
-                DeploymentTypes = deploymentTypeMetrics
+                DeploymentTypes = deploymentTypeMetrics,
+                AppScripts = tenantAppScriptMetrics
             };
         }
 

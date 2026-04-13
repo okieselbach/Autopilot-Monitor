@@ -30,7 +30,8 @@ namespace AutopilotMonitor.Shared.DataAccess
         Task IncrementSessionEventCountAsync(
             string tenantId, string sessionId, int increment,
             DateTime? earliestEventTimestamp = null, DateTime? latestEventTimestamp = null,
-            EnrollmentPhase? currentPhase = null);
+            EnrollmentPhase? currentPhase = null,
+            int platformScriptIncrement = 0, int remediationScriptIncrement = 0);
         Task UpdateSessionDiagnosticsBlobAsync(string tenantId, string sessionId, string blobName);
         Task SetSessionPreProvisionedAsync(string tenantId, string sessionId, bool isPreProvisioned,
             SessionStatus? status = null, bool? isUserDriven = null);

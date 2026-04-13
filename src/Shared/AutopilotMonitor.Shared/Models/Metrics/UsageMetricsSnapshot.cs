@@ -121,5 +121,14 @@ namespace AutopilotMonitor.Shared.Models
         /// Top 5 models as JSON: [{"name":"Latitude 7420","count":50,"percentage":25.0},...]
         /// </summary>
         public string TopModels { get; set; } = "[]";
+
+        // ===== APP & SCRIPT METRICS =====
+
+        public double AvgAppsPerSession { get; set; }
+        public int TotalUniqueApps { get; set; }
+        public double AvgPlatformScriptsPerSession { get; set; }
+        public double AvgRemediationScriptsPerSession { get; set; }
+        public int TotalPlatformScripts { get; set; }
+        public int TotalRemediationScripts { get; set; }
     }
 }

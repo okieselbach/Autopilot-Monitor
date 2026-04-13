@@ -220,6 +220,10 @@ namespace AutopilotMonitor.Shared.Models
         public string GeoRegion { get; set; } = string.Empty;
         public string GeoCity { get; set; } = string.Empty;
         public string GeoLoc { get; set; } = string.Empty;
+
+        // Script execution counts — incremented during ingest
+        public int PlatformScriptCount { get; set; }
+        public int RemediationScriptCount { get; set; }
     }
 
     /// <summary>

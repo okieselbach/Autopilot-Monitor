@@ -57,9 +57,11 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
         public Task IncrementSessionEventCountAsync(
             string tenantId, string sessionId, int increment,
             DateTime? earliestEventTimestamp = null, DateTime? latestEventTimestamp = null,
-            EnrollmentPhase? currentPhase = null)
+            EnrollmentPhase? currentPhase = null,
+            int platformScriptIncrement = 0, int remediationScriptIncrement = 0)
             => _storage.IncrementSessionEventCountAsync(tenantId, sessionId, increment,
-                earliestEventTimestamp, latestEventTimestamp, currentPhase);
+                earliestEventTimestamp, latestEventTimestamp, currentPhase,
+                platformScriptIncrement, remediationScriptIncrement);
 
         public Task UpdateSessionDiagnosticsBlobAsync(string tenantId, string sessionId, string blobName)
             => _storage.UpdateSessionDiagnosticsBlobAsync(tenantId, sessionId, blobName);

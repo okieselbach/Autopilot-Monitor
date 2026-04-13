@@ -38,7 +38,15 @@ namespace AutopilotMonitor.Functions.Services
                     ["UniqueUsers"] = metrics.UniqueUsers,
                     ["LoginCount"] = metrics.LoginCount,
                     ["TopManufacturers"] = metrics.TopManufacturers,
-                    ["TopModels"] = metrics.TopModels
+                    ["TopModels"] = metrics.TopModels,
+                    ["UserDrivenSessions"] = metrics.UserDrivenSessions,
+                    ["WhiteGloveSessions"] = metrics.WhiteGloveSessions,
+                    ["AvgAppsPerSession"] = metrics.AvgAppsPerSession,
+                    ["TotalUniqueApps"] = metrics.TotalUniqueApps,
+                    ["AvgPlatformScriptsPerSession"] = metrics.AvgPlatformScriptsPerSession,
+                    ["AvgRemediationScriptsPerSession"] = metrics.AvgRemediationScriptsPerSession,
+                    ["TotalPlatformScripts"] = metrics.TotalPlatformScripts,
+                    ["TotalRemediationScripts"] = metrics.TotalRemediationScripts
                 };
 
                 await tableClient.UpsertEntityAsync(entity);
@@ -101,7 +109,15 @@ namespace AutopilotMonitor.Functions.Services
                         UniqueUsers = entity.GetInt32("UniqueUsers") ?? 0,
                         LoginCount = entity.GetInt32("LoginCount") ?? 0,
                         TopManufacturers = entity.GetString("TopManufacturers") ?? "[]",
-                        TopModels = entity.GetString("TopModels") ?? "[]"
+                        TopModels = entity.GetString("TopModels") ?? "[]",
+                        UserDrivenSessions = entity.GetInt32("UserDrivenSessions") ?? 0,
+                        WhiteGloveSessions = entity.GetInt32("WhiteGloveSessions") ?? 0,
+                        AvgAppsPerSession = entity.GetDouble("AvgAppsPerSession") ?? 0,
+                        TotalUniqueApps = entity.GetInt32("TotalUniqueApps") ?? 0,
+                        AvgPlatformScriptsPerSession = entity.GetDouble("AvgPlatformScriptsPerSession") ?? 0,
+                        AvgRemediationScriptsPerSession = entity.GetDouble("AvgRemediationScriptsPerSession") ?? 0,
+                        TotalPlatformScripts = entity.GetInt32("TotalPlatformScripts") ?? 0,
+                        TotalRemediationScripts = entity.GetInt32("TotalRemediationScripts") ?? 0
                     });
 
                     if (results.Count >= maxResults) break;

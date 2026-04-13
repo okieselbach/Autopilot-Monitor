@@ -247,7 +247,9 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                         processedCount,
                         classification.EarliestEventTimestamp,
                         classification.LatestEventTimestamp,
-                        currentPhase: classification.LastPhaseChangeEvent?.Phase
+                        currentPhase: classification.LastPhaseChangeEvent?.Phase,
+                        platformScriptIncrement: classification.PlatformScriptCount,
+                        remediationScriptIncrement: classification.RemediationScriptCount
                     );
                 }
 
@@ -575,6 +577,15 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                         break;
                     case "session_stalled":
                         classification.SessionStalledEvent = evt;
+                        break;
+                    case "script_completed":
+                    case "script_failed":
+                        var scriptType = evt.Data?.ContainsKey("scriptType") == true
+                            ? evt.Data["scriptType"]?.ToString() : null;
+                        if (string.Equals(scriptType, "platform", StringComparison.OrdinalIgnoreCase))
+                            classification.PlatformScriptCount++;
+                        else if (string.Equals(scriptType, "remediation", StringComparison.OrdinalIgnoreCase))
+                            classification.RemediationScriptCount++;
                         break;
                 }
 
@@ -1087,5 +1098,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
         public DateTime? EarliestEventTimestamp { get; set; }
         public DateTime? LatestEventTimestamp { get; set; }
         public Dictionary<string, AppInstallAggregationState> AppInstallUpdates { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public int PlatformScriptCount { get; set; }
+        public int RemediationScriptCount { get; set; }
     }
 }
