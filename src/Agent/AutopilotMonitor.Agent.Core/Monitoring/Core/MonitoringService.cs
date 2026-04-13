@@ -7,10 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using AutopilotMonitor.Agent.Core.Configuration;
 using AutopilotMonitor.Agent.Core.Logging;
-using AutopilotMonitor.Agent.Core.Monitoring.Analyzers;
-using AutopilotMonitor.Agent.Core.Monitoring.Collectors;
 using AutopilotMonitor.Agent.Core.Monitoring.Network;
-using AutopilotMonitor.Agent.Core.Monitoring.Replay;
 using AutopilotMonitor.Agent.Core.Monitoring.Tracking;
 using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.Models;
@@ -18,40 +15,31 @@ using AutopilotMonitor.Shared.Models;
 namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 {
     /// <summary>
-    /// Main monitoring service that collects and uploads telemetry
+    /// Thin coordinator for the Autopilot Monitor Agent. Delegates to:
+    /// <see cref="EventUploadOrchestrator"/> — upload, retry, auth-failure circuit breaker.
+    /// <see cref="CollectorCoordinator"/> — collector lifecycle, idle detection, analyzers.
+    /// <see cref="EnrollmentCompletionHandler"/> — terminal event shutdown sequences.
     /// </summary>
-    public partial class MonitoringService : IDisposable
+    public class MonitoringService : IDisposable
     {
         private readonly AgentConfiguration _configuration;
         private readonly AgentLogger _logger;
         private readonly string _agentVersion;
         private readonly EventSpool _spool;
         private readonly BackendApiClient _apiClient;
-        private readonly Timer _uploadTimer;
-        private readonly Timer _debounceTimer;
-        private readonly object _timerLock = new object();
-        private readonly SemaphoreSlim _uploadSemaphore = new(1, 1);
         private readonly ManualResetEventSlim _completionEvent = new(false);
         private long _eventSequence; // Initialized from persistence + spool ceiling in constructor
         private readonly SessionPersistence _sessionPersistence;
+
+        // Composed orchestrators (extracted from partial classes)
+        private EventUploadOrchestrator _uploadOrchestrator;
+        private CollectorCoordinator _collectorCoordinator;
+        private EnrollmentCompletionHandler _completionHandler;
         private EnrollmentPhase? _lastPhase = null;
 
-        // Core event collectors (always on)
-        private EspAndHelloTracker _espAndHelloTracker;
-        private LogReplayService _logReplay;
 
-        // Optional collectors (toggled via remote config)
-        private PerformanceCollector _performanceCollector;
-        private AgentSelfMetricsCollector _agentSelfMetricsCollector;
-        private DeliveryOptimizationCollector _deliveryOptimizationCollector;
-        private StallProbeCollector _stallProbeCollector;
-
-        // Smart enrollment tracking (replaces DownloadProgressCollector + EspUiStateCollector)
-        private EnrollmentTracker _enrollmentTracker;
-
-        // Remote config and gather rules
+        // Remote config
         private RemoteConfigService _remoteConfigService;
-        private GatherRuleExecutor _gatherRuleExecutor;
 
         // Cleanup/self-destruct
         private readonly CleanupService _cleanupService;
@@ -59,26 +47,6 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         // Diagnostics package upload
         private readonly DiagnosticsPackageService _diagnosticsService;
 
-        // Agent-side security and configuration analyzers
-        private readonly List<IAgentAnalyzer> _analyzers = new List<IAgentAnalyzer>();
-
-        // Collector idle timeout — stops periodic collectors when no real enrollment activity
-        private DateTime _lastRealEventTime = DateTime.UtcNow;
-        private bool _collectorsIdleStopped;
-        private int _collectorIdleTimeoutMinutes = 15;
-        private Timer _idleCheckTimer;
-
-        // Desktop arrival detection (no-ESP scenarios)
-        private DesktopArrivalDetector _desktopArrivalDetector;
-
-        // IME process watcher — detects when IntuneManagementExtension.exe exits
-        private ImeProcessWatcher _imeProcessWatcher;
-
-        // Network change detection (always on)
-        private NetworkChangeDetector _networkChangeDetector;
-
-        // Agent max lifetime safety net
-        private Timer _maxLifetimeTimer;
         private readonly DateTime _agentStartTimeUtc = DateTime.UtcNow;
         private bool _enrollmentTerminalEventSeen;
         private bool _isWhiteGlovePart2;
@@ -92,12 +60,6 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         private readonly DateTime? _lastBootTimeUtc;   // boot time from Event Log (only for reboot_kill)
         private long _persistedSequenceAtStartup;      // for detecting spool ceiling recovery
 
-        // Auth failure circuit breaker
-        private int _consecutiveAuthFailures = 0;
-        private DateTime? _firstAuthFailureTime = null;
-
-        // Non-auth upload failure tracking for the emergency channel
-        private int _consecutiveUploadFailures = 0;
         private EmergencyReporter _emergencyReporter;
         private DistressReporter _distressReporter;
 
@@ -170,28 +132,25 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             }
             _logger.Info($"Event sequence initialized at {_eventSequence}");
 
-            // Subscribe to spool events for batched upload when new events arrive
-            _spool.EventsAvailable += OnEventsAvailable;
+            // Create upload orchestrator (timers start when Start() is called)
+            _uploadOrchestrator = new EventUploadOrchestrator(
+                _configuration, _logger, _spool, _apiClient,
+                _emergencyReporter, _distressReporter, _cleanupService,
+                EmitEvent, EmitShutdownEvent,
+                () => _enrollmentTerminalEventSeen);
 
-            // Set up debounce timer for batching (waits before uploading to collect more events)
-            // This reduces API calls while still being responsive
-            _debounceTimer = new Timer(
-                DebounceTimerCallback,
-                null,
-                Timeout.Infinite, // Don't start initially
-                Timeout.Infinite
-            );
+            // Create enrollment completion handler
+            _completionHandler = new EnrollmentCompletionHandler(
+                _configuration, _logger, _agentVersion,
+                EmitEvent, EmitShutdownEvent,
+                () => _uploadOrchestrator.UploadEventsAsync(),
+                () => _uploadOrchestrator.StopTimers(),
+                _cleanupService, _diagnosticsService, _sessionPersistence, _spool);
 
-            // Set up periodic upload timer as fallback (much longer interval)
-            // This ensures events are uploaded even if FileSystemWatcher misses something
-            _uploadTimer = new Timer(
-                UploadTimerCallback,
-                null,
-                TimeSpan.FromMinutes(1), // Initial delay
-                TimeSpan.FromMinutes(5) // Fallback check every 5 minutes
-            );
+            // Subscribe to spool events for batched upload
+            _spool.EventsAvailable += _uploadOrchestrator.OnEventsAvailable;
 
-            _logger.Info("MonitoringService initialized with FileSystemWatcher and batching");
+            _logger.Info("MonitoringService initialized");
         }
 
         /// <summary>
@@ -203,6 +162,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 
             // Fetch remote config (collector toggles + gather rules) from backend
             FetchRemoteConfig();
+
+            // Create collector coordinator (needs RemoteConfigService from FetchRemoteConfig)
+            _collectorCoordinator = new CollectorCoordinator(
+                _configuration, _logger, _agentVersion,
+                EmitEvent, EmitTraceEvent,
+                _apiClient, _spool, _remoteConfigService,
+                () => _enrollmentTerminalEventSeen,
+                _previousExitType, _lastBootTimeUtc, _agentStartTimeUtc);
 
             // Register session with backend
             RegisterSessionAsync().Wait();
@@ -237,6 +204,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 
             // Start FileSystemWatcher for efficient event detection
             _spool.StartWatching();
+            _uploadOrchestrator.Start();
             _logger.Info("FileSystemWatcher started for efficient event upload");
 
             // Emit agent_started event with startup context so the portal shows how the agent was launched
@@ -359,17 +327,17 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             Task.Run(EmitNtpTimeCheckEvent);
 
             // Start event collectors (HelloCollector + optional based on remote config)
-            StartEventCollectors();
+            _collectorCoordinator.StartEventCollectors();
 
             // Start optional collectors based on remote config (PerformanceCollector)
-            StartOptionalCollectors();
+            _collectorCoordinator.StartOptionalCollectors();
 
             // Start gather rule executor
-            StartGatherRuleExecutor();
+            _collectorCoordinator.StartGatherRuleExecutor();
 
             // Initialize and run startup analyzers (security/configuration checks)
-            InitializeAnalyzers();
-            RunStartupAnalyzers();
+            _collectorCoordinator.InitializeAnalyzers();
+            _collectorCoordinator.RunStartupAnalyzers();
 
             _logger.Info("Monitoring service started");
         }
@@ -514,61 +482,6 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             }
         }
 
-        /// <summary>
-        /// Starts all event collection components
-        /// </summary>
-        private void StartEventCollectors()
-        {
-            _logger.Info("Starting event collectors");
-
-            try
-            {
-                // Start ESP and Hello tracker (ESP exit, WhiteGlove, and WHfB provisioning tracking)
-                var helloTimeout = _remoteConfigService?.CurrentConfig?.Collectors?.HelloWaitTimeoutSeconds
-                    ?? _configuration.HelloWaitTimeoutSeconds;
-                var modernDeploymentEnabled = _remoteConfigService?.CurrentConfig?.Collectors?.ModernDeploymentWatcherEnabled ?? true;
-                var modernDeploymentLevelMax = _remoteConfigService?.CurrentConfig?.Collectors?.ModernDeploymentLogLevelMax ?? 3;
-                var modernDeploymentBackfillEnabled = _remoteConfigService?.CurrentConfig?.Collectors?.ModernDeploymentBackfillEnabled ?? true;
-                var modernDeploymentBackfillLookbackMinutes = _remoteConfigService?.CurrentConfig?.Collectors?.ModernDeploymentBackfillLookbackMinutes ?? 30;
-                _espAndHelloTracker = new EspAndHelloTracker(
-                    _configuration.SessionId,
-                    _configuration.TenantId,
-                    EmitEvent,
-                    _logger,
-                    helloTimeout,
-                    modernDeploymentWatcherEnabled: modernDeploymentEnabled,
-                    modernDeploymentLogLevelMax: modernDeploymentLevelMax,
-                    modernDeploymentBackfillEnabled: modernDeploymentBackfillEnabled,
-                    modernDeploymentBackfillLookbackMinutes: modernDeploymentBackfillLookbackMinutes,
-                    stateDirectory: @"%ProgramData%\AutopilotMonitor\State"
-                );
-                _espAndHelloTracker.Start();
-
-                // Start log replay if a replay directory is configured
-                if (!string.IsNullOrEmpty(_configuration.ReplayLogDir))
-                {
-                    _logger.Info($"Log replay mode enabled - starting log replay from: {_configuration.ReplayLogDir}");
-                    var imeLogPatterns = _remoteConfigService?.CurrentConfig?.ImeLogPatterns;
-                    _logReplay = new LogReplayService(
-                        _configuration.SessionId,
-                        _configuration.TenantId,
-                        EmitEvent,
-                        _logger,
-                        _configuration.ReplayLogDir,
-                        _configuration.ReplaySpeedFactor,
-                        imeLogPatterns
-                    );
-                    _logReplay.Start();
-                    _logger.Info("Log replay started");
-                }
-
-                _logger.Info("Core event collectors started successfully");
-            }
-            catch (Exception ex)
-            {
-                _logger.Error("Error starting event collectors", ex);
-            }
-        }
 
         /// <summary>
         /// Fetches remote configuration from the backend API
@@ -725,7 +638,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             _configuration.EnableTimezoneAutoSet = config.EnableTimezoneAutoSet;
             _configuration.SendTraceEvents = config.SendTraceEvents;
             AuditUnrestrictedModeChange(config);
-            _enrollmentTracker?.UpdateSendTraceEvents(config.SendTraceEvents);
+            _collectorCoordinator?.UpdateSendTraceEvents(config.SendTraceEvents);
 
             _logger.Info("Applied runtime settings from remote config");
             _logger.Info($"  uploadIntervalSeconds={_configuration.UploadIntervalSeconds}, selfDestructOnComplete={_configuration.SelfDestructOnComplete}, keepLogFile={_configuration.KeepLogFile}");
@@ -953,8 +866,308 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             try { File.Delete(path); } catch { }
         }
 
-        /// <summary>
-        /// Starts optional collectors based on remote configuration
-        /// </summary>
+        // ──────────────────────────────────────────────────────────────────
+        // Event emission (central nerve — all collectors route through here)
+        // ──────────────────────────────────────────────────────────────────
+
+        public void EmitEvent(EnrollmentEvent evt)
+        {
+            evt.Sequence = Interlocked.Increment(ref _eventSequence);
+            _spool.Add(evt);
+            if (evt.Severity <= EventSeverity.Debug)
+                _logger.Verbose($"Event emitted: {evt.EventType} - {evt.Message}");
+            else
+                _logger.Info($"Event emitted: {evt.EventType} - {evt.Message}");
+
+            // Track real enrollment activity for idle timeout
+            if (!string.IsNullOrEmpty(evt.EventType) && !CollectorCoordinator.IsPeriodicEvent(evt.EventType))
+            {
+                _collectorCoordinator?.OnRealEventReceived();
+            }
+
+            // Persist sequence periodically (every 50 events) + always on critical events
+            if (evt.Sequence % 50 == 0 ||
+                evt.EventType == "whiteglove_complete" ||
+                evt.EventType == "enrollment_complete" ||
+                evt.EventType == "enrollment_failed")
+            {
+                _sessionPersistence.SaveSequence(evt.Sequence);
+            }
+
+            // Cancel max lifetime timer on terminal events
+            if (evt.EventType == "whiteglove_complete" ||
+                evt.EventType == "enrollment_complete" ||
+                evt.EventType == "enrollment_failed")
+            {
+                _enrollmentTerminalEventSeen = true;
+                _collectorCoordinator?.CancelMaxLifetimeTimer();
+            }
+
+            // Track phase transitions for logging and gather rule notifications
+            if (evt.Phase != _lastPhase)
+            {
+                if (evt.Phase == EnrollmentPhase.Unknown)
+                    _logger.Debug($"Phase transition: {_lastPhase?.ToString() ?? "null"} -> {evt.Phase}");
+                else
+                    _logger.Info($"Phase transition: {_lastPhase?.ToString() ?? "null"} -> {evt.Phase}");
+                _lastPhase = evt.Phase;
+
+                _collectorCoordinator?.OnPhaseChanged(evt.Phase);
+            }
+
+            // Notify gather rule executor of event type (for on_event triggers)
+            if (!string.IsNullOrEmpty(evt.EventType))
+            {
+                _collectorCoordinator?.OnEvent(evt.EventType);
+            }
+
+            // Check for WhiteGlove completion — agent exits gracefully, session stays open
+            if (evt.EventType == "whiteglove_complete")
+            {
+                _logger.Info("WhiteGlove pre-provisioning complete. Starting graceful shutdown sequence.");
+
+                _collectorCoordinator.StopPerformanceCollectorOnly();
+                _collectorCoordinator.StopEventCollectors();
+                _spool.StopWatching();
+                _uploadOrchestrator.StopTimers();
+
+                Task.Run(() => _completionHandler.HandleWhiteGloveComplete(
+                    () => _collectorCoordinator.StopEventCollectors(),
+                    part => _collectorCoordinator.RunShutdownAnalyzers(part),
+                    () => Interlocked.Read(ref _eventSequence)));
+
+                return;
+            }
+
+            // Check for enrollment completion events
+            if (evt.EventType == "enrollment_complete" || evt.EventType == "enrollment_failed")
+            {
+                var enrollmentSucceeded = evt.EventType == "enrollment_complete";
+                _logger.Info($"Enrollment completion detected: {evt.EventType}");
+
+                _completionHandler.DeleteSessionId();
+
+                _logger.Info("Stopping all collectors after enrollment completion...");
+                _collectorCoordinator.StopEventCollectors();
+                _uploadOrchestrator.StopTimers();
+
+                Task.Run(async () =>
+                {
+                    try
+                    {
+                        await _uploadOrchestrator.UploadEventsAsync();
+                        _logger.Info("Final event upload after enrollment completion done");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Warning($"Final upload after enrollment completion failed: {ex.Message}");
+                    }
+                });
+
+                Task.Run(() => _completionHandler.HandleEnrollmentComplete(
+                    enrollmentSucceeded, _isWhiteGlovePart2,
+                    () => _collectorCoordinator.StopEventCollectors(),
+                    part => _collectorCoordinator.RunShutdownAnalyzers(part)));
+                return;
+            }
+
+            // Immediate upload when explicitly requested by the emitter, or as a safety net for
+            // unhandled errors. All other events batch via the debounce timer.
+            if (evt.ImmediateUpload || evt.Severity >= EventSeverity.Error)
+            {
+                _logger.Info($"Triggering immediate upload for {evt.EventType} (bypassing debounce)");
+                Task.Run(() => _uploadOrchestrator.UploadEventsAsync());
+            }
+        }
+
+        private void EmitTraceEvent(string source, string decision, string reason, Dictionary<string, object> context = null)
+        {
+            _logger.Trace($"{source}: {decision} — {reason}");
+
+            if (!_configuration.SendTraceEvents)
+                return;
+
+            var data = new Dictionary<string, object>
+            {
+                { "decision", decision },
+                { "reason", reason }
+            };
+            if (context != null)
+            {
+                foreach (var kvp in context)
+                    data[kvp.Key] = kvp.Value;
+            }
+
+            EmitEvent(new EnrollmentEvent
+            {
+                SessionId = _configuration.SessionId,
+                TenantId = _configuration.TenantId,
+                EventType = "agent_trace",
+                Severity = EventSeverity.Trace,
+                Source = source,
+                Phase = EnrollmentPhase.Unknown,
+                Message = $"{decision}: {reason}",
+                Data = data
+            });
+        }
+
+        private void EmitShutdownEvent(string reason, string message, Dictionary<string, object> extraData = null)
+        {
+            var data = new Dictionary<string, object>
+            {
+                { "reason", reason },
+                { "agentVersion", _agentVersion },
+                { "uptimeMinutes", Math.Round((DateTime.UtcNow - _agentStartTimeUtc).TotalMinutes, 1) }
+            };
+            if (extraData != null)
+            {
+                foreach (var kvp in extraData)
+                    data[kvp.Key] = kvp.Value;
+            }
+
+            EmitEvent(new EnrollmentEvent
+            {
+                SessionId = _configuration.SessionId,
+                TenantId = _configuration.TenantId,
+                Timestamp = DateTime.UtcNow,
+                EventType = "agent_shutdown",
+                Severity = EventSeverity.Info,
+                Source = "Agent",
+                Phase = _lastPhase ?? EnrollmentPhase.Unknown,
+                Message = message,
+                Data = data
+            });
+        }
+
+        // ──────────────────────────────────────────────────────────────────
+        // Session registration
+        // ──────────────────────────────────────────────────────────────────
+
+        private async Task RegisterSessionAsync()
+        {
+            const int maxAttempts = 5;
+
+            var registration = new SessionRegistration
+            {
+                SessionId = _configuration.SessionId,
+                TenantId = _configuration.TenantId,
+                SerialNumber = DeviceInfoProvider.GetSerialNumber(),
+                Manufacturer = DeviceInfoProvider.GetManufacturer(),
+                Model = DeviceInfoProvider.GetModel(),
+                DeviceName = Environment.MachineName,
+                OsName = DeviceInfoProvider.GetOsName(),
+                OsBuild = DeviceInfoProvider.GetOsBuild(),
+                OsDisplayVersion = DeviceInfoProvider.GetOsDisplayVersion(),
+                OsEdition = DeviceInfoProvider.GetOsEdition(),
+                OsLanguage = System.Globalization.CultureInfo.CurrentCulture.Name,
+                StartedAt = DateTime.UtcNow,
+                AgentVersion = _agentVersion,
+                EnrollmentType = EnrollmentTracker.DetectEnrollmentTypeStatic(),
+                IsHybridJoin = EnrollmentTracker.DetectHybridJoinStatic(),
+                IsUserDriven = true
+            };
+
+            for (int attempt = 1; attempt <= maxAttempts; attempt++)
+            {
+                try
+                {
+                    _logger.Info($"Registering session with backend (attempt {attempt}/{maxAttempts})");
+
+                    var response = await _apiClient.RegisterSessionAsync(registration);
+
+                    if (response.Success)
+                    {
+                        _logger.Info($"Session registered successfully: {response.SessionId}");
+
+                        if (!string.IsNullOrEmpty(response.AdminAction))
+                        {
+                            _logger.Warning($"Session already marked as {response.AdminAction} by administrator — will run cleanup after startup");
+                            _pendingAdminAction = response.AdminAction;
+                        }
+
+                        await Security.BootstrapConfigCleanup.TryDeleteIfCertReadyAsync(
+                            _configuration,
+                            _logger,
+                            _agentVersion).ConfigureAwait(false);
+
+                        return;
+                    }
+
+                    _logger.Warning($"Session registration failed: {response.Message}");
+                }
+                catch (BackendAuthException ex)
+                {
+                    _logger.Error($"Session registration authentication failed: {ex.Message}");
+                    _uploadOrchestrator.HandleAuthFailure(ex.StatusCode);
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    _logger.Error($"Failed to register session (attempt {attempt}/{maxAttempts})", ex);
+
+                    if (attempt == maxAttempts)
+                    {
+                        _ = _emergencyReporter.TrySendAsync(
+                            AgentErrorType.RegisterSessionFailed,
+                            ex.Message);
+                        return;
+                    }
+                }
+
+                var delaySeconds = (int)Math.Pow(2, attempt);
+                _logger.Info($"Retrying session registration in {delaySeconds}s");
+                await Task.Delay(delaySeconds * 1000);
+            }
+        }
+
+        // ──────────────────────────────────────────────────────────────────
+        // Lifecycle (Stop, WaitForCompletion, TriggerCleanup, Dispose)
+        // ──────────────────────────────────────────────────────────────────
+
+        public void Stop()
+        {
+            _logger.Info("Stopping monitoring service");
+
+            _spool.StopWatching();
+            _collectorCoordinator.StopEventCollectors();
+            _collectorCoordinator.RunShutdownAnalyzers();
+
+            EmitShutdownEvent("manual_stop", "Autopilot Monitor Agent stopped");
+
+            _uploadOrchestrator.UploadEventsAsync().Wait(TimeSpan.FromSeconds(10));
+
+            _logger.Info("Monitoring service stopped");
+            _completionEvent.Set();
+        }
+
+        public void WaitForCompletion()
+        {
+            _completionEvent.Wait();
+        }
+
+        public void TriggerCleanup()
+        {
+            _logger.Info("TriggerCleanup invoked - executing cleanup without enrollment monitoring");
+
+            if (_configuration.SelfDestructOnComplete)
+            {
+                _cleanupService.ExecuteSelfDestruct();
+            }
+            else
+            {
+                _logger.Info("SelfDestructOnComplete is disabled - nothing to clean up");
+            }
+        }
+
+        public void Dispose()
+        {
+            _uploadOrchestrator?.Dispose();
+            _collectorCoordinator?.Dispose();
+            _apiClient?.Dispose();
+            _spool?.Dispose();
+            _remoteConfigService?.Dispose();
+            _distressReporter?.Dispose();
+            _completionEvent.Dispose();
+        }
     }
 }
