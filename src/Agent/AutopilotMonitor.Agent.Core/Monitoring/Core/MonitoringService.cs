@@ -528,6 +528,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     ?? _configuration.HelloWaitTimeoutSeconds;
                 var modernDeploymentEnabled = _remoteConfigService?.CurrentConfig?.Collectors?.ModernDeploymentWatcherEnabled ?? true;
                 var modernDeploymentLevelMax = _remoteConfigService?.CurrentConfig?.Collectors?.ModernDeploymentLogLevelMax ?? 3;
+                var modernDeploymentBackfillEnabled = _remoteConfigService?.CurrentConfig?.Collectors?.ModernDeploymentBackfillEnabled ?? true;
+                var modernDeploymentBackfillLookbackMinutes = _remoteConfigService?.CurrentConfig?.Collectors?.ModernDeploymentBackfillLookbackMinutes ?? 30;
                 _espAndHelloTracker = new EspAndHelloTracker(
                     _configuration.SessionId,
                     _configuration.TenantId,
@@ -535,7 +537,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     _logger,
                     helloTimeout,
                     modernDeploymentWatcherEnabled: modernDeploymentEnabled,
-                    modernDeploymentLogLevelMax: modernDeploymentLevelMax
+                    modernDeploymentLogLevelMax: modernDeploymentLevelMax,
+                    modernDeploymentBackfillEnabled: modernDeploymentBackfillEnabled,
+                    modernDeploymentBackfillLookbackMinutes: modernDeploymentBackfillLookbackMinutes,
+                    stateDirectory: @"%ProgramData%\AutopilotMonitor\State"
                 );
                 _espAndHelloTracker.Start();
 
