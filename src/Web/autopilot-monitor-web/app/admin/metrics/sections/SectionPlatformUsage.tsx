@@ -67,6 +67,15 @@ interface PlatformStats {
   issuesDetected: number;
 }
 
+interface AppScriptMetrics {
+  avgAppsPerSession: number;
+  totalUniqueApps: number;
+  avgPlatformScriptsPerSession: number;
+  avgRemediationScriptsPerSession: number;
+  totalPlatformScripts: number;
+  totalRemediationScripts: number;
+}
+
 interface PlatformUsageMetrics {
   sessions: SessionMetrics;
   tenants: TenantMetrics;
@@ -74,6 +83,7 @@ interface PlatformUsageMetrics {
   performance: PerformanceMetrics;
   hardware: HardwareMetrics;
   deploymentTypes: DeploymentTypeMetrics;
+  appScripts?: AppScriptMetrics;
   platformStats?: PlatformStats;
   computedAt: string;
   computeDurationMs: number;
@@ -300,6 +310,30 @@ export function SectionPlatformUsage() {
             </div>
           </div>
         </div>
+
+        {/* Apps & Scripts */}
+        {metrics.appScripts && (
+          <div className="mb-6">
+            <h2 className="text-xl font-semibold text-gray-900 mb-4">Apps & Scripts</h2>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="bg-white rounded-lg shadow p-6">
+                <div className="text-sm text-gray-500 mb-1">Avg Apps / Session</div>
+                <div className="text-3xl font-bold text-blue-600">{metrics.appScripts.avgAppsPerSession}</div>
+                <p className="text-xs text-gray-400 mt-1">{metrics.appScripts.totalUniqueApps.toLocaleString()} unique apps total</p>
+              </div>
+              <div className="bg-white rounded-lg shadow p-6">
+                <div className="text-sm text-gray-500 mb-1">Avg Platform Scripts / Session</div>
+                <div className="text-3xl font-bold text-teal-600">{metrics.appScripts.avgPlatformScriptsPerSession}</div>
+                <p className="text-xs text-gray-400 mt-1">{metrics.appScripts.totalPlatformScripts.toLocaleString()} executions total</p>
+              </div>
+              <div className="bg-white rounded-lg shadow p-6">
+                <div className="text-sm text-gray-500 mb-1">Avg Remediation Scripts / Session</div>
+                <div className="text-3xl font-bold text-amber-600">{metrics.appScripts.avgRemediationScriptsPerSession}</div>
+                <p className="text-xs text-gray-400 mt-1">{metrics.appScripts.totalRemediationScripts.toLocaleString()} executions total</p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Tenant & User Statistics */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
