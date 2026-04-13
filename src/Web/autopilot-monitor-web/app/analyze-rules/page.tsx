@@ -141,7 +141,7 @@ export default function AnalyzeRulesPage() {
     const fetchStats = async () => {
       try {
         const statsUrl = globalAdminMode && user?.isGlobalAdmin
-          ? api.metrics.globalRuleStats(undefined, undefined, "analyze")
+          ? api.metrics.globalRuleStats(undefined, undefined, "analyze", effectiveTenantId)
           : api.metrics.ruleStats(undefined, undefined, "analyze");
         const response = await authenticatedFetch(statsUrl, getAccessToken);
         if (response.ok) {
@@ -485,21 +485,69 @@ export default function AnalyzeRulesPage() {
                 <StatCard label="Info" value={infoCount} borderColor="border-blue-400" valueColor="text-blue-600" />
               </div>
 
-              {/* Telemetry Stats (only shown when data is available) */}
+              {/* Rule Telemetry (only shown when data is available) */}
               {Object.keys(ruleStatsMap).length > 0 && (() => {
-                const stats = Object.values(ruleStatsMap);
-                const totalFires = stats.reduce((sum, s) => sum + s.fireCount, 0);
-                const rulesWithHits = stats.filter(s => s.fireCount > 0).length;
-                const highHitRules = stats.filter(s => s.hitRate >= 20).length;
-                const avgHitRate = stats.length > 0
-                  ? Math.round(stats.reduce((sum, s) => sum + s.hitRate, 0) / stats.length * 10) / 10
-                  : 0;
+                const statsEntries = Object.entries(ruleStatsMap)
+                  .filter(([, s]) => s.fireCount > 0)
+                  .sort((a, b) => b[1].fireCount - a[1].fireCount);
+                const totalFires = statsEntries.reduce((sum, [, s]) => sum + s.fireCount, 0);
+                const topRules = statsEntries.slice(0, 5);
+                const rulesList = rules || [];
+
                 return (
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <StatCard label="Total Fires (30d)" value={totalFires} borderColor="border-indigo-400" valueColor="text-indigo-600" />
-                    <StatCard label="Rules Firing" value={rulesWithHits} borderColor="border-indigo-400" valueColor="text-indigo-600" />
-                    <StatCard label="Avg Hit Rate" value={`${avgHitRate}%`} borderColor="border-indigo-400" valueColor="text-indigo-600" />
-                    <StatCard label="High Hit Rate (>20%)" value={highHitRules} borderColor="border-red-400" valueColor="text-red-600" />
+                  <div className="bg-white rounded-lg shadow border border-indigo-200 p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="text-sm font-semibold text-gray-700">Rule Telemetry (last 30 days)</h3>
+                      <span className="text-xs text-gray-500">{totalFires} total fires across {statsEntries.length} rules</span>
+                    </div>
+                    {topRules.length === 0 ? (
+                      <p className="text-sm text-gray-400">No rules have fired in the last 30 days.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {topRules.map(([ruleId, stat]) => {
+                          const rule = rulesList.find(r => r.ruleId === ruleId);
+                          const barWidth = totalFires > 0 ? Math.max(4, Math.round((stat.fireCount / totalFires) * 100)) : 0;
+                          return (
+                            <button
+                              key={ruleId}
+                              onClick={() => setExpandedRuleId(expandedRuleId === ruleId ? null : ruleId)}
+                              className="w-full text-left group"
+                            >
+                              <div className="flex items-center gap-3">
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 mb-0.5">
+                                    <span className="text-xs font-mono text-gray-400">{ruleId}</span>
+                                    <span className="text-sm text-gray-800 truncate">{rule?.title ?? ruleId}</span>
+                                  </div>
+                                  <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                    <div
+                                      className={`h-full rounded-full ${
+                                        stat.hitRate >= 20 ? "bg-red-500" :
+                                        stat.hitRate >= 5 ? "bg-amber-500" : "bg-indigo-400"
+                                      }`}
+                                      style={{ width: `${barWidth}%` }}
+                                    />
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-3 flex-shrink-0 text-right">
+                                  <span className="text-sm font-semibold text-gray-700">{stat.fireCount}x</span>
+                                  <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${
+                                    stat.hitRate >= 20 ? "bg-red-50 text-red-700" :
+                                    stat.hitRate >= 5 ? "bg-amber-50 text-amber-700" :
+                                    "bg-gray-50 text-gray-600"
+                                  }`}>
+                                    {stat.hitRate}% hit rate
+                                  </span>
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                        {statsEntries.length > 5 && (
+                          <p className="text-xs text-gray-400 pt-1">+ {statsEntries.length - 5} more rules with hits</p>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })()}

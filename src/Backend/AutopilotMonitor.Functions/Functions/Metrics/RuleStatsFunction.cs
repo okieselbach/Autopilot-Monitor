@@ -107,8 +107,9 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
         }
 
         /// <summary>
-        /// GET /api/global/metrics/rule-stats?startDate=...&endDate=...&ruleType=analyze
+        /// GET /api/global/metrics/rule-stats?startDate=...&endDate=...&ruleType=analyze&tenantId=...
         /// Returns cross-tenant global rule stats (Global Admin only).
+        /// When tenantId is provided, returns tenant-specific stats instead of global aggregates.
         /// </summary>
         [Function("GetGlobalRuleStats")]
         public async Task<HttpResponseData> GetGlobalRuleStats(
@@ -120,11 +121,15 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
                 var startDate = req.Query["startDate"] ?? DateTime.UtcNow.AddDays(-30).ToString("yyyy-MM-dd");
                 var endDate = req.Query["endDate"] ?? DateTime.UtcNow.ToString("yyyy-MM-dd");
                 var ruleType = req.Query["ruleType"];
+                var tenantId = req.Query["tenantId"];
 
-                _logger.LogInformation("Global rule stats requested ({StartDate} to {EndDate})", startDate, endDate);
+                // If tenantId specified, return tenant-specific stats; otherwise global aggregates
+                var queryTenantId = !string.IsNullOrEmpty(tenantId) ? tenantId : "global";
 
-                // Fetch global aggregate rows
-                var entries = await _metricsRepo.GetRuleStatsAsync("global", startDate, endDate, ruleType);
+                _logger.LogInformation("Global rule stats requested for {Scope} ({StartDate} to {EndDate})",
+                    queryTenantId, startDate, endDate);
+
+                var entries = await _metricsRepo.GetRuleStatsAsync(queryTenantId, startDate, endDate, ruleType);
 
                 var aggregated = entries
                     .GroupBy(e => e.RuleId)

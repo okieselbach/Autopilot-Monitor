@@ -147,8 +147,8 @@ export const api = {
     platform: () => `${API_BASE_URL}/api/global/metrics/platform`,
     ruleStats: (startDate?: string, endDate?: string, ruleType?: string) =>
       `${API_BASE_URL}/api/metrics/rule-stats${qs({ startDate, endDate, ruleType })}`,
-    globalRuleStats: (startDate?: string, endDate?: string, ruleType?: string) =>
-      `${API_BASE_URL}/api/global/metrics/rule-stats${qs({ startDate, endDate, ruleType })}`,
+    globalRuleStats: (startDate?: string, endDate?: string, ruleType?: string, tenantId?: string) =>
+      `${API_BASE_URL}/api/global/metrics/rule-stats${qs({ startDate, endDate, ruleType, tenantId })}`,
   },
 
   // ── Apps Dashboard ────────────────────────────────────────────────────────
