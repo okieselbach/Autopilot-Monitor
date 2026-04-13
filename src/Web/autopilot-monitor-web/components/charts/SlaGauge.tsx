@@ -1,36 +1,33 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
-import { chartColors } from "./chartTheme";
 
 interface SlaGaugeProps {
-  /** Current value (e.g. 94.5 for success rate, 32 for duration in minutes) */
   value: number;
-  /** Target value (e.g. 95.0 for success rate, 60 for max duration) */
   target: number;
-  /** Label shown below the value */
   label: string;
-  /** Unit shown after the value (e.g. "%" or "min") */
   unit: string;
-  /** If true, lower is better (e.g. duration) */
   invert?: boolean;
 }
 
-/**
- * Semi-circular gauge displaying current value vs target with color zones.
- * Green = at/above target, Yellow = within 5% margin, Red = >5% below target.
- * For inverted metrics (duration), lower is better.
- */
 export function SlaGauge({ value, target, label, unit, invert = false }: SlaGaugeProps) {
-  // Determine compliance status
+  const [isDark, setIsDark] = useState(false);
+
+  useEffect(() => {
+    const check = () => setIsDark(document.documentElement.classList.contains("dark"));
+    check();
+    const observer = new MutationObserver(check);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    return () => observer.disconnect();
+  }, []);
+
   const getStatus = (): "met" | "warning" | "breached" => {
     if (invert) {
-      // Lower is better (e.g. duration)
       if (value <= target) return "met";
       if (value <= target * 1.05) return "warning";
       return "breached";
     } else {
-      // Higher is better (e.g. success rate)
       if (value >= target) return "met";
       if (value >= target * 0.95) return "warning";
       return "breached";
@@ -39,17 +36,17 @@ export function SlaGauge({ value, target, label, unit, invert = false }: SlaGaug
 
   const status = getStatus();
   const statusColor =
-    status === "met" ? chartColors.success :
-    status === "warning" ? chartColors.warning :
-    chartColors.danger;
+    status === "met" ? "#16a34a" :
+    status === "warning" ? "#d97706" :
+    "#dc2626";
 
   const statusLabel =
     status === "met" ? "Compliant" :
     status === "warning" ? "At Risk" :
     "Breached";
 
-  // PieChart data for semi-circle gauge
-  // Fill portion vs empty portion (mapped to 180 degrees)
+  const emptyColor = isDark ? "#374151" : "#e5e7eb"; // gray-700 / gray-200
+
   const maxVal = invert ? target * 2 : 100;
   const fillPercent = Math.min(Math.max(value / maxVal, 0), 1);
 
@@ -75,18 +72,18 @@ export function SlaGauge({ value, target, label, unit, invert = false }: SlaGaug
               stroke="none"
             >
               <Cell fill={statusColor} />
-              <Cell fill="#374151" />
+              <Cell fill={emptyColor} />
             </Pie>
           </PieChart>
         </ResponsiveContainer>
         <div className="absolute inset-0 flex flex-col items-center justify-end pb-1">
-          <span className="text-2xl font-bold text-white">
+          <span className="text-2xl font-bold text-gray-900 dark:text-white">
             {value.toFixed(1)}{unit}
           </span>
         </div>
       </div>
-      <span className="text-sm text-gray-400 mt-1">{label}</span>
-      <span className="text-xs mt-0.5" style={{ color: statusColor }}>
+      <span className="text-sm text-gray-600 dark:text-gray-400 mt-1">{label}</span>
+      <span className="text-xs font-medium mt-0.5 px-2 py-0.5 rounded" style={{ color: statusColor }}>
         {statusLabel} (target: {target}{unit})
       </span>
     </div>
