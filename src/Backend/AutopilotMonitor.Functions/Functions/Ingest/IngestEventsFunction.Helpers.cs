@@ -15,7 +15,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
     /// </summary>
     public partial class IngestEventsFunction
     {
-        private async Task<IngestEventsRequest> ParseNdjsonGzipRequest(Stream body, string? tenantId = null)
+        private async Task<IngestEventsRequest> ParseNdjsonRequest(Stream body, string? tenantId = null)
         {
             var config = !string.IsNullOrEmpty(tenantId)
                 ? await _configService.GetConfigurationAsync(tenantId)
@@ -23,7 +23,9 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
 
             var maxPayloadSizeBytes = (config?.MaxNdjsonPayloadSizeMB ?? 5) * 1024 * 1024;
 
-            var (sessionId, metaTenantId, events) = await NdjsonParser.ParseGzipAsync(body, maxPayloadSizeBytes);
+            // body is already gzip-decompressed by the UseRequestDecompression middleware if the
+            // client sent Content-Encoding: gzip — parser reads plain NDJSON.
+            var (sessionId, metaTenantId, events) = await NdjsonParser.ParseNdjsonStreamAsync(body, maxPayloadSizeBytes);
             _logger.LogDebug("NDJSON payload parsed: {EventCount} events (limit: {LimitMB} MB)",
                 events.Count, config?.MaxNdjsonPayloadSizeMB ?? 5);
 

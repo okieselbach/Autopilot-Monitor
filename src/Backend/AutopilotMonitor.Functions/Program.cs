@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using AutopilotMonitor.Functions.DataAccess;
@@ -8,6 +9,9 @@ using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Middleware;
 using AutopilotMonitor.Functions.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Builder;
 using Microsoft.Azure.Functions.Worker.Middleware;
@@ -99,6 +103,22 @@ builder.Services.AddAuthorization();
 
 // Enable ASP.NET Core integration for authentication
 builder.Services.AddHttpContextAccessor();
+
+// HTTP compression — bidirectional gzip for bandwidth-sensitive agent links.
+// UseResponseCompression: backend → agent (config, ingest ack, ...). Triggered by Accept-Encoding.
+// UseRequestDecompression: agent → backend (ingest NDJSON). Triggered by Content-Encoding.
+// Registered via IStartupFilter because FunctionsApplication.CreateBuilder's Build() returns IHost,
+// not WebApplication — we can't call app.UseXxx() directly.
+builder.Services.AddResponseCompression(options =>
+{
+    options.EnableForHttps = true;
+    options.Providers.Add<GzipCompressionProvider>();
+    options.MimeTypes = ResponseCompressionDefaults.MimeTypes
+        .Concat(new[] { "application/json", "application/x-ndjson" });
+});
+builder.Services.Configure<GzipCompressionProviderOptions>(o => o.Level = CompressionLevel.Fastest);
+builder.Services.AddRequestDecompression();
+builder.Services.AddTransient<IStartupFilter, HttpCompressionStartupFilter>();
 
 // Register our services
 builder.Services.AddMemoryCache();

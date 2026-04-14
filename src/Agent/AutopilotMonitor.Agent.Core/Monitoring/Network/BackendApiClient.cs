@@ -95,6 +95,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Network
             // Azure App Service extracts the cert from the TLS handshake and forwards it
             // in the X-ARR-ClientCert header to the backend function.
             var handler = new HttpClientHandler();
+            // AutomaticDecompression sends Accept-Encoding and transparently decompresses
+            // gzip/deflate responses. Bandwidth-sensitive links benefit a lot on JSON-heavy
+            // endpoints like GetAgentConfig.
+            if (handler.SupportsAutomaticDecompression)
+            {
+                handler.AutomaticDecompression = System.Net.DecompressionMethods.GZip | System.Net.DecompressionMethods.Deflate;
+            }
             if (_clientCertificate != null)
             {
                 handler.ClientCertificates.Add(_clientCertificate);

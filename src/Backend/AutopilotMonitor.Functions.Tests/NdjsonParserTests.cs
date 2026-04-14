@@ -5,7 +5,9 @@ using Newtonsoft.Json;
 namespace AutopilotMonitor.Functions.Tests;
 
 /// <summary>
-/// Tests for NdjsonParser — the NDJSON+gzip parsing contract.
+/// Tests for NdjsonParser — the NDJSON parsing contract.
+/// Gzip transport compression is handled by ASP.NET Core's UseRequestDecompression middleware,
+/// so this parser only deals with already-decompressed NDJSON streams.
 /// If the wire format between agent and backend ever drifts, these tests will catch it.
 /// </summary>
 public class NdjsonParserTests
@@ -137,19 +139,28 @@ public class NdjsonParserTests
         Assert.Throws<InvalidOperationException>(() => NdjsonParser.ParseNdjson(""));
     }
 
-    // --- ParseGzipAsync ---
+    // --- ParseNdjsonStreamAsync (decompressed stream — middleware handles gzip upstream) ---
+
+    private static byte[] BuildNdjsonBytes(string sessionId, string tenantId, IEnumerable<object> events)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine(JsonConvert.SerializeObject(new { SessionId = sessionId, TenantId = tenantId }));
+        foreach (var evt in events)
+            sb.AppendLine(JsonConvert.SerializeObject(evt));
+        return System.Text.Encoding.UTF8.GetBytes(sb.ToString());
+    }
 
     [Fact]
-    public async Task ParseGzipAsync_ValidPayload_ReturnsCorrectData()
+    public async Task ParseNdjsonStreamAsync_ValidPayload_ReturnsCorrectData()
     {
-        var payload = NdjsonParser.BuildGzipPayload(ValidSessionId, ValidTenantId,
+        var payload = BuildNdjsonBytes(ValidSessionId, ValidTenantId,
         [
             new EnrollmentEvent { EventType = "phase_changed" },
             new EnrollmentEvent { EventType = "app_install_started" },
         ]);
 
         using var stream = new MemoryStream(payload);
-        var (sessionId, tenantId, events) = await NdjsonParser.ParseGzipAsync(stream, 5 * 1024 * 1024);
+        var (sessionId, tenantId, events) = await NdjsonParser.ParseNdjsonStreamAsync(stream, 5 * 1024 * 1024);
 
         Assert.Equal(ValidSessionId, sessionId);
         Assert.Equal(ValidTenantId, tenantId);
@@ -157,9 +168,9 @@ public class NdjsonParserTests
     }
 
     [Fact]
-    public async Task ParseGzipAsync_PayloadExceedsMaxSize_Throws()
+    public async Task ParseNdjsonStreamAsync_PayloadExceedsMaxSize_Throws()
     {
-        var payload = NdjsonParser.BuildGzipPayload(ValidSessionId, ValidTenantId,
+        var payload = BuildNdjsonBytes(ValidSessionId, ValidTenantId,
             Enumerable.Range(0, 100).Select(_ => new EnrollmentEvent
             {
                 EventType = "test",
@@ -170,18 +181,16 @@ public class NdjsonParserTests
 
         // Restrict to 1 byte — will throw immediately
         await Assert.ThrowsAsync<InvalidOperationException>(
-            () => NdjsonParser.ParseGzipAsync(stream, maxSizeBytes: 1));
+            () => NdjsonParser.ParseNdjsonStreamAsync(stream, maxSizeBytes: 1));
     }
 
-    // --- BuildGzipPayload (test helper verification) ---
-
     [Fact]
-    public async Task BuildGzipPayload_RoundTrip_PreservesMetadata()
+    public async Task ParseNdjsonStreamAsync_EmptyEvents_ReturnsMetadataOnly()
     {
-        var payload = NdjsonParser.BuildGzipPayload(ValidSessionId, ValidTenantId, []);
+        var payload = BuildNdjsonBytes(ValidSessionId, ValidTenantId, []);
 
         using var stream = new MemoryStream(payload);
-        var (sessionId, tenantId, events) = await NdjsonParser.ParseGzipAsync(stream, 5 * 1024 * 1024);
+        var (sessionId, tenantId, events) = await NdjsonParser.ParseNdjsonStreamAsync(stream, 5 * 1024 * 1024);
 
         Assert.Equal(ValidSessionId, sessionId);
         Assert.Equal(ValidTenantId, tenantId);

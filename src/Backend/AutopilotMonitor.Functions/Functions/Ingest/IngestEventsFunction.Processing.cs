@@ -48,7 +48,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                         // Session-aware block: parse body to check if this is a different (new) session
                         if (!string.IsNullOrEmpty(blockedSessionIds))
                         {
-                            earlyParsedRequest = await ParseNdjsonGzipRequest(req.Body, tenantId);
+                            earlyParsedRequest = await ParseNdjsonRequest(req.Body, tenantId);
                             if (earlyParsedRequest != null && !string.IsNullOrEmpty(earlyParsedRequest.SessionId))
                             {
                                 var (stillBlocked, _, _, _) = await _blockedDeviceService.IsBlockedAsync(
@@ -128,7 +128,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
 
                 // --- Parse NDJSON+gzip request body (only after security is cleared) ---
                 // If session-aware block check already parsed the body, reuse that result (stream is consumed)
-                var request = earlyParsedRequest ?? await ParseNdjsonGzipRequest(req.Body, tenantId);
+                var request = earlyParsedRequest ?? await ParseNdjsonRequest(req.Body, tenantId);
 
                 if (request?.Events == null || request.Events.Count == 0)
                 {

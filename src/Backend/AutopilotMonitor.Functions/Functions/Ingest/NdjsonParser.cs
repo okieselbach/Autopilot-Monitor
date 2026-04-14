@@ -1,4 +1,3 @@
-using System.IO.Compression;
 using System.Text;
 using AutopilotMonitor.Shared.Models;
 using Newtonsoft.Json;
@@ -7,38 +6,36 @@ using Newtonsoft.Json.Linq;
 namespace AutopilotMonitor.Functions.Functions.Ingest
 {
     /// <summary>
-    /// Pure NDJSON+gzip parsing logic — no service dependencies.
-    /// Isolated here so it can be unit-tested without DI infrastructure.
+    /// Pure NDJSON parsing logic — no service dependencies.
+    /// Gzip transport compression is handled upstream by ASP.NET Core's UseRequestDecompression
+    /// middleware, so this parser sees an already-decompressed stream.
     /// </summary>
     internal static class NdjsonParser
     {
         /// <summary>
-        /// Decompresses a gzip stream and parses NDJSON content.
+        /// Reads an NDJSON stream with a size cap and parses it.
         /// First line: metadata (sessionId, tenantId). Subsequent lines: EnrollmentEvent objects.
         /// </summary>
         internal static async Task<(string sessionId, string tenantId, List<EnrollmentEvent> events)>
-            ParseGzipAsync(Stream body, int maxSizeBytes)
+            ParseNdjsonStreamAsync(Stream body, int maxSizeBytes)
         {
-            using var decompressed = new MemoryStream();
-            using (var gzip = new GZipStream(body, CompressionMode.Decompress, leaveOpen: true))
-            {
-                var buffer = new byte[8192];
-                int bytesRead;
-                long totalBytesRead = 0;
+            using var buffered = new MemoryStream();
+            var buffer = new byte[8192];
+            int bytesRead;
+            long totalBytesRead = 0;
 
-                while ((bytesRead = await gzip.ReadAsync(buffer, 0, buffer.Length)) > 0)
-                {
-                    totalBytesRead += bytesRead;
-                    if (totalBytesRead > maxSizeBytes)
-                        throw new InvalidOperationException(
-                            $"NDJSON payload size exceeds maximum allowed size. " +
-                            $"Current size: {totalBytesRead / 1024.0 / 1024.0:F2} MB");
-                    await decompressed.WriteAsync(buffer, 0, bytesRead);
-                }
+            while ((bytesRead = await body.ReadAsync(buffer, 0, buffer.Length)) > 0)
+            {
+                totalBytesRead += bytesRead;
+                if (totalBytesRead > maxSizeBytes)
+                    throw new InvalidOperationException(
+                        $"NDJSON payload size exceeds maximum allowed size. " +
+                        $"Current size: {totalBytesRead / 1024.0 / 1024.0:F2} MB");
+                await buffered.WriteAsync(buffer, 0, bytesRead);
             }
 
-            decompressed.Position = 0;
-            var ndjson = await new StreamReader(decompressed, Encoding.UTF8).ReadToEndAsync();
+            buffered.Position = 0;
+            var ndjson = await new StreamReader(buffered, Encoding.UTF8).ReadToEndAsync();
             return ParseNdjson(ndjson);
         }
 
@@ -78,25 +75,6 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             }
 
             return (metadata.SessionId, metadata.TenantId, events);
-        }
-
-        /// <summary>
-        /// Builds a gzip-compressed NDJSON payload for testing.
-        /// </summary>
-        internal static byte[] BuildGzipPayload(string sessionId, string tenantId, IEnumerable<object> events)
-        {
-            var sb = new StringBuilder();
-            sb.AppendLine(JsonConvert.SerializeObject(new { SessionId = sessionId, TenantId = tenantId }));
-            foreach (var evt in events)
-                sb.AppendLine(JsonConvert.SerializeObject(evt));
-
-            using var output = new MemoryStream();
-            using (var gzip = new GZipStream(output, CompressionMode.Compress, leaveOpen: true))
-            {
-                var bytes = Encoding.UTF8.GetBytes(sb.ToString());
-                gzip.Write(bytes, 0, bytes.Length);
-            }
-            return output.ToArray();
         }
 
         internal static void NormalizeEventData(EnrollmentEvent evt)
