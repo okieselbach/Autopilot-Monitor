@@ -24,6 +24,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
         private readonly RateLimitService _rateLimitService;
         private readonly AutopilotDeviceValidator _autopilotDeviceValidator;
         private readonly CorporateIdentifierValidator _corporateIdentifierValidator;
+        private readonly DeviceAssociationValidator _deviceAssociationValidator;
         private readonly AnalyzeRuleService _analyzeRuleService;
         private readonly WebhookNotificationService _webhookNotificationService;
         private readonly BlockedDeviceService _blockedDeviceService;
@@ -46,6 +47,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             RateLimitService rateLimitService,
             AutopilotDeviceValidator autopilotDeviceValidator,
             CorporateIdentifierValidator corporateIdentifierValidator,
+            DeviceAssociationValidator deviceAssociationValidator,
             AnalyzeRuleService analyzeRuleService,
             WebhookNotificationService webhookNotificationService,
             BlockedDeviceService blockedDeviceService,
@@ -67,6 +69,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             _rateLimitService = rateLimitService;
             _autopilotDeviceValidator = autopilotDeviceValidator;
             _corporateIdentifierValidator = corporateIdentifierValidator;
+            _deviceAssociationValidator = deviceAssociationValidator;
             _analyzeRuleService = analyzeRuleService;
             _webhookNotificationService = webhookNotificationService;
             _blockedDeviceService = blockedDeviceService;
@@ -107,7 +110,8 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                     _autopilotDeviceValidator,
                     _corporateIdentifierValidator,
                     _logger,
-                    bootstrapSessionService: _bootstrapSessionService
+                    bootstrapSessionService: _bootstrapSessionService,
+                    deviceAssociationValidator: _deviceAssociationValidator
                 );
 
                 if (errorResponse != null)

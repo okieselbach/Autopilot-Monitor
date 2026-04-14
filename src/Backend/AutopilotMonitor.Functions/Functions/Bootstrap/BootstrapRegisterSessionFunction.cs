@@ -24,6 +24,7 @@ namespace AutopilotMonitor.Functions.Functions.Bootstrap
         private readonly RateLimitService _rateLimitService;
         private readonly AutopilotDeviceValidator _autopilotDeviceValidator;
         private readonly CorporateIdentifierValidator _corporateIdentifierValidator;
+        private readonly DeviceAssociationValidator _deviceAssociationValidator;
         private readonly BootstrapSessionService _bootstrapSessionService;
 
         public BootstrapRegisterSessionFunction(
@@ -33,6 +34,7 @@ namespace AutopilotMonitor.Functions.Functions.Bootstrap
             RateLimitService rateLimitService,
             AutopilotDeviceValidator autopilotDeviceValidator,
             CorporateIdentifierValidator corporateIdentifierValidator,
+            DeviceAssociationValidator deviceAssociationValidator,
             BootstrapSessionService bootstrapSessionService)
         {
             _logger = logger;
@@ -41,6 +43,7 @@ namespace AutopilotMonitor.Functions.Functions.Bootstrap
             _rateLimitService = rateLimitService;
             _autopilotDeviceValidator = autopilotDeviceValidator;
             _corporateIdentifierValidator = corporateIdentifierValidator;
+            _deviceAssociationValidator = deviceAssociationValidator;
             _bootstrapSessionService = bootstrapSessionService;
         }
 
@@ -91,7 +94,8 @@ namespace AutopilotMonitor.Functions.Functions.Bootstrap
                     registration.TenantId, _configService, _rateLimitService,
                     _autopilotDeviceValidator, _corporateIdentifierValidator,
                     _logger, registration.SessionId,
-                    bootstrapSessionService: _bootstrapSessionService);
+                    bootstrapSessionService: _bootstrapSessionService,
+                    deviceAssociationValidator: _deviceAssociationValidator);
 
                 if (errorResponse != null)
                 {

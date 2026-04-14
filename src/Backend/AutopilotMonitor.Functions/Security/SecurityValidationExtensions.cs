@@ -31,9 +31,10 @@ namespace AutopilotMonitor.Functions.Security
             CorporateIdentifierValidator corporateIdentifierValidator,
             ILogger logger,
             string? sessionId = null,
-            BootstrapSessionService? bootstrapSessionService = null)
+            BootstrapSessionService? bootstrapSessionService = null,
+            DeviceAssociationValidator? deviceAssociationValidator = null)
         {
-            var validator = new SecurityValidator(configService, rateLimitService, autopilotDeviceValidator, corporateIdentifierValidator, logger, bootstrapSessionService);
+            var validator = new SecurityValidator(configService, rateLimitService, autopilotDeviceValidator, corporateIdentifierValidator, logger, bootstrapSessionService, deviceAssociationValidator);
             var validation = await validator.ValidateRequestAsync(req, tenantId, sessionId);
 
             if (!validation.IsValid)

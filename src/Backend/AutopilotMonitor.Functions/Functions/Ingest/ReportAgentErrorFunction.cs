@@ -29,6 +29,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
         private readonly RateLimitService _rateLimitService;
         private readonly AutopilotDeviceValidator _autopilotDeviceValidator;
         private readonly CorporateIdentifierValidator _corporateIdentifierValidator;
+        private readonly DeviceAssociationValidator _deviceAssociationValidator;
         private readonly TelemetryClient _telemetryClient;
         private readonly BootstrapSessionService _bootstrapSessionService;
 
@@ -38,6 +39,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             RateLimitService rateLimitService,
             AutopilotDeviceValidator autopilotDeviceValidator,
             CorporateIdentifierValidator corporateIdentifierValidator,
+            DeviceAssociationValidator deviceAssociationValidator,
             TelemetryClient telemetryClient,
             BootstrapSessionService bootstrapSessionService)
         {
@@ -46,6 +48,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             _rateLimitService = rateLimitService;
             _autopilotDeviceValidator = autopilotDeviceValidator;
             _corporateIdentifierValidator = corporateIdentifierValidator;
+            _deviceAssociationValidator = deviceAssociationValidator;
             _telemetryClient = telemetryClient;
             _bootstrapSessionService = bootstrapSessionService;
         }
@@ -77,7 +80,8 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                     _autopilotDeviceValidator,
                     _corporateIdentifierValidator,
                     _logger,
-                    bootstrapSessionService: _bootstrapSessionService
+                    bootstrapSessionService: _bootstrapSessionService,
+                    deviceAssociationValidator: _deviceAssociationValidator
                 );
 
                 if (errorResponse != null)

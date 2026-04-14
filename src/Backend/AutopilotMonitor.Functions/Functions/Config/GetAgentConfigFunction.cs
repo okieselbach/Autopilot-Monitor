@@ -24,6 +24,7 @@ namespace AutopilotMonitor.Functions.Functions.Config
         private readonly RateLimitService _rateLimitService;
         private readonly AutopilotDeviceValidator _autopilotDeviceValidator;
         private readonly CorporateIdentifierValidator _corporateIdentifierValidator;
+        private readonly DeviceAssociationValidator _deviceAssociationValidator;
         private readonly BootstrapSessionService _bootstrapSessionService;
 
         public GetAgentConfigFunction(
@@ -35,6 +36,7 @@ namespace AutopilotMonitor.Functions.Functions.Config
             RateLimitService rateLimitService,
             AutopilotDeviceValidator autopilotDeviceValidator,
             CorporateIdentifierValidator corporateIdentifierValidator,
+            DeviceAssociationValidator deviceAssociationValidator,
             BootstrapSessionService bootstrapSessionService)
         {
             _logger = logger;
@@ -45,6 +47,7 @@ namespace AutopilotMonitor.Functions.Functions.Config
             _rateLimitService = rateLimitService;
             _autopilotDeviceValidator = autopilotDeviceValidator;
             _corporateIdentifierValidator = corporateIdentifierValidator;
+            _deviceAssociationValidator = deviceAssociationValidator;
             _bootstrapSessionService = bootstrapSessionService;
         }
 
@@ -76,7 +79,8 @@ namespace AutopilotMonitor.Functions.Functions.Config
                     _autopilotDeviceValidator,
                     _corporateIdentifierValidator,
                     _logger,
-                    bootstrapSessionService: _bootstrapSessionService
+                    bootstrapSessionService: _bootstrapSessionService,
+                    deviceAssociationValidator: _deviceAssociationValidator
                 );
 
                 if (errorResponse != null)
