@@ -56,8 +56,7 @@ export default function DiagnosisPage() {
 
   useEffect(() => {
     if (sessionTenantId && sessionId) {
-      fetchEvents();
-      fetchAnalysisResults();
+      Promise.all([fetchEvents(), fetchAnalysisResults()]);
     }
   }, [sessionTenantId, sessionId]);
 
@@ -70,8 +69,7 @@ export default function DiagnosisPage() {
         await joinGroup(`session-${effectiveTenantId}-${sessionId}`);
         hasJoinedGroups.current = true;
         // Re-fetch after group join to catch any missed during join
-        fetchEvents();
-        fetchAnalysisResults();
+        Promise.all([fetchEvents(), fetchAnalysisResults()]);
       };
       joinAndCatchUp();
     }

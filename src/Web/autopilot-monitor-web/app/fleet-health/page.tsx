@@ -56,8 +56,7 @@ export default function FleetHealthPage() {
     if (!globalAdminMode && !tenantId) return; // wait for real tenant ID
     if (hasInitialFetch.current) return;
     hasInitialFetch.current = true;
-    fetchSessions();
-    fetchAppMetrics(timeRange);
+    Promise.all([fetchSessions(), fetchAppMetrics(timeRange)]);
   }, [tenantId, globalAdminMode]);
 
   useEffect(() => {
@@ -65,8 +64,7 @@ export default function FleetHealthPage() {
       isTimeRangeMount.current = false;
       return;
     }
-    fetchSessions(timeRange);
-    fetchAppMetrics(timeRange);
+    Promise.all([fetchSessions(timeRange), fetchAppMetrics(timeRange)]);
   }, [timeRange]);
 
   useEffect(() => {
