@@ -5,6 +5,7 @@ using AutopilotMonitor.Functions.Services.Notifications;
 using AutopilotMonitor.Functions.Services.Vulnerability;
 using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
+using Microsoft.ApplicationInsights;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Azure.Functions.Worker.Extensions.SignalRService;
@@ -35,6 +36,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
         private readonly SignalRNotificationService _signalRNotification;
         private readonly OpsEventService _opsEventService;
         private readonly SlaBreachEvaluationService _slaBreachService;
+        private readonly TelemetryClient _telemetryClient;
 
         public IngestEventsFunction(
             ILogger<IngestEventsFunction> logger,
@@ -57,7 +59,8 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             AdminConfigurationService adminConfigService,
             SignalRNotificationService signalRNotification,
             OpsEventService opsEventService,
-            SlaBreachEvaluationService slaBreachService)
+            SlaBreachEvaluationService slaBreachService,
+            TelemetryClient telemetryClient)
         {
             _logger = logger;
             _sessionRepo = sessionRepo;
@@ -80,6 +83,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             _signalRNotification = signalRNotification;
             _opsEventService = opsEventService;
             _slaBreachService = slaBreachService;
+            _telemetryClient = telemetryClient;
         }
 
         [Function("IngestEvents")]

@@ -172,6 +172,7 @@ public static class EndpointAccessPolicyCatalog
         new("PUT",    "rules/ime-log-patterns/{patternId}", EndpointPolicy.TenantAdminOrGA),
         new("POST",   "sessions/{sessionId}/mark-failed",     EndpointPolicy.TenantAdminOrGA),
         new("POST",   "sessions/{sessionId}/mark-succeeded", EndpointPolicy.TenantAdminOrGA),
+        new("POST",   "sessions/{sessionId}/actions",          EndpointPolicy.TenantAdminOrGA),
         new("POST",   "sessions/{sessionId}/report",        EndpointPolicy.TenantAdminOrGA),
         new("DELETE", "sessions/{sessionId}",      EndpointPolicy.TenantAdminOrGA),
         new("GET",    "tenants/{tenantId}/admins",           EndpointPolicy.TenantAdminOrGA, TenantScoping.RouteParam),

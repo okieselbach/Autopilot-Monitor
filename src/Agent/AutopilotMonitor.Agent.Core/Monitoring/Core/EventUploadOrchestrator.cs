@@ -26,6 +26,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         private readonly Action<EnrollmentEvent> _emitEvent;
         private readonly Action<string, string, Dictionary<string, object>> _emitShutdownEvent;
         private readonly Func<bool> _isTerminalEventSeen;
+        private ServerActionDispatcher _serverActionDispatcher;
 
         private readonly Timer _uploadTimer;
         private readonly Timer _debounceTimer;
@@ -84,6 +85,16 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 TimeSpan.FromMinutes(5)
             );
             _logger.Info("EventUploadOrchestrator started (debounce + fallback timers)");
+        }
+
+        /// <summary>
+        /// Wires the server-action dispatcher. Called by <see cref="MonitoringService"/> after the
+        /// orchestrator is constructed, once all other services exist. Optional — if null, actions
+        /// in ingest responses are simply ignored.
+        /// </summary>
+        public void SetServerActionDispatcher(ServerActionDispatcher dispatcher)
+        {
+            _serverActionDispatcher = dispatcher;
         }
 
         /// <summary>
@@ -151,44 +162,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
 
                 var response = await _apiClient.IngestEventsAsync(request);
 
-                if (response.DeviceKillSignal)
-                {
-                    _logger.Warning($"=== REMOTE KILL SIGNAL received from administrator. Spool: {_spool.GetCount()} events pending. Initiating self-destruct... ===");
-
-                    StopTimers();
-
-                    _emitShutdownEvent(
-                        "remote_kill_signal",
-                        "Agent terminated by remote kill signal from administrator",
-                        new Dictionary<string, object>
-                        {
-                            { "pendingEvents", _spool.GetCount() },
-                            { "selfDestruct", true }
-                        });
-                    try
-                    {
-                        var shutdownEvents = _spool.GetBatch(_configuration.MaxBatchSize);
-                        if (shutdownEvents.Count > 0)
-                        {
-                            await _apiClient.IngestEventsAsync(new IngestEventsRequest
-                            {
-                                SessionId = _configuration.SessionId,
-                                TenantId = _configuration.TenantId,
-                                Events = shutdownEvents
-                            });
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.Warning($"Failed to upload shutdown event before kill: {ex.Message}");
-                    }
-
-                    _configuration.SelfDestructOnComplete = true;
-                    _cleanupService.ExecuteSelfDestruct();
-                    ExitProcess(0);
-                    return;
-                }
-
+                // DeviceBlocked is intentionally NOT synthesized into a ServerAction: it's a
+                // non-terminal quarantine (UnblockAt can auto-resume the session later). Treat it
+                // as a straight "stop uploads for now" signal.
                 if (response.DeviceBlocked)
                 {
                     var unblockMsg = response.UnblockAt.HasValue
@@ -200,26 +176,83 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     return;
                 }
 
-                if (!string.IsNullOrEmpty(response.AdminAction) && !_isTerminalEventSeen())
-                {
-                    var succeeded = string.Equals(response.AdminAction, "Succeeded", StringComparison.OrdinalIgnoreCase);
-                    _logger.Warning($"=== ADMIN OVERRIDE: Session marked as {response.AdminAction} by administrator. Initiating cleanup... ===");
+                // Synthesize legacy kill + admin-override signals into ServerActions so the whole
+                // "server told us to stop" surface runs through a single shutdown handler. This
+                // removes three divergent code paths (kill / admin / terminate) and guarantees
+                // every terminal path respects SelfDestructOnComplete — no more zombie agents
+                // after the operator clicks Mark-Failed in the portal.
+                List<ServerAction> synthesized = null;
 
-                    _emitEvent(new EnrollmentEvent
+                if (response.DeviceKillSignal)
+                {
+                    synthesized = new List<ServerAction>
                     {
-                        SessionId = _configuration.SessionId,
-                        TenantId = _configuration.TenantId,
-                        EventType = succeeded ? "enrollment_complete" : "enrollment_failed",
-                        Severity = succeeded ? EventSeverity.Info : EventSeverity.Warning,
-                        Source = "AdminOverride",
-                        Phase = EnrollmentPhase.Complete,
-                        Message = $"Session {response.AdminAction.ToLower()} by administrator — cleanup initiated",
-                        Timestamp = DateTime.UtcNow,
-                        Data = new Dictionary<string, object>
+                        new ServerAction
                         {
-                            { "adminAction", response.AdminAction }
+                            Type = ServerActionTypes.TerminateSession,
+                            Reason = "DeviceKillSignal from administrator",
+                            QueuedAt = DateTime.UtcNow,
+                            Params = new Dictionary<string, string>
+                            {
+                                // Kill overrides everything: force self-destruct even if local config says otherwise,
+                                // and no grace period — the operator decided this device must go NOW.
+                                { "forceSelfDestruct", "true" },
+                                { "gracePeriodSeconds", "0" },
+                                { "origin", "kill_signal" }
+                            }
                         }
-                    });
+                    };
+                }
+                else if (!string.IsNullOrEmpty(response.AdminAction) && !_isTerminalEventSeen())
+                {
+                    // Admin marked the session terminal from the portal (Mark-Failed / Mark-Succeeded).
+                    // Soft shutdown: config decides whether to self-destruct — but in Prod
+                    // SelfDestructOnComplete=true, so no zombies.
+                    synthesized = new List<ServerAction>
+                    {
+                        new ServerAction
+                        {
+                            Type = ServerActionTypes.TerminateSession,
+                            Reason = $"Admin marked session as {response.AdminAction}",
+                            QueuedAt = DateTime.UtcNow,
+                            Params = new Dictionary<string, string>
+                            {
+                                { "adminOutcome", response.AdminAction },
+                                { "gracePeriodSeconds", "0" },
+                                { "origin", "admin_action" }
+                            }
+                        }
+                    };
+                }
+
+                // Merge synthesized signals with real server actions, then dispatch once.
+                // Order: synthesized first (they're the highest-priority stop signals).
+                if (synthesized != null || (response.Actions != null && response.Actions.Count > 0))
+                {
+                    var batch = synthesized ?? new List<ServerAction>();
+                    if (response.Actions != null) batch.AddRange(response.Actions);
+
+                    if (_serverActionDispatcher != null)
+                    {
+                        try
+                        {
+                            await _serverActionDispatcher.DispatchAsync(batch);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.Error($"ServerActionDispatcher.DispatchAsync threw (batch aborted)", ex);
+                        }
+                    }
+                    else if (synthesized != null)
+                    {
+                        // Defensive: if a synthesized kill/admin signal arrives before the dispatcher
+                        // was wired, fall back to a bare-minimum shutdown so we don't leave a zombie.
+                        _logger.Error("Kill/Admin signal received but no dispatcher wired — forcing exit");
+                        StopTimers();
+                        _configuration.SelfDestructOnComplete = true;
+                        _cleanupService.ExecuteSelfDestruct();
+                        ExitProcess(1);
+                    }
                     return;
                 }
 

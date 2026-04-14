@@ -40,6 +40,20 @@ namespace AutopilotMonitor.Shared.DataAccess
             string? country, string? region, string? city, string? loc);
         Task UpdateSessionImeAgentVersionAsync(string tenantId, string sessionId, string version);
 
+        // --- Server→Agent Actions ---
+        /// <summary>
+        /// Queues a <see cref="ServerAction"/> for delivery on the next ingest call.
+        /// Dedup-by-Type: queueing the same action type twice replaces the existing entry
+        /// while preserving the earliest QueuedAt for TTL purposes.
+        /// </summary>
+        Task<bool> QueueServerActionAsync(string tenantId, string sessionId, ServerAction action);
+
+        /// <summary>
+        /// Reads the pending-action queue and atomically clears it for delivery on the ingest response.
+        /// At-least-once delivery semantics: concurrent callers may both observe the same actions.
+        /// </summary>
+        Task<List<ServerAction>> FetchAndClearPendingActionsAsync(string tenantId, string sessionId);
+
         // --- IME Version History ---
         Task<bool> RecordImeVersionAsync(string version, string tenantId, string sessionId);
         Task<List<ImeVersionHistoryEntry>> GetImeVersionHistoryAsync();

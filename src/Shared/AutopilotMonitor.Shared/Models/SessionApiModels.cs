@@ -108,6 +108,13 @@ namespace AutopilotMonitor.Shared.Models
         /// Values: "Succeeded", "Failed". Agent should treat as terminal signal and run cleanup.
         /// </summary>
         public string? AdminAction { get; set; }
+
+        /// <summary>
+        /// Generic server→agent action channel. Null/empty when no actions are pending.
+        /// Delivered at-least-once; agents must handle actions idempotently.
+        /// Unknown action types should be logged and skipped (forward-compatibility).
+        /// </summary>
+        public List<ServerAction>? Actions { get; set; }
     }
 
     /// <summary>
@@ -255,6 +262,21 @@ namespace AutopilotMonitor.Shared.Models
         // Script execution counts — incremented during ingest
         public int PlatformScriptCount { get; set; }
         public int RemediationScriptCount { get; set; }
+
+        /// <summary>
+        /// JSON-serialized <see cref="System.Collections.Generic.List{T}"/> of <see cref="ServerAction"/>
+        /// pending delivery to the agent. Empty string when no actions are queued.
+        /// The Ingest function reads this alongside the session's status fields (no extra I/O),
+        /// attaches the actions to the response, and clears the column via a merge.
+        /// </summary>
+        public string PendingActionsJson { get; set; } = string.Empty;
+
+        /// <summary>
+        /// When the first pending action was queued. Used for TTL and staleness detection —
+        /// maintenance can purge actions older than a threshold to prevent zombie signals
+        /// on long-dead sessions.
+        /// </summary>
+        public DateTime? PendingActionsQueuedAt { get; set; }
     }
 
     /// <summary>

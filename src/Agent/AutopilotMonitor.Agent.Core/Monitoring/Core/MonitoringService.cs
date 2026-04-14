@@ -155,7 +155,201 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             // Subscribe to spool events for batched upload
             _spool.EventsAvailable += _uploadOrchestrator.OnEventsAvailable;
 
+            // Wire server-action dispatcher. Handlers delegate to existing services:
+            //   rotate_config      → RemoteConfigService.FetchConfigAsync()
+            //   request_diagnostics → DiagnosticsPackageService.CreateAndUploadAsync(best-effort)
+            //   terminate_session  → HandleTerminateSessionAsync (optional grace period + upload + exit)
+            var dispatcher = new ServerActionDispatcher(
+                _configuration,
+                _logger,
+                rotateConfigAsync: async () =>
+                {
+                    try
+                    {
+                        var cfg = await _remoteConfigService.FetchConfigAsync();
+                        return cfg != null;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Warning($"rotate_config fetch failed: {ex.Message}");
+                        return false;
+                    }
+                },
+                uploadDiagnosticsAsync: async (suffix) =>
+                {
+                    try
+                    {
+                        return await _diagnosticsService.CreateAndUploadAsync(enrollmentSucceeded: false, fileNameSuffix: suffix);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Warning($"request_diagnostics upload failed: {ex.Message}");
+                        return new DiagnosticsUploadResult { ErrorCode = "exception: " + ex.Message };
+                    }
+                },
+                onTerminateRequested: HandleTerminateSessionAsync,
+                emitEvent: EmitEvent);
+
+            _uploadOrchestrator.SetServerActionDispatcher(dispatcher);
+
             _logger.Info("MonitoringService initialized");
+        }
+
+        /// <summary>
+        /// Unified shutdown handler for ALL server-initiated terminations: KO-rule <c>terminate_session</c>,
+        /// legacy <c>DeviceKillSignal</c> (synthesized), and legacy <c>AdminAction</c> (synthesized).
+        ///
+        /// Self-destruct policy: the agent always respects <see cref="AgentConfiguration.SelfDestructOnComplete"/>.
+        /// In production that's true, so every terminal path removes the scheduled task + agent files.
+        /// Debug/dev builds may flip it off; a <c>forceSelfDestruct</c> param in the action overrides
+        /// the local setting for security-driven kills (CVE response, rogue-device containment).
+        ///
+        /// Parameters honored from <see cref="ServerAction.Params"/>:
+        ///   <c>gracePeriodSeconds</c>   — 0-300, default 30. Time to keep collecting before shutdown.
+        ///   <c>uploadDiagnostics</c>    — "true"/"false". Best-effort diagnostics upload pre-shutdown.
+        ///   <c>adminOutcome</c>         — "Succeeded"/"Failed". Emits a synthetic enrollment_* event
+        ///                                  instead of the generic agent_shutdown event (preserves the
+        ///                                  session timeline's terminal-event semantics).
+        ///   <c>forceSelfDestruct</c>    — "true". Overrides local config to force self-destruct (kill).
+        ///   <c>origin</c>               — free-form tag carried through for observability.
+        ///
+        /// Idempotent: repeated deliveries of the same termination intent are no-ops after the first.
+        /// </summary>
+        private async Task HandleTerminateSessionAsync(ServerAction action)
+        {
+            if (_enrollmentTerminalEventSeen)
+            {
+                string originTag = "-";
+                if (action.Params != null && action.Params.TryGetValue("origin", out var o) && !string.IsNullOrEmpty(o))
+                    originTag = o;
+                _logger.Info($"terminate_session (origin={originTag}) received but session already terminal — skipping");
+                return;
+            }
+
+            _enrollmentTerminalEventSeen = true;
+
+            // --- Parse params ---
+            var graceSeconds = 30;
+            var wantDiagnostics = false;
+            var forceSelfDestruct = false;
+            string adminOutcome = null;
+            string origin = "server_action";
+
+            if (action.Params != null)
+            {
+                if (action.Params.TryGetValue("gracePeriodSeconds", out var graceStr)
+                    && int.TryParse(graceStr, out var parsedGrace)
+                    && parsedGrace >= 0 && parsedGrace <= 300)
+                {
+                    graceSeconds = parsedGrace;
+                }
+                if (action.Params.TryGetValue("uploadDiagnostics", out var diagStr))
+                    wantDiagnostics = string.Equals(diagStr, "true", StringComparison.OrdinalIgnoreCase);
+                if (action.Params.TryGetValue("forceSelfDestruct", out var forceStr))
+                    forceSelfDestruct = string.Equals(forceStr, "true", StringComparison.OrdinalIgnoreCase);
+                if (action.Params.TryGetValue("adminOutcome", out var outcomeStr))
+                    adminOutcome = outcomeStr;
+                if (action.Params.TryGetValue("origin", out var originStr) && !string.IsNullOrEmpty(originStr))
+                    origin = originStr;
+            }
+
+            _logger.Warning($"=== SERVER-REQUESTED TERMINATION origin={origin} reason='{action.Reason}' rule={action.RuleId ?? "-"} grace={graceSeconds}s upload={wantDiagnostics} force={forceSelfDestruct} outcome={adminOutcome ?? "-"} ===");
+
+            // --- Grace period: keep collectors running so late events get flushed ---
+            if (graceSeconds > 0)
+                await Task.Delay(TimeSpan.FromSeconds(graceSeconds)).ConfigureAwait(false);
+
+            _uploadOrchestrator.StopTimers();
+
+            // --- Best-effort diagnostics upload (only if requested AND tenant has SAS configured) ---
+            if (wantDiagnostics)
+            {
+                try
+                {
+                    await _diagnosticsService.CreateAndUploadAsync(enrollmentSucceeded: adminOutcome == "Succeeded", fileNameSuffix: "terminated-by-server");
+                }
+                catch (Exception ex)
+                {
+                    _logger.Warning($"terminate_session: diagnostics upload failed — {ex.Message}");
+                }
+            }
+
+            // --- Emit the terminal event appropriate for the origin ---
+            if (!string.IsNullOrEmpty(adminOutcome))
+            {
+                // Admin portal outcome: preserve the session timeline's terminal-event semantics
+                // by emitting enrollment_complete / enrollment_failed instead of a generic shutdown.
+                var succeeded = string.Equals(adminOutcome, "Succeeded", StringComparison.OrdinalIgnoreCase);
+                EmitEvent(new EnrollmentEvent
+                {
+                    SessionId = _configuration.SessionId,
+                    TenantId = _configuration.TenantId,
+                    EventType = succeeded ? "enrollment_complete" : "enrollment_failed",
+                    Severity = succeeded ? EventSeverity.Info : EventSeverity.Warning,
+                    Source = "AdminOverride",
+                    Phase = EnrollmentPhase.Complete,
+                    Message = $"Session {adminOutcome.ToLower()} by administrator — cleanup initiated",
+                    Timestamp = DateTime.UtcNow,
+                    Data = new Dictionary<string, object>
+                    {
+                        { "adminAction", adminOutcome },
+                        { "origin", origin }
+                    }
+                });
+            }
+            else
+            {
+                EmitShutdownEvent(
+                    "server_terminated",
+                    $"Agent terminated by server action (rule={action.RuleId ?? "-"}): {action.Reason}",
+                    new Dictionary<string, object>
+                    {
+                        { "actionType", action.Type },
+                        { "ruleId", action.RuleId ?? string.Empty },
+                        { "gracePeriodSeconds", graceSeconds },
+                        { "uploadDiagnostics", wantDiagnostics },
+                        { "origin", origin },
+                        { "forceSelfDestruct", forceSelfDestruct }
+                    });
+            }
+
+            // --- Final flush of the spool ---
+            try
+            {
+                await _uploadOrchestrator.UploadEventsAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"terminate_session: final flush failed — {ex.Message}");
+            }
+
+            // --- Self-destruct policy: config rules, forceSelfDestruct overrides ---
+            // No zombies in Prod: SelfDestructOnComplete defaults to true, so every terminal path
+            // removes the scheduled task + agent files. Dev builds that flip it to false still get
+            // process exit; a security-driven kill overrides even that.
+            if (forceSelfDestruct)
+            {
+                _logger.Warning("forceSelfDestruct=true — overriding local SelfDestructOnComplete setting");
+                _configuration.SelfDestructOnComplete = true;
+            }
+
+            if (_configuration.SelfDestructOnComplete)
+            {
+                try
+                {
+                    _cleanupService.ExecuteSelfDestruct();
+                }
+                catch (Exception ex)
+                {
+                    _logger.Error("ExecuteSelfDestruct threw — falling through to process exit", ex);
+                }
+            }
+            else
+            {
+                _logger.Warning("SelfDestructOnComplete=false — agent is being kept alive for debugging (not recommended in production)");
+            }
+
+            _completionEvent.Set();
         }
 
         /// <summary>

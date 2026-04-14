@@ -55,6 +55,12 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                 latestEventTimestamp, isPreProvisioned, isUserDriven, resumedAt,
                 stalledAt, clearStalledAt, clearFailureReason, failureSource);
 
+        public Task<bool> QueueServerActionAsync(string tenantId, string sessionId, ServerAction action)
+            => _storage.QueueServerActionAsync(tenantId, sessionId, action);
+
+        public Task<List<ServerAction>> FetchAndClearPendingActionsAsync(string tenantId, string sessionId)
+            => _storage.FetchAndClearPendingActionsAsync(tenantId, sessionId);
+
         public Task IncrementSessionEventCountAsync(
             string tenantId, string sessionId, int increment,
             DateTime? earliestEventTimestamp = null, DateTime? latestEventTimestamp = null,

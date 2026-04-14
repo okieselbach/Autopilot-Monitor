@@ -518,6 +518,33 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                         sessionPrefix, adminAction);
                 }
 
+                // Server→Agent actions: fetch+clear from the session row only when the session we
+                // just loaded indicates there are pending actions. Zero extra I/O in the common case.
+                List<ServerAction>? pendingActions = null;
+                if (updatedSession != null && !string.IsNullOrEmpty(updatedSession.PendingActionsJson))
+                {
+                    var fetched = await _sessionRepo.FetchAndClearPendingActionsAsync(request.TenantId, request.SessionId);
+                    if (fetched.Count > 0)
+                    {
+                        pendingActions = fetched;
+                        foreach (var a in fetched)
+                        {
+                            _telemetryClient.TrackEvent("ServerActionDelivered", new Dictionary<string, string>
+                            {
+                                { "tenantId", request.TenantId },
+                                { "sessionId", request.SessionId },
+                                { "actionType", a.Type ?? string.Empty },
+                                { "reason", a.Reason ?? string.Empty },
+                                { "ruleId", a.RuleId ?? string.Empty },
+                                { "queuedAt", a.QueuedAt.ToString("O") },
+                                { "ageSeconds", ((int)(DateTime.UtcNow - a.QueuedAt).TotalSeconds).ToString() }
+                            });
+                        }
+                        _logger.LogInformation("{SessionPrefix} Delivering {Count} server action(s): [{Types}]",
+                            sessionPrefix, fetched.Count, string.Join(",", fetched.Select(a => a.Type)));
+                    }
+                }
+
                 // Build HTTP response + SignalR messages
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(new IngestEventsResponse
@@ -527,7 +554,8 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                     EventsProcessed = processedCount,
                     Message = $"Successfully stored {processedCount} of {request.Events.Count} events",
                     ProcessedAt = DateTime.UtcNow,
-                    AdminAction = adminAction
+                    AdminAction = adminAction,
+                    Actions = pendingActions
                 });
 
                 var signalRMessages = BuildSignalRMessages(request, updatedSession, processedCount, newRuleResults);

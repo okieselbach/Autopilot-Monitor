@@ -78,6 +78,28 @@ namespace AutopilotMonitor.Agent.Core.Tests.Core
             return orch.Object;
         }
 
+        /// <summary>
+        /// Returns a Mock ServerActionDispatcher whose DispatchAsync captures the batch into the
+        /// supplied callback. Used by tests that verify the synthesis contract between the orchestrator
+        /// and the dispatcher (kill / admin-action → terminate_session ServerAction).
+        /// </summary>
+        private ServerActionDispatcher CreateCapturingDispatcher(Action<List<ServerAction>> onDispatched)
+        {
+            var mock = new Mock<ServerActionDispatcher>(
+                _config,
+                TestLogger.Instance,
+                (Func<Task<bool>>)(() => Task.FromResult(true)),
+                (Func<string, Task<DiagnosticsUploadResult>>)(_ => Task.FromResult(new DiagnosticsUploadResult())),
+                (Func<ServerAction, Task>)(_ => Task.CompletedTask),
+                (Action<EnrollmentEvent>)(_ => { }))
+            { CallBase = false };
+
+            mock.Setup(d => d.DispatchAsync(It.IsAny<List<ServerAction>>()))
+                .Returns<List<ServerAction>>(batch => { onDispatched(batch); return Task.CompletedTask; });
+
+            return mock.Object;
+        }
+
         private List<EnrollmentEvent> CreateTestEvents(int count = 3)
         {
             return Enumerable.Range(1, count)
@@ -185,22 +207,30 @@ namespace AutopilotMonitor.Agent.Core.Tests.Core
         // ===== Admin Signal Processing =====
 
         [Fact]
-        public async Task UploadEvents_KillSignal_SelfDestructsAndExits()
+        public async Task UploadEvents_KillSignal_SynthesizesTerminateActionWithForceSelfDestruct()
         {
+            // After the consolidation the orchestrator no longer runs kill-specific inline logic.
+            // It synthesizes a terminate_session ServerAction and hands it to the dispatcher.
+            // The actual self-destruct + exit happens in MonitoringService.HandleTerminateSessionAsync
+            // (see dedicated tests there). We verify the synthesis contract here.
             var events = CreateTestEvents();
             _mockSpool.Setup(s => s.GetBatch(It.IsAny<int>())).Returns(events);
-            _mockSpool.Setup(s => s.GetCount()).Returns(0);
             _mockApiClient.Setup(a => a.IngestEventsAsync(It.IsAny<IngestEventsRequest>()))
                 .ReturnsAsync(new IngestEventsResponse { DeviceKillSignal = true });
 
+            List<ServerAction> dispatched = null;
+            var dispatcher = CreateCapturingDispatcher(captured => dispatched = captured);
+
             var orch = CreateOrchestrator();
+            orch.SetServerActionDispatcher(dispatcher);
             await orch.UploadEventsAsync();
 
-            Assert.Single(_shutdownEvents);
-            Assert.Equal("remote_kill_signal", _shutdownEvents[0].type);
-            Assert.Equal(true, _shutdownEvents[0].data["selfDestruct"]);
-            _mockCleanup.Verify(c => c.ExecuteSelfDestruct(), Times.Once);
-            Assert.Equal(0, _exitCode);
+            Assert.NotNull(dispatched);
+            Assert.Single(dispatched);
+            Assert.Equal(ServerActionTypes.TerminateSession, dispatched[0].Type);
+            Assert.Equal("true", dispatched[0].Params["forceSelfDestruct"]);
+            Assert.Equal("0", dispatched[0].Params["gracePeriodSeconds"]);
+            Assert.Equal("kill_signal", dispatched[0].Params["origin"]);
         }
 
         [Fact]
@@ -220,24 +250,34 @@ namespace AutopilotMonitor.Agent.Core.Tests.Core
         }
 
         [Fact]
-        public async Task UploadEvents_AdminOverride_Succeeded_EmitsEnrollmentComplete()
+        public async Task UploadEvents_AdminOverride_Succeeded_SynthesizesTerminateWithOutcome()
         {
+            // AdminAction is a soft-shutdown path — no forceSelfDestruct. The adminOutcome param
+            // tells MonitoringService.HandleTerminateSessionAsync to emit enrollment_complete
+            // instead of agent_shutdown.
             var events = CreateTestEvents();
             _mockSpool.Setup(s => s.GetBatch(It.IsAny<int>())).Returns(events);
             _mockApiClient.Setup(a => a.IngestEventsAsync(It.IsAny<IngestEventsRequest>()))
                 .ReturnsAsync(new IngestEventsResponse { AdminAction = "Succeeded" });
             _terminalEventSeen = false;
 
+            List<ServerAction> dispatched = null;
+            var dispatcher = CreateCapturingDispatcher(captured => dispatched = captured);
+
             var orch = CreateOrchestrator();
+            orch.SetServerActionDispatcher(dispatcher);
             await orch.UploadEventsAsync();
 
-            Assert.Single(_emittedEvents);
-            Assert.Equal("enrollment_complete", _emittedEvents[0].EventType);
-            Assert.Equal("AdminOverride", _emittedEvents[0].Source);
+            Assert.NotNull(dispatched);
+            Assert.Single(dispatched);
+            Assert.Equal(ServerActionTypes.TerminateSession, dispatched[0].Type);
+            Assert.Equal("Succeeded", dispatched[0].Params["adminOutcome"]);
+            Assert.Equal("admin_action", dispatched[0].Params["origin"]);
+            Assert.False(dispatched[0].Params.ContainsKey("forceSelfDestruct"));
         }
 
         [Fact]
-        public async Task UploadEvents_AdminOverride_Failed_EmitsEnrollmentFailed()
+        public async Task UploadEvents_AdminOverride_Failed_SynthesizesTerminateWithFailedOutcome()
         {
             var events = CreateTestEvents();
             _mockSpool.Setup(s => s.GetBatch(It.IsAny<int>())).Returns(events);
@@ -245,11 +285,17 @@ namespace AutopilotMonitor.Agent.Core.Tests.Core
                 .ReturnsAsync(new IngestEventsResponse { AdminAction = "Failed" });
             _terminalEventSeen = false;
 
+            List<ServerAction> dispatched = null;
+            var dispatcher = CreateCapturingDispatcher(captured => dispatched = captured);
+
             var orch = CreateOrchestrator();
+            orch.SetServerActionDispatcher(dispatcher);
             await orch.UploadEventsAsync();
 
-            Assert.Single(_emittedEvents);
-            Assert.Equal("enrollment_failed", _emittedEvents[0].EventType);
+            Assert.NotNull(dispatched);
+            Assert.Single(dispatched);
+            Assert.Equal(ServerActionTypes.TerminateSession, dispatched[0].Type);
+            Assert.Equal("Failed", dispatched[0].Params["adminOutcome"]);
         }
 
         [Fact]
