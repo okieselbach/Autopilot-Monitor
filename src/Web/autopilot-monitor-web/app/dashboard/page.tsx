@@ -21,15 +21,8 @@ import TipOfTheDay from "./components/TipOfTheDay";
 import { useAdminMode } from "@/hooks/useAdminMode";
 import { useDeleteSession } from "./hooks/useDeleteSession";
 import { useBlockDevice } from "./hooks/useBlockDevice";
-
-interface TenantConfigurationSummary {
-  validateAutopilotDevice: boolean;
-}
-
-interface TenantListItem {
-  tenantId: string;
-  domainName: string;
-}
+import { useTenantSecurityConfig } from "./hooks/useTenantSecurityConfig";
+import { useTenantList } from "./hooks/useTenantList";
 
 export default function Home() {
   const router = useRouter();
@@ -41,10 +34,8 @@ export default function Home() {
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [cursor, setCursor] = useState<string | null>(null);
-  const [serialValidationEnabled, setSerialValidationEnabled] = useState<boolean | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [tenantIdFilter, setTenantIdFilter] = useState("");
-  const [tenantList, setTenantList] = useState<TenantListItem[]>([]);
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [sortColumn, setSortColumn] = useState<keyof Session | null>(null);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
@@ -202,31 +193,7 @@ export default function Home() {
     }
   }, [user, router]);
 
-  useEffect(() => {
-    const fetchTenantSecurityConfig = async () => {
-      if (!tenantId) return;
-      if (user && !user.isTenantAdmin && !user.isGlobalAdmin && user.role !== 'Operator') return;
-
-      try {
-        const response = await authenticatedFetch(api.config.tenant(tenantId), getAccessToken);
-
-        if (!response.ok) {
-          setSerialValidationEnabled(null);
-          return;
-        }
-
-        const data: TenantConfigurationSummary = await response.json();
-        setSerialValidationEnabled(!!data.validateAutopilotDevice);
-      } catch (error) {
-        if (error instanceof TokenExpiredError) {
-          addNotification('error', 'Session Expired', error.message, 'session-expired-error');
-        }
-        setSerialValidationEnabled(null);
-      }
-    };
-
-    fetchTenantSecurityConfig();
-  }, [tenantId, user]);
+  const serialValidationEnabled = useTenantSecurityConfig(tenantId, user, getAccessToken, addNotification);
 
   // Initial data fetch (only runs for admins).
   // Wait for a real tenantId before fetching — TenantContext initializes to '' and
@@ -399,30 +366,7 @@ export default function Home() {
     fetchSessions();
   }, [globalAdminMode]);
 
-  // Fetch tenant list for fuzzy search when entering global admin mode
-  useEffect(() => {
-    if (!globalAdminMode) {
-      setTenantList([]);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await authenticatedFetch(api.config.all(), getAccessToken);
-        if (!res.ok || cancelled) return;
-        const configs: { tenantId?: string; domainName?: string }[] = await res.json();
-        if (cancelled) return;
-        setTenantList(
-          configs
-            .filter((c): c is { tenantId: string; domainName: string } => !!c.tenantId && !!c.domainName)
-            .map((c) => ({ tenantId: c.tenantId, domainName: c.domainName }))
-        );
-      } catch {
-        // Non-critical — tenant autocomplete just won't work
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [globalAdminMode, getAccessToken]);
+  const tenantList = useTenantList(globalAdminMode, getAccessToken);
 
   // Reset to page 1 when search query, status filter, sort, or page size changes
   useEffect(() => {
