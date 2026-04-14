@@ -1,15 +1,14 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo } from "react";
-import { api } from "@/lib/api";
-import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
-import { trackEvent } from "@/lib/appInsights";
 import { useTenant } from "../../contexts/TenantContext";
 import { useAuth } from "../../contexts/AuthContext";
 import { useNotifications } from "../../contexts/NotificationContext";
 import { useSignalR } from "../../contexts/SignalRContext";
 import { ProtectedRoute } from "../../components/ProtectedRoute";
-import { Session, EnrollmentEvent } from "@/types";
+import { useProgressSearch } from "./hooks/useProgressSearch";
+import { useProgressEvents } from "./hooks/useProgressEvents";
+import { useProgressSignalR } from "./hooks/useProgressSignalR";
+import { useProgressDerivedData } from "./hooks/useProgressDerivedData";
 
 function formatDuration(ms: number): string {
   const seconds = Math.floor(ms / 1000);
@@ -33,407 +32,50 @@ const phaseSteps = [
 ];
 
 export default function ProgressPortalPage() {
-  const [serialInput, setSerialInput] = useState("");
-  const [session, setSession] = useState<Session | null>(null);
-  const [allSessions, setAllSessions] = useState<Session[]>([]);
-  const [searching, setSearching] = useState(false);
-  const [searched, setSearched] = useState(false);
-  const [notFound, setNotFound] = useState(false);
-  const [headerCollapsed, setHeaderCollapsed] = useState(false);
-  const [events, setEvents] = useState<EnrollmentEvent[]>([]);
-
   const { tenantId } = useTenant();
   const { getAccessToken } = useAuth();
   const { addNotification } = useNotifications();
-  const { on, off, isConnected, joinGroup, leaveGroup } = useSignalR();
+  const signalR = useSignalR();
 
-  const hasJoinedTenantGroup = useRef(false);
-  const hasJoinedSessionGroup = useRef(false);
-  const sessionRef = useRef<Session | null>(null);
+  const search = useProgressSearch({
+    tenantId,
+    getAccessToken,
+    addNotification,
+  });
+  const {
+    serialInput,
+    setSerialInput,
+    session,
+    setSession,
+    searching,
+    notFound,
+    headerCollapsed,
+    setHeaderCollapsed,
+    searchBySerial,
+  } = search;
 
-  // Keep ref in sync
-  useEffect(() => {
-    sessionRef.current = session;
-  }, [session]);
-
-  // Join tenant group for real-time updates
-  useEffect(() => {
-    if (isConnected && !hasJoinedTenantGroup.current) {
-      joinGroup(`tenant-${tenantId}`);
-      hasJoinedTenantGroup.current = true;
-    }
-    return () => {
-      if (hasJoinedTenantGroup.current) {
-        leaveGroup(`tenant-${tenantId}`);
-        hasJoinedTenantGroup.current = false;
-      }
-    };
-  }, [isConnected, tenantId]);
-
-  // Join session-specific group when session is found
-  useEffect(() => {
-    if (!isConnected || !session) {
-      return;
-    }
-
-    const sessionGroup = `session-${session.tenantId}-${session.sessionId}`;
-    console.log('[Progress] Joining session group:', sessionGroup);
-    joinGroup(sessionGroup);
-    hasJoinedSessionGroup.current = true;
-
-    return () => {
-      console.log('[Progress] Leaving session group:', sessionGroup);
-      leaveGroup(sessionGroup);
-      hasJoinedSessionGroup.current = false;
-    };
-  }, [isConnected, session?.sessionId, session?.tenantId, joinGroup, leaveGroup]);
-
-  // Debounced refetch: when SignalR signals new data, fetch fresh session + events from API
-  const refetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const refetchSessionData = useRef(async () => {
-    const currentSession = sessionRef.current;
-    if (!currentSession) return;
-    try {
-      // Fetch fresh session summary
-      const sessionsResponse = await authenticatedFetch(
-        api.progress.sessions(tenantId),
-        getAccessToken
-      );
-      if (sessionsResponse.ok) {
-        const sessionsData = await sessionsResponse.json();
-        const sessions: Session[] = sessionsData.sessions || [];
-        const updated = sessions.find((s) => s.sessionId === currentSession.sessionId);
-        if (updated) {
-          setSession(updated);
-        }
-      }
-
-      // Fetch fresh events
-      const eventsResponse = await authenticatedFetch(
-        api.progress.sessionEvents(currentSession.sessionId, tenantId),
-        getAccessToken
-      );
-      if (eventsResponse.ok) {
-        const eventsData = await eventsResponse.json();
-        const fetched: EnrollmentEvent[] = eventsData.events || [];
-        setEvents((prev) => {
-          const existingIds = new Set(prev.map((e) => e.eventId));
-          const newEvents = fetched.filter((e) => !existingIds.has(e.eventId));
-          if (newEvents.length === 0) return prev;
-          return [...prev, ...newEvents].sort((a, b) => a.sequence - b.sequence);
-        });
-      }
-    } catch (error) {
-      console.error("[Progress] Refetch failed:", error);
-    }
+  const { events, sessionRef, scheduleFetchEvents } = useProgressEvents({
+    session,
+    setSession,
+    tenantId,
+    getAccessToken,
+    addNotification,
   });
 
-  // Listen for real-time session updates
-  useEffect(() => {
-    const scheduleRefetch = (source: string, sessionId: string) => {
-      if (!sessionRef.current || sessionId !== sessionRef.current.sessionId) return;
-      console.log(`[Progress] ${source} signal for current session, scheduling refetch`);
-      if (refetchTimerRef.current) clearTimeout(refetchTimerRef.current);
-      refetchTimerRef.current = setTimeout(() => {
-        refetchSessionData.current();
-      }, 500);
-    };
+  useProgressSignalR({
+    session,
+    sessionRef,
+    tenantId,
+    signalR,
+    scheduleFetchEvents,
+  });
 
-    const handleNewEvents = (data: { sessionId: string }) => {
-      scheduleRefetch("newevents", data.sessionId);
-    };
-
-    const handleEventStream = (data: { sessionId: string }) => {
-      scheduleRefetch("eventStream", data.sessionId);
-    };
-
-    on("newevents", handleNewEvents);
-    on("newSession", handleNewEvents);
-    on("eventStream", handleEventStream);
-    return () => {
-      off("newevents", handleNewEvents);
-      off("newSession", handleNewEvents);
-      off("eventStream", handleEventStream);
-      if (refetchTimerRef.current) clearTimeout(refetchTimerRef.current);
-    };
-  }, [on, off]);
-
-  // Fetch events when a session is found
-  const lastFetchedSessionId = useRef<string | null>(null);
-  useEffect(() => {
-    if (!session) return;
-    if (lastFetchedSessionId.current === session.sessionId) return;
-    lastFetchedSessionId.current = session.sessionId;
-    const fetchEvents = async () => {
-      try {
-        const response = await authenticatedFetch(
-          api.progress.sessionEvents(session.sessionId, tenantId),
-          getAccessToken
-        );
-        if (response.ok) {
-          const data = await response.json();
-          const fetched: EnrollmentEvent[] = data.events || [];
-          setEvents((prev) => {
-            if (prev.length === 0) return fetched;
-            const existingIds = new Set(prev.map((e) => e.eventId));
-            const newEvents = fetched.filter((e) => !existingIds.has(e.eventId));
-            if (newEvents.length === 0) return prev;
-            return [...prev, ...newEvents].sort(
-              (a, b) => a.sequence - b.sequence
-            );
-          });
-        } else {
-          addNotification('error', 'Backend Error', `Failed to load enrollment events: ${response.statusText}`, 'progress-events-error');
-        }
-      } catch (error) {
-        if (error instanceof TokenExpiredError) {
-          addNotification('error', 'Session Expired', error.message, 'session-expired-error');
-        } else {
-          console.error("Failed to fetch events:", error);
-          addNotification('error', 'Backend Not Reachable', 'Unable to load enrollment events. Please check your connection.', 'progress-events-error');
-        }
-      }
-    };
-    fetchEvents();
-  }, [session?.sessionId, tenantId]);
-
-  const searchBySerial = async () => {
-    if (!serialInput.trim()) return;
-
-    trackEvent("progress_serial_submitted");
-    setSearching(true);
-    setSearched(true);
-    setNotFound(false);
-    setSession(null);
-    setEvents([]);
-    lastFetchedSessionId.current = null;
-
-    try {
-      const response = await authenticatedFetch(
-        api.progress.sessions(tenantId),
-        getAccessToken
-      );
-
-      if (response.ok) {
-        const data = await response.json();
-        const sessions: Session[] = data.sessions || [];
-        setAllSessions(sessions);
-
-        // Find session by serial number (case-insensitive)
-        const query = serialInput.trim().toLowerCase();
-        const found = sessions
-          .filter(
-            (s) =>
-              s.serialNumber.toLowerCase() === query ||
-              s.serialNumber.toLowerCase().includes(query) ||
-              s.deviceName?.toLowerCase().includes(query)
-          )
-          .sort(
-            (a, b) =>
-              new Date(b.startedAt).getTime() -
-              new Date(a.startedAt).getTime()
-          )[0];
-
-        if (found) {
-          setSession(found);
-          setHeaderCollapsed(true);
-        } else {
-          setNotFound(true);
-        }
-      } else {
-        addNotification('error', 'Backend Error', `Search failed: ${response.statusText}`, 'progress-search-error');
-        setNotFound(true);
-      }
-    } catch (error) {
-      if (error instanceof TokenExpiredError) {
-        addNotification('error', 'Session Expired', error.message, 'session-expired-error');
-      } else {
-        console.error("Search failed:", error);
-        addNotification('error', 'Backend Not Reachable', 'Unable to search for device. Please check your connection.', 'progress-search-error');
-      }
-      setNotFound(true);
-    } finally {
-      setSearching(false);
-    }
-  };
+  const { appSummary, currentDownload, currentInstall, installElapsedMs, overallProgress } =
+    useProgressDerivedData(events, session);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter") searchBySerial();
   };
-
-  // Derive app installation summary from events
-  const appSummary = useMemo(() => {
-    // Best source: app_tracking_summary (real-time aggregate from agent)
-    const summaryEvents = events.filter((e) => e.eventType === "app_tracking_summary");
-    if (summaryEvents.length > 0) {
-      const latest = summaryEvents[summaryEvents.length - 1];
-      const d = latest.data;
-      if (d) {
-        const total = parseInt(d.totalApps ?? d.total_apps ?? "0", 10);
-        if (total > 0) {
-          return {
-            total,
-            installed: parseInt(d.installed ?? "0", 10),
-            failed: parseInt(d.failed ?? "0", 10),
-            installing: parseInt(d.installing ?? "0", 10),
-            downloading: parseInt(d.downloading ?? "0", 10),
-          };
-        }
-      }
-    }
-
-    // Fallback: esp_ui_state (ESP blocking app counts)
-    const espEvents = events.filter((e) => e.eventType === "esp_ui_state");
-    if (espEvents.length > 0) {
-      const latest = espEvents[espEvents.length - 1];
-      const d = latest.data;
-      if (d) {
-        const total = parseInt(d.blocking_apps_total ?? d.blockingAppsTotal ?? "0", 10);
-        const installed = parseInt(d.blocking_apps_completed ?? d.blockingAppsCompleted ?? "0", 10);
-        if (total > 0) {
-          return { total, installed, failed: 0, installing: 0, downloading: 0 };
-        }
-      }
-    }
-
-    return null;
-  }, [events]);
-
-  // Derive current active download for inline display
-  const currentDownload = useMemo(() => {
-    const downloadEvents = events.filter((e) => e.eventType === "download_progress");
-    if (downloadEvents.length === 0) return null;
-
-    // Build latest state per app (last event wins)
-    const appLatest = new Map<string, { bytesDownloaded: number; bytesTotal: number; downloadRateBps: number; isComplete: boolean }>();
-    for (const evt of downloadEvents) {
-      const d = evt.data;
-      if (!d) continue;
-      const appName = d.app_name ?? d.appName ?? d.file_name ?? d.fileName ?? null;
-      if (!appName) continue;
-      const bytesDownloaded = Number(d.bytes_downloaded ?? d.bytesDownloaded ?? 0);
-      const bytesTotal = Number(d.bytes_total ?? d.bytesTotal ?? 0);
-      const downloadRateBps = Number(d.download_rate_bps ?? d.downloadRateBps ?? 0);
-      const status = d.status ?? "";
-      // Only mark complete via explicit status — don't infer from bytes (100% downloads are still active until status arrives)
-      const isComplete = status === "completed" || status === "failed" || d.isCompleted === true || d.is_completed === true;
-      appLatest.set(appName, {
-        bytesDownloaded: isNaN(bytesDownloaded) ? 0 : bytesDownloaded,
-        bytesTotal: isNaN(bytesTotal) ? 0 : bytesTotal,
-        downloadRateBps: isNaN(downloadRateBps) ? 0 : downloadRateBps,
-        isComplete,
-      });
-    }
-
-    const completedCount = Array.from(appLatest.values()).filter((v) => v.isComplete).length;
-
-    // Walk events in reverse to find the most recently seen active app
-    for (let i = downloadEvents.length - 1; i >= 0; i--) {
-      const d = downloadEvents[i].data;
-      if (!d) continue;
-      const appName = d.app_name ?? d.appName ?? d.file_name ?? d.fileName ?? null;
-      if (!appName) continue;
-      const latest = appLatest.get(appName);
-      if (latest && !latest.isComplete) {
-        return { appName, ...latest, completedCount, active: true };
-      }
-    }
-
-    // No active download — return just the counter so it stays visible
-    return { appName: null, bytesDownloaded: 0, bytesTotal: 0, downloadRateBps: 0, isComplete: true, completedCount, active: false };
-  }, [events]);
-
-  // Derive current app install state from app_install_* events
-  const currentInstall = useMemo(() => {
-    const installTypes = new Set(["app_install_started", "app_install_completed", "app_install_failed", "app_install_postponed", "app_install_skipped"]);
-    const installEvents = events.filter((e) => installTypes.has(e.eventType));
-    if (installEvents.length === 0) return null;
-
-    const sorted = [...installEvents].sort(
-      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-    );
-
-    const appState = new Map<string, { state: string; startedAt?: string }>();
-    for (const evt of sorted) {
-      const d = evt.data;
-      if (!d) continue;
-      const appName = d.appName ?? d.app_name ?? d.appId ?? d.app_id ?? null;
-      if (!appName) continue;
-      const existing = appState.get(appName);
-
-      if (evt.eventType === "app_install_started") {
-        if (existing?.state === "Installed") continue;
-        appState.set(appName, { state: "Installing", startedAt: evt.timestamp });
-      } else if (evt.eventType === "app_install_completed") {
-        if (existing?.state === "Installed") continue;
-        appState.set(appName, { state: "Installed" });
-      } else if (evt.eventType === "app_install_failed") {
-        if (existing?.state === "Installed") continue;
-        appState.set(appName, { state: "Failed" });
-      } else if (evt.eventType === "app_install_postponed") {
-        if (existing?.state === "Installed") continue;
-        appState.set(appName, { state: "Postponed" });
-      } else if (evt.eventType === "app_install_skipped") {
-        if (existing?.state === "Installed" || existing?.state === "Failed" || existing?.state === "Postponed") continue;
-        appState.set(appName, { state: "Skipped" });
-      }
-    }
-
-    const entries = Array.from(appState.entries());
-    const completedCount = entries.filter(([, v]) => v.state === "Installed").length;
-    const failedCount = entries.filter(([, v]) => v.state === "Failed").length;
-    const totalCount = entries.filter(([, v]) => v.state !== "Skipped").length;
-
-    // Find currently installing app (last one in Installing state)
-    let activeApp: string | null = null;
-    let activeStartedAt: string | null = null;
-    for (const [name, v] of entries) {
-      if (v.state === "Installing") {
-        activeApp = name;
-        activeStartedAt = v.startedAt ?? null;
-      }
-    }
-
-    return {
-      appName: activeApp,
-      startedAt: activeStartedAt,
-      completedCount,
-      failedCount,
-      totalCount,
-      active: activeApp !== null,
-    };
-  }, [events]);
-
-  // Live timer for current install
-  const [installElapsedMs, setInstallElapsedMs] = useState<number | null>(null);
-  useEffect(() => {
-    if (!currentInstall?.active || !currentInstall?.startedAt) {
-      setInstallElapsedMs(null);
-      return;
-    }
-    const startTime = new Date(currentInstall.startedAt).getTime();
-    const tick = () => setInstallElapsedMs(Date.now() - startTime);
-    tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, [currentInstall?.active, currentInstall?.startedAt]);
-
-  // Derive progress
-  const overallProgress = session
-    ? session.status === "Succeeded"
-      ? 100
-      : session.status === "Failed"
-      ? Math.min(
-          100,
-          ((session.currentPhase === 99
-            ? 3
-            : session.currentPhase) /
-            6) *
-            100
-        )
-      : Math.min(100, (session.currentPhase / 6) * 100)
-    : 0;
-
 
   return (
     <ProtectedRoute>
