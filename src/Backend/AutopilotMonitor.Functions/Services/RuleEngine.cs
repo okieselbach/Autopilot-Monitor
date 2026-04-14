@@ -79,6 +79,15 @@ namespace AutopilotMonitor.Functions.Services
                             result.TenantId = tenantId;
                             outcome.Results.Add(result);
                             _logger.LogInformation($"Rule {rule.RuleId} ({rule.Trigger}) fired for session {sessionId} with confidence {result.ConfidenceScore}%");
+
+                            // KO-criterion: if the (effective) MarkSessionAsFailed flag is on,
+                            // escalate the rule finding to a terminal session status. Tenant override
+                            // wins; otherwise we honor the rule-definition default.
+                            var shouldFailSession = rule.MarkSessionAsFailed ?? rule.MarkSessionAsFailedDefault;
+                            if (shouldFailSession)
+                            {
+                                await TryMarkSessionFailedFromRuleAsync(tenantId, sessionId, rule);
+                            }
                         }
                     }
                     catch (Exception ex)
@@ -93,6 +102,45 @@ namespace AutopilotMonitor.Functions.Services
             }
 
             return outcome;
+        }
+
+        /// <summary>
+        /// Promotes a fired rule to a terminal Failed status on the session, but only when the session
+        /// is still in a non-terminal state (InProgress/Pending/Stalled). Terminal states
+        /// (Succeeded/Failed) are left untouched — the agent's own terminal signal wins, and we never
+        /// overwrite a prior rule-based failure.
+        /// </summary>
+        private async Task TryMarkSessionFailedFromRuleAsync(string tenantId, string sessionId, AnalyzeRule rule)
+        {
+            try
+            {
+                var session = await _sessionRepo.GetSessionAsync(tenantId, sessionId);
+                if (session == null)
+                    return;
+
+                // Don't stomp on an already-terminal session. This also makes the call idempotent:
+                // on re-analysis the rule may fire again, but we only flip the status once.
+                if (session.Status == SessionStatus.Succeeded || session.Status == SessionStatus.Failed)
+                {
+                    _logger.LogDebug($"Rule {rule.RuleId} fired for session {sessionId} but status is already {session.Status} — skipping session failure");
+                    return;
+                }
+
+                var failureSource = $"rule:{rule.RuleId}";
+                var failureReason = $"Rule: {rule.Title}";
+
+                await _sessionRepo.UpdateSessionStatusAsync(
+                    tenantId, sessionId, SessionStatus.Failed,
+                    failureReason: failureReason,
+                    failureSource: failureSource,
+                    completedAt: DateTime.UtcNow);
+
+                _logger.LogWarning($"Session {sessionId} marked as failed by rule {rule.RuleId} ('{rule.Title}')");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to mark session {sessionId} as failed via rule {rule.RuleId}");
+            }
         }
 
         /// <summary>

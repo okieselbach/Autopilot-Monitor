@@ -123,6 +123,11 @@
           "items": { "type": "string" },
           "default": []
         },
+        "markSessionAsFailedDefault": {
+          "type": "boolean",
+          "description": "When true, a firing of this rule causes the entire enrollment session to be marked as failed (KO criterion). Tenants can override this via the portal.",
+          "default": false
+        },
         "templateVariables": {
           "type": "array",
           "description": "Template variables that must be customized per-tenant. If non-empty, the rule is a template: enabling it creates a tenant custom copy with the user's values substituted.",
@@ -161,7 +166,7 @@
         "operator": {
           "type": "string",
           "description": "Comparison operator.",
-          "enum": ["equals", "not_equals", "contains", "not_contains", "regex", "not_regex", "gt", "lt", "gte", "lte", "exists", "not_exists", "count_gte", "count_per_group_gte"]
+          "enum": ["equals", "not_equals", "contains", "not_contains", "regex", "not_regex", "gt", "lt", "gte", "lte", "exists", "not_exists", "count_gte", "count_per_group_gte", "in", "not_in"]
         },
         "value": {
           "type": "string",
@@ -208,7 +213,7 @@
         "eventAFilterOperator": {
           "type": "string",
           "description": "Operator for the Event A filter.",
-          "enum": ["equals", "not_equals", "contains", "not_contains", "regex", "not_regex", "gt", "lt", "gte", "lte", "exists", "not_exists", "count_gte", "count_per_group_gte"]
+          "enum": ["equals", "not_equals", "contains", "not_contains", "regex", "not_regex", "gt", "lt", "gte", "lte", "exists", "not_exists", "count_gte", "count_per_group_gte", "in", "not_in"]
         },
         "eventAFilterValue": {
           "type": "string",

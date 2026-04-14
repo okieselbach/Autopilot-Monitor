@@ -52,11 +52,12 @@ namespace AutopilotMonitor.Functions.Services
 
             var mergedRules = new List<GatherRule>();
 
-            // Apply tenant state overrides to global rules
+            // Apply tenant state overrides to global rules.
+            // MarkSessionAsFailed is analyze-rule-only; gather rules ignore it.
             foreach (var rule in globalRules)
             {
-                if (ruleStates.TryGetValue(rule.RuleId, out var enabled))
-                    rule.Enabled = enabled;
+                if (ruleStates.TryGetValue(rule.RuleId, out var state))
+                    rule.Enabled = state.Enabled;
                 mergedRules.Add(rule);
             }
 
@@ -104,7 +105,7 @@ namespace AutopilotMonitor.Functions.Services
             if (globalRule != null && (globalRule.IsBuiltIn || globalRule.IsCommunity))
             {
                 // Built-in/community rule: only persist enabled state per tenant
-                return await _ruleRepo.StoreRuleStateAsync(tenantId, rule.RuleId, rule.Enabled);
+                return await _ruleRepo.StoreRuleStateAsync(tenantId, rule.RuleId, new RuleState { Enabled = rule.Enabled });
             }
 
             // Ensure custom rules keep correct flags (the incoming payload may

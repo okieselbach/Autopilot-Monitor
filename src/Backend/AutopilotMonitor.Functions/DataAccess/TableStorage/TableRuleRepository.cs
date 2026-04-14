@@ -39,10 +39,10 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
         public Task<bool> DeleteGatherRuleAsync(string tenantId, string ruleId)
             => _storage.DeleteGatherRuleAsync(tenantId, ruleId);
 
-        public Task<bool> StoreRuleStateAsync(string tenantId, string ruleId, bool enabled)
-            => _storage.StoreRuleStateAsync(tenantId, ruleId, enabled);
+        public Task<bool> StoreRuleStateAsync(string tenantId, string ruleId, RuleState state)
+            => _storage.StoreRuleStateAsync(tenantId, ruleId, state);
 
-        public Task<Dictionary<string, bool>> GetRuleStatesAsync(string tenantId)
+        public Task<Dictionary<string, RuleState>> GetRuleStatesAsync(string tenantId)
             => _storage.GetRuleStatesAsync(tenantId);
 
         public Task<bool> DeleteRuleStateAsync(string tenantId, string ruleId)

@@ -739,6 +739,19 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     });
                 }
                 eventData["transitions"] = transitionData;
+
+                // Flat top-level field for RuleEngine matching — the RuleEngine cannot
+                // traverse nested collections via dataField, so we expose the names of
+                // subcategories that just transitioned to "failed" as a comma-separated
+                // string. Names come from registry keys and are language-invariant.
+                var failedNames = transitions
+                    .Where(t => t.IsFailure)
+                    .Select(t => t.SubcategoryName)
+                    .ToList();
+                if (failedNames.Count > 0)
+                {
+                    eventData["failedSubcategories"] = string.Join(",", failedNames);
+                }
             }
 
             _onEventCollected(new EnrollmentEvent

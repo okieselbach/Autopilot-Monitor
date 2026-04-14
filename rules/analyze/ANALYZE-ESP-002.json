@@ -1,0 +1,58 @@
+{
+  "$schema": "../schema/analyze-rule.schema.json",
+  "ruleId": "ANALYZE-ESP-002",
+  "title": "ESP Subcategory Failed (Certificates)",
+  "description": "Detects when the Certificates subcategory of the Enrollment Status Page reported a failure, even if the enrollment later appears to have succeeded. Users can click 'Continue anyway' on an ESP error, which masks the underlying certificate provisioning failure — this rule surfaces the transition so it stays visible.",
+  "severity": "high",
+  "category": "esp",
+  "version": "1.0.0",
+  "author": "Autopilot Monitor",
+  "enabled": true,
+  "trigger": "single",
+  "baseConfidence": 80,
+  "conditions": [
+    {
+      "signal": "certificates_subcategory_failed",
+      "source": "event_data",
+      "eventType": "esp_provisioning_status",
+      "dataField": "failedSubcategories",
+      "operator": "contains",
+      "value": "Certificates",
+      "required": true
+    }
+  ],
+  "confidenceFactors": [],
+  "confidenceThreshold": 70,
+  "explanation": "The ESP Certificates subcategory transitioned to **failed** during enrollment. This is frequently masked when the user clicks 'Continue anyway' on the ESP error screen — the overall enrollment then appears successful while a required certificate (e.g. Wi-Fi, VPN, SCEP/PKCS) was never deployed.\n\nThe subcategory name is read from the registry (`CertificatesSubcategory`) and is language-invariant, so this rule fires regardless of OS display language.",
+  "remediation": [
+    {
+      "title": "Validate certificate delivery on the device",
+      "steps": [
+        "Run `certutil -store My` and `certutil -store -user My` on the device to inspect installed certificates",
+        "Check `Event Viewer → Applications and Services Logs → Microsoft → Windows → DeviceManagement-Enterprise-Diagnostics-Provider → Admin` for SCEP/PKCS errors",
+        "Review the Intune portal for the device's certificate profile assignments and deployment status"
+      ]
+    },
+    {
+      "title": "Fix common certificate provisioning issues",
+      "steps": [
+        "Verify the NDES/SCEP connector is online and healthy",
+        "Confirm the certificate template permissions grant 'Enroll' to the Intune service account / NDES computer account",
+        "Check that the device has network line-of-sight to the SCEP endpoint at the time of ESP",
+        "Re-sync the device (Settings → Accounts → Access work or school → Info → Sync) and re-check the Certificates subcategory"
+      ]
+    }
+  ],
+  "relatedDocs": [
+    {
+      "title": "Microsoft Learn: Troubleshoot certificate profiles in Intune",
+      "url": "https://learn.microsoft.com/en-us/mem/intune/protect/troubleshoot-certificate-profiles"
+    },
+    {
+      "title": "Microsoft Learn: Enrollment Status Page tracking",
+      "url": "https://learn.microsoft.com/en-us/autopilot/enrollment-status"
+    }
+  ],
+  "markSessionAsFailedDefault": false,
+  "tags": ["esp", "certificates", "subcategory", "silent-failure"]
+}

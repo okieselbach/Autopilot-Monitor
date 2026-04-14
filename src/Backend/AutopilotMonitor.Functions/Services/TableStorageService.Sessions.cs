@@ -211,6 +211,7 @@ namespace AutopilotMonitor.Functions.Services
                 CurrentPhaseDetail = entity.GetString("CurrentPhaseDetail") ?? string.Empty,
                 Status = status,
                 FailureReason = entity.GetString("FailureReason") ?? string.Empty,
+                FailureSource = entity.GetString("FailureSource") ?? string.Empty,
                 EventCount = SafeGetInt32(entity, "EventCount") ?? 0,
                 DurationSeconds = ComputeEffectiveDuration(entity, status, startedAt, completedAt),
                 EnrollmentType = entity.GetString("EnrollmentType") ?? "v1",
@@ -909,7 +910,7 @@ namespace AutopilotMonitor.Functions.Services
         /// Event count is maintained atomically by IncrementSessionEventCountAsync and is not
         /// recounted here — avoiding an expensive full-partition scan on every status change.
         /// </summary>
-        public async Task<bool> UpdateSessionStatusAsync(string tenantId, string sessionId, SessionStatus status, EnrollmentPhase? currentPhase = null, string? failureReason = null, DateTime? completedAt = null, DateTime? earliestEventTimestamp = null, DateTime? latestEventTimestamp = null, bool? isPreProvisioned = null, bool? isUserDriven = null, DateTime? resumedAt = null, DateTime? stalledAt = null, bool clearStalledAt = false, bool clearFailureReason = false)
+        public async Task<bool> UpdateSessionStatusAsync(string tenantId, string sessionId, SessionStatus status, EnrollmentPhase? currentPhase = null, string? failureReason = null, DateTime? completedAt = null, DateTime? earliestEventTimestamp = null, DateTime? latestEventTimestamp = null, bool? isPreProvisioned = null, bool? isUserDriven = null, DateTime? resumedAt = null, DateTime? stalledAt = null, bool clearStalledAt = false, bool clearFailureReason = false, string? failureSource = null)
         {
             SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
             SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
@@ -1039,6 +1040,19 @@ namespace AutopilotMonitor.Functions.Services
                     if (status == SessionStatus.Failed && !string.IsNullOrEmpty(failureReason))
                     {
                         update["FailureReason"] = failureReason;
+                    }
+
+                    // Record the origin of a Failed status (agent / rule:<id> / manual). When the caller
+                    // passes null we leave the existing value untouched — concurrent updates from different
+                    // sources shouldn't stomp on each other's attribution.
+                    if (status == SessionStatus.Failed && !string.IsNullOrEmpty(failureSource))
+                    {
+                        update["FailureSource"] = failureSource;
+                    }
+                    // Heal: clear attribution when the session is un-failed (e.g. back to InProgress).
+                    if (clearFailureReason)
+                    {
+                        update["FailureSource"] = string.Empty;
                     }
 
                     // Set IsPreProvisioned flag atomically with the status update (WhiteGlove)
@@ -1691,6 +1705,7 @@ namespace AutopilotMonitor.Functions.Services
                 CurrentPhaseDetail = entity.GetString("CurrentPhaseDetail") ?? string.Empty,
                 Status = status,
                 FailureReason = entity.GetString("FailureReason") ?? string.Empty,
+                FailureSource = entity.GetString("FailureSource") ?? string.Empty,
                 EventCount = SafeGetInt32(entity, "EventCount") ?? 0,
                 DurationSeconds = ComputeEffectiveDuration(entity, status, startedAt, completedAt),
                 EnrollmentType = entity.GetString("EnrollmentType") ?? "v1",

@@ -55,12 +55,16 @@ namespace AutopilotMonitor.Functions.Services
             // Apply tenant state overrides to global rules
             foreach (var rule in globalRules)
             {
-                if (ruleStates.TryGetValue(rule.RuleId, out var enabled))
-                    rule.Enabled = enabled;
+                if (ruleStates.TryGetValue(rule.RuleId, out var state))
+                {
+                    rule.Enabled = state.Enabled;
+                    rule.MarkSessionAsFailed = state.MarkSessionAsFailed;
+                }
                 mergedRules.Add(rule);
             }
 
-            // Add tenant-specific custom rules
+            // Tenant custom rules carry their own MarkSessionAsFailedDefault; no override needed
+            // since the tenant already fully owns the rule definition.
             mergedRules.AddRange(customRules);
 
             return mergedRules;
@@ -95,7 +99,12 @@ namespace AutopilotMonitor.Functions.Services
         {
             if (rule.IsBuiltIn || rule.IsCommunity)
             {
-                return await _ruleRepo.StoreRuleStateAsync(tenantId, rule.RuleId, rule.Enabled);
+                var state = new RuleState
+                {
+                    Enabled = rule.Enabled,
+                    MarkSessionAsFailed = rule.MarkSessionAsFailed
+                };
+                return await _ruleRepo.StoreRuleStateAsync(tenantId, rule.RuleId, state);
             }
 
             rule.UpdatedAt = DateTime.UtcNow;
@@ -182,7 +191,7 @@ namespace AutopilotMonitor.Functions.Services
                 throw new InvalidOperationException("Failed to store custom rule.");
 
             // Ensure the template rule is disabled for this tenant
-            await _ruleRepo.StoreRuleStateAsync(tenantId, templateRuleId, false);
+            await _ruleRepo.StoreRuleStateAsync(tenantId, templateRuleId, new RuleState { Enabled = false });
 
             _logger.LogInformation("Created custom rule '{CustomRuleId}' from template '{TemplateRuleId}' for tenant '{TenantId}'",
                 customRule.RuleId, templateRuleId, tenantId);

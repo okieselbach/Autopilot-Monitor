@@ -177,6 +177,15 @@ namespace AutopilotMonitor.Shared.Models
         public string CurrentPhaseDetail { get; set; } = default!;
         public SessionStatus Status { get; set; }
         public string FailureReason { get; set; } = default!;
+
+        /// <summary>
+        /// Origin of a Failed status. Values:
+        ///   - "" / null: agent-reported (default; terminal enrollment_failed event)
+        ///   - "rule:&lt;RuleId&gt;": session failed because an analyze rule with MarkSessionAsFailed fired
+        ///   - "manual": operator flipped the session via the portal
+        /// Consumers use this to render rule-based failures distinctly (badge + link to rule).
+        /// </summary>
+        public string FailureSource { get; set; } = string.Empty;
         public int EventCount { get; set; }
         public int? DurationSeconds { get; set; }
 

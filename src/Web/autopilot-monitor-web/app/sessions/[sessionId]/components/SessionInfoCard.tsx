@@ -50,7 +50,7 @@ export default function SessionInfoCard({ session, enrollmentDuration, displaySt
           }
           copyText={session.sessionId}
         />
-        <InfoItem label="Status" value={<StatusBadge status={displayStatus} failureReason={session.failureReason} />} />
+        <InfoItem label="Status" value={<StatusBadge status={displayStatus} failureReason={session.failureReason} failureSource={session.failureSource} />} />
         <InfoItem label="Started" value={new Date(session.startedAt).toLocaleString([], { dateStyle: "short", timeStyle: "short" })} />
         <InfoItem label="Duration" value={enrollmentDuration ?? `${Math.round(session.durationSeconds / 60)} min`} />
         <InfoItem label="Events" value={session.eventCount.toString()} />
@@ -129,7 +129,7 @@ function InfoItem({ label, value, copyText }: { label: string; value: React.Reac
   );
 }
 
-function StatusBadge({ status, failureReason }: { status: string; failureReason?: string }) {
+function StatusBadge({ status, failureReason, failureSource }: { status: string; failureReason?: string; failureSource?: string }) {
   const statusConfig = {
     InProgress: { color: "bg-blue-100 text-blue-800", text: "In Progress" },
     Pending: { color: "bg-amber-100 text-amber-800", text: "Pending" },
@@ -142,17 +142,31 @@ function StatusBadge({ status, failureReason }: { status: string; failureReason?
   const config = statusConfig[status as keyof typeof statusConfig] || statusConfig.Unknown;
 
   const isTimeout = status === "Failed" && failureReason && failureReason.toLowerCase().includes("timed out");
+  const ruleId = status === "Failed" && failureSource && failureSource.startsWith("rule:")
+    ? failureSource.substring("rule:".length)
+    : null;
 
   return (
-    <span
-      className={`px-2 inline-flex items-center gap-1 text-xs leading-5 font-semibold rounded-full ${config.color}`}
-      title={failureReason || undefined}
-    >
-      {config.text}
-      {isTimeout && (
-        <span title={failureReason} className="inline-flex items-center">
-          ⏱️
-        </span>
+    <span className="inline-flex items-center gap-1.5">
+      <span
+        className={`px-2 inline-flex items-center gap-1 text-xs leading-5 font-semibold rounded-full ${config.color}`}
+        title={failureReason || undefined}
+      >
+        {config.text}
+        {isTimeout && (
+          <span title={failureReason} className="inline-flex items-center">
+            ⏱️
+          </span>
+        )}
+      </span>
+      {ruleId && (
+        <a
+          href={`/analyze-rules?highlight=${encodeURIComponent(ruleId)}`}
+          className="px-1.5 py-0.5 text-[10px] leading-4 font-semibold rounded border border-red-300 bg-red-50 text-red-700 hover:bg-red-100 transition-colors"
+          title={`Failed by analyze rule ${ruleId}${failureReason ? ` — ${failureReason}` : ""}`}
+        >
+          via rule {ruleId}
+        </a>
       )}
     </span>
   );

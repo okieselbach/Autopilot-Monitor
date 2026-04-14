@@ -187,6 +187,36 @@ export default function AnalyzeRulesPage() {
     setTogglingRuleId(null);
   };
 
+  // Toggle the "mark session as failed" (KO-criterion) override for a rule.
+  // Cycles between: default (unset) → opt-in (true) → opt-out (false) → default.
+  // Built-in rules' definitions ship a `markSessionAsFailedDefault`; the tenant
+  // state only stores an explicit override when it differs from the default.
+  const handleToggleMarkAsFailed = async (rule: AnalyzeRule) => {
+    const currentEffective = rule.markSessionAsFailed ?? rule.markSessionAsFailedDefault ?? false;
+    const nextEffective = !currentEffective;
+    // Write the override only when it diverges from the rule default; otherwise clear it
+    // so future default changes propagate.
+    const nextOverride: boolean | null =
+      nextEffective === (rule.markSessionAsFailedDefault ?? false) ? null : nextEffective;
+
+    setTogglingRuleId(rule.ruleId);
+    const result = await mutate(
+      api.rules.analyzeRule(rule.ruleId),
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...rule, markSessionAsFailed: nextOverride }),
+      }
+    );
+    if (result !== null) {
+      setRules((prev) =>
+        (prev || []).map((r) => (r.ruleId === rule.ruleId ? { ...r, markSessionAsFailed: nextOverride } : r))
+      );
+      showSuccess(`Rule "${rule.title}" ${nextEffective ? "set as KO criterion (session will be marked failed)" : "will no longer mark session as failed"}`);
+    }
+    setTogglingRuleId(null);
+  };
+
   // Delete custom rule
   const handleDeleteRule = async (rule: AnalyzeRule) => {
     if (!confirm(`Are you sure you want to delete the rule "${rule.title}"? This action cannot be undone.`)) {
@@ -703,6 +733,7 @@ export default function AnalyzeRulesPage() {
                         if (expandedRuleId === rule.ruleId && editingRuleId === rule.ruleId) setEditingRuleId(null);
                       }}
                       onToggleEnabled={handleToggleRule}
+                      onToggleMarkAsFailed={handleToggleMarkAsFailed}
                       onStartEditing={startEditing}
                       onSaveEdit={handleSaveEdit}
                       onCancelEdit={() => { setEditingRuleId(null); setJsonModeEdit(false); setJsonError(null); }}

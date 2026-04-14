@@ -20,8 +20,8 @@ namespace AutopilotMonitor.Shared.DataAccess
         Task<bool> DeleteGatherRuleAsync(string tenantId, string ruleId);
 
         // --- Rule States ---
-        Task<bool> StoreRuleStateAsync(string tenantId, string ruleId, bool enabled);
-        Task<Dictionary<string, bool>> GetRuleStatesAsync(string tenantId);
+        Task<bool> StoreRuleStateAsync(string tenantId, string ruleId, RuleState state);
+        Task<Dictionary<string, RuleState>> GetRuleStatesAsync(string tenantId);
         Task<bool> DeleteRuleStateAsync(string tenantId, string ruleId);
 
         // --- Analyze Rules ---

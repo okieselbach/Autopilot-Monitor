@@ -224,7 +224,7 @@ namespace AutopilotMonitor.Functions.Services
         /// Stores or updates the enabled/disabled state for a built-in or community rule per tenant
         /// PartitionKey: TenantId, RowKey: RuleId
         /// </summary>
-        public async Task<bool> StoreRuleStateAsync(string tenantId, string ruleId, bool enabled)
+        public async Task<bool> StoreRuleStateAsync(string tenantId, string ruleId, RuleState state)
         {
             SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
 
@@ -234,12 +234,20 @@ namespace AutopilotMonitor.Functions.Services
 
                 var entity = new TableEntity(tenantId, ruleId)
                 {
-                    ["Enabled"] = enabled,
+                    ["Enabled"] = state.Enabled,
                     ["UpdatedAt"] = DateTime.UtcNow
                 };
 
+                // Nullable override — store as boolean column when set, write an empty string when
+                // cleared so existing rows reset cleanly. Omitting the column would leave a stale value
+                // on the row after a merge.
+                if (state.MarkSessionAsFailed.HasValue)
+                    entity["MarkSessionAsFailed"] = state.MarkSessionAsFailed.Value;
+                else
+                    entity["MarkSessionAsFailed"] = null;
+
                 await tableClient.UpsertEntityAsync(entity);
-                _logger.LogDebug($"Stored rule state {ruleId} for {tenantId}: enabled={enabled}");
+                _logger.LogDebug($"Stored rule state {ruleId} for {tenantId}: enabled={state.Enabled}, markAsFailed={state.MarkSessionAsFailed?.ToString() ?? "inherit"}");
                 return true;
             }
             catch (Exception ex)
@@ -250,9 +258,9 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
-        /// Gets all rule states for a tenant as a dictionary of ruleId → enabled
+        /// Gets all rule states for a tenant as a dictionary of ruleId → RuleState.
         /// </summary>
-        public async Task<Dictionary<string, bool>> GetRuleStatesAsync(string tenantId)
+        public async Task<Dictionary<string, RuleState>> GetRuleStatesAsync(string tenantId)
         {
             SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
 
@@ -261,10 +269,14 @@ namespace AutopilotMonitor.Functions.Services
                 var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.RuleStates);
                 var query = tableClient.QueryAsync<TableEntity>(filter: $"PartitionKey eq '{tenantId}'");
 
-                var states = new Dictionary<string, bool>();
+                var states = new Dictionary<string, RuleState>();
                 await foreach (var entity in query)
                 {
-                    states[entity.RowKey] = entity.GetBoolean("Enabled") ?? true;
+                    states[entity.RowKey] = new RuleState
+                    {
+                        Enabled = entity.GetBoolean("Enabled") ?? true,
+                        MarkSessionAsFailed = entity.GetBoolean("MarkSessionAsFailed")
+                    };
                 }
 
                 return states;
@@ -272,7 +284,7 @@ namespace AutopilotMonitor.Functions.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, $"Failed to get rule states for {tenantId}");
-                return new Dictionary<string, bool>();
+                return new Dictionary<string, RuleState>();
             }
         }
 
@@ -330,6 +342,7 @@ namespace AutopilotMonitor.Functions.Services
                     ["TagsJson"] = JsonConvert.SerializeObject(rule.Tags ?? new string[0]),
                     ["TemplateVariablesJson"] = JsonConvert.SerializeObject(rule.TemplateVariables ?? new List<TemplateVariable>()),
                     ["DerivedFromTemplateRuleId"] = rule.DerivedFromTemplateRuleId ?? string.Empty,
+                    ["MarkSessionAsFailedDefault"] = rule.MarkSessionAsFailedDefault,
                     ["CreatedAt"] = rule.CreatedAt,
                     ["UpdatedAt"] = rule.UpdatedAt
                 };
@@ -455,6 +468,7 @@ namespace AutopilotMonitor.Functions.Services
                 Tags = DeserializeJsonArray(entity.GetString("TagsJson")),
                 TemplateVariables = DeserializeJson<List<TemplateVariable>>(entity.GetString("TemplateVariablesJson")),
                 DerivedFromTemplateRuleId = string.IsNullOrEmpty(derivedFrom) ? null : derivedFrom,
+                MarkSessionAsFailedDefault = entity.GetBoolean("MarkSessionAsFailedDefault") ?? false,
                 CreatedAt = entity.GetDateTimeOffset("CreatedAt")?.UtcDateTime ?? DateTime.UtcNow,
                 UpdatedAt = entity.GetDateTimeOffset("UpdatedAt")?.UtcDateTime ?? DateTime.UtcNow
             };

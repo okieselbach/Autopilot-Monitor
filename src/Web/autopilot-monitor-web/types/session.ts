@@ -12,6 +12,8 @@ export interface Session {
   eventCount: number;
   durationSeconds: number;
   failureReason?: string;
+  /** Origin of a Failed status — "" for agent-reported, "rule:<RuleId>" for rule-based, "manual" for portal. */
+  failureSource?: string;
   enrollmentType?: string; // "v1" | "v2" — absent for sessions before this feature
   diagnosticsBlobName?: string;
   lastEventAt?: string;

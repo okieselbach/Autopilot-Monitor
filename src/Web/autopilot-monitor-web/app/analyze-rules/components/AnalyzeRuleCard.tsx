@@ -21,6 +21,7 @@ interface AnalyzeRuleCardProps {
   jsonError: string | null;
   onToggle: () => void;
   onToggleEnabled: (rule: AnalyzeRule) => void;
+  onToggleMarkAsFailed?: (rule: AnalyzeRule) => void;
   onStartEditing: (rule: AnalyzeRule) => void;
   onSaveEdit: (rule: AnalyzeRule, formOverride?: RuleForm) => void;
   onCancelEdit: () => void;
@@ -42,7 +43,7 @@ export default function AnalyzeRuleCard({
   rule, isExpanded, isEditing, editForm, setEditForm, saving,
   togglingRuleId, deletingRuleId,
   jsonModeEdit, jsonText, jsonError,
-  onToggle, onToggleEnabled, onStartEditing, onSaveEdit, onCancelEdit,
+  onToggle, onToggleEnabled, onToggleMarkAsFailed, onStartEditing, onSaveEdit, onCancelEdit,
   onDelete, onExport,
   onSetJsonModeEdit, onSetJsonText, onSetJsonError,
   readOnly = false,
@@ -55,6 +56,8 @@ export default function AnalyzeRuleCard({
   const canEdit = !rule.isBuiltIn && !rule.isCommunity;
   const isTemplate = (rule.templateVariables?.length ?? 0) > 0;
   const isDerived = !!rule.derivedFromTemplateRuleId;
+  const effectiveMarkAsFailed = (rule.markSessionAsFailed ?? rule.markSessionAsFailedDefault) ?? false;
+  const koOverrideIsExplicit = rule.markSessionAsFailed !== null && rule.markSessionAsFailed !== undefined;
 
   return (
     <div
@@ -80,6 +83,25 @@ export default function AnalyzeRuleCard({
           ) : (
             <button onClick={(e) => { e.stopPropagation(); onToggleEnabled(rule); }} disabled={togglingRuleId === rule.ruleId} className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${togglingRuleId === rule.ruleId ? "opacity-50 cursor-not-allowed" : "cursor-pointer"} ${rule.enabled ? "bg-green-500" : "bg-gray-300"}`} title={rule.enabled ? "Disable rule" : "Enable rule"}>
               <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${rule.enabled ? "translate-x-6" : "translate-x-1"}`} />
+            </button>
+          )}
+          {/* KO-criterion toggle: only meaningful when the rule is actually enabled. Click cycles
+              the tenant override; the badge colour reflects the effective value. */}
+          {!readOnly && rule.enabled && onToggleMarkAsFailed && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onToggleMarkAsFailed(rule); }}
+              disabled={togglingRuleId === rule.ruleId}
+              className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold flex-shrink-0 border transition-colors ${
+                effectiveMarkAsFailed
+                  ? "bg-red-100 text-red-800 border-red-300 hover:bg-red-200"
+                  : "bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100"
+              } ${togglingRuleId === rule.ruleId ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+              title={effectiveMarkAsFailed
+                ? `KO criterion: when this rule fires, the session is marked as failed${koOverrideIsExplicit ? " (tenant override)" : " (rule default)"}. Click to disable.`
+                : `Not a KO criterion${koOverrideIsExplicit ? " (tenant override)" : ""}. Click to enable — firing the rule will then mark the session as failed.`}
+            >
+              {effectiveMarkAsFailed ? "KO" : "KO off"}
+              {koOverrideIsExplicit && <span className="ml-1 opacity-70">*</span>}
             </button>
           )}
           <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${sevColor.bg} ${sevColor.text} flex-shrink-0`}>

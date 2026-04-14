@@ -129,6 +129,23 @@ namespace AutopilotMonitor.Shared.Models
 
         // ===== METADATA =====
 
+        // ===== SESSION FAILURE POLICY =====
+
+        /// <summary>
+        /// Rule-definition default for whether firing this rule should mark the entire session as failed.
+        /// Shipped in the rule JSON. A tenant can override this via <see cref="MarkSessionAsFailed"/>
+        /// in their RuleState — a firing rule is considered a "KO criterion" for the enrollment when the
+        /// effective value (override ?? default) is true.
+        /// </summary>
+        public bool MarkSessionAsFailedDefault { get; set; } = false;
+
+        /// <summary>
+        /// Tenant-scoped override for <see cref="MarkSessionAsFailedDefault"/>. Not persisted in the rule
+        /// JSON — populated at load time from the RuleStates table. Null means the tenant has not expressed
+        /// a preference (fall back to the default).
+        /// </summary>
+        public bool? MarkSessionAsFailed { get; set; }
+
         /// <summary>
         /// Tags for filtering and categorization
         /// </summary>

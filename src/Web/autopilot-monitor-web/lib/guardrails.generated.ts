@@ -1,0 +1,232 @@
+/**
+ * AUTO-GENERATED from rules/guardrails.json — DO NOT EDIT.
+ * Run: node rules/scripts/combine.js
+ */
+
+// ---------------------------------------------------------------------------
+// Categorized data (for documentation / UI display)
+// ---------------------------------------------------------------------------
+
+export interface GuardrailCategory {
+  readonly category: string;
+  readonly items: readonly string[];
+}
+
+export const REGISTRY_PREFIX_CATEGORIES: readonly GuardrailCategory[] = [
+  {
+    category: "MDM / Enrollment",
+    items: [
+      "SOFTWARE\\Microsoft\\Enrollments",
+      "SOFTWARE\\Microsoft\\EnterpriseDesktopAppManagement",
+      "SOFTWARE\\Microsoft\\Provisioning",
+      "SOFTWARE\\Microsoft\\PolicyManager",
+      "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\MDM",
+    ],
+  },
+  {
+    category: "AAD / Entra Join",
+    items: [
+      "SOFTWARE\\Microsoft\\IdentityStore",
+      "SYSTEM\\CurrentControlSet\\Control\\CloudDomainJoin",
+    ],
+  },
+  {
+    category: "Windows Update / WUfB",
+    items: [
+      "SOFTWARE\\Microsoft\\WindowsUpdate",
+      "SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate",
+    ],
+  },
+  {
+    category: "BitLocker",
+    items: [
+      "SOFTWARE\\Microsoft\\BitLocker",
+      "SYSTEM\\CurrentControlSet\\Control\\BitLockerStatus",
+    ],
+  },
+  {
+    category: "Network / Proxy",
+    items: [
+      "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
+      "SYSTEM\\CurrentControlSet\\Services\\Tcpip",
+    ],
+  },
+  {
+    category: "Autopilot / OOBE / Setup",
+    items: [
+      "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Setup",
+      "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\OOBE",
+      "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon",
+    ],
+  },
+  {
+    category: "TPM",
+    items: [
+      "SYSTEM\\CurrentControlSet\\Services\\TPM",
+      "SOFTWARE\\Microsoft\\Tpm",
+    ],
+  },
+  {
+    category: "Secure Boot",
+    items: [
+      "SYSTEM\\CurrentControlSet\\Control\\SecureBoot",
+    ],
+  },
+  {
+    category: "Intune IME",
+    items: [
+      "SOFTWARE\\Microsoft\\IntuneManagementExtension",
+    ],
+  },
+  {
+    category: "Certificates (SCEP)",
+    items: [
+      "SOFTWARE\\Microsoft\\SystemCertificates",
+      "SOFTWARE\\Policies\\Microsoft\\SystemCertificates",
+    ],
+  },
+  {
+    category: "Servicing",
+    items: [
+      "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Component Based Servicing",
+    ],
+  },
+];
+
+export const COMMAND_CATEGORIES: readonly GuardrailCategory[] = [
+  {
+    category: "TPM and Security",
+    items: [
+      "Get-Tpm",
+      "Get-SecureBootPolicy",
+      "Get-SecureBootUEFI -Name SetupMode",
+    ],
+  },
+  {
+    category: "BitLocker",
+    items: [
+      "Get-BitLockerVolume -MountPoint C:",
+    ],
+  },
+  {
+    category: "Network",
+    items: [
+      "Get-NetAdapter | Select-Object Name, Status, InterfaceDescription, MacAddress, LinkSpeed",
+      "Get-DnsClientServerAddress | Select-Object InterfaceAlias, ServerAddresses",
+      "Get-NetIPConfiguration | Select-Object InterfaceAlias, IPv4Address, IPv4DefaultGateway, DNSServer",
+      "netsh winhttp show proxy",
+      "ipconfig /all",
+    ],
+  },
+  {
+    category: "Domain / Identity",
+    items: [
+      "nltest /dsgetdc:",
+      "dsregcmd /status",
+    ],
+  },
+  {
+    category: "Certificate",
+    items: [
+      "certutil -store My",
+      "$c = Get-ChildItem Cert:\\LocalMachine\\My; if ($c) { $c | Select-Object Subject, Thumbprint, Issuer, NotBefore, NotAfter, HasPrivateKey | ConvertTo-Json } else { '{\"CertificateCount\": 0}' }",
+    ],
+  },
+  {
+    category: "Windows Update",
+    items: [
+      "Get-HotFix | Select-Object -First 10 HotFixID, InstalledOn, Description",
+    ],
+  },
+];
+
+// ---------------------------------------------------------------------------
+// Flat arrays (for validation logic)
+// ---------------------------------------------------------------------------
+
+export const ALLOWED_REGISTRY_PREFIXES: readonly string[] = [
+  "SOFTWARE\\Microsoft\\Enrollments",
+  "SOFTWARE\\Microsoft\\EnterpriseDesktopAppManagement",
+  "SOFTWARE\\Microsoft\\Provisioning",
+  "SOFTWARE\\Microsoft\\PolicyManager",
+  "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\MDM",
+  "SOFTWARE\\Microsoft\\IdentityStore",
+  "SYSTEM\\CurrentControlSet\\Control\\CloudDomainJoin",
+  "SOFTWARE\\Microsoft\\WindowsUpdate",
+  "SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate",
+  "SOFTWARE\\Microsoft\\BitLocker",
+  "SYSTEM\\CurrentControlSet\\Control\\BitLockerStatus",
+  "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
+  "SYSTEM\\CurrentControlSet\\Services\\Tcpip",
+  "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Setup",
+  "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\OOBE",
+  "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon",
+  "SYSTEM\\CurrentControlSet\\Services\\TPM",
+  "SOFTWARE\\Microsoft\\Tpm",
+  "SYSTEM\\CurrentControlSet\\Control\\SecureBoot",
+  "SOFTWARE\\Microsoft\\IntuneManagementExtension",
+  "SOFTWARE\\Microsoft\\SystemCertificates",
+  "SOFTWARE\\Policies\\Microsoft\\SystemCertificates",
+  "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Component Based Servicing",
+];
+
+export const ALLOWED_FILE_PREFIXES: readonly string[] = [
+  "C:\\ProgramData\\Microsoft\\IntuneManagementExtension\\Logs",
+  "C:\\Windows\\CCM\\Logs",
+  "C:\\Windows\\Logs",
+  "C:\\Windows\\Panther",
+  "C:\\Windows\\SetupDiag",
+  "C:\\ProgramData\\Microsoft\\DiagnosticLogCSP",
+  "C:\\Windows\\SoftwareDistribution\\ReportingEvents.log",
+];
+
+export const ALLOWED_WMI_QUERY_PREFIXES: readonly string[] = [
+  "SELECT * FROM Win32_OperatingSystem",
+  "SELECT * FROM Win32_ComputerSystem",
+  "SELECT * FROM Win32_BIOS",
+  "SELECT * FROM Win32_Processor",
+  "SELECT * FROM Win32_BaseBoard",
+  "SELECT * FROM Win32_Battery",
+  "SELECT * FROM Win32_TPM",
+  "SELECT * FROM Win32_NetworkAdapter",
+  "SELECT * FROM Win32_NetworkAdapterConfiguration",
+  "SELECT * FROM Win32_DiskDrive",
+  "SELECT * FROM Win32_LogicalDisk",
+  "SELECT * FROM SoftwareLicensingProduct",
+];
+
+export const ALLOWED_COMMANDS_LIST: readonly string[] = [
+  "Get-Tpm",
+  "Get-SecureBootPolicy",
+  "Get-SecureBootUEFI -Name SetupMode",
+  "Get-BitLockerVolume -MountPoint C:",
+  "Get-NetAdapter | Select-Object Name, Status, InterfaceDescription, MacAddress, LinkSpeed",
+  "Get-DnsClientServerAddress | Select-Object InterfaceAlias, ServerAddresses",
+  "Get-NetIPConfiguration | Select-Object InterfaceAlias, IPv4Address, IPv4DefaultGateway, DNSServer",
+  "netsh winhttp show proxy",
+  "ipconfig /all",
+  "nltest /dsgetdc:",
+  "dsregcmd /status",
+  "certutil -store My",
+  "$c = Get-ChildItem Cert:\\LocalMachine\\My; if ($c) { $c | Select-Object Subject, Thumbprint, Issuer, NotBefore, NotAfter, HasPrivateKey | ConvertTo-Json } else { '{\"CertificateCount\": 0}' }",
+  "Get-HotFix | Select-Object -First 10 HotFixID, InstalledOn, Description",
+];
+
+export const ALLOWED_DIAGNOSTICS_PATH_PREFIXES: readonly string[] = [
+  "C:\\ProgramData\\AutopilotMonitor",
+  "C:\\ProgramData\\Microsoft\\IntuneManagementExtension\\Logs",
+  "C:\\Windows\\Panther",
+  "C:\\Windows\\Logs",
+  "C:\\Windows\\SetupDiag",
+  "C:\\Windows\\SoftwareDistribution\\ReportingEvents.log",
+  "C:\\Windows\\System32\\winevt\\Logs",
+  "C:\\Windows\\CCM\\Logs",
+  "C:\\ProgramData\\Microsoft\\DiagnosticLogCSP",
+  "C:\\ProgramData\\Microsoft\\Windows\\WER",
+  "C:\\Windows\\Logs\\CBS",
+  "C:\\Install\\Log",
+];
+
+export const BLOCKED_FILE_PREFIXES: readonly string[] = [
+  "C:\\Users",
+];

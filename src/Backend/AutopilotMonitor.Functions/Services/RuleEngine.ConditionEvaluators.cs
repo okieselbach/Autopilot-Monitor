@@ -384,9 +384,31 @@ namespace AutopilotMonitor.Functions.Services
                 case "not_exists":
                     return string.IsNullOrEmpty(fieldValue);
 
+                case "in":
+                    return MatchesInList(fieldValue, compareValue);
+
+                case "not_in":
+                    return !MatchesInList(fieldValue, compareValue);
+
                 default:
                     return false;
             }
+        }
+
+        private static bool MatchesInList(string fieldValue, string compareValue)
+        {
+            if (string.IsNullOrEmpty(fieldValue) || string.IsNullOrEmpty(compareValue))
+                return false;
+
+            foreach (var entry in compareValue.Split(','))
+            {
+                var trimmed = entry.Trim();
+                if (trimmed.Length == 0)
+                    continue;
+                if (string.Equals(fieldValue, trimmed, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
         }
 
         private (bool matched, object evidence) EvaluateAppInstallDurationCondition(RuleCondition condition, List<EnrollmentEvent> events)
