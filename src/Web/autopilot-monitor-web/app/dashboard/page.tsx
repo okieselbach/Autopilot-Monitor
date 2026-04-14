@@ -10,7 +10,6 @@ import { useAuth } from "../../contexts/AuthContext";
 import { useNotifications } from "../../contexts/NotificationContext";
 import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
-import { trackEvent } from "@/lib/appInsights";
 import { asGuidOrUndefined } from "@/lib/inputValidation";
 import { Session } from "./types";
 import { StatsCard } from "./components/StatsCards";
@@ -23,6 +22,7 @@ import { useDeleteSession } from "./hooks/useDeleteSession";
 import { useBlockDevice } from "./hooks/useBlockDevice";
 import { useTenantSecurityConfig } from "./hooks/useTenantSecurityConfig";
 import { useTenantList } from "./hooks/useTenantList";
+import { useDashboardFilters } from "./hooks/useDashboardFilters";
 
 export default function Home() {
   const router = useRouter();
@@ -34,20 +34,7 @@ export default function Home() {
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [cursor, setCursor] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
   const [tenantIdFilter, setTenantIdFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string | null>(null);
-  const [sortColumn, setSortColumn] = useState<keyof Session | null>(null);
-  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
-  const [columnFilters, setColumnFilters] = useState<Record<string, Set<string>>>({});
-  const [currentPage, setCurrentPage] = useState(1);
-  const [sessionsPerPage, setSessionsPerPage] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('sessionsPerPage');
-      if (stored) return parseInt(stored, 10);
-    }
-    return 10;
-  });
   const { adminMode, setAdminMode, globalAdminMode, setGlobalAdminMode } = useAdminMode();
 
   const {
@@ -68,6 +55,24 @@ export default function Home() {
   // Use global contexts
   const { on, off, isConnected, joinGroup, leaveGroup } = useSignalR();
   const { tenantId } = useTenant();
+
+  const {
+    searchQuery, setSearchQuery,
+    statusFilter, setStatusFilter,
+    sortColumn, sortDirection, handleSort,
+    columnFilters, setColumnFilters,
+    currentPage, sessionsPerPage, handleSessionsPerPageChange,
+    handlePreviousPage, handleNextPage,
+    effectiveSessions, filteredSessions, sortedSessions, paginatedSessions,
+    totalPages,
+    stats,
+  } = useDashboardFilters({
+    sessions,
+    blockedDevicesSet,
+    tenantId,
+    globalAdminMode,
+    tenantIdFilter,
+  });
 
   // Track if initial fetch has been done to prevent duplicate calls in React StrictMode
   const hasInitialFetch = useRef(false);
@@ -328,15 +333,6 @@ export default function Home() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isConnected]);
 
-  // Track search usage (debounced — fires 1s after user stops typing)
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      trackEvent("session_searched", { hasQuery: searchQuery.length > 0 });
-    }, 1000);
-    return () => clearTimeout(timer);
-  }, [searchQuery]);
-
-
   // Disable global admin mode if user is not a global admin
   useEffect(() => {
     if (user && !user.isGlobalAdmin && globalAdminMode) {
@@ -361,22 +357,11 @@ export default function Home() {
     // Clear sessions immediately to prevent showing stale cross-tenant data
     setSessions([]);
     setCursor(null);
-    setCurrentPage(1);
     setLoading(true);
     fetchSessions();
   }, [globalAdminMode]);
 
   const tenantList = useTenantList(globalAdminMode, getAccessToken);
-
-  // Reset to page 1 when search query, status filter, sort, or page size changes
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchQuery, statusFilter, sortColumn, sortDirection, columnFilters, sessionsPerPage]);
-
-  const handleSessionsPerPageChange = (value: number) => {
-    setSessionsPerPage(value);
-    localStorage.setItem('sessionsPerPage', String(value));
-  };
 
   const applyTenantIdFilter = (value: string) => {
     setTenantIdFilter(value);
@@ -384,7 +369,6 @@ export default function Home() {
 
   const submitTenantIdFilter = () => {
     setCursor(null);
-    setCurrentPage(1);
     setLoading(true);
     fetchSessions();
   };
@@ -392,129 +376,8 @@ export default function Home() {
   const clearTenantIdFilter = () => {
     setTenantIdFilter("");
     setCursor(null);
-    setCurrentPage(1);
     setLoading(true);
     fetchSessions(undefined, "");
-  };
-
-  // Client-side tenant filter: ensures sessions from other tenants are never displayed,
-  // regardless of how they entered the sessions state (SignalR, race conditions, etc.)
-  const effectiveSessions = globalAdminMode
-    ? (tenantIdFilter.trim()
-        ? sessions.filter(s => s.tenantId === tenantIdFilter.trim())
-        : sessions)
-    : (tenantId
-        ? sessions.filter(s => s.tenantId === tenantId)
-        : sessions);
-
-  const activeSessions = effectiveSessions.filter(s => s.status === "InProgress");
-  const successRate = effectiveSessions.length > 0
-    ? Math.round((effectiveSessions.filter(s => s.status === "Succeeded").length / effectiveSessions.length) * 100)
-    : 0;
-  const avgDuration = effectiveSessions.length > 0
-    ? Math.round(effectiveSessions.reduce((sum, s) => sum + s.durationSeconds, 0) / effectiveSessions.length / 60)
-    : 0;
-  const sessionsToday = effectiveSessions.filter(s =>
-    new Date(s.startedAt).toDateString() === new Date().toDateString()
-  );
-  const totalToday = sessionsToday.length;
-  const failedToday = sessionsToday.filter(s => s.status === "Failed").length;
-
-  // Filter sessions based on status filter, column filters, and search query
-  const filteredSessions = effectiveSessions.filter(session => {
-    if (statusFilter && session.status !== statusFilter) return false;
-
-    // Apply column filters
-    for (const [field, allowedValues] of Object.entries(columnFilters)) {
-      if (allowedValues.size === 0) continue;
-      const value = String(session[field as keyof Session] ?? "");
-      if (!allowedValues.has(value)) return false;
-    }
-
-    if (!searchQuery.trim()) return true;
-
-    const query = searchQuery.toLowerCase().trim();
-
-    const durationMatch = query.match(/^([><]=?)\s*(\d+)$/);
-    if (durationMatch) {
-      const operator = durationMatch[1];
-      const value = parseInt(durationMatch[2]);
-      const durationMinutes = Math.round(session.durationSeconds / 60);
-
-      if (operator === ">") return durationMinutes > value;
-      if (operator === ">=") return durationMinutes >= value;
-      if (operator === "<") return durationMinutes < value;
-      if (operator === "<=") return durationMinutes <= value;
-    }
-
-    const searchableText = [
-      session.deviceName,
-      session.serialNumber,
-      session.manufacturer,
-      session.model,
-      session.status,
-      session.sessionId,
-      new Date(session.startedAt).toLocaleString(),
-      `${Math.round(session.durationSeconds / 60)} min`,
-      blockedDevicesSet.has(`${session.tenantId}:${session.serialNumber}`) ? "blocked" : "",
-      session.geoCountry,
-      session.geoRegion,
-      session.geoCity,
-      session.agentVersion,
-      session.osName,
-      session.osBuild,
-      session.osDisplayVersion,
-      session.osEdition,
-      session.osLanguage,
-    ].join(" ").toLowerCase();
-
-    return searchableText.includes(query);
-  });
-
-  // Sort sessions
-  const sortedSessions = [...filteredSessions].sort((a, b) => {
-    if (!sortColumn) return 0;
-
-    const rawA: Session[typeof sortColumn] = a[sortColumn];
-    const rawB: Session[typeof sortColumn] = b[sortColumn];
-
-    let aValue: number | string | boolean | null | undefined;
-    let bValue: number | string | boolean | null | undefined;
-
-    if (sortColumn === "startedAt") {
-      aValue = new Date(rawA as string).getTime();
-      bValue = new Date(rawB as string).getTime();
-    } else {
-      aValue = rawA;
-      bValue = rawB;
-    }
-
-    if (aValue == null || bValue == null) return 0;
-    if (aValue < bValue) return sortDirection === "asc" ? -1 : 1;
-    if (aValue > bValue) return sortDirection === "asc" ? 1 : -1;
-    return 0;
-  });
-
-  // Paginated sessions
-  const totalPages = Math.ceil(sortedSessions.length / sessionsPerPage);
-  const startIndex = (currentPage - 1) * sessionsPerPage;
-  const paginatedSessions = sortedSessions.slice(startIndex, startIndex + sessionsPerPage);
-
-  const handleSort = (column: keyof Session) => {
-    if (sortColumn === column) {
-      setSortDirection(sortDirection === "asc" ? "desc" : "asc");
-    } else {
-      setSortColumn(column);
-      setSortDirection("asc");
-    }
-  };
-
-  const handlePreviousPage = () => {
-    setCurrentPage(prev => Math.max(1, prev - 1));
-  };
-
-  const handleNextPage = () => {
-    setCurrentPage(prev => Math.min(totalPages, prev + 1));
   };
 
   return (
@@ -600,31 +463,31 @@ export default function Home() {
           <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-5 mb-2">
             <StatsCard
               title="Active Sessions"
-              value={loading ? "..." : activeSessions.length.toString()}
+              value={loading ? "..." : stats.activeSessionsCount.toString()}
               description="Currently enrolling"
               color="blue"
             />
             <StatsCard
               title="Success Rate"
-              value={loading ? "..." : `${successRate}%`}
+              value={loading ? "..." : `${stats.successRate}%`}
               description="Last 7 days"
               color="green"
             />
             <StatsCard
               title="Avg. Duration"
-              value={loading ? "..." : `${avgDuration} min`}
+              value={loading ? "..." : `${stats.avgDuration} min`}
               description="Last 7 days"
               color="purple"
             />
             <StatsCard
               title="Total Today"
-              value={loading ? "..." : totalToday.toString()}
+              value={loading ? "..." : stats.totalToday.toString()}
               description="Started today"
               color="indigo"
             />
             <StatsCard
               title="Failed Today"
-              value={loading ? "..." : failedToday.toString()}
+              value={loading ? "..." : stats.failedToday.toString()}
               description="Needs attention"
               color="red"
             />
