@@ -66,6 +66,75 @@ public class AnalyzeRuleSessionFailureTests
     }
 
     [Fact]
+    public void BackfillDerivedEventFields_SynthesizesFailedSubcategoriesFromTransitions()
+    {
+        // Mirrors an esp_provisioning_status event emitted by an older agent build: no flat
+        // `failedSubcategories` field, but the `transitions` list is present. The RuleEngine's
+        // read-time projection must derive the flat field so ANALYZE-ESP-002 matches.
+        var legacyEvent = new EnrollmentEvent
+        {
+            EventType = "esp_provisioning_status",
+            Data = new Dictionary<string, object>
+            {
+                ["category"] = "DeviceSetup",
+                ["changeType"] = "subcategory_state_change",
+                ["transitions"] = new List<object>
+                {
+                    new Dictionary<string, object>
+                    {
+                        ["subcategory"] = "Certificates",
+                        ["previousState"] = "inProgress",
+                        ["newState"] = "failed"
+                    },
+                    new Dictionary<string, object>
+                    {
+                        ["subcategory"] = "Apps",
+                        ["previousState"] = "inProgress",
+                        ["newState"] = "succeeded"
+                    }
+                }
+            }
+        };
+
+        var method = typeof(RuleEngine).GetMethod(
+            "BackfillDerivedEventFields",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Assert.NotNull(method);
+        method!.Invoke(null, new object[] { new List<EnrollmentEvent> { legacyEvent } });
+
+        Assert.True(legacyEvent.Data.ContainsKey("failedSubcategories"));
+        Assert.Equal("Certificates", legacyEvent.Data["failedSubcategories"]);
+    }
+
+    [Fact]
+    public void BackfillDerivedEventFields_DoesNotOverwriteAgentProvidedValue()
+    {
+        var modernEvent = new EnrollmentEvent
+        {
+            EventType = "esp_provisioning_status",
+            Data = new Dictionary<string, object>
+            {
+                ["failedSubcategories"] = "AgentProvidedValue",
+                ["transitions"] = new List<object>
+                {
+                    new Dictionary<string, object>
+                    {
+                        ["subcategory"] = "Certificates",
+                        ["newState"] = "failed"
+                    }
+                }
+            }
+        };
+
+        var method = typeof(RuleEngine).GetMethod(
+            "BackfillDerivedEventFields",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        method!.Invoke(null, new object[] { new List<EnrollmentEvent> { modernEvent } });
+
+        Assert.Equal("AgentProvidedValue", modernEvent.Data["failedSubcategories"]);
+    }
+
+    [Fact]
     public void RuleState_ExplicitOverride_WinsOverDefault()
     {
         var state = new RuleState { Enabled = true, MarkSessionAsFailed = true };

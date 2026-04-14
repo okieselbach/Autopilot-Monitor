@@ -46,6 +46,10 @@ namespace AutopilotMonitor.Functions.Services
                     return outcome;
                 }
 
+                // Backfill derived fields for backward compatibility with events produced by older agents.
+                // This is a pure read-time projection — we never persist the synthesized values.
+                BackfillDerivedEventFields(allEvents);
+
                 // On reanalyze: skip deduplication so all rules are re-evaluated from scratch
                 // On normal run: skip rules already evaluated to avoid duplicate storage
                 HashSet<string> existingRuleIds;
@@ -102,6 +106,60 @@ namespace AutopilotMonitor.Functions.Services
             }
 
             return outcome;
+        }
+
+        /// <summary>
+        /// Read-time backfill of derived Event.Data fields that older agent builds didn't emit.
+        /// Keeps rules forward-compatible with historical sessions. Pure in-memory mutation — the
+        /// original event records in Table Storage are not modified.
+        ///
+        /// Current projections:
+        /// - esp_provisioning_status: synthesize `failedSubcategories` (comma-joined registry names)
+        ///   from `transitions[]` entries where newState == "failed". Matches what ProvisioningStatusTracker
+        ///   now emits natively, so ANALYZE-ESP-002 fires against pre-upgrade data too.
+        /// </summary>
+        private static void BackfillDerivedEventFields(List<EnrollmentEvent> events)
+        {
+            foreach (var evt in events)
+            {
+                if (evt.Data == null) continue;
+                if (!string.Equals(evt.EventType, "esp_provisioning_status", System.StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                // Don't overwrite what the agent already provided.
+                if (evt.Data.ContainsKey("failedSubcategories"))
+                    continue;
+
+                if (!evt.Data.TryGetValue("transitions", out var transitionsObj) || transitionsObj == null)
+                    continue;
+
+                // TableStorageService.DeserializeEventData normalizes JArray → List<object>, so every
+                // transition shows up as a Dictionary<string, object> after the JToken conversion.
+                if (transitionsObj is not System.Collections.IEnumerable enumerable)
+                    continue;
+
+                var failed = new List<string>();
+                foreach (var item in enumerable)
+                {
+                    if (item is not System.Collections.Generic.IDictionary<string, object> dict)
+                        continue;
+
+                    if (!dict.TryGetValue("newState", out var newStateObj) || newStateObj == null)
+                        continue;
+                    if (!string.Equals(newStateObj.ToString(), "failed", System.StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    if (dict.TryGetValue("subcategory", out var nameObj) && nameObj != null)
+                    {
+                        var name = nameObj.ToString();
+                        if (!string.IsNullOrWhiteSpace(name))
+                            failed.Add(name!);
+                    }
+                }
+
+                if (failed.Count > 0)
+                    evt.Data["failedSubcategories"] = string.Join(",", failed);
+            }
         }
 
         /// <summary>
