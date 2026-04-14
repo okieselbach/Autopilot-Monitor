@@ -146,13 +146,22 @@ export function useDashboardSessions({
     }
   }, [getAccessToken, addNotification, setBlockedDevicesSet]);
 
+  const getInitialLimit = (): number | undefined => {
+    if (typeof window === "undefined") return undefined;
+    const stored = window.localStorage.getItem("sessionsPerPage");
+    const parsed = stored ? parseInt(stored, 10) : NaN;
+    const value = Number.isFinite(parsed) && parsed > 0 ? parsed : 10;
+    return Math.min(value, 100);
+  };
+
   const fetchSessions = useCallback(async (loadMoreCursor?: string, globalTenantIdOverride?: string) => {
     try {
       const rawFilter = globalTenantIdOverride !== undefined ? globalTenantIdOverride : tenantIdFilterRef.current.trim();
       const effectiveTenantFilter = asGuidOrUndefined(rawFilter);
+      const initialLimit = loadMoreCursor ? undefined : getInitialLimit();
       let endpoint = globalAdminModeRef.current
-        ? api.globalSessions.list(effectiveTenantFilter)
-        : api.sessions.list(tenantIdRef.current ?? undefined);
+        ? api.globalSessions.list(effectiveTenantFilter, undefined, initialLimit)
+        : api.sessions.list(tenantIdRef.current ?? undefined, undefined, initialLimit);
 
       if (loadMoreCursor) {
         endpoint += endpoint.includes("?") ? "&" : "?";

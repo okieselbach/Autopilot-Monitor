@@ -35,9 +35,14 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
                 if (!string.IsNullOrEmpty(daysParam) && int.TryParse(daysParam, out var parsedDays) && parsedDays > 0)
                     days = parsedDays;
 
-                _logger.LogInformation("Fetching sessions for tenant {TenantId} (cursor: {Cursor}, days: {Days})", tenantId, cursor ?? "none", days?.ToString() ?? "all");
+                var limitParam = query["limit"];
+                int limit = 100;
+                if (!string.IsNullOrEmpty(limitParam) && int.TryParse(limitParam, out var parsedLimit))
+                    limit = Math.Clamp(parsedLimit, 1, 100);
 
-                var page = await _sessionRepo.GetSessionsAsync(tenantId, maxResults: 100, cursor: cursor, days: days);
+                _logger.LogInformation("Fetching sessions for tenant {TenantId} (cursor: {Cursor}, days: {Days}, limit: {Limit})", tenantId, cursor ?? "none", days?.ToString() ?? "all", limit);
+
+                var page = await _sessionRepo.GetSessionsAsync(tenantId, maxResults: limit, cursor: cursor, days: days);
 
                 return await req.OkAsync(new
                 {

@@ -91,6 +91,17 @@ export default function Home() {
     if (!globalAdminMode) setTenantIdFilter("");
   }, [globalAdminMode]);
 
+  // Auto-load more when the user needs more sessions than currently loaded
+  // (e.g. increased sessionsPerPage, paginated forward, or applied a sort/column filter
+  // that would benefit from the full dataset). Cheap server roundtrip, paid only on demand.
+  useEffect(() => {
+    if (loading || loadingMore || !hasMore) return;
+    const needed = currentPage * sessionsPerPage;
+    if (sessions.length < needed) {
+      loadMore();
+    }
+  }, [sessions.length, currentPage, sessionsPerPage, hasMore, loading, loadingMore, loadMore]);
+
   const applyTenantIdFilter = (value: string) => {
     setTenantIdFilter(value);
   };

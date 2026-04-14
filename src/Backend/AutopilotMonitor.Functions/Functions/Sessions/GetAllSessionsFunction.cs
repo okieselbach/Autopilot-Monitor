@@ -39,6 +39,11 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
                 if (!string.IsNullOrEmpty(daysParam) && int.TryParse(daysParam, out var parsedDays) && parsedDays > 0)
                     days = parsedDays;
 
+                var limitParam = query["limit"];
+                int limit = 100;
+                if (!string.IsNullOrEmpty(limitParam) && int.TryParse(limitParam, out var parsedLimit))
+                    limit = Math.Clamp(parsedLimit, 1, 100);
+
                 SessionPage page;
 
                 if (!string.IsNullOrEmpty(tenantIdFilter))
@@ -50,13 +55,13 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
                         return badRequest;
                     }
 
-                    _logger.LogInformation("Fetching sessions for tenant {TenantId} (User: {UserEmail}, cursor: {Cursor}, days: {Days})", tenantIdFilter, userEmail, cursor ?? "none", days?.ToString() ?? "all");
-                    page = await _sessionRepo.GetSessionsAsync(tenantIdFilter, maxResults: 100, cursor: cursor, days: days);
+                    _logger.LogInformation("Fetching sessions for tenant {TenantId} (User: {UserEmail}, cursor: {Cursor}, days: {Days}, limit: {Limit})", tenantIdFilter, userEmail, cursor ?? "none", days?.ToString() ?? "all", limit);
+                    page = await _sessionRepo.GetSessionsAsync(tenantIdFilter, maxResults: limit, cursor: cursor, days: days);
                 }
                 else
                 {
-                    _logger.LogInformation("Fetching all sessions across all tenants (User: {UserEmail}, cursor: {Cursor}, days: {Days})", userEmail, cursor ?? "none", days?.ToString() ?? "all");
-                    page = await _sessionRepo.GetAllSessionsAsync(maxResults: 100, cursor: cursor, days: days);
+                    _logger.LogInformation("Fetching all sessions across all tenants (User: {UserEmail}, cursor: {Cursor}, days: {Days}, limit: {Limit})", userEmail, cursor ?? "none", days?.ToString() ?? "all", limit);
+                    page = await _sessionRepo.GetAllSessionsAsync(maxResults: limit, cursor: cursor, days: days);
                 }
 
                 return await req.OkAsync(new
