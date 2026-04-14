@@ -21,6 +21,7 @@ export interface AdminConfiguration {
   opsAlertTeamsWebhookUrl?: string;
   opsAlertSlackEnabled?: boolean;
   opsAlertSlackWebhookUrl?: string;
+  allowAgentDowngrade?: boolean;
 }
 
 export interface OpsAlertRule {

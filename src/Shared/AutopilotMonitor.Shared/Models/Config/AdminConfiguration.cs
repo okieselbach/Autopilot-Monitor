@@ -251,6 +251,15 @@ namespace AutopilotMonitor.Shared.Models
         public string LatestAgentExeSha256 { get; set; } = default!;
 
         /// <summary>
+        /// When true, the agent's self-updater is allowed to install a version strictly lower
+        /// than the one it is currently running. Default: false (forward-only updates; prevents
+        /// dev builds from being silently downgraded to the production <c>version.json</c> via
+        /// the <c>runtime_hash_mismatch</c> force path). Set to true only for controlled rollback
+        /// scenarios — flip back to false immediately afterwards.
+        /// </summary>
+        public bool AllowAgentDowngrade { get; set; } = false;
+
+        /// <summary>
         /// Version string of the latest published bootstrap script (Install-AutopilotMonitor.ps1).
         /// Written by CI/CD pipeline and PS build scripts after bootstrap script upload.
         /// Used by the web UI to flag outdated bootstrap scripts in session views.

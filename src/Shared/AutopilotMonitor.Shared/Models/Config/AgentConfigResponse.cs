@@ -177,6 +177,14 @@ namespace AutopilotMonitor.Shared.Models
         public string LatestAgentExeSha256 { get; set; } = default!;
 
         /// <summary>
+        /// When true, the self-updater will install a lower version if the backend advertises one.
+        /// Default: false (forward-only). Gated per tenant via the admin configuration.
+        /// Only honoured by the runtime force-update path (hash mismatch) — startup version
+        /// comparison never downgrades regardless of this flag.
+        /// </summary>
+        public bool AllowAgentDowngrade { get; set; } = false;
+
+        /// <summary>
         /// NTP server address for time check during enrollment.
         /// Default: "time.windows.com"
         /// </summary>

@@ -10,6 +10,7 @@ export function SectionGlobalSettings() {
     globalRateLimit, setGlobalRateLimit,
     platformStatsBlobSasUrl, setPlatformStatsBlobSasUrl,
     collectorIdleTimeoutMinutes, setCollectorIdleTimeoutMinutes,
+    allowAgentDowngrade, setAllowAgentDowngrade,
     handleSaveAdminConfig, handleResetAdminConfig,
   } = useAdminConfig();
 
@@ -26,6 +27,8 @@ export function SectionGlobalSettings() {
         setPlatformStatsBlobSasUrl={setPlatformStatsBlobSasUrl}
         collectorIdleTimeoutMinutes={collectorIdleTimeoutMinutes}
         setCollectorIdleTimeoutMinutes={setCollectorIdleTimeoutMinutes}
+        allowAgentDowngrade={allowAgentDowngrade}
+        setAllowAgentDowngrade={setAllowAgentDowngrade}
         onSave={handleSaveAdminConfig}
         onReset={handleResetAdminConfig}
       />

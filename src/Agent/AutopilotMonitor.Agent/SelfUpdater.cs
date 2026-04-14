@@ -104,13 +104,20 @@ namespace AutopilotMonitor.Agent
         /// Autopilot boot speed. Runtime trigger passes 60000 because monitoring is already running
         /// and we know an update is required.
         /// </param>
+        /// <param name="allowDowngrade">
+        /// When false (default), a latest version strictly lower than <paramref name="currentVersion"/>
+        /// is rejected even when <paramref name="forceUpdate"/> is true — prevents the production
+        /// <c>version.json</c> from silently overwriting a higher-versioned dev/pre-release agent via
+        /// the runtime hash-mismatch path. Set to true only for controlled rollback scenarios.
+        /// </param>
         public static async Task CheckAndApplyUpdateAsync(
             string currentVersion,
             string agentDir,
             bool consoleMode,
             bool forceUpdate = false,
             string triggerReason = "startup",
-            int? downloadTimeoutMsOverride = null)
+            int? downloadTimeoutMsOverride = null,
+            bool allowDowngrade = false)
         {
             Action<string> log = msg =>
             {
@@ -141,19 +148,54 @@ namespace AutopilotMonitor.Agent
                     return; // Could not determine latest version — continue with current
                 }
 
-                // Step 2: Compare versions (skipped when forceUpdate=true)
-                if (!forceUpdate && !IsNewerVersion(currentVersion, latestVersion))
-                {
-                    log($"Self-update: current version {currentVersion} is up to date (latest: {latestVersion})");
-                    if (isStartupTrigger)
-                        WriteCheckedMarker(currentVersion, latestVersion, versionCheckMs, log);
-                    return;
-                }
+                // Step 2: Version comparison. Three-way decision:
+                //   cmp < 0  → latest < current  = downgrade
+                //   cmp == 0 → latest == current = same version (hash repair only, requires forceUpdate)
+                //   cmp > 0  → latest > current  = upgrade
+                var cmp = CompareVersions(currentVersion, latestVersion);
 
-                if (forceUpdate)
-                    log($"Self-update: FORCE mode (trigger={triggerReason}) — current={currentVersion}, latest={latestVersion}, skipping version check");
-                else
+                if (cmp < 0)
+                {
+                    // Downgrade — forward-only policy blocks this by default even when forceUpdate=true.
+                    // Protects dev/pre-release builds from being silently replaced by the production
+                    // version advertised by the prod backend (runtime_hash_mismatch force path).
+                    if (!allowDowngrade)
+                    {
+                        log($"Self-update: downgrade BLOCKED — current={currentVersion}, latest={latestVersion}, trigger={triggerReason}, allowDowngrade=false");
+                        WriteDowngradeBlockedMarker(currentVersion, latestVersion, triggerReason, log);
+                        return;
+                    }
+                    log($"Self-update: downgrade ALLOWED (admin override) — current={currentVersion}, latest={latestVersion}, trigger={triggerReason}");
+                }
+                else if (cmp == 0)
+                {
+                    // Same version: only proceed when forceUpdate (e.g. runtime hash mismatch = binary repair).
+                    if (!forceUpdate)
+                    {
+                        log($"Self-update: current version {currentVersion} is up to date (latest: {latestVersion})");
+                        if (isStartupTrigger)
+                            WriteCheckedMarker(currentVersion, latestVersion, versionCheckMs, log);
+                        return;
+                    }
+                    log($"Self-update: same-version REPAIR (trigger={triggerReason}) — reinstalling {currentVersion}");
+                }
+                else if (cmp > 0)
+                {
                     log($"Self-update: newer version available — current={currentVersion}, latest={latestVersion}");
+                }
+                else
+                {
+                    // cmp == int.MinValue sentinel from CompareVersions → unparsable version string on
+                    // either side. Fall back to the pre-fix behaviour: proceed only when forceUpdate.
+                    if (!forceUpdate)
+                    {
+                        log($"Self-update: cannot compare versions (current={currentVersion}, latest={latestVersion}) — skipping");
+                        if (isStartupTrigger)
+                            WriteSkipMarker("version_compare_failed", currentVersion, latestVersion, "version parse failed", log);
+                        return;
+                    }
+                    log($"Self-update: FORCE mode (trigger={triggerReason}) — current={currentVersion}, latest={latestVersion}, proceeding despite unparsable versions");
+                }
 
                 // Step 3: Download ZIP (timeout = downloadTimeoutMs)
                 var zipPath = Path.Combine(Path.GetTempPath(), "AutopilotMonitor-Agent-Update.zip");
@@ -361,12 +403,25 @@ namespace AutopilotMonitor.Agent
         /// </summary>
         private static bool IsNewerVersion(string current, string latest)
         {
-            if (!Version.TryParse(StripVersionSuffix(current), out var currentVer))
-                return false;
-            if (!Version.TryParse(StripVersionSuffix(latest), out var latestVer))
-                return false;
+            return CompareVersions(current, latest) > 0;
+        }
 
-            return latestVer > currentVer;
+        /// <summary>
+        /// Compares two version strings. Returns negative when latest is older than current,
+        /// zero when equal, positive when latest is newer than current. Returns
+        /// <see cref="int.MinValue"/> when either side is not a parseable <see cref="Version"/>
+        /// (callers must treat this as "cannot compare" rather than an ordered result).
+        /// Strips SemVer suffixes (+metadata, -prerelease) before parsing because
+        /// System.Version cannot handle them.
+        /// </summary>
+        internal static int CompareVersions(string current, string latest)
+        {
+            if (!Version.TryParse(StripVersionSuffix(current), out var currentVer))
+                return int.MinValue;
+            if (!Version.TryParse(StripVersionSuffix(latest), out var latestVer))
+                return int.MinValue;
+
+            return latestVer.CompareTo(currentVer);
         }
 
         private static string StripVersionSuffix(string version)
@@ -647,6 +702,41 @@ namespace AutopilotMonitor.Agent
             catch (Exception ex)
             {
                 log($"Self-update: could not write skip marker — {ex.Message} (non-critical)");
+            }
+        }
+
+        /// <summary>
+        /// Writes a downgrade-blocked marker so the next agent startup can emit an
+        /// <c>agent_version_check</c> event with <c>outcome=downgrade_blocked</c>. Uses the
+        /// existing skipped-marker channel so <see cref="Core.Monitoring.Core.VersionCheckEventBuilder"/>
+        /// picks it up alongside other skip reasons. Best-effort — never throws.
+        /// </summary>
+        private static void WriteDowngradeBlockedMarker(string currentVersion, string latestVersion, string triggerReason, Action<string> log)
+        {
+            try
+            {
+                var markerPath = Environment.ExpandEnvironmentVariables(Constants.SelfUpdateSkippedMarkerFile);
+                var dir = Path.GetDirectoryName(markerPath);
+                if (!Directory.Exists(dir))
+                    Directory.CreateDirectory(dir);
+
+                var payload = new JObject
+                {
+                    ["outcome"]        = "downgrade_blocked",
+                    ["reason"]         = "downgrade_blocked",
+                    ["currentVersion"] = currentVersion ?? "unknown",
+                    ["latestVersion"]  = latestVersion ?? "unknown",
+                    ["triggerReason"]  = triggerReason ?? "unknown",
+                    ["skippedAtUtc"]   = DateTime.UtcNow.ToString("O"),
+                    ["errorDetail"]    = string.Empty
+                };
+
+                File.WriteAllText(markerPath, payload.ToString(Newtonsoft.Json.Formatting.None));
+                log($"Self-update: downgrade-blocked marker written (current={currentVersion}, latest={latestVersion}, trigger={triggerReason})");
+            }
+            catch (Exception ex)
+            {
+                log($"Self-update: could not write downgrade-blocked marker — {ex.Message} (non-critical)");
             }
         }
 

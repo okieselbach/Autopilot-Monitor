@@ -78,7 +78,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         /// Receives the backend-provided ZIP SHA-256 hash so the updater can use it as the
         /// trusted-channel integrity source.
         /// </summary>
-        public Func<string, Task> RuntimeSelfUpdateTriggerAsync { get; set; }
+        /// <summary>
+        /// Host-provided runtime self-update trigger. Parameters: (backend ZIP hash, allowDowngrade).
+        /// The hash seeds <see cref="SelfUpdater"/>'s trusted-channel verification; the flag decides
+        /// whether a strictly older version advertised by the backend may replace the running binary.
+        /// </summary>
+        public Func<string, bool, Task> RuntimeSelfUpdateTriggerAsync { get; set; }
 
         public MonitoringService(AgentConfiguration configuration, AgentLogger logger, string agentVersion,
             string previousExitType = "first_run", string previousCrashException = null,
@@ -578,13 +583,15 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             // Hand the ZIP hash from the current config to the updater as trusted-channel source.
             // Null is acceptable — SelfUpdater falls back to the version.json hash.
             var zipHash = _remoteConfigService?.CurrentConfig?.LatestAgentSha256;
+            // Forward-only gate: admin must opt-in per tenant for a downgrade to apply.
+            var allowDowngrade = _remoteConfigService?.CurrentConfig?.AllowAgentDowngrade ?? false;
 
             Task.Run(async () =>
             {
                 try
                 {
-                    _logger.Info("Self-update: triggering forced update due to runtime hash mismatch");
-                    await RuntimeSelfUpdateTriggerAsync(zipHash).ConfigureAwait(false);
+                    _logger.Info($"Self-update: triggering forced update due to runtime hash mismatch (allowDowngrade={allowDowngrade})");
+                    await RuntimeSelfUpdateTriggerAsync(zipHash, allowDowngrade).ConfigureAwait(false);
                     _logger.Warning("Self-update: returned without restart — update did not apply, agent continues with stale binary");
                 }
                 catch (Exception ex)

@@ -101,6 +101,7 @@ namespace AutopilotMonitor.Agent
 
             // Try to load backend hash from cached remote-config.json (from a previous run).
             // This gives the self-updater a second trust channel for integrity verification.
+            bool cachedAllowAgentDowngrade = false;
             try
             {
                 var cachedConfigPath = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor\Config\remote-config.json");
@@ -117,6 +118,10 @@ namespace AutopilotMonitor.Agent
                     {
                         SelfUpdater.Log("Self-update: no backend integrity hash in cached config — will use version.json hash as fallback");
                     }
+
+                    cachedAllowAgentDowngrade = cachedConfig?.AllowAgentDowngrade ?? false;
+                    if (cachedAllowAgentDowngrade)
+                        SelfUpdater.Log("Self-update: cached config has AllowAgentDowngrade=true (downgrades permitted)");
                 }
                 else
                 {
@@ -128,7 +133,11 @@ namespace AutopilotMonitor.Agent
                 SelfUpdater.Log($"Self-update: could not load cached config for backend hash: {ex.Message}");
             }
 
-            SelfUpdater.CheckAndApplyUpdateAsync(GetAgentVersion(), agentDir, consoleMode).GetAwaiter().GetResult();
+            SelfUpdater.CheckAndApplyUpdateAsync(
+                GetAgentVersion(),
+                agentDir,
+                consoleMode,
+                allowDowngrade: cachedAllowAgentDowngrade).GetAwaiter().GetResult();
             // If we reach here, no update was applied — continue normal startup
 
             try
@@ -329,7 +338,7 @@ namespace AutopilotMonitor.Agent
                     // invokes SelfUpdater with forceUpdate=true and a longer download timeout
                     // (60s, vs. 10s at startup) because monitoring is already running and we
                     // know an update is required.
-                    service.RuntimeSelfUpdateTriggerAsync = zipHash =>
+                    service.RuntimeSelfUpdateTriggerAsync = (zipHash, allowDowngrade) =>
                     {
                         if (!string.IsNullOrEmpty(zipHash))
                             SelfUpdater.BackendExpectedSha256 = zipHash;
@@ -340,7 +349,8 @@ namespace AutopilotMonitor.Agent
                             consoleMode: consoleMode,
                             forceUpdate: true,
                             triggerReason: "runtime_hash_mismatch",
-                            downloadTimeoutMsOverride: 60000);
+                            downloadTimeoutMsOverride: 60000,
+                            allowDowngrade: allowDowngrade);
                     };
 
                     service.Start();

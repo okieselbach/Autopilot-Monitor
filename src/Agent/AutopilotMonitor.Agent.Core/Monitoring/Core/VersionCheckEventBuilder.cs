@@ -75,8 +75,33 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 }
                 else if (File.Exists(paths.SkippedMarker))
                 {
-                    result.Event = BuildSkippedEvent(paths.SkippedMarker, sessionId, tenantId, out var skipOutcome);
+                    var skipEvent = BuildSkippedEvent(paths.SkippedMarker, sessionId, tenantId, out var skipOutcome);
                     result.Outcome = skipOutcome;
+
+                    // Session-scoped dedup for downgrade_blocked: the runtime hash-mismatch path
+                    // re-fires on every agent restart, and each restart would otherwise emit another
+                    // Warning event for the same current→latest pair. Suppress duplicates within the
+                    // same session when the same downgrade is advertised by the backend.
+                    if (string.Equals(skipOutcome, "downgrade_blocked", StringComparison.Ordinal))
+                    {
+                        var latestVersion = ExtractLatestVersion(skipEvent);
+                        var lastEmit = TryReadLastEmit(paths.LastEmit);
+                        if (lastEmit != null &&
+                            string.Equals(lastEmit.SessionId, sessionId, StringComparison.Ordinal) &&
+                            string.Equals(lastEmit.LatestVersion, latestVersion, StringComparison.Ordinal) &&
+                            string.Equals(lastEmit.Outcome, "downgrade_blocked", StringComparison.Ordinal))
+                        {
+                            result.Deduped = true;
+                        }
+                        else
+                        {
+                            result.Event = skipEvent;
+                        }
+                    }
+                    else
+                    {
+                        result.Event = skipEvent;
+                    }
                 }
                 else if (File.Exists(paths.CheckedMarker))
                 {
@@ -189,6 +214,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             var latestVersion  = (string)marker["latestVersion"];
             var skippedAtUtc   = (string)marker["skippedAtUtc"] ?? "unknown";
             var errorDetail    = (string)marker["errorDetail"] ?? string.Empty;
+            var triggerReason  = (string)marker["triggerReason"];
 
             // Marker may already carry outcome (new SelfUpdater). For forward-compat with old markers
             // lying around across an upgrade, derive it from the reason.
@@ -205,6 +231,16 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
             };
             if (latestVersion != null)
                 data["latestVersion"] = latestVersion;
+            if (!string.IsNullOrEmpty(triggerReason))
+                data["triggerReason"] = triggerReason;
+
+            string message;
+            if (outcome == "check_failed")
+                message = $"Agent version check failed (reason={reason})";
+            else if (outcome == "downgrade_blocked")
+                message = $"Agent self-update blocked: downgrade from {currentVersion} to {latestVersion ?? "unknown"} (trigger={triggerReason ?? "unknown"}, allowDowngrade=false)";
+            else
+                message = $"Agent self-update skipped (reason={reason})";
 
             return new EnrollmentEvent
             {
@@ -213,9 +249,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 EventType = Constants.EventTypes.AgentVersionCheck,
                 Severity = EventSeverity.Warning,
                 Source = "Agent",
-                Message = outcome == "check_failed"
-                    ? $"Agent version check failed (reason={reason})"
-                    : $"Agent self-update skipped (reason={reason})",
+                Message = message,
                 Data = data,
                 ImmediateUpload = true
             };

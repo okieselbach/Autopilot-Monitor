@@ -246,5 +246,63 @@ namespace AutopilotMonitor.Agent.Core.Tests.Core
             Assert.NotNull(result.ParseError);
             Assert.False(File.Exists(_paths.CheckedMarker)); // still cleaned up
         }
+
+        private void WriteDowngradeBlocked(string current = "1.0.961", string latest = "1.0.951", string trigger = "runtime_hash_mismatch")
+        {
+            var json = new JObject
+            {
+                ["outcome"]        = "downgrade_blocked",
+                ["reason"]         = "downgrade_blocked",
+                ["currentVersion"] = current,
+                ["latestVersion"]  = latest,
+                ["triggerReason"]  = trigger,
+                ["skippedAtUtc"]   = DateTime.UtcNow.ToString("O"),
+                ["errorDetail"]    = string.Empty,
+            };
+            File.WriteAllText(_paths.SkippedMarker, json.ToString());
+        }
+
+        [Fact]
+        public void DowngradeBlockedMarker_FirstTime_EmitsWarningEvent()
+        {
+            WriteDowngradeBlocked();
+
+            var result = VersionCheckEventBuilder.TryBuild(SessionA, TenantId, DateTime.UtcNow, _paths);
+
+            Assert.NotNull(result.Event);
+            Assert.Equal(EventSeverity.Warning, result.Event.Severity);
+            Assert.Equal("downgrade_blocked", result.Event.Data["outcome"]);
+            Assert.Equal("1.0.951", result.Event.Data["latestVersion"]);
+            Assert.Equal("1.0.961", result.Event.Data["currentVersion"]);
+            Assert.Equal("runtime_hash_mismatch", result.Event.Data["triggerReason"]);
+            Assert.Contains("downgrade from 1.0.961 to 1.0.951", result.Event.Message);
+            Assert.False(result.Deduped);
+            Assert.False(File.Exists(_paths.SkippedMarker));
+        }
+
+        [Fact]
+        public void DowngradeBlocked_SameSessionSameLatest_IsDeduped()
+        {
+            WriteLastEmit(SessionA, "1.0.951", "downgrade_blocked");
+            WriteDowngradeBlocked();
+
+            var result = VersionCheckEventBuilder.TryBuild(SessionA, TenantId, DateTime.UtcNow, _paths);
+
+            Assert.Null(result.Event);
+            Assert.True(result.Deduped);
+            Assert.Equal("downgrade_blocked", result.Outcome);
+        }
+
+        [Fact]
+        public void DowngradeBlocked_DifferentSession_EmitsFresh()
+        {
+            WriteLastEmit(SessionA, "1.0.951", "downgrade_blocked");
+            WriteDowngradeBlocked();
+
+            var result = VersionCheckEventBuilder.TryBuild(SessionB, TenantId, DateTime.UtcNow, _paths);
+
+            Assert.NotNull(result.Event);
+            Assert.False(result.Deduped);
+        }
     }
 }

@@ -136,7 +136,7 @@ namespace AutopilotMonitor.Functions.Functions.Config
             var response = req.CreateResponse(HttpStatusCode.OK);
             await response.WriteAsJsonAsync(new AgentConfigResponse
             {
-                ConfigVersion = 22, // StallProbe trace indices [2,3,4] + ModernDeployment EventID 100 downgrade
+                ConfigVersion = 23, // AllowAgentDowngrade forward-only self-update gate
                 UploadIntervalSeconds = 10,
                 SelfDestructOnComplete = tenantConfig.SelfDestructOnComplete ?? true,
                 KeepLogFile = tenantConfig.KeepLogFile ?? false,
@@ -164,6 +164,7 @@ namespace AutopilotMonitor.Functions.Functions.Config
                 },
                 LatestAgentSha256 = adminConfig.LatestAgentSha256,
                 LatestAgentExeSha256 = adminConfig.LatestAgentExeSha256,
+                AllowAgentDowngrade = adminConfig.AllowAgentDowngrade,
                 NtpServer = string.IsNullOrEmpty(tenantConfig.NtpServer) ? "time.windows.com" : tenantConfig.NtpServer,
                 EnableTimezoneAutoSet = tenantConfig.EnableTimezoneAutoSet ?? false,
                 SendTraceEvents = tenantConfig.SendTraceEvents,

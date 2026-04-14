@@ -30,6 +30,8 @@ interface AdminConfigContextValue {
   setMaintenanceBlockDurationHours: (value: number) => void;
   opsEventRetentionDays: number;
   setOpsEventRetentionDays: (value: number) => void;
+  allowAgentDowngrade: boolean;
+  setAllowAgentDowngrade: (value: boolean) => void;
 
   // Diagnostics log paths
   globalDiagPaths: DiagnosticsLogPath[];
@@ -101,6 +103,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
   const [maxSessionWindowHours, setMaxSessionWindowHours] = useState(24);
   const [maintenanceBlockDurationHours, setMaintenanceBlockDurationHours] = useState(12);
   const [opsEventRetentionDays, setOpsEventRetentionDays] = useState(90);
+  const [allowAgentDowngrade, setAllowAgentDowngrade] = useState(false);
 
   // Diagnostics Log Paths state
   const [globalDiagPaths, setGlobalDiagPaths] = useState<DiagnosticsLogPath[]>([]);
@@ -150,6 +153,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
         setMaxSessionWindowHours(data.maxSessionWindowHours ?? 24);
         setMaintenanceBlockDurationHours(data.maintenanceBlockDurationHours ?? 12);
         setOpsEventRetentionDays(data.opsEventRetentionDays ?? 90);
+        setAllowAgentDowngrade(data.allowAgentDowngrade ?? false);
         try {
           setGlobalDiagPaths(data.diagnosticsGlobalLogPathsJson ? JSON.parse(data.diagnosticsGlobalLogPathsJson) : []);
         } catch {
@@ -240,6 +244,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
         maxSessionWindowHours,
         maintenanceBlockDurationHours,
         opsEventRetentionDays,
+        allowAgentDowngrade,
       };
 
       const response = await authenticatedFetch(api.globalConfig.get(), getAccessToken, {
@@ -266,7 +271,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
     } finally {
       setSavingConfig(false);
     }
-  }, [adminConfig, globalRateLimit, platformStatsBlobSasUrl, collectorIdleTimeoutMinutes, maxSessionWindowHours, maintenanceBlockDurationHours, opsEventRetentionDays, getAccessToken]);
+  }, [adminConfig, globalRateLimit, platformStatsBlobSasUrl, collectorIdleTimeoutMinutes, maxSessionWindowHours, maintenanceBlockDurationHours, opsEventRetentionDays, allowAgentDowngrade, getAccessToken]);
 
   // Reset admin config
   const handleResetAdminConfig = useCallback(() => {
@@ -277,6 +282,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
     setMaxSessionWindowHours(adminConfig.maxSessionWindowHours ?? 24);
     setMaintenanceBlockDurationHours(adminConfig.maintenanceBlockDurationHours ?? 12);
     setOpsEventRetentionDays(adminConfig.opsEventRetentionDays ?? 90);
+    setAllowAgentDowngrade(adminConfig.allowAgentDowngrade ?? false);
     try {
       setGlobalDiagPaths(adminConfig.diagnosticsGlobalLogPathsJson ? JSON.parse(adminConfig.diagnosticsGlobalLogPathsJson) : []);
     } catch {
@@ -395,6 +401,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
       maxSessionWindowHours, setMaxSessionWindowHours,
       maintenanceBlockDurationHours, setMaintenanceBlockDurationHours,
       opsEventRetentionDays, setOpsEventRetentionDays,
+      allowAgentDowngrade, setAllowAgentDowngrade,
       globalDiagPaths, setGlobalDiagPaths, savingDiagPaths,
       opsAlertRules, setOpsAlertRules,
       opsAlertTelegramEnabled, setOpsAlertTelegramEnabled,
