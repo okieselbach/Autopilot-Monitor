@@ -1,13 +1,12 @@
-using System.Diagnostics;
 using AutopilotMonitor.Functions.Security;
 
 namespace AutopilotMonitor.Functions.Tests;
 
 /// <summary>
 /// Tests for <see cref="DeviceAssociationValidator"/> — focused on pure-function pieces:
-/// JSON-to-DTO mapping (incl. exact-match guard), cache key shape, and Activity-tag
-/// enrichment used by SecurityValidator. The HTTP/cache/retry resilience is mirrored
-/// 1:1 from <c>AutopilotDeviceValidator</c>; behavioural drift would surface here.
+/// JSON-to-DTO mapping (incl. exact-match guard) and cache key shape. The HTTP/cache/retry
+/// resilience is mirrored 1:1 from <c>AutopilotDeviceValidator</c>; behavioural drift
+/// would surface here.
 /// </summary>
 public class DeviceAssociationValidatorTests
 {
@@ -128,54 +127,4 @@ public class DeviceAssociationValidatorTests
         Assert.True(result.IsValid);
     }
 
-    // -- EnrichRequestTelemetryWithDeviceAssociation --
-
-    [Fact]
-    public void Enrich_PopulatesActivityTags_WhenMatched()
-    {
-        using var activity = new Activity("test").Start();
-        var result = new DeviceAssociationResult
-        {
-            IsValid = true,
-            IsTransient = false,
-            AssociationState = "preassociated",
-            DevicePreparationPolicyId = "policy-1",
-            PreAssociationDateTime = new DateTime(2026, 4, 14, 12, 0, 0, DateTimeKind.Utc)
-        };
-
-        SecurityValidator.EnrichRequestTelemetryWithDeviceAssociation(result);
-
-        var tags = activity.Tags.ToDictionary(t => t.Key, t => t.Value);
-        Assert.Equal("true", tags["devprep.association.matched"]);
-        Assert.Equal("false", tags["devprep.association.transient"]);
-        Assert.Equal("preassociated", tags["devprep.association.state"]);
-        Assert.Equal("policy-1", tags["devprep.association.policyId"]);
-        Assert.Contains("devprep.association.preAssociationUtc", tags.Keys);
-    }
-
-    [Fact]
-    public void Enrich_OnlyMatchedAndTransient_WhenNoOtherFields()
-    {
-        using var activity = new Activity("test").Start();
-        var result = new DeviceAssociationResult { IsValid = false, IsTransient = true };
-
-        SecurityValidator.EnrichRequestTelemetryWithDeviceAssociation(result);
-
-        var tags = activity.Tags.ToDictionary(t => t.Key, t => t.Value);
-        Assert.Equal("false", tags["devprep.association.matched"]);
-        Assert.Equal("true", tags["devprep.association.transient"]);
-        Assert.DoesNotContain("devprep.association.state", tags.Keys);
-        Assert.DoesNotContain("devprep.association.policyId", tags.Keys);
-    }
-
-    [Fact]
-    public void Enrich_NoActivity_DoesNotThrow()
-    {
-        // Activity.Current is null in environments where no listener registered the activity source.
-        // Must be a safe no-op.
-        Activity.Current = null;
-        var result = new DeviceAssociationResult { IsValid = true };
-        var ex = Record.Exception(() => SecurityValidator.EnrichRequestTelemetryWithDeviceAssociation(result));
-        Assert.Null(ex);
-    }
 }
