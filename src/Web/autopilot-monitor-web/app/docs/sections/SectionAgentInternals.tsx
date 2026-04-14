@@ -662,7 +662,7 @@ export function SectionAgentInternals() {
             Rename trick for locked binaries (.old suffix). Copies staged EXE to Agent directory.
           </Step>
           <Step n={4} color="sky" title="Restart:">
-            Writes self-update marker, restarts via PowerShell Wait-Process. Next startup emits agent_self_updated event.
+            Writes self-update marker, restarts via PowerShell Wait-Process. Next startup emits agent_version_check event (outcome=updated).
           </Step>
         </div>
         <InfoBox color="sky">
@@ -885,7 +885,7 @@ export function SectionAgentInternals() {
               ["agent_started", "MonitoringService", "Agent started (version, config, previous exit type)"],
               ["agent_shutdown", "MonitoringService", "Graceful shutdown"],
               ["agent_trace", "Various", "Decision tracing (verbose diagnostics)"],
-              ["agent_self_updated", "MonitoringService", "Post-update event (old -> new version)"],
+              ["agent_version_check", "MonitoringService", "Version check outcome (up_to_date / updated / skipped / check_failed) - emitted every startup, session-scoped dedup for up_to_date"],
               ["system_reboot_detected", "MonitoringService", "Reboot detected between sessions"],
               ["security_audit", "MonitoringService", "Security flag status at startup"],
             ]}

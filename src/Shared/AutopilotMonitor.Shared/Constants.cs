@@ -30,18 +30,32 @@ namespace AutopilotMonitor.Shared
         public const string StateDirectory = @"%ProgramData%\AutopilotMonitor\State";
 
         /// <summary>
-        /// Marker file written by SelfUpdater before restart; read by MonitoringService on next startup
-        /// to emit an agent_self_updated event.
+        /// Marker file written by SelfUpdater after a successful update + restart; read by MonitoringService
+        /// on next startup to emit an agent_version_check event with outcome=updated.
         /// </summary>
         public const string SelfUpdateMarkerFile = @"%ProgramData%\AutopilotMonitor\State\self-update-info.json";
 
         /// <summary>
         /// Marker file written by SelfUpdater when the startup update path is skipped (network timeout,
         /// download failure, integrity mismatch, etc.); read by MonitoringService on next startup to emit
-        /// an agent_self_update_skipped event. Only written on the startup trigger path — runtime-triggered
-        /// failures are logged normally because the full logger is already up.
+        /// an agent_version_check event with outcome=skipped or check_failed. Only written on the startup
+        /// trigger path — runtime-triggered failures are logged normally because the full logger is already up.
         /// </summary>
         public const string SelfUpdateSkippedMarkerFile = @"%ProgramData%\AutopilotMonitor\State\self-update-skipped.json";
+
+        /// <summary>
+        /// Marker file written by SelfUpdater on the happy path (current version already up to date);
+        /// read by MonitoringService on next startup to emit an agent_version_check event with
+        /// outcome=up_to_date. Subject to session-scoped dedup via LastVersionCheckEmitFile.
+        /// </summary>
+        public const string SelfUpdateCheckedMarkerFile = @"%ProgramData%\AutopilotMonitor\State\self-update-checked.json";
+
+        /// <summary>
+        /// Persists the last emitted agent_version_check event across agent restarts. Used by
+        /// MonitoringService to dedup up_to_date events within the same session when the latestVersion
+        /// has not changed. Updated every time an event is emitted.
+        /// </summary>
+        public const string LastVersionCheckEmitFile = @"%ProgramData%\AutopilotMonitor\State\last-version-check.json";
 
         /// <summary>
         /// Default path for the IME pattern match log file (debugging/diagnostics)
@@ -175,8 +189,7 @@ namespace AutopilotMonitor.Shared
             public const string EspProvisioningStatus = "esp_provisioning_status";
             public const string SoftwareInventoryAnalysis = "software_inventory_analysis";
             public const string VulnerabilityReport       = "vulnerability_report";
-            public const string AgentSelfUpdated          = "agent_self_updated";
-            public const string AgentSelfUpdateSkipped    = "agent_self_update_skipped";
+            public const string AgentVersionCheck         = "agent_version_check";
 
             // Stall detection (Ebene 2 — StallProbeCollector)
             public const string StallProbeCheck           = "stall_probe_check";   // Trace heartbeat from Probe 2 (15 min) when no anomaly found

@@ -97,7 +97,7 @@ namespace AutopilotMonitor.Agent
         /// </param>
         /// <param name="triggerReason">
         /// "startup" (default) or "runtime_hash_mismatch". Recorded in the marker file so the
-        /// agent_self_updated event can distinguish the two paths.
+        /// agent_version_check event (outcome=updated) can distinguish the two paths.
         /// </param>
         /// <param name="downloadTimeoutMsOverride">
         /// Overrides the ZIP download timeout. Startup path leaves null (fast-fail, 10s) to preserve
@@ -145,7 +145,9 @@ namespace AutopilotMonitor.Agent
                 if (!forceUpdate && !IsNewerVersion(currentVersion, latestVersion))
                 {
                     log($"Self-update: current version {currentVersion} is up to date (latest: {latestVersion})");
-                    return; // happy path — no skip marker
+                    if (isStartupTrigger)
+                        WriteCheckedMarker(currentVersion, latestVersion, versionCheckMs, log);
+                    return;
                 }
 
                 if (forceUpdate)
@@ -551,10 +553,10 @@ namespace AutopilotMonitor.Agent
         }
 
         /// <summary>
-        /// Writes a small JSON marker so the next agent startup can emit an agent_self_updated event.
-        /// Best-effort — failure here must not block the update.
-        /// Includes phase timings, trigger reason, and exit timestamp so the downstream event
-        /// can carry aggregable telemetry (downtime, total update duration, etc.).
+        /// Writes a small JSON marker so the next agent startup can emit an agent_version_check event
+        /// with outcome=updated. Best-effort — failure here must not block the update. Includes phase
+        /// timings, trigger reason, and exit timestamp so the downstream event can carry aggregable
+        /// telemetry (downtime, total update duration, etc.).
         /// </summary>
         private static void WriteSelfUpdateMarker(
             string previousVersion,
@@ -579,6 +581,7 @@ namespace AutopilotMonitor.Agent
                 var now = DateTime.UtcNow;
                 var payload = new JObject
                 {
+                    ["outcome"]         = "updated",
                     ["previousVersion"] = previousVersion ?? "unknown",
                     ["newVersion"]      = newVersion ?? "unknown",
                     ["triggerReason"]   = triggerReason ?? "startup",
@@ -605,9 +608,10 @@ namespace AutopilotMonitor.Agent
         }
 
         /// <summary>
-        /// Writes a small JSON marker so the next agent startup can emit an agent_self_update_skipped
-        /// event. Only called on the startup trigger path (runtime-triggered failures are logged
-        /// normally because the full logger is already up). Best-effort — never throws.
+        /// Writes a small JSON marker so the next agent startup can emit an agent_version_check event
+        /// with outcome=skipped (or check_failed if the version.json fetch itself failed). Only called
+        /// on the startup trigger path (runtime-triggered failures are logged normally because the full
+        /// logger is already up). Best-effort — never throws.
         /// </summary>
         private static void WriteSkipMarker(string reason, string currentVersion, string latestVersion, string errorDetail, Action<string> log)
         {
@@ -621,8 +625,15 @@ namespace AutopilotMonitor.Agent
                 var detail = errorDetail ?? string.Empty;
                 if (detail.Length > 200) detail = detail.Substring(0, 200);
 
+                // version_check_failed = we never got a latestVersion; everything else = check succeeded
+                // but the download/verify/extract/swap step failed.
+                var outcome = string.Equals(reason, "version_check_failed", StringComparison.Ordinal)
+                    ? "check_failed"
+                    : "skipped";
+
                 var payload = new JObject
                 {
+                    ["outcome"]        = outcome,
                     ["reason"]         = reason ?? "unknown",
                     ["currentVersion"] = currentVersion ?? "unknown",
                     ["latestVersion"]  = latestVersion,   // may be null if version check failed
@@ -631,11 +642,43 @@ namespace AutopilotMonitor.Agent
                 };
 
                 File.WriteAllText(markerPath, payload.ToString(Newtonsoft.Json.Formatting.None));
-                log($"Self-update: skip marker written (reason={reason})");
+                log($"Self-update: skip marker written (outcome={outcome}, reason={reason})");
             }
             catch (Exception ex)
             {
                 log($"Self-update: could not write skip marker — {ex.Message} (non-critical)");
+            }
+        }
+
+        /// <summary>
+        /// Writes a small JSON marker on the happy path (current version is already up to date) so
+        /// the next agent startup can emit an agent_version_check event with outcome=up_to_date.
+        /// Subject to session-scoped dedup by the MonitoringService emitter. Best-effort — never throws.
+        /// </summary>
+        private static void WriteCheckedMarker(string currentVersion, string latestVersion, long versionCheckMs, Action<string> log)
+        {
+            try
+            {
+                var markerPath = Environment.ExpandEnvironmentVariables(Constants.SelfUpdateCheckedMarkerFile);
+                var dir = Path.GetDirectoryName(markerPath);
+                if (!Directory.Exists(dir))
+                    Directory.CreateDirectory(dir);
+
+                var payload = new JObject
+                {
+                    ["outcome"]        = "up_to_date",
+                    ["currentVersion"] = currentVersion ?? "unknown",
+                    ["latestVersion"]  = latestVersion ?? "unknown",
+                    ["versionCheckMs"] = versionCheckMs,
+                    ["checkedAtUtc"]   = DateTime.UtcNow.ToString("O")
+                };
+
+                File.WriteAllText(markerPath, payload.ToString(Newtonsoft.Json.Formatting.None));
+                log("Self-update: checked marker written (up_to_date) for next-startup event");
+            }
+            catch (Exception ex)
+            {
+                log($"Self-update: could not write checked marker — {ex.Message} (non-critical)");
             }
         }
 

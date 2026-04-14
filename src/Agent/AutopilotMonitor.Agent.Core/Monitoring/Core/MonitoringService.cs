@@ -267,12 +267,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 });
             }
 
-            // If the agent was self-updated on the previous run, emit a timeline event
-            EmitSelfUpdateEventIfMarkerExists();
-
-            // If the startup self-update was skipped (network timeout etc.), emit telemetry
-            // so we can measure how often this happens across the fleet.
-            EmitSelfUpdateSkippedEventIfMarkerExists();
+            // Consume self-update markers (updated / skipped / checked) left by SelfUpdater on the
+            // previous startup and emit a single agent_version_check event. Dedup suppresses
+            // repeated up_to_date events for the same latestVersion within the same session.
+            EmitVersionCheckEventFromMarkers();
 
             // Emit deferred security_audit (initial UnrestrictedMode) now that agent_started has its sequence
             if (_deferredSecurityAuditConfigVersion.HasValue)
@@ -711,159 +709,40 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
         }
 
         /// <summary>
-        /// Reads the self-update marker file left by SelfUpdater, emits an agent_self_updated event,
-        /// and deletes the marker. Best-effort — failures are logged but never block startup.
-        /// Includes phase timings, trigger reason, and a computed downtime (new process startup
-        /// time minus old process exit time) so we can aggregate update duration and event-loss
-        /// window across the fleet.
+        /// Consumes any self-update markers left by SelfUpdater and emits a single
+        /// <c>agent_version_check</c> event. Three marker variants map to the outcomes:
+        /// <list type="bullet">
+        /// <item><description>self-update-info.json → outcome=updated</description></item>
+        /// <item><description>self-update-skipped.json → outcome=skipped or check_failed</description></item>
+        /// <item><description>self-update-checked.json → outcome=up_to_date (subject to session-scoped dedup)</description></item>
+        /// </list>
+        /// Best-effort — failures are logged but never block startup. See
+        /// <see cref="VersionCheckEventBuilder"/> for the pure logic + dedup rules.
         /// </summary>
-        private void EmitSelfUpdateEventIfMarkerExists()
+        private void EmitVersionCheckEventFromMarkers()
         {
-            try
+            var result = VersionCheckEventBuilder.TryBuild(
+                _configuration.SessionId,
+                _configuration.TenantId,
+                _agentStartTimeUtc);
+
+            if (!string.IsNullOrEmpty(result.ParseError))
             {
-                var markerPath = Environment.ExpandEnvironmentVariables(Constants.SelfUpdateMarkerFile);
-                if (!File.Exists(markerPath))
-                    return;
-
-                var json = File.ReadAllText(markerPath);
-                var marker = Newtonsoft.Json.Linq.JObject.Parse(json);
-
-                var previousVersion = (string)marker["previousVersion"] ?? "unknown";
-                var newVersion      = (string)marker["newVersion"] ?? "unknown";
-                var updatedAtUtc    = (string)marker["updatedAtUtc"] ?? "unknown";
-                var triggerReason   = (string)marker["triggerReason"] ?? "startup";
-                var exitAtUtc       = (string)marker["exitAtUtc"];
-
-                long? ReadLong(string key)
-                {
-                    var token = marker[key];
-                    if (token == null || token.Type == Newtonsoft.Json.Linq.JTokenType.Null)
-                        return null;
-                    try { return token.ToObject<long>(); }
-                    catch { return null; }
-                }
-
-                var versionCheckMs = ReadLong("versionCheckMs");
-                var downloadMs     = ReadLong("downloadMs");
-                var zipSizeBytes   = ReadLong("zipSizeBytes");
-                var verifyMs       = ReadLong("verifyMs");
-                var extractMs      = ReadLong("extractMs");
-                var swapMs         = ReadLong("swapMs");
-                var totalUpdateMs  = ReadLong("totalUpdateMs");
-
-                // Downtime = new process start (_agentStartTimeUtc) minus old process exit.
-                // Measured across the PowerShell Wait-Process gap + new agent startup up to
-                // MonitoringService init. Closest proxy for "events potentially missed".
-                long? downtimeMs = null;
-                if (!string.IsNullOrEmpty(exitAtUtc) &&
-                    DateTime.TryParse(exitAtUtc, System.Globalization.CultureInfo.InvariantCulture,
-                        System.Globalization.DateTimeStyles.RoundtripKind, out var exitDt))
-                {
-                    downtimeMs = (long)(_agentStartTimeUtc - exitDt).TotalMilliseconds;
-                }
-
-                _logger.Info($"Self-update detected: {previousVersion} → {newVersion} (trigger={triggerReason}, downtimeMs={downtimeMs?.ToString() ?? "n/a"})");
-
-                var data = new Dictionary<string, object>
-                {
-                    { "previousVersion", previousVersion },
-                    { "newVersion", newVersion },
-                    { "updatedAtUtc", updatedAtUtc },
-                    { "triggerReason", triggerReason }
-                };
-                if (exitAtUtc != null)      data["exitAtUtc"]      = exitAtUtc;
-                if (versionCheckMs.HasValue) data["versionCheckMs"] = versionCheckMs.Value;
-                if (downloadMs.HasValue)     data["downloadMs"]     = downloadMs.Value;
-                if (zipSizeBytes.HasValue)   data["zipSizeBytes"]   = zipSizeBytes.Value;
-                if (verifyMs.HasValue)       data["verifyMs"]       = verifyMs.Value;
-                if (extractMs.HasValue)      data["extractMs"]      = extractMs.Value;
-                if (swapMs.HasValue)         data["swapMs"]         = swapMs.Value;
-                if (totalUpdateMs.HasValue)  data["totalUpdateMs"]  = totalUpdateMs.Value;
-                if (downtimeMs.HasValue)     data["downtimeMs"]     = downtimeMs.Value;
-
-                // Runtime-triggered updates are bumped to Warning so they stand out in the UI —
-                // startup updates stay Info because they are the normal rollout path.
-                var severity = string.Equals(triggerReason, "runtime_hash_mismatch", StringComparison.Ordinal)
-                    ? EventSeverity.Warning
-                    : EventSeverity.Info;
-
-                EmitEvent(new EnrollmentEvent
-                {
-                    SessionId = _configuration.SessionId,
-                    TenantId = _configuration.TenantId,
-                    EventType = Constants.EventTypes.AgentSelfUpdated,
-                    Severity = severity,
-                    Source = "Agent",
-                    Message = $"Agent self-updated from {previousVersion} to {newVersion} (trigger={triggerReason})",
-                    Data = data,
-                    ImmediateUpload = true
-                });
-
-                TryDeleteMarker(markerPath);
+                _logger.Warning($"Could not process version-check marker: {result.ParseError}");
+                return;
             }
-            catch (Exception ex)
+
+            if (result.Deduped)
             {
-                _logger.Warning($"Could not process self-update marker: {ex.Message}");
+                _logger.Verbose($"agent_version_check skipped (dedup: up_to_date, same session, same latestVersion)");
+                return;
             }
-        }
 
-        /// <summary>
-        /// Reads the self-update-skipped marker file left by SelfUpdater (startup trigger path only),
-        /// emits an agent_self_update_skipped event, and deletes the marker. Best-effort — failures
-        /// are logged but never block startup.
-        /// </summary>
-        private void EmitSelfUpdateSkippedEventIfMarkerExists()
-        {
-            try
+            if (result.Event != null)
             {
-                var markerPath = Environment.ExpandEnvironmentVariables(Constants.SelfUpdateSkippedMarkerFile);
-                if (!File.Exists(markerPath))
-                    return;
-
-                var json = File.ReadAllText(markerPath);
-                var marker = Newtonsoft.Json.Linq.JObject.Parse(json);
-
-                var reason         = (string)marker["reason"] ?? "unknown";
-                var currentVersion = (string)marker["currentVersion"] ?? "unknown";
-                var latestVersion  = (string)marker["latestVersion"];
-                var skippedAtUtc   = (string)marker["skippedAtUtc"] ?? "unknown";
-                var errorDetail    = (string)marker["errorDetail"] ?? string.Empty;
-
-                _logger.Warning($"Startup self-update skipped: reason={reason}, current={currentVersion}, latest={latestVersion ?? "n/a"}");
-
-                var data = new Dictionary<string, object>
-                {
-                    { "reason", reason },
-                    { "currentVersion", currentVersion },
-                    { "skippedAtUtc", skippedAtUtc },
-                    { "errorDetail", errorDetail }
-                };
-                if (latestVersion != null)
-                    data["latestVersion"] = latestVersion;
-
-                EmitEvent(new EnrollmentEvent
-                {
-                    SessionId = _configuration.SessionId,
-                    TenantId = _configuration.TenantId,
-                    EventType = Constants.EventTypes.AgentSelfUpdateSkipped,
-                    Severity = EventSeverity.Warning,
-                    Source = "Agent",
-                    Message = $"Startup self-update skipped (reason={reason})",
-                    Data = data,
-                    ImmediateUpload = true
-                });
-
-                TryDeleteMarker(markerPath);
+                _logger.Info($"Agent version check: outcome={result.Outcome}");
+                EmitEvent(result.Event);
             }
-            catch (Exception ex)
-            {
-                _logger.Warning($"Could not process self-update-skipped marker: {ex.Message}");
-            }
-        }
-
-        private static void TryDeleteMarker(string path)
-        {
-            try { File.Delete(path); } catch { }
         }
 
         // ──────────────────────────────────────────────────────────────────
