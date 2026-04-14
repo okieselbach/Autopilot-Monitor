@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ProtectedRoute } from "../../components/ProtectedRoute";
@@ -8,10 +8,6 @@ import { useSignalR } from "../../contexts/SignalRContext";
 import { useTenant } from "../../contexts/TenantContext";
 import { useAuth } from "../../contexts/AuthContext";
 import { useNotifications } from "../../contexts/NotificationContext";
-import { api } from "@/lib/api";
-import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
-import { asGuidOrUndefined } from "@/lib/inputValidation";
-import { Session } from "./types";
 import { StatsCard } from "./components/StatsCards";
 import { WelcomeMessage } from "./components/WelcomeMessage";
 import { SessionTable } from "./components/SessionTable";
@@ -23,38 +19,36 @@ import { useBlockDevice } from "./hooks/useBlockDevice";
 import { useTenantSecurityConfig } from "./hooks/useTenantSecurityConfig";
 import { useTenantList } from "./hooks/useTenantList";
 import { useDashboardFilters } from "./hooks/useDashboardFilters";
+import { useDashboardSessions } from "./hooks/useDashboardSessions";
 
 export default function Home() {
   const router = useRouter();
   const { user, logout, getAccessToken, isPreviewBlocked } = useAuth();
   const { addNotification } = useNotifications();
   const [apiStatus, setApiStatus] = useState<"unchecked" | "checking" | "healthy" | "error">("unchecked");
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [hasMore, setHasMore] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [cursor, setCursor] = useState<string | null>(null);
   const [tenantIdFilter, setTenantIdFilter] = useState("");
   const { adminMode, setAdminMode, globalAdminMode, setGlobalAdminMode } = useAdminMode();
 
-  const {
-    showDeleteConfirm, sessionToDelete,
-    deleteSession, confirmDelete, cancelDelete,
-  } = useDeleteSession(
-    getAccessToken,
-    addNotification,
-    adminMode,
-    (deletedId) => setSessions(prev => prev.filter(s => s.sessionId !== deletedId))
-  );
+  const signalR = useSignalR();
+  const { tenantId } = useTenant();
 
   const {
     showBlockConfirm, sessionToBlock, blockingDevice, blockedDevicesSet, setBlockedDevicesSet,
     blockDevice, confirmBlock, cancelBlock,
   } = useBlockDevice(getAccessToken, addNotification, adminMode, globalAdminMode);
 
-  // Use global contexts
-  const { on, off, isConnected, joinGroup, leaveGroup } = useSignalR();
-  const { tenantId } = useTenant();
+  const {
+    sessions, loading, hasMore, loadingMore,
+    refetch, refetchWith, loadMore, removeSession,
+  } = useDashboardSessions({
+    user, tenantId, globalAdminMode, tenantIdFilter, adminMode,
+    getAccessToken, addNotification, setBlockedDevicesSet, signalR,
+  });
+
+  const {
+    showDeleteConfirm, sessionToDelete,
+    deleteSession, confirmDelete, cancelDelete,
+  } = useDeleteSession(getAccessToken, addNotification, adminMode, removeSession);
 
   const {
     searchQuery, setSearchQuery,
@@ -74,123 +68,6 @@ export default function Home() {
     tenantIdFilter,
   });
 
-  // Track if initial fetch has been done to prevent duplicate calls in React StrictMode
-  const hasInitialFetch = useRef(false);
-
-  // Track if global admin mode has been initialized (to skip initial mount in useEffect)
-  const hasGlobalModeInitialized = useRef(false);
-
-  // Refs for SignalR handlers to access current filter state (avoids stale closures)
-  const tenantIdFilterRef = useRef(tenantIdFilter);
-  tenantIdFilterRef.current = tenantIdFilter;
-  const globalAdminModeRef = useRef(globalAdminMode);
-  globalAdminModeRef.current = globalAdminMode;
-  const tenantIdRef = useRef(tenantId);
-  tenantIdRef.current = tenantId;
-
-  // Track if we've joined the tenant group to prevent duplicate joins
-  const hasJoinedGroup = useRef(false);
-
-  // Track whether we've been connected at least once — used to detect reconnects
-  const wasConnectedRef = useRef(false);
-
-  const fetchSessions = async (loadMoreCursor?: string, globalTenantIdOverride?: string) => {
-    try {
-      // Use different endpoint based on global admin mode
-      // Only pass tenantIdFilter as query param if it's a valid GUID (fuzzy search sets the GUID on selection)
-      const rawFilter = globalTenantIdOverride !== undefined ? globalTenantIdOverride : tenantIdFilter.trim();
-      const effectiveTenantFilter = asGuidOrUndefined(rawFilter);
-      let endpoint = globalAdminMode
-        ? api.globalSessions.list(effectiveTenantFilter)
-        : api.sessions.list(tenantId);
-
-      // Append cursor for "Load More" requests
-      if (loadMoreCursor) {
-        endpoint += endpoint.includes('?') ? '&' : '?';
-        endpoint += `cursor=${encodeURIComponent(loadMoreCursor)}`;
-      }
-
-      const response = await authenticatedFetch(endpoint, getAccessToken);
-
-      if (response.ok) {
-        const data = await response.json();
-        const newSessions = data.sessions || [];
-
-        if (loadMoreCursor) {
-          // Append to existing sessions (Load More)
-          setSessions(prev => [...prev, ...newSessions]);
-        } else {
-          // Initial load — replace all sessions
-          setSessions(newSessions);
-          fetchBlockedDevices(newSessions);
-        }
-
-        setHasMore(data.hasMore || false);
-        setCursor(data.cursor || null);
-      } else {
-        addNotification('error', 'Backend Error', `Failed to fetch sessions: ${response.statusText}`, 'backend-error');
-      }
-    } catch (error) {
-      if (error instanceof TokenExpiredError) {
-        addNotification('error', 'Session Expired', error.message, 'session-expired-error');
-      } else {
-        console.error("Failed to fetch sessions:", error);
-        addNotification('error', 'Backend Not Reachable', 'Unable to connect to the backend API. Please ensure the backend server is running.', 'backend-unreachable');
-      }
-    } finally {
-      setLoading(false);
-      setLoadingMore(false);
-    }
-  };
-
-  const loadMore = () => {
-    if (!cursor || loadingMore) return;
-    setLoadingMore(true);
-    fetchSessions(cursor);
-  };
-
-  const fetchBlockedDevices = async (currentSessions: Session[]) => {
-    if (!adminMode || !globalAdminMode) {
-      setBlockedDevicesSet(new Set());
-      return;
-    }
-
-    try {
-      const tenantIds = globalAdminMode
-        ? [...new Set(currentSessions.map(s => s.tenantId))]
-        : tenantId ? [tenantId] : [];
-
-      if (tenantIds.length === 0) {
-        setBlockedDevicesSet(new Set());
-        return;
-      }
-
-      const results = await Promise.allSettled(
-        tenantIds.map(tid =>
-          authenticatedFetch(api.devices.blocked(tid), getAccessToken)
-            .then(res => res.ok ? res.json() : { blocked: [] })
-        )
-      );
-
-      const newSet = new Set<string>();
-      results.forEach(result => {
-        if (result.status === "fulfilled" && result.value?.blocked) {
-          for (const device of result.value.blocked) {
-            newSet.add(`${device.tenantId}:${device.serialNumber}`);
-          }
-        }
-      });
-
-      setBlockedDevicesSet(newSet);
-    } catch (error) {
-      if (error instanceof TokenExpiredError) {
-        addNotification('error', 'Session Expired', error.message, 'session-expired-error');
-      } else {
-        console.error("Failed to fetch blocked devices:", error);
-      }
-    }
-  };
-
   // Redirect regular users (non-admin, non-operator) to progress portal – they must never see the session list
   useEffect(() => {
     if (user && !user.isTenantAdmin && !user.isGlobalAdmin && user.role !== 'Operator') {
@@ -199,139 +76,7 @@ export default function Home() {
   }, [user, router]);
 
   const serialValidationEnabled = useTenantSecurityConfig(tenantId, user, getAccessToken, addNotification);
-
-  // Initial data fetch (only runs for admins).
-  // Wait for a real tenantId before fetching — TenantContext initializes to '' and
-  // updates asynchronously once AuthContext finishes loading the user token.
-  useEffect(() => {
-    if (user && !user.isTenantAdmin && !user.isGlobalAdmin && user.role !== 'Operator') {
-      return; // regular users are being redirected, don't fetch
-    }
-    if (!globalAdminMode && !tenantId) return; // wait for real tenant ID
-    // Prevent duplicate fetches in React StrictMode (development double-mounting)
-    if (hasInitialFetch.current) {
-      return;
-    }
-    hasInitialFetch.current = true;
-
-    // Only fetch sessions on load, no automatic health check
-    fetchSessions();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, tenantId, globalAdminMode]); // re-run once user and tenantId are known
-
-  // Join tenant group when SignalR is connected (for multi-tenancy)
-  useEffect(() => {
-    if (isConnected) {
-      const isReconnect = wasConnectedRef.current;
-      wasConnectedRef.current = true;
-
-      if (!hasJoinedGroup.current) {
-        const groupName = `tenant-${tenantId}`;
-        hasJoinedGroup.current = true;
-        joinGroup(groupName);
-      }
-
-      // After a reconnect, refresh the session list to catch any sessions that were
-      // registered while the client was disconnected and not in the SignalR group.
-      if (isReconnect && hasInitialFetch.current) {
-        fetchSessions();
-      }
-    }
-
-    return () => {
-      // Leave group when component unmounts
-      if (hasJoinedGroup.current) {
-        const groupName = `tenant-${tenantId}`;
-        leaveGroup(groupName);
-        hasJoinedGroup.current = false;
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isConnected, tenantId]);
-
-  // Join/leave global-admins group when Global Admin mode changes
-  useEffect(() => {
-    if (!isConnected) return;
-
-    if (globalAdminMode) {
-      console.log('[Home] Global Admin mode enabled: joining global-admins group');
-      joinGroup('global-admins');
-    } else {
-      console.log('[Home] Global Admin mode disabled: leaving global-admins group');
-      leaveGroup('global-admins');
-    }
-
-    return () => {
-      // Clean up global-admins group on unmount if currently in Global Admin mode
-      if (globalAdminMode) {
-        console.log('[Home] Component unmounting: leaving global-admins group');
-        leaveGroup('global-admins');
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isConnected, globalAdminMode]);
-
-  // Setup SignalR listener - re-register when connection changes
-  useEffect(() => {
-    const handleNewSession = (data: { sessionId: string; tenantId: string; session: Session }) => {
-      console.log('New session registered', data);
-
-      // In non-global mode, only accept sessions from the user's own tenant
-      if (!globalAdminModeRef.current && tenantIdRef.current && data.tenantId !== tenantIdRef.current) {
-        console.log(`Ignoring newSession from tenant ${data.tenantId} (not in global mode, own tenant: ${tenantIdRef.current})`);
-        return;
-      }
-
-      // In global admin mode with an active tenant filter, ignore sessions from other tenants
-      const activeFilter = tenantIdFilterRef.current.trim();
-      if (globalAdminModeRef.current && activeFilter && data.tenantId !== activeFilter) {
-        console.log(`Ignoring newSession from tenant ${data.tenantId} (filtered to ${activeFilter})`);
-        return;
-      }
-
-      if (data.session) {
-        setSessions(prevSessions => {
-          const sessionIndex = prevSessions.findIndex(s => s.sessionId === data.session.sessionId);
-          if (sessionIndex >= 0) {
-            const updated = [...prevSessions];
-            updated[sessionIndex] = data.session;
-            return updated;
-          } else {
-            return [data.session, ...prevSessions];
-          }
-        });
-      } else {
-        console.warn('newSession event received without session data, falling back to fetch');
-        fetchSessions();
-      }
-    };
-
-    const handleNewEvents = (data: { sessionId: string; tenantId: string; eventCount: number; sessionUpdate?: Partial<Session>; session?: Session }) => {
-      console.log('New events notification received on home page', data);
-
-      const update = data.sessionUpdate || data.session;
-      if (update) {
-        setSessions(prevSessions => {
-          const sessionIndex = prevSessions.findIndex(s => s.sessionId === data.sessionId);
-          if (sessionIndex >= 0) {
-            const updated = [...prevSessions];
-            updated[sessionIndex] = { ...prevSessions[sessionIndex], ...update };
-            return updated;
-          }
-          return prevSessions;
-        });
-      }
-    };
-
-    on('newSession', handleNewSession);
-    on('newevents', handleNewEvents);
-
-    return () => {
-      off('newSession', handleNewSession);
-      off('newevents', handleNewEvents);
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isConnected]);
+  const tenantList = useTenantList(globalAdminMode, getAccessToken);
 
   // Disable global admin mode if user is not a global admin
   useEffect(() => {
@@ -341,43 +86,22 @@ export default function Home() {
     }
   }, [user, globalAdminMode]);
 
-
-  // Refetch sessions when global admin mode changes
+  // Clear tenant filter when leaving Global Admin mode (refetch is owned by useDashboardSessions)
   useEffect(() => {
-    if (!hasGlobalModeInitialized.current) {
-      hasGlobalModeInitialized.current = true;
-      return;
-    }
-
-    // Clear tenant filter when leaving global mode
-    if (!globalAdminMode) {
-      setTenantIdFilter("");
-    }
-
-    // Clear sessions immediately to prevent showing stale cross-tenant data
-    setSessions([]);
-    setCursor(null);
-    setLoading(true);
-    fetchSessions();
+    if (!globalAdminMode) setTenantIdFilter("");
   }, [globalAdminMode]);
-
-  const tenantList = useTenantList(globalAdminMode, getAccessToken);
 
   const applyTenantIdFilter = (value: string) => {
     setTenantIdFilter(value);
   };
 
   const submitTenantIdFilter = () => {
-    setCursor(null);
-    setLoading(true);
-    fetchSessions();
+    refetch();
   };
 
   const clearTenantIdFilter = () => {
     setTenantIdFilter("");
-    setCursor(null);
-    setLoading(true);
-    fetchSessions(undefined, "");
+    refetchWith("");
   };
 
   return (
