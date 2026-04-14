@@ -77,7 +77,7 @@ export function SectionSlaTargets() {
               placeholder="e.g. 98.0"
               className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
             />
-            <p className="text-xs text-gray-400 mt-1">Requires 20+ installs to evaluate</p>
+            <p className="text-xs text-gray-400 mt-1">Requires 5+ installs per week to evaluate</p>
           </div>
         </div>
       </div>

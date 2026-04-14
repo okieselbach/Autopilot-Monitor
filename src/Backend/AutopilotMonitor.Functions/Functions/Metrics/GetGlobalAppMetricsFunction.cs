@@ -37,9 +37,13 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
                 if (!string.IsNullOrEmpty(daysParam) && int.TryParse(daysParam, out var parsedDays) && parsedDays > 0)
                     days = parsedDays;
 
+                var tenantIdFilter = query["tenantId"];
+
                 var cutoff = DateTime.UtcNow.AddDays(-days);
 
-                var allSummaries = await _metricsRepo.GetAllAppInstallSummariesAsync();
+                var allSummaries = !string.IsNullOrWhiteSpace(tenantIdFilter)
+                    ? await _metricsRepo.GetAppInstallSummariesByTenantAsync(tenantIdFilter)
+                    : await _metricsRepo.GetAllAppInstallSummariesAsync();
                 var summaries = allSummaries.Where(s => s.StartedAt >= cutoff).ToList();
 
                 var appGroups = summaries.GroupBy(s => s.AppName).Select(g =>

@@ -134,12 +134,12 @@ export const api = {
       `${API_BASE_URL}/api/global/metrics/usage${qs({ tenantId })}`,
     app: (tenantId: string, days: number) =>
       `${API_BASE_URL}/api/metrics/app${qs({ tenantId, days: String(days) })}`,
-    globalApp: (days: number) =>
-      `${API_BASE_URL}/api/global/metrics/app${qs({ days: String(days) })}`,
+    globalApp: (days: number, tenantId?: string) =>
+      `${API_BASE_URL}/api/global/metrics/app${qs({ days: String(days), tenantId })}`,
     geographic: (tenantId: string, days: number, groupBy: string) =>
       `${API_BASE_URL}/api/metrics/geographic${qs({ tenantId, days: String(days), groupBy })}`,
-    globalGeographic: (days: number, groupBy: string) =>
-      `${API_BASE_URL}/api/global/metrics/geographic${qs({ days: String(days), groupBy })}`,
+    globalGeographic: (days: number, groupBy: string, tenantId?: string) =>
+      `${API_BASE_URL}/api/global/metrics/geographic${qs({ days: String(days), groupBy, tenantId })}`,
     geographicSessions: (tenantId: string, days: number, groupBy: string, locationKey: string) =>
       `${API_BASE_URL}/api/metrics/geographic/sessions${qs({ tenantId, days: String(days), groupBy, locationKey })}`,
     globalGeographicSessions: (days: number, groupBy: string, locationKey: string) =>

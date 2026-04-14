@@ -66,6 +66,11 @@ interface GeographicMetricsResponse {
   geoLocationEnabled: boolean;
 }
 
+interface TenantInfo {
+  tenantId: string;
+  domainName: string;
+}
+
 type GroupBy = "city" | "region" | "country";
 type SortBy = "sessionCount" | "avgDurationMinutes" | "appLoadScore" | "avgThroughputBytesPerSec" | "avgDoPercentPeerCaching";
 type TimeRange = "7d" | "30d" | "90d";
@@ -112,19 +117,57 @@ export default function GeographicPerformancePage() {
   const [sortDesc, setSortDesc] = useState(true);
   const [selectedLocation, setSelectedLocation] = useState<string | null>(null);
 
-  const hasInitialFetch = useRef(false);
   const isTimeRangeMount = useRef(true);
 
   const { tenantId } = useTenant();
-  const { getAccessToken } = useAuth();
+  const { getAccessToken, user } = useAuth();
 
   const { globalAdminMode } = useAdminMode();
+
+  // Global admin: tenant selector state (default = own tenant, not aggregated).
+  const [tenants, setTenants] = useState<TenantInfo[]>([]);
+  const [selectedTenantId, setSelectedTenantId] = useState<string>("");
+  const [scopeInitialized, setScopeInitialized] = useState(false);
+
+  const isGlobalAdmin = Boolean(globalAdminMode && user?.isGlobalAdmin);
+  const isAggregatedGlobalView = Boolean(isGlobalAdmin && !selectedTenantId);
+  const isGlobalOverride = Boolean(
+    isGlobalAdmin && selectedTenantId && selectedTenantId !== tenantId
+  );
+
+  useEffect(() => {
+    if (!isGlobalAdmin) return;
+    const loadTenants = async () => {
+      try {
+        const response = await authenticatedFetch(api.config.all(), getAccessToken);
+        if (response.ok) {
+          const data = await response.json();
+          const mapped: TenantInfo[] = data.map((t: { tenantId: string; domainName: string }) => ({
+            tenantId: t.tenantId,
+            domainName: t.domainName || "",
+          }));
+          mapped.sort((a, b) =>
+            (a.domainName || a.tenantId).localeCompare(b.domainName || b.tenantId)
+          );
+          setTenants(mapped);
+        }
+      } catch (err) {
+        console.error("Error fetching tenant list:", err);
+      }
+    };
+    loadTenants();
+  }, [isGlobalAdmin, getAccessToken]);
+
+  const selectedTenantName = useMemo(
+    () => tenants.find((t) => t.tenantId === selectedTenantId)?.domainName,
+    [tenants, selectedTenantId]
+  );
 
   const fetchGeoMetrics = useCallback(async (range: TimeRange = timeRange, group: GroupBy = groupBy) => {
     try {
       const days = range === "7d" ? 7 : range === "30d" ? 30 : 90;
-      const endpoint = globalAdminMode
-        ? api.metrics.globalGeographic(days, group)
+      const endpoint = isGlobalAdmin
+        ? api.metrics.globalGeographic(days, group, selectedTenantId || undefined)
         : api.metrics.geographic(tenantId, days, group);
       const response = await authenticatedFetch(endpoint, getAccessToken);
       if (response.ok) {
@@ -140,23 +183,27 @@ export default function GeographicPerformancePage() {
     } finally {
       setLoading(false);
     }
-  }, [globalAdminMode, tenantId, getAccessToken, timeRange, groupBy]);
+  }, [isGlobalAdmin, selectedTenantId, tenantId, getAccessToken, timeRange, groupBy]);
 
   useEffect(() => {
-    if (!globalAdminMode && !tenantId) return;
-    if (hasInitialFetch.current) return;
-    hasInitialFetch.current = true;
-    fetchGeoMetrics();
-  }, [tenantId, globalAdminMode, fetchGeoMetrics]);
+    if (scopeInitialized) return;
+    if (!tenantId) return;
+    if (isGlobalAdmin) {
+      setSelectedTenantId(tenantId);
+    }
+    setScopeInitialized(true);
+  }, [tenantId, isGlobalAdmin, scopeInitialized]);
 
   useEffect(() => {
+    if (!scopeInitialized) return;
     if (isTimeRangeMount.current) {
       isTimeRangeMount.current = false;
-      return;
+    } else {
+      setLoading(true);
     }
-    setLoading(true);
     fetchGeoMetrics(timeRange, groupBy);
-  }, [timeRange, groupBy, fetchGeoMetrics]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopeInitialized, timeRange, groupBy, selectedTenantId]);
 
   const sortedLocations = useMemo(() => {
     if (!geoMetrics?.locations) return [];
@@ -206,13 +253,20 @@ export default function GeographicPerformancePage() {
   return (
     <ProtectedRoute>
       <div className="min-h-screen bg-gray-50">
-        {globalAdminMode && (
+        {isGlobalAdmin && (
           <div className="bg-purple-700 text-white text-sm px-4 py-2 flex items-center justify-center space-x-2">
             <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             <span className="font-medium">Global Admin View</span>
-            <span className="text-purple-300">&mdash; aggregating data across all tenants</span>
+            <span className="text-purple-300">
+              &mdash;{" "}
+              {isAggregatedGlobalView
+                ? "aggregating data across all tenants"
+                : isGlobalOverride
+                ? `viewing tenant ${selectedTenantName ?? selectedTenantId}`
+                : "access to all tenants"}
+            </span>
           </div>
         )}
         <header className="bg-white shadow">
@@ -227,6 +281,25 @@ export default function GeographicPerformancePage() {
                 </div>
               </div>
               <div className="flex items-center space-x-4">
+                {isGlobalAdmin && tenants.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm text-gray-500 hidden sm:inline">Tenant:</label>
+                    <select
+                      value={selectedTenantId}
+                      onChange={(e) => setSelectedTenantId(e.target.value)}
+                      className="text-sm border border-gray-300 rounded-md px-2 py-1.5 max-w-[220px] sm:max-w-xs"
+                    >
+                      <option value="">All tenants (aggregated)</option>
+                      {tenants.map((t) => (
+                        <option key={t.tenantId} value={t.tenantId}>
+                          {t.domainName
+                            ? `${t.domainName} (${t.tenantId.substring(0, 8)}…)`
+                            : t.tenantId}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
                 {/* Time Range Toggle */}
                 <div className="flex bg-gray-100 rounded-lg p-1">
                   {(["7d", "30d", "90d"] as TimeRange[]).map((range) => (
@@ -266,7 +339,7 @@ export default function GeographicPerformancePage() {
 
         <main className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
           {/* Geo Disabled Warning */}
-          {geoMetrics && !geoMetrics.geoLocationEnabled && !globalAdminMode && (
+          {geoMetrics && !geoMetrics.geoLocationEnabled && !isAggregatedGlobalView && (
             <div className="mb-4 bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start space-x-3">
               <svg className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />

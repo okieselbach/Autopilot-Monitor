@@ -41,10 +41,15 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
                     days = parsedDays;
 
                 var groupBy = query["groupBy"] ?? "city";
+                var tenantIdFilter = query["tenantId"];
 
                 var cutoff = DateTime.UtcNow.AddDays(-days);
-                var sessions = await _maintenanceRepo.GetSessionsByDateRangeAsync(cutoff, DateTime.UtcNow.AddDays(1));
-                var allSummaries = await _metricsRepo.GetAllAppInstallSummariesAsync();
+                var sessions = !string.IsNullOrWhiteSpace(tenantIdFilter)
+                    ? await _maintenanceRepo.GetSessionsByDateRangeAsync(cutoff, DateTime.UtcNow.AddDays(1), tenantIdFilter)
+                    : await _maintenanceRepo.GetSessionsByDateRangeAsync(cutoff, DateTime.UtcNow.AddDays(1));
+                var allSummaries = !string.IsNullOrWhiteSpace(tenantIdFilter)
+                    ? await _metricsRepo.GetAppInstallSummariesByTenantAsync(tenantIdFilter)
+                    : await _metricsRepo.GetAllAppInstallSummariesAsync();
                 var summaries = allSummaries.Where(s => s.StartedAt >= cutoff).ToList();
 
                 var result = GetGeographicMetricsFunction.ComputeGeographicMetrics(sessions, summaries, groupBy);
