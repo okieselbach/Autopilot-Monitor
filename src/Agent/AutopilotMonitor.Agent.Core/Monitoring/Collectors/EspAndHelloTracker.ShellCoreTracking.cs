@@ -11,6 +11,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
     /// </summary>
     public partial class EspAndHelloTracker
     {
+        private const int BackfillLookbackMinutes = 5;
+
         private void StartShellCoreEventLogWatcher()
         {
             try
@@ -70,20 +72,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                             triggerFinalizingSetup = true;
                             finalizingSetupReason = "hello_wizard_started";
 
-                            lock (_stateLock)
-                            {
-                                _helloWizardStarted = true;
-
-                                // Stop the hello wait timer if running (Hello wizard appeared within timeout)
-                                if (_helloWaitTimer != null)
-                                {
-                                    _helloWaitTimer.Dispose();
-                                    _helloWaitTimer = null;
-                                    _logger.Info($"Hello wizard started within {_helloWaitTimeoutSeconds}s timeout - stopping wait timer");
-                                }
-
-                                StartHelloCompletionTimerLocked();
-                            }
+                            _helloTracker?.NotifyHelloWizardStarted();
 
                             _logger.Info("Windows Hello wizard started - detected via Shell-Core event 62404");
                         }
@@ -174,6 +163,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                                 // Event 62407 occurs at every ESP phase transition (Device->Account, Account->End)
                                 // EnrollmentTracker will decide based on _lastEspPhase whether to start the timer
                             }
+                            _helloTracker?.NotifyEspExited();
 
                             _logger.Info("ESP phase exit detected - detected via Shell-Core event 62407");
                         }
@@ -312,14 +302,20 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                             // Check for ESP exit
                             if (System.Text.RegularExpressions.Regex.IsMatch(description, @"OOBE_ESP.*Exiting", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
                             {
+                                bool shouldNotify = false;
                                 lock (_stateLock)
                                 {
                                     if (!_espExitDetected)
                                     {
                                         _espExitDetected = true;
-                                        _logger.Info("Backfill: ESP exit event found in recent Shell-Core logs");
-                                        try { FinalizingSetupPhaseTriggered?.Invoke(this, "esp_exiting"); } catch (Exception ex) { _logger.Error("Backfill: FinalizingSetupPhaseTriggered handler failed", ex); }
+                                        shouldNotify = true;
                                     }
+                                }
+                                if (shouldNotify)
+                                {
+                                    _helloTracker?.NotifyEspExited();
+                                    _logger.Info("Backfill: ESP exit event found in recent Shell-Core logs");
+                                    try { FinalizingSetupPhaseTriggered?.Invoke(this, "esp_exiting"); } catch (Exception ex) { _logger.Error("Backfill: FinalizingSetupPhaseTriggered handler failed", ex); }
                                 }
                             }
 

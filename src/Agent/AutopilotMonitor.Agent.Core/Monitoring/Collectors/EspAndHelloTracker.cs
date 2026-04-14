@@ -5,30 +5,23 @@ using System.Threading;
 using AutopilotMonitor.Agent.Core.Logging;
 using AutopilotMonitor.Agent.Core.Monitoring.Core;
 using AutopilotMonitor.Shared.Models;
-using Microsoft.Win32;
 
 namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
 {
     /// <summary>
-    /// Tracks ESP (Enrollment Status Page) exit events and Windows Hello for Business (WHfB)
-    /// provisioning during Autopilot enrollment, including WhiteGlove (Pre-Provisioning) detection.
+    /// Coordinates ESP (Enrollment Status Page) exit detection and Windows Hello for Business (WHfB)
+    /// provisioning tracking during Autopilot enrollment, including WhiteGlove (Pre-Provisioning) detection.
     ///
-    /// Key Event IDs (User Device Registration/Admin):
-    ///   358 - Prerequisites passed, provisioning will be launched
-    ///   360 - Prerequisites failed, provisioning will NOT be launched (SNAPSHOT ONLY - not terminal)
-    ///   362 - Provisioning blocked
-    ///   300 - NGC key registered successfully (Hello provisioned)
-    ///   301 - NGC key registration failed
+    /// Composed of three focused sub-trackers:
+    ///   - <see cref="HelloTracker"/> — WHfB policy detection, UDR 300/301/358/360/362/376, HelloForBusiness 3024/6045, Hello timers
+    ///   - <see cref="ModernDeploymentTracker"/> — ModernDeployment-Diagnostics-Provider live capture + WhiteGlove Event 509
+    ///   - Shell-Core + Provisioning (remaining partials) — ESP exit / failure / provisioning category monitoring
     ///
     /// Key Event IDs (Microsoft-Windows-Shell-Core/Operational):
     ///   62404 - CloudExperienceHost Web App Activity Started (CXID: 'AADHello' or 'NGC' - Hello wizard started)
     ///   62407 - CloudExperienceHost Web App Event 2:
     ///           CommercialOOBE_ESPProgress_Page_Exiting      — normal ESP exit
     ///           CommercialOOBE_ESPProgress_WhiteGlove_Success — WhiteGlove (Pre-Provisioning) complete
-    ///
-    /// Key Event IDs (Microsoft-Windows-HelloForBusiness/Operational):
-    ///   3024 - Hello processing started (informational confirmation)
-    ///   6045 - Hello processing stopped (may contain skip/cancel HRESULT like 0x801C044F)
     /// </summary>
     public partial class EspAndHelloTracker : IDisposable
     {
@@ -36,22 +29,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         private readonly string _sessionId;
         private readonly string _tenantId;
         private readonly Action<EnrollmentEvent> _onEventCollected;
-        private System.Diagnostics.Eventing.Reader.EventLogWatcher _watcher;
-        private System.Diagnostics.Eventing.Reader.EventLogWatcher _shellCoreWatcher;
-        private System.Diagnostics.Eventing.Reader.EventLogWatcher _helloForBusinessWatcher;
-        private System.Threading.Timer _policyCheckTimer;
-        private System.Threading.Timer _helloWaitTimer;
-        private System.Threading.Timer _helloCompletionTimer;
+        private EventLogWatcher _shellCoreWatcher;
         private RegistryWatcher _provisioningWatcher;
         private System.Threading.Timer _provisioningWatcherRetryTimer;
         private System.Threading.Timer _provisioningDebounceTimer;
         private ModernDeploymentTracker _modernDeploymentTracker;
+        private HelloTracker _helloTracker;
 
-        private bool _isPolicyConfigured = false;
-        private bool _isHelloPolicyEnabled = false; // true when Hello policy is explicitly detected as enabled
-        private bool _isHelloCompleted = false;
         private bool _espExitDetected = false;
-        private bool _helloWizardStarted = false;
         private bool _whiteGloveDetected = false;
         private string _detectedEspFailureType; // set during Shell-Core event processing, consumed after event emission
         private readonly object _stateLock = new object();
@@ -62,8 +47,6 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         private readonly bool _modernDeploymentBackfillEnabled;
         private readonly int _modernDeploymentBackfillLookbackMinutes;
         private readonly string _stateDirectory;
-        private const int HelloCompletionTimeoutSeconds = 300;
-        private const int BackfillLookbackMinutes = 5;
 
         /// <summary>
         /// Callback invoked when Hello provisioning completes (successfully or failed)
@@ -100,55 +83,18 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         /// Outcome of Hello provisioning. Set when Hello resolves (via events, timeout, or not configured).
         /// Values: "completed", "skipped", "timeout", "not_configured", "wizard_not_started", null (not yet resolved).
         /// </summary>
-        public string HelloOutcome { get; private set; }
+        public string HelloOutcome => _helloTracker?.HelloOutcome;
 
-        private const string EventLogChannel = "Microsoft-Windows-User Device Registration/Admin";
         private const string ShellCoreEventLogChannel = "Microsoft-Windows-Shell-Core/Operational";
-        private const string HelloForBusinessEventLogChannel = "Microsoft-Windows-HelloForBusiness/Operational";
-
-        // WHfB policy registry paths
-        private const string CspPolicyBasePath = @"SOFTWARE\Microsoft\Policies\PassportForWork";
-        private const string GpoPolicyPath = @"SOFTWARE\Policies\Microsoft\PassportForWork";
-
-        // Tracked event IDs (User Device Registration)
-        private const int EventId_NgcKeyRegistered = 300;
-        private const int EventId_NgcKeyRegistrationFailed = 301;
-        private const int EventId_ProvisioningWillLaunch = 358;
-        private const int EventId_ProvisioningWillNotLaunch = 360;
-        private const int EventId_ProvisioningBlocked = 362;
-        private const int EventId_PinStatus = 376;
 
         // Tracked event IDs (Shell-Core/Operational)
         private const int EventId_ShellCore_WebAppStarted = 62404;
         private const int EventId_ShellCore_WebAppEvent = 62407;
 
-        // Tracked event IDs (HelloForBusiness/Operational)
-        private const int EventId_HelloForBusiness_ProcessingStarted = 3024;
-        private const int EventId_HelloForBusiness_ProcessingStopped = 6045;
-
-        // Known HRESULT codes from event 6045
-        private const string HResult_UserSkippedHello = "0x801C044F";
-
-        private static readonly HashSet<int> TrackedEventIds = new HashSet<int>
-        {
-            EventId_NgcKeyRegistered,
-            EventId_NgcKeyRegistrationFailed,
-            EventId_ProvisioningWillLaunch,
-            EventId_ProvisioningWillNotLaunch,
-            EventId_ProvisioningBlocked,
-            EventId_PinStatus
-        };
-
         private static readonly HashSet<int> TrackedShellCoreEventIds = new HashSet<int>
         {
             EventId_ShellCore_WebAppStarted,
             EventId_ShellCore_WebAppEvent
-        };
-
-        private static readonly HashSet<int> TrackedHelloForBusinessEventIds = new HashSet<int>
-        {
-            EventId_HelloForBusiness_ProcessingStarted,
-            EventId_HelloForBusiness_ProcessingStopped
         };
 
         public EspAndHelloTracker(
@@ -178,18 +124,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         /// <summary>
         /// Gets whether Windows Hello for Business policy is configured (enabled or disabled)
         /// </summary>
-        public bool IsPolicyConfigured
-        {
-            get { lock (_stateLock) { return _isPolicyConfigured; } }
-        }
+        public bool IsPolicyConfigured => _helloTracker?.IsPolicyConfigured ?? false;
 
         /// <summary>
         /// Gets whether Windows Hello provisioning has completed (successfully, failed, or skipped)
         /// </summary>
-        public bool IsHelloCompleted
-        {
-            get { lock (_stateLock) { return _isHelloCompleted; } }
-        }
+        public bool IsHelloCompleted => _helloTracker?.IsHelloCompleted ?? false;
 
         /// <summary>
         /// Force-marks Hello as completed from an external caller (e.g. safety timeout in EnrollmentTracker).
@@ -197,13 +137,27 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         /// </summary>
         public void ForceMarkHelloCompleted(string reason)
         {
+            _helloTracker?.ForceMarkHelloCompleted(reason);
+        }
+
+        /// <summary>
+        /// Starts the Hello wait timer. Should be called by EnrollmentTracker when AccountSetup phase exits.
+        /// </summary>
+        public void StartHelloWaitTimer()
+        {
+            _helloTracker?.StartHelloWaitTimer();
+        }
+
+        /// <summary>
+        /// Resets Hello tracking state when ESP resumes after a mid-enrollment reboot (hybrid join).
+        /// Also clears the coordinator's ESP-exit flag so ESP exit detection fires again.
+        /// </summary>
+        public void ResetForEspResumption()
+        {
+            _helloTracker?.ResetForEspResumption();
             lock (_stateLock)
             {
-                if (_isHelloCompleted) return;
-                _isHelloCompleted = true;
-                HelloOutcome = reason;
-                StopHelloCompletionTimerLocked();
-                _logger.Warning($"Hello force-completed by external caller: {reason}");
+                _espExitDetected = false;
             }
         }
 
@@ -211,30 +165,21 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         {
             _logger.Info("Starting ESP and Hello tracker");
 
-            // Check if WHfB policy is configured initially
-            CheckHelloPolicy();
-
-            // Start periodic policy check to detect policy arriving later via MDM
-            _policyCheckTimer = new System.Threading.Timer(
-                _ => CheckHelloPolicy(),
-                null,
-                TimeSpan.FromSeconds(10), // Initial delay before first check
-                TimeSpan.FromSeconds(10)  // Subsequent checks every 10 seconds (fast detection, low cost)
-            );
-
-            // Subscribe to User Device Registration event log
-            StartEventLogWatcher();
+            // Compose HelloTracker (UDR watcher + HelloForBusiness watcher + policy check + Hello timers)
+            _helloTracker = new HelloTracker(
+                _sessionId,
+                _tenantId,
+                _onEventCollected,
+                _logger,
+                _helloWaitTimeoutSeconds);
+            _helloTracker.HelloCompleted += OnHelloTrackerHelloCompleted;
+            _helloTracker.Start();
 
             // Subscribe to Shell-Core/Operational event log for ESP exit and Hello wizard detection
             StartShellCoreEventLogWatcher();
 
-            // Subscribe to HelloForBusiness/Operational event log for Hello processing signals
-            StartHelloForBusinessEventLogWatcher();
-
             // Subscribe to ModernDeployment-Diagnostics-Provider channels (Autopilot + ManagementService)
             // for live capture of ESP/Autopilot events that Shell-Core/Registry watchers may miss.
-            // The ManagementService watcher includes targeted event IDs (e.g. Event 509 for WhiteGlove
-            // start detection) that bypass the general Level≤3 filter via combined XPath.
             if (_modernDeploymentWatcherEnabled)
             {
                 _modernDeploymentTracker = new ModernDeploymentTracker(
@@ -249,10 +194,6 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                 _modernDeploymentTracker.Start();
             }
 
-            // Safety net: backfill recent terminal events in case watcher started late or event delivery lagged.
-            BackfillRecentTerminalHelloEvents();
-            BackfillRecentHelloForBusinessEvents();
-
             // Watch ESP provisioning category status from registry via RegNotifyChangeKeyValue
             // (catches failures that Shell-Core event 62407 patterns miss, e.g. Certificate failures)
             StartProvisioningStatusWatcher();
@@ -262,82 +203,22 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         {
             _logger.Info("Stopping ESP and Hello tracker");
 
-            // Stop periodic policy check timer
-            if (_policyCheckTimer != null)
+            if (_helloTracker != null)
             {
                 try
                 {
-                    _policyCheckTimer.Dispose();
-                    _policyCheckTimer = null;
+                    _helloTracker.HelloCompleted -= OnHelloTrackerHelloCompleted;
+                    _helloTracker.Stop();
+                    _helloTracker = null;
                 }
                 catch (Exception ex)
                 {
-                    _logger.Error("Error stopping ESP and Hello tracker policy check timer", ex);
-                }
-            }
-
-            // Stop Hello wait timer
-            if (_helloWaitTimer != null)
-            {
-                try
-                {
-                    _helloWaitTimer.Dispose();
-                    _helloWaitTimer = null;
-                }
-                catch (Exception ex)
-                {
-                    _logger.Error("Error stopping Hello wait timer", ex);
-                }
-            }
-
-            // Stop Hello completion timer
-            if (_helloCompletionTimer != null)
-            {
-                try
-                {
-                    _helloCompletionTimer.Dispose();
-                    _helloCompletionTimer = null;
-                }
-                catch (Exception ex)
-                {
-                    _logger.Error("Error stopping Hello completion timer", ex);
-                }
-            }
-
-            // Stop User Device Registration watcher
-            if (_watcher != null)
-            {
-                try
-                {
-                    _watcher.Enabled = false;
-                    _watcher.EventRecordWritten -= OnEventRecordWritten;
-                    _watcher.Dispose();
-                    _watcher = null;
-                }
-                catch (Exception ex)
-                {
-                    _logger.Error("Error stopping ESP and Hello tracker watcher", ex);
+                    _logger.Error("Error stopping Hello tracker", ex);
                 }
             }
 
             // Stop provisioning status registry watcher
             StopProvisioningStatusWatcher("tracker_stopped");
-
-            // Stop HelloForBusiness/Operational watcher
-            if (_helloForBusinessWatcher != null)
-            {
-                try
-                {
-                    _helloForBusinessWatcher.Enabled = false;
-                    _helloForBusinessWatcher.EventRecordWritten -= OnHelloForBusinessEventRecordWritten;
-                    _helloForBusinessWatcher.Dispose();
-                    _helloForBusinessWatcher = null;
-                }
-                catch (Exception ex)
-                {
-                    _logger.Error("Error stopping HelloForBusiness event watcher", ex);
-                }
-            }
 
             // Stop Shell-Core/Operational watcher
             if (_shellCoreWatcher != null)
@@ -373,6 +254,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         public void Dispose()
         {
             Stop();
+        }
+
+        private void OnHelloTrackerHelloCompleted(object sender, EventArgs e)
+        {
+            try { HelloCompleted?.Invoke(this, EventArgs.Empty); }
+            catch (Exception ex) { _logger.Error("Error forwarding HelloCompleted event", ex); }
         }
     }
 }
