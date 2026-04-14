@@ -200,6 +200,9 @@ namespace AutopilotMonitor.Shared
             public const string ModernDeploymentLog       = "modern_deployment_log";      // Info-level live capture
             public const string ModernDeploymentWarning   = "modern_deployment_warning";  // Level 3 (Warning)
             public const string ModernDeploymentError     = "modern_deployment_error";    // Level 1-2 (Critical/Error)
+
+            // TEMPORARY: shadow SM rollout verification — remove when CompletionStateMachine is promoted to primary
+            public const string ShadowDiscrepancy         = "shadow_discrepancy";
         }
 
         // -----------------------------------------------------------------------

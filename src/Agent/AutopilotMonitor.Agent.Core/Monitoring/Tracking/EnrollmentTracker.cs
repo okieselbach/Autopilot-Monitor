@@ -53,6 +53,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         private bool _isWaitingForHello = false; // Track if we're waiting for Hello to complete before sending enrollment_complete
         private readonly bool _isBootstrapMode; // Agent started via bootstrap token (pre-MDM)
         private bool _sendTraceEvents = true; // Send Trace-severity events to backend for decision auditing
+
+        // TEMPORARY: shadow SM rollout verification — remove when CompletionStateMachine is promoted to primary
+        private string _lastShadowDiscrepancySignature;
         private bool _enrollmentStartDeviceInfoCollected = false; // Re-collect enrollment-dependent info once at first ESP phase
         private bool _finalDeviceInfoCollected = false; // Ensure final device info is emitted only once
         private string _lastEmittedSummaryHash; // Track last emitted state-breakdown to avoid redundant summary events
@@ -185,6 +188,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     _logger.Warning($"EnrollmentTracker [SHADOW DISCREPANCY]: trigger='{trigger}', " +
                         $"shadowState={_completionSm.CurrentState}, actualEmitted={actualTerminal}, " +
                         $"shadowCompleted={shadowTerminal}");
+
+                    // TEMPORARY: shadow SM rollout verification — remove when CompletionStateMachine is promoted to primary
+                    // Emit a backend event (throttled to 1x per unique signature per session) so we can query
+                    // mismatches without relying on client-side logs. Severity=Warning so it ships independent of SendTraceEvents.
+                    EmitShadowDiscrepancyEvent(trigger, ctx, actualTerminal, shadowTerminal);
                 }
                 else if (result.Transitioned)
                 {
@@ -382,6 +390,64 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                     Message = $"{decision}: {reason}",
                     Data = data
                 });
+            }
+        }
+
+        // TEMPORARY: shadow SM rollout verification — remove when CompletionStateMachine is promoted to primary
+        /// <summary>
+        /// Emits a <c>shadow_discrepancy</c> event when the shadow CompletionStateMachine disagrees
+        /// with the actual <c>_enrollmentCompleteEmitted</c> flag. Throttled to one event per unique
+        /// {trigger|shadowState|actualEmitted} signature per session to avoid flooding the backend
+        /// while still surfacing every distinct divergence constellation.
+        /// </summary>
+        private void EmitShadowDiscrepancyEvent(string trigger, CompletionContext ctx, bool actualTerminal, bool shadowTerminal)
+        {
+            var shadowState = _completionSm.CurrentState.ToString();
+            var signature = $"{trigger}|{shadowState}|{actualTerminal}";
+            if (signature == _lastShadowDiscrepancySignature)
+                return;
+            _lastShadowDiscrepancySignature = signature;
+
+            var data = new Dictionary<string, object>
+            {
+                { "trigger", trigger ?? "(null)" },
+                { "shadowState", shadowState },
+                { "actualEmitted", actualTerminal },
+                { "shadowCompleted", shadowTerminal },
+                { "enrollmentType", ctx?.EnrollmentType },
+                { "autopilotMode", ctx?.AutopilotMode },
+                { "skipUserStatusPage", ctx?.SkipUserStatusPage },
+                { "aadJoinedWithUser", ctx?.AadJoinedWithUser ?? false },
+                { "isHybridJoin", ctx?.IsHybridJoin ?? false },
+                { "isDeviceOnly", ctx?.IsDeviceOnly ?? false },
+                { "espEverSeen", ctx?.EspEverSeen ?? false },
+                { "espFinalExitSeen", ctx?.EspFinalExitSeen ?? false },
+                { "desktopArrived", ctx?.DesktopArrived ?? false },
+                { "lastEspPhase", ctx?.LastEspPhase },
+                { "hasHelloTracker", ctx?.HasHelloTracker ?? false },
+                { "isHelloCompleted", ctx?.IsHelloCompleted ?? false },
+                { "isHelloPolicyConfigured", ctx?.IsHelloPolicyConfigured ?? false },
+                { "hasUnresolvedEspCategories", ctx?.HasUnresolvedEspCategories ?? false }
+            };
+
+            try
+            {
+                _emitEvent(new EnrollmentEvent
+                {
+                    SessionId = _sessionId,
+                    TenantId = _tenantId,
+                    EventType = Constants.EventTypes.ShadowDiscrepancy,
+                    Severity = EventSeverity.Warning,
+                    Source = "EnrollmentTracker",
+                    Phase = EnrollmentPhase.Unknown,
+                    Message = $"Shadow SM mismatch: trigger={trigger}, shadow={shadowState}, emitted={actualTerminal}",
+                    Data = data
+                });
+            }
+            catch (Exception ex)
+            {
+                // Diagnostic event must never crash the agent
+                _logger.Debug($"EnrollmentTracker [SHADOW EVENT ERROR]: {ex.Message}");
             }
         }
 
