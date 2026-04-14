@@ -238,7 +238,7 @@ export function SessionTable({
       document.addEventListener("mousedown", handleClickOutside);
       return () => document.removeEventListener("mousedown", handleClickOutside);
     }
-  }, [showColumnSelector, openFilterColumn, showTenantSuggestions]);
+  }, [showColumnSelector, openFilterColumn, showTenantSuggestions, showSearchSuggestions]);
 
   // Compute unique values for a filterable field from all sessions (not filtered)
   const getUniqueValues = (field: keyof Session): string[] => {

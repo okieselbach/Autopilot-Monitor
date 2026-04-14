@@ -85,24 +85,16 @@ export default function AnalyzeRuleCard({
               <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${rule.enabled ? "translate-x-6" : "translate-x-1"}`} />
             </button>
           )}
-          {/* KO-criterion toggle: only meaningful when the rule is actually enabled. Click cycles
-              the tenant override; the badge colour reflects the effective value. */}
-          {!readOnly && rule.enabled && onToggleMarkAsFailed && (
-            <button
-              onClick={(e) => { e.stopPropagation(); onToggleMarkAsFailed(rule); }}
-              disabled={togglingRuleId === rule.ruleId}
-              className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold flex-shrink-0 border transition-colors ${
-                effectiveMarkAsFailed
-                  ? "bg-red-100 text-red-800 border-red-300 hover:bg-red-200"
-                  : "bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100"
-              } ${togglingRuleId === rule.ruleId ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
-              title={effectiveMarkAsFailed
-                ? `KO criterion: when this rule fires, the session is marked as failed${koOverrideIsExplicit ? " (tenant override)" : " (rule default)"}. Click to disable.`
-                : `Not a KO criterion${koOverrideIsExplicit ? " (tenant override)" : ""}. Click to enable — firing the rule will then mark the session as failed.`}
+          {/* Read-only KO indicator. Visible only when the effective value is ON so the header
+              stays quiet for the common case. The actual toggle lives inside the expanded details
+              (bottom-left) to prevent accidental clicks. */}
+          {rule.enabled && effectiveMarkAsFailed && (
+            <span
+              className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-red-100 text-red-800 border border-red-300 flex-shrink-0"
+              title={`KO criterion: firing this rule marks the session as failed in the portal${koOverrideIsExplicit ? " (tenant override)" : " (rule default)"}.`}
             >
-              {effectiveMarkAsFailed ? "KO" : "KO off"}
-              {koOverrideIsExplicit && <span className="ml-1 opacity-70">*</span>}
-            </button>
+              KO
+            </span>
           )}
           <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${sevColor.bg} ${sevColor.text} flex-shrink-0`}>
             <span className={`w-1.5 h-1.5 rounded-full ${sevColor.dot} mr-1.5`}></span>
@@ -288,6 +280,43 @@ export default function AnalyzeRuleCard({
           )}
 
           </>
+          )}
+
+          {/* KO criterion toggle — deliberately placed in the expanded detail view (not the header)
+              to prevent accidental clicks. Visible to tenant admins for any enabled rule. */}
+          {!readOnly && rule.enabled && onToggleMarkAsFailed && (
+            <div className="pt-4 border-t border-gray-200">
+              <div className="flex items-start justify-between gap-4 bg-gray-50 border border-gray-200 rounded-lg p-4">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <h4 className="text-sm font-semibold text-gray-800">KO criterion</h4>
+                    {effectiveMarkAsFailed && (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-800 border border-red-300">
+                        ACTIVE
+                      </span>
+                    )}
+                    {koOverrideIsExplicit && (
+                      <span className="text-[10px] text-gray-500 italic" title="Tenant override — differs from the rule's shipped default">
+                        tenant override
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-600 leading-relaxed">
+                    When enabled, a firing of this rule marks the whole enrollment session as <span className="font-semibold text-red-700">failed</span> in the portal —
+                    even if the agent itself reported the session as successful. Use this for rules that represent a hard pass/fail criterion for your organization
+                    (e.g. certificate provisioning must succeed).
+                  </p>
+                </div>
+                <button
+                  onClick={() => onToggleMarkAsFailed(rule)}
+                  disabled={togglingRuleId === rule.ruleId}
+                  className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${togglingRuleId === rule.ruleId ? "opacity-50 cursor-not-allowed" : "cursor-pointer"} ${effectiveMarkAsFailed ? "bg-red-500" : "bg-gray-300"}`}
+                  title={effectiveMarkAsFailed ? "Disable KO criterion" : "Enable KO criterion"}
+                >
+                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${effectiveMarkAsFailed ? "translate-x-6" : "translate-x-1"}`} />
+                </button>
+              </div>
+            </div>
           )}
 
           {/* Actions */}
