@@ -2,6 +2,7 @@
 
 import { useTenantConfig } from "../../TenantConfigContext";
 import SaveResetBar from "../../components/SaveResetBar";
+import { trackEvent } from "@/lib/appInsights";
 
 export function SectionSlaTargets() {
   const {
@@ -95,7 +96,10 @@ export function SectionSlaTargets() {
             <input
               type="checkbox"
               checked={slaNotifyOnSuccessRateBreach}
-              onChange={(e) => setSlaNotifyOnSuccessRateBreach(e.target.checked)}
+              onChange={(e) => {
+                trackEvent('sla_channel_toggled', { channel: 'success_rate_breach', enabled: e.target.checked });
+                setSlaNotifyOnSuccessRateBreach(e.target.checked);
+              }}
               className="mt-1 h-4 w-4 rounded border-gray-300 text-indigo-600"
             />
             <div className="flex-1">
@@ -128,7 +132,10 @@ export function SectionSlaTargets() {
             <input
               type="checkbox"
               checked={slaNotifyOnDurationBreach}
-              onChange={(e) => setSlaNotifyOnDurationBreach(e.target.checked)}
+              onChange={(e) => {
+                trackEvent('sla_channel_toggled', { channel: 'duration_breach', enabled: e.target.checked });
+                setSlaNotifyOnDurationBreach(e.target.checked);
+              }}
               className="mt-1 h-4 w-4 rounded border-gray-300 text-indigo-600"
             />
             <div>
@@ -144,7 +151,10 @@ export function SectionSlaTargets() {
             <input
               type="checkbox"
               checked={slaNotifyOnAppInstallBreach}
-              onChange={(e) => setSlaNotifyOnAppInstallBreach(e.target.checked)}
+              onChange={(e) => {
+                trackEvent('sla_channel_toggled', { channel: 'app_install_breach', enabled: e.target.checked });
+                setSlaNotifyOnAppInstallBreach(e.target.checked);
+              }}
               className="mt-1 h-4 w-4 rounded border-gray-300 text-indigo-600"
             />
             <div>
@@ -160,7 +170,10 @@ export function SectionSlaTargets() {
             <input
               type="checkbox"
               checked={slaNotifyOnConsecutiveFailures}
-              onChange={(e) => setSlaNotifyOnConsecutiveFailures(e.target.checked)}
+              onChange={(e) => {
+                trackEvent('sla_channel_toggled', { channel: 'consecutive_failures', enabled: e.target.checked });
+                setSlaNotifyOnConsecutiveFailures(e.target.checked);
+              }}
               className="mt-1 h-4 w-4 rounded border-gray-300 text-indigo-600"
             />
             <div className="flex-1">
@@ -189,8 +202,18 @@ export function SectionSlaTargets() {
       </div>
 
       <SaveResetBar
-        onSave={handleSaveSlaTargets}
-        onReset={handleResetSlaTargets}
+        onSave={() => {
+          trackEvent('sla_targets_saved', {
+            hasSuccessRateTarget: slaTargetSuccessRate != null,
+            hasDurationTarget: slaTargetMaxDurationMinutes != null,
+            hasAppInstallTarget: slaTargetAppInstallSuccessRate != null,
+          });
+          return handleSaveSlaTargets();
+        }}
+        onReset={() => {
+          trackEvent('sla_targets_reset');
+          return handleResetSlaTargets();
+        }}
         saving={savingSection === "slaTargets"}
       />
     </div>

@@ -10,6 +10,7 @@ import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch"
 import { SlaGauge } from "@/components/charts/SlaGauge";
 import AppLineChart from "@/components/charts/AppLineChart";
 import { chartColors } from "@/components/charts/chartTheme";
+import { trackEvent } from "@/lib/appInsights";
 import Link from "next/link";
 
 interface SlaSnapshot {
@@ -125,6 +126,10 @@ export default function SlaPage() {
         console.error('Error loading SLA metrics:', err);
         addNotification('error', 'Error', 'Failed to load SLA metrics', 'sla-fetch-error');
       }
+      trackEvent('sla_load_failed', {
+        months,
+        error: err instanceof Error ? err.message : 'unknown',
+      });
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -132,6 +137,11 @@ export default function SlaPage() {
   }, [tenantId, months, getAccessToken, addNotification]);
 
   useEffect(() => { fetchMetrics(); }, [fetchMetrics]);
+
+  useEffect(() => {
+    if (tenantId) trackEvent('sla_page_viewed', { months });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tenantId]);
 
   const hasTargets = metrics &&
     (metrics.targetSuccessRate != null || metrics.targetMaxDurationMinutes != null ||
@@ -174,7 +184,11 @@ export default function SlaPage() {
               <div className="flex items-center gap-3">
                 <select
                   value={months}
-                  onChange={(e) => setMonths(Number(e.target.value))}
+                  onChange={(e) => {
+                    const next = Number(e.target.value);
+                    trackEvent('sla_months_changed', { months: next });
+                    setMonths(next);
+                  }}
                   className="text-sm border border-gray-300 dark:border-gray-600 rounded-md px-2 py-1.5 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value={1}>Last month</option>
@@ -182,7 +196,10 @@ export default function SlaPage() {
                   <option value={6}>Last 6 months</option>
                 </select>
                 <button
-                  onClick={() => fetchMetrics(true)}
+                  onClick={() => {
+                    trackEvent('sla_refresh_clicked', { months });
+                    fetchMetrics(true);
+                  }}
                   disabled={refreshing}
                   className="px-4 py-2 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-2"
                 >
@@ -353,7 +370,15 @@ export default function SlaPage() {
                         {metrics.violators.map((v) => (
                           <tr key={v.sessionId} className="hover:bg-gray-50 dark:hover:bg-gray-750">
                             <td className="px-6 py-4 whitespace-nowrap">
-                              <Link href={`/session/${v.tenantId}/${v.sessionId}`} className="text-indigo-600 dark:text-indigo-400 hover:underline text-sm">
+                              <Link
+                                href={`/session/${v.tenantId}/${v.sessionId}`}
+                                onClick={() => trackEvent('sla_violator_opened', {
+                                  sessionId: v.sessionId,
+                                  tenantId: v.tenantId,
+                                  violationType: v.violationType,
+                                })}
+                                className="text-indigo-600 dark:text-indigo-400 hover:underline text-sm"
+                              >
                                 {v.deviceName || "Unknown"}
                               </Link>
                             </td>

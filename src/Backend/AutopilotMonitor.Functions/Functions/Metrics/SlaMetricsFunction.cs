@@ -1,6 +1,7 @@
 using System.Net;
 using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Services;
+using Microsoft.ApplicationInsights;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
@@ -15,13 +16,16 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
     {
         private readonly ILogger<SlaMetricsFunction> _logger;
         private readonly SlaMetricsService _slaMetricsService;
+        private readonly TelemetryClient _telemetryClient;
 
         public SlaMetricsFunction(
             ILogger<SlaMetricsFunction> logger,
-            SlaMetricsService slaMetricsService)
+            SlaMetricsService slaMetricsService,
+            TelemetryClient telemetryClient)
         {
             _logger = logger;
             _slaMetricsService = slaMetricsService;
+            _telemetryClient = telemetryClient;
         }
 
         [Function("GetSlaMetrics")]
@@ -31,20 +35,33 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
         {
             _logger.LogInformation("SLA metrics requested");
 
+            string tenantId = TenantHelper.GetTenantId(req);
+            int months = 3;
+            bool fresh = false;
+
             try
             {
-                string tenantId = TenantHelper.GetTenantId(req);
-
-                // Parse query parameters
                 var qs = System.Web.HttpUtility.ParseQueryString(req.Url.Query ?? "");
 
-                int months = 3;
                 if (int.TryParse(qs.Get("months"), out var parsedMonths))
                     months = parsedMonths;
 
-                bool fresh = qs.Get("fresh") == "1";
+                fresh = qs.Get("fresh") == "1";
 
                 var metrics = await _slaMetricsService.ComputeSlaMetricsAsync(tenantId, months, fresh);
+
+                _telemetryClient.TrackEvent("SlaMetricsRequested", new Dictionary<string, string>
+                {
+                    ["TenantId"] = tenantId,
+                    ["Months"] = months.ToString(),
+                    ["Fresh"] = fresh.ToString(),
+                    ["FromCache"] = metrics.FromCache.ToString(),
+                    ["ComputeDurationMs"] = metrics.ComputeDurationMs.ToString(),
+                    ["SuccessRate"] = metrics.CurrentMonth.SuccessRate.ToString("F4"),
+                    ["P95DurationMinutes"] = metrics.CurrentMonth.P95DurationMinutes.ToString("F2"),
+                    ["ViolatorCount"] = metrics.Violators.Count.ToString(),
+                    ["TotalCompleted"] = metrics.CurrentMonth.TotalCompleted.ToString()
+                });
 
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(metrics);
@@ -53,6 +70,15 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error computing SLA metrics");
+
+                _telemetryClient.TrackEvent("SlaMetricsFailed", new Dictionary<string, string>
+                {
+                    ["TenantId"] = tenantId,
+                    ["Months"] = months.ToString(),
+                    ["Fresh"] = fresh.ToString(),
+                    ["Error"] = ex.GetType().Name,
+                    ["Message"] = ex.Message
+                });
 
                 var errorResponse = req.CreateResponse(HttpStatusCode.InternalServerError);
                 await errorResponse.WriteAsJsonAsync(new
