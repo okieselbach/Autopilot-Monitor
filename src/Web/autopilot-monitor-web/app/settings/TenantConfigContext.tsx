@@ -30,6 +30,10 @@ interface TenantConfigContextValue {
   setValidateAutopilotDevice: (v: boolean) => void;
   validateCorporateIdentifier: boolean;
   setValidateCorporateIdentifier: (v: boolean) => void;
+  validateDeviceAssociation: boolean;
+  setValidateDeviceAssociation: (v: boolean) => void;
+  /** Toggle + persist DevPrep Device Association validation in one shot (no consent flow needed). */
+  handleToggleDeviceAssociationValidation: (newValue: boolean) => Promise<void>;
   autopilotConsentInProgress: boolean;
   beginDeviceValidationConsentFlow: (trigger: "autopilot" | "corporate") => Promise<void>;
 
@@ -246,6 +250,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
   const [webhookNotifyOnHardwareRejection, setWebhookNotifyOnHardwareRejection] = useState(false);
   const [validateAutopilotDevice, setValidateAutopilotDevice] = useState(false);
   const [validateCorporateIdentifier, setValidateCorporateIdentifier] = useState(false);
+  const [validateDeviceAssociation, setValidateDeviceAssociation] = useState(false);
   const [dataRetentionDays, setDataRetentionDays] = useState(90);
   const [sessionTimeoutHours, setSessionTimeoutHours] = useState(5);
 
@@ -347,6 +352,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
         setWebhookNotifyOnHardwareRejection(data.webhookNotifyOnHardwareRejection ?? false);
         setValidateAutopilotDevice(data.validateAutopilotDevice);
         setValidateCorporateIdentifier(data.validateCorporateIdentifier ?? false);
+        setValidateDeviceAssociation(data.validateDeviceAssociation ?? false);
         setDataRetentionDays(data.dataRetentionDays ?? 90);
         setSessionTimeoutHours(data.sessionTimeoutHours ?? 5);
         setEnablePerformanceCollector(data.enablePerformanceCollector ?? true);
@@ -530,7 +536,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
   // -----------------------------------------------------------------------
   // Save configuration (shared by all sections)
   // -----------------------------------------------------------------------
-  const saveConfiguration = useCallback(async (sectionName: string, overrides?: { validateAutopilotDevice?: boolean; validateCorporateIdentifier?: boolean }) => {
+  const saveConfiguration = useCallback(async (sectionName: string, overrides?: { validateAutopilotDevice?: boolean; validateCorporateIdentifier?: boolean; validateDeviceAssociation?: boolean }) => {
     if (!tenantId || !config) return;
 
     try {
@@ -540,6 +546,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
 
       const autopilotDeviceValidationValue = overrides?.validateAutopilotDevice ?? validateAutopilotDevice;
       const corporateIdentifierValidationValue = overrides?.validateCorporateIdentifier ?? validateCorporateIdentifier;
+      const deviceAssociationValidationValue = overrides?.validateDeviceAssociation ?? validateDeviceAssociation;
 
       const updatedConfig: TenantConfiguration = {
         ...config,
@@ -548,6 +555,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
         webhookNotifyOnHardwareRejection,
         validateAutopilotDevice: autopilotDeviceValidationValue,
         validateCorporateIdentifier: corporateIdentifierValidationValue,
+        validateDeviceAssociation: deviceAssociationValidationValue,
         dataRetentionDays,
         sessionTimeoutHours,
         enablePerformanceCollector,
@@ -610,6 +618,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
       // Sync form state variables with the server response
       setValidateAutopilotDevice(result.config.validateAutopilotDevice);
       setValidateCorporateIdentifier(result.config.validateCorporateIdentifier ?? false);
+      setValidateDeviceAssociation(result.config.validateDeviceAssociation ?? false);
       setUnrestrictedMode(result.config.unrestrictedMode ?? false);
       trackEvent("settings_saved", { section: sectionName });
       setSuccessMessage("Configuration saved successfully!");
@@ -627,7 +636,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
     }
   }, [
     tenantId, config, getAccessToken, addNotification,
-    manufacturerWhitelist, modelWhitelist, validateAutopilotDevice, validateCorporateIdentifier,
+    manufacturerWhitelist, modelWhitelist, validateAutopilotDevice, validateCorporateIdentifier, validateDeviceAssociation,
     dataRetentionDays, sessionTimeoutHours, enablePerformanceCollector, performanceCollectorInterval,
     helloWaitTimeoutSeconds, selfDestructOnComplete, keepLogFile, rebootOnComplete, rebootDelaySeconds,
     enableGeoLocation, enableTimezoneAutoSet, enableImeMatchLog, logLevel, showScriptOutput, showEnrollmentSummary,
@@ -884,6 +893,16 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
 
   const handleSaveUnrestrictedMode = useCallback(() => saveConfiguration("unrestrictedMode"), [saveConfiguration]);
 
+  /**
+   * Toggle the DevPrep "Device association" shadow validation. No consent flow needed —
+   * the Graph permission is already covered by the existing Autopilot/Corporate validators
+   * and the result is observational (does not gate enrollment in Phase A).
+   */
+  const handleToggleDeviceAssociationValidation = useCallback(async (newValue: boolean) => {
+    setValidateDeviceAssociation(newValue);
+    await saveConfiguration("autopilotValidation", { validateDeviceAssociation: newValue });
+  }, [saveConfiguration]);
+
   // -----------------------------------------------------------------------
   // Admin management handlers
   // -----------------------------------------------------------------------
@@ -1138,6 +1157,8 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
       // Validation
       validateAutopilotDevice, setValidateAutopilotDevice,
       validateCorporateIdentifier, setValidateCorporateIdentifier,
+      validateDeviceAssociation, setValidateDeviceAssociation,
+      handleToggleDeviceAssociationValidation,
       autopilotConsentInProgress, beginDeviceValidationConsentFlow,
 
       // Hardware whitelist

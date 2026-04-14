@@ -161,6 +161,7 @@ builder.Services.AddSingleton<ReportAgentErrorFunction>();
 builder.Services.AddSingleton<AutopilotMonitor.Functions.Security.GraphTokenService>();
 builder.Services.AddSingleton<AutopilotMonitor.Functions.Security.AutopilotDeviceValidator>();
 builder.Services.AddSingleton<AutopilotMonitor.Functions.Security.CorporateIdentifierValidator>();
+builder.Services.AddSingleton<AutopilotMonitor.Functions.Security.DeviceAssociationValidator>();
 builder.Services.AddHttpClient<AutopilotMonitor.Functions.Services.Notifications.WebhookNotificationService>()
     .ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.SocketsHttpHandler
     {

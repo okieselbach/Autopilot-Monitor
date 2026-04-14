@@ -12,6 +12,20 @@ namespace AutopilotMonitor.Shared.Models
     }
 
     /// <summary>
+    /// Identifies which validator authorized the device during session registration.
+    /// Surfaced in the RegisterSession response so the agent can reconcile against its
+    /// own registry-based detection and, when needed, switch its enrollment flow.
+    /// </summary>
+    public enum ValidatorType
+    {
+        Unknown = 0,
+        AutopilotV1 = 1,           // AutopilotDeviceValidator (windowsAutopilotDeviceIdentities)
+        CorporateIdentifier = 2,   // CorporateIdentifierValidator (importedDeviceIdentities)
+        DeviceAssociation = 3,     // DevPrep DeviceAssociationValidator (tenantAssociatedDevices) — future
+        Bootstrap = 4              // Bootstrap token auth (pre-MDM OOBE)
+    }
+
+    /// <summary>
     /// Response from session registration
     /// </summary>
     public class RegisterSessionResponse
@@ -26,6 +40,14 @@ namespace AutopilotMonitor.Shared.Models
         /// Values: "Succeeded", "Failed". Agent should run cleanup instead of starting monitoring.
         /// </summary>
         public string? AdminAction { get; set; }
+
+        /// <summary>
+        /// Authoritative signal: which validator accepted this device.
+        /// Lets the agent reconcile its registry-based enrollment-type detection
+        /// against the backend's verdict (e.g. AutopilotV1 → Classic flow, DeviceAssociation → DevPrep flow).
+        /// Older backends that do not set this return Unknown — agent falls back to its own detection.
+        /// </summary>
+        public ValidatorType ValidatedBy { get; set; } = ValidatorType.Unknown;
     }
 
     /// <summary>

@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AutopilotMonitor.Agent.Core.Logging;
+using AutopilotMonitor.Agent.Core.Monitoring.Flows;
 using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Win32;
@@ -50,6 +51,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         private string _lastEspPhase; // Track last ESP phase to prevent duplicate events
         private bool _hasAutoSwitchedToAppsPhase; // Track if we've already auto-switched to apps phase for current ESP phase
         private string _enrollmentType = "v1"; // "v1" = Autopilot Classic/ESP, "v2" = Windows Device Preparation
+        private IEnrollmentFlowHandler _flowHandler = EnrollmentFlowFactory.FromWireFormat("v1"); // Kept in sync with _enrollmentType via SetEnrollmentType()
         private bool _isWaitingForHello = false; // Track if we're waiting for Hello to complete before sending enrollment_complete
         private readonly bool _isBootstrapMode; // Agent started via bootstrap token (pre-MDM)
         private bool _sendTraceEvents = true; // Send Trace-severity events to backend for decision auditing
@@ -120,6 +122,66 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             {
                 _systemRebootObserved = true;
             }
+        }
+
+        /// <summary>
+        /// Called after a successful RegisterSession. Compares the backend's authoritative
+        /// validator verdict against the agent's registry-based enrollment-type detection
+        /// and, on mismatch, emits an <c>enrollment_type_mismatch</c> warning event and
+        /// switches the active flow handler to the backend's verdict.
+        ///
+        /// <see cref="ValidatorType.CorporateIdentifier"/> and <see cref="ValidatorType.Bootstrap"/>
+        /// are treated as type-neutral (no claim about Classic vs DevPrep) and do not trigger a switch.
+        /// </summary>
+        public void ReconcileWithBackendValidator(ValidatorType validatedBy)
+        {
+            EnrollmentType backendType = validatedBy switch
+            {
+                ValidatorType.AutopilotV1 => EnrollmentType.Classic,
+                ValidatorType.DeviceAssociation => EnrollmentType.DevicePreparation,
+                _ => EnrollmentType.Unknown
+            };
+
+            if (backendType == EnrollmentType.Unknown)
+                return;
+
+            string currentWire;
+            lock (_stateLock) { currentWire = _enrollmentType; }
+            var currentType = EnrollmentTypeExtensions.FromWireFormat(currentWire);
+
+            if (currentType == backendType)
+            {
+                _logger.Verbose($"EnrollmentTracker: backend validator '{validatedBy}' matches registry-detected enrollment type '{currentWire}'.");
+                return;
+            }
+
+            var newWire = backendType.ToWireFormat();
+            _logger.Warning($"EnrollmentTracker: enrollment type mismatch — registry='{currentWire}', backend='{newWire}' (validator={validatedBy}). Switching to backend verdict.");
+
+            lock (_stateLock)
+            {
+                _enrollmentType = newWire;
+                _flowHandler = EnrollmentFlowFactory.Create(backendType);
+                _stateData.EnrollmentType = newWire;
+                _stateDirty = true;
+            }
+
+            _emitEvent(new EnrollmentEvent
+            {
+                SessionId = _sessionId,
+                TenantId = _tenantId,
+                EventType = "enrollment_type_mismatch",
+                Severity = EventSeverity.Warning,
+                Source = "EnrollmentTracker",
+                Phase = EnrollmentPhase.Unknown,
+                Message = $"Registry-detected enrollment type '{currentWire}' differs from backend validator verdict '{newWire}' ({validatedBy}). Using backend verdict.",
+                Data = new Dictionary<string, object>
+                {
+                    { "registryEnrollmentType", currentWire },
+                    { "backendEnrollmentType", newWire },
+                    { "backendValidator", validatedBy.ToString() }
+                }
+            });
         }
 
         // True when no interactive user session is expected.
@@ -538,6 +600,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             {
                 wasDeviceOnly = IsDeviceOnlyDeployment;
                 _enrollmentType = result.enrollmentType;
+                _flowHandler = EnrollmentFlowFactory.FromWireFormat(result.enrollmentType);
                 _skipUserStatusPage = result.skipUserStatusPage;
                 _skipDeviceStatusPage = result.skipDeviceStatusPage;
                 _autopilotMode = result.autopilotMode;

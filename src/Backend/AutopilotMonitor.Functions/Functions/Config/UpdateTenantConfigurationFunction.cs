@@ -94,7 +94,8 @@ namespace AutopilotMonitor.Functions.Functions.Config
                         config.UnrestrictedModeEnabled != existingConfig.UnrestrictedModeEnabled ||
                         config.CustomRateLimitRequestsPerMinute != existingConfig.CustomRateLimitRequestsPerMinute ||
                         config.RateLimitRequestsPerMinute != existingConfig.RateLimitRequestsPerMinute ||
-                        config.Disabled != existingConfig.Disabled)
+                        config.Disabled != existingConfig.Disabled ||
+                        config.ValidateDeviceAssociation != existingConfig.ValidateDeviceAssociation)
                     {
                         _logger.LogWarning(
                             "Tenant Admin {User} attempted to modify GA-only fields for tenant {TenantId}",
@@ -109,6 +110,12 @@ namespace AutopilotMonitor.Functions.Functions.Config
                     config.Disabled = existingConfig.Disabled;
                     config.DisabledReason = existingConfig.DisabledReason;
                     config.DisabledUntil = existingConfig.DisabledUntil;
+                    // DevPrep "Device association" toggle is GA-only during Private Preview.
+                    // TODO(devprep-followup): missing xUnit test for this GA-gate — needs
+                    // UpdateTenantConfigurationFunction test harness (mock HttpRequestData +
+                    // RequestContext + TenantConfigurationService). Tracked in
+                    // memory/project_devprep_followups.md.
+                    config.ValidateDeviceAssociation = existingConfig.ValidateDeviceAssociation;
                 }
 
                 // Safety: if GA gate is off, force UnrestrictedMode to false

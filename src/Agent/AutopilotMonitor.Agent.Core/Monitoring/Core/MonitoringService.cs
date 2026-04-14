@@ -958,6 +958,18 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     {
                         _logger.Info($"Session registered successfully: {response.SessionId}");
 
+                        // Reconcile registry-detected enrollment type with the backend's authoritative
+                        // validator verdict. Mismatches emit an enrollment_type_mismatch warning event
+                        // and live-switch the flow handler on the EnrollmentTracker.
+                        try
+                        {
+                            _collectorCoordinator?.ReconcileWithBackendValidator(response.ValidatedBy);
+                        }
+                        catch (Exception reconcileEx)
+                        {
+                            _logger.Warning($"ReconcileWithBackendValidator failed (non-fatal): {reconcileEx.Message}");
+                        }
+
                         if (!string.IsNullOrEmpty(response.AdminAction))
                         {
                             _logger.Warning($"Session already marked as {response.AdminAction} by administrator — will run cleanup after startup");

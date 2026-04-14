@@ -8,6 +8,12 @@ export interface TenantConfiguration {
   modelWhitelist: string;
   validateAutopilotDevice: boolean;
   validateCorporateIdentifier?: boolean;
+  /**
+   * DevPrep Device Association validation (shadow mode during Private Preview).
+   * Looks devices up via Graph `tenantAssociatedDevices` but does NOT block enrollment.
+   * UI surface is gated to Global Admins until DevPrep ships GA.
+   */
+  validateDeviceAssociation?: boolean;
   allowInsecureAgentRequests?: boolean;
   dataRetentionDays: number;
   sessionTimeoutHours: number;

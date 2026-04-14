@@ -37,17 +37,18 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
 
         private void HandleEspPhaseChanged(string phase)
         {
-            string enrollType, lastPhase;
+            string lastPhase;
+            bool tracksEspPhases;
             lock (_stateLock)
             {
-                enrollType = _enrollmentType;
+                tracksEspPhases = _flowHandler.TracksEspPhases;
                 lastPhase = _lastEspPhase;
             }
 
-            // WDP (v2) has no ESP - skip ESP phase handling entirely
-            if (enrollType == "v2")
+            // Flows that do not track ESP phases (DevPrep/WDP) ignore these events entirely.
+            if (!tracksEspPhases)
             {
-                _logger.Debug($"EnrollmentTracker: skipping ESP phase event in WDP enrollment (phase: {phase})");
+                _logger.Debug($"EnrollmentTracker: skipping ESP phase event — flow does not track ESP (phase: {phase})");
                 return;
             }
 

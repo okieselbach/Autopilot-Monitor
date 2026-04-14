@@ -136,7 +136,8 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
                 Success = true,
                 Message = "Session registered successfully",
                 RegisteredAt = DateTime.UtcNow,
-                AdminAction = adminAction
+                AdminAction = adminAction,
+                ValidatedBy = validation.ValidatedBy
             };
 
             await response.WriteAsJsonAsync(responseData);

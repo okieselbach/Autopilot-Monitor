@@ -741,6 +741,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                 _isWaitingForEspSettle = loaded.IsWaitingForEspSettle;
                 _enrollmentCompleteEmitted = loaded.EnrollmentCompleteEmitted;
                 _enrollmentType = loaded.EnrollmentType ?? _enrollmentType;
+                _flowHandler = Flows.EnrollmentFlowFactory.FromWireFormat(_enrollmentType);
                 _skipUserStatusPage = loaded.SkipUserStatusPage;
                 _skipDeviceStatusPage = loaded.SkipDeviceStatusPage;
                 _autopilotMode = loaded.AutopilotMode;
@@ -955,7 +956,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
                         || isDeviceOnly;
 
                     espGateBlocked = (source == "desktop_arrival" || source == "desktop_hello")
-                        && enrollmentType != "v2" && espEverSeen && !espFinalExitSeen;
+                        && _flowHandler.AppliesEspGateOnDesktopArrival && espEverSeen && !espFinalExitSeen;
 
                     // GUARD 3: Hybrid Join reboot gate
                     // In hybrid join, ESP exit may be for a mid-enrollment reboot (domain user

@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Linq;
 using System.Net;
 using System.Text.RegularExpressions;
@@ -45,6 +46,7 @@ namespace AutopilotMonitor.Functions.Security
         private readonly RateLimitService _rateLimitService;
         private readonly AutopilotDeviceValidator _autopilotDeviceValidator;
         private readonly CorporateIdentifierValidator _corporateIdentifierValidator;
+        private readonly DeviceAssociationValidator? _deviceAssociationValidator;
         private readonly BootstrapSessionService? _bootstrapSessionService;
         private readonly ILogger _logger;
 
@@ -54,12 +56,14 @@ namespace AutopilotMonitor.Functions.Security
             AutopilotDeviceValidator autopilotDeviceValidator,
             CorporateIdentifierValidator corporateIdentifierValidator,
             ILogger logger,
-            BootstrapSessionService? bootstrapSessionService = null)
+            BootstrapSessionService? bootstrapSessionService = null,
+            DeviceAssociationValidator? deviceAssociationValidator = null)
         {
             _configService = configService;
             _rateLimitService = rateLimitService;
             _autopilotDeviceValidator = autopilotDeviceValidator;
             _corporateIdentifierValidator = corporateIdentifierValidator;
+            _deviceAssociationValidator = deviceAssociationValidator;
             _bootstrapSessionService = bootstrapSessionService;
             _logger = logger;
         }
@@ -199,7 +203,8 @@ namespace AutopilotMonitor.Functions.Security
                     Manufacturer = bsManufacturer,
                     Model = bsModel,
                     SerialNumber = bsSerial,
-                    RateLimitResult = bsRateLimitResult
+                    RateLimitResult = bsRateLimitResult,
+                    ValidatedBy = ValidatorType.Bootstrap
                 };
             }
 
@@ -296,6 +301,7 @@ namespace AutopilotMonitor.Functions.Security
             bool deviceValidated = false;
             bool deviceValidationTransient = false;
             string? deviceValidationError = null;
+            ValidatorType validatedBy = ValidatorType.Unknown;
 
             if (config.ValidateAutopilotDevice)
             {
@@ -304,6 +310,7 @@ namespace AutopilotMonitor.Functions.Security
                 {
                     deviceValidated = true;
                     autopilotDeviceId = autopilotResult.AutopilotDeviceId;
+                    validatedBy = ValidatorType.AutopilotV1;
                 }
                 else
                 {
@@ -318,6 +325,7 @@ namespace AutopilotMonitor.Functions.Security
                 if (corpResult.IsValid)
                 {
                     deviceValidated = true;
+                    validatedBy = ValidatorType.CorporateIdentifier;
                 }
                 else
                 {
@@ -355,6 +363,28 @@ namespace AutopilotMonitor.Functions.Security
                 };
             }
 
+            // 5. DevPrep "Device association" lookup (shadow mode — does NOT gate enrollment).
+            // Runs only when the tenant has opted in and the existing validators have already
+            // authorized the device. Result is attached to the request telemetry (App Insights)
+            // via Activity tags so we can observe DevPrep readiness without breaking enrollment.
+            if (config.ValidateDeviceAssociation && _deviceAssociationValidator != null && !string.IsNullOrEmpty(serialNumber))
+            {
+                try
+                {
+                    var devPrepResult = await _deviceAssociationValidator.LookupAsync(tenantId, serialNumber, sessionId);
+                    EnrichRequestTelemetryWithDeviceAssociation(devPrepResult);
+                    _logger.LogInformation(
+                        "DevPrep association lookup (shadow) for tenant {TenantId}, serial {SerialNumber}: matched={Matched}, transient={Transient}, state={State}, policy={PolicyId}",
+                        tenantId, serialNumber, devPrepResult.IsValid, devPrepResult.IsTransient,
+                        devPrepResult.AssociationState ?? "<none>", devPrepResult.DevicePreparationPolicyId ?? "<none>");
+                }
+                catch (Exception ex)
+                {
+                    // Shadow mode must never break the enrollment flow — log and move on.
+                    _logger.LogWarning(ex, "DevPrep association lookup (shadow) failed for tenant {TenantId}, serial {SerialNumber} — ignored.", tenantId, serialNumber);
+                }
+            }
+
             // All checks passed
             return new SecurityValidationResult
             {
@@ -364,8 +394,30 @@ namespace AutopilotMonitor.Functions.Security
                 Model = model,
                 SerialNumber = serialNumber,
                 AutopilotDeviceId = autopilotDeviceId,
-                RateLimitResult = rateLimitResult
+                RateLimitResult = rateLimitResult,
+                ValidatedBy = validatedBy
             };
+        }
+
+        /// <summary>
+        /// Attaches DevPrep association lookup outcome to the current Activity so it surfaces
+        /// in Application Insights request telemetry as <c>customDimensions</c>.
+        /// Centralised here so the SecurityValidator's call-site stays small.
+        /// </summary>
+        internal static void EnrichRequestTelemetryWithDeviceAssociation(DeviceAssociationResult result)
+        {
+            var activity = Activity.Current;
+            if (activity == null) return;
+
+            activity.AddTag("devprep.association.matched", result.IsValid ? "true" : "false");
+            activity.AddTag("devprep.association.transient", result.IsTransient ? "true" : "false");
+
+            if (!string.IsNullOrEmpty(result.AssociationState))
+                activity.AddTag("devprep.association.state", result.AssociationState);
+            if (!string.IsNullOrEmpty(result.DevicePreparationPolicyId))
+                activity.AddTag("devprep.association.policyId", result.DevicePreparationPolicyId);
+            if (result.PreAssociationDateTime.HasValue)
+                activity.AddTag("devprep.association.preAssociationUtc", result.PreAssociationDateTime.Value.ToString("O"));
         }
     }
 
@@ -438,5 +490,12 @@ namespace AutopilotMonitor.Functions.Security
         /// Bootstrap session short code (only set when IsBootstrapAuth is true)
         /// </summary>
         public string? BootstrapShortCode { get; set; }
+
+        /// <summary>
+        /// Which validator ultimately authorized this device. Copied into the
+        /// RegisterSession response so the agent can reconcile the enrollment-type
+        /// verdict with its registry-based detection.
+        /// </summary>
+        public ValidatorType ValidatedBy { get; set; } = ValidatorType.Unknown;
     }
 }

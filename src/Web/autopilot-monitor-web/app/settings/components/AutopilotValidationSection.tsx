@@ -7,6 +7,12 @@ interface AutopilotValidationSectionProps {
   setValidateAutopilotDevice: (value: boolean) => void;
   validateCorporateIdentifier: boolean;
   setValidateCorporateIdentifier: (value: boolean) => void;
+  /** DevPrep "Device association" — shadow mode during Private Preview. Provided when `showDeviceAssociationToggle=true`. */
+  validateDeviceAssociation?: boolean;
+  /** Toggle + persist DevPrep validation in one shot (no consent dialog). */
+  onToggleDeviceAssociation?: (newValue: boolean) => void | Promise<void>;
+  /** Render the DevPrep Device Association toggle. Gated to Global Admins by the parent. */
+  showDeviceAssociationToggle?: boolean;
   autopilotConsentInProgress: boolean;
   saving: boolean;
   onBeginConsent: (trigger: 'autopilot' | 'corporate') => void;
@@ -17,6 +23,9 @@ export default function AutopilotValidationSection({
   setValidateAutopilotDevice,
   validateCorporateIdentifier,
   setValidateCorporateIdentifier,
+  validateDeviceAssociation = false,
+  onToggleDeviceAssociation,
+  showDeviceAssociationToggle = false,
   autopilotConsentInProgress,
   saving,
   onBeginConsent,
@@ -125,6 +134,34 @@ export default function AutopilotValidationSection({
             </button>
           </label>
         </div>
+
+        {/* DevPrep Device Association — Private Preview, GA-gated, shadow-mode (no enrollment block) */}
+        {showDeviceAssociationToggle && onToggleDeviceAssociation && (
+          <div className="border-t border-gray-100 pt-5 space-y-3" data-testid="devprep-association-toggle">
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-semibold text-gray-700 tracking-wide">Windows Autopilot Device Preparation</p>
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider bg-purple-100 text-purple-800">
+                Preview · GA only
+              </span>
+            </div>
+            <label className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-medium text-gray-900">Enable DevPrep Device Association Validation</p>
+                <p className="text-sm text-gray-500">
+                  Looks devices up in the WDP <code className="text-xs">tenantAssociatedDevices</code> catalog. Currently runs in <strong>shadow mode</strong> — the result is recorded as request telemetry only and does NOT block enrollment. Will become a hard gate once DevPrep ships GA.
+                </p>
+              </div>
+              <button
+                onClick={() => { void onToggleDeviceAssociation(!validateDeviceAssociation); }}
+                disabled={saving}
+                aria-label="Toggle DevPrep Device Association validation"
+                className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${validateDeviceAssociation ? 'bg-emerald-500' : 'bg-gray-300'}`}
+              >
+                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${validateDeviceAssociation ? 'translate-x-6' : 'translate-x-1'}`} />
+              </button>
+            </label>
+          </div>
+        )}
 
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
           <p className="text-sm text-amber-900">
