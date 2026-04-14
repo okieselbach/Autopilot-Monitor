@@ -33,6 +33,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         private readonly bool _modernDeploymentBackfillEnabled;
         private readonly int _modernDeploymentBackfillLookbackMinutes;
         private readonly string _stateDirectory;
+        private readonly int[] _modernDeploymentHarmlessEventIds;
 
         private HelloTracker _helloTracker;
         private ShellCoreTracker _shellCoreTracker;
@@ -106,7 +107,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             int modernDeploymentLogLevelMax = 3,
             bool modernDeploymentBackfillEnabled = true,
             int modernDeploymentBackfillLookbackMinutes = 30,
-            string stateDirectory = null)
+            string stateDirectory = null,
+            int[] modernDeploymentHarmlessEventIds = null)
         {
             _sessionId = sessionId ?? throw new ArgumentNullException(nameof(sessionId));
             _tenantId = tenantId ?? throw new ArgumentNullException(nameof(tenantId));
@@ -118,6 +120,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             _modernDeploymentBackfillEnabled = modernDeploymentBackfillEnabled;
             _modernDeploymentBackfillLookbackMinutes = modernDeploymentBackfillLookbackMinutes;
             _stateDirectory = stateDirectory != null ? Environment.ExpandEnvironmentVariables(stateDirectory) : null;
+            _modernDeploymentHarmlessEventIds = modernDeploymentHarmlessEventIds;
         }
 
         // =====================================================================
@@ -203,7 +206,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     _modernDeploymentLogLevelMax,
                     _modernDeploymentBackfillEnabled,
                     _modernDeploymentBackfillLookbackMinutes,
-                    _stateDirectory);
+                    _stateDirectory,
+                    _modernDeploymentHarmlessEventIds);
                 _modernDeploymentTracker.Start();
             }
         }

@@ -186,6 +186,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                 var modernDeploymentLevelMax = _remoteConfigService?.CurrentConfig?.Collectors?.ModernDeploymentLogLevelMax ?? 3;
                 var modernDeploymentBackfillEnabled = _remoteConfigService?.CurrentConfig?.Collectors?.ModernDeploymentBackfillEnabled ?? true;
                 var modernDeploymentBackfillLookbackMinutes = _remoteConfigService?.CurrentConfig?.Collectors?.ModernDeploymentBackfillLookbackMinutes ?? 30;
+                var modernDeploymentHarmlessEventIds = _remoteConfigService?.CurrentConfig?.Collectors?.ModernDeploymentHarmlessEventIds;
                 _espAndHelloTracker = new EspAndHelloTracker(
                     _configuration.SessionId,
                     _configuration.TenantId,
@@ -196,7 +197,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                     modernDeploymentLogLevelMax: modernDeploymentLevelMax,
                     modernDeploymentBackfillEnabled: modernDeploymentBackfillEnabled,
                     modernDeploymentBackfillLookbackMinutes: modernDeploymentBackfillLookbackMinutes,
-                    stateDirectory: @"%ProgramData%\AutopilotMonitor\State"
+                    stateDirectory: @"%ProgramData%\AutopilotMonitor\State",
+                    modernDeploymentHarmlessEventIds: modernDeploymentHarmlessEventIds
                 );
                 _espAndHelloTracker.Start();
 
@@ -248,6 +250,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                         "provisioning_registry", "diagnostics_registry", "eventlog", "appworkload_log"
                     };
                     var stalledAfterIndex = collectors?.SessionStalledAfterProbeIndex ?? 4;
+                    var harmlessMdmIds = collectors?.ModernDeploymentHarmlessEventIds ?? new[] { 100, 1005 };
                     _stallProbeCollector = new StallProbeCollector(
                         _configuration.SessionId,
                         _configuration.TenantId,
@@ -256,7 +259,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                         probeThresholds,
                         probeTraceIndices,
                         probeSources,
-                        stalledAfterIndex);
+                        stalledAfterIndex,
+                        harmlessMdmIds);
                     _logger.Info($"StallProbeCollector enabled: thresholds=[{string.Join(",", probeThresholds)}]min, traces=[{string.Join(",", probeTraceIndices)}], sources={probeSources.Length}");
                 }
                 else

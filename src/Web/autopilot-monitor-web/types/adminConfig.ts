@@ -22,6 +22,7 @@ export interface AdminConfiguration {
   opsAlertSlackEnabled?: boolean;
   opsAlertSlackWebhookUrl?: string;
   allowAgentDowngrade?: boolean;
+  modernDeploymentHarmlessEventIdsJson?: string;
 }
 
 export interface OpsAlertRule {

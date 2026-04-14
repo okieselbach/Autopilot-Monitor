@@ -11,6 +11,7 @@ export function SectionGlobalSettings() {
     platformStatsBlobSasUrl, setPlatformStatsBlobSasUrl,
     collectorIdleTimeoutMinutes, setCollectorIdleTimeoutMinutes,
     allowAgentDowngrade, setAllowAgentDowngrade,
+    modernDeploymentHarmlessEventIds, setModernDeploymentHarmlessEventIds,
     handleSaveAdminConfig, handleResetAdminConfig,
   } = useAdminConfig();
 
@@ -29,6 +30,8 @@ export function SectionGlobalSettings() {
         setCollectorIdleTimeoutMinutes={setCollectorIdleTimeoutMinutes}
         allowAgentDowngrade={allowAgentDowngrade}
         setAllowAgentDowngrade={setAllowAgentDowngrade}
+        modernDeploymentHarmlessEventIds={modernDeploymentHarmlessEventIds}
+        setModernDeploymentHarmlessEventIds={setModernDeploymentHarmlessEventIds}
         onSave={handleSaveAdminConfig}
         onReset={handleResetAdminConfig}
       />

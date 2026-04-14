@@ -48,6 +48,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         private readonly HashSet<int> _traceIndices;
         private readonly HashSet<string> _sources;
         private readonly int _sessionStalledAfterProbeIndex;
+        private readonly HashSet<int> _harmlessModernDeploymentEventIds;
 
         private readonly object _stateLock = new object();
         private readonly HashSet<int> _firedProbeIndices = new HashSet<int>();
@@ -79,13 +80,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             // Kept empty intentionally — live-capture mode (Etappe 3) collects the raw events first.
         };
 
-        // ModernDeployment EventIDs that are known to be harmless and should NOT count as anomalies
-        // in the stall probe scan. EventID 100 Level 3 = "Die Autopilot-Richtlinie [X] wurde nicht
-        // gefunden" — fires when optional ESP sync policies are not configured; no real impact.
-        private static readonly HashSet<int> HarmlessModernDeploymentEventIds = new HashSet<int>
-        {
-            100 // "Autopilot policy not found" — optional ESP sync policy configuration warnings
-        };
+        // Fallback list of ModernDeployment EventIDs that are known to be harmless and should NOT
+        // count as anomalies in the stall probe scan. The runtime-configurable list from the backend
+        // is injected via the constructor (CollectorConfiguration.ModernDeploymentHarmlessEventIds);
+        // this fallback is used only when no list is provided.
+        private static readonly int[] DefaultHarmlessModernDeploymentEventIds = new[] { 100, 1005 };
 
         // AppWorkload.log active-install markers (positive signals)
         private static readonly Regex ActiveInstallRegex = new Regex(
@@ -132,7 +131,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             int[] thresholdsMinutes,
             int[] traceIndices,
             string[] sources,
-            int sessionStalledAfterProbeIndex)
+            int sessionStalledAfterProbeIndex,
+            int[] harmlessModernDeploymentEventIds = null)
         {
             _sessionId = sessionId ?? throw new ArgumentNullException(nameof(sessionId));
             _tenantId = tenantId ?? throw new ArgumentNullException(nameof(tenantId));
@@ -142,6 +142,10 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             _traceIndices = new HashSet<int>(traceIndices ?? new int[0]);
             _sources = new HashSet<string>(sources ?? new string[0], StringComparer.OrdinalIgnoreCase);
             _sessionStalledAfterProbeIndex = sessionStalledAfterProbeIndex;
+            _harmlessModernDeploymentEventIds = new HashSet<int>(
+                harmlessModernDeploymentEventIds != null && harmlessModernDeploymentEventIds.Length > 0
+                    ? harmlessModernDeploymentEventIds
+                    : DefaultHarmlessModernDeploymentEventIds);
         }
 
         /// <summary>
@@ -365,7 +369,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                             {
                                 // Skip known harmless events — they are normal operational noise
                                 // and should not be counted as stall anomalies.
-                                if (HarmlessModernDeploymentEventIds.Contains(record.Id))
+                                if (_harmlessModernDeploymentEventIds.Contains(record.Id))
                                     continue;
 
                                 foundCount++;

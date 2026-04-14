@@ -32,6 +32,8 @@ interface AdminConfigContextValue {
   setOpsEventRetentionDays: (value: number) => void;
   allowAgentDowngrade: boolean;
   setAllowAgentDowngrade: (value: boolean) => void;
+  modernDeploymentHarmlessEventIds: string;
+  setModernDeploymentHarmlessEventIds: (value: string) => void;
 
   // Diagnostics log paths
   globalDiagPaths: DiagnosticsLogPath[];
@@ -82,6 +84,8 @@ interface AdminConfigContextValue {
 import { type DiagnosticsLogPath } from "./components/DiagnosticsLogPathsSection";
 import { type TenantConfiguration } from "./components/TenantManagementSection";
 
+import { parseHarmlessEventIdsJson, serializeHarmlessEventIds } from "./harmlessEventIds";
+
 const AdminConfigContext = createContext<AdminConfigContextValue | null>(null);
 
 export function useAdminConfig() {
@@ -104,6 +108,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
   const [maintenanceBlockDurationHours, setMaintenanceBlockDurationHours] = useState(12);
   const [opsEventRetentionDays, setOpsEventRetentionDays] = useState(90);
   const [allowAgentDowngrade, setAllowAgentDowngrade] = useState(false);
+  const [modernDeploymentHarmlessEventIds, setModernDeploymentHarmlessEventIds] = useState("100, 1005");
 
   // Diagnostics Log Paths state
   const [globalDiagPaths, setGlobalDiagPaths] = useState<DiagnosticsLogPath[]>([]);
@@ -154,6 +159,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
         setMaintenanceBlockDurationHours(data.maintenanceBlockDurationHours ?? 12);
         setOpsEventRetentionDays(data.opsEventRetentionDays ?? 90);
         setAllowAgentDowngrade(data.allowAgentDowngrade ?? false);
+        setModernDeploymentHarmlessEventIds(parseHarmlessEventIdsJson(data.modernDeploymentHarmlessEventIdsJson));
         try {
           setGlobalDiagPaths(data.diagnosticsGlobalLogPathsJson ? JSON.parse(data.diagnosticsGlobalLogPathsJson) : []);
         } catch {
@@ -245,6 +251,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
         maintenanceBlockDurationHours,
         opsEventRetentionDays,
         allowAgentDowngrade,
+        modernDeploymentHarmlessEventIdsJson: serializeHarmlessEventIds(modernDeploymentHarmlessEventIds),
       };
 
       const response = await authenticatedFetch(api.globalConfig.get(), getAccessToken, {
@@ -271,7 +278,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
     } finally {
       setSavingConfig(false);
     }
-  }, [adminConfig, globalRateLimit, platformStatsBlobSasUrl, collectorIdleTimeoutMinutes, maxSessionWindowHours, maintenanceBlockDurationHours, opsEventRetentionDays, allowAgentDowngrade, getAccessToken]);
+  }, [adminConfig, globalRateLimit, platformStatsBlobSasUrl, collectorIdleTimeoutMinutes, maxSessionWindowHours, maintenanceBlockDurationHours, opsEventRetentionDays, allowAgentDowngrade, modernDeploymentHarmlessEventIds, getAccessToken]);
 
   // Reset admin config
   const handleResetAdminConfig = useCallback(() => {
@@ -283,6 +290,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
     setMaintenanceBlockDurationHours(adminConfig.maintenanceBlockDurationHours ?? 12);
     setOpsEventRetentionDays(adminConfig.opsEventRetentionDays ?? 90);
     setAllowAgentDowngrade(adminConfig.allowAgentDowngrade ?? false);
+    setModernDeploymentHarmlessEventIds(parseHarmlessEventIdsJson(adminConfig.modernDeploymentHarmlessEventIdsJson));
     try {
       setGlobalDiagPaths(adminConfig.diagnosticsGlobalLogPathsJson ? JSON.parse(adminConfig.diagnosticsGlobalLogPathsJson) : []);
     } catch {
@@ -402,6 +410,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
       maintenanceBlockDurationHours, setMaintenanceBlockDurationHours,
       opsEventRetentionDays, setOpsEventRetentionDays,
       allowAgentDowngrade, setAllowAgentDowngrade,
+      modernDeploymentHarmlessEventIds, setModernDeploymentHarmlessEventIds,
       globalDiagPaths, setGlobalDiagPaths, savingDiagPaths,
       opsAlertRules, setOpsAlertRules,
       opsAlertTelegramEnabled, setOpsAlertTelegramEnabled,

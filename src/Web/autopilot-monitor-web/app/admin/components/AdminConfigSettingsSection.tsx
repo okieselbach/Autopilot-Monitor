@@ -14,6 +14,8 @@ interface AdminConfigSettingsSectionProps {
   setCollectorIdleTimeoutMinutes: (value: number) => void;
   allowAgentDowngrade: boolean;
   setAllowAgentDowngrade: (value: boolean) => void;
+  modernDeploymentHarmlessEventIds: string;
+  setModernDeploymentHarmlessEventIds: (value: string) => void;
   onSave: () => Promise<void>;
   onReset: () => void;
 }
@@ -30,6 +32,8 @@ export function AdminConfigSettingsSection({
   setCollectorIdleTimeoutMinutes,
   allowAgentDowngrade,
   setAllowAgentDowngrade,
+  modernDeploymentHarmlessEventIds,
+  setModernDeploymentHarmlessEventIds,
   onSave,
   onReset,
 }: AdminConfigSettingsSectionProps) {
@@ -126,6 +130,25 @@ export function AdminConfigSettingsSection({
                     When <strong>off</strong> (default), the agent&apos;s self-updater refuses to install a version strictly lower than the one it is currently running — including via the runtime hash-mismatch force path. Protects dev/pre-release builds from being replaced by the production <code className="text-xs bg-indigo-100 dark:bg-indigo-900 dark:text-indigo-200 px-1 rounded">version.json</code>. Turn on only for controlled rollback scenarios, then turn off again.
                   </p>
                 </span>
+              </label>
+            </div>
+
+            <div>
+              <label className="block">
+                <span className="text-indigo-900 dark:text-indigo-100 font-medium">ModernDeployment Harmless EventIDs</span>
+                <p className="text-sm text-indigo-800 dark:text-gray-300 mb-2">
+                  Comma-separated list of Windows ModernDeployment EventIDs that should be treated as noise.
+                  Matching Error/Warning events get downgraded to <strong>Debug</strong> in the session timeline
+                  and are ignored by the stall-probe anomaly scan. Critical (Level 1) is never downgraded.
+                  Defaults: <code className="text-xs bg-indigo-100 dark:bg-indigo-900 dark:text-indigo-200 px-1 rounded">100, 1005</code>.
+                </p>
+                <input
+                  type="text"
+                  value={modernDeploymentHarmlessEventIds}
+                  onChange={(e) => setModernDeploymentHarmlessEventIds(e.target.value)}
+                  placeholder="100, 1005"
+                  className="mt-1 block w-full px-4 py-2 border border-indigo-300 dark:border-indigo-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors font-mono text-sm"
+                />
               </label>
             </div>
 

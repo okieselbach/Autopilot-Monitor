@@ -45,6 +45,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         private readonly bool _backfillEnabled;
         private readonly int _backfillLookbackMinutes;
         private readonly string _stateDirectory;
+        private readonly HashSet<int> _harmlessEventIds;
 
         private EventLogWatcher _autopilotWatcher;
         private EventLogWatcher _managementWatcher;
@@ -59,7 +60,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             int logLevelMax = 3,
             bool backfillEnabled = true,
             int backfillLookbackMinutes = 30,
-            string stateDirectory = null)
+            string stateDirectory = null,
+            int[] harmlessEventIds = null)
         {
             _sessionId = sessionId ?? throw new ArgumentNullException(nameof(sessionId));
             _tenantId = tenantId ?? throw new ArgumentNullException(nameof(tenantId));
@@ -69,6 +71,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             _backfillEnabled = backfillEnabled;
             _backfillLookbackMinutes = backfillLookbackMinutes;
             _stateDirectory = stateDirectory != null ? Environment.ExpandEnvironmentVariables(stateDirectory) : null;
+            _harmlessEventIds = harmlessEventIds != null && harmlessEventIds.Length > 0
+                ? new HashSet<int>(harmlessEventIds)
+                : new HashSet<int> { 100, 1005 };
         }
 
         /// <summary>
@@ -251,10 +256,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     break;
             }
 
-            // Downgrade known harmless warnings to Debug.
-            // EventID 100 Level 3 = "Autopilot policy not found" — fires when optional
-            // ESP sync policies are not configured; no real impact on enrollment.
-            if (effectiveLevel == 3 && eventId == 100)
+            // Downgrade configurable harmless EventIDs to Debug.
+            // Level 1 (Critical) is NEVER downgraded — too risky to silence. Only Level 2
+            // (Error) and Level 3 (Warning) are considered. The list is delivered by the
+            // backend via CollectorConfiguration.ModernDeploymentHarmlessEventIds and
+            // pre-seeded with known-harmless IDs (e.g. 100 "Autopilot policy not found",
+            // 1005 — no real enrollment impact). Events stay visible in the timeline
+            // (Debug severity) for troubleshooting.
+            if ((effectiveLevel == 2 || effectiveLevel == 3) && _harmlessEventIds.Contains(eventId))
             {
                 eventType = Constants.EventTypes.ModernDeploymentLog;
                 severity = EventSeverity.Debug;

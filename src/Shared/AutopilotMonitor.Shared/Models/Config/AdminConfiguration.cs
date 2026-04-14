@@ -266,6 +266,40 @@ namespace AutopilotMonitor.Shared.Models
         /// </summary>
         public string LatestBootstrapScriptVersion { get; set; } = default!;
 
+        // ===== MODERN DEPLOYMENT NOISE SUPPRESSION =====
+
+        /// <summary>
+        /// JSON-serialized list of Windows ModernDeployment EventIDs that are considered
+        /// harmless. Matching events (Level 2 Error or Level 3 Warning) are downgraded
+        /// to Debug severity by the agent — they stay visible for troubleshooting but
+        /// do not surface as Error/Warning in the session timeline and are ignored by
+        /// the stall-probe anomaly scan. Level 1 Critical is never downgraded.
+        /// Example: "[100, 1005]"
+        /// </summary>
+        public string ModernDeploymentHarmlessEventIdsJson { get; set; } = default!;
+
+        /// <summary>
+        /// Returns the deserialized list of harmless ModernDeployment EventIDs.
+        /// Falls back to the built-in defaults [100, 1005] when the JSON is
+        /// null/empty/invalid so new agents always receive a sensible baseline.
+        /// </summary>
+        public List<int> GetModernDeploymentHarmlessEventIds()
+        {
+            var defaults = new List<int> { 100, 1005 };
+            if (string.IsNullOrWhiteSpace(ModernDeploymentHarmlessEventIdsJson))
+                return defaults;
+            try
+            {
+                var parsed = JsonSerializer.Deserialize<List<int>>(ModernDeploymentHarmlessEventIdsJson,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                return parsed ?? defaults;
+            }
+            catch
+            {
+                return defaults;
+            }
+        }
+
         /// <summary>
         /// Whether vulnerability correlation is globally enabled.
         /// When false, agents still collect inventory but backend skips correlation.

@@ -123,7 +123,8 @@ namespace AutopilotMonitor.Functions.Functions.Config
                 PerformanceIntervalSeconds = tenantConfig.PerformanceCollectorIntervalSeconds,
                 CollectorIdleTimeoutMinutes = adminConfig.CollectorIdleTimeoutMinutes,
                 HelloWaitTimeoutSeconds = tenantConfig.HelloWaitTimeoutSeconds,
-                AgentMaxLifetimeMinutes = tenantConfig.AgentMaxLifetimeMinutes ?? 360
+                AgentMaxLifetimeMinutes = tenantConfig.AgentMaxLifetimeMinutes ?? 360,
+                ModernDeploymentHarmlessEventIds = adminConfig.GetModernDeploymentHarmlessEventIds().ToArray()
             };
 
             // Get active gather rules for this tenant (user-defined ad-hoc only)
@@ -140,7 +141,7 @@ namespace AutopilotMonitor.Functions.Functions.Config
             var response = req.CreateResponse(HttpStatusCode.OK);
             await response.WriteAsJsonAsync(new AgentConfigResponse
             {
-                ConfigVersion = 23, // AllowAgentDowngrade forward-only self-update gate
+                ConfigVersion = 24, // Configurable ModernDeploymentHarmlessEventIds (noise suppression)
                 UploadIntervalSeconds = 10,
                 SelfDestructOnComplete = tenantConfig.SelfDestructOnComplete ?? true,
                 KeepLogFile = tenantConfig.KeepLogFile ?? false,

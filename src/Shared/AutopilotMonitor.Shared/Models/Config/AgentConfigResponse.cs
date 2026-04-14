@@ -340,6 +340,16 @@ namespace AutopilotMonitor.Shared.Models
         public bool ModernDeploymentBackfillEnabled { get; set; } = true;
 
         /// <summary>
+        /// List of Windows ModernDeployment EventIDs that are considered harmless.
+        /// Matching Level 2 (Error) and Level 3 (Warning) events are downgraded to
+        /// Debug severity and skipped by the stall-probe anomaly scan. Level 1
+        /// (Critical) is never downgraded.
+        /// Default: [100, 1005] — two known noise EventIDs with no enrollment impact.
+        /// Configurable per Admin in the global settings.
+        /// </summary>
+        public int[] ModernDeploymentHarmlessEventIds { get; set; } = new[] { 100, 1005 };
+
+        /// <summary>
         /// Lookback window in minutes for the ModernDeployment backfill scan.
         /// Only events within this window are considered. Set generously because the
         /// gap between WhiteGlove initiation and MDM enroll (when the agent starts)

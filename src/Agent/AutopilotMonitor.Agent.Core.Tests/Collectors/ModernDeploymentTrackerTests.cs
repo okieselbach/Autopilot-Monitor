@@ -35,7 +35,7 @@ namespace AutopilotMonitor.Agent.Core.Tests.Collectors
             catch { /* best-effort */ }
         }
 
-        private ModernDeploymentTracker CreateTracker(string stateDirectory = null)
+        private ModernDeploymentTracker CreateTracker(string stateDirectory = null, int[] harmlessEventIds = null)
         {
             return new ModernDeploymentTracker(
                 sessionId: "sess-1",
@@ -45,7 +45,8 @@ namespace AutopilotMonitor.Agent.Core.Tests.Collectors
                 logLevelMax: 3,
                 backfillEnabled: true,
                 backfillLookbackMinutes: 30,
-                stateDirectory: stateDirectory);
+                stateDirectory: stateDirectory,
+                harmlessEventIds: harmlessEventIds);
         }
 
         private List<EnrollmentEvent> GetCaptured() => new List<EnrollmentEvent>(_captured);
@@ -135,14 +136,74 @@ namespace AutopilotMonitor.Agent.Core.Tests.Collectors
         }
 
         [Fact]
-        public void ProcessEvent_EventId100Level2_StillMappedToError()
+        public void ProcessEvent_EventId100Level2_DowngradedToDebugLog()
         {
             var tracker = CreateTracker();
 
             tracker.ProcessEvent(100, 2, "Error", "prov", DateTime.UtcNow, "msg",
                 "Autopilot", ModernDeploymentTracker.AutopilotChannel, false);
 
-            Assert.Equal(Constants.EventTypes.ModernDeploymentError, Assert.Single(GetCaptured()).EventType);
+            var evt = Assert.Single(GetCaptured());
+            Assert.Equal(Constants.EventTypes.ModernDeploymentLog, evt.EventType);
+            Assert.Equal(EventSeverity.Debug, evt.Severity);
+        }
+
+        [Fact]
+        public void ProcessEvent_EventId100Level1Critical_NeverDowngraded()
+        {
+            var tracker = CreateTracker();
+
+            tracker.ProcessEvent(100, 1, "Critical", "prov", DateTime.UtcNow, "msg",
+                "Autopilot", ModernDeploymentTracker.AutopilotChannel, false);
+
+            var evt = Assert.Single(GetCaptured());
+            Assert.Equal(Constants.EventTypes.ModernDeploymentError, evt.EventType);
+            Assert.Equal(EventSeverity.Error, evt.Severity);
+        }
+
+        [Fact]
+        public void ProcessEvent_DefaultHarmlessList_IncludesEventId1005()
+        {
+            var tracker = CreateTracker();
+
+            tracker.ProcessEvent(1005, 3, "Warning", "prov", DateTime.UtcNow, "noisy",
+                "Autopilot", ModernDeploymentTracker.AutopilotChannel, false);
+
+            var evt = Assert.Single(GetCaptured());
+            Assert.Equal(Constants.EventTypes.ModernDeploymentLog, evt.EventType);
+            Assert.Equal(EventSeverity.Debug, evt.Severity);
+        }
+
+        [Fact]
+        public void ProcessEvent_CustomHarmlessList_OverridesDefaults()
+        {
+            var tracker = CreateTracker(harmlessEventIds: new[] { 4242 });
+
+            // 100 is NOT in the custom list → stays Warning
+            tracker.ProcessEvent(100, 3, "Warning", "prov", DateTime.UtcNow, "msg",
+                "Autopilot", ModernDeploymentTracker.AutopilotChannel, false);
+            // 4242 IS in the custom list → downgraded
+            tracker.ProcessEvent(4242, 3, "Warning", "prov", DateTime.UtcNow, "msg",
+                "Autopilot", ModernDeploymentTracker.AutopilotChannel, false);
+
+            var events = GetCaptured();
+            Assert.Equal(2, events.Count);
+            Assert.Contains(events, e => e.Data != null && (int)e.Data["eventId"] == 100 && e.Severity == EventSeverity.Warning);
+            Assert.Contains(events, e => e.Data != null && (int)e.Data["eventId"] == 4242 && e.Severity == EventSeverity.Debug);
+        }
+
+        [Fact]
+        public void ProcessEvent_UnlistedHighLevelEvent_RemainsAsError()
+        {
+            var tracker = CreateTracker();
+
+            // 999 not in the default harmless list → Level 2 stays Error
+            tracker.ProcessEvent(999, 2, "Error", "prov", DateTime.UtcNow, "msg",
+                "Autopilot", ModernDeploymentTracker.AutopilotChannel, false);
+
+            var evt = Assert.Single(GetCaptured());
+            Assert.Equal(Constants.EventTypes.ModernDeploymentError, evt.EventType);
+            Assert.Equal(EventSeverity.Error, evt.Severity);
         }
 
         // ========== Message payload shape ==========
