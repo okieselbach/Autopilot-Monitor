@@ -12,11 +12,16 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
     {
         private readonly ILogger<GetGeographicLocationSessionsFunction> _logger;
         private readonly IMaintenanceRepository _maintenanceRepo;
+        private readonly IMetricsRepository _metricsRepo;
 
-        public GetGeographicLocationSessionsFunction(ILogger<GetGeographicLocationSessionsFunction> logger, IMaintenanceRepository maintenanceRepo)
+        public GetGeographicLocationSessionsFunction(
+            ILogger<GetGeographicLocationSessionsFunction> logger,
+            IMaintenanceRepository maintenanceRepo,
+            IMetricsRepository metricsRepo)
         {
             _logger = logger;
             _maintenanceRepo = maintenanceRepo;
+            _metricsRepo = metricsRepo;
         }
 
         [Function("GetGeographicLocationSessions")]
@@ -49,11 +54,13 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
 
                 var cutoff = DateTime.UtcNow.AddDays(-days);
                 var sessions = await _maintenanceRepo.GetSessionsByDateRangeAsync(cutoff, DateTime.UtcNow.AddDays(1), tenantId);
-
                 var filtered = FilterSessionsByLocation(sessions, locationKey, groupBy);
 
+                var appSummaries = await _metricsRepo.GetAppInstallSummariesByTenantAsync(tenantId);
+                var rows = BuildRows(filtered, appSummaries);
+
                 var response = req.CreateResponse(HttpStatusCode.OK);
-                await response.WriteAsJsonAsync(new { success = true, sessions = filtered, totalCount = filtered.Count });
+                await response.WriteAsJsonAsync(new { success = true, sessions = rows, totalCount = rows.Count });
                 return response;
             }
             catch (Exception ex)
@@ -72,6 +79,23 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
                 .Where(s => GetGeographicMetricsFunction.GetLocationKey(s, groupBy) == locationKey)
                 .OrderByDescending(s => s.StartedAt)
                 .ToList();
+        }
+
+        internal static List<LocationSessionRow> BuildRows(
+            List<SessionSummary> sessions, List<AppInstallSummary> appSummaries)
+        {
+            var appsBySession = appSummaries
+                .GroupBy(a => a.SessionId)
+                .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
+
+            var rows = new List<LocationSessionRow>(sessions.Count);
+            foreach (var s in sessions)
+            {
+                var apps = appsBySession.TryGetValue(s.SessionId, out var list) ? list : new List<AppInstallSummary>();
+                var agg = DoAggregator.Compute(apps);
+                rows.Add(LocationSessionRow.From(s, agg, apps.Count));
+            }
+            return rows;
         }
     }
 }

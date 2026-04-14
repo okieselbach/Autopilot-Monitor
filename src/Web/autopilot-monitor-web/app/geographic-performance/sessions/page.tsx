@@ -22,7 +22,25 @@ interface SessionSummary {
   failureReason: string | null;
   durationSeconds: number | null;
   enrollmentType: string;
+  // Per-session Delivery Optimization aggregate (added by geographic drilldown endpoint)
+  hasDoTelemetry?: boolean;
+  doAppCount?: number;
+  totalAppCount?: number;
+  doPercentPeerCaching?: number;
+  doBytesFromPeers?: number;
+  doBytesFromHttp?: number;
+  doTotalBytesDownloaded?: number;
+  doBytesFromLanPeers?: number;
+  doBytesFromGroupPeers?: number;
+  doBytesFromInternetPeers?: number;
 }
+
+const formatBytes = (bytes: number) => {
+  if (!bytes || bytes <= 0) return "—";
+  if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(0)} MB`;
+  return `${(bytes / 1024).toFixed(0)} KB`;
+};
 
 interface LocationSessionsResponse {
   success: boolean;
@@ -139,6 +157,14 @@ function LocationSessionsContent() {
             .map((s) => s.durationSeconds!);
           return durations.length > 0 ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length / 60) : 0;
         })(),
+        // Weighted peer-caching % across sessions with DO telemetry (matches region aggregate formula)
+        doSessions: data.sessions.filter((s) => s.hasDoTelemetry).length,
+        avgDoPercent: (() => {
+          const doSessions = data.sessions.filter((s) => s.hasDoTelemetry);
+          const totalPeers = doSessions.reduce((a, s) => a + (s.doBytesFromPeers ?? 0), 0);
+          const totalBytes = doSessions.reduce((a, s) => a + (s.doTotalBytesDownloaded ?? 0), 0);
+          return totalBytes > 0 ? Math.round((totalPeers / totalBytes) * 1000) / 10 : 0;
+        })(),
       }
     : null;
 
@@ -191,7 +217,7 @@ function LocationSessionsContent() {
         <main className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
           {/* Summary Stats */}
           {stats && (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
               <div className="bg-white rounded-lg shadow p-4">
                 <div className="text-sm font-medium text-gray-500">Sessions</div>
                 <div className="text-2xl font-bold text-gray-900">{stats.total}</div>
@@ -218,6 +244,20 @@ function LocationSessionsContent() {
                   {stats.avgDuration > 0 ? `${stats.avgDuration} min` : "—"}
                 </div>
                 <div className="text-xs text-gray-400">succeeded sessions</div>
+              </div>
+              <div className="bg-white rounded-lg shadow p-4">
+                <div className="text-sm font-medium text-gray-500">DO Peers</div>
+                <div className={`text-2xl font-bold ${
+                  stats.doSessions === 0 ? "text-gray-400" :
+                  stats.avgDoPercent >= 50 ? "text-green-600" :
+                  stats.avgDoPercent >= 10 ? "text-yellow-600" :
+                  "text-gray-600"
+                }`}>
+                  {stats.doSessions > 0 ? `${stats.avgDoPercent}%` : "—"}
+                </div>
+                <div className="text-xs text-gray-400">
+                  {stats.doSessions > 0 ? `${stats.doSessions} of ${stats.total} sessions` : "no DO telemetry"}
+                </div>
               </div>
             </div>
           )}
@@ -254,6 +294,9 @@ function LocationSessionsContent() {
                         Duration
                       </th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        DO Peers
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Started At
                       </th>
                     </tr>
@@ -279,6 +322,42 @@ function LocationSessionsContent() {
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-600">
                           {formatDuration(session.durationSeconds)}
+                        </td>
+                        <td className="px-4 py-3 text-sm">
+                          {session.hasDoTelemetry ? (
+                            <div
+                              title={
+                                `Peers: ${formatBytes(session.doBytesFromPeers ?? 0)} | HTTP: ${formatBytes(session.doBytesFromHttp ?? 0)} | Total: ${formatBytes(session.doTotalBytesDownloaded ?? 0)}\n` +
+                                `LAN: ${formatBytes(session.doBytesFromLanPeers ?? 0)} | Group: ${formatBytes(session.doBytesFromGroupPeers ?? 0)} | Internet: ${formatBytes(session.doBytesFromInternetPeers ?? 0)}`
+                              }
+                            >
+                              <span
+                                className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                                  (session.doPercentPeerCaching ?? 0) >= 50
+                                    ? "bg-green-100 text-green-800"
+                                    : (session.doPercentPeerCaching ?? 0) >= 10
+                                    ? "bg-yellow-100 text-yellow-800"
+                                    : "bg-gray-100 text-gray-600"
+                                }`}
+                              >
+                                {(session.doPercentPeerCaching ?? 0).toFixed(1)}%
+                              </span>
+                              <span className="text-xs text-gray-400 ml-1">
+                                ({session.doAppCount}/{session.totalAppCount})
+                              </span>
+                            </div>
+                          ) : (
+                            <span
+                              className="text-gray-300"
+                              title={
+                                (session.totalAppCount ?? 0) > 0
+                                  ? `${session.totalAppCount} app(s) installed, no DO telemetry`
+                                  : "no app install data"
+                              }
+                            >
+                              —
+                            </span>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-500">
                           {formatDate(session.startedAt)}

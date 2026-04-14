@@ -76,6 +76,86 @@ namespace AutopilotMonitor.Shared.Models
     }
 
     /// <summary>
+    /// Session row returned by the geographic drilldown endpoint. Extends <see cref="SessionSummary"/>
+    /// with per-session Delivery Optimization aggregates so the user can troubleshoot DO usage
+    /// without leaving the drilldown view.
+    /// </summary>
+    public class LocationSessionRow : SessionSummary
+    {
+        /// <summary>True if any app in this session has DO telemetry (DoDownloadMode &gt;= 0).</summary>
+        public bool HasDoTelemetry { get; set; }
+        /// <summary>Number of apps in this session that have DO telemetry.</summary>
+        public int DoAppCount { get; set; }
+        /// <summary>Total number of app install summaries recorded for this session.</summary>
+        public int TotalAppCount { get; set; }
+        /// <summary>Weighted peer-caching percentage for this session (0-100).</summary>
+        public double DoPercentPeerCaching { get; set; }
+        public long DoBytesFromPeers { get; set; }
+        public long DoBytesFromHttp { get; set; }
+        public long DoTotalBytesDownloaded { get; set; }
+        public long DoBytesFromLanPeers { get; set; }
+        public long DoBytesFromGroupPeers { get; set; }
+        public long DoBytesFromInternetPeers { get; set; }
+
+        public static LocationSessionRow From(SessionSummary s, DoAggregator.DoAggregate a, int totalAppCount)
+        {
+            return new LocationSessionRow
+            {
+                // SessionSummary fields
+                SessionId = s.SessionId,
+                TenantId = s.TenantId,
+                SerialNumber = s.SerialNumber,
+                DeviceName = s.DeviceName,
+                Manufacturer = s.Manufacturer,
+                Model = s.Model,
+                StartedAt = s.StartedAt,
+                CompletedAt = s.CompletedAt,
+                CurrentPhase = s.CurrentPhase,
+                CurrentPhaseDetail = s.CurrentPhaseDetail,
+                Status = s.Status,
+                FailureReason = s.FailureReason,
+                FailureSource = s.FailureSource,
+                EventCount = s.EventCount,
+                DurationSeconds = s.DurationSeconds,
+                EnrollmentType = s.EnrollmentType,
+                DiagnosticsBlobName = s.DiagnosticsBlobName,
+                LastEventAt = s.LastEventAt,
+                IsPreProvisioned = s.IsPreProvisioned,
+                ResumedAt = s.ResumedAt,
+                StalledAt = s.StalledAt,
+                IsHybridJoin = s.IsHybridJoin,
+                OsName = s.OsName,
+                OsBuild = s.OsBuild,
+                OsDisplayVersion = s.OsDisplayVersion,
+                OsEdition = s.OsEdition,
+                OsLanguage = s.OsLanguage,
+                IsUserDriven = s.IsUserDriven,
+                AgentVersion = s.AgentVersion,
+                ImeAgentVersion = s.ImeAgentVersion,
+                GeoCountry = s.GeoCountry,
+                GeoRegion = s.GeoRegion,
+                GeoCity = s.GeoCity,
+                GeoLoc = s.GeoLoc,
+                PlatformScriptCount = s.PlatformScriptCount,
+                RemediationScriptCount = s.RemediationScriptCount,
+                PendingActionsJson = s.PendingActionsJson,
+                PendingActionsQueuedAt = s.PendingActionsQueuedAt,
+                // DO aggregate
+                HasDoTelemetry = a.HasTelemetry,
+                DoAppCount = a.DoAppCount,
+                TotalAppCount = totalAppCount,
+                DoPercentPeerCaching = System.Math.Round(a.PercentPeerCaching, 1),
+                DoBytesFromPeers = a.BytesFromPeers,
+                DoBytesFromHttp = a.BytesFromHttp,
+                DoTotalBytesDownloaded = a.TotalBytesDownloaded,
+                DoBytesFromLanPeers = a.BytesFromLanPeers,
+                DoBytesFromGroupPeers = a.BytesFromGroupPeers,
+                DoBytesFromInternetPeers = a.BytesFromInternetPeers,
+            };
+        }
+    }
+
+    /// <summary>
     /// Global average benchmarks for geographic comparison.
     /// </summary>
     public class GlobalAverages

@@ -123,17 +123,10 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
                     .Where(s => appsBySession.ContainsKey(s.SessionId))
                     .SelectMany(s => appsBySession[s.SessionId])
                     .ToList();
-                var doApps = allLocationApps.Where(a => a.DoDownloadMode >= 0).ToList();
+                var doAgg = DoAggregator.Compute(allLocationApps);
                 var doSessionCount = group
                     .Where(s => appsBySession.ContainsKey(s.SessionId))
                     .Count(s => appsBySession[s.SessionId].Any(a => a.DoDownloadMode >= 0));
-                var totalDoPeers = doApps.Sum(a => a.DoBytesFromPeers);
-                var totalDoHttp = doApps.Sum(a => a.DoBytesFromHttp);
-                // Use DoTotalBytesDownloaded as ground truth denominator (accounts for all sources);
-                // fall back to peers+http sum for old records without the field
-                var totalDoDownloaded = doApps.Sum(a => a.DoTotalBytesDownloaded);
-                var totalDoBytes = totalDoDownloaded > 0 ? totalDoDownloaded : (totalDoPeers + totalDoHttp);
-                var avgDoPct = totalDoBytes > 0 ? (double)totalDoPeers / totalDoBytes * 100 : 0;
 
                 locations.Add(new LocationMetrics
                 {
@@ -155,12 +148,12 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
                     TotalDownloadBytes = totalBytes,
                     // Delivery Optimization
                     DoSessionCount = doSessionCount,
-                    AvgDoPercentPeerCaching = Math.Round(avgDoPct, 1),
-                    TotalDoBytesFromPeers = totalDoPeers,
-                    TotalDoBytesFromHttp = totalDoHttp,
-                    TotalDoBytesFromLanPeers = doApps.Sum(a => a.DoBytesFromLanPeers),
-                    TotalDoBytesFromGroupPeers = doApps.Sum(a => a.DoBytesFromGroupPeers),
-                    TotalDoBytesFromInternetPeers = doApps.Sum(a => a.DoBytesFromInternetPeers)
+                    AvgDoPercentPeerCaching = Math.Round(doAgg.PercentPeerCaching, 1),
+                    TotalDoBytesFromPeers = doAgg.BytesFromPeers,
+                    TotalDoBytesFromHttp = doAgg.BytesFromHttp,
+                    TotalDoBytesFromLanPeers = doAgg.BytesFromLanPeers,
+                    TotalDoBytesFromGroupPeers = doAgg.BytesFromGroupPeers,
+                    TotalDoBytesFromInternetPeers = doAgg.BytesFromInternetPeers
                 });
             }
 

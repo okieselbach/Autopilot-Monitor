@@ -11,13 +11,16 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
     {
         private readonly ILogger<GetGlobalGeographicLocationSessionsFunction> _logger;
         private readonly IMaintenanceRepository _maintenanceRepo;
+        private readonly IMetricsRepository _metricsRepo;
 
         public GetGlobalGeographicLocationSessionsFunction(
             ILogger<GetGlobalGeographicLocationSessionsFunction> logger,
-            IMaintenanceRepository maintenanceRepo)
+            IMaintenanceRepository maintenanceRepo,
+            IMetricsRepository metricsRepo)
         {
             _logger = logger;
             _maintenanceRepo = maintenanceRepo;
+            _metricsRepo = metricsRepo;
         }
 
         [Function("GetGlobalGeographicLocationSessions")]
@@ -50,11 +53,13 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
 
                 var cutoff = DateTime.UtcNow.AddDays(-days);
                 var sessions = await _maintenanceRepo.GetSessionsByDateRangeAsync(cutoff, DateTime.UtcNow.AddDays(1));
-
                 var filtered = GetGeographicLocationSessionsFunction.FilterSessionsByLocation(sessions, locationKey, groupBy);
 
+                var appSummaries = await _metricsRepo.GetAllAppInstallSummariesAsync();
+                var rows = GetGeographicLocationSessionsFunction.BuildRows(filtered, appSummaries);
+
                 var response = req.CreateResponse(HttpStatusCode.OK);
-                await response.WriteAsJsonAsync(new { success = true, sessions = filtered, totalCount = filtered.Count });
+                await response.WriteAsJsonAsync(new { success = true, sessions = rows, totalCount = rows.Count });
                 return response;
             }
             catch (Exception ex)
