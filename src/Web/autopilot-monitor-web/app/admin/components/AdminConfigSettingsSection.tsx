@@ -1,19 +1,6 @@
 "use client";
 
-interface AdminConfiguration {
-  partitionKey: string;
-  rowKey: string;
-  lastUpdated: string;
-  updatedBy: string;
-  globalRateLimitRequestsPerMinute: number;
-  platformStatsBlobSasUrl?: string;
-  collectorIdleTimeoutMinutes?: number;
-  maxSessionWindowHours?: number;
-  maintenanceBlockDurationHours?: number;
-  opsEventRetentionDays?: number;
-  diagnosticsGlobalLogPathsJson?: string;
-  customSettings?: string;
-}
+import type { AdminConfiguration } from "@/types/adminConfig";
 
 interface AdminConfigSettingsSectionProps {
   loadingConfig: boolean;

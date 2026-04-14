@@ -4,33 +4,10 @@ import { createContext, useCallback, useContext, useEffect, useState } from "rea
 import { useAuth } from "../../contexts/AuthContext";
 import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
+import type { AdminConfiguration, OpsAlertRule } from "@/types/adminConfig";
 
-// Re-export for section components
-export interface AdminConfiguration {
-  partitionKey: string;
-  rowKey: string;
-  lastUpdated: string;
-  updatedBy: string;
-  globalRateLimitRequestsPerMinute: number;
-  platformStatsBlobSasUrl?: string;
-  collectorIdleTimeoutMinutes?: number;
-  maxSessionWindowHours?: number;
-  maintenanceBlockDurationHours?: number;
-  opsEventRetentionDays?: number;
-  diagnosticsGlobalLogPathsJson?: string;
-  customSettings?: string;
-  nvdApiKey?: string;
-  vulnerabilityCorrelationEnabled?: boolean;
-  vulnerabilityDataLastSyncUtc?: string;
-  // Ops Alert settings
-  opsAlertRulesJson?: string;
-  opsAlertTelegramEnabled?: boolean;
-  opsAlertTelegramChatId?: string;
-  opsAlertTeamsEnabled?: boolean;
-  opsAlertTeamsWebhookUrl?: string;
-  opsAlertSlackEnabled?: boolean;
-  opsAlertSlackWebhookUrl?: string;
-}
+// Re-export so existing `import { AdminConfiguration } from "../AdminConfigContext"` consumers keep working
+export type { AdminConfiguration, OpsAlertRule };
 
 interface AdminConfigContextValue {
   // Admin config
@@ -102,12 +79,6 @@ interface AdminConfigContextValue {
 
 import { type DiagnosticsLogPath } from "./components/DiagnosticsLogPathsSection";
 import { type TenantConfiguration } from "./components/TenantManagementSection";
-
-export interface OpsAlertRule {
-  eventType: string;
-  minSeverity: string;
-  enabled: boolean;
-}
 
 const AdminConfigContext = createContext<AdminConfigContextValue | null>(null);
 
