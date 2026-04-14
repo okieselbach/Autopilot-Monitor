@@ -1,6 +1,6 @@
 "use client";
 
-import { ValidationResult } from "@/lib/guardValidation";
+import { ValidationResult } from "@/utils/guardValidation";
 
 interface ValidationIndicatorProps {
   result: ValidationResult | null;

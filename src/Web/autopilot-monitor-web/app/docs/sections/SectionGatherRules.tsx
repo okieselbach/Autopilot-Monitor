@@ -6,7 +6,7 @@ import {
   COMMAND_CATEGORIES,
   ALLOWED_FILE_PREFIXES,
   ALLOWED_WMI_QUERY_PREFIXES,
-} from "@/lib/guardrails.generated";
+} from "@/utils/guardrails.generated";
 
 function GuardToggle({ label, children }: { label: string; children: React.ReactNode }) {
   const [open, setOpen] = useState(false);

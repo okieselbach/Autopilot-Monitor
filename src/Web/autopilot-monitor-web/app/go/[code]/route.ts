@@ -1,4 +1,4 @@
-import { validateBootstrapResponse } from "@/lib/bootstrapValidation";
+import { validateBootstrapResponse } from "@/utils/bootstrapValidation";
 
 export const runtime = "nodejs";
 
@@ -79,7 +79,7 @@ function errorScript(message: string): Response {
 }
 
 // SECURITY INVARIANT: All template parameters MUST come from
-// validateBootstrapResponse() in @/lib/bootstrapValidation. The single-quoted
+// validateBootstrapResponse() in @/utils/bootstrapValidation. The single-quoted
 // PowerShell string literals below are the second line of defense against
 // injection (single-quoted PS strings do NOT expand $(...), $var, or
 // backticks). Do NOT change to double-quoted without re-reviewing the

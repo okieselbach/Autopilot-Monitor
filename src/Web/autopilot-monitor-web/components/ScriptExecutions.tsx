@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { compareVersions, extractBootstrapVersion } from "@/lib/bootstrapVersion";
+import { compareVersions, extractBootstrapVersion } from "@/utils/bootstrapVersion";
 
 interface ScriptEvent {
   timestamp: string;

@@ -2,7 +2,7 @@
  * Typed API URL builder
  * All backend endpoint URLs are defined here for type-safety and maintainability.
  */
-import { API_BASE_URL } from "./config";
+import { API_BASE_URL } from "@/utils/config";
 
 function qs(params: Record<string, string | undefined>): string {
   const p = new URLSearchParams();

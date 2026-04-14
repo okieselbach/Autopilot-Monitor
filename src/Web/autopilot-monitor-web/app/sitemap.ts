@@ -1,6 +1,6 @@
 import type { MetadataRoute } from "next";
 import { NAV_SECTIONS } from "./docs/docsNavSections";
-import { PAGE_LASTMOD } from "../lib/page-lastmod.generated";
+import { PAGE_LASTMOD } from "@/utils/page-lastmod.generated";
 
 const BASE_URL = "https://www.autopilotmonitor.com";
 

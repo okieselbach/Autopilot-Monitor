@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
-import { asGuidOrUndefined } from "@/lib/inputValidation";
+import { asGuidOrUndefined } from "@/utils/inputValidation";
 import type { NotificationType } from "@/contexts/NotificationContext";
 import type { Session } from "../types";
 

@@ -5,7 +5,7 @@ import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 import { TenantConfiguration } from "./TenantManagementSection";
 import { TenantSearchSelect } from "./TenantSearchSelect";
-import { SessionExportEvent, generateCsvExport, generateUiExport } from "@/lib/sessionExportUtils";
+import { SessionExportEvent, generateCsvExport, generateUiExport } from "@/utils/sessionExportUtils";
 import { trackEvent } from "@/lib/appInsights";
 
 function downloadFile(content: string, filename: string, mimeType: string) {

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { DiagnosticsLogPath } from "../types";
-import { validateDiagnosticsPath } from "@/lib/guardValidation";
+import { validateDiagnosticsPath } from "@/utils/guardValidation";
 import { ValidationIndicator } from "@/components/ValidationIndicator";
 import SaveResetBar from "./SaveResetBar";
 

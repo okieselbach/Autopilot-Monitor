@@ -13,7 +13,7 @@ import {
   formatTrigger,
 } from "../types";
 import { KNOWN_EVENT_TYPES, findEventType } from "../eventTypes";
-import { validateGatherRuleTarget } from "@/lib/guardValidation";
+import { validateGatherRuleTarget } from "@/utils/guardValidation";
 import { ValidationIndicator } from "@/components/ValidationIndicator";
 
 interface GatherRuleFormFieldsProps {

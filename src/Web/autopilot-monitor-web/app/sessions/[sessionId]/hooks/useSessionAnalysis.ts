@@ -3,7 +3,7 @@ import { useState, useCallback } from "react";
 import { api } from "@/lib/api";
 import { authenticatedFetch } from "@/lib/authenticatedFetch";
 import { RuleResult } from "@/types";
-import { isGuid } from "@/lib/inputValidation";
+import { isGuid } from "@/utils/inputValidation";
 
 export function useSessionAnalysis(
   sessionId: string,

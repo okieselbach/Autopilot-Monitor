@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { GatherRule, NewRuleForm, CATEGORY_COLORS, COLLECTOR_TYPE_LABELS, EMPTY_FORM, formatTrigger } from "../types";
 import { GatherRuleFormFields } from "./GatherRuleFormFields";
 import { FormJsonToggle, JsonModeToggleButtons, ReadOnlyJsonView } from "@/components/rules/FormJsonToggle";
-import { validateGatherRuleTarget } from "@/lib/guardValidation";
+import { validateGatherRuleTarget } from "@/utils/guardValidation";
 import { ValidationIndicator } from "@/components/ValidationIndicator";
 import { stripInternalFields } from "@/lib/rulePageHelpers";
 

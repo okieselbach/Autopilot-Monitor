@@ -1,9 +1,4 @@
-export interface DiagnosticsLogPath {
-  path: string;
-  description: string;
-  isBuiltIn: boolean;
-  includeSubfolders?: boolean;
-}
+export type { DiagnosticsLogPath } from "@/types/diagnostics";
 
 export interface TenantConfiguration {
   tenantId: string;

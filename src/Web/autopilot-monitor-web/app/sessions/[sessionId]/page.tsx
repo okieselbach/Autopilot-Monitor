@@ -30,11 +30,11 @@ import { usePageSections } from "../../../hooks/usePageSections";
 import { PageSectionItem } from "../../../contexts/SidebarContext";
 import { InformationCircleIcon, ComputerDesktopIcon, PlayCircleIcon, SparklesIcon, ChartBarIcon, CodeBracketIcon, ArrowDownTrayIcon, ListBulletIcon, ClockIcon, ShieldCheckIcon } from "../../../lib/sidebarIcons";
 import DeviceDetailsCard from "./components/DeviceDetailsCard";
-import { generateUiExport, generateCsvExport, generateSessionCsvExport, generateRuleResultsCsvExport, SessionExportEvent } from "@/lib/sessionExportUtils";
+import { generateUiExport, generateCsvExport, generateSessionCsvExport, generateRuleResultsCsvExport, SessionExportEvent } from "@/utils/sessionExportUtils";
 import { Session, EnrollmentEvent, RuleResult } from "@/types";
 import { trackEvent } from "@/lib/appInsights";
 import { useAdminMode } from "@/hooks/useAdminMode";
-import { isGuid } from "@/lib/inputValidation";
+import { isGuid } from "@/utils/inputValidation";
 
 export default function SessionDetailPage() {
   const params = useParams();

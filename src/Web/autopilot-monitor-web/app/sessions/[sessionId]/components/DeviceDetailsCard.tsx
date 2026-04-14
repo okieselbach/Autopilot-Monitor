@@ -3,7 +3,7 @@
 import { useState, useMemo } from "react";
 import { EnrollmentEvent } from "@/types";
 import OobeConfigModal from "./OobeConfigModal";
-import { compareVersions, stripGitHashSuffix } from "@/lib/bootstrapVersion";
+import { compareVersions, stripGitHashSuffix } from "@/utils/bootstrapVersion";
 
 export default function DeviceDetailsCard({ events, latestAgentVersion }: { events: EnrollmentEvent[]; latestAgentVersion?: string | null }) {
   const [expanded, setExpanded] = useState(false);

@@ -1,15 +1,12 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { validateDiagnosticsPath } from "@/lib/guardValidation";
+import { validateDiagnosticsPath } from "@/utils/guardValidation";
 import { ValidationIndicator } from "@/components/ValidationIndicator";
+import type { DiagnosticsLogPath } from "@/types/diagnostics";
 
-export interface DiagnosticsLogPath {
-  path: string;
-  description: string;
-  isBuiltIn: boolean;
-  includeSubfolders?: boolean;
-}
+// Re-export so existing consumers importing from this component keep working
+export type { DiagnosticsLogPath };
 
 interface DiagnosticsLogPathsSectionProps {
   globalDiagPaths: DiagnosticsLogPath[];
