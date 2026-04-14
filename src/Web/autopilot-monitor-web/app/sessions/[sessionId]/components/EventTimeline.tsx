@@ -3,7 +3,7 @@
 import { useState, useMemo } from "react";
 import { EnrollmentEvent, Session } from "@/types";
 import { normalizeEventDataForDisplay } from "../utils/eventHelpers";
-import { getErrorCodeEntry, formatErrorCode } from "@/lib/errorCodeMap";
+import { getErrorCodeEntry, formatErrorCode } from "@/utils/errorCodeMap";
 
 interface EventTimelineProps {
   filteredEvents: EnrollmentEvent[];

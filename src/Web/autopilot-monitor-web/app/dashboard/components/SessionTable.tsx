@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState, useEffect, useRef } from "react";
 import { Session } from "../types";
 import { trackEvent } from "@/lib/appInsights";
-import { fuzzyContains } from "@/lib/fuzzy";
+import { fuzzyContains } from "@/utils/fuzzy";
 
 // Column definition for the session table
 interface ColumnDef {

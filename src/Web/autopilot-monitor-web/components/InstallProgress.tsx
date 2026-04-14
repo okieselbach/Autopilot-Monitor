@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { getErrorCodeEntry, formatErrorCode } from "@/lib/errorCodeMap";
+import { getErrorCodeEntry, formatErrorCode } from "@/utils/errorCodeMap";
 
 interface InstallEvent {
   timestamp: string;

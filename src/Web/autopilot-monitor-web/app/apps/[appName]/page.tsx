@@ -9,7 +9,7 @@ import { useAuth } from "../../../contexts/AuthContext";
 import { useNotifications } from "../../../contexts/NotificationContext";
 import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
-import { getErrorCodeEntry, formatErrorCode } from "@/lib/errorCodeMap";
+import { getErrorCodeEntry, formatErrorCode } from "@/utils/errorCodeMap";
 import { useAdminMode } from "@/hooks/useAdminMode";
 import { chartColors } from "../../../components/charts/chartTheme";
 
