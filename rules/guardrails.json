@@ -146,6 +146,12 @@
       "commands": [
         "Get-HotFix | Select-Object -First 10 HotFixID, InstalledOn, Description"
       ]
+    },
+    {
+      "category": "Autopilot / Hardware Identity",
+      "commands": [
+        "try { $cs = Get-CimInstance -ClassName Win32_ComputerSystem; $bios = Get-CimInstance -ClassName Win32_BIOS; $hash = $null; try { $hash = (Get-CimInstance -Namespace root/cimv2/mdm/dmmap -ClassName MDM_DevDetail_Ext01 -Filter \"InstanceID='Ext' AND ParentID='./DevDetail'\" -ErrorAction Stop).DeviceHardwareData } catch { $hash = \"ERROR: $($_.Exception.Message)\" }; [pscustomobject]@{ Manufacturer = $cs.Manufacturer; Model = $cs.Model; SystemSKU = $cs.SystemSKUNumber; SerialNumber = $bios.SerialNumber; BiosVersion = $bios.SMBIOSBIOSVersion; HardwareHash = $hash } | ConvertTo-Json -Compress } catch { @{ error = $_.Exception.Message } | ConvertTo-Json -Compress }"
+      ]
     }
   ],
   "diagnosticsPathPrefixes": [

@@ -138,6 +138,12 @@ export const COMMAND_CATEGORIES: readonly GuardrailCategory[] = [
       "Get-HotFix | Select-Object -First 10 HotFixID, InstalledOn, Description",
     ],
   },
+  {
+    category: "Autopilot / Hardware Identity",
+    items: [
+      "try { $cs = Get-CimInstance -ClassName Win32_ComputerSystem; $bios = Get-CimInstance -ClassName Win32_BIOS; $hash = $null; try { $hash = (Get-CimInstance -Namespace root/cimv2/mdm/dmmap -ClassName MDM_DevDetail_Ext01 -Filter \"InstanceID='Ext' AND ParentID='./DevDetail'\" -ErrorAction Stop).DeviceHardwareData } catch { $hash = \"ERROR: $($_.Exception.Message)\" }; [pscustomobject]@{ Manufacturer = $cs.Manufacturer; Model = $cs.Model; SystemSKU = $cs.SystemSKUNumber; SerialNumber = $bios.SerialNumber; BiosVersion = $bios.SMBIOSBIOSVersion; HardwareHash = $hash } | ConvertTo-Json -Compress } catch { @{ error = $_.Exception.Message } | ConvertTo-Json -Compress }",
+    ],
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -210,6 +216,7 @@ export const ALLOWED_COMMANDS_LIST: readonly string[] = [
   "certutil -store My",
   "$c = Get-ChildItem Cert:\\LocalMachine\\My; if ($c) { $c | Select-Object Subject, Thumbprint, Issuer, NotBefore, NotAfter, HasPrivateKey | ConvertTo-Json } else { '{\"CertificateCount\": 0}' }",
   "Get-HotFix | Select-Object -First 10 HotFixID, InstalledOn, Description",
+  "try { $cs = Get-CimInstance -ClassName Win32_ComputerSystem; $bios = Get-CimInstance -ClassName Win32_BIOS; $hash = $null; try { $hash = (Get-CimInstance -Namespace root/cimv2/mdm/dmmap -ClassName MDM_DevDetail_Ext01 -Filter \"InstanceID='Ext' AND ParentID='./DevDetail'\" -ErrorAction Stop).DeviceHardwareData } catch { $hash = \"ERROR: $($_.Exception.Message)\" }; [pscustomobject]@{ Manufacturer = $cs.Manufacturer; Model = $cs.Model; SystemSKU = $cs.SystemSKUNumber; SerialNumber = $bios.SerialNumber; BiosVersion = $bios.SMBIOSBIOSVersion; HardwareHash = $hash } | ConvertTo-Json -Compress } catch { @{ error = $_.Exception.Message } | ConvertTo-Json -Compress }",
 ];
 
 export const ALLOWED_DIAGNOSTICS_PATH_PREFIXES: readonly string[] = [
