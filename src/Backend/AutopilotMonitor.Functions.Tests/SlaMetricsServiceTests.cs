@@ -92,8 +92,8 @@ public class SlaMetricsServiceTests
         var (service, tenantId) = CreateService(sessions);
         var result = await service.ComputeSlaMetricsAsync(tenantId, 1);
 
-        Assert.Equal(100, result.CurrentMonth.SuccessRate);
-        Assert.True(result.CurrentMonth.SuccessRateMet);
+        Assert.Equal(100, result.CurrentWeek.SuccessRate);
+        Assert.True(result.CurrentWeek.SuccessRateMet);
         Assert.Empty(result.Violators.Where(v => v.ViolationType == "Failed"));
     }
 
@@ -111,10 +111,10 @@ public class SlaMetricsServiceTests
         var (service, tenantId) = CreateService(sessions);
         var result = await service.ComputeSlaMetricsAsync(tenantId, 1);
 
-        Assert.Equal(75, result.CurrentMonth.SuccessRate);
-        Assert.False(result.CurrentMonth.SuccessRateMet);
-        Assert.Equal(3, result.CurrentMonth.Succeeded);
-        Assert.Equal(1, result.CurrentMonth.Failed);
+        Assert.Equal(75, result.CurrentWeek.SuccessRate);
+        Assert.False(result.CurrentWeek.SuccessRateMet);
+        Assert.Equal(3, result.CurrentWeek.Succeeded);
+        Assert.Equal(1, result.CurrentWeek.Failed);
     }
 
     [Fact]
@@ -123,8 +123,8 @@ public class SlaMetricsServiceTests
         var (service, tenantId) = CreateService(new List<SessionSummary>());
         var result = await service.ComputeSlaMetricsAsync(tenantId, 1);
 
-        Assert.Equal(0, result.CurrentMonth.SuccessRate);
-        Assert.Equal(0, result.CurrentMonth.TotalCompleted);
+        Assert.Equal(0, result.CurrentWeek.SuccessRate);
+        Assert.Equal(0, result.CurrentWeek.TotalCompleted);
         Assert.Empty(result.Violators);
     }
 
@@ -142,7 +142,7 @@ public class SlaMetricsServiceTests
         var (service, tenantId) = CreateService(sessions, config);
         var result = await service.ComputeSlaMetricsAsync(tenantId, 1);
 
-        Assert.Equal(2, result.CurrentMonth.DurationViolationCount);
+        Assert.Equal(2, result.CurrentWeek.DurationViolationCount);
         Assert.Equal(2, result.Violators.Count(v => v.ViolationType == "DurationExceeded"));
     }
 
@@ -174,8 +174,8 @@ public class SlaMetricsServiceTests
         var (service, tenantId) = CreateService(sessions, config);
         var result = await service.ComputeSlaMetricsAsync(tenantId, 1);
 
-        Assert.True(result.CurrentMonth.SuccessRateMet);
-        Assert.True(result.CurrentMonth.DurationTargetMet);
+        Assert.True(result.CurrentWeek.SuccessRateMet);
+        Assert.True(result.CurrentWeek.DurationTargetMet);
     }
 
     [Fact]

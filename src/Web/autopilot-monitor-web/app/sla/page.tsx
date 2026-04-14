@@ -11,10 +11,16 @@ import { SlaGauge } from "@/components/charts/SlaGauge";
 import AppLineChart from "@/components/charts/AppLineChart";
 import { chartColors } from "@/components/charts/chartTheme";
 import { trackEvent } from "@/lib/appInsights";
+import { useAdminMode } from "@/hooks/useAdminMode";
 import Link from "next/link";
 
+interface TenantInfo {
+  tenantId: string;
+  domainName: string;
+}
+
 interface SlaSnapshot {
-  month: string;
+  week: string;
   totalCompleted: number;
   succeeded: number;
   failed: number;
@@ -26,8 +32,8 @@ interface SlaSnapshot {
   durationTargetMet: boolean;
 }
 
-interface SlaMonthlyTrend {
-  month: string;
+interface SlaWeeklyTrend {
+  week: string;
   successRate: number;
   p95DurationMinutes: number;
   appInstallSuccessRate: number;
@@ -70,8 +76,8 @@ interface SlaMetricsResponse {
   targetSuccessRate: number | null;
   targetMaxDurationMinutes: number | null;
   targetAppInstallSuccessRate: number | null;
-  currentMonth: SlaSnapshot;
-  monthlyTrend: SlaMonthlyTrend[];
+  currentWeek: SlaSnapshot;
+  weeklyTrend: SlaWeeklyTrend[];
   violators: SlaViolatorSession[];
   appInstallSla: AppInstallSlaSnapshot | null;
   computedAt: string;
@@ -92,7 +98,7 @@ const statusLabels: Record<number, string> = {
 
 export default function SlaPage() {
   const { tenantId } = useTenant();
-  const { getAccessToken } = useAuth();
+  const { getAccessToken, user } = useAuth();
   const { addNotification } = useNotifications();
 
   const [metrics, setMetrics] = useState<SlaMetricsResponse | null>(null);
@@ -101,8 +107,49 @@ export default function SlaPage() {
   const [months, setMonths] = useState(3);
   const [initialLoad, setInitialLoad] = useState(true);
 
+  // Global admin mode
+  const { globalAdminMode } = useAdminMode();
+  const [tenants, setTenants] = useState<TenantInfo[]>([]);
+  const [selectedTenantId, setSelectedTenantId] = useState<string>('');
+
+  // Fetch tenant list for global admin
+  useEffect(() => {
+    if (!globalAdminMode || !user?.isGlobalAdmin) return;
+    const fetchTenants = async () => {
+      try {
+        const response = await authenticatedFetch(api.config.all(), getAccessToken);
+        if (response.ok) {
+          const data = await response.json();
+          const mapped: TenantInfo[] = data.map((t: { tenantId: string; domainName: string }) => ({
+            tenantId: t.tenantId,
+            domainName: t.domainName || '',
+          }));
+          mapped.sort((a, b) => {
+            const nameA = a.domainName || a.tenantId;
+            const nameB = b.domainName || b.tenantId;
+            return nameA.localeCompare(nameB);
+          });
+          setTenants(mapped);
+        }
+      } catch (err) {
+        console.error('Error fetching tenant list:', err);
+      }
+    };
+    fetchTenants();
+  }, [globalAdminMode, user?.isGlobalAdmin]);
+
+  // Default selected tenant to user's own tenant when available
+  useEffect(() => {
+    if (tenantId && !selectedTenantId) {
+      setSelectedTenantId(tenantId);
+    }
+  }, [tenantId]);
+
+  const isGlobalOverride = !!(globalAdminMode && user?.isGlobalAdmin && selectedTenantId && selectedTenantId !== tenantId);
+  const effectiveTenantId = (globalAdminMode && user?.isGlobalAdmin && selectedTenantId) ? selectedTenantId : tenantId;
+
   const fetchMetrics = useCallback(async (showRefreshing = false) => {
-    if (!tenantId) return;
+    if (!effectiveTenantId) return;
     try {
       if (showRefreshing) setRefreshing(true);
       else setLoading(true);
@@ -110,10 +157,11 @@ export default function SlaPage() {
       const useFresh = initialLoad;
       if (initialLoad) setInitialLoad(false);
 
-      const response = await authenticatedFetch(
-        api.metrics.sla(tenantId, months, useFresh),
-        getAccessToken
-      );
+      const url = isGlobalOverride
+        ? api.metrics.globalSla(effectiveTenantId, months, useFresh)
+        : api.metrics.sla(effectiveTenantId, months, useFresh);
+
+      const response = await authenticatedFetch(url, getAccessToken);
       if (!response.ok) {
         addNotification('error', 'Error', `Failed to load SLA metrics: ${response.statusText}`, 'sla-fetch-error');
         return;
@@ -134,7 +182,7 @@ export default function SlaPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [tenantId, months, getAccessToken, addNotification]);
+  }, [effectiveTenantId, isGlobalOverride, months, getAccessToken, addNotification]);
 
   useEffect(() => { fetchMetrics(); }, [fetchMetrics]);
 
@@ -142,6 +190,8 @@ export default function SlaPage() {
     if (tenantId) trackEvent('sla_page_viewed', { months });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tenantId]);
+
+  const selectedTenantName = tenants.find(t => t.tenantId === selectedTenantId)?.domainName;
 
   const hasTargets = metrics &&
     (metrics.targetSuccessRate != null || metrics.targetMaxDurationMinutes != null ||
@@ -161,6 +211,15 @@ export default function SlaPage() {
   return (
     <ProtectedRoute>
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+        {globalAdminMode && user?.isGlobalAdmin && (
+          <div className="bg-purple-700 text-white text-sm px-4 py-2 flex items-center justify-center space-x-2">
+            <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span className="font-medium">Global Admin View</span>
+            <span className="text-purple-300">&mdash; access to all tenants</span>
+          </div>
+        )}
         {/* Header */}
         <header className="bg-white dark:bg-gray-800 shadow">
           <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
@@ -168,6 +227,9 @@ export default function SlaPage() {
               <div>
                 <h1 className="text-2xl font-normal text-gray-900 dark:text-white">SLA Compliance</h1>
                 <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                  {isGlobalOverride && selectedTenantName
+                    ? `Tenant: ${selectedTenantName} · `
+                    : ''}
                   Monitor enrollment performance against your SLA targets
                   {metrics && (
                     <>
@@ -182,6 +244,24 @@ export default function SlaPage() {
                 </p>
               </div>
               <div className="flex items-center gap-3">
+                {globalAdminMode && user?.isGlobalAdmin && tenants.length > 0 && (
+                  <>
+                    <label className="text-sm text-gray-500 dark:text-gray-400 hidden sm:inline">Tenant:</label>
+                    <select
+                      value={selectedTenantId}
+                      onChange={(e) => setSelectedTenantId(e.target.value)}
+                      className="text-sm border border-gray-300 dark:border-gray-600 rounded-md px-2 py-1.5 max-w-[220px] sm:max-w-xs bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    >
+                      {tenants.map((t) => (
+                        <option key={t.tenantId} value={t.tenantId}>
+                          {t.domainName
+                            ? `${t.domainName} (${t.tenantId.substring(0, 8)}...)`
+                            : t.tenantId}
+                        </option>
+                      ))}
+                    </select>
+                  </>
+                )}
                 <select
                   value={months}
                   onChange={(e) => {
@@ -243,7 +323,7 @@ export default function SlaPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 mb-8">
                 {metrics.targetSuccessRate != null && (
                   <SlaGauge
-                    value={metrics.currentMonth.successRate}
+                    value={metrics.currentWeek.successRate}
                     target={metrics.targetSuccessRate}
                     label="Enrollment Success Rate"
                     unit="%"
@@ -251,7 +331,7 @@ export default function SlaPage() {
                 )}
                 {metrics.targetMaxDurationMinutes != null && (
                   <SlaGauge
-                    value={metrics.currentMonth.p95DurationMinutes}
+                    value={metrics.currentWeek.p95DurationMinutes}
                     target={metrics.targetMaxDurationMinutes}
                     label="P95 Enrollment Duration"
                     unit="min"
@@ -268,21 +348,22 @@ export default function SlaPage() {
                 )}
               </div>
 
-              {/* Current month stats */}
+              {/* Current week stats */}
+              <div className="mb-3 text-sm text-gray-500 dark:text-gray-400">This week ({metrics.currentWeek.week})</div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
-                <StatCard label="Total Sessions" value={metrics.currentMonth.totalCompleted} color="blue" />
-                <StatCard label="Succeeded" value={metrics.currentMonth.succeeded} color="green" />
-                <StatCard label="Failed" value={metrics.currentMonth.failed} color="red" />
-                <StatCard label="Duration Violations" value={metrics.currentMonth.durationViolationCount} color="yellow" />
+                <StatCard label="Total Sessions" value={metrics.currentWeek.totalCompleted} color="blue" />
+                <StatCard label="Succeeded" value={metrics.currentWeek.succeeded} color="green" />
+                <StatCard label="Failed" value={metrics.currentWeek.failed} color="red" />
+                <StatCard label="Duration Violations" value={metrics.currentWeek.durationViolationCount} color="yellow" />
               </div>
 
-              {/* Monthly trend */}
-              {metrics.monthlyTrend.length > 1 && (
+              {/* Weekly trend */}
+              {metrics.weeklyTrend.length > 1 && (
                 <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6 mb-8">
-                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Monthly Trend</h2>
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Weekly Trend</h2>
                   <AppLineChart
-                    data={[...metrics.monthlyTrend].reverse() as unknown as Array<Record<string, unknown>>}
-                    xKey="month"
+                    data={[...metrics.weeklyTrend].reverse() as unknown as Array<Record<string, unknown>>}
+                    xKey="week"
                     series={[
                       { dataKey: "successRate", label: "Success Rate (%)", color: chartColors.primary },
                       ...(metrics.targetAppInstallSuccessRate != null
@@ -431,9 +512,9 @@ export default function SlaPage() {
 function OverallStatusBanner({ metrics }: { metrics: SlaMetricsResponse }) {
   const checks: { label: string; met: boolean }[] = [];
   if (metrics.targetSuccessRate != null)
-    checks.push({ label: "Success Rate", met: metrics.currentMonth.successRateMet });
+    checks.push({ label: "Success Rate", met: metrics.currentWeek.successRateMet });
   if (metrics.targetMaxDurationMinutes != null)
-    checks.push({ label: "Duration", met: metrics.currentMonth.durationTargetMet });
+    checks.push({ label: "Duration", met: metrics.currentWeek.durationTargetMet });
   if (metrics.targetAppInstallSuccessRate != null && metrics.appInstallSla)
     checks.push({ label: "App Installs", met: metrics.appInstallSla.targetMet });
 

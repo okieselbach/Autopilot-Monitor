@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 using AutopilotMonitor.Shared.DataAccess;
@@ -108,14 +109,14 @@ namespace AutopilotMonitor.Functions.Services
                 TargetAppInstallSuccessRate = config?.SlaTargetAppInstallSuccessRate,
             };
 
-            // Current month snapshot
-            var currentMonthKey = now.ToString("yyyy-MM");
-            var currentMonthSessions = terminal.Where(s => s.StartedAt.ToString("yyyy-MM") == currentMonthKey).ToList();
-            response.CurrentMonth = BuildSnapshot(currentMonthSessions, currentMonthKey, config);
+            // Current week snapshot (ISO 8601 week)
+            var currentWeekKey = GetIsoWeekKey(now);
+            var currentWeekSessions = terminal.Where(s => GetIsoWeekKey(s.StartedAt) == currentWeekKey).ToList();
+            response.CurrentWeek = BuildSnapshot(currentWeekSessions, currentWeekKey, config);
 
-            // Monthly trend (newest first)
-            var monthGroups = terminal
-                .GroupBy(s => s.StartedAt.ToString("yyyy-MM"))
+            // Weekly trend (newest first)
+            var weekGroups = terminal
+                .GroupBy(s => GetIsoWeekKey(s.StartedAt))
                 .OrderByDescending(g => g.Key)
                 .ToList();
 
@@ -130,32 +131,32 @@ namespace AutopilotMonitor.Functions.Services
                     .ToList();
             }
 
-            foreach (var group in monthGroups)
+            foreach (var group in weekGroups)
             {
-                var monthSessions = group.ToList();
-                var snapshot = BuildSnapshot(monthSessions, group.Key, config);
+                var weekSessions = group.ToList();
+                var snapshot = BuildSnapshot(weekSessions, group.Key, config);
 
-                // App install rate for this month
+                // App install rate for this week
                 double appInstallRate = 0;
                 bool appInstallMet = true;
                 if (appInstalls != null)
                 {
-                    var monthApps = appInstalls
-                        .Where(a => a.StartedAt.ToString("yyyy-MM") == group.Key &&
+                    var weekApps = appInstalls
+                        .Where(a => GetIsoWeekKey(a.StartedAt) == group.Key &&
                                     (a.Status == "Succeeded" || a.Status == "Failed"))
                         .ToList();
-                    if (monthApps.Count >= 20)
+                    if (weekApps.Count >= 5)
                     {
-                        var appSucceeded = monthApps.Count(a => a.Status == "Succeeded");
-                        appInstallRate = Math.Round((appSucceeded / (double)monthApps.Count) * 100, 1);
+                        var appSucceeded = weekApps.Count(a => a.Status == "Succeeded");
+                        appInstallRate = Math.Round((appSucceeded / (double)weekApps.Count) * 100, 1);
                         appInstallMet = config?.SlaTargetAppInstallSuccessRate == null ||
                                         appInstallRate >= (double)config.SlaTargetAppInstallSuccessRate;
                     }
                 }
 
-                response.MonthlyTrend.Add(new SlaMonthlyTrend
+                response.WeeklyTrend.Add(new SlaWeeklyTrend
                 {
-                    Month = group.Key,
+                    Week = group.Key,
                     SuccessRate = snapshot.SuccessRate,
                     P95DurationMinutes = snapshot.P95DurationMinutes,
                     AppInstallSuccessRate = appInstallRate,
@@ -166,26 +167,26 @@ namespace AutopilotMonitor.Functions.Services
                 });
             }
 
-            // App install SLA snapshot (current month)
+            // App install SLA snapshot (current week)
             if (appInstalls != null)
             {
-                var currentMonthApps = appInstalls
-                    .Where(a => a.StartedAt.ToString("yyyy-MM") == currentMonthKey &&
+                var currentWeekApps = appInstalls
+                    .Where(a => GetIsoWeekKey(a.StartedAt) == currentWeekKey &&
                                 (a.Status == "Succeeded" || a.Status == "Failed"))
                     .ToList();
 
-                if (currentMonthApps.Count >= 20)
+                if (currentWeekApps.Count >= 5)
                 {
-                    var appSucceeded = currentMonthApps.Count(a => a.Status == "Succeeded");
-                    var appFailed = currentMonthApps.Count(a => a.Status == "Failed");
-                    var appRate = Math.Round((appSucceeded / (double)currentMonthApps.Count) * 100, 1);
+                    var appSucceeded = currentWeekApps.Count(a => a.Status == "Succeeded");
+                    var appFailed = currentWeekApps.Count(a => a.Status == "Failed");
+                    var appRate = Math.Round((appSucceeded / (double)currentWeekApps.Count) * 100, 1);
 
-                    var topFailing = currentMonthApps
+                    var topFailing = currentWeekApps
                         .Where(a => a.Status == "Failed")
                         .GroupBy(a => a.AppName)
                         .Select(g =>
                         {
-                            var totalForApp = currentMonthApps.Count(a => a.AppName == g.Key);
+                            var totalForApp = currentWeekApps.Count(a => a.AppName == g.Key);
                             return new TopFailingApp
                             {
                                 AppName = g.Key,
@@ -202,7 +203,7 @@ namespace AutopilotMonitor.Functions.Services
 
                     response.AppInstallSla = new AppInstallSlaSnapshot
                     {
-                        TotalInstalls = currentMonthApps.Count,
+                        TotalInstalls = currentWeekApps.Count,
                         Succeeded = appSucceeded,
                         Failed = appFailed,
                         SuccessRate = appRate,
@@ -256,8 +257,15 @@ namespace AutopilotMonitor.Functions.Services
             return response;
         }
 
+        private static string GetIsoWeekKey(DateTime dt)
+        {
+            var week = ISOWeek.GetWeekOfYear(dt);
+            var year = ISOWeek.GetYear(dt);
+            return $"{year:D4}-W{week:D2}";
+        }
+
         private static SlaSnapshot BuildSnapshot(
-            List<SessionSummary> sessions, string monthKey,
+            List<SessionSummary> sessions, string weekKey,
             Shared.Models.TenantConfiguration? config)
         {
             var total = sessions.Count;
@@ -283,7 +291,7 @@ namespace AutopilotMonitor.Functions.Services
 
             return new SlaSnapshot
             {
-                Month = monthKey,
+                Week = weekKey,
                 TotalCompleted = total,
                 Succeeded = succeeded,
                 Failed = failed,

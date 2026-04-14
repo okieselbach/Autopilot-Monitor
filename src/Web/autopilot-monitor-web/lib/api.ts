@@ -151,6 +151,8 @@ export const api = {
       `${API_BASE_URL}/api/global/metrics/rule-stats${qs({ startDate, endDate, ruleType, tenantId })}`,
     sla: (tenantId?: string, months?: number, fresh?: boolean) =>
       `${API_BASE_URL}/api/metrics/sla${qs({ tenantId, months: months?.toString(), fresh: fresh ? "1" : undefined })}`,
+    globalSla: (tenantId: string, months?: number, fresh?: boolean) =>
+      `${API_BASE_URL}/api/global/metrics/sla${qs({ tenantId, months: months?.toString(), fresh: fresh ? "1" : undefined })}`,
   },
 
   // ── Apps Dashboard ────────────────────────────────────────────────────────

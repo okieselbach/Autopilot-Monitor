@@ -1,5 +1,4 @@
 using System.Net;
-using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Services;
 using Microsoft.ApplicationInsights;
 using Microsoft.Azure.Functions.Worker;
@@ -9,17 +8,17 @@ using Microsoft.Extensions.Logging;
 namespace AutopilotMonitor.Functions.Functions.Metrics
 {
     /// <summary>
-    /// GET /api/metrics/sla?tenantId={tenantId}&amp;months=3
-    /// Returns SLA compliance metrics for a tenant.
+    /// GET /api/global/metrics/sla?tenantId={tenantId}&amp;months=3
+    /// Returns SLA compliance metrics for any tenant (Global Admin only).
     /// </summary>
-    public class SlaMetricsFunction
+    public class GetGlobalSlaMetricsFunction
     {
-        private readonly ILogger<SlaMetricsFunction> _logger;
+        private readonly ILogger<GetGlobalSlaMetricsFunction> _logger;
         private readonly SlaMetricsService _slaMetricsService;
         private readonly TelemetryClient _telemetryClient;
 
-        public SlaMetricsFunction(
-            ILogger<SlaMetricsFunction> logger,
+        public GetGlobalSlaMetricsFunction(
+            ILogger<GetGlobalSlaMetricsFunction> logger,
             SlaMetricsService slaMetricsService,
             TelemetryClient telemetryClient)
         {
@@ -28,20 +27,29 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
             _telemetryClient = telemetryClient;
         }
 
-        [Function("GetSlaMetrics")]
+        [Function("GetGlobalSlaMetrics")]
         public async Task<HttpResponseData> Run(
-            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "metrics/sla")]
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "global/metrics/sla")]
             HttpRequestData req)
         {
-            _logger.LogInformation("SLA metrics requested");
+            // Authentication + GlobalAdminOnly authorization enforced by PolicyEnforcementMiddleware
+            _logger.LogInformation("Global SLA metrics requested");
 
-            string tenantId = TenantHelper.GetTenantId(req);
+            string? tenantId = null;
             int months = 3;
             bool fresh = false;
 
             try
             {
                 var qs = System.Web.HttpUtility.ParseQueryString(req.Url.Query ?? "");
+                tenantId = qs.Get("tenantId");
+
+                if (string.IsNullOrWhiteSpace(tenantId))
+                {
+                    var bad = req.CreateResponse(HttpStatusCode.BadRequest);
+                    await bad.WriteAsJsonAsync(new { success = false, message = "tenantId query parameter is required" });
+                    return bad;
+                }
 
                 if (int.TryParse(qs.Get("months"), out var parsedMonths))
                     months = parsedMonths;
@@ -50,17 +58,13 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
 
                 var metrics = await _slaMetricsService.ComputeSlaMetricsAsync(tenantId, months, fresh);
 
-                _telemetryClient.TrackEvent("SlaMetricsRequested", new Dictionary<string, string>
+                _telemetryClient.TrackEvent("GlobalSlaMetricsRequested", new Dictionary<string, string>
                 {
                     ["TenantId"] = tenantId,
                     ["Months"] = months.ToString(),
                     ["Fresh"] = fresh.ToString(),
                     ["FromCache"] = metrics.FromCache.ToString(),
                     ["ComputeDurationMs"] = metrics.ComputeDurationMs.ToString(),
-                    ["SuccessRate"] = metrics.CurrentWeek.SuccessRate.ToString("F4"),
-                    ["P95DurationMinutes"] = metrics.CurrentWeek.P95DurationMinutes.ToString("F2"),
-                    ["ViolatorCount"] = metrics.Violators.Count.ToString(),
-                    ["TotalCompleted"] = metrics.CurrentWeek.TotalCompleted.ToString()
                 });
 
                 var response = req.CreateResponse(HttpStatusCode.OK);
@@ -69,16 +73,7 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error computing SLA metrics");
-
-                _telemetryClient.TrackEvent("SlaMetricsFailed", new Dictionary<string, string>
-                {
-                    ["TenantId"] = tenantId,
-                    ["Months"] = months.ToString(),
-                    ["Fresh"] = fresh.ToString(),
-                    ["Error"] = ex.GetType().Name,
-                    ["Message"] = ex.Message
-                });
+                _logger.LogError(ex, "Error computing global SLA metrics for tenant {TenantId}", tenantId);
 
                 var errorResponse = req.CreateResponse(HttpStatusCode.InternalServerError);
                 await errorResponse.WriteAsJsonAsync(new

@@ -13,11 +13,11 @@ namespace AutopilotMonitor.Shared.Models.Metrics
         public int? TargetMaxDurationMinutes { get; set; }
         public decimal? TargetAppInstallSuccessRate { get; set; }
 
-        /// <summary>Current month SLA snapshot.</summary>
-        public SlaSnapshot CurrentMonth { get; set; } = new();
+        /// <summary>Current ISO week SLA snapshot.</summary>
+        public SlaSnapshot CurrentWeek { get; set; } = new();
 
-        /// <summary>Monthly trend (newest first).</summary>
-        public List<SlaMonthlyTrend> MonthlyTrend { get; set; } = new();
+        /// <summary>Weekly trend (newest first).</summary>
+        public List<SlaWeeklyTrend> WeeklyTrend { get; set; } = new();
 
         /// <summary>Sessions that breached SLA targets (failed or exceeded duration).</summary>
         public List<SlaViolatorSession> Violators { get; set; } = new();
@@ -31,12 +31,12 @@ namespace AutopilotMonitor.Shared.Models.Metrics
     }
 
     /// <summary>
-    /// SLA compliance snapshot for a single month.
+    /// SLA compliance snapshot for a single period (ISO week).
     /// </summary>
     public class SlaSnapshot
     {
-        /// <summary>Month identifier, e.g. "2026-04".</summary>
-        public string Month { get; set; } = default!;
+        /// <summary>ISO week identifier, e.g. "2026-W15".</summary>
+        public string Week { get; set; } = default!;
 
         public int TotalCompleted { get; set; }
         public int Succeeded { get; set; }
@@ -56,12 +56,12 @@ namespace AutopilotMonitor.Shared.Models.Metrics
     }
 
     /// <summary>
-    /// SLA compliance trend entry for one month.
+    /// SLA compliance trend entry for one ISO week.
     /// </summary>
-    public class SlaMonthlyTrend
+    public class SlaWeeklyTrend
     {
-        /// <summary>Month identifier, e.g. "2026-04".</summary>
-        public string Month { get; set; } = default!;
+        /// <summary>ISO week identifier, e.g. "2026-W15".</summary>
+        public string Week { get; set; } = default!;
 
         public double SuccessRate { get; set; }
         public double P95DurationMinutes { get; set; }

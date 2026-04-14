@@ -230,6 +230,7 @@ public static class EndpointAccessPolicyCatalog
         new("GET",    "global/metrics/geographic",  EndpointPolicy.GlobalAdminOnly),
         new("GET",    "global/metrics/geographic/sessions", EndpointPolicy.GlobalAdminOnly),
         new("GET",    "global/metrics/usage",       EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "global/metrics/sla",         EndpointPolicy.GlobalAdminOnly),
         new("GET",    "global/metrics/rule-stats",  EndpointPolicy.GlobalAdminOnly),
         new("GET",    "global/metrics/mcp-usage",       EndpointPolicy.GlobalAdminOnly),
         new("GET",    "global/metrics/mcp-usage/daily", EndpointPolicy.GlobalAdminOnly),
