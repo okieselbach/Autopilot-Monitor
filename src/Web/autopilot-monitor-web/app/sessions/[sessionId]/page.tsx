@@ -1,8 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef, useMemo } from "react";
-import { useSessionAnalysis } from "./hooks/useSessionAnalysis";
-import { useAutoScroll } from "./hooks/useAutoScroll";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useSignalR } from "../../../contexts/SignalRContext";
 import { useTenant } from "../../../contexts/TenantContext";
@@ -17,8 +15,14 @@ import { useLatestVersions } from '@/lib/useLatestVersions';
 import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 
-import { V1_PHASE_NAMES, V2_PHASE_NAMES, V1_PHASE_ORDER, V2_PHASE_ORDER } from "./utils/phaseConstants";
-import { groupEventsByPhase } from "./utils/eventHelpers";
+import { useSessionAnalysis } from "./hooks/useSessionAnalysis";
+import { useAutoScroll } from "./hooks/useAutoScroll";
+import { useSessionDetail } from "./hooks/useSessionDetail";
+import { useSessionEvents } from "./hooks/useSessionEvents";
+import { useSessionSignalR } from "./hooks/useSessionSignalR";
+import { useSessionDerivedData } from "./hooks/useSessionDerivedData";
+import { useSessionTenantConfig } from "./hooks/useSessionTenantConfig";
+
 import SessionInfoCard from "./components/SessionInfoCard";
 import PhaseTimeline from "./components/PhaseTimeline";
 import EventTimeline from "./components/EventTimeline";
@@ -31,403 +35,135 @@ import { PageSectionItem } from "../../../contexts/SidebarContext";
 import { InformationCircleIcon, ComputerDesktopIcon, PlayCircleIcon, SparklesIcon, ChartBarIcon, CodeBracketIcon, ArrowDownTrayIcon, ListBulletIcon, ClockIcon, ShieldCheckIcon } from "../../../lib/sidebarIcons";
 import DeviceDetailsCard from "./components/DeviceDetailsCard";
 import { generateUiExport, generateCsvExport, generateSessionCsvExport, generateRuleResultsCsvExport, SessionExportEvent } from "@/utils/sessionExportUtils";
-import { Session, EnrollmentEvent, RuleResult } from "@/types";
 import { trackEvent } from "@/lib/appInsights";
 import { useAdminMode } from "@/hooks/useAdminMode";
-import { isGuid } from "@/utils/inputValidation";
 
 export default function SessionDetailPage() {
   const params = useParams();
   const router = useRouter();
   const sessionId = params?.sessionId as string;
 
-  const [events, setEvents] = useState<EnrollmentEvent[]>([]);
-  const [session, setSession] = useState<Session | null>(null);
-  const [sessionTenantId, setSessionTenantId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  // UI-only state (modals, expand/collapse, severity filters)
   const [severityFilters, setSeverityFilters] = useState<Set<string>>(new Set(["Info", "Warning", "Error", "Critical"]));
   const [showMarkFailedConfirm, setShowMarkFailedConfirm] = useState(false);
   const [showMarkSucceededConfirm, setShowMarkSucceededConfirm] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
   const [reportSubmitting, setReportSubmitting] = useState(false);
-  const [showScriptOutput, setShowScriptOutput] = useState(true);
-  const [enableSoftwareInventoryAnalyzer, setEnableSoftwareInventoryAnalyzer] = useState(false);
   const [analysisExpanded, setAnalysisExpanded] = useState(true);
   const [vulnerabilityReportExpanded, setVulnerabilityReportExpanded] = useState(false);
   const [phaseTimelineExpanded, setPhaseTimelineExpanded] = useState(true);
   const [perfExpanded, setPerfExpanded] = useState(true);
   const [timelineExpanded, setTimelineExpanded] = useState(true);
-  const { adminMode, setAdminMode, globalAdminMode, setGlobalAdminMode } = useAdminMode();
+  const [expandedPhases, setExpandedPhases] = useState<Set<string>>(new Set());
 
-  // Debounce real-time event refreshes to avoid burst reads in Table Storage.
-  const eventRefreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const sessionIdRef = useRef(sessionId);
-  const sessionRef = useRef<Session | null>(null);
-  const hasInitialFetch = useRef(false);
-  const lastFetchedSessionId = useRef<string | null>(null);
-  const tenantIdRef = useRef<string>("");
-  const sessionTenantIdRef = useRef<string | null>(sessionTenantId);
-  const globalAdminModeRef = useRef(globalAdminMode);
+  const { adminMode, globalAdminMode } = useAdminMode();
 
-  // Track if we've joined groups to prevent duplicate joins
-  const hasJoinedGroups = useRef(false);
-
-  // Deduplication: track in-flight fetchEvents to avoid concurrent calls
-  const fetchEventsInFlight = useRef(false);
-  const fetchEventsQueued = useRef(false);
-
-  // Use global contexts
+  // Global contexts
   const { on, off, isConnected, joinGroup, leaveGroup } = useSignalR();
   const { tenantId } = useTenant();
   const { getAccessToken, user } = useAuth();
   const { addNotification } = useNotifications();
   const { latestAgentVersion, latestBootstrapVersion } = useLatestVersions(getAccessToken);
 
+  // Session-scoped hooks (data/SignalR/derivations)
+  const detail = useSessionDetail({ sessionId, tenantId, globalAdminMode, user, getAccessToken, addNotification });
+  const analysis = useSessionAnalysis(sessionId, detail.sessionTenantId, getAccessToken);
+  const tenantConfig = useSessionTenantConfig(detail.sessionTenantId, getAccessToken);
+  const eventsApi = useSessionEvents({
+    sessionId,
+    sessionTenantId: detail.sessionTenantId,
+    resolveEffectiveTenantId: detail.resolveEffectiveTenantId,
+    sessionRef: detail.sessionRef,
+    sessionIdRef: detail.sessionIdRef,
+    fetchSessionDetails: detail.fetchSessionDetails,
+    setLoading: detail.setLoading,
+    isConnected,
+    getAccessToken,
+    addNotification,
+  });
+  useSessionSignalR({
+    sessionId,
+    sessionTenantId: detail.sessionTenantId,
+    tenantId,
+    sessionTenantIdFromSession: detail.session?.tenantId,
+    globalAdminMode,
+    sessionIdRef: detail.sessionIdRef,
+    resolveEffectiveTenantId: detail.resolveEffectiveTenantId,
+    signalR: { on, off, isConnected, joinGroup, leaveGroup },
+    scheduleFetchEvents: eventsApi.scheduleFetchEvents,
+    setSession: detail.setSession,
+    setSessionTenantId: detail.setSessionTenantId,
+    fetchAnalysisResults: analysis.fetchAnalysisResults,
+    fetchVulnerabilityReport: analysis.fetchVulnerabilityReport,
+  });
+  const derived = useSessionDerivedData(eventsApi.events, detail.session, severityFilters);
+  const { autoScroll, handleAutoScrollToggle } = useAutoScroll(eventsApi.events);
+
+  // Convenience local aliases (keeps the JSX below readable, matches previous names)
+  const { session, setSession, sessionTenantId, loading } = detail;
+  const events = eventsApi.events;
+  const { analysisResults, loadingAnalysis, vulnerabilityReport, fetchAnalysisResults, fetchVulnerabilityReport } = analysis;
+  const { showScriptOutput, enableSoftwareInventoryAnalyzer } = tenantConfig;
   const {
-    analysisResults,
-    loadingAnalysis,
-    vulnerabilityReport,
-    setVulnerabilityReport,
-    fetchAnalysisResults,
-    fetchVulnerabilityReport,
-  } = useSessionAnalysis(sessionId, sessionTenantId, getAccessToken);
+    filteredEvents,
+    appSummaryStats,
+    ntpOffset,
+    configMgrDetected,
+    isGatherRulesSession,
+    displayStatus,
+    enrollmentDurationFromEvents,
+    isSkipUserStatusPage,
+    isWhiteGloveSession,
+    whiteGloveSplitSequence,
+    userEnrollEvents,
+    whiteGloveDurations,
+    eventsByPhase,
+    orderedPhases,
+    preProvGrouped,
+    userEnrollGrouped,
+  } = derived;
 
-  const { autoScroll, handleAutoScrollToggle } = useAutoScroll(events);
-
+  // Auto-expand new phases as they appear (keeps existing expanded/collapsed state).
+  // For WhiteGlove sessions we use prefixed keys (pre-X, user-X) to avoid collisions.
   useEffect(() => {
-    sessionRef.current = session;
-  }, [session]);
+    setExpandedPhases(prev => {
+      const newExpanded = new Set(prev);
+      let hasChanges = false;
 
-  useEffect(() => {
-    tenantIdRef.current = tenantId;
-  }, [tenantId]);
+      const allPhases = isWhiteGloveSession
+        ? [
+            ...preProvGrouped.orderedPhases.map(p => `pre-${p}`),
+            ...userEnrollGrouped.orderedPhases.map(p => `user-${p}`),
+          ]
+        : orderedPhases;
 
-  useEffect(() => {
-    sessionTenantIdRef.current = sessionTenantId;
-  }, [sessionTenantId]);
-
-  useEffect(() => {
-    globalAdminModeRef.current = globalAdminMode;
-  }, [globalAdminMode]);
-
-  const resolveEffectiveTenantId = () => {
-    const knownSessionTenant = sessionTenantIdRef.current || sessionRef.current?.tenantId || null;
-    if (knownSessionTenant) return knownSessionTenant;
-    if (globalAdminModeRef.current) return null;
-    return tenantIdRef.current || null;
-  };
-
-  const scheduleFetchEvents = (delayMs = 300) => {
-    if (eventRefreshTimeoutRef.current) {
-      clearTimeout(eventRefreshTimeoutRef.current);
-    }
-    eventRefreshTimeoutRef.current = setTimeout(() => {
-      fetchEvents();
-    }, delayMs);
-  };
-
-  // Initial data fetch — wait for auth to be ready and a real tenantId before calling the backend.
-  // TenantContext initializes to '' and updates once AuthContext finishes loading.
-  // `user` is included so that a retry fires once MSAL settles (token becomes available).
-  useEffect(() => {
-    if (!sessionId) return;
-    if (!globalAdminMode && !tenantId) return; // wait for real tenant ID
-
-    // Update sessionIdRef
-    sessionIdRef.current = sessionId;
-
-    // Reset fetch flag only if navigating to a different session
-    if (lastFetchedSessionId.current !== sessionId) {
-      hasInitialFetch.current = false;
-      lastFetchedSessionId.current = sessionId;
-      setSessionTenantId(null); // Reset session tenant ID for new session
-    }
-
-    // Prevent duplicate fetches in React StrictMode (development double-mounting)
-    if (hasInitialFetch.current) return;
-    hasInitialFetch.current = true;
-
-    // Performance: eager-set sessionTenantId if we already know it from TenantContext.
-    // This lets the second useEffect kick off fetchEvents/analysis/vulns/config in parallel
-    // with fetchSessionDetails instead of waiting for its roundtrip — eliminates a waterfall.
-    // Global Admins in all-tenant view fall through with null and keep the old behavior.
-    const knownTenantId = resolveEffectiveTenantId();
-    if (knownTenantId && isGuid(knownTenantId)) {
-      setSessionTenantId(knownTenantId);
-    }
-
-    fetchSessionDetails();
-    // fetchEvents will be called after sessionTenantId is set
-  }, [sessionId, tenantId, globalAdminMode, user]);
-
-  // Fetch events, analysis, and vulnerability report when we have the session's tenant ID
-  useEffect(() => {
-    if (sessionTenantId && sessionId) {
-      fetchEvents();
-      fetchAnalysisResults();
-      fetchVulnerabilityReport();
-      // Fetch showScriptOutput setting (best-effort)
-      (async () => {
-        try {
-          const res = await authenticatedFetch(
-            api.config.tenant(sessionTenantId),
-            getAccessToken
-          );
-          if (res.ok) {
-            const cfg = await res.json();
-            setShowScriptOutput(cfg.showScriptOutput ?? true);
-            setEnableSoftwareInventoryAnalyzer(cfg.enableSoftwareInventoryAnalyzer ?? false);
-          }
-        } catch { /* non-fatal */ }
-      })();
-    }
-  }, [sessionTenantId, sessionId]);
-
-  // Join SignalR groups when connected (for multi-tenancy and cost optimization)
-  // Uses "subscribe-then-fetch" pattern: join groups first, then re-fetch events
-  // to catch anything that arrived before the group join completed.
-  useEffect(() => {
-    const effectiveTenantId = resolveEffectiveTenantId();
-    if (!sessionId || !isConnected || !effectiveTenantId) return;
-
-    if (!hasJoinedGroups.current) {
-      // Join both tenant group (for newEvents) and session group (for eventStream)
-      const tenantGroupName = `tenant-${effectiveTenantId}`;
-      const sessionGroupName = `session-${effectiveTenantId}-${sessionId}`;
-
-      const joinAndCatchUp = async () => {
-        await joinGroup(tenantGroupName);
-        await joinGroup(sessionGroupName);
-        hasJoinedGroups.current = true;
-
-        // Re-fetch events after group join to catch any SignalR messages
-        // that were sent before the client joined the session group.
-        // The frontend deduplicates by eventId, so no duplicates.
-        scheduleFetchEvents(0);
-      };
-      joinAndCatchUp();
-    }
-
-    return () => {
-      // Leave groups when component unmounts or sessionId changes
-      if (hasJoinedGroups.current && effectiveTenantId) {
-        const tenantGroupName = `tenant-${effectiveTenantId}`;
-        const sessionGroupName = `session-${effectiveTenantId}-${sessionId}`;
-
-        leaveGroup(tenantGroupName);
-        leaveGroup(sessionGroupName);
-        hasJoinedGroups.current = false;
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, isConnected, sessionTenantId, tenantId, session?.tenantId, globalAdminMode]);
-
-  // Setup SignalR listener - re-register when connection changes
-  useEffect(() => {
-    // Listen for event stream signal — backend sends a lightweight signal (no event payload).
-    // Frontend fetches fresh events from Table Storage on receipt: canonical truth, no gaps.
-    const handleEventStream = (data: { sessionId: string; tenantId: string; newEventCount: number; newRuleResults?: RuleResult[] }) => {
-      console.log('Event stream signal received via SignalR:', data);
-      if (data.sessionId !== sessionIdRef.current) return;
-
-      // Fetch full events from storage (single source of truth), but debounce bursts.
-      // Session updates arrive via the "newevents" message (tenant group) — no session
-      // object in this signal to keep payloads minimal.
-      scheduleFetchEvents();
-
-      if (data.tenantId) {
-        setSessionTenantId(prev => prev || data.tenantId);
-      }
-
-      // Rule results from SignalR (only on enrollment completion)
-      if (data.newRuleResults && data.newRuleResults.length > 0) {
-        fetchAnalysisResults();
-      }
-    };
-
-    // Listen for session delta updates via the tenant group ("newevents").
-    // This replaces the full session object that was previously sent inside "eventStream".
-    const handleNewEvents = (data: { sessionId: string; tenantId: string; sessionUpdate?: Partial<Session> }) => {
-      if (data.sessionId !== sessionIdRef.current) return;
-
-      if (data.sessionUpdate) {
-        setSession(prev => prev ? { ...prev, ...data.sessionUpdate } : prev);
-      }
-      if (data.tenantId) {
-        setSessionTenantId(prev => prev || data.tenantId);
-      }
-    };
-
-    // Listen for async rule engine results (pushed after background analysis completes)
-    const handleRuleResultsReady = (data: { sessionId: string; tenantId: string; ruleResultCount: number }) => {
-      if (data.sessionId !== sessionIdRef.current) return;
-      console.info(`[SessionDetail] ruleResultsReady signal: ${data.ruleResultCount} results`);
-      fetchAnalysisResults();
-    };
-
-    // Listen for async vulnerability correlation results
-    const handleVulnerabilityReportReady = (data: { sessionId: string; tenantId: string; overallRisk: string }) => {
-      if (data.sessionId !== sessionIdRef.current) return;
-      console.info(`[SessionDetail] vulnerabilityReportReady signal: risk=${data.overallRisk}`);
-      fetchVulnerabilityReport();
-    };
-
-    on('eventStream', handleEventStream);
-    on('newevents', handleNewEvents);
-    on('ruleResultsReady', handleRuleResultsReady);
-    on('vulnerabilityReportReady', handleVulnerabilityReportReady);
-
-    return () => {
-      off('eventStream', handleEventStream);
-      off('newevents', handleNewEvents);
-      off('ruleResultsReady', handleRuleResultsReady);
-      off('vulnerabilityReportReady', handleVulnerabilityReportReady);
-      if (eventRefreshTimeoutRef.current) {
-        clearTimeout(eventRefreshTimeoutRef.current);
-      }
-    };
-  }, [on, off]); // Re-register when SignalR connection changes
-
-  // Fallback polling only while SignalR is disconnected.
-  useEffect(() => {
-    const effectiveTenantId = resolveEffectiveTenantId();
-    if (!sessionId || !effectiveTenantId || isConnected) return;
-    const interval = setInterval(() => {
-      if (document.visibilityState === "visible") fetchEvents();
-    }, 30_000);
-    return () => clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, sessionTenantId, tenantId, session?.tenantId, globalAdminMode, isConnected]);
-
-  const fetchSessionDetails = async () => {
-    try {
-      const knownTenantId = resolveEffectiveTenantId();
-      // Always use the direct session endpoint — the backend resolves the tenant
-      // via FindSessionTenantIdAsync for global admins when tenantId is unknown.
-      const endpoint = knownTenantId
-        ? api.sessions.get(sessionId, knownTenantId)
-        : api.sessions.get(sessionId);
-
-      const response = await authenticatedFetch(endpoint, getAccessToken);
-      if (response.ok) {
-        const data = await response.json();
-        const foundSession = data.session ?? data.sessions?.find((s: Session) => s.sessionId === sessionId);
-        if (foundSession) {
-          setSession(foundSession);
-          // Store the session's tenant ID for subsequent requests
-          setSessionTenantId(foundSession.tenantId);
+      for (const phase of allPhases) {
+        if (!prev.has(phase)) {
+          newExpanded.add(phase);
+          hasChanges = true;
         }
-      } else {
-        addNotification('error', 'Backend Error', `Failed to load session details: ${response.statusText}`, 'session-detail-fetch-error');
       }
-    } catch (error) {
-      if (error instanceof TokenExpiredError) {
-        addNotification('error', 'Session Expired', error.message, 'session-expired-error');
-        return;
-      }
-      console.error("Failed to fetch session details:", error);
-      addNotification('error', 'Backend Not Reachable', 'Unable to load session details. Please check your connection.', 'session-detail-fetch-error');
-      // Allow retry on network errors
-      hasInitialFetch.current = false;
-    }
-  };
 
-  const fetchEvents = async () => {
-    // Deduplication: if a fetch is already in flight, queue one follow-up instead of
-    // stacking concurrent requests (SignalR signal + 30s timer + group-join can overlap).
-    if (fetchEventsInFlight.current) {
-      fetchEventsQueued.current = true;
-      return;
-    }
-    const effectiveTenantId = resolveEffectiveTenantId();
-    if (!effectiveTenantId || !isGuid(effectiveTenantId)) {
-      return;
-    }
-    fetchEventsInFlight.current = true;
-    fetchEventsQueued.current = false;
+      return hasChanges ? newExpanded : prev;
+    });
+  }, [orderedPhases, preProvGrouped.orderedPhases, userEnrollGrouped.orderedPhases, isWhiteGloveSession]);
 
-    try {
-      const response = await authenticatedFetch(
-        api.sessions.events(sessionId, effectiveTenantId),
-        getAccessToken
-      );
-      if (response.ok) {
-        const data = await response.json();
-        // Replace entire event list with fresh data from Table Storage (canonical truth).
-        // No merge needed — fetchEvents() is the single source; SignalR only signals.
-        // phaseName is computed at render time in eventsByPhase useMemo (no race condition).
-        const fetchedEvents = Array.isArray(data.events) ? data.events : [];
-        setEvents(prevEvents => {
-          // Keep the last known-good snapshot if backend transiently returns an empty list.
-          if (fetchedEvents.length === 0 && prevEvents.length > 0) {
-            console.warn(
-              `[SessionDetail] Ignoring empty event refresh for session ${sessionIdRef.current} (tenant ${effectiveTenantId}); keeping ${prevEvents.length} cached events`
-            );
-            return prevEvents;
-          }
-          return fetchedEvents;
-        });
-
-        // Surgical status-stale detection: if events contain a terminal event but session
-        // status is still InProgress, the SignalR status delta was likely lost. Refetch
-        // session details from the DB (single read, only when truly needed).
-        const currentStatus = sessionRef.current?.status;
-        if (currentStatus && currentStatus !== "Succeeded" && currentStatus !== "Failed") {
-          const hasTerminalEvent = fetchedEvents.some(
-            (e: EnrollmentEvent) => e.eventType === "enrollment_complete" || e.eventType === "enrollment_failed"
-          );
-          if (hasTerminalEvent) {
-            console.info(
-              `[SessionDetail] Terminal event detected but session status is '${currentStatus}' — refetching session details`
-            );
-            fetchSessionDetails();
-          }
-        }
-      } else {
-        addNotification('error', 'Backend Error', `Failed to load session events: ${response.statusText}`, 'session-events-fetch-error');
-      }
-    } catch (error) {
-      if (error instanceof TokenExpiredError) {
-        addNotification('error', 'Session Expired', error.message, 'session-expired-error');
-      } else {
-        console.error("Failed to fetch events:", error);
-        addNotification('error', 'Backend Not Reachable', 'Unable to load session events. Please check your connection.', 'session-events-fetch-error');
-      }
-    } finally {
-      setLoading(false);
-      fetchEventsInFlight.current = false;
-
-      // If another fetch was requested while we were in flight, run it now
-      if (fetchEventsQueued.current) {
-        fetchEventsQueued.current = false;
-        fetchEvents();
-      }
-    }
-  };
-
-  const markAsFailed = () => {
-    setShowMarkFailedConfirm(true);
-  };
-
-  const markAsSucceeded = () => {
-    setShowMarkSucceededConfirm(true);
-  };
+  const markAsFailed = () => setShowMarkFailedConfirm(true);
+  const markAsSucceeded = () => setShowMarkSucceededConfirm(true);
+  const cancelMarkFailed = () => setShowMarkFailedConfirm(false);
+  const cancelMarkSucceeded = () => setShowMarkSucceededConfirm(false);
 
   const confirmMarkFailed = async () => {
     const effectiveTenantId = sessionTenantId || tenantId;
-
     try {
       const response = await authenticatedFetch(
         api.sessions.markFailed(sessionId, effectiveTenantId),
         getAccessToken,
         { method: 'POST' }
       );
-
       if (response.ok) {
         setShowMarkFailedConfirm(false);
-        if (session) {
-          setSession({ ...session, status: 'Failed' });
-        }
+        if (session) setSession({ ...session, status: 'Failed' });
       } else {
         console.error('Failed to mark session as failed');
       }
@@ -438,33 +174,21 @@ export default function SessionDetailPage() {
 
   const confirmMarkSucceeded = async () => {
     const effectiveTenantId = sessionTenantId || tenantId;
-
     try {
       const response = await authenticatedFetch(
         api.sessions.markSucceeded(sessionId, effectiveTenantId),
         getAccessToken,
         { method: 'POST' }
       );
-
       if (response.ok) {
         setShowMarkSucceededConfirm(false);
-        if (session) {
-          setSession({ ...session, status: 'Succeeded' });
-        }
+        if (session) setSession({ ...session, status: 'Succeeded' });
       } else {
         console.error('Failed to mark session as succeeded');
       }
     } catch (error) {
       console.error('Error marking session as succeeded:', error);
     }
-  };
-
-  const cancelMarkFailed = () => {
-    setShowMarkFailedConfirm(false);
-  };
-
-  const cancelMarkSucceeded = () => {
-    setShowMarkSucceededConfirm(false);
   };
 
   const handleSubmitReport = async (
@@ -534,232 +258,11 @@ export default function SessionDetailPage() {
   const toggleSeverityFilter = (severity: string) => {
     setSeverityFilters(prev => {
       const next = new Set(prev);
-      if (next.has(severity)) {
-        next.delete(severity);
-      } else {
-        next.add(severity);
-      }
+      if (next.has(severity)) next.delete(severity);
+      else next.add(severity);
       return next;
     });
   };
-
-  // Filter events by severity for the timeline.
-  // Trace events are always excluded — they are for backend-side auditing only.
-  const filteredEvents = useMemo(() =>
-    events.filter(e => e.severity !== "Trace" && severityFilters.has(e.severity)),
-    [events, severityFilters]
-  );
-
-  // Extract latest app_tracking_summary state-breakdown for progress headers
-  const appSummaryStats = useMemo(() => {
-    const summaryEvents = events.filter(e => e.eventType === "app_tracking_summary");
-    if (summaryEvents.length === 0) return null;
-    const latest = summaryEvents[summaryEvents.length - 1];
-    const d = latest.data;
-    if (!d) return null;
-    return {
-      totalApps: parseInt(d.totalApps ?? "0", 10),
-      completedApps: parseInt(d.completedApps ?? "0", 10),
-      downloading: parseInt(d.downloading ?? "0", 10),
-      installing: parseInt(d.installing ?? "0", 10),
-      installed: parseInt(d.installed ?? "0", 10),
-      skipped: parseInt(d.skipped ?? "0", 10),
-      failed: parseInt(d.failed ?? "0", 10),
-      pending: parseInt(d.pending ?? "0", 10),
-    };
-  }, [events]);
-
-  // Extract NTP offset from the first ntp_time_check event (if present)
-  const ntpOffset = useMemo(() => {
-    const ntpEvent = events.find(e => e.eventType === "ntp_time_check");
-    if (!ntpEvent?.data?.offsetSeconds) return null;
-    return {
-      offsetSeconds: ntpEvent.data.offsetSeconds as number,
-      ntpServer: ntpEvent.data.ntpServer as string | undefined,
-    };
-  }, [events]);
-
-  // Extract ConfigMgr co-management detection (if present)
-  // Only show badge when confidence >= 50 (directory-only is too weak).
-  // Default to 100 for backward compat with old agent events that lack confidenceScore.
-  const configMgrDetected = useMemo(() => {
-    const evt = events.find(e => e.eventType === "configmgr_client_detected");
-    if (!evt?.data) return null;
-    const confidence = (evt.data.confidenceScore as number) ?? 100;
-    if (confidence < 50) return null;
-    return {
-      ccmVersion: evt.data.ccmVersion as string | undefined,
-      ccmServiceState: evt.data.ccmServiceState as string | undefined,
-      siteCode: evt.data.siteCode as string | undefined,
-      confidenceScore: confidence,
-    };
-  }, [events]);
-
-  const isGatherRulesSession = session?.enrollmentType === "gather_rules";
-  // For gather_rules sessions: if the completed event is present, derive status as Succeeded
-  // (the backend never sets this status automatically for one-shot gather runs).
-  const gatherRulesSucceeded = isGatherRulesSession &&
-    events.some(e => e.eventType === "gather_rules_collection_completed");
-  const displayStatus = gatherRulesSucceeded ? "Succeeded" : (session?.status ?? "");
-
-  // Calculate enrollment duration from events (first event → enrollment_complete or last event)
-  // More accurate than session.durationSeconds which is based on registration StartedAt
-  const enrollmentDurationFromEvents = useMemo(() => {
-    if (events.length === 0) return null;
-    const timestamps = events.map(e => new Date(e.timestamp).getTime());
-    const firstEventTime = Math.min(...timestamps);
-    const completeEvent = events.find(e => e.eventType === "enrollment_complete");
-    const endTime = completeEvent
-      ? new Date(completeEvent.timestamp).getTime()
-      : Math.max(...timestamps);
-    const durationSec = Math.round((endTime - firstEventTime) / 1000);
-    if (durationSec < 60) return `${durationSec}s`;
-    if (durationSec < 3600) return `${Math.floor(durationSec / 60)}m ${durationSec % 60}s`;
-    return `${Math.floor(durationSec / 3600)}h ${Math.floor((durationSec % 3600) / 60)}m`;
-  }, [events]);
-
-  const phaseNamesMap = session?.enrollmentType === "v2" ? V2_PHASE_NAMES : V1_PHASE_NAMES;
-  const phaseOrder = session?.enrollmentType === "v2" ? V2_PHASE_ORDER : V1_PHASE_ORDER;
-
-  // Detect SkipUserStatusPage from esp_config_detected event
-  const isSkipUserStatusPage = useMemo(() => {
-    if (session?.enrollmentType === "v2") return false;
-    const espConfigEvent = events.find(e => e.eventType === "esp_config_detected");
-    if (!espConfigEvent?.data) return false;
-    const val = espConfigEvent.data.skipUserStatusPage;
-    return val === true || val === "True" || val === "true";
-  }, [events, session?.enrollmentType]);
-
-  // Detect WhiteGlove session and find the split point
-  const isWhiteGloveSession = session?.isPreProvisioned === true ||
-    events.some(e => e.eventType === "whiteglove_complete");
-
-  const whiteGloveSplitSequence = useMemo(() => {
-    if (!isWhiteGloveSession) return -1;
-    const wgEvent = events.find(e => e.eventType === "whiteglove_complete");
-    const resumedEvent = events.find(e => e.eventType === "whiteglove_resumed");
-
-    // whiteglove_resumed is the definitive Part 2 marker (emitted at Part 2 agent startup).
-    // This handles both normal ordering and the race condition where Windows writes the
-    // whiteglove_complete event (Event 62407) after the Part 2 reboot.
-    if (resumedEvent) {
-      return resumedEvent.sequence - 1;
-    }
-
-    // Fallback for old agents without whiteglove_resumed:
-    // first agent_started AFTER whiteglove_complete = Part 2 start.
-    // NOTE: We do NOT use the "last agent_started before whiteglove_complete" heuristic
-    // because reboots within Part 1 would be misidentified as Part 2.
-    if (wgEvent) {
-      const nextStart = events.find(e =>
-        e.eventType === "agent_started" && e.sequence > wgEvent.sequence
-      );
-      if (nextStart) return nextStart.sequence - 1;
-
-      // Pre-provisioning only (no Part 2 yet). Include cleanup events
-      // (local_admin_analysis, agent_shutdown) that follow whiteglove_complete.
-      const shutdownAfterWg = events.find(e =>
-        e.eventType === "agent_shutdown" && e.sequence > wgEvent.sequence
-      );
-      return shutdownAfterWg?.sequence ?? wgEvent.sequence;
-    }
-    return -1;
-  }, [events, isWhiteGloveSession]);
-
-  // For WhiteGlove sessions: split filtered events into pre-provisioning and user-enrollment parts.
-  // Events are assigned purely by sequence number — no special-casing for whiteglove_complete.
-  // In the race-condition case (Windows writes the WhiteGlove success event after the reboot),
-  // whiteglove_complete naturally lands in the user-enrollment part, preserving chronological order.
-  const preProvEvents = useMemo(() => {
-    if (!isWhiteGloveSession || whiteGloveSplitSequence < 0) return [] as EnrollmentEvent[];
-    return filteredEvents.filter(e => e.sequence <= whiteGloveSplitSequence);
-  }, [filteredEvents, isWhiteGloveSession, whiteGloveSplitSequence]);
-
-  const userEnrollEvents = useMemo(() => {
-    if (!isWhiteGloveSession || whiteGloveSplitSequence < 0) return [] as EnrollmentEvent[];
-    return filteredEvents.filter(e => e.sequence > whiteGloveSplitSequence);
-  }, [filteredEvents, isWhiteGloveSession, whiteGloveSplitSequence]);
-
-  // Compute per-block durations for WhiteGlove sessions (using unfiltered events for accuracy).
-  // Duration 1 = pre-provisioning, Duration 2 = user enrollment, combined = D1 + D2 (pause excluded).
-  const whiteGloveDurations = useMemo(() => {
-    if (!isWhiteGloveSession || whiteGloveSplitSequence < 0) {
-      return { preProvDuration: null as string | null, userEnrollDuration: null as string | null, combinedDuration: null as string | null };
-    }
-
-    const preProvEvts = events.filter(e => e.sequence <= whiteGloveSplitSequence);
-    const userEnrollEvts = events.filter(e => e.sequence > whiteGloveSplitSequence);
-
-    const calcMs = (evts: EnrollmentEvent[]): number => {
-      if (evts.length === 0) return 0;
-      const ts = evts.map(e => new Date(e.timestamp).getTime());
-      return Math.max(...ts) - Math.min(...ts);
-    };
-
-    const fmt = (ms: number): string | null => {
-      const sec = Math.round(ms / 1000);
-      if (sec < 1) return null;
-      if (sec < 60) return `${sec}s`;
-      if (sec < 3600) return `${Math.floor(sec / 60)}m ${sec % 60}s`;
-      return `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}m`;
-    };
-
-    const preProvMs = calcMs(preProvEvts);
-    const userEnrollMs = calcMs(userEnrollEvts);
-
-    return {
-      preProvDuration: fmt(preProvMs),
-      userEnrollDuration: fmt(userEnrollMs),
-      combinedDuration: fmt(preProvMs + userEnrollMs),
-    };
-  }, [events, isWhiteGloveSession, whiteGloveSplitSequence]);
-
-  // Group events by phase — single timeline for normal sessions, two groups for WhiteGlove
-  const { eventsByPhase, orderedPhases } = useMemo(() => {
-    if (isWhiteGloveSession) return { eventsByPhase: {} as Record<string, EnrollmentEvent[]>, orderedPhases: [] as string[] };
-    return groupEventsByPhase(filteredEvents, phaseNamesMap, phaseOrder, { preventPhaseRegression: true });
-  }, [filteredEvents, isWhiteGloveSession, phaseNamesMap, phaseOrder]);
-
-  const preProvGrouped = useMemo(() =>
-    isWhiteGloveSession && preProvEvents.length > 0
-      ? groupEventsByPhase(preProvEvents, phaseNamesMap, phaseOrder, { preventPhaseRegression: true })
-      : { eventsByPhase: {} as Record<string, EnrollmentEvent[]>, orderedPhases: [] as string[] },
-    [preProvEvents, isWhiteGloveSession, phaseNamesMap, phaseOrder]
-  );
-
-  const userEnrollGrouped = useMemo(() =>
-    isWhiteGloveSession && userEnrollEvents.length > 0
-      ? groupEventsByPhase(userEnrollEvents, phaseNamesMap, phaseOrder, { preventPhaseRegression: true })
-      : { eventsByPhase: {} as Record<string, EnrollmentEvent[]>, orderedPhases: [] as string[] },
-    [userEnrollEvents, isWhiteGloveSession, phaseNamesMap, phaseOrder]
-  );
-
-  const [expandedPhases, setExpandedPhases] = useState<Set<string>>(new Set());
-
-  // Auto-expand new phases as they appear (keeps existing expanded/collapsed state).
-  // For WhiteGlove sessions we use prefixed keys (pre-X, user-X) to avoid collisions.
-  useEffect(() => {
-    setExpandedPhases(prev => {
-      const newExpanded = new Set(prev);
-      let hasChanges = false;
-
-      const allPhases = isWhiteGloveSession
-        ? [
-            ...preProvGrouped.orderedPhases.map(p => `pre-${p}`),
-            ...userEnrollGrouped.orderedPhases.map(p => `user-${p}`),
-          ]
-        : orderedPhases;
-
-      for (const phase of allPhases) {
-        if (!prev.has(phase)) {
-          newExpanded.add(phase);
-          hasChanges = true;
-        }
-      }
-
-      return hasChanges ? newExpanded : prev;
-    });
-  }, [orderedPhases, preProvGrouped.orderedPhases, userEnrollGrouped.orderedPhases, isWhiteGloveSession]);
 
   const expandAll = () => {
     if (isWhiteGloveSession) {
@@ -772,19 +275,14 @@ export default function SessionDetailPage() {
     }
   };
 
-  const collapseAll = () => {
-    setExpandedPhases(new Set());
-  };
+  const collapseAll = () => setExpandedPhases(new Set());
 
   const scrollToPhase = (phaseName: string) => {
     const id = `phase-${phaseName.replace(/[^a-zA-Z0-9]/g, '-')}`;
-    // Try both WhiteGlove prefixed and plain ids
     const el = document.getElementById(id);
     if (el) {
-      // Expand the phase section if collapsed
       setExpandedPhases(prev => {
         const newExpanded = new Set(prev);
-        // For WhiteGlove sessions, the expandedPhases key may be prefixed
         if (isWhiteGloveSession) {
           newExpanded.add(`pre-${phaseName}`);
           newExpanded.add(`user-${phaseName}`);
@@ -793,7 +291,6 @@ export default function SessionDetailPage() {
         }
         return newExpanded;
       });
-      // Scroll after a tick so the section is expanded
       setTimeout(() => {
         el.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }, 50);
@@ -815,18 +312,14 @@ export default function SessionDetailPage() {
         setTimeout(() => el.classList.remove("ring-2", "ring-amber-400", "ring-offset-1"), 3000);
       }
     }, 100);
-    // Clear hash so it doesn't re-trigger
     window.history.replaceState(null, "", window.location.pathname + window.location.search);
   }, [loading, events.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const togglePhase = (phaseName: string) => {
     setExpandedPhases(prev => {
       const newExpanded = new Set(prev);
-      if (newExpanded.has(phaseName)) {
-        newExpanded.delete(phaseName);
-      } else {
-        newExpanded.add(phaseName);
-      }
+      if (newExpanded.has(phaseName)) newExpanded.delete(phaseName);
+      else newExpanded.add(phaseName);
       return newExpanded;
     });
   };
@@ -1129,4 +622,3 @@ export default function SessionDetailPage() {
   </ProtectedRoute>
   );
 }
-
