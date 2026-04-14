@@ -238,15 +238,13 @@ namespace AutopilotMonitor.Functions.Services
                     ["UpdatedAt"] = DateTime.UtcNow
                 };
 
-                // Nullable override — store as boolean column when set, write an empty string when
-                // cleared so existing rows reset cleanly. Omitting the column would leave a stale value
-                // on the row after a merge.
+                // Nullable override: write the bool when set; leave the property absent when cleared.
+                // Use Replace mode so a cleared override actually wipes the column — Merge mode skips
+                // null values, leaving a stale `true` on the row (reset would silently fail).
                 if (state.MarkSessionAsFailed.HasValue)
                     entity["MarkSessionAsFailed"] = state.MarkSessionAsFailed.Value;
-                else
-                    entity["MarkSessionAsFailed"] = null;
 
-                await tableClient.UpsertEntityAsync(entity);
+                await tableClient.UpsertEntityAsync(entity, TableUpdateMode.Replace);
                 _logger.LogDebug($"Stored rule state {ruleId} for {tenantId}: enabled={state.Enabled}, markAsFailed={state.MarkSessionAsFailed?.ToString() ?? "inherit"}");
                 return true;
             }
