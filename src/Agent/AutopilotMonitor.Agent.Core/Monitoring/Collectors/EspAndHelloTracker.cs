@@ -45,6 +45,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         private RegistryWatcher _provisioningWatcher;
         private System.Threading.Timer _provisioningWatcherRetryTimer;
         private System.Threading.Timer _provisioningDebounceTimer;
+        private ModernDeploymentTracker _modernDeploymentTracker;
 
         private bool _isPolicyConfigured = false;
         private bool _isHelloPolicyEnabled = false; // true when Hello policy is explicitly detected as enabled
@@ -52,7 +53,6 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
         private bool _espExitDetected = false;
         private bool _helloWizardStarted = false;
         private bool _whiteGloveDetected = false;
-        private bool _whiteGloveStartDetected = false;
         private string _detectedEspFailureType; // set during Shell-Core event processing, consumed after event emission
         private readonly object _stateLock = new object();
 
@@ -237,13 +237,16 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
             // start detection) that bypass the general Level≤3 filter via combined XPath.
             if (_modernDeploymentWatcherEnabled)
             {
-                StartModernDeploymentEventLogWatchers();
-
-                // Backfill targeted events (e.g. Event 509 / WhiteGlove start) that may have been
-                // written before the agent started. Uses EventLogReader to scan the event log for
-                // recent occurrences. Must run AFTER watcher subscription so no gap exists between
-                // backfill scan and live capture. Fire-once guards prevent duplicate emissions.
-                BackfillTargetedModernDeploymentEvents();
+                _modernDeploymentTracker = new ModernDeploymentTracker(
+                    _sessionId,
+                    _tenantId,
+                    _onEventCollected,
+                    _logger,
+                    _modernDeploymentLogLevelMax,
+                    _modernDeploymentBackfillEnabled,
+                    _modernDeploymentBackfillLookbackMinutes,
+                    _stateDirectory);
+                _modernDeploymentTracker.Start();
             }
 
             // Safety net: backfill recent terminal events in case watcher started late or event delivery lagged.
@@ -352,8 +355,19 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                 }
             }
 
-            // Stop ModernDeployment-Diagnostics-Provider watchers
-            StopModernDeploymentEventLogWatchers();
+            // Stop ModernDeployment-Diagnostics-Provider tracker (composed)
+            if (_modernDeploymentTracker != null)
+            {
+                try
+                {
+                    _modernDeploymentTracker.Stop();
+                    _modernDeploymentTracker = null;
+                }
+                catch (Exception ex)
+                {
+                    _logger.Error("Error stopping ModernDeployment tracker", ex);
+                }
+            }
         }
 
         public void Dispose()
