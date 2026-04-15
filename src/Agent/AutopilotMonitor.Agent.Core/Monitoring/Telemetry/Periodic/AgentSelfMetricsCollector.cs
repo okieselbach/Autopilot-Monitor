@@ -3,9 +3,14 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
 using AutopilotMonitor.Agent.Core.Logging;
-using AutopilotMonitor.Agent.Core.Monitoring.Core;
 using AutopilotMonitor.Agent.Core.Monitoring.Transport;
 using AutopilotMonitor.Shared.Models;
+using AutopilotMonitor.Agent.Core.Monitoring.Enrollment;
+using AutopilotMonitor.Agent.Core.Monitoring.Enrollment.Flows;
+using AutopilotMonitor.Agent.Core.Monitoring.Enrollment.Ime;
+using AutopilotMonitor.Agent.Core.Monitoring.Enrollment.SystemSignals;
+using AutopilotMonitor.Agent.Core.Monitoring.Enrollment.Completion;
+using AutopilotMonitor.Agent.Core.Monitoring.Collectors;
 
 namespace AutopilotMonitor.Agent.Core.Monitoring.Telemetry.Periodic
 {

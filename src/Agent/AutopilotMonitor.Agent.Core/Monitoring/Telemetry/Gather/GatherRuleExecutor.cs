@@ -4,8 +4,13 @@ using System.Linq;
 using System.Threading;
 using AutopilotMonitor.Agent.Core.Logging;
 using AutopilotMonitor.Agent.Core.Monitoring.Telemetry.Gather.Collectors;
-using AutopilotMonitor.Agent.Core.Monitoring.Tracking;
 using AutopilotMonitor.Shared.Models;
+using AutopilotMonitor.Agent.Core.Monitoring.Enrollment;
+using AutopilotMonitor.Agent.Core.Monitoring.Enrollment.Flows;
+using AutopilotMonitor.Agent.Core.Monitoring.Enrollment.Ime;
+using AutopilotMonitor.Agent.Core.Monitoring.Enrollment.SystemSignals;
+using AutopilotMonitor.Agent.Core.Monitoring.Enrollment.Completion;
+using AutopilotMonitor.Agent.Core.Monitoring.Collectors;
 
 namespace AutopilotMonitor.Agent.Core.Monitoring.Telemetry.Gather
 {

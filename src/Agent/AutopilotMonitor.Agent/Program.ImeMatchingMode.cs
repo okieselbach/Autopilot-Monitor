@@ -5,9 +5,14 @@ using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Text.RegularExpressions;
-using AutopilotMonitor.Agent.Core.Monitoring.Tracking;
 using AutopilotMonitor.Shared.Models;
 using Newtonsoft.Json;
+using AutopilotMonitor.Agent.Core.Monitoring.Enrollment;
+using AutopilotMonitor.Agent.Core.Monitoring.Enrollment.Flows;
+using AutopilotMonitor.Agent.Core.Monitoring.Enrollment.Ime;
+using AutopilotMonitor.Agent.Core.Monitoring.Enrollment.SystemSignals;
+using AutopilotMonitor.Agent.Core.Monitoring.Enrollment.Completion;
+using AutopilotMonitor.Agent.Core.Monitoring.Collectors;
 
 namespace AutopilotMonitor.Agent
 {

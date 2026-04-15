@@ -2,6 +2,11 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Management;
+using AutopilotMonitor.Agent.Core.Monitoring.Enrollment;
+using AutopilotMonitor.Agent.Core.Monitoring.Enrollment.Flows;
+using AutopilotMonitor.Agent.Core.Monitoring.Enrollment.Ime;
+using AutopilotMonitor.Agent.Core.Monitoring.Enrollment.SystemSignals;
+using AutopilotMonitor.Agent.Core.Monitoring.Enrollment.Completion;
 using AutopilotMonitor.Agent.Core.Monitoring.Collectors;
 
 namespace AutopilotMonitor.Agent.Core.Monitoring.Runtime

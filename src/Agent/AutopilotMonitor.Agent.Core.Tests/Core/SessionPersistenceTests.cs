@@ -1,8 +1,13 @@
 using System;
 using System.IO;
-using AutopilotMonitor.Agent.Core.Monitoring.Core;
 using AutopilotMonitor.Agent.Core.Monitoring.Runtime;
 using Xunit;
+using AutopilotMonitor.Agent.Core.Monitoring.Enrollment;
+using AutopilotMonitor.Agent.Core.Monitoring.Enrollment.Flows;
+using AutopilotMonitor.Agent.Core.Monitoring.Enrollment.Ime;
+using AutopilotMonitor.Agent.Core.Monitoring.Enrollment.SystemSignals;
+using AutopilotMonitor.Agent.Core.Monitoring.Enrollment.Completion;
+using AutopilotMonitor.Agent.Core.Monitoring.Collectors;
 
 namespace AutopilotMonitor.Agent.Core.Tests.Core
 {

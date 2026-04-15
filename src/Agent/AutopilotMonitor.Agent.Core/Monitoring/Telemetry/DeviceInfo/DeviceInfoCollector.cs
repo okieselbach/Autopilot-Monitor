@@ -7,9 +7,14 @@ using System.Net.NetworkInformation;
 using System.Text.Json;
 using System.Threading.Tasks;
 using AutopilotMonitor.Agent.Core.Logging;
-using AutopilotMonitor.Agent.Core.Monitoring.Core;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Win32;
+using AutopilotMonitor.Agent.Core.Monitoring.Enrollment;
+using AutopilotMonitor.Agent.Core.Monitoring.Enrollment.Flows;
+using AutopilotMonitor.Agent.Core.Monitoring.Enrollment.Ime;
+using AutopilotMonitor.Agent.Core.Monitoring.Enrollment.SystemSignals;
+using AutopilotMonitor.Agent.Core.Monitoring.Enrollment.Completion;
+using AutopilotMonitor.Agent.Core.Monitoring.Collectors;
 
 namespace AutopilotMonitor.Agent.Core.Monitoring.Telemetry.DeviceInfo
 {
