@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using AutopilotMonitor.Agent.Core.Configuration;
 using AutopilotMonitor.Agent.Core.Monitoring.Core;
+using AutopilotMonitor.Agent.Core.Monitoring.Runtime;
 using AutopilotMonitor.Agent.Core.Monitoring.Network;
 using AutopilotMonitor.Agent.Core.Tests.Helpers;
 using AutopilotMonitor.Shared;

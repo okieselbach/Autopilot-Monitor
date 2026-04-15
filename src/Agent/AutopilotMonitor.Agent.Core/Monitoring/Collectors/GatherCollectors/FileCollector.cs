@@ -4,6 +4,8 @@ using System.IO;
 using System.Linq;
 using AutopilotMonitor.Shared.Models;
 
+using AutopilotMonitor.Agent.Core.Monitoring.Runtime;
+
 namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors.GatherCollectors
 {
     public class FileCollector : IGatherRuleCollector

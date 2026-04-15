@@ -5,7 +5,7 @@ using AutopilotMonitor.Agent.Core.Configuration;
 using AutopilotMonitor.Agent.Core.Logging;
 using AutopilotMonitor.Agent.Core.Security;
 
-namespace AutopilotMonitor.Agent.Core.Monitoring.Core
+namespace AutopilotMonitor.Agent.Core.Monitoring.Runtime
 {
     /// <summary>
     /// Handles agent cleanup on enrollment completion:

@@ -5,7 +5,7 @@ using AutopilotMonitor.Agent.Core.Monitoring.Interop;
 using Microsoft.Win32;
 using Microsoft.Win32.SafeHandles;
 
-namespace AutopilotMonitor.Agent.Core.Monitoring.Core
+namespace AutopilotMonitor.Agent.Core.Monitoring.Runtime
 {
     /// <summary>
     /// Watches a registry key for changes using RegNotifyChangeKeyValue.

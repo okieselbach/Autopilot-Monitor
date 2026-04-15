@@ -5,7 +5,7 @@ using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.Models;
 using Newtonsoft.Json.Linq;
 
-namespace AutopilotMonitor.Agent.Core.Monitoring.Core
+namespace AutopilotMonitor.Agent.Core.Monitoring.Runtime
 {
     /// <summary>
     /// Consumes the three self-update marker files written by SelfUpdater on every agent startup

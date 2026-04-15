@@ -6,10 +6,11 @@ using System.Text;
 using System.Threading.Tasks;
 using AutopilotMonitor.Agent.Core.Configuration;
 using AutopilotMonitor.Agent.Core.Logging;
+using AutopilotMonitor.Agent.Core.Monitoring.Core;
 using AutopilotMonitor.Agent.Core.Monitoring.Network;
 using AutopilotMonitor.Shared;
 
-namespace AutopilotMonitor.Agent.Core.Monitoring.Core
+namespace AutopilotMonitor.Agent.Core.Monitoring.Runtime
 {
     /// <summary>
     /// Result of a diagnostics package upload attempt.
@@ -134,15 +135,15 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Core
                         foreach (var entry in _configuration.DiagnosticsLogPaths ?? new System.Collections.Generic.List<Shared.Models.DiagnosticsLogPath>())
                         {
                             // Resolve %LOGGED_ON_USER_PROFILE% token and get profile path for guard exception
-                            var userProfilePath = Collectors.UserProfileResolver.ContainsUserProfileToken(entry.Path)
-                                ? Collectors.UserProfileResolver.GetLoggedOnUserProfilePath() : null;
+                            var userProfilePath = UserProfileResolver.ContainsUserProfileToken(entry.Path)
+                                ? UserProfileResolver.GetLoggedOnUserProfilePath() : null;
 
                             if (!Collectors.DiagnosticsPathGuards.IsDiagnosticsPathAllowed(entry.Path, _configuration.UnrestrictedMode, userProfilePath))
                             {
                                 _logger.Warning($"Diagnostics path blocked by guard: {entry.Path}");
                                 continue;
                             }
-                            var expandedPath = Collectors.UserProfileResolver.ExpandCustomTokens(entry.Path);
+                            var expandedPath = UserProfileResolver.ExpandCustomTokens(entry.Path);
                             if (expandedPath == null)
                             {
                                 _logger.Warning($"Diagnostics path skipped (no user session for token): {entry.Path}");

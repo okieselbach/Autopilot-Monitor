@@ -5,6 +5,8 @@ using System.Linq;
 using AutopilotMonitor.Shared.Models;
 using Newtonsoft.Json.Linq;
 
+using AutopilotMonitor.Agent.Core.Monitoring.Runtime;
+
 namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors.GatherCollectors
 {
     public class JsonCollector : IGatherRuleCollector

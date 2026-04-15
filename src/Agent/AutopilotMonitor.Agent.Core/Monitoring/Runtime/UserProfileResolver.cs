@@ -2,8 +2,9 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Management;
+using AutopilotMonitor.Agent.Core.Monitoring.Collectors;
 
-namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
+namespace AutopilotMonitor.Agent.Core.Monitoring.Runtime
 {
     /// <summary>
     /// Resolves the custom %LOGGED_ON_USER_PROFILE% token to the logged-on user's profile path.

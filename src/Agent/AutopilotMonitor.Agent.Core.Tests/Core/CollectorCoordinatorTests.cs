@@ -1,4 +1,5 @@
 using AutopilotMonitor.Agent.Core.Monitoring.Core;
+using AutopilotMonitor.Agent.Core.Monitoring.Runtime;
 using Xunit;
 
 namespace AutopilotMonitor.Agent.Core.Tests.Core

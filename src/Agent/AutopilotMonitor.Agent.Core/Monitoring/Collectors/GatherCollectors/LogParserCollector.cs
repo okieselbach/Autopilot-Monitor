@@ -7,6 +7,8 @@ using System.Text.RegularExpressions;
 using AutopilotMonitor.Agent.Core.Monitoring.Tracking;
 using AutopilotMonitor.Shared.Models;
 
+using AutopilotMonitor.Agent.Core.Monitoring.Runtime;
+
 namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors.GatherCollectors
 {
     public class LogParserCollector : IGatherRuleCollector

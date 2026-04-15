@@ -5,7 +5,7 @@ using System.Runtime.InteropServices;
 using AutopilotMonitor.Agent.Core.Logging;
 using AutopilotMonitor.Agent.Core.Monitoring.Interop;
 
-namespace AutopilotMonitor.Agent.Core.Monitoring.Core
+namespace AutopilotMonitor.Agent.Core.Monitoring.Runtime
 {
     /// <summary>
     /// Launches a process in the logged-in user's desktop session from a SYSTEM context.

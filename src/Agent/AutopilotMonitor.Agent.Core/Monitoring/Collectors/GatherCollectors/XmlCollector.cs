@@ -7,6 +7,8 @@ using System.Xml.Linq;
 using System.Xml.XPath;
 using AutopilotMonitor.Shared.Models;
 
+using AutopilotMonitor.Agent.Core.Monitoring.Runtime;
+
 namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors.GatherCollectors
 {
     public class XmlCollector : IGatherRuleCollector

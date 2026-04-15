@@ -6,6 +6,7 @@ using System.Linq;
 using AutopilotMonitor.Agent.Core.Configuration;
 using AutopilotMonitor.Agent.Core.Logging;
 using AutopilotMonitor.Agent.Core.Monitoring.Core;
+using AutopilotMonitor.Agent.Core.Monitoring.Runtime;
 using AutopilotMonitor.Agent.Core.Security;
 using AutopilotMonitor.Shared;
 
