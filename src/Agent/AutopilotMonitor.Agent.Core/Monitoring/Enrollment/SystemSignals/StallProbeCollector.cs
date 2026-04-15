@@ -11,7 +11,7 @@ using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Win32;
 
-namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
+namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment.SystemSignals
 {
     /// <summary>
     /// Ebene 2 — Defensive deep probes that run only when enrollment has been silent for a while.
