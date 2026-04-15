@@ -26,7 +26,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
     public class DeliveryOptimizationCollector : CollectorBase
     {
         private const string LogFileName = "do-status.jsonl";
-        private const int InvokeTimeoutMs = 10000;
+        private const int InvokeTimeoutMs = 5000;
 
         private readonly Func<AppPackageStateList> _getPackageStates;
         private readonly Action<AppPackageState> _onDoTelemetryReceived;
@@ -212,7 +212,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                     if (!asyncResult.AsyncWaitHandle.WaitOne(InvokeTimeoutMs))
                     {
                         ps.Stop();
-                        Logger.Warning("[DeliveryOptimizationCollector] PS invoke timed out after 10s, stopping");
+                        Logger.Warning("[DeliveryOptimizationCollector] PS invoke timed out after 5s, stopping");
                         HandleError("timeout");
                         return null;
                     }

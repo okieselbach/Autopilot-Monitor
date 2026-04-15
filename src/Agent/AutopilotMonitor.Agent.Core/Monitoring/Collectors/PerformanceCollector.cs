@@ -2,10 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.Management;
 using System.Net.NetworkInformation;
 using System.Threading;
 using AutopilotMonitor.Agent.Core.Logging;
+using AutopilotMonitor.Agent.Core.Monitoring.Interop;
 using AutopilotMonitor.Shared.Models;
 
 namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
@@ -100,24 +100,24 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
                 Logger.Debug($"CPU counter read failed: {ex.Message}");
             }
 
-            // Memory info via WMI
+            // Memory info via GlobalMemoryStatusEx (kernel32)
             try
             {
-                using (var searcher = new ManagementObjectSearcher("SELECT FreePhysicalMemory, TotalVisibleMemorySize FROM Win32_OperatingSystem"))
+                if (MemoryNativeMethods.TryGetMemoryInfo(out var availBytes, out var totalBytes, out var loadPercent)
+                    && totalBytes > 0)
                 {
-                    foreach (ManagementObject obj in searcher.Get())
-                    {
-                        var freeKb = Convert.ToDouble(obj["FreePhysicalMemory"]);
-                        var totalKb = Convert.ToDouble(obj["TotalVisibleMemorySize"]);
-                        data["memory_available_mb"] = Math.Round(freeKb / 1024, 0);
-                        data["memory_total_mb"] = Math.Round(totalKb / 1024, 0);
-                        data["memory_used_percent"] = Math.Round((1 - freeKb / totalKb) * 100, 1);
-                    }
+                    data["memory_available_mb"] = Math.Round(availBytes / (1024.0 * 1024.0), 0);
+                    data["memory_total_mb"] = Math.Round(totalBytes / (1024.0 * 1024.0), 0);
+                    data["memory_used_percent"] = Math.Round((double)loadPercent, 1);
+                }
+                else
+                {
+                    Logger.Debug("GlobalMemoryStatusEx returned no data");
                 }
             }
             catch (Exception ex)
             {
-                Logger.Debug($"Memory WMI query failed: {ex.Message}");
+                Logger.Debug($"Memory query failed: {ex.Message}");
             }
 
             // Disk queue length
