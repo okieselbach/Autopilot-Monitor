@@ -104,3 +104,10 @@ export function normalizeEventDataForDisplay(data?: Record<string, any>): Record
   if (!data) return null;
   return normalizeJsonLikeValue(data);
 }
+
+// Shortens SemVer+git-hash build metadata (e.g. "1.0.987+4da1540f8c64d8ff5f7ab75d9c5f0b8dd3506bfa")
+// to the first 7 hash chars for display. Full hash is preserved in event.data / JSON details.
+export function shortenBuildHashInMessage(message?: string | null): string {
+  if (!message) return "";
+  return message.replace(/\+([0-9a-f]{7})[0-9a-f]+/gi, "+$1");
+}

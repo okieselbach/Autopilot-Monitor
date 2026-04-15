@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { EnrollmentEvent, Session } from "@/types";
-import { normalizeEventDataForDisplay } from "../utils/eventHelpers";
+import { normalizeEventDataForDisplay, shortenBuildHashInMessage } from "../utils/eventHelpers";
 import { getErrorCodeEntry, formatErrorCode } from "@/utils/errorCodeMap";
 
 interface EventTimelineProps {
@@ -436,7 +436,7 @@ function EventRow({ event, showScriptOutput }: { event: EnrollmentEvent; showScr
             <SeverityBadge severity={event.severity} />
             <span className="text-sm font-medium text-gray-900">{event.eventType}</span>
           </div>
-          <p className="mt-1 text-sm text-gray-600">{event.message}</p>
+          <p className="mt-1 text-sm text-gray-600" title={event.message || undefined}>{shortenBuildHashInMessage(event.message)}</p>
           {/* Exit code / HRESULT badge for app install events */}
           {(event.eventType === "app_install_failed" || event.eventType === "app_install_completed") && (() => {
             const ec = event.data?.exitCode ?? event.data?.exit_code;
@@ -678,7 +678,7 @@ function RawEventRow({ event }: { event: EnrollmentEvent }) {
         <span className="text-gray-500 flex-shrink-0">{new Date(event.timestamp).toLocaleTimeString()}</span>
         <span className={`flex-shrink-0 w-14 ${sevColor[event.severity] || "text-gray-500"}`}>{event.severity}</span>
         <span className="text-gray-900 font-medium flex-shrink-0">{event.eventType}</span>
-        <span className="text-gray-500 truncate flex-1 min-w-0">{event.message}</span>
+        <span className="text-gray-500 truncate flex-1 min-w-0" title={event.message || undefined}>{shortenBuildHashInMessage(event.message)}</span>
         {hasDetails && (
           <button onClick={() => setExpanded(!expanded)} className="text-gray-400 hover:text-blue-600 flex-shrink-0 ml-1">
             {expanded ? '−' : '+'}
