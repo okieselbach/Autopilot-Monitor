@@ -181,6 +181,20 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
 
             lock (_lock)
             {
+                // Sync internal signal flags from the authoritative tracker snapshot.
+                // Monoton false→true: these signals are stable-once-seen. The single
+                // intentional reset (HandleEspResumed clearing _espFinalExitSeen) runs
+                // AFTER this sync inside its own switch case, so it remains the last writer.
+                // Without this, the SM can drift from the tracker (e.g. when
+                // _stateData.EspEverSeen=true was set in memory but Save() hadn't run
+                // before a reboot — restore loads false and downstream guards misfire).
+                if (ctx != null)
+                {
+                    if (ctx.EspEverSeen)      _espEverSeen = true;
+                    if (ctx.EspFinalExitSeen) _espFinalExitSeen = true;
+                    if (ctx.DesktopArrived)   _desktopArrived = true;
+                }
+
                 // Terminal states: no transitions allowed
                 if (_currentState.IsTerminal())
                     return TransitionResult.NoTransition;

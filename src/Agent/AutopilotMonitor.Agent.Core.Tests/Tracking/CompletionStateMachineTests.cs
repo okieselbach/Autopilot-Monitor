@@ -1072,5 +1072,64 @@ namespace AutopilotMonitor.Agent.Core.Tests.Tracking
         {
             Assert.False(EnrollmentCompletionState.EspActive.IsWaiting());
         }
+
+        // ===== SECTION 5: Drift regression tests =====
+        // Repro for session 1fda3b0a-e586-4980-bc90-491e4e8ca870:
+        // ESP phase events were not persisted before reboot, so SM was restored with
+        // espEverSeen=false. Subsequent esp_exiting + desktop_arrived must not complete
+        // the SM prematurely — the ProcessTrigger snapshot sync lifts the missing flags
+        // from the context (the authoritative tracker state).
+
+        [Fact]
+        public void Drift_RestoredWithoutEspEverSeen_EspExitingSyncsFromContext()
+        {
+            var sm = new CompletionStateMachine();
+            sm.RestoreState(EnrollmentCompletionState.Idle,
+                espEverSeen: false, espFinalExitSeen: false, desktopArrived: false,
+                isWaitingForHello: false, isWaitingForEspSettle: false, deferredSource: null);
+
+            // ctx says ESP was seen (real tracker is the source of truth).
+            // Hello policy IS configured but not yet completed — must wait, not complete.
+            var ctx = DefaultContext(
+                lastEspPhase: "AccountSetup",
+                isHelloPolicyConfigured: true,
+                isHelloCompleted: false);
+            ctx.EspEverSeen = true;
+            ctx.EspFinalExitSeen = false;
+
+            var result = sm.ProcessTrigger("esp_exiting", ctx);
+
+            Assert.True(result.Transitioned);
+            Assert.NotEqual(EnrollmentCompletionState.Completed, sm.CurrentState);
+            Assert.False(result.ShouldEmitEnrollmentComplete);
+            Assert.True(sm.EspEverSeen, "SM must lift _espEverSeen from ctx via the sync block");
+            Assert.True(sm.EspFinalExitSeen, "esp_exiting Path A must mark final exit");
+        }
+
+        [Fact]
+        public void Drift_RestoredWithoutEspEverSeen_DesktopArrivedRoutesToEspBlocking()
+        {
+            // The exact scenario from session 1fda3b0a-e586-4980-bc90-491e4e8ca870 at 06:05:41:
+            // SM restored with espEverSeen=false, but ctx says ESP IS active.
+            // Pre-fix: SM took the "no ESP" else branch and reached Completed.
+            // Post-fix: sync block lifts _espEverSeen from ctx, SM correctly routes to
+            // DesktopArrivedEspBlocking.
+            var sm = new CompletionStateMachine();
+            sm.RestoreState(EnrollmentCompletionState.Idle,
+                espEverSeen: false, espFinalExitSeen: false, desktopArrived: false,
+                isWaitingForHello: false, isWaitingForEspSettle: false, deferredSource: null);
+
+            var ctx = DefaultContext(
+                isHelloPolicyConfigured: true,
+                isHelloCompleted: false);
+            ctx.EspEverSeen = true;
+            ctx.EspFinalExitSeen = false;
+
+            var result = sm.ProcessTrigger("desktop_arrived", ctx);
+
+            Assert.NotEqual(EnrollmentCompletionState.Completed, sm.CurrentState);
+            Assert.Equal(EnrollmentCompletionState.DesktopArrivedEspBlocking, sm.CurrentState);
+            Assert.False(result.ShouldEmitEnrollmentComplete);
+        }
     }
 }
