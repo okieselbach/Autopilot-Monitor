@@ -4,12 +4,12 @@ using System.Threading;
 using System.Threading.Tasks;
 using AutopilotMonitor.Agent.Core.Configuration;
 using AutopilotMonitor.Agent.Core.Logging;
-using AutopilotMonitor.Agent.Core.Monitoring.Network;
+using AutopilotMonitor.Agent.Core.Monitoring.Transport;
 using AutopilotMonitor.Agent.Core.Monitoring.Runtime;
 using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.Models;
 
-namespace AutopilotMonitor.Agent.Core.Monitoring.Core
+namespace AutopilotMonitor.Agent.Core.Monitoring.Transport
 {
     /// <summary>
     /// Manages event upload lifecycle: debouncing, batched upload, auth-failure circuit breaker,

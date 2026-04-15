@@ -3,7 +3,7 @@ using System.Net;
 using System.Net.Sockets;
 using AutopilotMonitor.Agent.Core.Logging;
 
-namespace AutopilotMonitor.Agent.Core.Monitoring.Network
+namespace AutopilotMonitor.Agent.Core.Monitoring.Transport
 {
     public class NtpCheckResult
     {

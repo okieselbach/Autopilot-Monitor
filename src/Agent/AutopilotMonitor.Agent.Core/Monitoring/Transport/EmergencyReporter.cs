@@ -4,7 +4,7 @@ using System.Threading.Tasks;
 using AutopilotMonitor.Agent.Core.Logging;
 using AutopilotMonitor.Shared.Models;
 
-namespace AutopilotMonitor.Agent.Core.Monitoring.Network
+namespace AutopilotMonitor.Agent.Core.Monitoring.Transport
 {
     /// <summary>
     /// Sends critical agent-side errors to the backend emergency channel endpoint.

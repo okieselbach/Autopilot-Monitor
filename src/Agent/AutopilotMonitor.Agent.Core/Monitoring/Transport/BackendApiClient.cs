@@ -14,7 +14,7 @@ using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.Models;
 using Newtonsoft.Json;
 
-namespace AutopilotMonitor.Agent.Core.Monitoring.Network
+namespace AutopilotMonitor.Agent.Core.Monitoring.Transport
 {
     /// <summary>
     /// Client for communicating with the backend API

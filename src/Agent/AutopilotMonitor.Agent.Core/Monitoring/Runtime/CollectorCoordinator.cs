@@ -6,7 +6,7 @@ using AutopilotMonitor.Agent.Core.Configuration;
 using AutopilotMonitor.Agent.Core.Logging;
 using AutopilotMonitor.Agent.Core.Monitoring.Collectors;
 using AutopilotMonitor.Agent.Core.Monitoring.Core;
-using AutopilotMonitor.Agent.Core.Monitoring.Network;
+using AutopilotMonitor.Agent.Core.Monitoring.Transport;
 using AutopilotMonitor.Agent.Core.Monitoring.Replay;
 using AutopilotMonitor.Agent.Core.Monitoring.Tracking;
 using AutopilotMonitor.Shared;

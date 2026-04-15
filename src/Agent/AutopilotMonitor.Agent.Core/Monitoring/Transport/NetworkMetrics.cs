@@ -1,6 +1,6 @@
 using System.Threading;
 
-namespace AutopilotMonitor.Agent.Core.Monitoring.Network
+namespace AutopilotMonitor.Agent.Core.Monitoring.Transport
 {
     /// <summary>
     /// Thread-safe counters for HTTP request/response tracking.

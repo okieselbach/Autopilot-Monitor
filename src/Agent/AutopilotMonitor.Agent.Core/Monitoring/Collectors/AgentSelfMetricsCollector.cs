@@ -4,7 +4,7 @@ using System.Diagnostics;
 using System.Threading;
 using AutopilotMonitor.Agent.Core.Logging;
 using AutopilotMonitor.Agent.Core.Monitoring.Core;
-using AutopilotMonitor.Agent.Core.Monitoring.Network;
+using AutopilotMonitor.Agent.Core.Monitoring.Transport;
 using AutopilotMonitor.Shared.Models;
 
 namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors

@@ -5,7 +5,7 @@ using System.Linq;
 using AutopilotMonitor.Shared.Models;
 using Newtonsoft.Json;
 
-namespace AutopilotMonitor.Agent.Core.Monitoring.Core
+namespace AutopilotMonitor.Agent.Core.Monitoring.Transport
 {
     /// <summary>
     /// Manages offline event storage (spool) for resilient uploads

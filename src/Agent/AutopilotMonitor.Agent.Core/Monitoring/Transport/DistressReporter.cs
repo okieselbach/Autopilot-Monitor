@@ -9,7 +9,7 @@ using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.Models;
 using Newtonsoft.Json;
 
-namespace AutopilotMonitor.Agent.Core.Monitoring.Network
+namespace AutopilotMonitor.Agent.Core.Monitoring.Transport
 {
     /// <summary>
     /// Sends pre-auth distress signals to the backend when the authenticated error channel

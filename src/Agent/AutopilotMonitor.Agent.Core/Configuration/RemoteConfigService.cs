@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using AutopilotMonitor.Agent.Core.Monitoring.Network;
+using AutopilotMonitor.Agent.Core.Monitoring.Transport;
 using AutopilotMonitor.Agent.Core.Logging;
 using AutopilotMonitor.Shared.Models;
 using Newtonsoft.Json;
