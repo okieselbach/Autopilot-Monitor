@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using AutopilotMonitor.Agent.Core.Configuration;
 using AutopilotMonitor.Agent.Core.Logging;
-using AutopilotMonitor.Agent.Core.Monitoring.Analyzers;
+using AutopilotMonitor.Agent.Core.Monitoring.Telemetry.Analyzers;
 using AutopilotMonitor.Shared.Models;
 
 namespace AutopilotMonitor.Agent.Core.Monitoring.Runtime

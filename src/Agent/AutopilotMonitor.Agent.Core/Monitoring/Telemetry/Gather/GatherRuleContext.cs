@@ -4,7 +4,7 @@ using AutopilotMonitor.Agent.Core.Logging;
 using AutopilotMonitor.Agent.Core.Monitoring.Tracking;
 using AutopilotMonitor.Shared.Models;
 
-namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors.GatherCollectors
+namespace AutopilotMonitor.Agent.Core.Monitoring.Telemetry.Gather
 {
     /// <summary>
     /// Shared dependencies passed to each gather rule collector.

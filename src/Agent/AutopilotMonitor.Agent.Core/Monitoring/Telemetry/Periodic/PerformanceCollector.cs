@@ -8,7 +8,7 @@ using AutopilotMonitor.Agent.Core.Logging;
 using AutopilotMonitor.Agent.Core.Monitoring.Interop;
 using AutopilotMonitor.Shared.Models;
 
-namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
+namespace AutopilotMonitor.Agent.Core.Monitoring.Telemetry.Periodic
 {
     /// <summary>
     /// Collects system performance metrics (CPU, memory, disk) on a configurable interval.

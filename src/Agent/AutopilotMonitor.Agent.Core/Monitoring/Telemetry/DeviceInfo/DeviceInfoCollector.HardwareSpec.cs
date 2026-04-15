@@ -4,7 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Management;
 
-namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
+namespace AutopilotMonitor.Agent.Core.Monitoring.Telemetry.DeviceInfo
 {
     /// <summary>
     /// Partial: Static hardware specifications (CPU, RAM, Disk, BIOS, Battery, GPU).

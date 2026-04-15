@@ -6,7 +6,7 @@ using AutopilotMonitor.Agent.Core.Logging;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Win32;
 
-namespace AutopilotMonitor.Agent.Core.Monitoring.Analyzers
+namespace AutopilotMonitor.Agent.Core.Monitoring.Telemetry.Analyzers
 {
     /// <summary>
     /// Collects installed software inventory from the Windows registry, normalizes

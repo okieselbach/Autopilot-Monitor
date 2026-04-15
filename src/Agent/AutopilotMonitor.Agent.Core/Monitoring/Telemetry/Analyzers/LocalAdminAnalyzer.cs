@@ -7,7 +7,7 @@ using AutopilotMonitor.Agent.Core.Logging;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Win32;
 
-namespace AutopilotMonitor.Agent.Core.Monitoring.Analyzers
+namespace AutopilotMonitor.Agent.Core.Monitoring.Telemetry.Analyzers
 {
     /// <summary>
     /// Analyzes local administrator accounts and user profiles on the device

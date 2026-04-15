@@ -7,7 +7,7 @@ using AutopilotMonitor.Agent.Core.Monitoring.Core;
 using AutopilotMonitor.Agent.Core.Monitoring.Transport;
 using AutopilotMonitor.Shared.Models;
 
-namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
+namespace AutopilotMonitor.Agent.Core.Monitoring.Telemetry.Periodic
 {
     /// <summary>
     /// Measures the agent's own resource footprint: process CPU, memory, threads, handles,

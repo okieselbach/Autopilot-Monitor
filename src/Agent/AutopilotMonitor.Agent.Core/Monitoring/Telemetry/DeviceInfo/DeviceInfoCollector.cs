@@ -11,7 +11,7 @@ using AutopilotMonitor.Agent.Core.Monitoring.Core;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Win32;
 
-namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
+namespace AutopilotMonitor.Agent.Core.Monitoring.Telemetry.DeviceInfo
 {
     /// <summary>
     /// Collects static and semi-static device information at enrollment startup and end.

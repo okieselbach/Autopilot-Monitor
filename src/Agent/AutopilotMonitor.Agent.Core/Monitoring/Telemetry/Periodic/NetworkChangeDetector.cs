@@ -12,7 +12,7 @@ using AutopilotMonitor.Agent.Core.Security;
 using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.Models;
 
-namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
+namespace AutopilotMonitor.Agent.Core.Monitoring.Telemetry.Periodic
 {
     /// <summary>
     /// Detects network changes (SSID switches, wired↔wireless, IP changes) during provisioning

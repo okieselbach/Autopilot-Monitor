@@ -298,7 +298,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
         // Default IME log folder
         private const string DefaultImeLogFolder = @"%ProgramData%\Microsoft\IntuneManagementExtension\Logs";
 
-        private Collectors.DeviceInfoCollector _deviceInfoCollector;
+        private Telemetry.DeviceInfo.DeviceInfoCollector _deviceInfoCollector;
 
         // ConfigMgr (SCCM) co-management detection — fire-once guard
         private bool _configMgrDetected;
@@ -381,7 +381,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Tracking
             _imeLogPatterns = imeLogPatterns ?? new List<ImeLogPattern>();
             _imeLogFolder = imeLogFolderOverride ?? DefaultImeLogFolder;
             _espAndHelloTracker = espAndHelloTracker;
-            _deviceInfoCollector = new Collectors.DeviceInfoCollector(sessionId, tenantId, emitEvent, logger);
+            _deviceInfoCollector = new Telemetry.DeviceInfo.DeviceInfoCollector(sessionId, tenantId, emitEvent, logger);
 
             // State persistence for crash recovery
             var stateDirectory = @"%ProgramData%\AutopilotMonitor\State";

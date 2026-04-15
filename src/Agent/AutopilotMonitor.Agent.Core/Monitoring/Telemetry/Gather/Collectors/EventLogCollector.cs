@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics.Eventing.Reader;
 using AutopilotMonitor.Shared.Models;
 
-namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors.GatherCollectors
+namespace AutopilotMonitor.Agent.Core.Monitoring.Telemetry.Gather.Collectors
 {
     public class EventLogCollector : IGatherRuleCollector
     {

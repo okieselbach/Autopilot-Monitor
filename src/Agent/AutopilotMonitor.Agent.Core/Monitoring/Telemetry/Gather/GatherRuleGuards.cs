@@ -5,7 +5,7 @@ using System.Linq;
 using System.Reflection;
 using Newtonsoft.Json.Linq;
 
-namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
+namespace AutopilotMonitor.Agent.Core.Monitoring.Telemetry.Gather
 {
     /// <summary>
     /// Privacy and security guards for GatherRule collectors.

@@ -4,7 +4,7 @@ using System.Linq;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Win32;
 
-namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors.GatherCollectors
+namespace AutopilotMonitor.Agent.Core.Monitoring.Telemetry.Gather.Collectors
 {
     public class RegistryCollector : IGatherRuleCollector
     {

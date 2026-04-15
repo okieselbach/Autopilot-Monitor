@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using AutopilotMonitor.Shared.Models;
 
-namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors.GatherCollectors
+namespace AutopilotMonitor.Agent.Core.Monitoring.Telemetry.Gather
 {
     /// <summary>
     /// Strategy interface for individual gather rule collector implementations.

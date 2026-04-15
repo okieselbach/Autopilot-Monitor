@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using AutopilotMonitor.Agent.Core.Configuration;
 using AutopilotMonitor.Agent.Core.Logging;
 using AutopilotMonitor.Agent.Core.Monitoring.Core;
+using AutopilotMonitor.Agent.Core.Monitoring.Telemetry.DeviceInfo;
 using AutopilotMonitor.Agent.Core.Monitoring.Transport;
 using AutopilotMonitor.Agent.Core.Monitoring.Tracking;
 using AutopilotMonitor.Shared;

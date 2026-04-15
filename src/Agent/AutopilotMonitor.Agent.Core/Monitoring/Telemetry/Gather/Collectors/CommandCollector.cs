@@ -5,7 +5,7 @@ using System.Text;
 using AutopilotMonitor.Agent.Core.Security;
 using AutopilotMonitor.Shared.Models;
 
-namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors.GatherCollectors
+namespace AutopilotMonitor.Agent.Core.Monitoring.Telemetry.Gather.Collectors
 {
     public class CommandCollector : IGatherRuleCollector
     {

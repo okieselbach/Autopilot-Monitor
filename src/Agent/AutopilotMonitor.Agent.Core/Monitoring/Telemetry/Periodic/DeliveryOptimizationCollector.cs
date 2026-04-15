@@ -12,7 +12,7 @@ using AutopilotMonitor.Shared.Models;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
-namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
+namespace AutopilotMonitor.Agent.Core.Monitoring.Telemetry.Periodic
 {
     /// <summary>
     /// Polls OS-level Delivery Optimization status via a persistent PowerShell Runspace.

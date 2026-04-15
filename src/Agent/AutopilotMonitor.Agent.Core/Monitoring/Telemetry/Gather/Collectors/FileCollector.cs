@@ -6,7 +6,7 @@ using AutopilotMonitor.Shared.Models;
 
 using AutopilotMonitor.Agent.Core.Monitoring.Runtime;
 
-namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors.GatherCollectors
+namespace AutopilotMonitor.Agent.Core.Monitoring.Telemetry.Gather.Collectors
 {
     public class FileCollector : IGatherRuleCollector
     {

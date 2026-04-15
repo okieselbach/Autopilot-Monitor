@@ -3,7 +3,7 @@ using System.Threading;
 using AutopilotMonitor.Agent.Core.Logging;
 using AutopilotMonitor.Shared.Models;
 
-namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
+namespace AutopilotMonitor.Agent.Core.Monitoring.Telemetry
 {
     /// <summary>
     /// Abstract base for interval-based event collectors.

@@ -1,4 +1,4 @@
-using AutopilotMonitor.Agent.Core.Monitoring.Collectors;
+using AutopilotMonitor.Agent.Core.Monitoring.Telemetry.Gather;
 using Xunit;
 
 namespace AutopilotMonitor.Agent.Core.Tests.Collectors

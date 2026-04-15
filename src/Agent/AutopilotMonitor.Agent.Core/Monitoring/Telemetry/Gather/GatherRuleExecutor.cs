@@ -3,11 +3,11 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using AutopilotMonitor.Agent.Core.Logging;
-using AutopilotMonitor.Agent.Core.Monitoring.Collectors.GatherCollectors;
+using AutopilotMonitor.Agent.Core.Monitoring.Telemetry.Gather.Collectors;
 using AutopilotMonitor.Agent.Core.Monitoring.Tracking;
 using AutopilotMonitor.Shared.Models;
 
-namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
+namespace AutopilotMonitor.Agent.Core.Monitoring.Telemetry.Gather
 {
     /// <summary>
     /// Executes gather rules received from the backend API

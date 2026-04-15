@@ -11,7 +11,7 @@ using AutopilotMonitor.Agent.Core.Security;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Win32;
 
-namespace AutopilotMonitor.Agent.Core.Monitoring.Collectors
+namespace AutopilotMonitor.Agent.Core.Monitoring.Telemetry.DeviceInfo
 {
     /// <summary>
     /// Partial: Network, proxy, Autopilot profile, security (SecureBoot, BitLocker, TPM, AAD join),

@@ -7,6 +7,8 @@ using System.Threading.Tasks;
 using AutopilotMonitor.Agent.Core.Configuration;
 using AutopilotMonitor.Agent.Core.Logging;
 using AutopilotMonitor.Agent.Core.Monitoring.Core;
+using AutopilotMonitor.Agent.Core.Monitoring.Telemetry.DeviceInfo;
+using AutopilotMonitor.Agent.Core.Monitoring.Telemetry.Gather;
 using AutopilotMonitor.Agent.Core.Monitoring.Transport;
 using AutopilotMonitor.Shared;
 
@@ -138,7 +140,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Runtime
                             var userProfilePath = UserProfileResolver.ContainsUserProfileToken(entry.Path)
                                 ? UserProfileResolver.GetLoggedOnUserProfilePath() : null;
 
-                            if (!Collectors.DiagnosticsPathGuards.IsDiagnosticsPathAllowed(entry.Path, _configuration.UnrestrictedMode, userProfilePath))
+                            if (!DiagnosticsPathGuards.IsDiagnosticsPathAllowed(entry.Path, _configuration.UnrestrictedMode, userProfilePath))
                             {
                                 _logger.Warning($"Diagnostics path blocked by guard: {entry.Path}");
                                 continue;

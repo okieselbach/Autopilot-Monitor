@@ -1,4 +1,4 @@
-namespace AutopilotMonitor.Agent.Core.Monitoring.Analyzers
+namespace AutopilotMonitor.Agent.Core.Monitoring.Telemetry.Analyzers
 {
     /// <summary>
     /// Represents an agent-side security or configuration analyzer.

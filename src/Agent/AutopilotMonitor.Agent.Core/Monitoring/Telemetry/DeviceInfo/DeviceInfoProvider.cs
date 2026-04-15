@@ -1,6 +1,6 @@
 using System;
 
-namespace AutopilotMonitor.Agent.Core.Monitoring.Core
+namespace AutopilotMonitor.Agent.Core.Monitoring.Telemetry.DeviceInfo
 {
     /// <summary>
     /// Provides device hardware and OS information via WMI and registry queries.
