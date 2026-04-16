@@ -132,6 +132,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment
                     {
                         { "whiteGloveStartDetected", whiteGloveStarted },
                         { "saveWhiteGloveSuccessResult", whiteGloveSuccessResult },
+                        { "fooUserDetected", _fooUserDetected },
                         { "autopilotMode", _autopilotMode },
                         { "skipUserStatusPage", _skipUserStatusPage }
                     });
@@ -680,6 +681,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment
                             {
                                 { "whiteGloveStartDetected", wgStarted },
                                 { "saveWhiteGloveSuccessResult", wgSuccessResult },
+                                { "fooUserDetected", _fooUserDetected },
                                 { "previousPhase", lastPhase ?? "unknown" }
                             });
 
@@ -1208,7 +1210,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment
                     { "isSelfDeploying", IsSelfDeploying },
                     { "isDeviceOnlyDeployment", IsDeviceOnlyDeployment },
                     { "whiteGloveStartDetected", _espAndHelloTracker?.IsWhiteGloveStartDetected ?? false },
-                    { "saveWhiteGloveSuccessResult", _espAndHelloTracker?.HasSaveWhiteGloveSuccessResult ?? false }
+                    { "saveWhiteGloveSuccessResult", _espAndHelloTracker?.HasSaveWhiteGloveSuccessResult ?? false },
+                    { "fooUserDetected", _fooUserDetected }
                 };
             }
 

@@ -48,7 +48,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Telemetry.DeviceInfo
         /// Runs all device info collectors at agent startup.
         /// Returns the detected enrollment type, Hybrid Join flag, and ESP skip configuration from registry.
         /// </summary>
-        public (string enrollmentType, bool isHybridJoin, bool? skipUserStatusPage, bool? skipDeviceStatusPage, int? autopilotMode, bool hasAadJoinedUser) CollectAll()
+        public (string enrollmentType, bool isHybridJoin, bool? skipUserStatusPage, bool? skipDeviceStatusPage, int? autopilotMode, bool hasAadJoinedUser, bool isFooUserDetected) CollectAll()
         {
             _logger.Info("EnrollmentTracker: collecting device info (at start)");
 
@@ -64,7 +64,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Telemetry.DeviceInfo
             CollectActiveNetworkInterfaceInfo();
             CollectHardwareSpec();
 
-            return (profileResult.enrollmentType, profileResult.isHybridJoin, espConfig.skipUserStatusPage, espConfig.skipDeviceStatusPage, profileResult.autopilotMode, HasAadJoinedUser);
+            return (profileResult.enrollmentType, profileResult.isHybridJoin, espConfig.skipUserStatusPage, espConfig.skipDeviceStatusPage, profileResult.autopilotMode, HasAadJoinedUser, IsFooUserDetected);
         }
 
         /// <summary>

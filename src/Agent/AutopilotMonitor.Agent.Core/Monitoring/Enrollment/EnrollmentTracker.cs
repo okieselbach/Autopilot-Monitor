@@ -104,6 +104,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment
         // True when AAD join status shows a joined device with a real user email.
         // Detected via CollectAadJoinStatus() in DeviceInfoCollector.
         private bool _aadJoinedWithUser;
+        // Soft indicator: AAD userEmail starts with "foouser@" (pre-provisioning synthetic account).
+        private bool _fooUserDetected;
 
         // Signal-correlated WhiteGlove detection (Ebene 2.6):
         // Feeds the bestehenden OnWhiteGloveCompleted() callback when the Shell-Core detector
@@ -617,6 +619,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment
                 _skipDeviceStatusPage = result.skipDeviceStatusPage;
                 _autopilotMode = result.autopilotMode;
                 _aadJoinedWithUser = result.hasAadJoinedUser;
+                _fooUserDetected = result.isFooUserDetected;
                 _stateData.EnrollmentType = _enrollmentType;
                 _stateData.SkipUserStatusPage = _skipUserStatusPage;
                 _stateData.SkipDeviceStatusPage = _skipDeviceStatusPage;

@@ -26,6 +26,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Telemetry.DeviceInfo
         /// </summary>
         public bool HasAadJoinedUser { get; private set; }
 
+        /// <summary>
+        /// True when the AAD join userEmail starts with "foouser@" — a synthetic account used
+        /// by Windows during Autopilot pre-provisioning (WhiteGlove) for AAD discovery.
+        /// Soft indicator for pre-provisioning; does not affect completion logic.
+        /// </summary>
+        public bool IsFooUserDetected { get; private set; }
+
         private void CollectNetworkAndDnsConfiguration()
         {
             try
@@ -433,7 +440,16 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Telemetry.DeviceInfo
                                     data["thumbprint"] = subKeyNames[0]; // Certificate thumbprint
 
                                     if (!string.IsNullOrWhiteSpace(userEmail))
+                                    {
                                         HasAadJoinedUser = true;
+
+                                        if (userEmail.StartsWith("foouser@", StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            IsFooUserDetected = true;
+                                            data["isFooUser"] = true;
+                                            _logger.Info($"AAD join: foouser@ detected ({userEmail}) — pre-provisioning indicator");
+                                        }
+                                    }
                                 }
                             }
                         }
