@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { apiFetch, buildQuery } from '../client.js';
+import { withToolTelemetry } from '../telemetry.js';
 import type { SearchProvider } from '../search-provider.js';
 import { READ_ONLY } from './shared.js';
 import { toolError } from './error-handler.js';
@@ -11,18 +12,74 @@ type EventEntry = {
   eventType?: string; severity?: string; source?: string;
   message?: string; timestamp?: string; phase?: string;
   data?: Record<string, unknown>; _sessionId?: string;
+  sessionId?: string;
 };
 
-/** Fetch events for a single session or across recent failed sessions. */
+/** All known event type strings — used for index-based pre-filtering. */
+const KNOWN_EVENT_TYPES = [
+  'phase_transition', 'esp_state_change', 'completion_check',
+  'enrollment_complete', 'enrollment_failed', 'desktop_arrived',
+  'app_install_started', 'app_install_completed', 'app_install_failed',
+  'app_download_started', 'app_install_skipped',
+  'network_state_change', 'network_connectivity_check',
+  'os_info', 'hardware_spec', 'tpm_status', 'autopilot_profile',
+  'secureboot_status', 'bitlocker_status', 'network_adapters',
+  'network_interface_info', 'aad_join_status', 'enrollment_type_detected',
+  'error_detected', 'software_inventory_analysis', 'vulnerability_report',
+  'performance_snapshot', 'log_entry', 'gather_result',
+  'script_completed', 'script_failed', 'ime_agent_version',
+  'do_telemetry', 'download_progress', 'agent_started',
+  'esp_phase_changed', 'shadow_discrepancy',
+];
+
+/** Match query keywords against known event types using prefix-aware matching. */
+function extractEventTypeCandidates(keywords: string[]): string[] {
+  return KNOWN_EVENT_TYPES.filter((et) =>
+    keywords.some((kw) => prefixAwareMatch(et, kw)),
+  );
+}
+
+/** Fetch events for a single session or across sessions using index-based search. */
 async function fetchSessionEvents(
   sessionId: string | undefined,
   tenantId: string | undefined,
-): Promise<{ events: EventEntry[]; sessionIds: string[] }> {
+  queryKeywords?: string[],
+): Promise<{ events: EventEntry[]; sessionIds: string[]; searchMethod: string }> {
+  // Single-session: direct fetch (unchanged)
   if (sessionId) {
     const q = buildQuery({ tenantId } as Record<string, string | undefined>);
     const data = await apiFetch(`/api/sessions/${sessionId}/events${q}`) as { events?: EventEntry[] };
-    return { events: data?.events ?? [], sessionIds: [sessionId] };
+    return { events: data?.events ?? [], sessionIds: [sessionId], searchMethod: 'direct-session' };
   }
+
+  // Multi-session: try index-based search first if we have keyword candidates
+  if (queryKeywords && queryKeywords.length > 0) {
+    const candidates = extractEventTypeCandidates(queryKeywords);
+    if (candidates.length > 0 && candidates.length <= 10) {
+      try {
+        const params: Record<string, string | number | undefined> = {
+          eventTypes: candidates.join(','),
+          limit: 200,
+          sessionLimit: 10,
+        };
+        if (tenantId) params.tenantId = tenantId;
+        const basePath = tenantId ? '/api/raw/events/search' : '/api/global/raw/events/search';
+        const data = await apiFetch(`${basePath}${buildQuery(params)}`) as {
+          events?: EventEntry[];
+        };
+        const events = (data?.events ?? []).map((e) => ({
+          ...e,
+          _sessionId: e.sessionId ?? e._sessionId,
+        }));
+        const sessionIds = [...new Set(events.map((e) => e._sessionId).filter(Boolean) as string[])];
+        return { events, sessionIds, searchMethod: 'index-based' };
+      } catch {
+        // Fall through to legacy approach
+      }
+    }
+  }
+
+  // Fallback: search recent failed sessions + fetch all events (legacy N+1 path)
   const searchParams: Record<string, string | number | undefined> = { status: 'Failed', limit: 5 };
   if (tenantId) searchParams.tenantId = tenantId;
   const searchQ = buildQuery(searchParams);
@@ -38,9 +95,9 @@ async function fetchSessionEvents(
         const d = await apiFetch(`/api/sessions/${sid}/events${q}`) as { events?: EventEntry[] };
         return (d?.events ?? []).map((e) => ({ ...e, _sessionId: sid }));
       } catch { return [] as EventEntry[]; }
-    })
+    }),
   );
-  return { events: allEvents.flat(), sessionIds: ids };
+  return { events: allEvents.flat(), sessionIds: ids, searchMethod: 'legacy-failed-sessions' };
 }
 
 const KEYWORD_STOP_WORDS = new Set([
@@ -191,11 +248,11 @@ export function registerSearchTools(server: McpServer, knowledgeBase?: SearchPro
         .describe('Minimum relevance score (0-1, default 0.1). Events matching at least one keyword in any field pass this threshold.'),
     },
     READ_ONLY,
-    async (args) => {
+    async (args) => withToolTelemetry('search_events_semantic', async () => {
       try {
         const { query, sessionId, tenantId, topK, minScore } = args;
-        const { events, sessionIds } = await fetchSessionEvents(sessionId, tenantId);
 
+        // Extract keywords FIRST so we can use them for index-based pre-filtering
         const queryKeywords = extractKeywords(query);
         if (queryKeywords.length === 0) {
           return {
@@ -205,6 +262,8 @@ export function registerSearchTools(server: McpServer, knowledgeBase?: SearchPro
             }],
           };
         }
+
+        const { events, sessionIds, searchMethod } = await fetchSessionEvents(sessionId, tenantId, queryKeywords);
 
         const scored: Array<ScoredEvent & { event: EventEntry }> = [];
         for (let i = 0; i < events.length; i++) {
@@ -234,6 +293,7 @@ export function registerSearchTools(server: McpServer, knowledgeBase?: SearchPro
             text: JSON.stringify({
               query,
               searchBackend: 'weighted-keyword',
+              searchMethod,
               keywordsUsed: queryKeywords,
               sessionsSearched: sessionIds,
               eventsScanned: events.length,
@@ -246,7 +306,7 @@ export function registerSearchTools(server: McpServer, knowledgeBase?: SearchPro
       } catch (error: unknown) {
         return toolError('search_events_semantic', args, error);
       }
-    }
+    })
   );
 
   // Tool 10: search_knowledge (unchanged — vector, pre-indexed at startup)
@@ -265,7 +325,7 @@ export function registerSearchTools(server: McpServer, knowledgeBase?: SearchPro
         .describe('Minimum similarity score threshold (0-1, default 0.3). Lower = more results, higher = stricter matching.'),
     },
     READ_ONLY,
-    async (args) => {
+    async (args) => withToolTelemetry('search_knowledge', async () => {
       try {
         const { query, topK, type, minScore } = args;
         if (!knowledgeBase || knowledgeBase.size === 0) {
@@ -310,7 +370,7 @@ export function registerSearchTools(server: McpServer, knowledgeBase?: SearchPro
       } catch (error: unknown) {
         return toolError('search_knowledge', args, error);
       }
-    }
+    })
   );
 
   // Tool 23: deep_search_events — same scoring + exhaustive data scan
@@ -336,10 +396,22 @@ export function registerSearchTools(server: McpServer, knowledgeBase?: SearchPro
         .describe('Additional exact keywords for matching. Auto-extracted from query if omitted.'),
     },
     READ_ONLY,
-    async (args) => {
+    async (args) => withToolTelemetry('deep_search_events', async () => {
       try {
         const { query, sessionId, tenantId, topK, minScore, keywords } = args;
-        const { events, sessionIds } = await fetchSessionEvents(sessionId, tenantId);
+
+        // Extract keywords FIRST for index-based pre-filtering
+        const queryKeywords = keywords ?? extractKeywords(query);
+        if (queryKeywords.length === 0) {
+          return {
+            content: [{
+              type: 'text' as const,
+              text: JSON.stringify({ query, resultCount: 0, results: [], note: 'No searchable keywords extracted from query.' }),
+            }],
+          };
+        }
+
+        const { events, sessionIds, searchMethod } = await fetchSessionEvents(sessionId, tenantId, queryKeywords);
 
         if (events.length === 0) {
           return {
@@ -349,16 +421,6 @@ export function registerSearchTools(server: McpServer, knowledgeBase?: SearchPro
                 query, resultCount: 0, eventsMatched: 0,
                 results: [], note: 'No events found.',
               }),
-            }],
-          };
-        }
-
-        const queryKeywords = keywords ?? extractKeywords(query);
-        if (queryKeywords.length === 0) {
-          return {
-            content: [{
-              type: 'text' as const,
-              text: JSON.stringify({ query, resultCount: 0, results: [], note: 'No searchable keywords extracted from query.' }),
             }],
           };
         }
@@ -391,6 +453,7 @@ export function registerSearchTools(server: McpServer, knowledgeBase?: SearchPro
             text: JSON.stringify({
               query,
               searchBackend: 'weighted-keyword',
+              searchMethod,
               keywordsUsed: queryKeywords,
               sessionsSearched: sessionIds,
               totalEventsScanned: events.length,
@@ -403,6 +466,6 @@ export function registerSearchTools(server: McpServer, knowledgeBase?: SearchPro
       } catch (error: unknown) {
         return toolError('deep_search_events', args, error);
       }
-    }
+    })
   );
 }

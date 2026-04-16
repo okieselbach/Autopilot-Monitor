@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { apiFetch, buildQuery } from '../client.js';
+import { withToolTelemetry } from '../telemetry.js';
 import { READ_ONLY } from './shared.js';
 import { toolError } from './error-handler.js';
 
@@ -65,7 +66,7 @@ export function registerSessionTools(server: McpServer): void {
       limit: z.coerce.number().min(1).max(100).optional().default(50).describe('Maximum number of results (1-100, default 50)'),
     },
     READ_ONLY,
-    async (args) => {
+    async (args) => withToolTelemetry('search_sessions', async () => {
       try {
         const { deviceProperties, tenantId, ...rest } = args;
         const queryParams: Record<string, string | number | boolean | undefined | null> = { ...rest };
@@ -81,7 +82,7 @@ export function registerSessionTools(server: McpServer): void {
       } catch (error: unknown) {
         return toolError('search_sessions', args, error);
       }
-    }
+    })
   );
 
   // Tool 2: search_sessions_by_event
@@ -97,7 +98,7 @@ export function registerSessionTools(server: McpServer): void {
       limit: z.coerce.number().min(1).max(100).optional().default(50),
     },
     READ_ONLY,
-    async (args) => {
+    async (args) => withToolTelemetry('search_sessions_by_event', async () => {
       try {
         const { tenantId, ...rest } = args;
         const params: Record<string, string | number | boolean | undefined | null> = { ...rest };
@@ -108,7 +109,7 @@ export function registerSessionTools(server: McpServer): void {
       } catch (error: unknown) {
         return toolError('search_sessions_by_event', args, error);
       }
-    }
+    })
   );
 
   // Tool 3: get_session
@@ -121,7 +122,7 @@ export function registerSessionTools(server: McpServer): void {
       includeAnalysis: z.boolean().optional().default(false).describe('Include rule analysis results (failure explanations and remediation steps)'),
     },
     READ_ONLY,
-    async (args) => {
+    async (args) => withToolTelemetry('get_session', async () => {
       try {
         const { sessionId, tenantId, includeAnalysis } = args;
         const q = buildQuery({ tenantId } as Record<string, string | undefined>);
@@ -138,7 +139,7 @@ export function registerSessionTools(server: McpServer): void {
       } catch (error: unknown) {
         return toolError('get_session', args, error);
       }
-    }
+    })
   );
 
   // Tool 4: get_session_events
@@ -157,7 +158,7 @@ export function registerSessionTools(server: McpServer): void {
       source: z.string().optional().describe('Filter by event source/app name (e.g. "MicrosoftTeams")'),
     },
     READ_ONLY,
-    async (args) => {
+    async (args) => withToolTelemetry('get_session_events', async () => {
       try {
         const { sessionId, tenantId, ...filters } = args;
         const q = buildQuery({ tenantId } as Record<string, string | undefined>);
@@ -178,7 +179,7 @@ export function registerSessionTools(server: McpServer): void {
       } catch (error: unknown) {
         return toolError('get_session_events', args, error);
       }
-    }
+    })
   );
 
   // Tool 5: get_session_summary
@@ -195,7 +196,7 @@ export function registerSessionTools(server: McpServer): void {
       tenantId: z.string().optional().describe('Tenant ID. If omitted, auto-resolved from the session (Global Admin can access any tenant).'),
     },
     READ_ONLY,
-    async (args) => {
+    async (args) => withToolTelemetry('get_session_summary', async () => {
       try {
         const { sessionId, tenantId } = args;
         const q = buildQuery({ tenantId } as Record<string, string | undefined>);
@@ -312,7 +313,7 @@ export function registerSessionTools(server: McpServer): void {
       } catch (error: unknown) {
         return toolError('get_session_summary', args, error);
       }
-    }
+    })
   );
 
   // Tool 6: get_metrics
@@ -325,7 +326,7 @@ export function registerSessionTools(server: McpServer): void {
       days: z.coerce.number().refine(v => [7, 30, 90].includes(v), { message: 'days must be 7, 30, or 90' }).optional().default(30),
     },
     READ_ONLY,
-    async (args) => {
+    async (args) => withToolTelemetry('get_metrics', async () => {
       try {
         const { tenantId, ...rest } = args;
         const params: Record<string, string | number | undefined> = { ...rest };
@@ -340,7 +341,7 @@ export function registerSessionTools(server: McpServer): void {
       } catch (error: unknown) {
         return toolError('get_metrics', args, error);
       }
-    }
+    })
   );
 
   // Tool 7: search_sessions_by_cve
@@ -357,7 +358,7 @@ export function registerSessionTools(server: McpServer): void {
       limit: z.coerce.number().min(1).max(100).optional().default(50),
     },
     READ_ONLY,
-    async (args) => {
+    async (args) => withToolTelemetry('search_sessions_by_cve', async () => {
       try {
         const { tenantId, ...rest } = args;
         const params: Record<string, string | number | boolean | undefined | null> = { ...rest };
@@ -368,7 +369,7 @@ export function registerSessionTools(server: McpServer): void {
       } catch (error: unknown) {
         return toolError('search_sessions_by_cve', args, error);
       }
-    }
+    })
   );
 
   // Tool 8: list_blocked_devices
@@ -380,7 +381,7 @@ export function registerSessionTools(server: McpServer): void {
       tenantId: z.string().optional().describe('Tenant ID to scope results. Omit for cross-tenant listing (Global Admin only).'),
     },
     READ_ONLY,
-    async (args) => {
+    async (args) => withToolTelemetry('list_blocked_devices', async () => {
       try {
         const { tenantId } = args;
         const endpoint = tenantId
@@ -391,7 +392,7 @@ export function registerSessionTools(server: McpServer): void {
       } catch (error: unknown) {
         return toolError('list_blocked_devices', args, error);
       }
-    }
+    })
   );
 
   // Tool: get_ime_version_history
@@ -403,13 +404,13 @@ export function registerSessionTools(server: McpServer): void {
     'Available to all tenant members (no tenantId needed, data is global).',
     {},
     READ_ONLY,
-    async (args) => {
+    async (args) => withToolTelemetry('get_ime_version_history', async () => {
       try {
         const data = await apiFetch('/api/metrics/ime-versions');
         return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
       } catch (error: unknown) {
         return toolError('get_ime_version_history', args, error);
       }
-    }
+    })
   );
 }

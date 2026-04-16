@@ -250,6 +250,9 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
                     var upn = principal.GetUserPrincipalName() ?? "unknown";
                     var tid = principal.GetTenantId() ?? "";
                     var normalizedEndpoint = EndpointNormalizer.Normalize(requestPath);
+                    var mcpToolName = httpContext.Request.Headers["X-MCP-Tool-Name"].FirstOrDefault();
+                    if (!string.IsNullOrEmpty(mcpToolName))
+                        normalizedEndpoint = $"{mcpToolName}:{normalizedEndpoint}";
                     var repo = _userUsageRepo;
                     var logger = _logger;
                     _ = Task.Run(async () =>

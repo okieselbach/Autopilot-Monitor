@@ -32,6 +32,9 @@ param imageTag string = 'latest'
 @description('Entra ID client secret for OAuth token exchange')
 param entraClientSecret string = ''
 
+@description('Enable structured tool-call logging to stderr (queryable via Container App Logs)')
+param toolLoggingEnabled bool = false
+
 // --- Azure Container Registry ---
 
 resource acr 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
@@ -120,6 +123,7 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
             { name: 'AUTOPILOT_API_URL', value: apiUrl }
             { name: 'PORT', value: '8080' }
             { name: 'AUTOPILOT_ENTRA_CLIENT_SECRET', secretRef: 'entra-client-secret' }
+            { name: 'MCP_TOOL_LOGGING', value: toolLoggingEnabled ? 'true' : 'false' }
           ]
           probes: [
             {

@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { apiFetch, buildQuery } from '../client.js';
+import { withToolTelemetry } from '../telemetry.js';
 import { READ_ONLY, READ_ONLY_OPEN } from './shared.js';
 import { toolError } from './error-handler.js';
 
@@ -19,7 +20,7 @@ export function registerAdminTools(server: McpServer): void {
       daily: z.boolean().optional().default(false).describe('Return daily aggregated summary instead of per-endpoint breakdown'),
     },
     READ_ONLY,
-    async (args) => {
+    async (args) => withToolTelemetry('get_api_usage', async () => {
       try {
         let data: unknown;
         const params: Record<string, string | undefined> = { tenantId: args.tenantId, dateFrom: args.dateFrom, dateTo: args.dateTo };
@@ -34,7 +35,7 @@ export function registerAdminTools(server: McpServer): void {
       } catch (error: unknown) {
         return toolError('get_api_usage', args, error);
       }
-    }
+    })
   );
 
   // Tool 12: get_geographic_metrics
@@ -50,7 +51,7 @@ export function registerAdminTools(server: McpServer): void {
         .describe('Geographic grouping level (default: "city")'),
     },
     READ_ONLY,
-    async (args) => {
+    async (args) => withToolTelemetry('get_geographic_metrics', async () => {
       try {
         const { tenantId, ...rest } = args;
         const params: Record<string, string | number | undefined> = { ...rest };
@@ -61,7 +62,7 @@ export function registerAdminTools(server: McpServer): void {
       } catch (error: unknown) {
         return toolError('get_geographic_metrics', args, error);
       }
-    }
+    })
   );
 
   // Tool 13: get_geographic_sessions
@@ -79,7 +80,7 @@ export function registerAdminTools(server: McpServer): void {
       days: z.coerce.number().optional().default(30).describe('Time range in days (default: 30)'),
     },
     READ_ONLY,
-    async (args) => {
+    async (args) => withToolTelemetry('get_geographic_sessions', async () => {
       try {
         const { tenantId, country, region, city, ...rest } = args;
         const params: Record<string, string | number | undefined> = { ...rest };
@@ -95,7 +96,7 @@ export function registerAdminTools(server: McpServer): void {
       } catch (error: unknown) {
         return toolError('get_geographic_sessions', args, error);
       }
-    }
+    })
   );
 
   // Tool 14: get_platform_metrics
@@ -106,7 +107,7 @@ export function registerAdminTools(server: McpServer): void {
     'top sessions by CPU/memory, and per-agent-version breakdown. Global Admin only.',
     {},
     READ_ONLY,
-    async (args) => {
+    async (args) => withToolTelemetry('get_platform_metrics', async () => {
       try {
         type SessionMetric = {
           sessionId: string; tenantId: string; deviceName?: string; model?: string; status?: string;
@@ -172,7 +173,7 @@ export function registerAdminTools(server: McpServer): void {
       } catch (error: unknown) {
         return toolError('get_platform_metrics', args, error);
       }
-    }
+    })
   );
 
   // Tool 15: get_usage_metrics
@@ -184,7 +185,7 @@ export function registerAdminTools(server: McpServer): void {
       tenantId: z.string().optional().describe('Tenant ID for tenant-specific metrics. Omit for platform-wide overview (Global Admin only).'),
     },
     READ_ONLY,
-    async (args) => {
+    async (args) => withToolTelemetry('get_usage_metrics', async () => {
       try {
         const { tenantId } = args;
         if (tenantId) {
@@ -196,7 +197,7 @@ export function registerAdminTools(server: McpServer): void {
       } catch (error: unknown) {
         return toolError('get_usage_metrics', args, error);
       }
-    }
+    })
   );
 
   // Tool 16: get_audit_logs
@@ -208,7 +209,7 @@ export function registerAdminTools(server: McpServer): void {
       tenantId: z.string().optional().describe('Tenant ID for tenant-scoped audit log. Omit for cross-tenant view (Global Admin only).'),
     },
     READ_ONLY,
-    async (args) => {
+    async (args) => withToolTelemetry('get_audit_logs', async () => {
       try {
         const { tenantId } = args;
         const endpoint = tenantId
@@ -219,7 +220,7 @@ export function registerAdminTools(server: McpServer): void {
       } catch (error: unknown) {
         return toolError('get_audit_logs', args, error);
       }
-    }
+    })
   );
 
   // Tool 17: get_ops_events
@@ -233,7 +234,7 @@ export function registerAdminTools(server: McpServer): void {
       maxResults: z.coerce.number().min(1).max(500).optional().default(200).describe('Max events to return (default: 200)'),
     },
     READ_ONLY,
-    async (args) => {
+    async (args) => withToolTelemetry('get_ops_events', async () => {
       try {
         const params: Record<string, string | number | undefined> = {};
         if (args.category) params.category = args.category;
@@ -243,7 +244,7 @@ export function registerAdminTools(server: McpServer): void {
       } catch (error: unknown) {
         return toolError('get_ops_events', args, error);
       }
-    }
+    })
   );
 
   // Tool 18: list_session_reports
@@ -253,14 +254,14 @@ export function registerAdminTools(server: McpServer): void {
     'Global Admin only — returns reports across all tenants.',
     {},
     READ_ONLY,
-    async (args) => {
+    async (args) => withToolTelemetry('list_session_reports', async () => {
       try {
         const data = await apiFetch('/api/global/session-reports');
         return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
       } catch (error: unknown) {
         return toolError('list_session_reports', args, error);
       }
-    }
+    })
   );
 
   // ── Raw Data Tools ────────────────────────────────────────────────────
@@ -284,7 +285,7 @@ export function registerAdminTools(server: McpServer): void {
       limit: z.coerce.number().min(1).max(500).optional().default(100),
     },
     READ_ONLY,
-    async (args) => {
+    async (args) => withToolTelemetry('query_raw_events', async () => {
       try {
         const { tenantId, ...rest } = args;
         const params: Record<string, string | number | boolean | undefined | null> = { ...rest };
@@ -295,7 +296,7 @@ export function registerAdminTools(server: McpServer): void {
       } catch (error: unknown) {
         return toolError('query_raw_events', args, error);
       }
-    }
+    })
   );
 
   // Tool 19: query_raw_sessions
@@ -314,7 +315,7 @@ export function registerAdminTools(server: McpServer): void {
       limit: z.coerce.number().min(1).max(200).optional().default(50),
     },
     READ_ONLY,
-    async (args) => {
+    async (args) => withToolTelemetry('query_raw_sessions', async () => {
       try {
         const { tenantId, ...rest } = args;
         const params: Record<string, string | number | boolean | undefined | null> = { ...rest };
@@ -325,7 +326,7 @@ export function registerAdminTools(server: McpServer): void {
       } catch (error: unknown) {
         return toolError('query_raw_sessions', args, error);
       }
-    }
+    })
   );
 
   // ── Admin Diagnostic Tools ────────────────────────────────────────────
@@ -340,14 +341,14 @@ export function registerAdminTools(server: McpServer): void {
     'List all available Azure Table Storage tables that can be queried via query_table. Global Admin only.',
     {},
     READ_ONLY,
-    async (args) => {
+    async (args) => withToolTelemetry('list_tables', async () => {
       try {
         const data = await apiFetch('/api/global/raw/tables');
         return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
       } catch (error: unknown) {
         return toolError('list_tables', args, error);
       }
-    }
+    })
   );
 
   // Tool 21: query_table
@@ -363,7 +364,7 @@ export function registerAdminTools(server: McpServer): void {
       limit: z.coerce.number().min(1).max(500).optional().default(100),
     },
     READ_ONLY,
-    async (args) => {
+    async (args) => withToolTelemetry('query_table', async () => {
       try {
         const { tableName, ...rest } = args;
         const data = await apiFetch(`/api/global/raw/tables/${encodeURIComponent(tableName)}${buildQuery(rest)}`);
@@ -371,7 +372,7 @@ export function registerAdminTools(server: McpServer): void {
       } catch (error: unknown) {
         return toolError('query_table', args, error);
       }
-    }
+    })
   );
 
   // Tool 22: query_backend_logs
@@ -384,7 +385,7 @@ export function registerAdminTools(server: McpServer): void {
       timespan: z.string().optional().default('PT1H').describe('ISO 8601 duration (default: PT1H = last 1 hour). Examples: PT30M, PT6H, P1D'),
     },
     READ_ONLY_OPEN,
-    async (args) => {
+    async (args) => withToolTelemetry('query_backend_logs', async () => {
       try {
         const data = await apiFetch('/api/global/raw/logs', {
           method: 'POST',
@@ -394,7 +395,7 @@ export function registerAdminTools(server: McpServer): void {
       } catch (error: unknown) {
         return toolError('query_backend_logs', args, error);
       }
-    }
+    })
   );
 
   // Tool: get_rule_stats
@@ -411,7 +412,7 @@ export function registerAdminTools(server: McpServer): void {
       endDate: z.string().optional().describe('End date (YYYY-MM-DD). Defaults to today.'),
     },
     READ_ONLY,
-    async (args) => {
+    async (args) => withToolTelemetry('get_rule_stats', async () => {
       try {
         const params = buildQuery({
           startDate: args.startDate,
@@ -426,6 +427,6 @@ export function registerAdminTools(server: McpServer): void {
       } catch (error: unknown) {
         return toolError('get_rule_stats', args, error);
       }
-    }
+    })
   );
 }

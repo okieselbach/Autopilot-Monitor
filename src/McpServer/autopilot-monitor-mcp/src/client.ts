@@ -50,6 +50,20 @@ export function getCurrentToken(): string | undefined {
   return tokenStore.getStore();
 }
 
+/**
+ * Per-request tool name store. Carries the MCP tool name through the async
+ * context so apiFetch can send it as X-MCP-Tool-Name header to the backend.
+ */
+const toolNameStore = new AsyncLocalStorage<string>();
+
+export function runWithToolName<T>(toolName: string, fn: () => T | Promise<T>): T | Promise<T> {
+  return toolNameStore.run(toolName, fn);
+}
+
+export function getCurrentToolName(): string | undefined {
+  return toolNameStore.getStore();
+}
+
 async function apiFetch(path: string, options: RequestInit = {}): Promise<unknown> {
   const token = getCurrentToken();
   if (!token) {
@@ -63,6 +77,9 @@ async function apiFetch(path: string, options: RequestInit = {}): Promise<unknow
     'X-Client-Source': 'mcp',
     ...((options.headers as Record<string, string>) ?? {}),
   };
+
+  const toolName = getCurrentToolName();
+  if (toolName) headers['X-MCP-Tool-Name'] = toolName;
 
   // Apply timeout to prevent hanging on unresponsive backend
   const signal = options.signal ?? AbortSignal.timeout(API_TIMEOUT_MS);

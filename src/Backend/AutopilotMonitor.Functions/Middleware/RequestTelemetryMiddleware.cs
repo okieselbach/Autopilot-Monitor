@@ -78,6 +78,14 @@ public class RequestTelemetryMiddleware : IFunctionsWorkerMiddleware
             requestTelemetry.Properties["HttpMethod"] = method;
             requestTelemetry.Properties["HttpPath"] = httpContext.Request.Path.Value ?? "";
 
+            var clientSource = httpContext.Request.Headers["X-Client-Source"].FirstOrDefault();
+            if (!string.IsNullOrEmpty(clientSource))
+                requestTelemetry.Properties["ClientSource"] = clientSource;
+
+            var mcpToolName = httpContext.Request.Headers["X-MCP-Tool-Name"].FirstOrDefault();
+            if (!string.IsNullOrEmpty(mcpToolName))
+                requestTelemetry.Properties["McpToolName"] = mcpToolName;
+
             if (context.Items.TryGetValue("CorrelationId", out var corrId) && corrId is string correlationId)
                 requestTelemetry.Properties["CorrelationId"] = correlationId;
 
