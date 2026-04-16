@@ -214,7 +214,7 @@ export default function AgentAnalyzersSection({
           <div className="flex items-center justify-between p-4 rounded-lg border border-gray-200 hover:border-rose-200 transition-colors">
             <div>
               <p className="font-medium text-gray-900">Enable Integrity Bypass Analyzer</p>
-              <p className="text-sm text-gray-500">Run at enrollment start and completion to surface devices with bypassed Win11 hardware gates</p>
+              <p className="text-sm text-gray-500">Run at enrollment start to surface devices with bypassed Win11 hardware gates</p>
             </div>
             <button
               onClick={() => setEnableIntegrityBypassAnalyzer(!enableIntegrityBypassAnalyzer)}
