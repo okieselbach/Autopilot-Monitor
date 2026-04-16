@@ -236,7 +236,8 @@ namespace AutopilotMonitor.Functions.Services
                 GeoCity = entity.GetString("GeoCity") ?? string.Empty,
                 GeoLoc = entity.GetString("GeoLoc") ?? string.Empty,
                 PlatformScriptCount = SafeGetInt32(entity, "PlatformScriptCount") ?? 0,
-                RemediationScriptCount = SafeGetInt32(entity, "RemediationScriptCount") ?? 0
+                RemediationScriptCount = SafeGetInt32(entity, "RemediationScriptCount") ?? 0,
+                ExcessiveEventsAlerted = entity.GetBoolean("ExcessiveEventsAlerted") ?? false
             };
         }
 
@@ -1732,7 +1733,8 @@ namespace AutopilotMonitor.Functions.Services
                 GeoCity = entity.GetString("GeoCity") ?? string.Empty,
                 GeoLoc = entity.GetString("GeoLoc") ?? string.Empty,
                 PlatformScriptCount = SafeGetInt32(entity, "PlatformScriptCount") ?? 0,
-                RemediationScriptCount = SafeGetInt32(entity, "RemediationScriptCount") ?? 0
+                RemediationScriptCount = SafeGetInt32(entity, "RemediationScriptCount") ?? 0,
+                ExcessiveEventsAlerted = entity.GetBoolean("ExcessiveEventsAlerted") ?? false
             };
         }
 
@@ -1883,6 +1885,82 @@ namespace AutopilotMonitor.Functions.Services
             }
 
             return results.OrderByDescending(e => e.FirstSeenAt).ToList();
+        }
+
+        #endregion
+
+        #region Excessive-Event Detection
+
+        /// <summary>
+        /// Returns sessions in the given tenant whose EventCount exceeds the threshold.
+        /// Projects only the fields needed for the idempotency check — avoids full entity read.
+        /// Never throws: on failure returns an empty list (maintenance scan is best-effort).
+        /// </summary>
+        public async Task<List<SessionSummary>> GetSessionsWithEventCountAboveAsync(string tenantId, int threshold)
+        {
+            SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
+
+            var matches = new List<SessionSummary>();
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
+                var query = tableClient.QueryAsync<TableEntity>(
+                    filter: $"PartitionKey eq '{tenantId}' and EventCount gt {threshold}",
+                    select: new[] { "PartitionKey", "RowKey", "EventCount", "ExcessiveEventsAlerted" });
+
+                await foreach (var entity in query)
+                {
+                    matches.Add(new SessionSummary
+                    {
+                        TenantId = entity.PartitionKey,
+                        SessionId = entity.RowKey,
+                        EventCount = SafeGetInt32(entity, "EventCount") ?? 0,
+                        ExcessiveEventsAlerted = entity.GetBoolean("ExcessiveEventsAlerted") ?? false
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to query sessions with EventCount > {Threshold} for tenant {TenantId}", threshold, tenantId);
+            }
+            return matches;
+        }
+
+        /// <summary>
+        /// Sets ExcessiveEventsAlerted=true on the session entity to make the ops-alert emission
+        /// idempotent across maintenance runs. Best-effort Merge write; failures are logged only.
+        /// </summary>
+        public async Task MarkExcessiveEventsAlertedAsync(string tenantId, string sessionId)
+        {
+            SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
+            SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
+
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
+                var update = new TableEntity(tenantId, sessionId)
+                {
+                    ["ExcessiveEventsAlerted"] = true
+                };
+                await tableClient.UpdateEntityAsync(update, ETag.All, TableUpdateMode.Merge);
+
+                // Dual-write into SessionsIndex so dashboard queries see the flag without a separate read.
+                try
+                {
+                    var entity = await tableClient.GetEntityAsync<TableEntity>(tenantId, sessionId,
+                        select: new[] { "IndexRowKey" });
+                    var indexRowKey = entity.Value.GetString("IndexRowKey");
+                    await MergeSessionIndexAsync(tenantId, indexRowKey, update);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "SessionsIndex merge skipped for ExcessiveEventsAlerted on {SessionId}", sessionId);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to mark session {SessionId} as ExcessiveEventsAlerted", sessionId);
+            }
         }
 
         #endregion

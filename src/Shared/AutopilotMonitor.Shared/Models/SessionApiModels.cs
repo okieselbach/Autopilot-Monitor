@@ -264,6 +264,12 @@ namespace AutopilotMonitor.Shared.Models
         public int RemediationScriptCount { get; set; }
 
         /// <summary>
+        /// True once maintenance has emitted an ExcessiveSessionEvents ops alert for this session.
+        /// Prevents duplicate alerts on subsequent maintenance runs for the same runaway session.
+        /// </summary>
+        public bool ExcessiveEventsAlerted { get; set; }
+
+        /// <summary>
         /// JSON-serialized <see cref="System.Collections.Generic.List{T}"/> of <see cref="ServerAction"/>
         /// pending delivery to the agent. Empty string when no actions are queued.
         /// The Ingest function reads this alongside the session's status fields (no extra I/O),

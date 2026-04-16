@@ -1,3 +1,4 @@
+using Azure;
 using Azure.Data.Tables;
 using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Shared;
@@ -376,40 +377,13 @@ namespace AutopilotMonitor.Functions.Services
             SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
             SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
 
-            try
-            {
-                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Events);
-
-                // Query all events for this session using the same PartitionKey format as StoreEventAsync
-                var partitionKey = $"{tenantId}_{sessionId}";
-                var filter = $"PartitionKey eq '{partitionKey}'";
-                var events = tableClient.QueryAsync<TableEntity>(filter);
-
-                int deletedCount = 0;
-                var batch = new List<TableTransactionAction>();
-                await foreach (var eventEntity in events)
-                {
-                    batch.Add(new TableTransactionAction(TableTransactionActionType.Delete, eventEntity));
-                    deletedCount++;
-                    if (batch.Count >= 100)
-                    {
-                        await tableClient.SubmitTransactionAsync(batch);
-                        batch.Clear();
-                    }
-                }
-                if (batch.Count > 0)
-                {
-                    await tableClient.SubmitTransactionAsync(batch);
-                }
-
-                _logger.LogInformation($"Deleted {deletedCount} events for session {sessionId}");
-                return deletedCount;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, $"Failed to delete events for session {sessionId}");
-                return 0;
-            }
+            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Events);
+            var partitionKey = $"{tenantId}_{sessionId}";
+            var filter = $"PartitionKey eq '{partitionKey}'";
+            var deleted = await DeleteByFilterInBatchesAsync(tableClient, filter, $"events for session {sessionId}");
+            if (deleted > 0)
+                _logger.LogInformation($"Deleted {deleted} events for session {sessionId}");
+            return deleted;
         }
 
         /// <summary>
@@ -420,36 +394,10 @@ namespace AutopilotMonitor.Functions.Services
             SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
             SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
 
-            try
-            {
-                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.RuleResults);
-                var partitionKey = $"{tenantId}_{sessionId}";
-                var query = tableClient.QueryAsync<TableEntity>(filter: $"PartitionKey eq '{partitionKey}'");
-
-                int deletedCount = 0;
-                var batch = new List<TableTransactionAction>();
-                await foreach (var entity in query)
-                {
-                    batch.Add(new TableTransactionAction(TableTransactionActionType.Delete, entity));
-                    deletedCount++;
-                    if (batch.Count >= 100)
-                    {
-                        await tableClient.SubmitTransactionAsync(batch);
-                        batch.Clear();
-                    }
-                }
-                if (batch.Count > 0)
-                {
-                    await tableClient.SubmitTransactionAsync(batch);
-                }
-
-                return deletedCount;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, $"Failed to delete rule results for session {sessionId}");
-                return 0;
-            }
+            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.RuleResults);
+            var partitionKey = $"{tenantId}_{sessionId}";
+            var filter = $"PartitionKey eq '{partitionKey}'";
+            return await DeleteByFilterInBatchesAsync(tableClient, filter, $"rule results for session {sessionId}");
         }
 
         /// <summary>
@@ -460,34 +408,66 @@ namespace AutopilotMonitor.Functions.Services
             SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
             SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
 
+            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.AppInstallSummaries);
+            // AppInstallSummaries PK=tenantId, so all filtered rows still share the same PK → batch-tx-safe.
+            var filter = $"PartitionKey eq '{tenantId}' and SessionId eq '{sessionId}'";
+            return await DeleteByFilterInBatchesAsync(tableClient, filter, $"app install summaries for session {sessionId}");
+        }
+
+        /// <summary>
+        /// Deletes all entities matching the filter from the given table.
+        /// Uses projected query (PK/RK only) to minimize payload, and submits 100-entity
+        /// batch transactions in parallel (up to 4 in flight) for faster bulk delete.
+        /// REQUIRES all matched rows to share the same PartitionKey (Table Storage batch constraint).
+        /// </summary>
+        private async Task<int> DeleteByFilterInBatchesAsync(TableClient tableClient, string filter, string contextForLogs)
+        {
+            const int maxParallelBatches = 4;
+            const int batchSize = 100;
+
             try
             {
-                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.AppInstallSummaries);
-                var query = tableClient.QueryAsync<TableEntity>(
-                    filter: $"PartitionKey eq '{tenantId}' and SessionId eq '{sessionId}'");
+                // Project to PK/RK only — drastically reduces query bytes for large sessions.
+                var query = tableClient.QueryAsync<TableEntity>(filter: filter, select: new[] { "PartitionKey", "RowKey" });
 
                 int deletedCount = 0;
-                var batch = new List<TableTransactionAction>();
+                var batch = new List<TableTransactionAction>(batchSize);
+                var gate = new SemaphoreSlim(maxParallelBatches);
+                var inFlight = new List<Task>();
+
+                async Task SubmitAsync(List<TableTransactionAction> snapshot)
+                {
+                    await gate.WaitAsync().ConfigureAwait(false);
+                    try { await tableClient.SubmitTransactionAsync(snapshot).ConfigureAwait(false); }
+                    finally { gate.Release(); }
+                }
+
                 await foreach (var entity in query)
                 {
-                    batch.Add(new TableTransactionAction(TableTransactionActionType.Delete, entity));
+                    // ETag.All → unconditional delete (safe for maintenance cleanup; no optimistic concurrency needed).
+                    var stub = new TableEntity(entity.PartitionKey, entity.RowKey) { ETag = ETag.All };
+                    batch.Add(new TableTransactionAction(TableTransactionActionType.Delete, stub));
                     deletedCount++;
-                    if (batch.Count >= 100)
+                    if (batch.Count >= batchSize)
                     {
-                        await tableClient.SubmitTransactionAsync(batch);
-                        batch.Clear();
+                        var snapshot = batch;
+                        batch = new List<TableTransactionAction>(batchSize);
+                        inFlight.Add(SubmitAsync(snapshot));
                     }
                 }
                 if (batch.Count > 0)
                 {
-                    await tableClient.SubmitTransactionAsync(batch);
+                    inFlight.Add(SubmitAsync(batch));
                 }
+
+                if (inFlight.Count > 0)
+                    await Task.WhenAll(inFlight).ConfigureAwait(false);
 
                 return deletedCount;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"Failed to delete app install summaries for session {sessionId}");
+                _logger.LogError(ex, $"Failed to delete {contextForLogs}");
                 return 0;
             }
         }

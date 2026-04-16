@@ -84,6 +84,12 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
         public Task UpdateSessionImeAgentVersionAsync(string tenantId, string sessionId, string version)
             => _storage.UpdateSessionImeAgentVersionAsync(tenantId, sessionId, version);
 
+        public Task<List<SessionSummary>> GetSessionsWithEventCountAboveAsync(string tenantId, int threshold)
+            => _storage.GetSessionsWithEventCountAboveAsync(tenantId, threshold);
+
+        public Task MarkExcessiveEventsAlertedAsync(string tenantId, string sessionId)
+            => _storage.MarkExcessiveEventsAlertedAsync(tenantId, sessionId);
+
         public Task<bool> RecordImeVersionAsync(string version, string tenantId, string sessionId)
             => _storage.RecordImeVersionAsync(version, tenantId, sessionId);
 

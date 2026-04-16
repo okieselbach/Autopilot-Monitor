@@ -54,6 +54,18 @@ namespace AutopilotMonitor.Shared.DataAccess
         /// </summary>
         Task<List<ServerAction>> FetchAndClearPendingActionsAsync(string tenantId, string sessionId);
 
+        // --- Excessive-Event Detection ---
+        /// <summary>
+        /// Returns sessions in <paramref name="tenantId"/> whose EventCount exceeds <paramref name="threshold"/>.
+        /// Used by maintenance to surface runaway sessions (likely agent loop bugs).
+        /// </summary>
+        Task<List<SessionSummary>> GetSessionsWithEventCountAboveAsync(string tenantId, int threshold);
+
+        /// <summary>
+        /// Marks the session as already-alerted so maintenance only emits one ops event per runaway session.
+        /// </summary>
+        Task MarkExcessiveEventsAlertedAsync(string tenantId, string sessionId);
+
         // --- IME Version History ---
         Task<bool> RecordImeVersionAsync(string version, string tenantId, string sessionId);
         Task<List<ImeVersionHistoryEntry>> GetImeVersionHistoryAsync();

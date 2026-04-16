@@ -91,6 +91,11 @@ namespace AutopilotMonitor.Functions.Services
                 $"{sessionCount} session(s) timed out after {timeoutHours}h",
                 tenantId, "System.Maintenance", new { sessionCount, timeoutHours });
 
+        public Task RecordExcessiveSessionEventsAsync(string tenantId, string sessionId, int eventCount, int threshold)
+            => WriteAsync(OpsEventCategory.Agent, "ExcessiveSessionEvents", OpsEventSeverity.Warning,
+                $"Session {sessionId} has {eventCount} events (threshold {threshold}) — likely agent loop bug",
+                tenantId, "System.Maintenance", new { sessionId, eventCount, threshold });
+
         public Task RecordNewImeVersionDetectedAsync(string version, string tenantId, string sessionId)
             => WriteAsync(OpsEventCategory.Agent, "NewImeVersionDetected", OpsEventSeverity.Warning,
                 $"New IME agent version detected: {version}",
