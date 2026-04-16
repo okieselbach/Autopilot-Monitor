@@ -309,6 +309,12 @@ namespace AutopilotMonitor.Shared.Models
         public bool? EnableSoftwareInventoryAnalyzer { get; set; } = null;
 
         /// <summary>
+        /// Whether the IntegrityBypassAnalyzer is enabled for this tenant's devices.
+        /// null = use agent default (true).
+        /// </summary>
+        public bool? EnableIntegrityBypassAnalyzer { get; set; } = null;
+
+        /// <summary>
         /// JSON-serialized list of additional local account names that are considered expected
         /// on a newly enrolled device (merged with built-in defaults on the agent).
         /// Example: ["SupportAdmin", "TechDesk"]

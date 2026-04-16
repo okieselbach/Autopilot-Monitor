@@ -397,5 +397,14 @@ namespace AutopilotMonitor.Shared.Models
         /// Default: true
         /// </summary>
         public bool EnableSoftwareInventoryAnalyzer { get; set; } = false;
+
+        /// <summary>
+        /// Whether to run the IntegrityBypassAnalyzer at startup and shutdown.
+        /// Detects Windows 11 TPM/SecureBoot/CPU/RAM/Disk install-time bypass keys,
+        /// the MoSetup upgrade bypass flag, the per-user PCHC UpgradeEligibility flag,
+        /// and suspicious post-OOBE SetupComplete/ErrorHandler scripts.
+        /// Default: true
+        /// </summary>
+        public bool EnableIntegrityBypassAnalyzer { get; set; } = true;
     }
 }

@@ -92,6 +92,8 @@ interface TenantConfigContextValue {
   setNewAllowedAccount: (v: string) => void;
   enableSoftwareInventoryAnalyzer: boolean;
   setEnableSoftwareInventoryAnalyzer: (v: boolean) => void;
+  enableIntegrityBypassAnalyzer: boolean;
+  setEnableIntegrityBypassAnalyzer: (v: boolean) => void;
   handleSaveAgentAnalyzers: () => void;
   handleResetAgentAnalyzers: () => void;
 
@@ -307,6 +309,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
   const [localAdminAllowedAccounts, setLocalAdminAllowedAccounts] = useState<string[]>([]);
   const [newAllowedAccount, setNewAllowedAccount] = useState("");
   const [enableSoftwareInventoryAnalyzer, setEnableSoftwareInventoryAnalyzer] = useState(false);
+  const [enableIntegrityBypassAnalyzer, setEnableIntegrityBypassAnalyzer] = useState(true);
 
   // Unrestricted mode
   const [unrestrictedMode, setUnrestrictedMode] = useState(false);
@@ -413,6 +416,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
           setLocalAdminAllowedAccounts([]);
         }
         setEnableSoftwareInventoryAnalyzer(data.enableSoftwareInventoryAnalyzer ?? false);
+        setEnableIntegrityBypassAnalyzer(data.enableIntegrityBypassAnalyzer ?? true);
         setUnrestrictedMode(data.unrestrictedMode ?? false);
 
         // Parse SAS expiry and fire notification to bell if needed
@@ -599,6 +603,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
         enableLocalAdminAnalyzer,
         localAdminAllowedAccountsJson: localAdminAllowedAccounts.length > 0 ? JSON.stringify(localAdminAllowedAccounts) : "",
         enableSoftwareInventoryAnalyzer,
+        enableIntegrityBypassAnalyzer,
         unrestrictedMode,
       };
 
@@ -646,7 +651,8 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
     slaNotifyOnSuccessRateBreach, slaSuccessRateNotifyThreshold, slaNotifyOnDurationBreach,
     slaNotifyOnAppInstallBreach, slaNotifyOnConsecutiveFailures, slaConsecutiveFailureThreshold,
     diagnosticsBlobSasUrl, diagnosticsUploadMode, tenantDiagPaths,
-    enableLocalAdminAnalyzer, localAdminAllowedAccounts, enableSoftwareInventoryAnalyzer, unrestrictedMode,
+    enableLocalAdminAnalyzer, localAdminAllowedAccounts, enableSoftwareInventoryAnalyzer,
+    enableIntegrityBypassAnalyzer, unrestrictedMode,
   ]);
 
   // -----------------------------------------------------------------------
@@ -837,6 +843,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
     } catch { setLocalAdminAllowedAccounts([]); }
     setNewAllowedAccount("");
     setEnableSoftwareInventoryAnalyzer(config.enableSoftwareInventoryAnalyzer ?? false);
+    setEnableIntegrityBypassAnalyzer(config.enableIntegrityBypassAnalyzer ?? true);
   }, [config]);
 
   const handleSaveNotifications = useCallback(() => saveConfiguration("notifications"), [saveConfiguration]);
@@ -1191,6 +1198,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
       localAdminAllowedAccounts, setLocalAdminAllowedAccounts,
       newAllowedAccount, setNewAllowedAccount,
       enableSoftwareInventoryAnalyzer, setEnableSoftwareInventoryAnalyzer,
+      enableIntegrityBypassAnalyzer, setEnableIntegrityBypassAnalyzer,
       handleSaveAgentAnalyzers, handleResetAgentAnalyzers,
 
       // Unrestricted mode

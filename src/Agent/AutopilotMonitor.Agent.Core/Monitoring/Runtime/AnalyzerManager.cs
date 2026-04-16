@@ -70,6 +70,21 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Runtime
                 _logger.Info("SoftwareInventoryAnalyzer disabled by remote config");
             }
 
+            if (analyzerConfig.EnableIntegrityBypassAnalyzer)
+            {
+                _analyzers.Add(new IntegrityBypassAnalyzer(
+                    _configuration.SessionId,
+                    _configuration.TenantId,
+                    _emitEvent,
+                    _logger
+                ));
+                _logger.Info("IntegrityBypassAnalyzer registered");
+            }
+            else
+            {
+                _logger.Info("IntegrityBypassAnalyzer disabled by remote config");
+            }
+
             _logger.Info($"Analyzers initialized: {_analyzers.Count} active");
         }
 

@@ -141,7 +141,7 @@ namespace AutopilotMonitor.Functions.Functions.Config
             var response = req.CreateResponse(HttpStatusCode.OK);
             await response.WriteAsJsonAsync(new AgentConfigResponse
             {
-                ConfigVersion = 24, // Configurable ModernDeploymentHarmlessEventIds (noise suppression)
+                ConfigVersion = 25, // IntegrityBypassAnalyzer flag
                 UploadIntervalSeconds = 10,
                 SelfDestructOnComplete = tenantConfig.SelfDestructOnComplete ?? true,
                 KeepLogFile = tenantConfig.KeepLogFile ?? false,
@@ -165,7 +165,8 @@ namespace AutopilotMonitor.Functions.Functions.Config
                 {
                     EnableLocalAdminAnalyzer = tenantConfig.EnableLocalAdminAnalyzer ?? true,
                     LocalAdminAllowedAccounts = tenantConfig.GetLocalAdminAllowedAccounts(),
-                    EnableSoftwareInventoryAnalyzer = tenantConfig.EnableSoftwareInventoryAnalyzer ?? false
+                    EnableSoftwareInventoryAnalyzer = tenantConfig.EnableSoftwareInventoryAnalyzer ?? false,
+                    EnableIntegrityBypassAnalyzer = tenantConfig.EnableIntegrityBypassAnalyzer ?? true
                 },
                 LatestAgentSha256 = adminConfig.LatestAgentSha256,
                 LatestAgentExeSha256 = adminConfig.LatestAgentExeSha256,

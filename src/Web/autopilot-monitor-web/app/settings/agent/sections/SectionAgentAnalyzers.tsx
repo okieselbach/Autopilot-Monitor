@@ -10,6 +10,7 @@ export function SectionAgentAnalyzers() {
     localAdminAllowedAccounts, setLocalAdminAllowedAccounts,
     newAllowedAccount, setNewAllowedAccount,
     enableSoftwareInventoryAnalyzer, setEnableSoftwareInventoryAnalyzer,
+    enableIntegrityBypassAnalyzer, setEnableIntegrityBypassAnalyzer,
     handleSaveAgentAnalyzers, handleResetAgentAnalyzers,
     savingSection,
   } = useTenantConfig();
@@ -26,6 +27,8 @@ export function SectionAgentAnalyzers() {
         setNewAllowedAccount={setNewAllowedAccount}
         enableSoftwareInventoryAnalyzer={enableSoftwareInventoryAnalyzer}
         setEnableSoftwareInventoryAnalyzer={setEnableSoftwareInventoryAnalyzer}
+        enableIntegrityBypassAnalyzer={enableIntegrityBypassAnalyzer}
+        setEnableIntegrityBypassAnalyzer={setEnableIntegrityBypassAnalyzer}
         onSave={handleSaveAgentAnalyzers}
         onReset={handleResetAgentAnalyzers}
         saving={savingSection === "agentAnalyzers"}

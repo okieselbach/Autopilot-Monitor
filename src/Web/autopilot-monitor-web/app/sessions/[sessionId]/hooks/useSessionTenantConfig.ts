@@ -7,6 +7,7 @@ import { authenticatedFetch } from "@/lib/authenticatedFetch";
 interface UseSessionTenantConfigReturn {
   showScriptOutput: boolean;
   enableSoftwareInventoryAnalyzer: boolean;
+  enableIntegrityBypassAnalyzer: boolean;
 }
 
 /**
@@ -20,6 +21,7 @@ export function useSessionTenantConfig(
 ): UseSessionTenantConfigReturn {
   const [showScriptOutput, setShowScriptOutput] = useState(true);
   const [enableSoftwareInventoryAnalyzer, setEnableSoftwareInventoryAnalyzer] = useState(false);
+  const [enableIntegrityBypassAnalyzer, setEnableIntegrityBypassAnalyzer] = useState(true);
 
   useEffect(() => {
     if (!sessionTenantId) return;
@@ -32,10 +34,11 @@ export function useSessionTenantConfig(
         if (cancelled) return;
         setShowScriptOutput(cfg.showScriptOutput ?? true);
         setEnableSoftwareInventoryAnalyzer(cfg.enableSoftwareInventoryAnalyzer ?? false);
+        setEnableIntegrityBypassAnalyzer(cfg.enableIntegrityBypassAnalyzer ?? true);
       } catch { /* non-fatal */ }
     })();
     return () => { cancelled = true; };
   }, [sessionTenantId, getAccessToken]);
 
-  return { showScriptOutput, enableSoftwareInventoryAnalyzer };
+  return { showScriptOutput, enableSoftwareInventoryAnalyzer, enableIntegrityBypassAnalyzer };
 }

@@ -28,6 +28,7 @@ import PhaseTimeline from "./components/PhaseTimeline";
 import EventTimeline from "./components/EventTimeline";
 import AnalysisResultsSection from "./components/AnalysisResultsSection";
 import VulnerabilityReportSection from "./components/VulnerabilityReportSection";
+import IntegrityBypassSection from "./components/IntegrityBypassSection";
 import AdminOverrideModal from "./components/AdminOverrideModal";
 import ReportSessionModal from "./components/ReportSessionModal";
 import { usePageSections } from "../../../hooks/usePageSections";
@@ -51,6 +52,7 @@ export default function SessionDetailPage() {
   const [reportSubmitting, setReportSubmitting] = useState(false);
   const [analysisExpanded, setAnalysisExpanded] = useState(true);
   const [vulnerabilityReportExpanded, setVulnerabilityReportExpanded] = useState(false);
+  const [integrityBypassExpanded, setIntegrityBypassExpanded] = useState(false);
   const [phaseTimelineExpanded, setPhaseTimelineExpanded] = useState(true);
   const [perfExpanded, setPerfExpanded] = useState(true);
   const [timelineExpanded, setTimelineExpanded] = useState(true);
@@ -103,7 +105,7 @@ export default function SessionDetailPage() {
   const { session, setSession, sessionTenantId, loading } = detail;
   const events = eventsApi.events;
   const { analysisResults, loadingAnalysis, vulnerabilityReport, fetchAnalysisResults, fetchVulnerabilityReport } = analysis;
-  const { showScriptOutput, enableSoftwareInventoryAnalyzer } = tenantConfig;
+  const { showScriptOutput, enableSoftwareInventoryAnalyzer, enableIntegrityBypassAnalyzer } = tenantConfig;
   const {
     filteredEvents,
     appSummaryStats,
@@ -508,6 +510,17 @@ export default function SessionDetailPage() {
                 expanded={vulnerabilityReportExpanded}
                 setExpanded={setVulnerabilityReportExpanded}
                 onRescan={() => fetchVulnerabilityReport(true)}
+              />
+            </div>
+          )}
+
+          {/* Integrity Bypass — only when analyzer is enabled for this tenant and the session has produced at least one event */}
+          {!isGatherRulesSession && enableIntegrityBypassAnalyzer && (
+            <div id="section-integrity-bypass">
+              <IntegrityBypassSection
+                events={events}
+                expanded={integrityBypassExpanded}
+                setExpanded={setIntegrityBypassExpanded}
               />
             </div>
           )}

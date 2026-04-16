@@ -11,6 +11,8 @@ interface AgentAnalyzersSectionProps {
   setNewAllowedAccount: (value: string) => void;
   enableSoftwareInventoryAnalyzer: boolean;
   setEnableSoftwareInventoryAnalyzer: (value: boolean) => void;
+  enableIntegrityBypassAnalyzer: boolean;
+  setEnableIntegrityBypassAnalyzer: (value: boolean) => void;
   onSave: () => Promise<void> | void;
   onReset: () => void;
   saving: boolean;
@@ -39,6 +41,8 @@ export default function AgentAnalyzersSection({
   setNewAllowedAccount,
   enableSoftwareInventoryAnalyzer,
   setEnableSoftwareInventoryAnalyzer,
+  enableIntegrityBypassAnalyzer,
+  setEnableIntegrityBypassAnalyzer,
   onSave,
   onReset,
   saving,
@@ -189,6 +193,34 @@ export default function AgentAnalyzersSection({
               className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${enableSoftwareInventoryAnalyzer ? 'bg-emerald-500' : 'bg-gray-300'}`}
             >
               <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${enableSoftwareInventoryAnalyzer ? 'translate-x-6' : 'translate-x-1'}`} />
+            </button>
+          </div>
+        </div>
+
+        {/* ── Divider ─────────────────────────────────────── */}
+        <div className="border-t border-gray-200" />
+
+        {/* ── Integrity Bypass Analyzer ───────────────────── */}
+        <div>
+          <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-3">Integrity Bypass Analyzer</h3>
+          <p className="text-sm text-gray-500 mb-4">
+            Detects Windows 11 &quot;unsupported hardware&quot; installations where PC Health Check / Setup-time gates were bypassed
+            (LabConfig TPM / SecureBoot / CPU / RAM / Disk bypass keys, MoSetup upgrade flag, PCHC UpgradeEligibility).
+            Also flags suspicious post-OOBE <code className="px-1 bg-gray-100 rounded">SetupComplete.cmd</code> / <code className="px-1 bg-gray-100 rounded">ErrorHandler.cmd</code> scripts.
+            Results are correlated against current TPM and SecureBoot state.
+          </p>
+
+          {/* Enable toggle */}
+          <div className="flex items-center justify-between p-4 rounded-lg border border-gray-200 hover:border-rose-200 transition-colors">
+            <div>
+              <p className="font-medium text-gray-900">Enable Integrity Bypass Analyzer</p>
+              <p className="text-sm text-gray-500">Run at enrollment start and completion to surface devices with bypassed Win11 hardware gates</p>
+            </div>
+            <button
+              onClick={() => setEnableIntegrityBypassAnalyzer(!enableIntegrityBypassAnalyzer)}
+              className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${enableIntegrityBypassAnalyzer ? 'bg-rose-500' : 'bg-gray-300'}`}
+            >
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${enableIntegrityBypassAnalyzer ? 'translate-x-6' : 'translate-x-1'}`} />
             </button>
           </div>
         </div>
