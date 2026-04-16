@@ -34,6 +34,50 @@ export function SectionKnownIssues() {
 
       <AnnouncementCard
         date="2026-04-16"
+        title="Transparency Note &mdash; Root Cause of Today's Event Data Loss"
+        type="info"
+      >
+        <p>
+          I want to share a quick note with full transparency regarding an incident from today.
+        </p>
+        <p>
+          If you notice missing events in older session timelines, this is the reason: during a
+          storage migration to a new layout that improves performance, I identified some orphaned
+          event entries from the very early days of the platform and attempted to remove them.
+          Unfortunately, part of the filter logic was not applied as expected, and I did not catch
+          the issue quickly enough. As a result, a larger number of historical event entries were
+          deleted.
+        </p>
+        <p>
+          The impact is mainly limited to older session timelines. The platform is designed so
+          that events are most valuable during the enrollment itself and shortly afterwards for
+          troubleshooting and analysis. Over time, they become less critical and are used more
+          for reporting purposes. In addition, the default configuration already removes sessions
+          and events after 90 days. Even so, the impact is real, and I want to be open about it.
+        </p>
+        <p>
+          This happened while I was implementing a new table structure to address one of the root
+          causes identified during Private Preview: performance limitations caused by the previous
+          storage design. The new layout significantly improves that area, but in this case the
+          migration also introduced this incident.
+        </p>
+        <p>
+          I take this seriously. While issues like this can happen during a Private Preview,
+          especially in a fast-moving product, I know that does not reduce the impact. At the
+          moment, I also do not have a separate staging environment, so larger refactorings
+          currently have to be carried out on the live system. That is not ideal, and I will put
+          additional operational safeguards and procedures in place to reduce the risk of this
+          happening again.
+        </p>
+        <p>
+          Thank you for your understanding, your patience, and your trust. I hope this message
+          reflects the level of transparency I want to maintain while building the platform
+          together with early adopters.
+        </p>
+      </AnnouncementCard>
+
+      <AnnouncementCard
+        date="2026-04-16"
         title="Agent Changes in Progress — Possible Detection Issues"
         type="known-issue"
       >
