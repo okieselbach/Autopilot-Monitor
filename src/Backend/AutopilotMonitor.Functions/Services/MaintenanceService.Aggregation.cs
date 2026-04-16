@@ -652,6 +652,65 @@ namespace AutopilotMonitor.Functions.Services
                 _logger.LogError(ex, "OpsEvents cleanup failed");
             }
         }
+        /// <summary>
+        /// Detects and cleans up orphaned events — events stored in the Events table
+        /// whose session no longer exists in the Sessions table.
+        /// Uses the EventSessionIndex side-table for efficient detection (no full Events scan).
+        /// Grace period: 24 hours to protect against register+ingest race conditions.
+        /// </summary>
+        private async Task CleanupOrphanedEventsAsync()
+        {
+            try
+            {
+                _logger.LogInformation("Starting orphaned events cleanup...");
+                var sw = Stopwatch.StartNew();
+
+                var orphans = await _maintenanceRepo.GetOrphanedEventSessionsAsync(TimeSpan.FromHours(24));
+
+                if (orphans.Count == 0)
+                {
+                    _logger.LogInformation("No orphaned events found");
+                    return;
+                }
+
+                _logger.LogWarning("Found {Count} orphaned event sessions, cleaning up...", orphans.Count);
+
+                int totalEventsDeleted = 0;
+                int sessionsCleanedUp = 0;
+
+                foreach (var orphan in orphans)
+                {
+                    try
+                    {
+                        var deletedEvents = await _maintenanceRepo.DeleteSessionEventsAsync(orphan.TenantId, orphan.SessionId);
+                        await _maintenanceRepo.DeleteEventSessionIndexEntryAsync(orphan.TenantId, orphan.SessionId);
+
+                        totalEventsDeleted += deletedEvents;
+                        sessionsCleanedUp++;
+
+                        _logger.LogInformation(
+                            "Cleaned orphan: TenantId={TenantId}, SessionId={SessionId}, Events={Events}",
+                            orphan.TenantId, orphan.SessionId, deletedEvents);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to cleanup orphan: TenantId={TenantId}, SessionId={SessionId}",
+                            orphan.TenantId, orphan.SessionId);
+                    }
+                }
+
+                sw.Stop();
+                _logger.LogInformation(
+                    "Orphaned events cleanup completed in {Ms}ms: {Sessions} sessions, {Events} events deleted",
+                    sw.ElapsedMilliseconds, sessionsCleanedUp, totalEventsDeleted);
+
+                await _opsEventService.RecordOrphanEventsCleanedAsync(sessionsCleanedUp, totalEventsDeleted);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Orphaned events cleanup failed");
+            }
+        }
     }
 }
 

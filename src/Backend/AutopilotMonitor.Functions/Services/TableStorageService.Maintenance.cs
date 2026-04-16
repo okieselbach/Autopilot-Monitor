@@ -624,5 +624,85 @@ namespace AutopilotMonitor.Functions.Services
                 return true; // Assume empty on error → trigger backfill
             }
         }
+
+        // ===== ORPHAN EVENT DETECTION =====
+
+        /// <summary>
+        /// Scans EventSessionIndex, checks each entry against the Sessions table,
+        /// and returns entries where no session exists and LastIngestAt is older than the grace period.
+        /// </summary>
+        public async Task<List<OrphanedEventSession>> GetOrphanedEventSessionsAsync(TimeSpan gracePeriod)
+        {
+            var orphans = new List<OrphanedEventSession>();
+            var cutoff = DateTime.UtcNow - gracePeriod;
+
+            try
+            {
+                var indexClient = _tableServiceClient.GetTableClient(Constants.TableNames.EventSessionIndex);
+                var sessionsClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
+
+                await foreach (var entity in indexClient.QueryAsync<TableEntity>())
+                {
+                    var tenantId = entity.PartitionKey;
+                    var sessionId = entity.RowKey;
+                    var lastIngestAt = entity.GetDateTimeOffset("LastIngestAt")?.UtcDateTime ?? DateTime.MinValue;
+                    var eventCount = entity.GetInt32("EventCount") ?? 0;
+
+                    // Grace period: skip recent entries (race condition protection)
+                    if (lastIngestAt > cutoff)
+                        continue;
+
+                    // Check if session exists
+                    try
+                    {
+                        var session = await sessionsClient.GetEntityIfExistsAsync<TableEntity>(tenantId, sessionId, select: new[] { "PartitionKey" });
+                        if (!session.HasValue)
+                        {
+                            orphans.Add(new OrphanedEventSession
+                            {
+                                TenantId = tenantId,
+                                SessionId = sessionId,
+                                LastIngestAt = lastIngestAt,
+                                EventCount = eventCount
+                            });
+                        }
+                    }
+                    catch (RequestFailedException)
+                    {
+                        // 404 = session doesn't exist → orphan
+                        orphans.Add(new OrphanedEventSession
+                        {
+                            TenantId = tenantId,
+                            SessionId = sessionId,
+                            LastIngestAt = lastIngestAt,
+                            EventCount = eventCount
+                        });
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to scan EventSessionIndex for orphans");
+            }
+
+            return orphans;
+        }
+
+        public async Task DeleteEventSessionIndexEntryAsync(string tenantId, string sessionId)
+        {
+            try
+            {
+                var indexClient = _tableServiceClient.GetTableClient(Constants.TableNames.EventSessionIndex);
+                await indexClient.DeleteEntityAsync(tenantId, sessionId);
+            }
+            catch (RequestFailedException ex) when (ex.Status == 404)
+            {
+                // Already deleted, ignore
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to delete EventSessionIndex entry for {TenantId}/{SessionId}", tenantId, sessionId);
+            }
+        }
     }
 }

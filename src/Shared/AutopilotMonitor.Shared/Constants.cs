@@ -333,6 +333,9 @@ namespace AutopilotMonitor.Shared
             // IME version history (permanent archive, survives data retention)
             public const string ImeVersionHistory = "ImeVersionHistory";
 
+            // Lightweight index of sessions that have events (for orphan detection)
+            public const string EventSessionIndex = "EventSessionIndex";
+
             /// <summary>
             /// Returns all table names for initialization
             /// </summary>
@@ -373,7 +376,8 @@ namespace AutopilotMonitor.Shared
                 UserUsageLog,
                 OpsEvents,
                 ImeVersionHistory,
-                RuleStats
+                RuleStats,
+                EventSessionIndex
             };
         }
     }

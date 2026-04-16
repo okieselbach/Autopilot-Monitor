@@ -109,6 +109,7 @@ namespace AutopilotMonitor.Functions.Services
                 await CleanupOldDataAsync();
                 await CleanupOldDistressReportsAsync();
                 await CleanupOldOpsEventsAsync();
+                await CleanupOrphanedEventsAsync();
                 await CheckAgentBlobStorageAsync();
                 await RecomputePlatformStatsAsync();
 

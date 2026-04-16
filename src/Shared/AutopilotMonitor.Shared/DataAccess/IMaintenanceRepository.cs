@@ -37,8 +37,24 @@ namespace AutopilotMonitor.Shared.DataAccess
         Task<int> CleanupGhostSessionIndexEntriesAsync();
         Task<bool> IsSessionIndexEmptyAsync();
 
+        // --- Orphan Event Detection ---
+        /// <summary>
+        /// Returns EventSessionIndex entries whose session no longer exists in the Sessions table
+        /// and whose last ingest is older than the grace period.
+        /// </summary>
+        Task<List<OrphanedEventSession>> GetOrphanedEventSessionsAsync(TimeSpan gracePeriod);
+        Task DeleteEventSessionIndexEntryAsync(string tenantId, string sessionId);
+
         // --- Tenant Offboarding ---
         Task<Dictionary<string, int>> DeleteAllTenantDataAsync(string tenantId);
+    }
+
+    public class OrphanedEventSession
+    {
+        public string TenantId { get; set; } = string.Empty;
+        public string SessionId { get; set; } = string.Empty;
+        public DateTime LastIngestAt { get; set; }
+        public int EventCount { get; set; }
     }
 
     public class AuditLogEntry

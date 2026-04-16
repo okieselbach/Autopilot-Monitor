@@ -223,7 +223,18 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment
                 _signalCorrelatedWhiteGloveTriggered = true;
             }
 
-            _logger.Info($"EnrollmentTracker: WhiteGlove pre-provisioning completed (source: {sender?.GetType().Name ?? "unknown"})");
+            var wgSource = sender?.GetType().Name ?? "unknown";
+            _logger.Info($"EnrollmentTracker: WhiteGlove pre-provisioning completed (source: {wgSource})");
+
+            // Emit decision process before the terminal event
+            EmitDecisionProcess("whiteglove_complete", wgSource, "pending_part1", new List<string>
+            {
+                $"trigger={wgSource}",
+                (_espAndHelloTracker?.HasSaveWhiteGloveSuccessResult ?? false) ? "registry_confirmed" : "registry_not_confirmed",
+                (_espAndHelloTracker?.IsWhiteGloveStartDetected ?? false) ? "event509_seen" : "event509_not_seen",
+                _aadJoinedWithUser ? "user_joined" : "no_user_joined",
+                _fooUserDetected ? "foouser_detected" : "no_foouser"
+            });
 
             // Stop summary timer — no more app tracking needed
             _summaryTimer?.Change(System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite);
@@ -548,6 +559,15 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment
         /// </summary>
         private void EmitEnrollmentFailed(string failureType, string failureSource)
         {
+            // Emit decision process before the terminal event
+            EmitDecisionProcess("enrollment_failed", failureSource, failureType, new List<string>
+            {
+                $"failure_type={failureType}",
+                $"failure_source={failureSource}",
+                _espEverSeen ? $"esp_seen(finalExit={_espFinalExitSeen})" : "esp_not_seen",
+                _desktopArrived ? "desktop_arrived" : "desktop_not_arrived"
+            });
+
             // Stop timers
             _summaryTimer?.Change(Timeout.Infinite, Timeout.Infinite);
             _summaryTimerActive = false;
@@ -1096,7 +1116,45 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment
                 return;
             }
 
+            // GUARD 4: WhiteGlove Part 1 redirect.
+            // If SaveWhiteGloveSuccessResult=succeeded (hard WG signal from ESP registry) but no real
+            // user has joined yet, this is WG Part 1 — the device is pre-provisioned and waiting for
+            // a user. Redirect to whiteglove_complete (Pending) instead of enrollment_complete (Succeeded).
+            // This catches WG Part 1 with SkipUser=False where ShellCore WhiteGlove_Success doesn't fire.
+            bool wgSuccessResult = _espAndHelloTracker?.HasSaveWhiteGloveSuccessResult ?? false;
+            if (wgSuccessResult && !_aadJoinedWithUser && !desktopArrived)
+            {
+                _logger.Info($"EnrollmentTracker: all guards passed but SaveWhiteGloveSuccessResult=succeeded " +
+                             $"with no user joined and no desktop arrived — redirecting to WhiteGlove Part 1 " +
+                             $"(source={source}, aadJoinedWithUser={_aadJoinedWithUser}, desktopArrived={desktopArrived})");
+
+                EmitDecisionProcess("whiteglove_complete", source, "redirected_wg_part1", new List<string>
+                {
+                    $"original_source={source}",
+                    "save_whiteglove_succeeded=true",
+                    "aad_joined_with_user=false",
+                    "desktop_arrived=false",
+                    "redirect: enrollment_complete -> whiteglove_complete"
+                });
+
+                OnWhiteGloveCompleted(this, EventArgs.Empty);
+                ShadowProcessTrigger("whiteglove_complete");
+                return;
+            }
+
             _logger.Info($"EnrollmentTracker: all guards passed for source '{source}' — emitting enrollment_complete");
+
+            // Emit decision process before the terminal event
+            EmitDecisionProcess("enrollment_complete", source, "succeeded", new List<string>
+            {
+                $"source={source}",
+                helloResolved ? "hello_resolved" : "hello_bypassed",
+                espEverSeen ? $"esp_seen(finalExit={espFinalExitSeen})" : "esp_not_seen",
+                desktopArrived ? "desktop_arrived" : "desktop_not_arrived",
+                isDeviceOnly ? "device_only" : "user_driven",
+                _isHybridJoin ? "hybrid_join" : "aad_join",
+                wgSuccessResult ? "wg_registry_succeeded" : "no_wg_registry"
+            });
 
             // Stop timers
             _summaryTimer?.Change(Timeout.Infinite, Timeout.Infinite);
@@ -1227,6 +1285,95 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment
                 ImmediateUpload = true,
                 Data = checkData
             });
+        }
+
+        /// <summary>
+        /// Emits a decision_process_completion event immediately before a terminal event
+        /// (enrollment_complete, whiteglove_complete, enrollment_failed).
+        /// Contains the full state machine snapshot, all signal timestamps, and the decision chain
+        /// that led to the outcome — enabling post-hoc analysis without reconstructing from individual events.
+        /// </summary>
+        private void EmitDecisionProcess(string terminalEvent, string source, string outcome,
+            List<string> decisionChain = null)
+        {
+            Dictionary<string, object> data;
+            lock (_stateLock)
+            {
+                // Full state machine snapshot
+                data = new Dictionary<string, object>
+                {
+                    // Decision metadata
+                    { "terminalEvent", terminalEvent },
+                    { "completionSource", source },
+                    { "outcome", outcome },
+                    { "decisionChain", decisionChain ?? new List<string>() },
+
+                    // Core state variables
+                    { "enrollmentType", _enrollmentType },
+                    { "autopilotMode", _autopilotMode?.ToString() ?? "unknown" },
+                    { "skipUserStatusPage", _skipUserStatusPage?.ToString() ?? "unknown" },
+                    { "skipDeviceStatusPage", _skipDeviceStatusPage?.ToString() ?? "unknown" },
+                    { "isHybridJoin", _isHybridJoin },
+                    { "isSelfDeploying", IsSelfDeploying },
+                    { "isDeviceOnlyDeployment", IsDeviceOnlyDeployment },
+
+                    // ESP state
+                    { "espEverSeen", _espEverSeen },
+                    { "espFinalExitSeen", _espFinalExitSeen },
+                    { "lastEspPhase", _lastEspPhase ?? "none" },
+
+                    // Desktop & Hello state
+                    { "desktopArrived", _desktopArrived },
+                    { "helloResolved", _espAndHelloTracker?.IsHelloCompleted ?? false },
+                    { "helloPolicyConfigured", _espAndHelloTracker?.IsPolicyConfigured ?? false },
+                    { "helloOutcome", _espAndHelloTracker?.HelloOutcome ?? "unknown" },
+
+                    // WhiteGlove signals
+                    { "whiteGloveStartDetected", _espAndHelloTracker?.IsWhiteGloveStartDetected ?? false },
+                    { "saveWhiteGloveSuccessResult", _espAndHelloTracker?.HasSaveWhiteGloveSuccessResult ?? false },
+                    { "fooUserDetected", _fooUserDetected },
+                    { "aadJoinedWithUser", _aadJoinedWithUser },
+
+                    // Signal audit trail with timestamps
+                    { "signalsSeen", new List<string>(_stateData.SignalsSeen) },
+
+                    // Agent context
+                    { "agentUptimeSeconds", (DateTime.UtcNow - _agentStartTimeUtc).TotalSeconds },
+                    { "enrollmentCompleteAlreadyEmitted", _enrollmentCompleteEmitted },
+                    { "whiteGloveAlreadyTriggered", _signalCorrelatedWhiteGloveTriggered }
+                };
+
+                // Signal timestamps
+                var ts = new Dictionary<string, string>();
+                if (_stateData.EspFirstSeenUtc.HasValue)
+                    ts["espFirstSeen"] = _stateData.EspFirstSeenUtc.Value.ToString("o");
+                if (_stateData.DesktopArrivedUtc.HasValue)
+                    ts["desktopArrived"] = _stateData.DesktopArrivedUtc.Value.ToString("o");
+                if (_stateData.EspFinalExitUtc.HasValue)
+                    ts["espFinalExit"] = _stateData.EspFinalExitUtc.Value.ToString("o");
+                if (_stateData.HelloResolvedUtc.HasValue)
+                    ts["helloResolved"] = _stateData.HelloResolvedUtc.Value.ToString("o");
+                if (_stateData.ImePatternSeenUtc.HasValue)
+                    ts["imePatternSeen"] = _stateData.ImePatternSeenUtc.Value.ToString("o");
+                if (_stateData.DeviceSetupProvisioningCompleteUtc.HasValue)
+                    ts["deviceSetupProvisioningComplete"] = _stateData.DeviceSetupProvisioningCompleteUtc.Value.ToString("o");
+                data["signalTimestamps"] = ts;
+            }
+
+            _emitEvent(new EnrollmentEvent
+            {
+                SessionId = _sessionId,
+                TenantId = _tenantId,
+                EventType = "decision_process_completion",
+                Severity = EventSeverity.Info,
+                Source = "EnrollmentTracker",
+                Phase = EnrollmentPhase.Unknown,
+                Message = $"Decision: {terminalEvent} via {source} — {outcome}",
+                ImmediateUpload = true,
+                Data = data
+            });
+
+            _logger.Info($"EnrollmentTracker: decision_process_completion emitted — {terminalEvent} via {source} ({outcome})");
         }
 
         /// <summary>

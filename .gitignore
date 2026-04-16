@@ -116,3 +116,4 @@ scripts/Deployment/build_and_upload_release_agent_build.ps1
 .dotnet-home/
 .vscode/
 TODO.txt
+tools/orphan-analysis.py

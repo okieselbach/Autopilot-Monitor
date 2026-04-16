@@ -375,8 +375,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Runtime
                 () => _enrollmentTerminalEventSeen,
                 _previousExitType, _lastBootTimeUtc, _agentStartTimeUtc);
 
-            // Register session with backend
-            RegisterSessionAsync().Wait();
+            // Register session with backend — must succeed before collectors start
+            var registrationSucceeded = RegisterSessionAsync().GetAwaiter().GetResult();
+
+            if (!registrationSucceeded)
+            {
+                _logger.Error("=== SESSION REGISTRATION FAILED — collectors will NOT start to prevent orphaned events ===");
+                return;
+            }
 
             // Check if admin already terminated this session before we restarted
             if (!string.IsNullOrEmpty(_pendingAdminAction))
@@ -1128,7 +1134,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Runtime
         // Session registration
         // ──────────────────────────────────────────────────────────────────
 
-        private async Task RegisterSessionAsync()
+        /// <summary>
+        /// Registers the session with the backend. Returns true on success, false on final failure.
+        /// On failure, collectors MUST NOT be started to prevent orphaned events.
+        /// </summary>
+        private async Task<bool> RegisterSessionAsync()
         {
             const int maxAttempts = 5;
 
@@ -1187,7 +1197,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Runtime
                             _logger,
                             _agentVersion).ConfigureAwait(false);
 
-                        return;
+                        return true;
                     }
 
                     _logger.Warning($"Session registration failed: {response.Message}");
@@ -1196,7 +1206,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Runtime
                 {
                     _logger.Error($"Session registration authentication failed: {ex.Message}");
                     _uploadOrchestrator.HandleAuthFailure(ex.StatusCode);
-                    return;
+                    return false;
                 }
                 catch (Exception ex)
                 {
@@ -1207,7 +1217,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Runtime
                         _ = _emergencyReporter.TrySendAsync(
                             AgentErrorType.RegisterSessionFailed,
                             ex.Message);
-                        return;
+                        return false;
                     }
                 }
 
@@ -1215,6 +1225,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Runtime
                 _logger.Info($"Retrying session registration in {delaySeconds}s");
                 await Task.Delay(delaySeconds * 1000);
             }
+
+            return false;
         }
 
         // ──────────────────────────────────────────────────────────────────

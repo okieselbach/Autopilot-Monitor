@@ -586,6 +586,28 @@ namespace AutopilotMonitor.Functions.Services
                 }
             }
 
+            // Update EventSessionIndex (side-table for orphan detection)
+            // Fire-and-forget upsert — one write per ingest call, no read needed
+            if (storedEvents.Count > 0)
+            {
+                try
+                {
+                    var firstEvent = storedEvents[0];
+                    var indexClient = _tableServiceClient.GetTableClient(Constants.TableNames.EventSessionIndex);
+                    var indexEntity = new TableEntity(firstEvent.TenantId, firstEvent.SessionId)
+                    {
+                        ["LastIngestAt"] = DateTimeOffset.UtcNow,
+                        ["EventCount"] = storedEvents.Count // Will be overwritten on each upsert (not cumulative — acceptable for orphan detection)
+                    };
+                    await indexClient.UpsertEntityAsync(indexEntity, TableUpdateMode.Merge);
+                }
+                catch (Exception ex)
+                {
+                    // Non-critical — don't fail event ingestion if index update fails
+                    _logger.LogWarning(ex, "Failed to update EventSessionIndex");
+                }
+            }
+
             return storedEvents;
         }
 

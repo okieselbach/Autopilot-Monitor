@@ -60,6 +60,11 @@ namespace AutopilotMonitor.Functions.Services
                 $"Cleaned up {deletedCount} ops events older than {retentionDays} days",
                 null, "System.Maintenance", new { deletedCount, retentionDays });
 
+        public Task RecordOrphanEventsCleanedAsync(int orphanSessions, int totalEventsDeleted)
+            => WriteAsync(OpsEventCategory.Maintenance, "OrphanEventsCleaned", OpsEventSeverity.Warning,
+                $"Cleaned {totalEventsDeleted} orphaned events across {orphanSessions} sessions",
+                null, "System.Maintenance", new { orphanSessions, totalEventsDeleted });
+
         // ── Security ───────────────────────────────────────────────────────────
 
         public Task RecordDeviceBlockedAsync(string tenantId, string serialNumber, string reason, string blockedBy)

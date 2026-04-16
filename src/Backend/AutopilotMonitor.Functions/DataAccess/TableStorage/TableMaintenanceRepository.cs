@@ -244,5 +244,10 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                 return 0;
             }
         }
+        public Task<List<OrphanedEventSession>> GetOrphanedEventSessionsAsync(TimeSpan gracePeriod)
+            => _storage.GetOrphanedEventSessionsAsync(gracePeriod);
+
+        public Task DeleteEventSessionIndexEntryAsync(string tenantId, string sessionId)
+            => _storage.DeleteEventSessionIndexEntryAsync(tenantId, sessionId);
     }
 }
