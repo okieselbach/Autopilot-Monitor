@@ -50,17 +50,16 @@ namespace AutopilotMonitor.Agent.Core.Tests.Monitoring
         }
 
         [Fact]
-        public void AnalyzeAtShutdown_EmitsSingleIntegrityBypassEvent_WithShutdownTrigger()
+        public void AnalyzeAtShutdown_IsNoOp()
         {
+            // Integrity bypass artefacts are pre-enrollment state and do not change during
+            // enrollment. The shutdown call must not emit a duplicate event.
             var events = new List<EnrollmentEvent>();
             var analyzer = CreateAnalyzer(events);
 
             analyzer.AnalyzeAtShutdown();
 
-            var evt = Assert.Single(events);
-            Assert.Equal("integrity_bypass_analysis", evt.EventType);
-            Assert.Equal(EnrollmentPhase.Unknown, evt.Phase);
-            Assert.Equal("shutdown", evt.Data["triggered_at"]);
+            Assert.Empty(events);
         }
 
         [Fact]

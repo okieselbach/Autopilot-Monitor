@@ -26,8 +26,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Telemetry.Analyzers
     ///   Bypass flags are cross-checked against current TPM and SecureBoot state; a bypass
     ///   combined with a missing security feature is escalated to "critical".
     ///
-    /// Emits a single "integrity_bypass_analysis" event at startup and at shutdown,
-    /// enabling delta detection (e.g. scripts that appear between enrollment start and end).
+    /// Runs only at startup: the inspected artefacts are pre-enrollment state (install-time
+    /// registry keys, OEM/bypass scripts) that do not change during enrollment. Shutdown
+    /// would just re-emit the same data — the analyzer treats AnalyzeAtShutdown as a no-op.
     /// </summary>
     public class IntegrityBypassAnalyzer : IAgentAnalyzer
     {
@@ -79,8 +80,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Telemetry.Analyzers
 
         public void AnalyzeAtShutdown()
         {
-            _logger.Info($"{Name}: Running shutdown analysis");
-            RunAnalysis("shutdown");
+            // Pre-enrollment state does not change during enrollment — skip the shutdown run.
+            _logger.Debug($"{Name}: Shutdown no-op (bypass state is pre-enrollment, already captured at startup)");
         }
 
         // -----------------------------------------------------------------------

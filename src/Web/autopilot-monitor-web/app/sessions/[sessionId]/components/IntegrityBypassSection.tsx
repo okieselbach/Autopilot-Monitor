@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import type { EnrollmentEvent } from "@/types";
 
 interface IntegrityBypassSectionProps {
@@ -55,15 +55,6 @@ interface AnalysisPayload {
   checks?: ChecksPayload;
 }
 
-const severityOrder: Record<string, number> = {
-  critical: 4,
-  error: 3,
-  warning: 2,
-  info: 1,
-  debug: 0,
-  trace: -1,
-};
-
 const severityBadgeColors: Record<string, string> = {
   critical: "bg-red-100 text-red-700 border-red-200",
   error: "bg-red-100 text-red-700 border-red-200",
@@ -72,14 +63,11 @@ const severityBadgeColors: Record<string, string> = {
   clean: "bg-emerald-100 text-emerald-700 border-emerald-200",
 };
 
-function pickDominant(events: EnrollmentEvent[]): { shutdown: EnrollmentEvent | null; startup: EnrollmentEvent | null; any: EnrollmentEvent | null } {
+function pickLatest(events: EnrollmentEvent[]): EnrollmentEvent | null {
   const analyses = events
     .filter((e) => e.eventType === "integrity_bypass_analysis")
     .sort((a, b) => a.sequence - b.sequence);
-  const shutdown = [...analyses].reverse().find((e) => (e.data as AnalysisPayload | undefined)?.triggered_at === "shutdown") ?? null;
-  const startup = analyses.find((e) => (e.data as AnalysisPayload | undefined)?.triggered_at === "startup") ?? null;
-  const any = shutdown ?? startup ?? (analyses.length > 0 ? analyses[analyses.length - 1] : null);
-  return { shutdown, startup, any };
+  return analyses.length > 0 ? analyses[analyses.length - 1] : null;
 }
 
 function severityLabel(sev?: string, findings?: string[]): string {
@@ -102,8 +90,7 @@ function describeSecureBoot(v: boolean | null | undefined): string {
 }
 
 export default function IntegrityBypassSection({ events, expanded, setExpanded }: IntegrityBypassSectionProps) {
-  const { shutdown, startup, any } = useMemo(() => pickDominant(events), [events]);
-  const primary = shutdown ?? any;
+  const primary = useMemo(() => pickLatest(events), [events]);
 
   if (!primary) return null;
 
@@ -118,15 +105,6 @@ export default function IntegrityBypassSection({ events, expanded, setExpanded }
   const pchcUsers = payload.checks?.pchc_upgrade_eligibility?.users_with_flag ?? [];
   const setupScripts = (payload.checks?.setup_scripts ?? []).filter((s) => s.exists === true);
   const corr = payload.checks?.correlation ?? {};
-
-  // Delta summary (startup vs shutdown) — focus on the facts that change in practice
-  const startupPayload = (startup?.data ?? {}) as AnalysisPayload | undefined;
-  const startupActive = startupPayload?.checks?.lab_config?.active_bypasses ?? [];
-  const newlyAppeared = activeBypasses.filter((b) => !startupActive.includes(b));
-  const newScripts = setupScripts.filter((s) => {
-    const startScripts = startupPayload?.checks?.setup_scripts ?? [];
-    return !startScripts.some((ss) => ss.path === s.path && ss.exists === true);
-  });
 
   return (
     <div className="bg-white shadow rounded-lg p-6 mb-6">
@@ -161,11 +139,6 @@ export default function IntegrityBypassSection({ events, expanded, setExpanded }
             <span className="inline-flex items-center px-2 py-1 rounded bg-gray-50 border border-gray-200 text-xs">
               {describeSecureBoot(corr.secure_boot_enabled)}
             </span>
-            {startup && shutdown && (
-              <span className="inline-flex items-center px-2 py-1 rounded bg-gray-50 border border-gray-200 text-xs text-gray-500">
-                Startup + Shutdown checks available
-              </span>
-            )}
           </div>
 
           {/* LabConfig bypass keys */}
@@ -179,14 +152,10 @@ export default function IntegrityBypassSection({ events, expanded, setExpanded }
               <ul className="space-y-1">
                 {Object.entries(labValues).map(([name, value]) => {
                   const active = value === 1;
-                  const newlyActive = active && newlyAppeared.includes(name);
                   return (
                     <li key={name} className="flex items-center gap-2">
                       <span className={`inline-block w-2 h-2 rounded-full ${active ? 'bg-rose-500' : 'bg-gray-300'}`} />
                       <span className={`font-mono text-xs ${active ? 'text-rose-700' : 'text-gray-500'}`}>{name} = {value}</span>
-                      {newlyActive && (
-                        <span className="text-xs px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 border border-amber-200">appeared during enrollment</span>
-                      )}
                     </li>
                   );
                 })}
@@ -234,15 +203,11 @@ export default function IntegrityBypassSection({ events, expanded, setExpanded }
             ) : (
               <ul className="space-y-1">
                 {setupScripts.map((s) => {
-                  const isNew = newScripts.some((ns) => ns.path === s.path);
                   return (
                     <li key={s.path ?? ''} className="flex items-center gap-2">
                       <span className="inline-block w-2 h-2 rounded-full bg-amber-500" />
                       <span className="font-mono text-xs text-amber-800">{s.path}</span>
                       <span className="text-xs text-gray-500">({s.size_bytes ?? 0} bytes{s.last_modified_utc ? `, modified ${new Date(s.last_modified_utc).toISOString().replace('T', ' ').substring(0, 19)} UTC` : ""})</span>
-                      {isNew && (
-                        <span className="text-xs px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 border border-amber-200">appeared during enrollment</span>
-                      )}
                     </li>
                   );
                 })}
