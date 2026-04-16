@@ -51,6 +51,7 @@ export interface UseDashboardSessionsReturn {
   refetch: () => void;
   refetchWith: (tenantIdOverride: string) => void;
   loadMore: () => void;
+  loadAll: () => void;
   removeSession: (sessionId: string) => void;
 }
 
@@ -154,7 +155,12 @@ export function useDashboardSessions({
     return Math.min(value, 100);
   };
 
-  const fetchSessions = useCallback(async (loadMoreCursor?: string, globalTenantIdOverride?: string) => {
+  // Internal batch fetcher — returns data without touching state so callers can
+  // decide how to apply it (single append vs. progressive loop).
+  const fetchSessionsBatch = useCallback(async (
+    loadMoreCursor?: string,
+    globalTenantIdOverride?: string,
+  ): Promise<{ sessions: Session[]; hasMore: boolean; cursor: string | null } | null> => {
     try {
       const rawFilter = globalTenantIdOverride !== undefined ? globalTenantIdOverride : tenantIdFilterRef.current.trim();
       const effectiveTenantFilter = asGuidOrUndefined(rawFilter);
@@ -172,19 +178,14 @@ export function useDashboardSessions({
 
       if (response.ok) {
         const data = await response.json();
-        const newSessions: Session[] = data.sessions || [];
-
-        if (loadMoreCursor) {
-          setSessions((prev) => [...prev, ...newSessions]);
-        } else {
-          setSessions(newSessions);
-          fetchBlockedDevices(newSessions);
-        }
-
-        setHasMore(data.hasMore || false);
-        setCursor(data.cursor || null);
+        return {
+          sessions: data.sessions || [],
+          hasMore: data.hasMore || false,
+          cursor: data.cursor || null,
+        };
       } else {
         addNotification("error", "Backend Error", `Failed to fetch sessions: ${response.statusText}`, "backend-error");
+        return null;
       }
     } catch (error) {
       if (error instanceof TokenExpiredError) {
@@ -198,11 +199,28 @@ export function useDashboardSessions({
           "backend-unreachable",
         );
       }
-    } finally {
-      setLoading(false);
-      setLoadingMore(false);
+      return null;
     }
-  }, [getAccessToken, addNotification, fetchBlockedDevices]);
+  }, [getAccessToken, addNotification]);
+
+  // High-level fetch that applies result to state (initial load + single load-more).
+  const fetchSessions = useCallback(async (loadMoreCursor?: string, globalTenantIdOverride?: string) => {
+    const result = await fetchSessionsBatch(loadMoreCursor, globalTenantIdOverride);
+
+    if (result) {
+      if (loadMoreCursor) {
+        setSessions((prev) => [...prev, ...result.sessions]);
+      } else {
+        setSessions(result.sessions);
+        fetchBlockedDevices(result.sessions);
+      }
+      setHasMore(result.hasMore);
+      setCursor(result.cursor);
+    }
+
+    setLoading(false);
+    setLoadingMore(false);
+  }, [fetchSessionsBatch, fetchBlockedDevices]);
 
   const refetch = useCallback(() => {
     setLoading(true);
@@ -219,6 +237,26 @@ export function useDashboardSessions({
     setLoadingMore(true);
     fetchSessions(cursorRef.current);
   }, [fetchSessions]);
+
+  // Progressive loader — fetches ALL remaining sessions batch by batch.
+  // Used when search is active and local results are insufficient.
+  const loadAll = useCallback(async () => {
+    if (!cursorRef.current || loadingMoreRef.current) return;
+    setLoadingMore(true);
+    let currentCursor: string | null = cursorRef.current;
+
+    while (currentCursor) {
+      const result = await fetchSessionsBatch(currentCursor);
+      if (!result) break;
+
+      setSessions((prev) => [...prev, ...result.sessions]);
+      setCursor(result.cursor);
+      setHasMore(result.hasMore);
+      currentCursor = result.hasMore ? result.cursor : null;
+    }
+
+    setLoadingMore(false);
+  }, [fetchSessionsBatch]);
 
   const removeSession = useCallback((sessionId: string) => {
     setSessions((prev) => prev.filter((s) => s.sessionId !== sessionId));
@@ -370,6 +408,7 @@ export function useDashboardSessions({
     refetch,
     refetchWith,
     loadMore,
+    loadAll,
     removeSession,
   };
 }

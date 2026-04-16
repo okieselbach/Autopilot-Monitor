@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ProtectedRoute } from "../../components/ProtectedRoute";
@@ -39,7 +39,7 @@ export default function Home() {
 
   const {
     sessions, loading, hasMore, loadingMore,
-    refetch, refetchWith, loadMore, removeSession,
+    refetch, refetchWith, loadMore, loadAll, removeSession,
   } = useDashboardSessions({
     user, tenantId, globalAdminMode, tenantIdFilter, adminMode,
     getAccessToken, addNotification, setBlockedDevicesSet, signalR,
@@ -101,6 +101,26 @@ export default function Home() {
       loadMore();
     }
   }, [sessions.length, currentPage, sessionsPerPage, hasMore, loading, loadingMore, loadMore]);
+
+  // Auto-load ALL remaining sessions when search is active and local results are insufficient.
+  // Uses a 500ms debounce so rapid typing doesn't trigger unnecessary loads.
+  const autoLoadTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  useEffect(() => {
+    if (autoLoadTimerRef.current) clearTimeout(autoLoadTimerRef.current);
+
+    const query = searchQuery.trim();
+    if (!query || query.length < 2) return;
+    if (loading || loadingMore || !hasMore) return;
+    // Skip duration queries — those are local-only filters
+    if (/^[><]=?\s*\d+$/.test(query)) return;
+    if (filteredSessions.length >= 8) return;
+
+    autoLoadTimerRef.current = setTimeout(() => {
+      loadAll();
+    }, 500);
+
+    return () => { if (autoLoadTimerRef.current) clearTimeout(autoLoadTimerRef.current); };
+  }, [searchQuery, filteredSessions.length, hasMore, loading, loadingMore, loadAll]);
 
   const applyTenantIdFilter = (value: string) => {
     setTenantIdFilter(value);
@@ -256,6 +276,7 @@ export default function Home() {
               hasMore={hasMore}
               loadingMore={loadingMore}
               onLoadMore={loadMore}
+              onLoadAll={loadAll}
               adminMode={adminMode}
               globalAdminMode={globalAdminMode}
               tenantIdFilter={tenantIdFilter}

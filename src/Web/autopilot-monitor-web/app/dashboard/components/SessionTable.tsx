@@ -71,6 +71,7 @@ interface SessionTableProps {
   hasMore: boolean;
   loadingMore: boolean;
   onLoadMore: () => void;
+  onLoadAll: () => void;
   adminMode: boolean;
   globalAdminMode: boolean;
   tenantIdFilter: string;
@@ -108,6 +109,7 @@ export function SessionTable({
   hasMore,
   loadingMore,
   onLoadMore,
+  onLoadAll,
   adminMode,
   globalAdminMode,
   tenantIdFilter,
@@ -577,18 +579,30 @@ export function SessionTable({
             {/* Hint when more sessions may exist on the server */}
             {hasMore && searchSuggestions.length < 8 && (
               <div className="border-t border-gray-100 px-4 py-2.5 flex items-center justify-between">
-                <span className="text-xs text-gray-400">
-                  Searching {sessions.length} loaded sessions
-                </span>
-                <button
-                  onClick={() => {
-                    setShowSearchSuggestions(false);
-                    onLoadMore();
-                  }}
-                  className="text-xs font-medium text-blue-600 hover:text-blue-800 transition-colors"
-                >
-                  Load more sessions
-                </button>
+                {loadingMore ? (
+                  <span className="text-xs text-gray-400 flex items-center gap-1.5">
+                    <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Searching... ({sessions.length} sessions loaded)
+                  </span>
+                ) : (
+                  <>
+                    <span className="text-xs text-gray-400">
+                      Searching {sessions.length} loaded sessions
+                    </span>
+                    <button
+                      onClick={() => {
+                        setShowSearchSuggestions(false);
+                        onLoadAll();
+                      }}
+                      className="text-xs font-medium text-blue-600 hover:text-blue-800 transition-colors"
+                    >
+                      Search all sessions
+                    </button>
+                  </>
+                )}
               </div>
             )}
           </div>
@@ -758,23 +772,45 @@ export function SessionTable({
       {/* Load More Button */}
       {hasMore && (
         <div className="mt-4 flex justify-center">
-          <button
-            onClick={onLoadMore}
-            disabled={loadingMore}
-            className="px-6 py-2 bg-gray-100 text-gray-700 border border-gray-300 rounded-md hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {loadingMore ? (
-              <span className="flex items-center gap-2">
-                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-                Loading...
-              </span>
-            ) : (
-              'Load 100 more sessions...'
-            )}
-          </button>
+          {searchQuery.trim() ? (
+            // Search active: offer to load all remaining sessions
+            <button
+              onClick={onLoadAll}
+              disabled={loadingMore}
+              className="px-6 py-2 bg-gray-100 text-gray-700 border border-gray-300 rounded-md hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {loadingMore ? (
+                <span className="flex items-center gap-2">
+                  <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  Searching... ({sessions.length} sessions loaded)
+                </span>
+              ) : (
+                'Search all sessions...'
+              )}
+            </button>
+          ) : (
+            // No search: standard load-more (100 at a time)
+            <button
+              onClick={onLoadMore}
+              disabled={loadingMore}
+              className="px-6 py-2 bg-gray-100 text-gray-700 border border-gray-300 rounded-md hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {loadingMore ? (
+                <span className="flex items-center gap-2">
+                  <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  Loading...
+                </span>
+              ) : (
+                'Load 100 more sessions...'
+              )}
+            </button>
+          )}
         </div>
       )}
     </div>
