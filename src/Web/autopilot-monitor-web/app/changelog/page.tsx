@@ -31,21 +31,84 @@ export default function ChangelogPage() {
             </p>
           </div>
 
-          {/* Known Issues */}
-          <div className="mb-10 pb-8 border-b border-gray-100">
-            <h2 className="text-sm font-semibold text-gray-900 mb-3 uppercase tracking-wider">Known Issues</h2>
-            <ul className="space-y-2">
-              <li className="flex gap-2 text-sm text-gray-600 leading-relaxed">
-                <span className="mt-0.5 text-yellow-500 flex-shrink-0">⚠</span>
-                <span>
-                  <span className="font-medium text-gray-800">Device Preparation scenario</span> — not actively tested yet. Other enrollment scenarios (Entra-only, Pre-Provisioning, user-driven, hybrid) have been seen in the wild and are continuously being fine-tuned. If you&apos;d like to share logs for any scenario, that would be greatly appreciated.
-                </span>
-              </li>
-            </ul>
-          </div>
-
           {/* Entries — newest first */}
           <div className="space-y-10">
+
+            <div>
+              <div className="flex items-center gap-3 mb-3">
+                <span className="text-xs font-mono font-semibold text-gray-400 uppercase tracking-wider">
+                  2026-04-16 - 12:00 CET
+                </span>
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                  Platform Update
+                </span>
+              </div>
+              <h2 className="text-base font-semibold text-gray-900 mb-2">
+                Completion state machine, SLA &amp; App Health dashboards, Ops Alerts, and Device Preparation groundwork
+              </h2>
+              <ul className="space-y-2 text-sm text-gray-600 leading-relaxed list-none">
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Session completion state machine</span> — The agent soon uses a dedicated <code>CompletionStateMachine</code> that combines multiple signals (ESP final exit, Hello, Desktop arrival) to decide when an enrollment is truly done. This fixes several cases where WhiteGlove and Hybrid Join sessions were misclassified or never marked complete.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">SLA tracking dashboard</span> — New SLA monitoring page with per-tenant configuration and notification support when SLAs are breached.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">App Health dashboard</span> — New global view of app deployment health with scoped drill-downs and a configurable column picker.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Ops Events &amp; Ops Alerts</span> — Operational event log plus admin alerts for backend health, blob storage, runaway sessions, and excessive event counts per session.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Agent emergency / distress channel</span> — A separate low-overhead channel so the agent can still report critical errors when the normal telemetry path is impaired.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Enhanced analyze rule engine</span> — New <code>in</code> / <code>not_in</code> compare operators, <code>MarkSessionAsFailed</code> action, template variables, per-rule stats card, and a new ESP certificate-error analyze rule (<code>ANALYZE-ESP-002</code>).</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Delivery Optimization</span> — OS-level DO collector, P2P totals in download progress, and DO usage stats in the geographic drill-down.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Vulnerability matching improvements</span> — Fuzzy (Jaro-Winkler) CPE matching, confidence levels, data freshness indicators, CVE mapping column in the vulnerability report, and WhiteGlove sessions now also get a vulnerability report.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Device Preparation (WDP v2) groundwork</span> — The agent now distinguishes Classic vs v2 Autopilot flow, and a device-association validator was added on the backend. Device Preparation support is still in active validation.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">IME version history</span> — Intune Management Extension version history is tracked and surfaced via MCP; agents running on outdated IME versions trigger an alert.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Known Issues page</span> — Dedicated docs page for ongoing issues (replaces the inline list that used to live in this changelog).</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">MCP server</span> — Stateless endpoint, tools split into domain modules, new ops-events tool, tool-call telemetry, improved semantic + keyword search, and an integration test suite.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Security hardening</span> — Centralized tenant-isolation middleware, OData sanitizer, hardened agent config endpoint, cross-tenant fallback fixes, session-aware auto-unblock, and additional request-size / integrity guards on the self-update path.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Web performance &amp; refactor</span> — Lazy session loading, response compression, more parallel fetches, and a large internal restructuring of the web app into hooks and utils for easier maintenance.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Bugfixes &amp; UX polish</span> — Quick search, bootstrap scripts, webhook notifications, WhiteGlove timeline rendering, phase-timeline regressions, report upload size, summary dialog launch fallback, NTP / timezone defaults, and many more small fixes.</span>
+                </li>
+              </ul>
+            </div>
 
             <div>
               <div className="flex items-center gap-3 mb-3">
