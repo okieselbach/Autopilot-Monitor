@@ -34,6 +34,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment.Completion
         public bool IsHelloPolicyConfigured { get; set; }
         public bool HasUnresolvedEspCategories { get; set; }
 
+        // WhiteGlove detection signals
+        public bool WhiteGloveStartDetected { get; set; }
+        public bool HasSaveWhiteGloveSuccessResult { get; set; }
+        public bool IsWhiteGloveActive => WhiteGloveStartDetected || HasSaveWhiteGloveSuccessResult;
+
         // Timing
         public DateTime AgentStartTimeUtc { get; set; }
         public DateTime? EspFinalExitUtc { get; set; }
@@ -309,6 +314,18 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment.Completion
             // Path B: Registry definitively says device-only
             else if (ctx.SkipUserStatusPage == true)
             {
+                // WhiteGlove guard: SkipUserStatusPage=true + WG signals → WhiteGloveCompleted.
+                // Mirrors the guard in EnrollmentTracker.CompletionLogic.OnFinalizingSetupPhaseTriggered.
+                if (ctx.IsWhiteGloveActive)
+                {
+                    _currentState = EnrollmentCompletionState.WhiteGloveCompleted;
+                    result.ShouldEmitWhiteGloveComplete = true;
+                    result.SignalsToRecord.Add("whiteglove_guard_esp_exiting");
+                    result.Transitioned = true;
+                    result.NewState = _currentState;
+                    return result;
+                }
+
                 _espFinalExitSeen = true;
                 _currentState = EnrollmentCompletionState.DeviceOnlyAwaitingCompletion;
                 result.SignalsToRecord.Add("device_only_esp_registry");
@@ -509,6 +526,18 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment.Completion
                 PreviousState = prev,
                 SignalsToRecord = new List<string> { "device_setup_provisioning_complete" }
             };
+
+            // WhiteGlove guard: device-only + WG signals → WhiteGloveCompleted, not self-deploying.
+            // This mirrors the guard in EnrollmentTracker.CompletionLogic.OnDeviceSetupProvisioningComplete.
+            if (ctx.IsDeviceOnly && ctx.IsWhiteGloveActive)
+            {
+                _currentState = EnrollmentCompletionState.WhiteGloveCompleted;
+                result.ShouldEmitWhiteGloveComplete = true;
+                result.SignalsToRecord.Add("whiteglove_guard_activated");
+                result.Transitioned = true;
+                result.NewState = _currentState;
+                return result;
+            }
 
             if (!ctx.IsDeviceOnly)
             {

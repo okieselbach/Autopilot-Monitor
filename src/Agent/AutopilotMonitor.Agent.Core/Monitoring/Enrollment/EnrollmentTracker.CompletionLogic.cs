@@ -112,6 +112,38 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment
                 return;
             }
 
+            // WhiteGlove guard: When EventID 509 was detected OR the DeviceSetup registry
+            // contains SaveWhiteGloveSuccessResult=succeeded, this is a WhiteGlove session.
+            // Route to OnWhiteGloveCompleted instead of self_deploying_provisioning_complete.
+            bool whiteGloveStarted = _espAndHelloTracker?.IsWhiteGloveStartDetected ?? false;
+            bool whiteGloveSuccessResult = _espAndHelloTracker?.HasSaveWhiteGloveSuccessResult ?? false;
+
+            if (whiteGloveStarted || whiteGloveSuccessResult)
+            {
+                _logger.Info($"EnrollmentTracker: Device-only deployment with WhiteGlove signals detected " +
+                             $"(whiteGloveStarted={whiteGloveStarted}, saveWhiteGloveSuccessResult={whiteGloveSuccessResult}) — " +
+                             "routing to WhiteGlove completion instead of self_deploying_provisioning_complete");
+
+                RecordSignal("whiteglove_guard_activated");
+
+                EmitTraceEvent("whiteglove_guard_activated",
+                    "DeviceSetup provisioning complete but WhiteGlove signals present — routing to WhiteGlove path",
+                    new Dictionary<string, object>
+                    {
+                        { "whiteGloveStartDetected", whiteGloveStarted },
+                        { "saveWhiteGloveSuccessResult", whiteGloveSuccessResult },
+                        { "autopilotMode", _autopilotMode },
+                        { "skipUserStatusPage", _skipUserStatusPage }
+                    });
+
+                try { CollectDeviceInfoAtFinalizingSetup("whiteglove_provisioning_complete"); }
+                catch (Exception ex) { _logger.Warning($"EnrollmentTracker: final device info collection failed (whiteglove): {ex.Message}"); }
+
+                OnWhiteGloveCompleted(this, EventArgs.Empty);
+                ShadowProcessTrigger("whiteglove_complete");
+                return;
+            }
+
             // Device-only deployment: this is our primary completion signal.
             // No user session → no Hello, no desktop arrival, possibly no Shell-Core ESP exit.
             _logger.Info($"EnrollmentTracker: Device-only deployment (autopilotMode={_autopilotMode}, skipUserStatusPage={_skipUserStatusPage}) + DeviceSetup provisioning complete — " +
@@ -620,6 +652,36 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment
                 }
                 else if (skipUser == true)
                 {
+                    // WhiteGlove guard: same check as in OnDeviceSetupProvisioningComplete.
+                    // If the ESP exit happens in a WhiteGlove session (SkipUserStatusPage=true, but
+                    // WhiteGlove signals present), route to WhiteGlove completion instead of device-only.
+                    bool wgStarted = _espAndHelloTracker?.IsWhiteGloveStartDetected ?? false;
+                    bool wgSuccessResult = _espAndHelloTracker?.HasSaveWhiteGloveSuccessResult ?? false;
+
+                    if (wgStarted || wgSuccessResult)
+                    {
+                        _logger.Info($"EnrollmentTracker: ESP exiting with SkipUserStatusPage=true but WhiteGlove signals present " +
+                                     $"(whiteGloveStarted={wgStarted}, saveWhiteGloveSuccessResult={wgSuccessResult}) — " +
+                                     "routing to WhiteGlove completion instead of device_only_esp_registry");
+
+                        RecordSignal("whiteglove_guard_activated");
+                        EmitTraceEvent("whiteglove_guard_esp_exiting",
+                            "ESP exiting with SkipUserStatusPage=true but WhiteGlove signals present — routing to WhiteGlove path",
+                            new Dictionary<string, object>
+                            {
+                                { "whiteGloveStartDetected", wgStarted },
+                                { "saveWhiteGloveSuccessResult", wgSuccessResult },
+                                { "previousPhase", lastPhase ?? "unknown" }
+                            });
+
+                        try { CollectDeviceInfoAtFinalizingSetup("whiteglove_esp_exiting"); }
+                        catch (Exception ex) { _logger.Warning($"EnrollmentTracker: final device info collection failed (whiteglove_esp_exiting): {ex.Message}"); }
+
+                        OnWhiteGloveCompleted(this, EventArgs.Empty);
+                        ShadowProcessTrigger("whiteglove_complete");
+                        return;
+                    }
+
                     // Registry definitively says no AccountSetup expected → immediate device-only classification
                     _logger.Info($"EnrollmentTracker: ESP phase exiting from '{lastPhase ?? "unknown"}' — SkipUserStatusPage=true, classified as device-only ESP (registry)");
 

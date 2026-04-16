@@ -97,6 +97,18 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment.SystemSignals
         /// </summary>
         public bool HasAccountSetupActivity => _provisioningTracker?.HasAccountSetupActivity ?? false;
 
+        /// <summary>
+        /// True once WhiteGlove start has been detected (EventID 509 or persisted from prior run).
+        /// Forwarded from ModernDeploymentTracker.
+        /// </summary>
+        public bool IsWhiteGloveStartDetected => _modernDeploymentTracker?.IsWhiteGloveStartDetected ?? false;
+
+        /// <summary>
+        /// True when DeviceSetup contains a SaveWhiteGloveSuccessResult subcategory with state "succeeded".
+        /// This is a definitive WhiteGlove (Pre-Provisioning) confirmation signal from the ESP registry.
+        /// </summary>
+        public bool HasSaveWhiteGloveSuccessResult => _provisioningTracker?.HasSaveWhiteGloveSuccessResult ?? false;
+
         public EspAndHelloTracker(
             string sessionId,
             string tenantId,

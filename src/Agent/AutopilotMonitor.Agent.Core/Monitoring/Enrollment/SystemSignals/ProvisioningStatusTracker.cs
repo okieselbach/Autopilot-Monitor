@@ -74,6 +74,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment.SystemSignals
         private Dictionary<string, Dictionary<string, string>> _lastSubcategoryStates;
         // Fire-once guard for DeviceSetupProvisioningComplete event
         private bool _deviceSetupProvisioningCompleteFired;
+        // WhiteGlove confirmation: DeviceSetup registry contains SaveWhiteGloveSuccessResult=succeeded
+        private bool _saveWhiteGloveSuccessResultSeen;
         private readonly object _stateLock = new object();
 
         public event EventHandler<string> EspFailureDetected;
@@ -144,6 +146,16 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment.SystemSignals
                         && subs.Count > 0;
                 }
             }
+        }
+
+        /// <summary>
+        /// True when DeviceSetup registry JSON contains a SaveWhiteGloveSuccessResult property
+        /// with subcategoryState=succeeded. This is a definitive WhiteGlove (Pre-Provisioning)
+        /// confirmation signal — Windows only writes this property during White Glove flows.
+        /// </summary>
+        public bool HasSaveWhiteGloveSuccessResult
+        {
+            get { lock (_stateLock) { return _saveWhiteGloveSuccessResultSeen; } }
         }
 
         /// <summary>
@@ -543,6 +555,29 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment.SystemSignals
                     bool? categorySucceeded = SafeGetBool(root, "categorySucceeded");
                     string categoryStatusMessage = SafeGetString(root, "categoryStatusMessage");
                     var subcategories = ParseSubcategories(root);
+
+                    // Detect WhiteGlove confirmation signal in DeviceSetup category.
+                    // SaveWhiteGloveSuccessResult is NOT a *Subcategory-suffixed property, so
+                    // ParseSubcategories skips it. We scan the raw JSON explicitly.
+                    if (string.Equals(categoryLabel, "DeviceSetup", StringComparison.OrdinalIgnoreCase)
+                        && !_saveWhiteGloveSuccessResultSeen)
+                    {
+                        foreach (var prop in root.EnumerateObject())
+                        {
+                            if (prop.Name.IndexOf("SaveWhiteGloveSuccessResult", StringComparison.OrdinalIgnoreCase) >= 0
+                                && prop.Value.ValueKind == JsonValueKind.Object)
+                            {
+                                var state = SafeGetString(prop.Value, "subcategoryState");
+                                if (string.Equals(state, "succeeded", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    _saveWhiteGloveSuccessResultSeen = true;
+                                    _logger.Info("ProvisioningStatusTracker: SaveWhiteGloveSuccessResult=succeeded detected " +
+                                                 "— WhiteGlove confirmation signal");
+                                    break;
+                                }
+                            }
+                        }
+                    }
 
                     string statusText;
                     if (categoryStatusMessage != null)

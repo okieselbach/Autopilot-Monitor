@@ -25,7 +25,9 @@ namespace AutopilotMonitor.Agent.Core.Tests.Tracking
             bool hasUnresolvedEspCategories = false,
             bool deviceInfoCollected = true,
             string lastEspPhase = null,
-            string source = null)
+            string source = null,
+            bool whiteGloveStartDetected = false,
+            bool hasSaveWhiteGloveSuccessResult = false)
         {
             return new CompletionContext
             {
@@ -41,6 +43,8 @@ namespace AutopilotMonitor.Agent.Core.Tests.Tracking
                 DeviceInfoCollected = deviceInfoCollected,
                 LastEspPhase = lastEspPhase,
                 Source = source,
+                WhiteGloveStartDetected = whiteGloveStartDetected,
+                HasSaveWhiteGloveSuccessResult = hasSaveWhiteGloveSuccessResult,
                 AgentStartTimeUtc = DateTime.UtcNow.AddMinutes(-30),
                 EspFinalExitUtc = null,
                 EspEverSeen = false,
@@ -1134,6 +1138,149 @@ namespace AutopilotMonitor.Agent.Core.Tests.Tracking
             Assert.NotEqual(EnrollmentCompletionState.Completed, sm.CurrentState);
             Assert.Equal(EnrollmentCompletionState.DesktopArrivedEspBlocking, sm.CurrentState);
             Assert.False(result.ShouldEmitEnrollmentComplete);
+        }
+
+        // ===== WhiteGlove Guard Tests =====
+
+        [Fact]
+        public void DeviceOnly_ProvisioningComplete_WithWhiteGloveStart_TransitionsToWhiteGloveCompleted()
+        {
+            var sm = new CompletionStateMachine();
+            var ctx = DeviceOnlyContext();
+            ctx.WhiteGloveStartDetected = true;
+
+            var result = sm.ProcessTrigger("device_setup_provisioning_complete", ctx);
+
+            Assert.Equal(EnrollmentCompletionState.WhiteGloveCompleted, sm.CurrentState);
+            Assert.True(result.ShouldEmitWhiteGloveComplete);
+            Assert.False(result.ShouldEmitEnrollmentComplete);
+            Assert.Contains("whiteglove_guard_activated", result.SignalsToRecord);
+        }
+
+        [Fact]
+        public void DeviceOnly_ProvisioningComplete_WithSaveWhiteGloveSuccessResult_TransitionsToWhiteGloveCompleted()
+        {
+            var sm = new CompletionStateMachine();
+            var ctx = DeviceOnlyContext();
+            ctx.HasSaveWhiteGloveSuccessResult = true;
+
+            var result = sm.ProcessTrigger("device_setup_provisioning_complete", ctx);
+
+            Assert.Equal(EnrollmentCompletionState.WhiteGloveCompleted, sm.CurrentState);
+            Assert.True(result.ShouldEmitWhiteGloveComplete);
+            Assert.False(result.ShouldEmitEnrollmentComplete);
+        }
+
+        [Fact]
+        public void DeviceOnly_ProvisioningComplete_BothWhiteGloveSignals_TransitionsToWhiteGloveCompleted()
+        {
+            var sm = new CompletionStateMachine();
+            var ctx = DeviceOnlyContext();
+            ctx.WhiteGloveStartDetected = true;
+            ctx.HasSaveWhiteGloveSuccessResult = true;
+
+            var result = sm.ProcessTrigger("device_setup_provisioning_complete", ctx);
+
+            Assert.Equal(EnrollmentCompletionState.WhiteGloveCompleted, sm.CurrentState);
+            Assert.True(result.ShouldEmitWhiteGloveComplete);
+            Assert.False(result.ShouldEmitEnrollmentComplete);
+        }
+
+        [Fact]
+        public void DeviceOnly_ProvisioningComplete_NoWhiteGloveSignals_CompletesAsSelfDeploying()
+        {
+            var sm = new CompletionStateMachine();
+            var ctx = DeviceOnlyContext();
+            ctx.WhiteGloveStartDetected = false;
+            ctx.HasSaveWhiteGloveSuccessResult = false;
+
+            var result = sm.ProcessTrigger("device_setup_provisioning_complete", ctx);
+
+            Assert.Equal(EnrollmentCompletionState.Completed, sm.CurrentState);
+            Assert.True(result.ShouldEmitEnrollmentComplete);
+            Assert.False(result.ShouldEmitWhiteGloveComplete);
+            Assert.Equal("self_deploying_provisioning_complete", result.CompletionSource);
+        }
+
+        [Fact]
+        public void NonDeviceOnly_ProvisioningComplete_WithWhiteGloveStart_DoesNotTriggerWhiteGlove()
+        {
+            // Non-device-only deployments should NOT activate the WhiteGlove guard
+            var sm = new CompletionStateMachine();
+            var ctx = DefaultContext(whiteGloveStartDetected: true);
+
+            var result = sm.ProcessTrigger("device_setup_provisioning_complete", ctx);
+
+            Assert.NotEqual(EnrollmentCompletionState.WhiteGloveCompleted, sm.CurrentState);
+            Assert.False(result.ShouldEmitWhiteGloveComplete);
+        }
+
+        [Fact]
+        public void WhiteGloveCompleted_IsTerminal()
+        {
+            var sm = new CompletionStateMachine();
+            var ctx = DeviceOnlyContext();
+            ctx.WhiteGloveStartDetected = true;
+            sm.ProcessTrigger("device_setup_provisioning_complete", ctx);
+
+            Assert.Equal(EnrollmentCompletionState.WhiteGloveCompleted, sm.CurrentState);
+
+            // Further triggers should be no-ops
+            var result2 = sm.ProcessTrigger("esp_phase_changed", DefaultContext());
+            Assert.False(result2.Transitioned);
+            Assert.Equal(EnrollmentCompletionState.WhiteGloveCompleted, sm.CurrentState);
+        }
+
+        [Fact]
+        public void EspExiting_SkipUser_WithWhiteGloveStart_TransitionsToWhiteGloveCompleted()
+        {
+            var sm = new CompletionStateMachine();
+
+            // ESP phase detected first
+            var ctx = DefaultContext(autopilotMode: 0, skipUserStatusPage: true, aadJoinedWithUser: false,
+                isHelloPolicyConfigured: false, whiteGloveStartDetected: true);
+            sm.ProcessTrigger("esp_phase_changed", ctx);
+
+            // ESP exits with SkipUserStatusPage=true + WhiteGlove signal
+            ctx.LastEspPhase = "DeviceSetup";
+            var result = sm.ProcessTrigger("esp_exiting", ctx);
+
+            Assert.Equal(EnrollmentCompletionState.WhiteGloveCompleted, sm.CurrentState);
+            Assert.True(result.ShouldEmitWhiteGloveComplete);
+            Assert.False(result.ShouldEmitEnrollmentComplete);
+            Assert.Contains("whiteglove_guard_esp_exiting", result.SignalsToRecord);
+        }
+
+        [Fact]
+        public void EspExiting_SkipUser_WithSaveWhiteGloveSuccessResult_TransitionsToWhiteGloveCompleted()
+        {
+            var sm = new CompletionStateMachine();
+
+            var ctx = DefaultContext(autopilotMode: 0, skipUserStatusPage: true, aadJoinedWithUser: false,
+                isHelloPolicyConfigured: false, hasSaveWhiteGloveSuccessResult: true);
+            sm.ProcessTrigger("esp_phase_changed", ctx);
+
+            ctx.LastEspPhase = "DeviceSetup";
+            var result = sm.ProcessTrigger("esp_exiting", ctx);
+
+            Assert.Equal(EnrollmentCompletionState.WhiteGloveCompleted, sm.CurrentState);
+            Assert.True(result.ShouldEmitWhiteGloveComplete);
+        }
+
+        [Fact]
+        public void EspExiting_SkipUser_NoWhiteGloveSignals_CompletesAsDeviceOnly()
+        {
+            var sm = new CompletionStateMachine();
+
+            var ctx = DefaultContext(autopilotMode: 0, skipUserStatusPage: true, aadJoinedWithUser: false,
+                isHelloPolicyConfigured: false, isHelloCompleted: true);
+            sm.ProcessTrigger("esp_phase_changed", ctx);
+
+            ctx.LastEspPhase = "DeviceSetup";
+            var result = sm.ProcessTrigger("esp_exiting", ctx);
+
+            Assert.NotEqual(EnrollmentCompletionState.WhiteGloveCompleted, sm.CurrentState);
+            Assert.False(result.ShouldEmitWhiteGloveComplete);
         }
     }
 }

@@ -219,6 +219,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment
                     IsHelloCompleted = _espAndHelloTracker?.IsHelloCompleted ?? false,
                     IsHelloPolicyConfigured = _espAndHelloTracker?.IsPolicyConfigured ?? false,
                     HasUnresolvedEspCategories = false, // Will be set by caller when available
+                    WhiteGloveStartDetected = _espAndHelloTracker?.IsWhiteGloveStartDetected ?? false,
+                    HasSaveWhiteGloveSuccessResult = _espAndHelloTracker?.HasSaveWhiteGloveSuccessResult ?? false,
                     AgentStartTimeUtc = _agentStartTimeUtc,
                     EspFinalExitUtc = _stateData.EspFinalExitUtc,
                     ImePatternSeenUtc = _stateData.ImePatternSeenUtc

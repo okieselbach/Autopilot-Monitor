@@ -372,5 +372,73 @@ namespace AutopilotMonitor.Agent.Core.Tests.Collectors
             Assert.Single(withTransitions);
             Assert.Equal("subcategory_state_change", withTransitions[0].Data["changeType"]);
         }
+
+        // =====================================================================
+        // SaveWhiteGloveSuccessResult detection
+        // =====================================================================
+
+        [Fact]
+        public void ProcessCategoryStatus_DeviceSetup_WithSaveWhiteGloveSuccessResult_SetsFlag()
+        {
+            var t = CreateTracker();
+            // Simulates the exact JSON structure from a real WhiteGlove DeviceSetup registry
+            var json = @"{
+                ""categoryState"":""succeeded"",
+                ""DeviceSetup.SecurityPoliciesSubcategory"":{""subcategoryState"":""succeeded"",""subcategoryStatusText"":""ok""},
+                ""DeviceSetup.AppsSubcategory"":{""subcategoryState"":""succeeded"",""subcategoryStatusText"":""ok""},
+                ""DeviceSetup.SaveWhiteGloveSuccessResult"":{""subcategoryState"":""succeeded"",""subcategoryStatusText"":""succeeded""},
+                ""categoryStatusText"":""Complete""
+            }";
+
+            Assert.False(t.HasSaveWhiteGloveSuccessResult);
+            t.ProcessCategoryStatusForTest("DeviceSetupCategory.Status", json);
+            Assert.True(t.HasSaveWhiteGloveSuccessResult);
+        }
+
+        [Fact]
+        public void ProcessCategoryStatus_DeviceSetup_WithoutSaveWhiteGloveSuccessResult_FlagStaysFalse()
+        {
+            var t = CreateTracker();
+            // Normal (non-WhiteGlove) DeviceSetup — no SaveWhiteGloveSuccessResult property
+            var json = @"{
+                ""categoryState"":""succeeded"",
+                ""DeviceSetup.SecurityPoliciesSubcategory"":{""subcategoryState"":""succeeded"",""subcategoryStatusText"":""ok""},
+                ""DeviceSetup.AppsSubcategory"":{""subcategoryState"":""succeeded"",""subcategoryStatusText"":""ok""},
+                ""categoryStatusText"":""Complete""
+            }";
+
+            t.ProcessCategoryStatusForTest("DeviceSetupCategory.Status", json);
+            Assert.False(t.HasSaveWhiteGloveSuccessResult);
+        }
+
+        [Fact]
+        public void ProcessCategoryStatus_AccountSetup_WithSaveWhiteGloveSuccessResult_Ignored()
+        {
+            var t = CreateTracker();
+            // SaveWhiteGloveSuccessResult in AccountSetup should be ignored (only DeviceSetup matters)
+            var json = @"{
+                ""categoryState"":""succeeded"",
+                ""AccountSetup.SaveWhiteGloveSuccessResult"":{""subcategoryState"":""succeeded"",""subcategoryStatusText"":""succeeded""},
+                ""categoryStatusText"":""Complete""
+            }";
+
+            t.ProcessCategoryStatusForTest("AccountSetupCategory.Status", json);
+            Assert.False(t.HasSaveWhiteGloveSuccessResult);
+        }
+
+        [Fact]
+        public void ProcessCategoryStatus_DeviceSetup_SaveWhiteGloveNotSucceeded_FlagStaysFalse()
+        {
+            var t = CreateTracker();
+            var json = @"{
+                ""categoryState"":""inProgress"",
+                ""DeviceSetup.SecurityPoliciesSubcategory"":{""subcategoryState"":""succeeded"",""subcategoryStatusText"":""ok""},
+                ""DeviceSetup.SaveWhiteGloveSuccessResult"":{""subcategoryState"":""inProgress"",""subcategoryStatusText"":""working""},
+                ""categoryStatusText"":""working""
+            }";
+
+            t.ProcessCategoryStatusForTest("DeviceSetupCategory.Status", json);
+            Assert.False(t.HasSaveWhiteGloveSuccessResult);
+        }
     }
 }
