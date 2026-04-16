@@ -13,6 +13,23 @@ export function SectionKnownIssues() {
       </p>
 
       <AnnouncementCard
+        date="2026-04-16"
+        title="Agent Changes in Progress — Possible Detection Issues"
+        type="known-issue"
+      >
+        <p>
+          The agent is currently undergoing active changes. During this period,
+          detection and classification issues may occur (e.g.&nbsp;sessions not completing
+          correctly, events being misclassified, or sessions being falsely classified
+          as WhiteGlove).
+        </p>
+        <p>
+          This is actively being worked on. An update will follow once everything
+          is running correctly again.
+        </p>
+      </AnnouncementCard>
+
+      <AnnouncementCard
         date="2026-04-06"
         title="Delivery Optimization Data Restored via OS-Level Collection"
         type="resolved"
