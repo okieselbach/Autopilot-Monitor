@@ -27,8 +27,8 @@ export function SectionKnownIssues() {
           states. There is no way to restore the deleted data retroactively.
         </p>
         <p>
-          A plan for improved backup data retention is currently being developed to prevent
-          similar incidents in the future.
+          Operational safeguards are being put in place to block and verify cleanup operations
+          before execution and prevent similar incidents in the future.
         </p>
       </AnnouncementCard>
 
