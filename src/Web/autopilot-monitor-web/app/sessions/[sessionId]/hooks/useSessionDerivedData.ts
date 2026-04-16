@@ -180,8 +180,10 @@ export function useSessionDerivedData(
   // Events are assigned purely by sequence number — no special-casing for whiteglove_complete.
   // In the race-condition case (Windows writes the WhiteGlove success event after the reboot),
   // whiteglove_complete naturally lands in the user-enrollment part, preserving chronological order.
+  // When no split point exists yet (pre-provisioning still in progress), all events belong to Part 1.
   const preProvEvents = useMemo(() => {
-    if (!isWhiteGloveSession || whiteGloveSplitSequence < 0) return [] as EnrollmentEvent[];
+    if (!isWhiteGloveSession) return [] as EnrollmentEvent[];
+    if (whiteGloveSplitSequence < 0) return filteredEvents;
     return filteredEvents.filter(e => e.sequence <= whiteGloveSplitSequence);
   }, [filteredEvents, isWhiteGloveSession, whiteGloveSplitSequence]);
 
@@ -193,12 +195,12 @@ export function useSessionDerivedData(
   // Compute per-block durations for WhiteGlove sessions (using unfiltered events for accuracy).
   // Duration 1 = pre-provisioning, Duration 2 = user enrollment, combined = D1 + D2 (pause excluded).
   const whiteGloveDurations = useMemo(() => {
-    if (!isWhiteGloveSession || whiteGloveSplitSequence < 0) {
+    if (!isWhiteGloveSession) {
       return { preProvDuration: null as string | null, userEnrollDuration: null as string | null, combinedDuration: null as string | null };
     }
 
-    const preProvEvts = events.filter(e => e.sequence <= whiteGloveSplitSequence);
-    const userEnrollEvts = events.filter(e => e.sequence > whiteGloveSplitSequence);
+    const preProvEvts = whiteGloveSplitSequence < 0 ? events : events.filter(e => e.sequence <= whiteGloveSplitSequence);
+    const userEnrollEvts = whiteGloveSplitSequence < 0 ? [] : events.filter(e => e.sequence > whiteGloveSplitSequence);
 
     const calcMs = (evts: EnrollmentEvent[]): number => {
       if (evts.length === 0) return 0;
