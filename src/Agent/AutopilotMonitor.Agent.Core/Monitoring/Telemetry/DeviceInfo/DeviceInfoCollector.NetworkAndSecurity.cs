@@ -216,9 +216,34 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Telemetry.DeviceInfo
 
                         // --- Interpret CloudAssignedDomainJoinMethod ---
                         // 0 = Entra Join (Azure AD Join), 1 = Hybrid Azure AD Join
+                        // This value may be a top-level registry value OR embedded in PolicyJsonCache JSON.
                         var domainJoinMethodStr = data.ContainsKey("CloudAssignedDomainJoinMethod")
                             ? data["CloudAssignedDomainJoinMethod"]?.ToString()
                             : null;
+
+                        // Fallback: extract from PolicyJsonCache if not a top-level registry value
+                        if (domainJoinMethodStr == null && data.ContainsKey("PolicyJsonCache"))
+                        {
+                            try
+                            {
+                                var policyRaw = data["PolicyJsonCache"]?.ToString();
+                                if (!string.IsNullOrWhiteSpace(policyRaw))
+                                {
+                                    using (var pDoc = System.Text.Json.JsonDocument.Parse(policyRaw))
+                                    {
+                                        if (pDoc.RootElement.TryGetProperty("CloudAssignedDomainJoinMethod", out var djmProp))
+                                        {
+                                            domainJoinMethodStr = djmProp.ToString();
+                                        }
+                                    }
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.Trace($"EnrollmentTracker: Failed to parse PolicyJsonCache for DomainJoinMethod: {ex.Message}");
+                            }
+                        }
+
                         if (domainJoinMethodStr != null && int.TryParse(domainJoinMethodStr, out var domainJoinMethod))
                         {
                             string joinLabel;
