@@ -135,6 +135,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment
                 if (_stateData.EspFirstSeenUtc == null)
                     _stateData.EspFirstSeenUtc = DateTime.UtcNow;
             }
+            _statePersistence.Save(_stateData); // Immediate persist — ESP phase + espEverSeen must survive reboot
             RecordSignal($"esp_phase_{phase}");
 
             // ESP phase change means ESP is progressing — cancel any pending failure grace period

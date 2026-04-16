@@ -219,6 +219,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment
                     IsHelloCompleted = _espAndHelloTracker?.IsHelloCompleted ?? false,
                     IsHelloPolicyConfigured = _espAndHelloTracker?.IsPolicyConfigured ?? false,
                     HasUnresolvedEspCategories = false, // Will be set by caller when available
+                    HasAccountSetupActivity = _espAndHelloTracker?.HasAccountSetupActivity ?? false,
                     WhiteGloveStartDetected = _espAndHelloTracker?.IsWhiteGloveStartDetected ?? false,
                     HasSaveWhiteGloveSuccessResult = _espAndHelloTracker?.HasSaveWhiteGloveSuccessResult ?? false,
                     AgentStartTimeUtc = _agentStartTimeUtc,
@@ -418,6 +419,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment
                 _espAndHelloTracker.WhiteGloveCompleted += OnWhiteGloveCompleted;
                 _espAndHelloTracker.EspFailureDetected += OnEspFailureDetected;
                 _espAndHelloTracker.DeviceSetupProvisioningComplete += OnDeviceSetupProvisioningComplete;
+
+                // Backfill recent ESP exit events that may have fired before we subscribed.
+                // The EspAndHelloTracker is started by CollectorCoordinator before the EnrollmentTracker
+                // is created, so esp_exiting events detected during that window are lost. Backfill recovers them.
+                _espAndHelloTracker.BackfillRecentEspExitEvents();
             }
         }
 

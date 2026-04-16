@@ -602,12 +602,22 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment
                     skipUser = _skipUserStatusPage;
                 }
 
-                if (string.Equals(lastPhase, "AccountSetup", StringComparison.OrdinalIgnoreCase) || desktopArr)
+                // Defense-in-depth: if lastEspPhase is null (state lost after reboot) but the
+                // ESP provisioning registry shows AccountSetup activity, treat as AccountSetup.
+                // This catches the edge case where neither persistence nor backfill recovered the phase.
+                bool accountSetupFromProvisioning = lastPhase == null
+                    && (_espAndHelloTracker?.HasAccountSetupActivity == true);
+
+                if (string.Equals(lastPhase, "AccountSetup", StringComparison.OrdinalIgnoreCase)
+                    || desktopArr
+                    || accountSetupFromProvisioning)
                 {
-                    // Final ESP exit: either AccountSetup phase detected OR desktop arrived (backup)
+                    // Final ESP exit: AccountSetup phase detected, desktop arrived (backup), or provisioning registry confirms AccountSetup
                     var phaseInfo = string.Equals(lastPhase, "AccountSetup", StringComparison.OrdinalIgnoreCase)
                         ? "AccountSetup"
-                        : $"{lastPhase ?? "unknown"} (desktop arrival backup)";
+                        : accountSetupFromProvisioning
+                            ? "AccountSetup (provisioning registry fallback)"
+                            : $"{lastPhase ?? "unknown"} (desktop arrival backup)";
                     _logger.Info($"EnrollmentTracker: ESP final exit from {phaseInfo} — marking _espFinalExitSeen, starting Hello wait timer");
 
                     lock (_stateLock)

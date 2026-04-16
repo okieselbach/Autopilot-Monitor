@@ -33,6 +33,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment.Completion
         public bool IsHelloCompleted { get; set; }
         public bool IsHelloPolicyConfigured { get; set; }
         public bool HasUnresolvedEspCategories { get; set; }
+        public bool HasAccountSetupActivity { get; set; }
 
         // WhiteGlove detection signals
         public bool WhiteGloveStartDetected { get; set; }
@@ -287,9 +288,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment.Completion
             var prev = _currentState;
             var result = new TransitionResult { PreviousState = prev, SignalsToRecord = new List<string>() };
 
-            // Path A: AccountSetup completed or desktop already arrived
+            // Path A: AccountSetup completed, desktop already arrived, or provisioning registry confirms AccountSetup
+            bool accountSetupFromProvisioning = ctx.LastEspPhase == null && ctx.HasAccountSetupActivity;
             if (string.Equals(ctx.LastEspPhase, "AccountSetup", StringComparison.OrdinalIgnoreCase)
-                || _desktopArrived)
+                || _desktopArrived
+                || accountSetupFromProvisioning)
             {
                 _espFinalExitSeen = true;
                 _currentState = EnrollmentCompletionState.EspExitedAwaitingCompletion;
