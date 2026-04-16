@@ -74,6 +74,7 @@ namespace AutopilotMonitor.Shared.DataAccess
         Task<bool> StoreEventAsync(EnrollmentEvent evt);
         Task<List<EnrollmentEvent>> StoreEventsBatchAsync(List<EnrollmentEvent> events);
         Task<List<EnrollmentEvent>> GetSessionEventsAsync(string tenantId, string sessionId, int maxResults = 1000);
+        Task<List<EnrollmentEvent>> GetSessionEventsByTypeAsync(string tenantId, string sessionId, string eventType, int maxResults = 200);
 
         // --- Search ---
         Task<List<QuickSearchResult>> QuickSearchSessionsAsync(string? tenantId, string query, int limit = 10);
@@ -81,11 +82,14 @@ namespace AutopilotMonitor.Shared.DataAccess
         Task<List<SessionSummary>> SearchSessionsByEventAsync(
             string? tenantId, string eventType, string? source, string? severity,
             string? phase, int limit = 50);
+        Task<List<EnrollmentEvent>> SearchEventsByTypesAsync(
+            string? tenantId, IEnumerable<string> eventTypes, string? source, string? severity,
+            int sessionLimit = 10, int eventLimit = 50);
         Task<List<SessionSummary>> SearchSessionsByCveAsync(
             string? tenantId, string cveId, double? minCvssScore, string? overallRisk, int limit = 50);
 
         // --- Agent Indexes ---
-        Task UpsertEventTypeIndexBatchAsync(string tenantId, string sessionId, IEnumerable<string> eventTypes);
+        Task UpsertEventTypeIndexBatchAsync(string tenantId, string sessionId, IEnumerable<EnrollmentEvent> events);
         Task UpsertDeviceSnapshotAsync(string tenantId, string sessionId, IEnumerable<EnrollmentEvent> events);
         Task UpsertCveIndexEntriesAsync(string tenantId, string sessionId, List<Dictionary<string, object>> findings);
     }

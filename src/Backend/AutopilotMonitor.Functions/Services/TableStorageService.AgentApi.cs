@@ -16,26 +16,97 @@ namespace AutopilotMonitor.Functions.Services
         /// PartitionKey = {tenantId}_{eventType}, RowKey = {invertedTicks}_{sessionId}
         /// This enables efficient "find all sessions with event X" queries.
         /// </summary>
-        public async Task UpsertEventTypeIndexBatchAsync(string tenantId, string sessionId, IEnumerable<string> eventTypes)
+        public async Task UpsertEventTypeIndexBatchAsync(string tenantId, string sessionId, IEnumerable<AutopilotMonitor.Shared.Models.EnrollmentEvent> events)
         {
             try
             {
+                var eventList = events.ToList();
+                if (eventList.Count == 0) return;
+
                 var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.EventTypeIndex);
-                var rowKey = $"{(DateTime.MaxValue.Ticks - DateTime.UtcNow.Ticks):D19}_{sessionId}";
 
-                var tasks = eventTypes.Distinct().Select(eventType =>
+                // Obtain stable StartedAt for deterministic RowKey (one GET per batch call)
+                DateTime startedAt;
+                try
                 {
-                    var partitionKey = $"{tenantId}_{eventType}";
-                    var entity = new TableEntity(partitionKey, rowKey)
-                    {
-                        ["SessionId"] = sessionId,
-                        ["TenantId"] = tenantId,
-                        ["EventType"] = eventType,
-                    };
-                    return tableClient.UpsertEntityAsync(entity);
-                });
+                    var sessionsTable = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
+                    var sessionEntity = await sessionsTable.GetEntityAsync<TableEntity>(tenantId, sessionId,
+                        select: new[] { "StartedAt" });
+                    startedAt = sessionEntity.Value.GetDateTimeOffset("StartedAt")?.UtcDateTime ?? DateTime.UtcNow;
+                }
+                catch (RequestFailedException ex) when (ex.Status == 404)
+                {
+                    startedAt = eventList.Min(e => e.Timestamp);
+                }
 
-                await Task.WhenAll(tasks);
+                var rowKey = $"{(DateTime.MaxValue.Ticks - startedAt.Ticks):D19}_{sessionId}";
+
+                var groups = eventList.GroupBy(e => e.EventType);
+
+                foreach (var group in groups)
+                {
+                    var eventType = group.Key;
+                    var partitionKey = $"{tenantId}_{eventType}";
+
+                    var batchMaxSeverity = (int)group.Max(e => e.Severity);
+                    var batchSources = group
+                        .Where(e => !string.IsNullOrEmpty(e.Source))
+                        .Select(e => e.Source!)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                    for (int retry = 0; retry < 3; retry++)
+                    {
+                        try
+                        {
+                            int existingMaxSeverity = -2;
+                            var existingSources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                            ETag etag = default;
+                            bool exists = false;
+
+                            try
+                            {
+                                var existing = await tableClient.GetEntityAsync<TableEntity>(partitionKey, rowKey);
+                                existingMaxSeverity = existing.Value.GetInt32("MaxSeverity") ?? -2;
+                                var sourcesStr = existing.Value.GetString("Sources") ?? "";
+                                if (!string.IsNullOrEmpty(sourcesStr))
+                                {
+                                    foreach (var s in sourcesStr.Split(','))
+                                        existingSources.Add(s.Trim());
+                                }
+                                etag = existing.Value.ETag;
+                                exists = true;
+                            }
+                            catch (RequestFailedException ex2) when (ex2.Status == 404) { }
+
+                            var mergedMaxSeverity = Math.Max(existingMaxSeverity, batchMaxSeverity);
+                            existingSources.UnionWith(batchSources);
+                            var mergedSources = string.Join(",", existingSources.OrderBy(s => s, StringComparer.OrdinalIgnoreCase));
+                            var mergedSeverityName = ((AutopilotMonitor.Shared.Models.EventSeverity)mergedMaxSeverity).ToString();
+
+                            var entity = new TableEntity(partitionKey, rowKey)
+                            {
+                                ["SessionId"] = sessionId,
+                                ["TenantId"] = tenantId,
+                                ["EventType"] = eventType,
+                                ["MaxSeverity"] = mergedMaxSeverity,
+                                ["MaxSeverityName"] = mergedSeverityName,
+                                ["Sources"] = mergedSources,
+                            };
+
+                            if (exists)
+                                await tableClient.UpdateEntityAsync(entity, etag, TableUpdateMode.Replace);
+                            else
+                                await tableClient.UpsertEntityAsync(entity);
+
+                            break;
+                        }
+                        catch (RequestFailedException ex3) when (ex3.Status == 412 && retry < 2)
+                        {
+                            // ETag conflict — retry with fresh read
+                        }
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -649,19 +720,31 @@ namespace AutopilotMonitor.Functions.Services
 
         /// <summary>
         /// Searches sessions that contain a specific event type using the EventTypeIndex.
-        /// Note: source/severity/phase filtering is not supported in v1 (too expensive).
+        /// Supports server-side severity prefilter via MaxSeverity (enriched index rows).
+        /// Source filtering is applied client-side on the Sources field.
         /// </summary>
         public async Task<List<SessionSummary>> SearchSessionsByEventAsync(
             string? tenantId, string eventType, string? source, string? severity, string? phase, int limit = 50)
         {
             var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.EventTypeIndex);
 
+            // Build OData filter: PartitionKey + optional severity prefilter
+            int? minSeverity = null;
+            if (!string.IsNullOrEmpty(severity) &&
+                Enum.TryParse<AutopilotMonitor.Shared.Models.EventSeverity>(severity, ignoreCase: true, out var parsedSeverity))
+            {
+                minSeverity = (int)parsedSeverity;
+            }
+
             string? oDataFilter;
             if (!string.IsNullOrEmpty(tenantId))
+            {
                 oDataFilter = $"PartitionKey eq '{ODataSanitizer.EscapeValue(tenantId)}_{ODataSanitizer.EscapeValue(eventType)}'";
-
+                if (minSeverity.HasValue)
+                    oDataFilter += $" and MaxSeverity ge {minSeverity.Value}";
+            }
             else
-                oDataFilter = null; // full scan — not efficient but functional
+                oDataFilter = null;
 
             var sessionIds = new List<string>();
             await foreach (var entity in tableClient.QueryAsync<TableEntity>(filter: oDataFilter))
@@ -674,6 +757,20 @@ namespace AutopilotMonitor.Functions.Services
                     if (underscoreIdx < 0) continue;
                     var pkEventType = pk.Substring(underscoreIdx + 1);
                     if (!string.Equals(pkEventType, eventType, StringComparison.OrdinalIgnoreCase)) continue;
+
+                    // Cross-tenant severity filter (client-side since no PK filter)
+                    if (minSeverity.HasValue)
+                    {
+                        var entitySeverity = entity.GetInt32("MaxSeverity");
+                        if (entitySeverity == null || entitySeverity < minSeverity.Value) continue;
+                    }
+                }
+
+                // Client-side source filter on the Sources field
+                if (!string.IsNullOrEmpty(source))
+                {
+                    var sources = entity.GetString("Sources") ?? "";
+                    if (!sources.Contains(source, StringComparison.OrdinalIgnoreCase)) continue;
                 }
 
                 var sessionId = entity.GetString("SessionId");
@@ -687,6 +784,77 @@ namespace AutopilotMonitor.Functions.Services
 
             var sessions = await BatchGetSessionsAsync(tenantId, sessionIds);
             return sessions.Take(limit).ToList();
+        }
+
+        /// <summary>
+        /// Searches events across sessions for multiple event types using the EventTypeIndex for pre-filtering,
+        /// then fetches only matching events per session via server-side OData filter on the Events table.
+        /// Designed for MCP search tools to replace the N+1 fetchSessionEvents pattern.
+        /// </summary>
+        public async Task<List<EnrollmentEvent>> SearchEventsByTypesAsync(
+            string? tenantId, IEnumerable<string> eventTypes, string? source, string? severity,
+            int sessionLimit = 10, int eventLimit = 50)
+        {
+            var typeList = eventTypes.Where(t => !string.IsNullOrEmpty(t)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            if (typeList.Count == 0) return new List<EnrollmentEvent>();
+
+            // Step 1: Query EventTypeIndex for each event type to find candidate sessions
+            var candidateSessionIds = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase); // sessionId → tenantId
+
+            foreach (var eventType in typeList)
+            {
+                var sessions = await SearchSessionsByEventAsync(tenantId, eventType, source, severity, null, limit: sessionLimit);
+                foreach (var session in sessions)
+                {
+                    candidateSessionIds.TryAdd(session.SessionId, session.TenantId);
+                }
+
+                if (candidateSessionIds.Count >= sessionLimit) break;
+            }
+
+            if (candidateSessionIds.Count == 0) return new List<EnrollmentEvent>();
+
+            // Step 2: For each candidate session, fetch only matching event types via filtered query
+            var allEvents = new List<EnrollmentEvent>();
+            var sem = new SemaphoreSlim(10, 10);
+
+            var tasks = candidateSessionIds.Take(sessionLimit).Select(async kvp =>
+            {
+                await sem.WaitAsync();
+                try
+                {
+                    var sessionEvents = new List<EnrollmentEvent>();
+                    foreach (var eventType in typeList)
+                    {
+                        var events = await GetSessionEventsByTypeAsync(kvp.Value, kvp.Key, eventType, eventLimit);
+                        sessionEvents.AddRange(events);
+                    }
+
+                    // Apply remaining client-side filters (severity, source)
+                    return sessionEvents.Where(e =>
+                        (string.IsNullOrEmpty(severity) || e.Severity.ToString().Equals(severity, StringComparison.OrdinalIgnoreCase)) &&
+                        (string.IsNullOrEmpty(source) || (e.Source ?? "").Contains(source, StringComparison.OrdinalIgnoreCase))
+                    ).ToList();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to fetch events for session {SessionId}", kvp.Key);
+                    return new List<EnrollmentEvent>();
+                }
+                finally
+                {
+                    sem.Release();
+                }
+            });
+
+            var results = await Task.WhenAll(tasks);
+            foreach (var batch in results)
+                allEvents.AddRange(batch);
+
+            return allEvents
+                .OrderByDescending(e => e.Timestamp)
+                .Take(eventLimit)
+                .ToList();
         }
 
         /// <summary>

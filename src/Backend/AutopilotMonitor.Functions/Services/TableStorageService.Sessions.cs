@@ -1444,6 +1444,42 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
+        /// Gets events for a specific session filtered by event type (server-side OData filter).
+        /// Much more efficient than GetSessionEventsAsync when only one event type is needed.
+        /// </summary>
+        public async Task<List<EnrollmentEvent>> GetSessionEventsByTypeAsync(string tenantId, string sessionId, string eventType, int maxResults = 200)
+        {
+            SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
+            SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
+
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Events);
+                var events = new List<EnrollmentEvent>();
+
+                var partitionKey = $"{tenantId}_{sessionId}";
+                var filter = $"PartitionKey eq '{ODataSanitizer.EscapeValue(partitionKey)}' and EventType eq '{ODataSanitizer.EscapeValue(eventType)}'";
+
+                var query = tableClient.QueryAsync<TableEntity>(
+                    filter: filter,
+                    maxPerPage: maxResults
+                );
+
+                await foreach (var entity in query)
+                {
+                    events.Add(MapToEnrollmentEvent(entity));
+                }
+
+                return events.OrderBy(e => e.Sequence).ToList();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to get events by type {EventType} for session {SessionId}", eventType, sessionId);
+                return new List<EnrollmentEvent>();
+            }
+        }
+
+        /// <summary>
         /// Stores the diagnostics blob name on an existing session (Merge-mode, single field update).
         /// </summary>
         public async Task UpdateSessionDiagnosticsBlobAsync(string tenantId, string sessionId, string blobName)

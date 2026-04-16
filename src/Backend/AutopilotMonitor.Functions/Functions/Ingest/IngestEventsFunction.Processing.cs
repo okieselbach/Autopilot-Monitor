@@ -169,8 +169,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                 var indexEvents = storedEvents.ToList();
                 _ = Task.WhenAll(
                     _sessionRepo.UpsertEventTypeIndexBatchAsync(
-                        indexTenantId, indexSessionId,
-                        indexEvents.Select(e => e.EventType).Distinct()),
+                        indexTenantId, indexSessionId, indexEvents),
                     _sessionRepo.UpsertDeviceSnapshotAsync(
                         indexTenantId, indexSessionId, indexEvents)
                 ).ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException,
@@ -605,6 +604,9 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                     case "whiteglove_resumed":
                         classification.WhiteGloveResumedEvent = evt;
                         break;
+                    case "whiteglove_started":
+                        classification.WhiteGloveStartedEvent = evt;
+                        break;
                     case "esp_failure":
                         classification.EspFailureEvent = evt;
                         break;
@@ -743,6 +745,23 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                 else
                 {
                     _logger.LogInformation("{SessionPrefix} WhiteGlove resumed skipped, session already {Status}", sessionPrefix, currentSession?.Status);
+                }
+            }
+
+            // Early WhiteGlove classification: if whiteglove_started event is in this batch,
+            // mark the session as pre-provisioned immediately (safety net for old agents that may
+            // still send self_deploying_provisioning_complete instead of whiteglove_complete).
+            if (c.WhiteGloveStartedEvent != null)
+            {
+                try
+                {
+                    await _sessionRepo.SetSessionPreProvisionedAsync(
+                        request.TenantId, request.SessionId, true, isUserDriven: false);
+                    _logger.LogInformation("{SessionPrefix} whiteglove_started detected — marked IsPreProvisioned=true early", sessionPrefix);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "{SessionPrefix} Failed to set early IsPreProvisioned for whiteglove_started", sessionPrefix);
                 }
             }
 
@@ -1132,6 +1151,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
         public EnrollmentEvent? GatherCompletionEvent { get; set; }
         public EnrollmentEvent? DiagnosticsUploadedEvent { get; set; }
         public EnrollmentEvent? WhiteGloveEvent { get; set; }
+        public EnrollmentEvent? WhiteGloveStartedEvent { get; set; }
         public EnrollmentEvent? WhiteGloveResumedEvent { get; set; }
         public EnrollmentEvent? EspFailureEvent { get; set; }
         public EnrollmentEvent? SessionStalledEvent { get; set; }

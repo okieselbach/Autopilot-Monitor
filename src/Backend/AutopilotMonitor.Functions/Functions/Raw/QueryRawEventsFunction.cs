@@ -98,14 +98,14 @@ namespace AutopilotMonitor.Functions.Functions.Raw
                     return bad;
                 }
 
-                // Use search by event to find sessions, then fetch their events
+                // Use EventTypeIndex (pre-filtered by severity/source) to find sessions,
+                // then fetch only matching event types per session via server-side OData filter
                 var sessions = await _sessionRepo.SearchSessionsByEventAsync(tenantId, eventType, source, severity, null, limit: 20);
                 events = new List<EnrollmentEvent>();
                 foreach (var session in sessions)
                 {
-                    var sessionEvents = await _sessionRepo.GetSessionEventsAsync(session.TenantId, session.SessionId, 200);
+                    var sessionEvents = await _sessionRepo.GetSessionEventsByTypeAsync(session.TenantId, session.SessionId, eventType, limit);
                     events.AddRange(sessionEvents.Where(e =>
-                        (string.IsNullOrEmpty(eventType) || e.EventType == eventType) &&
                         (string.IsNullOrEmpty(severity) || e.Severity.ToString().Equals(severity, StringComparison.OrdinalIgnoreCase)) &&
                         (string.IsNullOrEmpty(source) || (e.Source ?? "").Contains(source, StringComparison.OrdinalIgnoreCase))
                     ));

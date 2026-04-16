@@ -115,6 +115,9 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
         public Task<List<EnrollmentEvent>> GetSessionEventsAsync(string tenantId, string sessionId, int maxResults = 1000)
             => _storage.GetSessionEventsAsync(tenantId, sessionId, maxResults);
 
+        public Task<List<EnrollmentEvent>> GetSessionEventsByTypeAsync(string tenantId, string sessionId, string eventType, int maxResults = 200)
+            => _storage.GetSessionEventsByTypeAsync(tenantId, sessionId, eventType, maxResults);
+
         public Task<List<QuickSearchResult>> QuickSearchSessionsAsync(string? tenantId, string query, int limit = 10)
             => _storage.QuickSearchSessionsAsync(tenantId, query, limit);
 
@@ -126,12 +129,17 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
             string? phase, int limit = 50)
             => _storage.SearchSessionsByEventAsync(tenantId, eventType, source, severity, phase, limit);
 
+        public Task<List<EnrollmentEvent>> SearchEventsByTypesAsync(
+            string? tenantId, IEnumerable<string> eventTypes, string? source, string? severity,
+            int sessionLimit = 10, int eventLimit = 50)
+            => _storage.SearchEventsByTypesAsync(tenantId, eventTypes, source, severity, sessionLimit, eventLimit);
+
         public Task<List<SessionSummary>> SearchSessionsByCveAsync(
             string? tenantId, string cveId, double? minCvssScore, string? overallRisk, int limit = 50)
             => _storage.SearchSessionsByCveAsync(tenantId, cveId, minCvssScore, overallRisk, limit);
 
-        public Task UpsertEventTypeIndexBatchAsync(string tenantId, string sessionId, IEnumerable<string> eventTypes)
-            => _storage.UpsertEventTypeIndexBatchAsync(tenantId, sessionId, eventTypes);
+        public Task UpsertEventTypeIndexBatchAsync(string tenantId, string sessionId, IEnumerable<EnrollmentEvent> events)
+            => _storage.UpsertEventTypeIndexBatchAsync(tenantId, sessionId, events);
 
         public Task UpsertDeviceSnapshotAsync(string tenantId, string sessionId, IEnumerable<EnrollmentEvent> events)
             => _storage.UpsertDeviceSnapshotAsync(tenantId, sessionId, events);

@@ -129,6 +129,7 @@ public static class EndpointAccessPolicyCatalog
         // ── MemberRead (Admin + Operator, later + Viewer) ───────────────
         new("GET",    "raw/sessions",                        EndpointPolicy.MemberRead),
         new("GET",    "raw/events",                          EndpointPolicy.MemberRead),
+        new("GET",    "raw/events/search",                   EndpointPolicy.MemberRead),
         new("GET",    "search/quick",                   EndpointPolicy.MemberRead),
         new("GET",    "search/sessions",                EndpointPolicy.MemberRead),
         new("GET",    "search/sessions-by-event",       EndpointPolicy.MemberRead),
@@ -201,6 +202,7 @@ public static class EndpointAccessPolicyCatalog
         // ── GlobalAdminOnly ────────────────────────────────────────────
         new("GET",    "global/raw/sessions",                  EndpointPolicy.GlobalAdminOnly),
         new("GET",    "global/raw/events",                    EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "global/raw/events/search",              EndpointPolicy.GlobalAdminOnly),
         new("GET",    "global/raw/tables",                    EndpointPolicy.GlobalAdminOnly),
         new("GET",    "global/raw/tables/{tableName}",        EndpointPolicy.GlobalAdminOnly),
         new("POST",   "global/raw/logs",                      EndpointPolicy.GlobalAdminOnly),
