@@ -136,7 +136,7 @@ export function SectionAgentMetrics() {
 
   const [loading, setLoading] = useState(true);
   const [sessionMetrics, setSessionMetrics] = useState<SessionAgentMetrics[]>([]);
-  const [sampleSize, setSampleSize] = useState(20);
+  const [sampleSize, setSampleSize] = useState(100);
   const [error, setError] = useState<string | null>(null);
   const [versionFilter, setVersionFilter] = useState<string>('all');
   const [cacheInfo, setCacheInfo] = useState<{ fromCache: boolean; computeDurationMs: number; computedAt: string } | null>(null);
@@ -313,10 +313,11 @@ export function SectionAgentMetrics() {
                 onChange={(e) => setSampleSize(Number(e.target.value))}
                 className="text-sm border border-gray-300 rounded-md px-2 py-1"
               >
-                <option value={10}>10</option>
                 <option value={20}>20</option>
                 <option value={50}>50</option>
                 <option value={100}>100</option>
+                <option value={200}>200</option>
+                <option value={500}>500</option>
               </select>
               {availableVersions.length > 1 && (
                 <>
