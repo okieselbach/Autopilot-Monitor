@@ -74,6 +74,13 @@ namespace AutopilotMonitor.Shared.Models
         /// </summary>
         public int CollectorIdleTimeoutMinutes { get; set; } = 15;
 
+        /// <summary>
+        /// Maintenance alarm threshold: sessions with more events than this value trigger an
+        /// ExcessiveSessionEvents ops alert (dispatched to Telegram/Teams).
+        /// 0 = disabled. Default: 2000 (largest real sessions observed are ~500).
+        /// </summary>
+        public int ExcessiveEventCountThreshold { get; set; } = 2000;
+
         // ===== MAINTENANCE AUTO-BLOCK SETTINGS =====
 
         /// <summary>

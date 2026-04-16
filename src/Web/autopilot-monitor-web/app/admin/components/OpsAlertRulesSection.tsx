@@ -33,11 +33,13 @@ interface OpsAlertRulesSectionProps {
   opsAlertTeamsWebhookUrl: string;
   opsAlertSlackEnabled: boolean;
   opsAlertSlackWebhookUrl: string;
+  excessiveEventCountThreshold: number;
   onSave: (
     rules: OpsAlertRule[],
     telegramEnabled: boolean, telegramChatId: string,
     teamsEnabled: boolean, teamsWebhookUrl: string,
     slackEnabled: boolean, slackWebhookUrl: string,
+    excessiveEventCountThreshold: number,
   ) => Promise<void>;
 }
 
@@ -52,6 +54,7 @@ export function OpsAlertRulesSection({
   opsAlertTeamsWebhookUrl,
   opsAlertSlackEnabled,
   opsAlertSlackWebhookUrl,
+  excessiveEventCountThreshold: excessiveEventCountThresholdProp,
   onSave,
 }: OpsAlertRulesSectionProps) {
   // Local state for editing
@@ -62,6 +65,7 @@ export function OpsAlertRulesSection({
   const [teamsWebhookUrl, setTeamsWebhookUrl] = useState("");
   const [slackEnabled, setSlackEnabled] = useState(false);
   const [slackWebhookUrl, setSlackWebhookUrl] = useState("");
+  const [excessiveThreshold, setExcessiveThreshold] = useState(excessiveEventCountThresholdProp);
 
   // Sync from props
   useEffect(() => {
@@ -81,7 +85,8 @@ export function OpsAlertRulesSection({
     setTeamsWebhookUrl(opsAlertTeamsWebhookUrl);
     setSlackEnabled(opsAlertSlackEnabled);
     setSlackWebhookUrl(opsAlertSlackWebhookUrl);
-  }, [opsAlertRules, opsAlertTelegramEnabled, opsAlertTelegramChatId, opsAlertTeamsEnabled, opsAlertTeamsWebhookUrl, opsAlertSlackEnabled, opsAlertSlackWebhookUrl]);
+    setExcessiveThreshold(excessiveEventCountThresholdProp);
+  }, [opsAlertRules, opsAlertTelegramEnabled, opsAlertTelegramChatId, opsAlertTeamsEnabled, opsAlertTeamsWebhookUrl, opsAlertSlackEnabled, opsAlertSlackWebhookUrl, excessiveEventCountThresholdProp]);
 
   const toggleRule = (eventType: string) => {
     setRules(prev => prev.map(r => r.eventType === eventType ? { ...r, enabled: !r.enabled } : r));
@@ -92,7 +97,7 @@ export function OpsAlertRulesSection({
   };
 
   const handleSave = () => {
-    onSave(rules, telegramEnabled, telegramChatId, teamsEnabled, teamsWebhookUrl, slackEnabled, slackWebhookUrl);
+    onSave(rules, telegramEnabled, telegramChatId, teamsEnabled, teamsWebhookUrl, slackEnabled, slackWebhookUrl, excessiveThreshold);
   };
 
   const enabledRulesCount = rules.filter(r => r.enabled).length;
@@ -141,29 +146,45 @@ export function OpsAlertRulesSection({
                       const rule = rules.find(r => r.eventType === et);
                       if (!rule) return null;
                       return (
-                        <div key={et} className="flex items-center gap-3 py-1.5 px-3 rounded hover:bg-amber-100/50 dark:hover:bg-gray-700/50 transition-colors">
-                          <label className="relative inline-flex items-center cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={rule.enabled}
-                              onChange={() => toggleRule(et)}
-                              className="sr-only peer"
-                            />
-                            <div className="w-9 h-5 bg-gray-300 dark:bg-gray-600 rounded-full peer peer-checked:bg-amber-500 dark:peer-checked:bg-amber-500 transition-colors after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-full"></div>
-                          </label>
-                          <span className={`flex-1 text-sm font-mono ${rule.enabled ? "text-gray-900 dark:text-gray-100" : "text-gray-400 dark:text-gray-500"}`}>
-                            {et}
-                          </span>
-                          <select
-                            value={rule.minSeverity}
-                            onChange={(e) => setSeverity(et, e.target.value)}
-                            disabled={!rule.enabled}
-                            className="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus:ring-1 focus:ring-amber-500"
-                          >
-                            {SEVERITIES.map(s => (
-                              <option key={s} value={s}>{s}+</option>
-                            ))}
-                          </select>
+                        <div key={et}>
+                          <div className="flex items-center gap-3 py-1.5 px-3 rounded hover:bg-amber-100/50 dark:hover:bg-gray-700/50 transition-colors">
+                            <label className="relative inline-flex items-center cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={rule.enabled}
+                                onChange={() => toggleRule(et)}
+                                className="sr-only peer"
+                              />
+                              <div className="w-9 h-5 bg-gray-300 dark:bg-gray-600 rounded-full peer peer-checked:bg-amber-500 dark:peer-checked:bg-amber-500 transition-colors after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-full"></div>
+                            </label>
+                            <span className={`flex-1 text-sm font-mono ${rule.enabled ? "text-gray-900 dark:text-gray-100" : "text-gray-400 dark:text-gray-500"}`}>
+                              {et}
+                            </span>
+                            <select
+                              value={rule.minSeverity}
+                              onChange={(e) => setSeverity(et, e.target.value)}
+                              disabled={!rule.enabled}
+                              className="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus:ring-1 focus:ring-amber-500"
+                            >
+                              {SEVERITIES.map(s => (
+                                <option key={s} value={s}>{s}+</option>
+                              ))}
+                            </select>
+                          </div>
+                          {et === "ExcessiveSessionEvents" && rule.enabled && (
+                            <div className="ml-12 mt-1 mb-2 flex items-center gap-2">
+                              <label className="text-xs text-amber-700 dark:text-amber-300 whitespace-nowrap">Threshold:</label>
+                              <input
+                                type="number"
+                                min={0}
+                                step={100}
+                                value={excessiveThreshold}
+                                onChange={(e) => setExcessiveThreshold(parseInt(e.target.value, 10) || 0)}
+                                className="w-24 text-xs px-2 py-1 rounded border border-amber-300 dark:border-amber-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                              />
+                              <span className="text-xs text-amber-600 dark:text-amber-400">events per session (0 = disabled)</span>
+                            </div>
+                          )}
                         </div>
                       );
                     })}

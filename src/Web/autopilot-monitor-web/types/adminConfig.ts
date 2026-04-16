@@ -6,6 +6,7 @@ export interface AdminConfiguration {
   globalRateLimitRequestsPerMinute: number;
   platformStatsBlobSasUrl?: string;
   collectorIdleTimeoutMinutes?: number;
+  excessiveEventCountThreshold?: number;
   maxSessionWindowHours?: number;
   maintenanceBlockDurationHours?: number;
   opsEventRetentionDays?: number;

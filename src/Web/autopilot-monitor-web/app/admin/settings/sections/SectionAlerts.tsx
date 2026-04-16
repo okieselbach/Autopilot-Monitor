@@ -16,6 +16,7 @@ export function SectionAlerts() {
     opsAlertTeamsWebhookUrl,
     opsAlertSlackEnabled,
     opsAlertSlackWebhookUrl,
+    excessiveEventCountThreshold,
     handleSaveOpsAlertConfig,
   } = useAdminConfig();
 
@@ -33,6 +34,7 @@ export function SectionAlerts() {
         opsAlertTeamsWebhookUrl={opsAlertTeamsWebhookUrl}
         opsAlertSlackEnabled={opsAlertSlackEnabled}
         opsAlertSlackWebhookUrl={opsAlertSlackWebhookUrl}
+        excessiveEventCountThreshold={excessiveEventCountThreshold}
         onSave={handleSaveOpsAlertConfig}
       />
     </>

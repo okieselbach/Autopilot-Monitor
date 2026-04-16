@@ -316,20 +316,24 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
-        /// Runaway-session threshold: sessions with more events than this are very likely produced
-        /// by an agent loop bug (largest real sessions observed to date are &lt;~500 events).
-        /// </summary>
-        private const int ExcessiveEventCountThreshold = 2000;
-
-        /// <summary>
-        /// Scans every tenant for sessions whose EventCount exceeds <see cref="ExcessiveEventCountThreshold"/>.
-        /// Emits one ExcessiveSessionEvents ops event per session (dispatched to Telegram/Teams via OpsAlertDispatchService)
-        /// and marks the session so subsequent maintenance runs do not re-alert.
+        /// Scans every tenant for sessions whose EventCount exceeds the configured
+        /// <c>ExcessiveEventCountThreshold</c> (AdminConfiguration, default 2000).
+        /// Emits one ExcessiveSessionEvents ops event per session (dispatched to Telegram/Teams
+        /// via OpsAlertDispatchService) and marks the session so subsequent runs do not re-alert.
+        /// A threshold of 0 disables the scan entirely.
         /// </summary>
         private async Task DetectExcessiveEventSessionsAsync()
         {
             try
             {
+                var adminConfig = await _adminConfigurationService.GetConfigurationAsync();
+                var threshold = adminConfig?.ExcessiveEventCountThreshold ?? 2000;
+                if (threshold <= 0)
+                {
+                    _logger.LogDebug("Excessive-event scan disabled (threshold = 0)");
+                    return;
+                }
+
                 var tenantIds = await _maintenanceRepo.GetAllTenantIdsAsync();
                 int totalAlerted = 0;
 
@@ -337,13 +341,13 @@ namespace AutopilotMonitor.Functions.Services
                 {
                     try
                     {
-                        var runaways = await _sessionRepo.GetSessionsWithEventCountAboveAsync(tenantId, ExcessiveEventCountThreshold);
+                        var runaways = await _sessionRepo.GetSessionsWithEventCountAboveAsync(tenantId, threshold);
                         foreach (var session in runaways)
                         {
                             if (session.ExcessiveEventsAlerted) continue;
 
                             await _opsEventService.RecordExcessiveSessionEventsAsync(
-                                tenantId, session.SessionId, session.EventCount, ExcessiveEventCountThreshold);
+                                tenantId, session.SessionId, session.EventCount, threshold);
                             await _sessionRepo.MarkExcessiveEventsAlertedAsync(tenantId, session.SessionId);
                             totalAlerted++;
                         }
@@ -355,7 +359,7 @@ namespace AutopilotMonitor.Functions.Services
                 }
 
                 if (totalAlerted > 0)
-                    _logger.LogWarning("Excessive-event scan: {Count} new runaway session(s) alerted (threshold {Threshold})", totalAlerted, ExcessiveEventCountThreshold);
+                    _logger.LogWarning("Excessive-event scan: {Count} new runaway session(s) alerted (threshold {Threshold})", totalAlerted, threshold);
             }
             catch (Exception ex)
             {

@@ -55,8 +55,9 @@ interface AdminConfigContextValue {
   setOpsAlertSlackEnabled: (value: boolean) => void;
   opsAlertSlackWebhookUrl: string;
   setOpsAlertSlackWebhookUrl: (value: string) => void;
+  excessiveEventCountThreshold: number;
   savingOpsAlerts: boolean;
-  handleSaveOpsAlertConfig: (rules: OpsAlertRule[], telegramEnabled: boolean, telegramChatId: string, teamsEnabled: boolean, teamsWebhookUrl: string, slackEnabled: boolean, slackWebhookUrl: string) => Promise<void>;
+  handleSaveOpsAlertConfig: (rules: OpsAlertRule[], telegramEnabled: boolean, telegramChatId: string, teamsEnabled: boolean, teamsWebhookUrl: string, slackEnabled: boolean, slackWebhookUrl: string, excessiveEventCountThreshold: number) => Promise<void>;
 
   // Tenants
   tenants: TenantConfiguration[];
@@ -122,6 +123,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
   const [opsAlertTeamsWebhookUrl, setOpsAlertTeamsWebhookUrl] = useState("");
   const [opsAlertSlackEnabled, setOpsAlertSlackEnabled] = useState(false);
   const [opsAlertSlackWebhookUrl, setOpsAlertSlackWebhookUrl] = useState("");
+  const [excessiveEventCountThreshold, setExcessiveEventCountThreshold] = useState(2000);
   const [savingOpsAlerts, setSavingOpsAlerts] = useState(false);
 
   // Tenant Management state
@@ -177,6 +179,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
         setOpsAlertTeamsWebhookUrl(data.opsAlertTeamsWebhookUrl ?? "");
         setOpsAlertSlackEnabled(data.opsAlertSlackEnabled ?? false);
         setOpsAlertSlackWebhookUrl(data.opsAlertSlackWebhookUrl ?? "");
+        setExcessiveEventCountThreshold(data.excessiveEventCountThreshold ?? 2000);
       } catch (err) {
         if (err instanceof TokenExpiredError) {
           console.error("Session expired while fetching admin configuration");
@@ -307,6 +310,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
     setOpsAlertTeamsWebhookUrl(adminConfig.opsAlertTeamsWebhookUrl ?? "");
     setOpsAlertSlackEnabled(adminConfig.opsAlertSlackEnabled ?? false);
     setOpsAlertSlackWebhookUrl(adminConfig.opsAlertSlackWebhookUrl ?? "");
+    setExcessiveEventCountThreshold(adminConfig.excessiveEventCountThreshold ?? 2000);
     setSuccessMessage(null);
     setError(null);
   }, [adminConfig]);
@@ -353,6 +357,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
     telegramEnabled: boolean, telegramChatId: string,
     teamsEnabled: boolean, teamsWebhookUrl: string,
     slackEnabled: boolean, slackWebhookUrl: string,
+    newExcessiveThreshold: number,
   ) => {
     if (!adminConfig) return;
     try {
@@ -369,6 +374,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
         opsAlertTeamsWebhookUrl: teamsWebhookUrl.trim(),
         opsAlertSlackEnabled: slackEnabled,
         opsAlertSlackWebhookUrl: slackWebhookUrl.trim(),
+        excessiveEventCountThreshold: newExcessiveThreshold,
       };
 
       const response = await authenticatedFetch(api.globalConfig.get(), getAccessToken, {
@@ -388,6 +394,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
       setOpsAlertTeamsWebhookUrl(teamsWebhookUrl.trim());
       setOpsAlertSlackEnabled(slackEnabled);
       setOpsAlertSlackWebhookUrl(slackWebhookUrl.trim());
+      setExcessiveEventCountThreshold(newExcessiveThreshold);
       setSuccessMessage("Alert configuration saved successfully!");
       setTimeout(() => setSuccessMessage(null), 4000);
     } catch (err) {
@@ -419,6 +426,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
       opsAlertTeamsWebhookUrl, setOpsAlertTeamsWebhookUrl,
       opsAlertSlackEnabled, setOpsAlertSlackEnabled,
       opsAlertSlackWebhookUrl, setOpsAlertSlackWebhookUrl,
+      excessiveEventCountThreshold,
       savingOpsAlerts,
       tenants, setTenants, loadingTenants, fetchTenants,
       previewApproved, setPreviewApproved,
