@@ -251,7 +251,7 @@ export default function Home() {
           <TipOfTheDay />
 
           {/* Welcome message - only show when no sessions */}
-          {sessions.length === 0 && <WelcomeMessage />}
+          {!loading && sessions.length === 0 && <WelcomeMessage />}
 
           {/* Sessions List */}
           {sessions.length > 0 && (
