@@ -709,8 +709,12 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             }
             else if (c.WhiteGloveEvent != null)
             {
+                // The whiteglove_complete event carries Phase=Complete as a convention
+                // (agent signalling "terminal reached"). Persisting that literally as Session.CurrentPhase
+                // contradicts Status=Pending and tricks the UI timeline into rendering user-enrollment
+                // phases as completed. Cap to AppsDevice (last pre-provisioning phase actually reached).
                 whiteGloveStatusTransitioned = await _sessionRepo.UpdateSessionStatusAsync(
-                    request.TenantId, request.SessionId, SessionStatus.Pending, c.WhiteGloveEvent.Phase,
+                    request.TenantId, request.SessionId, SessionStatus.Pending, EnrollmentPhase.AppsDevice,
                     earliestEventTimestamp: c.EarliestEventTimestamp, latestEventTimestamp: c.LatestEventTimestamp,
                     isPreProvisioned: true, isUserDriven: false);
 

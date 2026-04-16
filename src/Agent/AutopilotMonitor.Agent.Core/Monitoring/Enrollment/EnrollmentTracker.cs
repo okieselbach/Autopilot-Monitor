@@ -249,10 +249,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment
                     _stateData.CompletionState = _completionSm.CurrentState.ToString();
                 }
 
-                // Compare terminal state: shadow SM reached terminal vs actual _enrollmentCompleteEmitted
+                // Compare terminal state: shadow SM reached terminal vs actual _enrollmentCompleteEmitted.
+                // Both sides must use the same definition of "terminal": the actual flag is set for
+                // enrollment_complete, enrollment_failed AND the WG-redirect path — so shadow must match
+                // that by accepting Completed, Failed and WhiteGloveCompleted as terminal states.
                 bool actualTerminal;
                 lock (_stateLock) { actualTerminal = _enrollmentCompleteEmitted; }
-                bool shadowTerminal = _completionSm.CurrentState == EnrollmentCompletionState.Completed;
+                bool shadowTerminal = _completionSm.CurrentState.IsTerminal();
 
                 if (actualTerminal != shadowTerminal)
                 {

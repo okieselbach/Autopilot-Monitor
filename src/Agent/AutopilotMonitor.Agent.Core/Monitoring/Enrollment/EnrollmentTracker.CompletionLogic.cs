@@ -205,13 +205,31 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment
         }
 
         /// <summary>
-        /// Called when WhiteGlove (Pre-Provisioning) completes successfully.
-        /// Emits the whiteglove_complete event. The MonitoringService handles
-        /// the actual agent shutdown upon seeing this event type.
+        /// Called when WhiteGlove (Pre-Provisioning) completes successfully (event-handler signature).
+        /// Subscribed to EspAndHelloTracker.WhiteGloveCompleted. Delegates to CompleteWhiteGlove
+        /// which contains the actual emission pipeline.
+        /// </summary>
+        private void OnWhiteGloveCompleted(object sender, EventArgs e)
+        {
+            var wgSource = sender?.GetType().Name ?? "unknown";
+            CompleteWhiteGlove(wgSource, decisionAlreadyEmitted: false);
+        }
+
+        /// <summary>
+        /// Core WhiteGlove completion pipeline: emits the whiteglove_complete terminal event,
+        /// the decision_process_completion audit record (unless the caller already emitted one),
+        /// stops the summary timer, and updates the shadow state machine. MonitoringService handles
+        /// the actual agent shutdown upon seeing whiteglove_complete.
         /// Idempotent: fire-once per session instance. A second invocation (e.g. Shell-Core
         /// watcher fires after the signal-correlated detector already matched) is a no-op.
         /// </summary>
-        private void OnWhiteGloveCompleted(object sender, EventArgs e)
+        /// <param name="source">Decision source identifier (caller type or descriptor).</param>
+        /// <param name="decisionAlreadyEmitted">
+        /// Set to true when the caller already emitted a decision_process_completion for this
+        /// terminal (e.g. the WG-redirect guard inside TryEmitEnrollmentComplete). Prevents the
+        /// double-decision pattern that loses the upstream decisionChain under a second record.
+        /// </param>
+        private void CompleteWhiteGlove(string source, bool decisionAlreadyEmitted)
         {
             lock (_stateLock)
             {
@@ -223,18 +241,21 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment
                 _signalCorrelatedWhiteGloveTriggered = true;
             }
 
-            var wgSource = sender?.GetType().Name ?? "unknown";
-            _logger.Info($"EnrollmentTracker: WhiteGlove pre-provisioning completed (source: {wgSource})");
+            _logger.Info($"EnrollmentTracker: WhiteGlove pre-provisioning completed (source: {source})");
 
-            // Emit decision process before the terminal event
-            EmitDecisionProcess("whiteglove_complete", wgSource, "pending_part1", new List<string>
+            // Decision audit: only emit if the caller hasn't already recorded the decision that led here.
+            // Keeps the invariant "one terminal event = one decision_process_completion".
+            if (!decisionAlreadyEmitted)
             {
-                $"trigger={wgSource}",
-                (_espAndHelloTracker?.HasSaveWhiteGloveSuccessResult ?? false) ? "registry_confirmed" : "registry_not_confirmed",
-                (_espAndHelloTracker?.IsWhiteGloveStartDetected ?? false) ? "event509_seen" : "event509_not_seen",
-                _aadJoinedWithUser ? "user_joined" : "no_user_joined",
-                _fooUserDetected ? "foouser_detected" : "no_foouser"
-            });
+                EmitDecisionProcess("whiteglove_complete", source, "pending_part1", new List<string>
+                {
+                    $"trigger={source}",
+                    (_espAndHelloTracker?.HasSaveWhiteGloveSuccessResult ?? false) ? "registry_confirmed" : "registry_not_confirmed",
+                    (_espAndHelloTracker?.IsWhiteGloveStartDetected ?? false) ? "event509_seen" : "event509_not_seen",
+                    _aadJoinedWithUser ? "user_joined" : "no_user_joined",
+                    _fooUserDetected ? "foouser_detected" : "no_foouser"
+                });
+            }
 
             // Stop summary timer — no more app tracking needed
             _summaryTimer?.Change(System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite);
@@ -1128,17 +1149,22 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment
                              $"with no user joined and no desktop arrived — redirecting to WhiteGlove Part 1 " +
                              $"(source={source}, aadJoinedWithUser={_aadJoinedWithUser}, desktopArrived={desktopArrived})");
 
+                // Consolidated decision record: includes the upstream source AND the WG-context
+                // signals that used to live in a second (now-suppressed) decision record.
                 EmitDecisionProcess("whiteglove_complete", source, "redirected_wg_part1", new List<string>
                 {
                     $"original_source={source}",
                     "save_whiteglove_succeeded=true",
+                    (_espAndHelloTracker?.IsWhiteGloveStartDetected ?? false) ? "event509_seen" : "event509_not_seen",
                     "aad_joined_with_user=false",
                     "desktop_arrived=false",
+                    _fooUserDetected ? "foouser_detected" : "no_foouser",
                     "redirect: enrollment_complete -> whiteglove_complete"
                 });
 
-                OnWhiteGloveCompleted(this, EventArgs.Empty);
-                ShadowProcessTrigger("whiteglove_complete");
+                // Decision is already recorded above — CompleteWhiteGlove must not emit a second one.
+                // ShadowProcessTrigger("whiteglove_complete") is called inside CompleteWhiteGlove, so no extra call here.
+                CompleteWhiteGlove(source, decisionAlreadyEmitted: true);
                 return;
             }
 

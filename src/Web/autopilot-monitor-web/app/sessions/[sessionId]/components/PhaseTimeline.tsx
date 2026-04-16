@@ -265,6 +265,12 @@ export default function PhaseTimeline({ currentPhase, completedPhases, events = 
   const effectiveCurrentPhase = (() => {
     if (sessionStatus === 'Succeeded') return currentPhase;
     if (sessionStatus === 'Failed') return failurePhase !== null ? failurePhase : currentPhase;
+    // WG Part 1 (sealed, awaiting user): trust the already-capped maxEventPhase.
+    // Older sessions may still carry currentPhase=7 (Complete) from before the backend cap;
+    // without this guard the `>=` comparison below would ignore the cap and mark all user phases as completed.
+    if (sessionStatus === 'Pending' && hasWhiteGloveComplete && !hasWhiteGloveResumed) {
+      return maxEventPhase >= 0 ? maxEventPhase : currentPhase;
+    }
     if (maxEventPhase < 0) return currentPhase;
     return phaseIndex(maxEventPhase) >= phaseIndex(currentPhase) ? maxEventPhase : currentPhase;
   })();
