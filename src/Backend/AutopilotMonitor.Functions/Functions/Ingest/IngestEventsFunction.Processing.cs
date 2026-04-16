@@ -748,21 +748,12 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                 }
             }
 
-            // Early WhiteGlove classification: if whiteglove_started event is in this batch,
-            // mark the session as pre-provisioned immediately (safety net for old agents that may
-            // still send self_deploying_provisioning_complete instead of whiteglove_complete).
+            // whiteglove_started (EventID 509) is a soft signal only — it fires on hybrid-join
+            // devices too. Do NOT set IsPreProvisioned here. Only whiteglove_complete (confirmed by
+            // SaveWhiteGloveSuccessResult=succeeded in ESP registry) should mark IsPreProvisioned.
             if (c.WhiteGloveStartedEvent != null)
             {
-                try
-                {
-                    await _sessionRepo.SetSessionPreProvisionedAsync(
-                        request.TenantId, request.SessionId, true, isUserDriven: false);
-                    _logger.LogInformation("{SessionPrefix} whiteglove_started detected — marked IsPreProvisioned=true early", sessionPrefix);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "{SessionPrefix} Failed to set early IsPreProvisioned for whiteglove_started", sessionPrefix);
-                }
+                _logger.LogInformation("{SessionPrefix} whiteglove_started detected (soft signal — not setting IsPreProvisioned, awaiting whiteglove_complete)", sessionPrefix);
             }
 
             // Stalled-status transitions are independent of Succeeded/Failed/Pending/WhiteGlove paths.

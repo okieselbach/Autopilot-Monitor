@@ -440,5 +440,90 @@ namespace AutopilotMonitor.Agent.Core.Tests.Collectors
             t.ProcessCategoryStatusForTest("DeviceSetupCategory.Status", json);
             Assert.False(t.HasSaveWhiteGloveSuccessResult);
         }
+
+        [Fact]
+        public void ProcessCategoryStatus_DeviceSetup_WhiteGloveStateTransition_EmitsRawDumpForEachChange()
+        {
+            var t = CreateTracker();
+
+            // Poll 1: SaveWhiteGloveSuccessResult=notStarted
+            var jsonNotStarted = @"{
+                ""categoryState"":""inProgress"",
+                ""DeviceSetup.SecurityPoliciesSubcategory"":{""subcategoryState"":""succeeded"",""subcategoryStatusText"":""ok""},
+                ""DeviceSetup.SaveWhiteGloveSuccessResult"":{""subcategoryState"":""notStarted""},
+                ""categoryStatusText"":""working""
+            }";
+
+            t.ProcessCategoryStatusForTest("DeviceSetupCategory.Status", jsonNotStarted);
+
+            // Should emit raw dump for first WG state observation
+            var raws = OfType("esp_provisioning_raw");
+            var wgRaws = raws.Where(e => e.Message.Contains("whiteglove_signal_")).ToList();
+            Assert.Single(wgRaws);
+            Assert.Contains("whiteglove_signal_notStarted", wgRaws[0].Message);
+            Assert.False(t.HasSaveWhiteGloveSuccessResult);
+
+            // Poll 2: SaveWhiteGloveSuccessResult=succeeded
+            var jsonSucceeded = @"{
+                ""categoryState"":""succeeded"",
+                ""DeviceSetup.SecurityPoliciesSubcategory"":{""subcategoryState"":""succeeded"",""subcategoryStatusText"":""ok""},
+                ""DeviceSetup.SaveWhiteGloveSuccessResult"":{""subcategoryState"":""succeeded"",""subcategoryStatusText"":""succeeded""},
+                ""categoryStatusText"":""Complete""
+            }";
+
+            t.ProcessCategoryStatusForTest("DeviceSetupCategory.Status", jsonSucceeded);
+
+            // Should now have 2 WG raw dumps (ConcurrentBag has no guaranteed order)
+            raws = OfType("esp_provisioning_raw");
+            wgRaws = raws.Where(e => e.Message.Contains("whiteglove_signal_")).ToList();
+            Assert.Equal(2, wgRaws.Count);
+            Assert.Single(wgRaws, e => e.Message.Contains("whiteglove_signal_notStarted"));
+            Assert.Single(wgRaws, e => e.Message.Contains("whiteglove_signal_succeeded"));
+            Assert.True(t.HasSaveWhiteGloveSuccessResult);
+        }
+
+        [Fact]
+        public void ProcessCategoryStatus_DeviceSetup_WhiteGloveStateSame_NoDuplicateRawDump()
+        {
+            var t = CreateTracker();
+
+            var json = @"{
+                ""categoryState"":""inProgress"",
+                ""DeviceSetup.SecurityPoliciesSubcategory"":{""subcategoryState"":""succeeded"",""subcategoryStatusText"":""ok""},
+                ""DeviceSetup.SaveWhiteGloveSuccessResult"":{""subcategoryState"":""notStarted""},
+                ""categoryStatusText"":""working""
+            }";
+
+            // Same JSON twice — should only emit WG raw dump once
+            t.ProcessCategoryStatusForTest("DeviceSetupCategory.Status", json);
+            t.ProcessCategoryStatusForTest("DeviceSetupCategory.Status", json);
+
+            var raws = OfType("esp_provisioning_raw");
+            var wgRaws = raws.Where(e => e.Message.Contains("whiteglove_signal_")).ToList();
+            Assert.Single(wgRaws);
+            Assert.False(t.HasSaveWhiteGloveSuccessResult);
+        }
+
+        [Fact]
+        public void ProcessCategoryStatus_DeviceSetup_WhiteGloveStaysNotStarted_FlagNeverSet()
+        {
+            var t = CreateTracker();
+
+            var json = @"{
+                ""categoryState"":""succeeded"",
+                ""DeviceSetup.SecurityPoliciesSubcategory"":{""subcategoryState"":""succeeded"",""subcategoryStatusText"":""ok""},
+                ""DeviceSetup.SaveWhiteGloveSuccessResult"":{""subcategoryState"":""notStarted""},
+                ""categoryStatusText"":""Complete""
+            }";
+
+            t.ProcessCategoryStatusForTest("DeviceSetupCategory.Status", json);
+
+            // Raw dump emitted (for observability), but flag stays false
+            var wgRaws = OfType("esp_provisioning_raw")
+                .Where(e => e.Message.Contains("whiteglove_signal_")).ToList();
+            Assert.Single(wgRaws);
+            Assert.Contains("whiteglove_signal_notStarted", wgRaws[0].Message);
+            Assert.False(t.HasSaveWhiteGloveSuccessResult);
+        }
     }
 }

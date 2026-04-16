@@ -1143,18 +1143,19 @@ namespace AutopilotMonitor.Agent.Core.Tests.Tracking
         // ===== WhiteGlove Guard Tests =====
 
         [Fact]
-        public void DeviceOnly_ProvisioningComplete_WithWhiteGloveStart_TransitionsToWhiteGloveCompleted()
+        public void DeviceOnly_ProvisioningComplete_WithWhiteGloveStartOnly_CompletesAsSelfDeploying()
         {
+            // EventID 509 alone (soft signal) must NOT trigger WhiteGlove — fires on hybrid-join too
             var sm = new CompletionStateMachine();
             var ctx = DeviceOnlyContext();
             ctx.WhiteGloveStartDetected = true;
+            ctx.HasSaveWhiteGloveSuccessResult = false;
 
             var result = sm.ProcessTrigger("device_setup_provisioning_complete", ctx);
 
-            Assert.Equal(EnrollmentCompletionState.WhiteGloveCompleted, sm.CurrentState);
-            Assert.True(result.ShouldEmitWhiteGloveComplete);
-            Assert.False(result.ShouldEmitEnrollmentComplete);
-            Assert.Contains("whiteglove_guard_activated", result.SignalsToRecord);
+            Assert.Equal(EnrollmentCompletionState.Completed, sm.CurrentState);
+            Assert.True(result.ShouldEmitEnrollmentComplete);
+            Assert.False(result.ShouldEmitWhiteGloveComplete);
         }
 
         [Fact]
@@ -1220,7 +1221,7 @@ namespace AutopilotMonitor.Agent.Core.Tests.Tracking
         {
             var sm = new CompletionStateMachine();
             var ctx = DeviceOnlyContext();
-            ctx.WhiteGloveStartDetected = true;
+            ctx.HasSaveWhiteGloveSuccessResult = true;
             sm.ProcessTrigger("device_setup_provisioning_complete", ctx);
 
             Assert.Equal(EnrollmentCompletionState.WhiteGloveCompleted, sm.CurrentState);
@@ -1232,23 +1233,21 @@ namespace AutopilotMonitor.Agent.Core.Tests.Tracking
         }
 
         [Fact]
-        public void EspExiting_SkipUser_WithWhiteGloveStart_TransitionsToWhiteGloveCompleted()
+        public void EspExiting_SkipUser_WithWhiteGloveStartOnly_CompletesAsDeviceOnly()
         {
+            // EventID 509 alone (soft signal) must NOT trigger WhiteGlove on ESP exit
             var sm = new CompletionStateMachine();
 
-            // ESP phase detected first
             var ctx = DefaultContext(autopilotMode: 0, skipUserStatusPage: true, aadJoinedWithUser: false,
                 isHelloPolicyConfigured: false, whiteGloveStartDetected: true);
+            ctx.HasSaveWhiteGloveSuccessResult = false;
             sm.ProcessTrigger("esp_phase_changed", ctx);
 
-            // ESP exits with SkipUserStatusPage=true + WhiteGlove signal
             ctx.LastEspPhase = "DeviceSetup";
             var result = sm.ProcessTrigger("esp_exiting", ctx);
 
-            Assert.Equal(EnrollmentCompletionState.WhiteGloveCompleted, sm.CurrentState);
-            Assert.True(result.ShouldEmitWhiteGloveComplete);
-            Assert.False(result.ShouldEmitEnrollmentComplete);
-            Assert.Contains("whiteglove_guard_esp_exiting", result.SignalsToRecord);
+            Assert.NotEqual(EnrollmentCompletionState.WhiteGloveCompleted, sm.CurrentState);
+            Assert.False(result.ShouldEmitWhiteGloveComplete);
         }
 
         [Fact]

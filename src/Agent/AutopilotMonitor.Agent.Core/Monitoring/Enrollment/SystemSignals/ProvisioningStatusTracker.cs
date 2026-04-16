@@ -76,6 +76,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment.SystemSignals
         private bool _deviceSetupProvisioningCompleteFired;
         // WhiteGlove confirmation: DeviceSetup registry contains SaveWhiteGloveSuccessResult=succeeded
         private bool _saveWhiteGloveSuccessResultSeen;
+        // Track SaveWhiteGloveSuccessResult state transitions for observability (null → notStarted → succeeded)
+        private string _lastSaveWhiteGloveState;
         private readonly object _stateLock = new object();
 
         public event EventHandler<string> EspFailureDetected;
@@ -556,25 +558,38 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment.SystemSignals
                     string categoryStatusMessage = SafeGetString(root, "categoryStatusMessage");
                     var subcategories = ParseSubcategories(root);
 
-                    // Detect WhiteGlove confirmation signal in DeviceSetup category.
+                    // Detect WhiteGlove signal in DeviceSetup category.
                     // SaveWhiteGloveSuccessResult is NOT a *Subcategory-suffixed property, so
                     // ParseSubcategories skips it. We scan the raw JSON explicitly.
-                    if (string.Equals(categoryLabel, "DeviceSetup", StringComparison.OrdinalIgnoreCase)
-                        && !_saveWhiteGloveSuccessResultSeen)
+                    // Track state transitions for full observability (notStarted → succeeded).
+                    if (string.Equals(categoryLabel, "DeviceSetup", StringComparison.OrdinalIgnoreCase))
                     {
                         foreach (var prop in root.EnumerateObject())
                         {
                             if (prop.Name.IndexOf("SaveWhiteGloveSuccessResult", StringComparison.OrdinalIgnoreCase) >= 0
                                 && prop.Value.ValueKind == JsonValueKind.Object)
                             {
-                                var state = SafeGetString(prop.Value, "subcategoryState");
-                                if (string.Equals(state, "succeeded", StringComparison.OrdinalIgnoreCase))
+                                var state = SafeGetString(prop.Value, "subcategoryState") ?? "unknown";
+
+                                if (!string.Equals(state, _lastSaveWhiteGloveState, StringComparison.OrdinalIgnoreCase))
                                 {
-                                    _saveWhiteGloveSuccessResultSeen = true;
-                                    _logger.Info("ProvisioningStatusTracker: SaveWhiteGloveSuccessResult=succeeded detected " +
-                                                 "— WhiteGlove confirmation signal");
-                                    break;
+                                    var previousState = _lastSaveWhiteGloveState ?? "not_seen";
+                                    _lastSaveWhiteGloveState = state;
+
+                                    _logger.Info($"ProvisioningStatusTracker: SaveWhiteGloveSuccessResult state " +
+                                                 $"transition: {previousState} -> {state}");
+
+                                    EmitRawRegistryDump(categoryLabel, jsonValue,
+                                        $"whiteglove_signal_{state}");
+
+                                    if (string.Equals(state, "succeeded", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        _saveWhiteGloveSuccessResultSeen = true;
+                                        _logger.Info("ProvisioningStatusTracker: SaveWhiteGloveSuccessResult=succeeded " +
+                                                     "— WhiteGlove confirmation signal");
+                                    }
                                 }
+                                break;
                             }
                         }
                     }

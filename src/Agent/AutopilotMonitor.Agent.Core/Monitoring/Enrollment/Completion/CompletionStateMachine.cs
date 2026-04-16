@@ -38,7 +38,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment.Completion
         // WhiteGlove detection signals
         public bool WhiteGloveStartDetected { get; set; }
         public bool HasSaveWhiteGloveSuccessResult { get; set; }
-        public bool IsWhiteGloveActive => WhiteGloveStartDetected || HasSaveWhiteGloveSuccessResult;
+        // Only SaveWhiteGloveSuccessResult=succeeded from ESP registry is a reliable WG confirmation.
+        // WhiteGloveStartDetected (EventID 509) is a soft signal — fires on hybrid-join too.
+        public bool IsWhiteGloveActive => HasSaveWhiteGloveSuccessResult;
 
         // Timing
         public DateTime AgentStartTimeUtc { get; set; }

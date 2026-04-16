@@ -112,22 +112,22 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment
                 return;
             }
 
-            // WhiteGlove guard: When EventID 509 was detected OR the DeviceSetup registry
-            // contains SaveWhiteGloveSuccessResult=succeeded, this is a WhiteGlove session.
-            // Route to OnWhiteGloveCompleted instead of self_deploying_provisioning_complete.
+            // WhiteGlove guard: Only SaveWhiteGloveSuccessResult=succeeded from the ESP registry
+            // is a reliable WhiteGlove confirmation. EventID 509 is a soft signal only — it fires
+            // on hybrid-join devices too and must NOT trigger WG completion on its own.
             bool whiteGloveStarted = _espAndHelloTracker?.IsWhiteGloveStartDetected ?? false;
             bool whiteGloveSuccessResult = _espAndHelloTracker?.HasSaveWhiteGloveSuccessResult ?? false;
 
-            if (whiteGloveStarted || whiteGloveSuccessResult)
+            if (whiteGloveSuccessResult)
             {
-                _logger.Info($"EnrollmentTracker: Device-only deployment with WhiteGlove signals detected " +
+                _logger.Info($"EnrollmentTracker: Device-only deployment with WhiteGlove confirmed " +
                              $"(whiteGloveStarted={whiteGloveStarted}, saveWhiteGloveSuccessResult={whiteGloveSuccessResult}) — " +
                              "routing to WhiteGlove completion instead of self_deploying_provisioning_complete");
 
                 RecordSignal("whiteglove_guard_activated");
 
                 EmitTraceEvent("whiteglove_guard_activated",
-                    "DeviceSetup provisioning complete but WhiteGlove signals present — routing to WhiteGlove path",
+                    "DeviceSetup provisioning complete with SaveWhiteGloveSuccessResult confirmed — routing to WhiteGlove path",
                     new Dictionary<string, object>
                     {
                         { "whiteGloveStartDetected", whiteGloveStarted },
@@ -662,21 +662,20 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment
                 }
                 else if (skipUser == true)
                 {
-                    // WhiteGlove guard: same check as in OnDeviceSetupProvisioningComplete.
-                    // If the ESP exit happens in a WhiteGlove session (SkipUserStatusPage=true, but
-                    // WhiteGlove signals present), route to WhiteGlove completion instead of device-only.
+                    // WhiteGlove guard: Only SaveWhiteGloveSuccessResult=succeeded is reliable.
+                    // EventID 509 is a soft signal — fires on hybrid-join too, must not trigger WG.
                     bool wgStarted = _espAndHelloTracker?.IsWhiteGloveStartDetected ?? false;
                     bool wgSuccessResult = _espAndHelloTracker?.HasSaveWhiteGloveSuccessResult ?? false;
 
-                    if (wgStarted || wgSuccessResult)
+                    if (wgSuccessResult)
                     {
-                        _logger.Info($"EnrollmentTracker: ESP exiting with SkipUserStatusPage=true but WhiteGlove signals present " +
+                        _logger.Info($"EnrollmentTracker: ESP exiting with SkipUserStatusPage=true and WhiteGlove confirmed " +
                                      $"(whiteGloveStarted={wgStarted}, saveWhiteGloveSuccessResult={wgSuccessResult}) — " +
                                      "routing to WhiteGlove completion instead of device_only_esp_registry");
 
                         RecordSignal("whiteglove_guard_activated");
                         EmitTraceEvent("whiteglove_guard_esp_exiting",
-                            "ESP exiting with SkipUserStatusPage=true but WhiteGlove signals present — routing to WhiteGlove path",
+                            "ESP exiting with SaveWhiteGloveSuccessResult confirmed — routing to WhiteGlove path",
                             new Dictionary<string, object>
                             {
                                 { "whiteGloveStartDetected", wgStarted },
@@ -1207,7 +1206,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment
                     { "skipDeviceStatusPage", _skipDeviceStatusPage?.ToString() ?? "unknown" },
                     { "autopilotMode", _autopilotMode?.ToString() ?? "unknown" },
                     { "isSelfDeploying", IsSelfDeploying },
-                    { "isDeviceOnlyDeployment", IsDeviceOnlyDeployment }
+                    { "isDeviceOnlyDeployment", IsDeviceOnlyDeployment },
+                    { "whiteGloveStartDetected", _espAndHelloTracker?.IsWhiteGloveStartDetected ?? false },
+                    { "saveWhiteGloveSuccessResult", _espAndHelloTracker?.HasSaveWhiteGloveSuccessResult ?? false }
                 };
             }
 
