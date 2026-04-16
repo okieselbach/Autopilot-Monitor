@@ -14,6 +14,26 @@ export function SectionKnownIssues() {
 
       <AnnouncementCard
         date="2026-04-16"
+        title="Event Data Loss Due to Faulty Cleanup Operation"
+        type="breaking"
+      >
+        <p>
+          Due to an unfortunately faulty cleanup operation, a significant number of events were
+          deleted from the database. As a result, some sessions no longer have a complete or
+          correct timeline.
+        </p>
+        <p>
+          Affected sessions may show missing events, incomplete phases, or incorrect completion
+          states. There is no way to restore the deleted data retroactively.
+        </p>
+        <p>
+          A plan for improved backup data retention is currently being developed to prevent
+          similar incidents in the future.
+        </p>
+      </AnnouncementCard>
+
+      <AnnouncementCard
+        date="2026-04-16"
         title="Agent Changes in Progress — Possible Detection Issues"
         type="known-issue"
       >
