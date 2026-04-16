@@ -9,7 +9,7 @@ const OPS_EVENT_TYPES: Record<string, string[]> = {
   Maintenance: ["MaintenanceCompleted", "MaintenanceFailed", "OpsEventCleanup", "SessionTimeouts"],
   Security: ["DeviceBlocked", "ExcessiveDataBlocked", "VersionBlocked"],
   Tenant: ["TenantOffboarded"],
-  Agent: ["BlobStorageMissing", "BlobStorageUnreachable", "NewImeVersionDetected"],
+  Agent: ["BlobStorageMissing", "BlobStorageUnreachable", "NewImeVersionDetected", "ExcessiveSessionEvents"],
 };
 
 const SEVERITIES = ["Info", "Warning", "Error", "Critical"];
