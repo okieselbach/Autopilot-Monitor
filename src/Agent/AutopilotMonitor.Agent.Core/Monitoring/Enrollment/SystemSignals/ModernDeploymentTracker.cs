@@ -332,7 +332,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment.SystemSignals
                 Severity = EventSeverity.Info,
                 Source = "ModernDeploymentWatcher",
                 Phase = EnrollmentPhase.Unknown,
-                Message = $"WhiteGlove (Pre-Provisioning) initiated — ManagementService EventID {eventId}",
+                Message = $"First WhiteGlove (Pre-Provisioning) hint — ManagementService EventID {eventId} (soft signal, not yet confirmed)",
                 Data = new Dictionary<string, object>
                 {
                     { "channel", "ManagementService" },
