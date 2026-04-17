@@ -38,9 +38,18 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment.Completion
         // WhiteGlove detection signals
         public bool WhiteGloveStartDetected { get; set; }
         public bool HasSaveWhiteGloveSuccessResult { get; set; }
-        // Only SaveWhiteGloveSuccessResult=succeeded from ESP registry is a reliable WG confirmation.
-        // WhiteGloveStartDetected (EventID 509) is a soft signal — fires on hybrid-join too.
+        public bool ShellCoreWhiteGloveSuccess { get; set; }
+        public bool IsFooUserDetected { get; set; }
+
+        // Legacy helper — kept for backwards-compat with places that only need a binary
+        // "there is some WG evidence" read. Actual classification now goes through
+        // <see cref="WhiteGloveClassifier"/>.
         public bool IsWhiteGloveActive => HasSaveWhiteGloveSuccessResult;
+
+        // Computed: has the agent restarted since ESP final exit? Typical WhiteGlove Part 1
+        // boundary marker (the restart between DeviceSetup-complete and user sign-in).
+        public bool AgentRestartedAfterEspExit
+            => EspFinalExitUtc.HasValue && AgentStartTimeUtc > EspFinalExitUtc.Value;
 
         // Timing
         public DateTime AgentStartTimeUtc { get; set; }
@@ -319,13 +328,18 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment.Completion
             // Path B: Registry definitively says device-only
             else if (ctx.SkipUserStatusPage == true)
             {
-                // WhiteGlove guard: SkipUserStatusPage=true + WG signals → WhiteGloveCompleted.
-                // Mirrors the guard in EnrollmentTracker.CompletionLogic.OnFinalizingSetupPhaseTriggered.
-                if (ctx.IsWhiteGloveActive)
+                // WhiteGlove guard — canonical WhiteGloveClassifier decision (same rule as
+                // HandleDeviceSetupProvisioningComplete and the EnrollmentTracker paths).
+                // Weak confidence falls through to the regular device-only path by design.
+                var wgSignals = WhiteGloveSignals.FromContext(ctx);
+                var wgClassification = WhiteGloveClassifier.Classify(wgSignals);
+                if (wgClassification.ShouldRouteToWhiteGlovePart1)
                 {
                     _currentState = EnrollmentCompletionState.WhiteGloveCompleted;
                     result.ShouldEmitWhiteGloveComplete = true;
                     result.SignalsToRecord.Add("whiteglove_guard_esp_exiting");
+                    result.SignalsToRecord.Add($"wg_score:{wgClassification.Score}");
+                    result.SignalsToRecord.Add($"wg_confidence:{wgClassification.Confidence}");
                     result.Transitioned = true;
                     result.NewState = _currentState;
                     return result;
@@ -532,13 +546,19 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment.Completion
                 SignalsToRecord = new List<string> { "device_setup_provisioning_complete" }
             };
 
-            // WhiteGlove guard: device-only + WG signals → WhiteGloveCompleted, not self-deploying.
-            // This mirrors the guard in EnrollmentTracker.CompletionLogic.OnDeviceSetupProvisioningComplete.
-            if (ctx.IsDeviceOnly && ctx.IsWhiteGloveActive)
+            // WhiteGlove guard — canonical WhiteGloveClassifier decision (same rule as
+            // EnrollmentTracker.CompletionLogic.OnDeviceSetupProvisioningComplete and
+            // TryEmitEnrollmentComplete). Weak confidence falls through to the regular
+            // self-deploying path by design (asymmetric-conservative routing).
+            var wgSignals = WhiteGloveSignals.FromContext(ctx);
+            var wgClassification = WhiteGloveClassifier.Classify(wgSignals);
+            if (wgClassification.ShouldRouteToWhiteGlovePart1)
             {
                 _currentState = EnrollmentCompletionState.WhiteGloveCompleted;
                 result.ShouldEmitWhiteGloveComplete = true;
                 result.SignalsToRecord.Add("whiteglove_guard_activated");
+                result.SignalsToRecord.Add($"wg_score:{wgClassification.Score}");
+                result.SignalsToRecord.Add($"wg_confidence:{wgClassification.Confidence}");
                 result.Transitioned = true;
                 result.NewState = _currentState;
                 return result;

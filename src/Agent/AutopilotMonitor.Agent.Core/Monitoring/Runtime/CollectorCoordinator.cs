@@ -55,6 +55,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Runtime
 
         // Desktop arrival / IME watcher / Network change
         private DesktopArrivalDetector _desktopArrivalDetector;
+        private AadJoinWatcher _aadJoinWatcher;
         private ImeProcessWatcher _imeProcessWatcher;
         private NetworkChangeDetector _networkChangeDetector;
 
@@ -356,6 +357,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Runtime
                 _desktopArrivalDetector.Start();
                 _logger.Info("DesktopArrivalDetector started — monitoring for real user desktop");
 
+                _aadJoinWatcher = new AadJoinWatcher(_logger);
+                _aadJoinWatcher.PlaceholderUserDetected += OnAadPlaceholderUserDetected;
+                _aadJoinWatcher.AadUserJoined += OnAadUserJoined;
+                _aadJoinWatcher.Start();
+                _logger.Info("AadJoinWatcher started — monitoring JoinInfo registry for late AAD user");
+
                 _imeProcessWatcher = new ImeProcessWatcher(
                     _configuration.SessionId,
                     _configuration.TenantId,
@@ -408,6 +415,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Runtime
                 _desktopArrivalDetector.DesktopArrived -= OnDesktopArrived;
                 _desktopArrivalDetector.Dispose();
                 _desktopArrivalDetector = null;
+            }
+
+            if (_aadJoinWatcher != null)
+            {
+                _aadJoinWatcher.PlaceholderUserDetected -= OnAadPlaceholderUserDetected;
+                _aadJoinWatcher.AadUserJoined -= OnAadUserJoined;
+                _aadJoinWatcher.Dispose();
+                _aadJoinWatcher = null;
             }
 
             _imeProcessWatcher?.Dispose();
@@ -570,7 +585,37 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Runtime
                 _desktopArrivalDetector.DesktopArrived -= OnDesktopArrived;
                 _desktopArrivalDetector.Dispose();
             }
+            if (_aadJoinWatcher != null)
+            {
+                _aadJoinWatcher.PlaceholderUserDetected -= OnAadPlaceholderUserDetected;
+                _aadJoinWatcher.AadUserJoined -= OnAadUserJoined;
+                _aadJoinWatcher.Dispose();
+            }
             _imeProcessWatcher?.Dispose();
+        }
+
+        private void OnAadPlaceholderUserDetected(object sender, AadPlaceholderUserDetectedEventArgs e)
+        {
+            try
+            {
+                _enrollmentTracker?.NotifyAadPlaceholderUserDetected(e.UserEmail);
+            }
+            catch (Exception ex)
+            {
+                _logger.Error("CollectorCoordinator: OnAadPlaceholderUserDetected failed", ex);
+            }
+        }
+
+        private void OnAadUserJoined(object sender, AadUserJoinedEventArgs e)
+        {
+            try
+            {
+                _enrollmentTracker?.NotifyAadUserJoinedLate(e.UserEmail);
+            }
+            catch (Exception ex)
+            {
+                _logger.Error("CollectorCoordinator: OnAadUserJoined failed", ex);
+            }
         }
     }
 }

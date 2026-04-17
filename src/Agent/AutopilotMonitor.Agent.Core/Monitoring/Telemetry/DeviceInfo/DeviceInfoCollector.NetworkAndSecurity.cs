@@ -7,6 +7,7 @@ using System.Net.NetworkInformation;
 using System.Text.Json;
 using System.Threading.Tasks;
 using AutopilotMonitor.Agent.Core.Logging;
+using AutopilotMonitor.Agent.Core.Monitoring.Enrollment.SystemSignals;
 using AutopilotMonitor.Agent.Core.Security;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Win32;
@@ -20,16 +21,18 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Telemetry.DeviceInfo
     public partial class DeviceInfoCollector
     {
         /// <summary>
-        /// True when AAD join status shows "Azure AD Joined" with a non-empty userEmail.
+        /// True when AAD join status shows "Azure AD Joined" with a non-empty userEmail
+        /// that is NOT a provisioning placeholder (see <see cref="IsFooUserDetected"/>).
         /// Used by EnrollmentTracker to distinguish user-driven from device-only deployments
         /// when SkipUserStatusPage=true (which admins commonly set for user-driven enrollments too).
         /// </summary>
         public bool HasAadJoinedUser { get; private set; }
 
         /// <summary>
-        /// True when the AAD join userEmail starts with "foouser@" — a synthetic account used
-        /// by Windows during Autopilot pre-provisioning (WhiteGlove) for AAD discovery.
-        /// Soft indicator for pre-provisioning; does not affect completion logic.
+        /// True when the AAD join userEmail matches a known transient provisioning-account
+        /// pattern (foouser@*, autopilot@*). These accounts appear during Autopilot
+        /// pre-provisioning (WhiteGlove) and are NOT a real AAD join — they are a soft
+        /// positive WhiteGlove indicator and feed into <see cref="AutopilotMonitor.Agent.Core.Monitoring.Enrollment.Completion.WhiteGloveClassifier"/>.
         /// </summary>
         public bool IsFooUserDetected { get; private set; }
 
@@ -447,46 +450,46 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Telemetry.DeviceInfo
             {
                 var data = new Dictionary<string, object>();
 
-                using (var joinInfoKey = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\CloudDomainJoin\JoinInfo"))
+                // Read AAD join info via shared helper. Placeholder users (foouser@, autopilot@)
+                // are transient provisioning accounts and must NOT be treated as a real AAD join;
+                // HasAadJoinedUser is only set for real user emails.
+                if (AadJoinInfo.TryReadAadJoinedUser(out var userEmail, out var thumbprint, out var isPlaceholderUser))
                 {
-                    if (joinInfoKey != null)
+                    // Still need TenantId — open the subkey directly when we have a thumbprint.
+                    if (!string.IsNullOrEmpty(thumbprint))
                     {
-                        var subKeyNames = joinInfoKey.GetSubKeyNames();
-                        if (subKeyNames.Length > 0)
+                        using (var joinInfoKey = Registry.LocalMachine.OpenSubKey(AadJoinInfo.JoinInfoRegistryPath))
+                        using (var subKey = joinInfoKey?.OpenSubKey(thumbprint))
                         {
-                            using (var subKey = joinInfoKey.OpenSubKey(subKeyNames[0]))
-                            {
-                                if (subKey != null)
-                                {
-                                    var userEmail = subKey.GetValue("UserEmail")?.ToString();
-                                    data["tenantId"] = subKey.GetValue("TenantId")?.ToString();
-                                    data["userEmail"] = userEmail;
-                                    data["joinType"] = "Azure AD Joined";
-                                    data["thumbprint"] = subKeyNames[0]; // Certificate thumbprint
-
-                                    if (!string.IsNullOrWhiteSpace(userEmail))
-                                    {
-                                        HasAadJoinedUser = true;
-
-                                        if (userEmail.StartsWith("foouser@", StringComparison.OrdinalIgnoreCase))
-                                        {
-                                            IsFooUserDetected = true;
-                                            data["isFooUser"] = true;
-                                            _logger.Info($"AAD join: foouser@ detected ({userEmail}) — pre-provisioning indicator");
-                                        }
-                                    }
-                                }
-                            }
+                            data["tenantId"] = subKey?.GetValue("TenantId")?.ToString();
                         }
-                        else
+
+                        data["userEmail"] = userEmail;
+                        data["joinType"] = "Azure AD Joined";
+                        data["thumbprint"] = thumbprint;
+
+                        if (!string.IsNullOrWhiteSpace(userEmail))
                         {
-                            data["joinType"] = "Not Joined";
+                            if (isPlaceholderUser)
+                            {
+                                IsFooUserDetected = true;
+                                data["isFooUser"] = true;
+                                _logger.Info($"AAD join: placeholder user detected ({userEmail}) — pre-provisioning indicator, NOT a real AAD join");
+                            }
+                            else
+                            {
+                                HasAadJoinedUser = true;
+                            }
                         }
                     }
                     else
                     {
                         data["joinType"] = "Not Joined";
                     }
+                }
+                else
+                {
+                    data["joinType"] = "Not Joined";
                 }
 
                 object joinTypeValue;

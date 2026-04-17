@@ -104,8 +104,16 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment
         // True when AAD join status shows a joined device with a real user email.
         // Detected via CollectAadJoinStatus() in DeviceInfoCollector.
         private bool _aadJoinedWithUser;
-        // Soft indicator: AAD userEmail starts with "foouser@" (pre-provisioning synthetic account).
+        // Soft indicator: AAD userEmail matches a transient provisioning placeholder pattern
+        // (foouser@, autopilot@). These accounts appear during Autopilot pre-provisioning
+        // (WhiteGlove) and MUST NOT be treated as a real AAD-joined user.
         private bool _fooUserDetected;
+
+        // Set to true the moment the Shell-Core Event-62407 "WhiteGlove_Success" handler fires.
+        // Distinct from <see cref="_signalCorrelatedWhiteGloveTriggered"/> (which is the
+        // fire-once guard inside CompleteWhiteGlove and covers any completion path). Feeds
+        // the WhiteGloveClassifier as the strongest positive signal.
+        private bool _shellCoreWhiteGloveFired;
 
         // Signal-correlated WhiteGlove detection (Ebene 2.6):
         // Feeds the bestehenden OnWhiteGloveCompleted() callback when the Shell-Core detector
@@ -224,6 +232,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment
                     HasAccountSetupActivity = _espAndHelloTracker?.HasAccountSetupActivity ?? false,
                     WhiteGloveStartDetected = _espAndHelloTracker?.IsWhiteGloveStartDetected ?? false,
                     HasSaveWhiteGloveSuccessResult = _espAndHelloTracker?.HasSaveWhiteGloveSuccessResult ?? false,
+                    ShellCoreWhiteGloveSuccess = _shellCoreWhiteGloveFired,
+                    IsFooUserDetected = _fooUserDetected,
                     AgentStartTimeUtc = _agentStartTimeUtc,
                     EspFinalExitUtc = _stateData.EspFinalExitUtc,
                     ImePatternSeenUtc = _stateData.ImePatternSeenUtc
@@ -628,6 +638,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment
                 _stateData.SkipDeviceStatusPage = _skipDeviceStatusPage;
                 _stateData.AutopilotMode = _autopilotMode;
                 _stateData.AadJoinedWithUser = _aadJoinedWithUser;
+                _stateData.FooUserDetected = _fooUserDetected;
                 _stateData.IsHybridJoin = _isHybridJoin;
                 _stateDirty = true;
             }

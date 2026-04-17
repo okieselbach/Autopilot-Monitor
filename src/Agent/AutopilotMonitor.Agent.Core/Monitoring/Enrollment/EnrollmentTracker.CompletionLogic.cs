@@ -112,27 +112,32 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment
                 return;
             }
 
-            // WhiteGlove guard: Only SaveWhiteGloveSuccessResult=succeeded from the ESP registry
-            // is a reliable WhiteGlove confirmation. EventID 509 is a soft signal only — it fires
-            // on hybrid-join devices too and must NOT trigger WG completion on its own.
-            bool whiteGloveStarted = _espAndHelloTracker?.IsWhiteGloveStartDetected ?? false;
-            bool whiteGloveSuccessResult = _espAndHelloTracker?.HasSaveWhiteGloveSuccessResult ?? false;
+            // WhiteGlove guard — canonical decision via WhiteGloveClassifier.
+            // See plan: all three completion paths (this one, TryEmitEnrollmentComplete,
+            // and CompletionStateMachine.HandleDeviceSetupProvisioningComplete) share the
+            // same classifier output. HasSaveWhiteGloveSuccessResult alone is no longer
+            // sufficient — it also fires on non-WG devices (observed in production).
+            var wgSignals = SnapshotWhiteGloveSignals();
+            var wgClassification = WhiteGloveClassifier.Classify(wgSignals);
+            EmitWhiteGloveClassification(wgClassification, "DeviceSetupProvisioningComplete", wgSignals);
 
-            if (whiteGloveSuccessResult)
+            if (wgClassification.ShouldRouteToWhiteGlovePart1)
             {
-                _logger.Info($"EnrollmentTracker: Device-only deployment with WhiteGlove confirmed " +
-                             $"(whiteGloveStarted={whiteGloveStarted}, saveWhiteGloveSuccessResult={whiteGloveSuccessResult}) — " +
+                _logger.Info($"EnrollmentTracker: Device-only deployment with WhiteGlove (classifier: {wgClassification.Reason}) — " +
                              "routing to WhiteGlove completion instead of self_deploying_provisioning_complete");
 
                 RecordSignal("whiteglove_guard_activated");
 
                 EmitTraceEvent("whiteglove_guard_activated",
-                    "DeviceSetup provisioning complete with SaveWhiteGloveSuccessResult confirmed — routing to WhiteGlove path",
+                    "DeviceSetup provisioning complete with WG classifier Strong — routing to WhiteGlove path",
                     new Dictionary<string, object>
                     {
-                        { "whiteGloveStartDetected", whiteGloveStarted },
-                        { "saveWhiteGloveSuccessResult", whiteGloveSuccessResult },
-                        { "fooUserDetected", _fooUserDetected },
+                        { "wgScore", wgClassification.Score },
+                        { "wgConfidence", wgClassification.Confidence.ToString() },
+                        { "wgFactors", wgClassification.ContributingFactors },
+                        { "whiteGloveStartDetected", wgSignals.IsWhiteGloveStartDetected },
+                        { "saveWhiteGloveSuccessResult", wgSignals.HasSaveWhiteGloveSuccessResult },
+                        { "fooUserDetected", wgSignals.IsFooUserDetected },
                         { "autopilotMode", _autopilotMode },
                         { "skipUserStatusPage", _skipUserStatusPage }
                     });
@@ -211,6 +216,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment
         /// </summary>
         private void OnWhiteGloveCompleted(object sender, EventArgs e)
         {
+            // Shell-Core Event 62407 "WhiteGlove_Success" has fired — record it so the
+            // WhiteGloveClassifier can see this hard-positive signal (weight +80) on any
+            // subsequent classification call in the same session.
+            lock (_stateLock) { _shellCoreWhiteGloveFired = true; }
+
             var wgSource = sender?.GetType().Name ?? "unknown";
             CompleteWhiteGlove(wgSource, decisionAlreadyEmitted: false);
         }
@@ -861,6 +871,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment
                 _skipDeviceStatusPage = loaded.SkipDeviceStatusPage;
                 _autopilotMode = loaded.AutopilotMode;
                 _aadJoinedWithUser = loaded.AadJoinedWithUser;
+                _fooUserDetected = loaded.FooUserDetected;
                 // Restore hybrid join flag from persisted state; re-detect as fallback
                 _isHybridJoin = loaded.IsHybridJoin || DetectHybridJoinStatic();
                 _stateData = loaded;
@@ -1094,6 +1105,18 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment
                         _enrollmentCompleteEmitted = true;
                         _stateData.EnrollmentCompleteEmitted = true;
                         signalsSeen = new List<string>(_stateData.SignalsSeen);
+
+                        // Stop recurring/watchdog timers under the SAME lock that claims
+                        // the emission flag. Concurrent timer callbacks already past their
+                        // own _enrollmentCompleteEmitted check will no-op further work;
+                        // callbacks not yet past it will read flag=true and return.
+                        // Change(Inf,Inf) is idempotent and deadlock-safe inside the lock;
+                        // Dispose would wait on in-flight callbacks and is risky here.
+                        _summaryTimer?.Change(Timeout.Infinite, Timeout.Infinite);
+                        _summaryTimerActive = false;
+                        _debugStateTimer?.Change(Timeout.Infinite, Timeout.Infinite);
+                        _debugStateTimerActive = false;
+                        _deviceOnlyCompletionSafetyTimer?.Change(Timeout.Infinite, Timeout.Infinite);
                     }
                     else
                     {
@@ -1137,38 +1160,37 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment
                 return;
             }
 
-            // GUARD 4: WhiteGlove Part 1 redirect.
-            // If SaveWhiteGloveSuccessResult=succeeded (hard WG signal from ESP registry) but no real
-            // user has joined yet, this is WG Part 1 — the device is pre-provisioned and waiting for
-            // a user. Redirect to whiteglove_complete (Pending) instead of enrollment_complete (Succeeded).
-            // This catches WG Part 1 with SkipUser=False where ShellCore WhiteGlove_Success doesn't fire.
-            bool wgSuccessResult = _espAndHelloTracker?.HasSaveWhiteGloveSuccessResult ?? false;
-            if (wgSuccessResult && !_aadJoinedWithUser && !desktopArrived)
-            {
-                _logger.Info($"EnrollmentTracker: all guards passed but SaveWhiteGloveSuccessResult=succeeded " +
-                             $"with no user joined and no desktop arrived — redirecting to WhiteGlove Part 1 " +
-                             $"(source={source}, aadJoinedWithUser={_aadJoinedWithUser}, desktopArrived={desktopArrived})");
+            // GUARD 4: WhiteGlove Part 1 redirect — canonical classifier decision.
+            // All three WG decision sites go through WhiteGloveClassifier, so this guard
+            // uses the same rule as OnDeviceSetupProvisioningComplete and the StateMachine.
+            // ShouldRouteToWhiteGlovePart1==true only on Strong confidence; Weak is
+            // observable telemetry but falls through to the regular completion path.
+            var wgSignals = SnapshotWhiteGloveSignals();
+            var wgClassification = WhiteGloveClassifier.Classify(wgSignals);
+            EmitWhiteGloveClassification(wgClassification, "TryEmitEnrollmentComplete", wgSignals);
 
-                // Consolidated decision record: includes the upstream source AND the WG-context
-                // signals that used to live in a second (now-suppressed) decision record.
+            if (wgClassification.ShouldRouteToWhiteGlovePart1)
+            {
+                _logger.Info($"EnrollmentTracker: all guards passed and WG classifier Strong — " +
+                             $"redirecting to WhiteGlove Part 1 (source={source}, {wgClassification.Reason})");
+
                 EmitDecisionProcess("whiteglove_complete", source, "redirected_wg_part1", new List<string>
                 {
                     $"original_source={source}",
-                    "save_whiteglove_succeeded=true",
-                    (_espAndHelloTracker?.IsWhiteGloveStartDetected ?? false) ? "event509_seen" : "event509_not_seen",
-                    "aad_joined_with_user=false",
-                    "desktop_arrived=false",
-                    _fooUserDetected ? "foouser_detected" : "no_foouser",
-                    "redirect: enrollment_complete -> whiteglove_complete"
-                });
+                    $"wg_score={wgClassification.Score}",
+                    $"wg_confidence={wgClassification.Confidence}",
+                }.Concat(wgClassification.ContributingFactors ?? new List<string>())
+                 .Concat(new[] { "redirect: enrollment_complete -> whiteglove_complete" })
+                 .ToList(),
+                classification: wgClassification);
 
                 // Decision is already recorded above — CompleteWhiteGlove must not emit a second one.
-                // ShadowProcessTrigger("whiteglove_complete") is called inside CompleteWhiteGlove, so no extra call here.
                 CompleteWhiteGlove(source, decisionAlreadyEmitted: true);
                 return;
             }
 
-            _logger.Info($"EnrollmentTracker: all guards passed for source '{source}' — emitting enrollment_complete");
+            _logger.Info($"EnrollmentTracker: all guards passed for source '{source}' — emitting enrollment_complete " +
+                         $"(wg_classifier: {wgClassification.Reason})");
 
             // Emit decision process before the terminal event
             EmitDecisionProcess("enrollment_complete", source, "succeeded", new List<string>
@@ -1179,15 +1201,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment
                 desktopArrived ? "desktop_arrived" : "desktop_not_arrived",
                 isDeviceOnly ? "device_only" : "user_driven",
                 _isHybridJoin ? "hybrid_join" : "aad_join",
-                wgSuccessResult ? "wg_registry_succeeded" : "no_wg_registry"
-            });
+                wgSignals.HasSaveWhiteGloveSuccessResult ? "wg_registry_succeeded" : "no_wg_registry",
+                $"wg_score={wgClassification.Score}",
+                $"wg_confidence={wgClassification.Confidence}"
+            }, classification: wgClassification);
 
-            // Stop timers
-            _summaryTimer?.Change(Timeout.Infinite, Timeout.Infinite);
-            _summaryTimerActive = false;
-            _debugStateTimer?.Change(Timeout.Infinite, Timeout.Infinite);
-            _debugStateTimerActive = false;
-            _deviceOnlyCompletionSafetyTimer?.Change(Timeout.Infinite, Timeout.Infinite);
+            // Timers were already stopped inside the lock when _enrollmentCompleteEmitted was claimed.
 
             var helloOutcome = _espAndHelloTracker?.HelloOutcome ?? "unknown";
 
@@ -1320,7 +1339,8 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment
         /// that led to the outcome — enabling post-hoc analysis without reconstructing from individual events.
         /// </summary>
         private void EmitDecisionProcess(string terminalEvent, string source, string outcome,
-            List<string> decisionChain = null)
+            List<string> decisionChain = null,
+            WhiteGloveClassification classification = null)
         {
             Dictionary<string, object> data;
             lock (_stateLock)
@@ -1384,6 +1404,16 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment
                 if (_stateData.DeviceSetupProvisioningCompleteUtc.HasValue)
                     ts["deviceSetupProvisioningComplete"] = _stateData.DeviceSetupProvisioningCompleteUtc.Value.ToString("o");
                 data["signalTimestamps"] = ts;
+
+                // WhiteGlove classifier output — same fields as the whiteglove_classification
+                // event so aggregate MCP queries can correlate terminal decisions with the
+                // scoring history across a session.
+                if (classification != null)
+                {
+                    data["wgScore"] = classification.Score;
+                    data["wgConfidence"] = classification.Confidence.ToString();
+                    data["wgFactors"] = classification.ContributingFactors ?? new List<string>();
+                }
             }
 
             _emitEvent(new EnrollmentEvent
@@ -1400,6 +1430,192 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment
             });
 
             _logger.Info($"EnrollmentTracker: decision_process_completion emitted — {terminalEvent} via {source} ({outcome})");
+        }
+
+        // =====================================================================
+        // WhiteGlove classification helpers — see WhiteGloveClassifier for the
+        // scoring rules and thresholds. The three completion call-sites
+        // (OnDeviceSetupProvisioningComplete, TryEmitEnrollmentComplete,
+        //  CompletionStateMachine.HandleDeviceSetupProvisioningComplete) all
+        // classify through the same classifier, so decisions converge.
+        // =====================================================================
+
+        /// <summary>
+        /// Snapshot current WhiteGlove-relevant state under _stateLock and return a
+        /// consumable <see cref="WhiteGloveSignals"/> for <see cref="WhiteGloveClassifier.Classify"/>.
+        /// </summary>
+        private WhiteGloveSignals SnapshotWhiteGloveSignals()
+        {
+            lock (_stateLock)
+            {
+                var hasAccountSetup = _espAndHelloTracker?.HasAccountSetupActivity ?? false;
+                var hasSaveWg = _espAndHelloTracker?.HasSaveWhiteGloveSuccessResult ?? false;
+                var wgStart = _espAndHelloTracker?.IsWhiteGloveStartDetected ?? false;
+
+                bool agentRestartedAfterEsp = _stateData.EspFinalExitUtc.HasValue
+                    && _agentStartTimeUtc > _stateData.EspFinalExitUtc.Value;
+
+                return new WhiteGloveSignals
+                {
+                    ShellCoreWhiteGloveSuccess = _shellCoreWhiteGloveFired,
+                    HasSaveWhiteGloveSuccessResult = hasSaveWg,
+                    IsWhiteGloveStartDetected = wgStart,
+                    IsFooUserDetected = _fooUserDetected,
+                    AgentRestartedAfterEspExit = agentRestartedAfterEsp,
+
+                    AadJoinedWithUser = _aadJoinedWithUser,
+                    DesktopArrived = _desktopArrived,
+                    HasAccountSetupActivity = hasAccountSetup,
+
+                    IsDeviceOnlyDeployment = IsDeviceOnlyDeployment,
+
+                    EspFinalExitUtc = _stateData.EspFinalExitUtc,
+                    DeviceSetupProvisioningCompleteUtc = _stateData.DeviceSetupProvisioningCompleteUtc,
+                };
+            }
+        }
+
+        /// <summary>
+        /// Emits the observability-only <c>whiteglove_classification</c> event with the
+        /// full scoring breakdown. Enables MCP <c>query_table</c> queries like
+        /// "distribution of wgConfidence over last 24h" or "drill-down into Weak sessions"
+        /// without any backend schema change — all fields live inside the existing data bag.
+        /// </summary>
+        private void EmitWhiteGloveClassification(
+            WhiteGloveClassification c,
+            string callSite,
+            WhiteGloveSignals signals)
+        {
+            if (c == null) return;
+
+            var data = new Dictionary<string, object>
+            {
+                { "wgScore", c.Score },
+                { "wgConfidence", c.Confidence.ToString() },
+                { "callSite", callSite },
+                { "shouldRouteToWg", c.ShouldRouteToWhiteGlovePart1 },
+                { "factors", c.ContributingFactors ?? new List<string>() },
+                { "signals", new Dictionary<string, object>
+                    {
+                        { "shellCoreWg", signals.ShellCoreWhiteGloveSuccess },
+                        { "hasSaveWg", signals.HasSaveWhiteGloveSuccessResult },
+                        { "event509", signals.IsWhiteGloveStartDetected },
+                        { "fooUser", signals.IsFooUserDetected },
+                        { "agentRestartAfterEsp", signals.AgentRestartedAfterEspExit },
+                        { "aadJoined", signals.AadJoinedWithUser },
+                        { "desktopArrived", signals.DesktopArrived },
+                        { "accountSetupActive", signals.HasAccountSetupActivity },
+                        { "deviceOnly", signals.IsDeviceOnlyDeployment },
+                    }
+                },
+            };
+
+            _emitEvent(new EnrollmentEvent
+            {
+                SessionId = _sessionId,
+                TenantId = _tenantId,
+                EventType = "whiteglove_classification",
+                Severity = EventSeverity.Info,
+                Source = "EnrollmentTracker",
+                Phase = EnrollmentPhase.Unknown,
+                Message = $"WG classification at {callSite}: {c.Confidence} (score={c.Score})",
+                ImmediateUpload = false,
+                Data = data,
+            });
+        }
+
+        /// <summary>
+        /// Called by CollectorCoordinator when the <see cref="SystemSignals.AadJoinWatcher"/>
+        /// detects a transient provisioning placeholder user (foouser@/autopilot@). Updates
+        /// <c>_fooUserDetected</c> so the WhiteGloveClassifier sees the positive indicator
+        /// on the next classification call. Does NOT re-trigger completion — placeholder
+        /// alone is not a terminal signal.
+        /// </summary>
+        public void NotifyAadPlaceholderUserDetected(string userEmail)
+        {
+            bool alreadyDetected;
+            lock (_stateLock)
+            {
+                if (_enrollmentCompleteEmitted) return;
+
+                alreadyDetected = _fooUserDetected;
+                if (!alreadyDetected)
+                {
+                    _fooUserDetected = true;
+                    _stateData.FooUserDetected = true;
+                }
+            }
+
+            if (alreadyDetected)
+            {
+                _logger.Debug("EnrollmentTracker: NotifyAadPlaceholderUserDetected — already detected, ignoring");
+                return;
+            }
+
+            _statePersistence.Save(_stateData);
+            RecordSignal("aad_placeholder_user_detected_late");
+            _logger.Info("EnrollmentTracker: late placeholder user detected — recording for classifier");
+
+            var secondsSinceStart = (DateTime.UtcNow - _agentStartTimeUtc).TotalSeconds;
+            EmitTraceEvent("aad_placeholder_user_detected_late",
+                "Transient AAD provisioning placeholder user appeared in JoinInfo registry",
+                new Dictionary<string, object>
+                {
+                    { "secondsSinceAgentStart", secondsSinceStart },
+                    { "emailPattern", userEmail?.Split('@')[0] ?? "unknown" },
+                });
+        }
+
+        /// <summary>
+        /// Called by CollectorCoordinator when the <see cref="SystemSignals.AadJoinWatcher"/>
+        /// detects a real AAD user join (non-placeholder) during the session. Updates
+        /// <c>_aadJoinedWithUser</c> atomically so subsequent WhiteGloveClassifier calls
+        /// correctly see the real user (driving <c>IsDeviceOnlyDeployment</c> to false and
+        /// triggering the classifier's hard-exclude). Re-runs the completion guards.
+        /// </summary>
+        public void NotifyAadUserJoinedLate(string userEmail)
+        {
+            bool alreadyJoined;
+            bool alreadyEmitted;
+            lock (_stateLock)
+            {
+                alreadyEmitted = _enrollmentCompleteEmitted;
+                alreadyJoined = _aadJoinedWithUser;
+                if (!alreadyJoined && !alreadyEmitted)
+                {
+                    _aadJoinedWithUser = true;
+                    _stateData.AadJoinedWithUser = true;
+                }
+            }
+
+            if (alreadyEmitted)
+            {
+                _logger.Debug("EnrollmentTracker: NotifyAadUserJoinedLate — enrollment already emitted, ignoring");
+                return;
+            }
+            if (alreadyJoined)
+            {
+                _logger.Debug("EnrollmentTracker: NotifyAadUserJoinedLate — already joined, ignoring");
+                return;
+            }
+
+            _statePersistence.Save(_stateData);
+            RecordSignal("aad_user_joined_late");
+            _logger.Info($"EnrollmentTracker: late AAD user joined ({userEmail}) — re-evaluating completion");
+
+            var secondsSinceStart = (DateTime.UtcNow - _agentStartTimeUtc).TotalSeconds;
+            EmitTraceEvent("aad_user_joined_late",
+                "Real AAD user appeared in JoinInfo registry after session started",
+                new Dictionary<string, object>
+                {
+                    { "secondsSinceAgentStart", secondsSinceStart },
+                    { "userEmailDomain", userEmail?.Contains("@") == true ? userEmail.Substring(userEmail.IndexOf('@')) : "unknown" },
+                });
+
+            // Re-evaluate guards with fresh AAD-joined state. The classifier will now hard-exclude
+            // a WhiteGlove classification for this session; the standard enrollment_complete path
+            // can now fire once Hello/desktop resolve.
+            TryEmitEnrollmentComplete("aad_user_joined_late");
         }
 
         /// <summary>

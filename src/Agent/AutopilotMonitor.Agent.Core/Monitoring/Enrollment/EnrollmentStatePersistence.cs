@@ -116,7 +116,13 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment
         public int? AutopilotMode { get; set; }
 
         // True when AAD join status shows a joined device with a real user email
+        // (placeholder accounts like foouser@/autopilot@ are excluded — see AadJoinInfo)
         public bool AadJoinedWithUser { get; set; }
+
+        // True when a transient AAD provisioning placeholder (foouser@/autopilot@) has been
+        // observed at any point in the session — survives crash/restart so the classifier
+        // keeps its positive WG signal after agent recovery.
+        public bool FooUserDetected { get; set; }
 
         // True when Autopilot profile indicates Hybrid Azure AD Join (CloudAssignedDomainJoinMethod == 1)
         public bool IsHybridJoin { get; set; }

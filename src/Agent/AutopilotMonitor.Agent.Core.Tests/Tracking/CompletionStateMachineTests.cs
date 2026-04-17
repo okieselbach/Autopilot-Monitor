@@ -1159,11 +1159,45 @@ namespace AutopilotMonitor.Agent.Core.Tests.Tracking
         }
 
         [Fact]
-        public void DeviceOnly_ProvisioningComplete_WithSaveWhiteGloveSuccessResult_TransitionsToWhiteGloveCompleted()
+        public void DeviceOnly_ProvisioningComplete_WithOnlySaveWhiteGloveSuccessResult_DoesNotTriggerWhiteGlove()
         {
+            // Post-classifier behaviour: HasSaveWhiteGloveSuccessResult alone scores 10 (very
+            // weak — it also fires on genuinely non-WG devices). With DeviceOnly that reaches
+            // 25 → Confidence.None → NOT routed to WhiteGlove. This is the core bugfix.
             var sm = new CompletionStateMachine();
             var ctx = DeviceOnlyContext();
             ctx.HasSaveWhiteGloveSuccessResult = true;
+
+            var result = sm.ProcessTrigger("device_setup_provisioning_complete", ctx);
+
+            Assert.NotEqual(EnrollmentCompletionState.WhiteGloveCompleted, sm.CurrentState);
+            Assert.False(result.ShouldEmitWhiteGloveComplete);
+            Assert.True(result.ShouldEmitEnrollmentComplete);
+        }
+
+        [Fact]
+        public void DeviceOnly_ProvisioningComplete_BothWgSignals_IsWeak_DoesNotTriggerWhiteGlove()
+        {
+            // SaveWg(+10) + Event509(+15) + DeviceOnly(+15) = 40 → Confidence.Weak → NOT WG
+            // (asymmetric-conservative routing: unsicher → kein WG).
+            var sm = new CompletionStateMachine();
+            var ctx = DeviceOnlyContext();
+            ctx.WhiteGloveStartDetected = true;
+            ctx.HasSaveWhiteGloveSuccessResult = true;
+
+            var result = sm.ProcessTrigger("device_setup_provisioning_complete", ctx);
+
+            Assert.NotEqual(EnrollmentCompletionState.WhiteGloveCompleted, sm.CurrentState);
+            Assert.False(result.ShouldEmitWhiteGloveComplete);
+        }
+
+        [Fact]
+        public void DeviceOnly_ProvisioningComplete_ShellCoreWgSuccess_TransitionsToWhiteGloveCompleted()
+        {
+            // ShellCoreWhiteGloveSuccess (Event 62407) alone scores 80 → Confidence.Strong → WG.
+            var sm = new CompletionStateMachine();
+            var ctx = DeviceOnlyContext();
+            ctx.ShellCoreWhiteGloveSuccess = true;
 
             var result = sm.ProcessTrigger("device_setup_provisioning_complete", ctx);
 
@@ -1173,18 +1207,38 @@ namespace AutopilotMonitor.Agent.Core.Tests.Tracking
         }
 
         [Fact]
-        public void DeviceOnly_ProvisioningComplete_BothWhiteGloveSignals_TransitionsToWhiteGloveCompleted()
+        public void DeviceOnly_ProvisioningComplete_WgSignalVerbund_ReachingThreshold_TransitionsToWhiteGlove()
         {
+            // Signalverbund ohne ShellCore: SaveWg(+10) + Event509(+15) + FooUser(+20) +
+            // DeviceOnly(+15) + AgentRestartAfterEsp(+10) = 70 → Strong → WG.
             var sm = new CompletionStateMachine();
             var ctx = DeviceOnlyContext();
             ctx.WhiteGloveStartDetected = true;
             ctx.HasSaveWhiteGloveSuccessResult = true;
+            ctx.IsFooUserDetected = true;
+            ctx.EspFinalExitUtc = DateTime.UtcNow.AddHours(-1);
+            ctx.AgentStartTimeUtc = DateTime.UtcNow.AddMinutes(-30);
 
             var result = sm.ProcessTrigger("device_setup_provisioning_complete", ctx);
 
             Assert.Equal(EnrollmentCompletionState.WhiteGloveCompleted, sm.CurrentState);
             Assert.True(result.ShouldEmitWhiteGloveComplete);
-            Assert.False(result.ShouldEmitEnrollmentComplete);
+        }
+
+        [Fact]
+        public void DeviceOnly_ProvisioningComplete_LateAadJoin_DoesNotTriggerWhiteGlove()
+        {
+            // Selbst mit starkem WG-Signal: realer AAD-Join (späte Erkennung via AadJoinWatcher)
+            // muss Classifier-Hard-Excluder auslösen → NICHT WG.
+            var sm = new CompletionStateMachine();
+            var ctx = DeviceOnlyContext();
+            ctx.ShellCoreWhiteGloveSuccess = true;
+            ctx.AadJoinedWithUser = true; // late AAD join flipped this
+
+            var result = sm.ProcessTrigger("device_setup_provisioning_complete", ctx);
+
+            Assert.NotEqual(EnrollmentCompletionState.WhiteGloveCompleted, sm.CurrentState);
+            Assert.False(result.ShouldEmitWhiteGloveComplete);
         }
 
         [Fact]
@@ -1219,9 +1273,11 @@ namespace AutopilotMonitor.Agent.Core.Tests.Tracking
         [Fact]
         public void WhiteGloveCompleted_IsTerminal()
         {
+            // Use ShellCoreWhiteGloveSuccess (score 80) to drive into WG — post-classifier
+            // it's the only single signal that hits Strong on its own.
             var sm = new CompletionStateMachine();
             var ctx = DeviceOnlyContext();
-            ctx.HasSaveWhiteGloveSuccessResult = true;
+            ctx.ShellCoreWhiteGloveSuccess = true;
             sm.ProcessTrigger("device_setup_provisioning_complete", ctx);
 
             Assert.Equal(EnrollmentCompletionState.WhiteGloveCompleted, sm.CurrentState);
@@ -1251,12 +1307,31 @@ namespace AutopilotMonitor.Agent.Core.Tests.Tracking
         }
 
         [Fact]
-        public void EspExiting_SkipUser_WithSaveWhiteGloveSuccessResult_TransitionsToWhiteGloveCompleted()
+        public void EspExiting_SkipUser_WithOnlySaveWhiteGloveSuccessResult_DoesNotTriggerWhiteGlove()
         {
+            // Post-classifier behaviour: weak single signal (score 25 with device-only) → NOT WG.
             var sm = new CompletionStateMachine();
 
             var ctx = DefaultContext(autopilotMode: 0, skipUserStatusPage: true, aadJoinedWithUser: false,
                 isHelloPolicyConfigured: false, hasSaveWhiteGloveSuccessResult: true);
+            sm.ProcessTrigger("esp_phase_changed", ctx);
+
+            ctx.LastEspPhase = "DeviceSetup";
+            var result = sm.ProcessTrigger("esp_exiting", ctx);
+
+            Assert.NotEqual(EnrollmentCompletionState.WhiteGloveCompleted, sm.CurrentState);
+            Assert.False(result.ShouldEmitWhiteGloveComplete);
+        }
+
+        [Fact]
+        public void EspExiting_SkipUser_WithShellCoreWgSuccess_TransitionsToWhiteGloveCompleted()
+        {
+            // ShellCoreWhiteGloveSuccess alone reaches Strong → WG.
+            var sm = new CompletionStateMachine();
+
+            var ctx = DefaultContext(autopilotMode: 0, skipUserStatusPage: true, aadJoinedWithUser: false,
+                isHelloPolicyConfigured: false);
+            ctx.ShellCoreWhiteGloveSuccess = true;
             sm.ProcessTrigger("esp_phase_changed", ctx);
 
             ctx.LastEspPhase = "DeviceSetup";
