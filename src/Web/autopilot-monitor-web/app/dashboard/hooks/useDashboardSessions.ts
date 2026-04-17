@@ -100,6 +100,16 @@ export function useDashboardSessions({
   const loadingMoreRef = useRef(loadingMore);
   loadingMoreRef.current = loadingMore;
 
+  // Synchronous lock: set true BEFORE the first await so two triggers in the same
+  // render cycle (pagination effect + debounced search effect in page.tsx) cannot
+  // both pass the guard. The state-mirrored loadingMoreRef above lags by one tick
+  // and is insufficient for that race.
+  const fetchLockRef = useRef(false);
+  // Cancellation token for the progressive loadAll() loop. Bumped whenever the
+  // session list is being reset (refetch/refetchWith/unmount) so an in-flight
+  // loop stops appending to a now-stale list.
+  const loadAllTokenRef = useRef(0);
+
   const hasInitialFetch = useRef(false);
   const hasGlobalModeInitialized = useRef(false);
   const hasJoinedGroup = useRef(false);
@@ -223,43 +233,60 @@ export function useDashboardSessions({
   }, [fetchSessionsBatch, fetchBlockedDevices]);
 
   const refetch = useCallback(() => {
+    loadAllTokenRef.current++; // cancel any in-flight progressive loader
     setLoading(true);
     fetchSessions();
   }, [fetchSessions]);
 
   const refetchWith = useCallback((tenantIdOverride: string) => {
+    loadAllTokenRef.current++; // cancel any in-flight progressive loader
     setLoading(true);
     fetchSessions(undefined, tenantIdOverride);
   }, [fetchSessions]);
 
   const loadMore = useCallback(() => {
-    if (!cursorRef.current || loadingMoreRef.current) return;
+    if (!cursorRef.current || fetchLockRef.current) return;
+    fetchLockRef.current = true;
     setLoadingMore(true);
-    fetchSessions(cursorRef.current);
+    fetchSessions(cursorRef.current).finally(() => {
+      fetchLockRef.current = false;
+    });
   }, [fetchSessions]);
 
   // Progressive loader — fetches ALL remaining sessions batch by batch.
   // Used when search is active and local results are insufficient.
   const loadAll = useCallback(async () => {
-    if (!cursorRef.current || loadingMoreRef.current) return;
+    if (!cursorRef.current || fetchLockRef.current) return;
+    fetchLockRef.current = true;
+    const myToken = ++loadAllTokenRef.current;
     setLoadingMore(true);
-    let currentCursor: string | null = cursorRef.current;
+    try {
+      let currentCursor: string | null = cursorRef.current;
+      while (currentCursor && loadAllTokenRef.current === myToken) {
+        const result = await fetchSessionsBatch(currentCursor);
+        if (!result || loadAllTokenRef.current !== myToken) break;
 
-    while (currentCursor) {
-      const result = await fetchSessionsBatch(currentCursor);
-      if (!result) break;
-
-      setSessions((prev) => [...prev, ...result.sessions]);
-      setCursor(result.cursor);
-      setHasMore(result.hasMore);
-      currentCursor = result.hasMore ? result.cursor : null;
+        setSessions((prev) => [...prev, ...result.sessions]);
+        setCursor(result.cursor);
+        setHasMore(result.hasMore);
+        currentCursor = result.hasMore ? result.cursor : null;
+      }
+    } finally {
+      fetchLockRef.current = false;
+      setLoadingMore(false);
     }
-
-    setLoadingMore(false);
   }, [fetchSessionsBatch]);
 
   const removeSession = useCallback((sessionId: string) => {
     setSessions((prev) => prev.filter((s) => s.sessionId !== sessionId));
+  }, []);
+
+  // Cancel any in-flight progressive loadAll() loop on unmount so it
+  // doesn't call setSessions against a torn-down component.
+  useEffect(() => {
+    return () => {
+      loadAllTokenRef.current++;
+    };
   }, []);
 
   // Initial fetch — gated on user role + tenant readiness

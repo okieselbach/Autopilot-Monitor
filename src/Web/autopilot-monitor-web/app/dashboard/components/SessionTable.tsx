@@ -1,10 +1,11 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo, useDeferredValue } from "react";
 import { Session } from "../types";
 import { trackEvent } from "@/lib/appInsights";
 import { fuzzyContains } from "@/utils/fuzzy";
+import { buildUniqueValuesByField } from "./uniqueValuesByField";
 
 // Column definition for the session table
 interface ColumnDef {
@@ -163,8 +164,12 @@ export function SessionTable({
     { key: "status", label: "Status" },
   ];
 
-  const searchSuggestions: SearchSuggestion[] = (() => {
-    const q = searchQuery.trim().toLowerCase();
+  // Defer expensive suggestion scans so rapid typing keeps the input responsive.
+  const deferredSearchQuery = useDeferredValue(searchQuery);
+  const deferredTenantIdFilter = useDeferredValue(tenantIdFilter);
+
+  const searchSuggestions = useMemo<SearchSuggestion[]>(() => {
+    const q = deferredSearchQuery.trim().toLowerCase();
     if (q.length < 2 || sessions.length === 0) return [];
     if (/^[><]=?\s*\d+$/.test(q)) return [];
 
@@ -204,16 +209,18 @@ export function SessionTable({
     }
 
     return [...exactResults, ...fuzzyResults];
-  })();
+    // SEARCH_FIELDS is a stable literal — intentionally omitted from deps.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deferredSearchQuery, sessions]);
 
   // Fuzzy-match tenants by domain name or tenant ID
-  const tenantSuggestions = (() => {
-    const q = tenantIdFilter.trim().toLowerCase();
+  const tenantSuggestions = useMemo(() => {
+    const q = deferredTenantIdFilter.trim().toLowerCase();
     if (q.length < 2 || tenantList.length === 0) return [];
     return tenantList
       .filter((t) => t.domainName.toLowerCase().includes(q) || t.tenantId.toLowerCase().includes(q))
       .slice(0, 8);
-  })();
+  }, [deferredTenantIdFilter, tenantList]);
 
   // Persist visible columns to localStorage
   useEffect(() => {
@@ -242,15 +249,16 @@ export function SessionTable({
     }
   }, [showColumnSelector, openFilterColumn, showTenantSuggestions, showSearchSuggestions]);
 
-  // Compute unique values for a filterable field from all sessions (not filtered)
-  const getUniqueValues = (field: keyof Session): string[] => {
-    const values = new Set<string>();
-    for (const s of sessions) {
-      const v = s[field];
-      if (v != null && v !== "") values.add(String(v));
-    }
-    return [...values].sort();
-  };
+  // Compute unique values for every filterable field in a single pass over sessions.
+  // Memoized so that header re-renders pay only a map lookup, not N × O(sessions).
+  const uniqueValuesByField = useMemo(
+    () =>
+      buildUniqueValuesByField(
+        sessions,
+        ALL_COLUMNS.map((c) => c.filterKey).filter((k): k is keyof Session => !!k),
+      ),
+    [sessions],
+  );
 
   const activeFilterCount = Object.values(columnFilters).reduce(
     (sum, s) => sum + (s.size > 0 ? 1 : 0), 0
@@ -681,7 +689,7 @@ export function SessionTable({
                       onSort={onSort}
                       className={["eventCount", "duration", "started", "country", "agentVersion", "osName", "osBuild", "osDisplayVersion", "osEdition", "osLanguage"].includes(col.key) ? "px-3" : undefined}
                       filterKey={col.filterKey}
-                      filterValues={col.filterKey ? getUniqueValues(col.filterKey) : undefined}
+                      filterValues={col.filterKey ? uniqueValuesByField[col.filterKey] : undefined}
                       activeFilter={col.filterKey ? columnFilters[col.filterKey] : undefined}
                       isFilterOpen={openFilterColumn === col.key}
                       onFilterToggle={() => setOpenFilterColumn(openFilterColumn === col.key ? null : col.key)}

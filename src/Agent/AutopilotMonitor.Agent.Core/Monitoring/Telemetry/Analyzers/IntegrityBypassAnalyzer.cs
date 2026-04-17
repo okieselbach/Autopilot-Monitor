@@ -269,7 +269,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Telemetry.Analyzers
                         if (raw != null)
                         {
                             try { intValue = Convert.ToInt32(raw); }
-                            catch { intValue = 0; }
+                            catch (Exception ex) when (ex is InvalidCastException || ex is FormatException || ex is OverflowException)
+                            {
+                                _logger.Warning($"{Name}: LabConfig '{valueName}' has unparseable value (raw type={raw.GetType().Name}): {ex.Message}");
+                                intValue = 0;
+                            }
                         }
                         result.Values[valueName] = intValue;
                         if (intValue == 1)
@@ -301,7 +305,11 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Telemetry.Analyzers
                         return new MoSetupCheckResult { KeyExists = true, Value = 0 };
 
                     int intValue = 0;
-                    try { intValue = Convert.ToInt32(raw); } catch { intValue = 0; }
+                    try { intValue = Convert.ToInt32(raw); }
+                    catch (Exception ex) when (ex is InvalidCastException || ex is FormatException || ex is OverflowException)
+                    {
+                        _logger.Warning($"{Name}: MoSetup 'AllowUpgradesWithUnsupportedTPMOrCPU' has unparseable value (raw type={raw.GetType().Name}): {ex.Message}");
+                    }
                     return new MoSetupCheckResult { KeyExists = true, Value = intValue };
                 }
             }
@@ -345,7 +353,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Telemetry.Analyzers
                                 if (raw == null) continue;
 
                                 int intValue = 0;
-                                try { intValue = Convert.ToInt32(raw); } catch { intValue = 0; }
+                                try { intValue = Convert.ToInt32(raw); }
+                                catch (Exception ex) when (ex is InvalidCastException || ex is FormatException || ex is OverflowException)
+                                {
+                                    _logger.Warning($"{Name}: PCHC UpgradeEligibility for SID {sid} has unparseable value (raw type={raw.GetType().Name}): {ex.Message}");
+                                    continue;
+                                }
 
                                 if (intValue == 1)
                                 {
@@ -415,13 +428,17 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Telemetry.Analyzers
                 using (var searcher = new ManagementObjectSearcher(
                     @"root\CIMV2\Security\MicrosoftTpm",
                     "SELECT IsEnabled_InitialValue, IsActivated_InitialValue FROM Win32_Tpm"))
+                using (var results = searcher.Get())
                 {
-                    foreach (ManagementObject tpm in searcher.Get())
+                    foreach (ManagementObject tpm in results)
                     {
-                        var isEnabled = tpm["IsEnabled_InitialValue"] != null
-                            && Convert.ToBoolean(tpm["IsEnabled_InitialValue"]);
-                        // At least one Tpm instance exists — return its enabled state
-                        return isEnabled;
+                        using (tpm)
+                        {
+                            var isEnabled = tpm["IsEnabled_InitialValue"] != null
+                                && Convert.ToBoolean(tpm["IsEnabled_InitialValue"]);
+                            // At least one Tpm instance exists — return its enabled state
+                            return isEnabled;
+                        }
                     }
                 }
                 // No Win32_Tpm instance returned — no TPM present
