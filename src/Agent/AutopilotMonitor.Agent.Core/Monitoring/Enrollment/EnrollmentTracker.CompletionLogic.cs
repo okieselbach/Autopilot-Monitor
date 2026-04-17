@@ -1579,8 +1579,16 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment
         /// detects a real AAD user join (non-placeholder) during the session. Updates
         /// <c>_aadJoinedWithUser</c> atomically so subsequent WhiteGloveClassifier calls
         /// correctly see the real user (driving <c>IsDeviceOnlyDeployment</c> to false and
-        /// triggering the classifier's hard-exclude). Re-runs the completion guards.
+        /// triggering the classifier's hard-exclude).
         /// </summary>
+        /// <remarks>
+        /// This is NOT a completion trigger. In a user-driven v1 flow the real AAD user
+        /// appears at the START of AccountSetup (when the user signs in), not at the end —
+        /// firing completion here would short-circuit ESP. The signal only flips classifier
+        /// state away from device-only/WhiteGlove; completion continues to flow through the
+        /// standard paths (ime_pattern / esp_hello_composite / desktop_hello), each of which
+        /// enforces its own ESP and Hello gates.
+        /// </remarks>
         public void NotifyAadUserJoinedLate(string userEmail)
         {
             bool alreadyJoined;
@@ -1609,7 +1617,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment
 
             _statePersistence.Save(_stateData);
             RecordSignal("aad_user_joined_late");
-            _logger.Info($"EnrollmentTracker: late AAD user joined ({userEmail}) — re-evaluating completion");
+            _logger.Info($"EnrollmentTracker: late AAD user joined ({userEmail}) — classifier state updated");
 
             var secondsSinceStart = (DateTime.UtcNow - _agentStartTimeUtc).TotalSeconds;
             EmitTraceEvent("aad_user_joined_late",
@@ -1619,11 +1627,6 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment
                     { "secondsSinceAgentStart", secondsSinceStart },
                     { "userEmailDomain", userEmail?.Contains("@") == true ? userEmail.Substring(userEmail.IndexOf('@')) : "unknown" },
                 });
-
-            // Re-evaluate guards with fresh AAD-joined state. The classifier will now hard-exclude
-            // a WhiteGlove classification for this session; the standard enrollment_complete path
-            // can now fire once Hello/desktop resolve.
-            TryEmitEnrollmentComplete("aad_user_joined_late");
         }
 
         /// <summary>
