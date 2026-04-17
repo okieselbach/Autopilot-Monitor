@@ -714,25 +714,32 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment
                 }
                 else if (skipUser == true)
                 {
-                    // WhiteGlove guard: Only SaveWhiteGloveSuccessResult=succeeded is reliable.
-                    // EventID 509 is a soft signal — fires on hybrid-join too, must not trigger WG.
-                    bool wgStarted = _espAndHelloTracker?.IsWhiteGloveStartDetected ?? false;
-                    bool wgSuccessResult = _espAndHelloTracker?.HasSaveWhiteGloveSuccessResult ?? false;
+                    // WhiteGlove guard — canonical decision via WhiteGloveClassifier, identical to
+                    // the other three WG decision sites. HasSaveWhiteGloveSuccessResult alone is
+                    // not sufficient: after WhiteGlove Part 1 the registry flag remains set and a
+                    // subsequent user-enrollment ESP exit (Part 2) would falsely re-route to WG.
+                    // The classifier's AadJoinedWithUser hard-excluder blocks that path correctly.
+                    var wgSignals = SnapshotWhiteGloveSignals();
+                    var wgClassification = WhiteGloveClassifier.Classify(wgSignals);
+                    EmitWhiteGloveClassification(wgClassification, "EspExiting_SkipUserTrue", wgSignals);
 
-                    if (wgSuccessResult)
+                    if (wgClassification.ShouldRouteToWhiteGlovePart1)
                     {
-                        _logger.Info($"EnrollmentTracker: ESP exiting with SkipUserStatusPage=true and WhiteGlove confirmed " +
-                                     $"(whiteGloveStarted={wgStarted}, saveWhiteGloveSuccessResult={wgSuccessResult}) — " +
-                                     "routing to WhiteGlove completion instead of device_only_esp_registry");
+                        _logger.Info($"EnrollmentTracker: ESP exiting with SkipUserStatusPage=true and WG classifier Strong " +
+                                     $"({wgClassification.Reason}) — routing to WhiteGlove completion instead of device_only_esp_registry");
 
                         RecordSignal("whiteglove_guard_activated");
                         EmitTraceEvent("whiteglove_guard_esp_exiting",
-                            "ESP exiting with SaveWhiteGloveSuccessResult confirmed — routing to WhiteGlove path",
+                            "ESP exiting with WG classifier Strong — routing to WhiteGlove path",
                             new Dictionary<string, object>
                             {
-                                { "whiteGloveStartDetected", wgStarted },
-                                { "saveWhiteGloveSuccessResult", wgSuccessResult },
-                                { "fooUserDetected", _fooUserDetected },
+                                { "wgScore", wgClassification.Score },
+                                { "wgConfidence", wgClassification.Confidence.ToString() },
+                                { "wgFactors", wgClassification.ContributingFactors },
+                                { "whiteGloveStartDetected", wgSignals.IsWhiteGloveStartDetected },
+                                { "saveWhiteGloveSuccessResult", wgSignals.HasSaveWhiteGloveSuccessResult },
+                                { "fooUserDetected", wgSignals.IsFooUserDetected },
+                                { "aadJoinedWithUser", wgSignals.AadJoinedWithUser },
                                 { "previousPhase", lastPhase ?? "unknown" }
                             });
 
@@ -1161,8 +1168,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment
             }
 
             // GUARD 4: WhiteGlove Part 1 redirect — canonical classifier decision.
-            // All three WG decision sites go through WhiteGloveClassifier, so this guard
-            // uses the same rule as OnDeviceSetupProvisioningComplete and the StateMachine.
+            // All four WG decision sites go through WhiteGloveClassifier (this guard,
+            // OnDeviceSetupProvisioningComplete, OnFinalizingSetupPhaseTriggered esp_exiting,
+            // and the StateMachine), so decisions converge on the same rule.
             // ShouldRouteToWhiteGlovePart1==true only on Strong confidence; Weak is
             // observable telemetry but falls through to the regular completion path.
             var wgSignals = SnapshotWhiteGloveSignals();

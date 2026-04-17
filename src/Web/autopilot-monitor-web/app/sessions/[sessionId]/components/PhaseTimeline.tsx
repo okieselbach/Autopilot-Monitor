@@ -2,7 +2,7 @@
 
 import React from "react";
 import { EnrollmentEvent } from "@/types";
-import { V1_PHASES, V1_SKIP_USER_PHASES, V2_PHASES } from "../utils/phaseConstants";
+import { resolvePhaseLayout } from "../utils/phaseConstants";
 
 interface PhaseTimelineProps {
   currentPhase: number;
@@ -16,9 +16,7 @@ interface PhaseTimelineProps {
 }
 
 export default function PhaseTimeline({ currentPhase, completedPhases, events = [], sessionStatus, enrollmentType, isPreProvisioned, isSkipUserStatusPage, onPhaseClick }: PhaseTimelineProps) {
-  const phases = enrollmentType === "v2"
-    ? V2_PHASES
-    : isSkipUserStatusPage ? V1_SKIP_USER_PHASES : V1_PHASES;
+  const { phases, useSkipLayout } = resolvePhaseLayout({ enrollmentType, isSkipUserStatusPage, isPreProvisioned });
 
   // Derive current activity for the active phase from events
   const getCurrentActivity = (phaseId: number): string | null => {
@@ -149,7 +147,7 @@ export default function PhaseTimeline({ currentPhase, completedPhases, events = 
 
     let end: number | null = null;
 
-    if (isSkipUserStatusPage) {
+    if (useSkipLayout) {
       // V1 SkipUser: Device Setup(2) → FinalizingSetup(6) → AppsUser(5) → Complete(7)
       // No AccountSetup(4). AppsUser is a top-level phase (not sub-phase).
       switch (phaseId) {
@@ -207,7 +205,7 @@ export default function PhaseTimeline({ currentPhase, completedPhases, events = 
   // since there is no Account Setup parent phase.
   const isSubPhase = (phaseId: number): boolean => {
     if (enrollmentType === "v2") return false;
-    if (isSkipUserStatusPage) return phaseId === 3;
+    if (useSkipLayout) return phaseId === 3;
     return phaseId === 3 || phaseId === 5;
   };
 

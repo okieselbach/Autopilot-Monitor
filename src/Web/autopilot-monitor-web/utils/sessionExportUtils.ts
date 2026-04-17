@@ -276,7 +276,7 @@ export function generateUiExport(
 
   if (!isWhiteGlove) {
     // Standard single timeline
-    const grouped = groupEventsByPhase(sorted, phaseNames, phaseOrder);
+    const grouped = groupEventsByPhase(sorted, phaseNames, phaseOrder, { preventPhaseRegression: true });
     renderPhaseBlocks(lines, grouped, phaseOrder, severityLabel);
   } else {
     // WhiteGlove session: two-part timeline, matching the UI split logic.
@@ -347,7 +347,7 @@ export function generateUiExport(
     lines.push("#".repeat(43));
     lines.push(`  PRE-PROVISIONING PART  [WhiteGlove]`);
     lines.push("#".repeat(43));
-    const preProvGrouped = groupEventsByPhase(preProvEvents, phaseNames, phaseOrder);
+    const preProvGrouped = groupEventsByPhase(preProvEvents, phaseNames, phaseOrder, { preventPhaseRegression: true });
     renderPhaseBlocks(lines, preProvGrouped, phaseOrder, severityLabel);
 
     // --- User Enrollment Part or Awaiting Banner ---

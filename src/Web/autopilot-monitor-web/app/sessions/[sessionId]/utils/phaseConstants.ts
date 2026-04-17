@@ -32,6 +32,26 @@ export const V2_PHASES = [
 export const V1_PHASE_ORDER = ["Start", "Device Preparation", "Device Setup", "Apps (Device)", "Account Setup", "Apps (User)", "Finalizing Setup", "Complete", "Failed"];
 export const V2_PHASE_ORDER = ["Start", "Device Preparation", "App Installation", "Finalizing Setup", "Complete", "Failed"];
 
+export type PhaseDescriptor = { id: number; name: string; shortName: string };
+
+// WhiteGlove (IsPreProvisioned=true) runs the full user enrollment in Part 2 even when the
+// admin set SkipUserStatusPage=true — the collapsed layout only applies to pure device-only
+// deployments. V2 always uses its simplified phase set.
+export function resolvePhaseLayout(params: {
+  enrollmentType?: string;
+  isSkipUserStatusPage?: boolean;
+  isPreProvisioned?: boolean;
+}): { phases: PhaseDescriptor[]; useSkipLayout: boolean } {
+  if (params.enrollmentType === "v2") {
+    return { phases: V2_PHASES, useSkipLayout: false };
+  }
+  const useSkipLayout = !!params.isSkipUserStatusPage && !params.isPreProvisioned;
+  return {
+    phases: useSkipLayout ? V1_SKIP_USER_PHASES : V1_PHASES,
+    useSkipLayout,
+  };
+}
+
 // Lookup by phase number — Phase 3 has different names per enrollment type
 export const V1_PHASE_NAMES: Record<number, string> = { [-1]: "Unknown", 0: "Start", 1: "Device Preparation", 2: "Device Setup", 3: "Apps (Device)",    4: "Account Setup", 5: "Apps (User)", 6: "Finalizing Setup", 7: "Complete", 99: "Failed" };
 export const V2_PHASE_NAMES: Record<number, string> = { [-1]: "Unknown", 0: "Start", 1: "Device Preparation", 2: "Device Setup", 3: "App Installation", 4: "Account Setup", 5: "Apps (User)", 6: "Finalizing Setup", 7: "Complete", 99: "Failed" };

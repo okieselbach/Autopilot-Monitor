@@ -213,6 +213,32 @@ namespace AutopilotMonitor.Agent.Core.Tests.Tracking
         }
 
         // =====================================================================
+        // Session 304620a8 regression — WhiteGlove Part 2 re-entry after resume
+        // =====================================================================
+
+        [Fact]
+        public void Classify_Part2ResumeWithAllPositivesAndAadJoin_IsWeakNotStrong()
+        {
+            // Reproduziert den Signalstand beim 2. ESP-Exit in Session 304620a8-...:
+            // Part 1 ist sauber durchgelaufen (Shell-Core + SaveWg + Event509 + FooUser),
+            // Agent hat nach Part 1 rebootet, in Part 2 hat der reale User sich
+            // eingeloggt (AadJoinedWithUser=true). Der 2. ESP-Exit darf nicht erneut
+            // zu whiteglove_complete routen — Hard-Excluder muss das Routing kippen.
+            var result = WhiteGloveClassifier.Classify(new WhiteGloveSignals
+            {
+                ShellCoreWhiteGloveSuccess = true,      // +80
+                HasSaveWhiteGloveSuccessResult = true,  // +10
+                IsWhiteGloveStartDetected = true,       // +15
+                IsFooUserDetected = true,               // +20
+                AgentRestartedAfterEspExit = true,      // +10
+                AadJoinedWithUser = true,               // -100 hard excluder
+            });
+
+            Assert.False(result.ShouldRouteToWhiteGlovePart1);
+            Assert.NotEqual(WhiteGloveConfidence.Strong, result.Confidence);
+        }
+
+        // =====================================================================
         // ShouldRouteToWhiteGlovePart1 only fires on Strong
         // =====================================================================
 
