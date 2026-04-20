@@ -70,6 +70,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         private readonly AgentLogger _logger;
         private readonly IBackendTelemetryUploader _uploader;
         private readonly IReadOnlyList<IClassifier> _classifiers;
+        private readonly IComponentFactory? _componentFactory;
         private readonly int _channelCapacity;
         private readonly int _quarantineThreshold;
         private readonly TimeSpan _drainInterval;
@@ -94,6 +95,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         private DecisionStepProcessor? _processor;
         private SessionTraceOrdinalProvider? _traceCounter;
         private SignalIngress? _ingress;
+        private IReadOnlyList<ICollectorHost>? _collectorHosts;
 
         private EventHandler<DeadlineFiredEventArgs>? _deadlineBridge;
 
@@ -119,6 +121,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             AgentLogger logger,
             IBackendTelemetryUploader uploader,
             IEnumerable<IClassifier> classifiers,
+            IComponentFactory? componentFactory = null,
             int channelCapacity = SignalIngress.DefaultChannelCapacity,
             int quarantineThreshold = DecisionStepProcessor.DefaultQuarantineThreshold,
             TimeSpan? drainInterval = null,
@@ -145,6 +148,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 list.Add(c);
             }
             _classifiers = list;
+            _componentFactory = componentFactory;
 
             _channelCapacity = channelCapacity;
             _quarantineThreshold = quarantineThreshold;
@@ -265,10 +269,31 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             _deadlineBridge = OnDeadlineFired;
             _scheduler.Fired += _deadlineBridge;
 
-            // 13) Ingress-Worker starten.
+            // 13) Ingress-Worker starten (vor Collectors — sonst race-prone).
             _ingress.Start();
 
-            // 14) Periodischer Drain-Loop (Fire-and-forget).
+            // 14) Collector-Hosts via Factory — onEnrollmentEvent bridged Telemetry-Events
+            //     an den zentralen TelemetryEventEmitter. Exception-Swallow damit ein
+            //     Collector-Thread nicht am Emitter-Fehler stirbt (Plan §2.7a).
+            if (_componentFactory != null)
+            {
+                var safeSink = BuildTelemetryEventSink();
+                _collectorHosts = _componentFactory.CreateCollectorHosts(_sessionId, _tenantId, _logger, safeSink);
+                foreach (var host in _collectorHosts)
+                {
+                    try
+                    {
+                        host.Start();
+                        _logger.Debug($"EnrollmentOrchestrator: started collector host '{host.Name}'.");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Error($"EnrollmentOrchestrator: failed to start collector host '{host.Name}'.", ex);
+                    }
+                }
+            }
+
+            // 15) Periodischer Drain-Loop (Fire-and-forget).
             _drainCts = new CancellationTokenSource();
             _drainTask = Task.Run(() => DrainLoopAsync(_drainCts.Token));
 
@@ -284,6 +309,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             if (Interlocked.Exchange(ref _stopRequested, 1) == 1) return;
 
             _logger.Info("EnrollmentOrchestrator: stopping.");
+
+            // 0) Collector-Hosts stoppen — keine neuen Events / DecisionSignals aus dem Feld.
+            if (_collectorHosts != null)
+            {
+                foreach (var host in _collectorHosts)
+                {
+                    try { host.Stop(); }
+                    catch (Exception ex) { _logger.Warning($"EnrollmentOrchestrator: host '{host.Name}' stop failed: {ex.Message}"); }
+                }
+            }
 
             // 1) Scheduler.Fired-Handler abmelden — keine neuen DeadlineFired-Signals mehr.
             try
@@ -333,6 +368,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             catch (Exception ex) { _logger.Warning($"EnrollmentOrchestrator: final snapshot save failed: {ex.Message}"); }
 
             // 7) Dispose aller Disposables.
+            if (_collectorHosts != null)
+            {
+                foreach (var host in _collectorHosts)
+                {
+                    try { host.Dispose(); } catch { /* best-effort */ }
+                }
+            }
             try { _transport?.Dispose(); } catch { /* best-effort */ }
             try { _ingress?.Dispose(); } catch { /* best-effort */ }
             try { _drainCts?.Dispose(); } catch { /* best-effort */ }
@@ -374,6 +416,27 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         {
             if (!Directory.Exists(_stateDirectory)) Directory.CreateDirectory(_stateDirectory);
             if (!Directory.Exists(_transportDirectory)) Directory.CreateDirectory(_transportDirectory);
+        }
+
+        /// <summary>
+        /// Shared callback that collector hosts use for <c>onEventCollected</c>. Exception-safe:
+        /// an emitter failure (disk hiccup, transport closed) must never kill a collector thread.
+        /// </summary>
+        private Action<AutopilotMonitor.Shared.Models.EnrollmentEvent> BuildTelemetryEventSink()
+        {
+            return evt =>
+            {
+                if (evt == null || _eventEmitter == null) return;
+                try
+                {
+                    _eventEmitter.Emit(evt);
+                }
+                catch (Exception ex)
+                {
+                    _logger.Error(
+                        $"EnrollmentOrchestrator: telemetry emit failed for event '{evt.EventType}'.", ex);
+                }
+            };
         }
 
         private void OnDeadlineFired(object? sender, DeadlineFiredEventArgs e)
