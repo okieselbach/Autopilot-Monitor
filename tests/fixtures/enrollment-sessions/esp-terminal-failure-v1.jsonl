@@ -1,0 +1,9 @@
+# Scenario: ESP Terminal Failure
+# ESP reports a non-recoverable failure (e.g. Event 62411 failure) during AccountSetup.
+# Reducer transitions to Failed directly with reason carried from the signal payload.
+# enrollment_failed event emitted.
+# Plan: §4 M3.5 ESP-Terminal-Failure.
+{"SessionSignalOrdinal":0,"SessionTraceOrdinal":0,"Kind":"SessionStarted","KindSchemaVersion":1,"OccurredAtUtc":"2026-04-24T09:00:00Z","SourceOrigin":"orchestrator","Evidence":{"Kind":"Synthetic","Identifier":"session:esp-fail:started","Summary":"Session start anchor"}}
+{"SessionSignalOrdinal":1,"SessionTraceOrdinal":1,"Kind":"EspPhaseChanged","KindSchemaVersion":1,"OccurredAtUtc":"2026-04-24T09:01:00Z","SourceOrigin":"EspAndHelloTracker","Evidence":{"Kind":"Derived","Identifier":"esp-phase-detector-v1","Summary":"ESP phase=DeviceSetup","DerivationInputs":{"rawValue":"1"}},"Payload":{"phase":"DeviceSetup"}}
+{"SessionSignalOrdinal":2,"SessionTraceOrdinal":2,"Kind":"EspPhaseChanged","KindSchemaVersion":1,"OccurredAtUtc":"2026-04-24T09:10:00Z","SourceOrigin":"EspAndHelloTracker","Evidence":{"Kind":"Derived","Identifier":"esp-phase-detector-v1","Summary":"ESP phase=AccountSetup","DerivationInputs":{"rawValue":"2"}},"Payload":{"phase":"AccountSetup"}}
+{"SessionSignalOrdinal":3,"SessionTraceOrdinal":3,"Kind":"EspTerminalFailure","KindSchemaVersion":1,"OccurredAtUtc":"2026-04-24T09:12:00Z","SourceOrigin":"EspAndHelloTracker","Evidence":{"Kind":"Raw","Identifier":"eventlog:Shell-Core:62411:recordId:900","Summary":"ESP terminal failure (Event 62411)","RawPointer":"blob://events/shell-core/900"},"Payload":{"reason":"esp_terminal_failure_account_setup"}}

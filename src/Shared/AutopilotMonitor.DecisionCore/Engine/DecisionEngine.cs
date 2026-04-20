@@ -83,7 +83,12 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 (DecisionSignalKind.DesktopArrivedPart2, 1)                => HandleDesktopArrivedPart2V1(state, signal),
                 (DecisionSignalKind.AccountSetupCompletedPart2, 1)         => HandleAccountSetupCompletedPart2V1(state, signal),
 
-                // ----- Not yet wired (edge in M3.5) -----
+                // ----- Edge (DecisionEngine.Edge.cs) -----
+                (DecisionSignalKind.EspResumed, 1)                         => HandleEspResumedV1(state, signal),
+                (DecisionSignalKind.EspTerminalFailure, 1)                 => HandleEspTerminalFailureV1(state, signal),
+                (DecisionSignalKind.SystemRebootObserved, 1)               => HandleSystemRebootObservedV1(state, signal),
+
+                // ----- Still unwired (AppInstall, DeviceInfo, AutopilotProfileRead — v11.1+) -----
                 _ => HandleUnhandledSignal(state, signal),
             };
         }

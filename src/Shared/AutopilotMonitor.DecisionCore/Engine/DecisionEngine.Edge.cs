@@ -1,0 +1,114 @@
+using System;
+using System.Collections.Generic;
+using AutopilotMonitor.DecisionCore.Signals;
+using AutopilotMonitor.DecisionCore.State;
+
+namespace AutopilotMonitor.DecisionCore.Engine
+{
+    // Edge-case handlers: hybrid reboot, ESP terminal failure, system reboot observation.
+    // Plan §2.5 / §M3.5.
+    public sealed partial class DecisionEngine
+    {
+        /// <summary>
+        /// Handle <see cref="DecisionSignalKind.EspResumed"/>. Emitted by
+        /// <c>EspAndHelloTracker</c> after a reboot mid-ESP. The session's stage is preserved
+        /// (we were already somewhere in the ESP phase sequence), but the reboot fact is
+        /// recorded so downstream classifiers (WhiteGloveSealingClassifier) can factor it in.
+        /// </summary>
+        private DecisionStep HandleEspResumedV1(DecisionState state, DecisionSignal signal)
+        {
+            var nextStep = state.StepIndex + 1;
+            var builder = state.ToBuilder()
+                .WithStepIndex(nextStep)
+                .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal);
+
+            // Record the reboot fact on first observation. Subsequent EspResumed signals
+            // keep the original timestamp so the hash over SystemRebootUtc is stable.
+            if (state.SystemRebootUtc == null)
+            {
+                builder.SystemRebootUtc = new SignalFact<DateTime>(signal.OccurredAtUtc, signal.SessionSignalOrdinal);
+            }
+
+            var newState = builder.Build();
+            var transition = BuildTakenTransition(
+                before: state,
+                signal: signal,
+                toStage: state.Stage,
+                nextStepIndex: nextStep,
+                trigger: nameof(DecisionSignalKind.EspResumed));
+
+            return new DecisionStep(newState, transition, Array.Empty<DecisionEffect>());
+        }
+
+        /// <summary>
+        /// Handle <see cref="DecisionSignalKind.EspTerminalFailure"/>. Directly transitions
+        /// to <see cref="SessionStage.Failed"/> with <see cref="SessionOutcome.EnrollmentFailed"/>,
+        /// clears deadlines, and emits <c>enrollment_failed</c>. No classifier re-run —
+        /// ESP terminal failure is definitive.
+        /// </summary>
+        private DecisionStep HandleEspTerminalFailureV1(DecisionState state, DecisionSignal signal)
+        {
+            var nextStep = state.StepIndex + 1;
+
+            var reason = signal.Payload != null && signal.Payload.TryGetValue("reason", out var r)
+                ? r
+                : "esp_terminal_failure";
+
+            var builder = state.ToBuilder()
+                .WithStage(SessionStage.Failed)
+                .WithOutcome(SessionOutcome.EnrollmentFailed)
+                .WithStepIndex(nextStep)
+                .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal)
+                .ClearDeadlines();
+
+            var newState = builder.Build();
+
+            var transition = BuildTakenTransition(
+                before: state,
+                signal: signal,
+                toStage: SessionStage.Failed,
+                nextStepIndex: nextStep,
+                trigger: nameof(DecisionSignalKind.EspTerminalFailure));
+
+            var effects = new[]
+            {
+                new DecisionEffect(
+                    DecisionEffectKind.EmitEventTimelineEntry,
+                    parameters: new Dictionary<string, string>
+                    {
+                        ["eventType"] = "enrollment_failed",
+                        ["reason"] = reason,
+                    }),
+            };
+
+            return new DecisionStep(newState, transition, effects);
+        }
+
+        /// <summary>
+        /// Handle <see cref="DecisionSignalKind.SystemRebootObserved"/>. Records the fact so
+        /// WhiteGlove scoring (plan §2.4) can credit the +15 reboot-observed weight.
+        /// </summary>
+        private DecisionStep HandleSystemRebootObservedV1(DecisionState state, DecisionSignal signal)
+        {
+            var nextStep = state.StepIndex + 1;
+            var builder = state.ToBuilder()
+                .WithStepIndex(nextStep)
+                .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal);
+
+            if (state.SystemRebootUtc == null)
+            {
+                builder.SystemRebootUtc = new SignalFact<DateTime>(signal.OccurredAtUtc, signal.SessionSignalOrdinal);
+            }
+
+            var newState = builder.Build();
+            var transition = BuildTakenTransition(
+                before: state,
+                signal: signal,
+                toStage: state.Stage,
+                nextStepIndex: nextStep,
+                trigger: nameof(DecisionSignalKind.SystemRebootObserved));
+
+            return new DecisionStep(newState, transition, Array.Empty<DecisionEffect>());
+        }
+    }
+}
