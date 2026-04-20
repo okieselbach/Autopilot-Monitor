@@ -33,6 +33,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
         private readonly SemaphoreSlim _drainGuard = new SemaphoreSlim(1, 1);
         private bool _disposed;
 
+        // M4.6.ε — backend-to-agent control signals.
+        private DateTime? _pausedUntilUtc;
+
         public TelemetryUploadOrchestrator(
             ITelemetrySpool spool,
             IBackendTelemetryUploader uploader,
@@ -49,6 +52,25 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
 
             _retryBackoffs = retryBackoffs ?? DefaultRetryBackoffs;
         }
+
+        /// <summary>
+        /// Raised once per successful upload — <see cref="UploadResult.OkWithSignals"/> flows
+        /// here so Program.cs can synthesize <c>terminate_session</c> <c>ServerAction</c>s from
+        /// <see cref="UploadResult.DeviceKillSignal"/> / <see cref="UploadResult.AdminAction"/>
+        /// and dispatch <see cref="UploadResult.Actions"/> directly. Plan §4.x M4.6.ε.
+        /// <para>
+        /// The orchestrator already handles <see cref="UploadResult.DeviceBlocked"/> internally
+        /// (pauses the drain loop until <see cref="UploadResult.UnblockAt"/>). Handlers should
+        /// NOT call <see cref="DrainAllAsync"/> re-entrantly.
+        /// </para>
+        /// </summary>
+        public event EventHandler<UploadResult>? ServerResponseReceived;
+
+        /// <summary>
+        /// <c>true</c> when the last successful upload returned <see cref="UploadResult.DeviceBlocked"/>
+        /// and the paused-until window has not expired. Drain is a no-op in this state.
+        /// </summary>
+        public bool IsPaused => _pausedUntilUtc.HasValue && _pausedUntilUtc.Value > _clock.UtcNow;
 
         public long LastUploadedItemId => _spool.LastUploadedItemId;
 
@@ -71,6 +93,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
 
                 while (!cancellationToken.IsCancellationRequested)
                 {
+                    // M4.6.ε — honour a backend-issued DeviceBlocked quarantine. The block is
+                    // checked per batch so UnblockAt can auto-resume uploads mid-session.
+                    if (IsPaused)
+                    {
+                        lastError = $"device blocked until {_pausedUntilUtc:O}";
+                        break;
+                    }
+
                     var batch = _spool.Peek(_batchSize);
                     if (batch.Count == 0) break;
 
@@ -80,6 +110,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
                     {
                         _spool.MarkUploaded(batch[batch.Count - 1].TelemetryItemId);
                         uploaded += batch.Count;
+
+                        ApplyControlSignals(outcome);
+                        RaiseServerResponse(outcome);
+
+                        // Stop draining immediately if the backend just quarantined the device —
+                        // the next loop iteration would see IsPaused and break anyway, but there
+                        // is no point in even Peeking another batch.
+                        if (outcome.DeviceBlocked) break;
                     }
                     else
                     {
@@ -96,6 +134,33 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
             finally
             {
                 _drainGuard.Release();
+            }
+        }
+
+        private void ApplyControlSignals(UploadResult outcome)
+        {
+            if (outcome.DeviceBlocked)
+            {
+                // UnblockAt == null → indefinite block, represented as DateTime.MaxValue so
+                // IsPaused stays true until Clear() is called (admin un-block on next run).
+                _pausedUntilUtc = outcome.UnblockAt ?? DateTime.MaxValue;
+            }
+        }
+
+        private void RaiseServerResponse(UploadResult outcome)
+        {
+            // Only raise when there is actually something to tell the subscriber.
+            var carriesSignal = outcome.DeviceBlocked
+                || outcome.DeviceKillSignal
+                || !string.IsNullOrEmpty(outcome.AdminAction)
+                || (outcome.Actions != null && outcome.Actions.Count > 0);
+            if (!carriesSignal) return;
+
+            try { ServerResponseReceived?.Invoke(this, outcome); }
+            catch
+            {
+                // Handler exceptions MUST NOT abort the drain loop — the upload itself succeeded,
+                // and the cursor is already forwarded. Swallow + log via the caller's logger chain.
             }
         }
 

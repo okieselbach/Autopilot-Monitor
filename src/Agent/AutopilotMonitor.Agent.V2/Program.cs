@@ -427,9 +427,8 @@ namespace AutopilotMonitor.Agent.V2
                         signalShutdown: () => shutdown.Set(),
                         analyzerManager: analyzerManager);
 
-                    // ServerActionDispatcher — ready for M5 backend wiring. For now it has no
-                    // ingest-response consumer (V2 BackendTelemetryUploader's batch endpoint is
-                    // M5 scope). The callbacks are live: RotateConfig refetches remote config;
+                    // ServerActionDispatcher — handlers are live and the M4.6.ε response-parse
+                    // path below feeds it. RotateConfig refetches remote config;
                     // RequestDiagnostics triggers the same diagnostics pipeline as enrollment-end;
                     // TerminateSession routes to the termination handler (reason: server-requested).
                     var serverActionDispatcher = new ServerActionDispatcher(
@@ -444,7 +443,16 @@ namespace AutopilotMonitor.Agent.V2
                             await diagnosticsService.CreateAndUploadAsync(enrollmentSucceeded: false, fileNameSuffix: suffix),
                         onTerminateRequested: action =>
                         {
-                            logger.Warning($"ServerAction terminate_session received (ruleId={action?.RuleId}) — invoking termination handler.");
+                            var forceSelfDestruct = action?.Params != null
+                                && action.Params.TryGetValue("forceSelfDestruct", out var f)
+                                && string.Equals(f, "true", StringComparison.OrdinalIgnoreCase);
+                            if (forceSelfDestruct && !agentConfig.SelfDestructOnComplete)
+                            {
+                                logger.Warning("ServerAction terminate_session: forceSelfDestruct=true overrides SelfDestructOnComplete=false.");
+                                agentConfig.SelfDestructOnComplete = true;
+                            }
+
+                            logger.Warning($"ServerAction terminate_session received (ruleId={action?.RuleId}, reason={action?.Reason}) — invoking termination handler.");
                             // Synthesise a Terminated event as if the kernel fired it.
                             terminationHandler.Handle(
                                 sender: null,
@@ -453,14 +461,18 @@ namespace AutopilotMonitor.Agent.V2
                                     outcome: EnrollmentTerminationOutcome.Failed,
                                     stageName: orchestrator.CurrentState?.Stage.ToString(),
                                     terminatedAtUtc: DateTime.UtcNow,
-                                    details: $"Server-requested termination: ruleId={action?.RuleId}"));
+                                    details: $"Server-requested termination: ruleId={action?.RuleId}, reason={action?.Reason}"));
                             return Task.CompletedTask;
                         },
                         emitEvent: evt => { orchestrator.EventEmitter.Emit(evt); });
 
-                    // Keep the dispatcher alive for the duration of the run. M5 will plug it into
-                    // the BackendTelemetryUploader response path; M4.6.β wires the API contract.
-                    _ = serverActionDispatcher;
+                    // M4.6.ε — BackendTelemetryUploader response-plumbing. The orchestrator parses
+                    // DeviceBlocked / DeviceKillSignal / AdminAction / Actions out of the 2xx
+                    // response body (see BackendTelemetryUploader.TryReadControlSignalsAsync) and
+                    // raises ServerResponseReceived. We translate those into ServerActions and
+                    // dispatch. Legacy parity with IngestEventsResponse synthesis in
+                    // EventUploadOrchestrator.OnEventsUploaded().
+                    WireTelemetryServerResponse(orchestrator, serverActionDispatcher, logger);
 
                     ConsoleCancelEventHandler cancelHandler = (s, e) =>
                     {
@@ -530,6 +542,76 @@ namespace AutopilotMonitor.Agent.V2
 
             logger.Info("AutopilotMonitor.Agent.V2 stopped cleanly.");
             return 0;
+        }
+
+        /// <summary>
+        /// M4.6.ε — routes <see cref="TelemetryUploadOrchestrator.ServerResponseReceived"/>
+        /// control signals through the <see cref="ServerActionDispatcher"/>. Synthesises the
+        /// same <c>terminate_session</c> <see cref="ServerAction"/>s that Legacy built in
+        /// <c>EventUploadOrchestrator.OnEventsUploaded</c> (kill-signal → force self-destruct;
+        /// admin-action → soft terminate respecting <c>SelfDestructOnComplete</c>).
+        /// </summary>
+        private static void WireTelemetryServerResponse(
+            EnrollmentOrchestrator orchestrator,
+            ServerActionDispatcher dispatcher,
+            AgentLogger logger)
+        {
+            orchestrator.Transport.ServerResponseReceived += (sender, upload) =>
+            {
+                var toDispatch = new System.Collections.Generic.List<ServerAction>();
+
+                if (upload.DeviceKillSignal)
+                {
+                    logger.Warning("Backend signalled DeviceKillSignal — synthesising terminate_session (force self-destruct).");
+                    toDispatch.Add(new ServerAction
+                    {
+                        Type = ServerActionTypes.TerminateSession,
+                        Reason = "DeviceKillSignal from administrator",
+                        QueuedAt = DateTime.UtcNow,
+                        Params = new System.Collections.Generic.Dictionary<string, string>
+                        {
+                            { "forceSelfDestruct", "true" },
+                            { "gracePeriodSeconds", "0" },
+                            { "origin", "kill_signal" },
+                        },
+                    });
+                }
+                else if (!string.IsNullOrEmpty(upload.AdminAction))
+                {
+                    logger.Warning($"Backend signalled AdminAction={upload.AdminAction} — synthesising terminate_session (soft).");
+                    toDispatch.Add(new ServerAction
+                    {
+                        Type = ServerActionTypes.TerminateSession,
+                        Reason = $"Admin marked session as {upload.AdminAction}",
+                        QueuedAt = DateTime.UtcNow,
+                        Params = new System.Collections.Generic.Dictionary<string, string>
+                        {
+                            { "adminOutcome", upload.AdminAction },
+                            { "gracePeriodSeconds", "0" },
+                            { "origin", "admin_action" },
+                        },
+                    });
+                }
+
+                if (upload.Actions != null && upload.Actions.Count > 0)
+                {
+                    foreach (var a in upload.Actions) toDispatch.Add(a);
+                }
+
+                if (upload.DeviceBlocked)
+                {
+                    // DeviceBlocked is non-terminal: the transport already paused its drain
+                    // loop in TelemetryUploadOrchestrator.ApplyControlSignals; we just log it
+                    // here so it surfaces on the console / agent log.
+                    var until = upload.UnblockAt.HasValue ? $"until {upload.UnblockAt.Value:O}" : "indefinitely";
+                    logger.Warning($"Backend signalled DeviceBlocked {until} — uploads paused, session remains alive.");
+                }
+
+                if (toDispatch.Count == 0) return;
+
+                try { dispatcher.DispatchAsync(toDispatch).GetAwaiter().GetResult(); }
+                catch (Exception ex) { logger.Error("ServerActionDispatcher.DispatchAsync threw during server-response wiring.", ex); }
+            };
         }
 
         private static void EmitVersionCheckEventIfAny(

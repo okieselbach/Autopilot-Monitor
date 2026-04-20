@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -52,6 +53,26 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Transport
         public FakeBackendTelemetryUploader QueueThrow(Exception ex)
         {
             _script.Enqueue(_ => throw ex);
+            return this;
+        }
+
+        /// <summary>
+        /// Queues a 2xx success carrying backend-to-agent control signals (DeviceBlocked /
+        /// DeviceKillSignal / AdminAction / Actions). M4.6.ε.
+        /// </summary>
+        public FakeBackendTelemetryUploader QueueOkWithSignals(
+            bool deviceBlocked = false,
+            DateTime? unblockAt = null,
+            bool deviceKillSignal = false,
+            string? reason_AdminAction = null,
+            IReadOnlyList<AutopilotMonitor.Shared.Models.ServerAction>? actions = null)
+        {
+            _script.Enqueue(_ => UploadResult.OkWithSignals(
+                deviceBlocked: deviceBlocked,
+                unblockAt: unblockAt,
+                deviceKillSignal: deviceKillSignal,
+                adminAction: reason_AdminAction,
+                actions: actions));
             return this;
         }
 

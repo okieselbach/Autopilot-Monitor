@@ -8,7 +8,9 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using AutopilotMonitor.Shared;
+using AutopilotMonitor.Shared.Models;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
 {
@@ -117,7 +119,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
         {
             var statusCode = (int)response.StatusCode;
 
-            if (response.IsSuccessStatusCode) return UploadResult.Ok();
+            if (response.IsSuccessStatusCode)
+            {
+                // M4.6.ε — parse backend-to-agent control signals from the 2xx response body.
+                // Body is best-effort JSON; anything unparseable degrades cleanly to plain Ok().
+                return await TryReadControlSignalsAsync(response).ConfigureAwait(false);
+            }
 
             var reason = await TryReadReasonAsync(response).ConfigureAwait(false);
             var shortReason = $"http {statusCode}{(string.IsNullOrEmpty(reason) ? string.Empty : ": " + reason)}";
@@ -151,6 +158,113 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
             catch
             {
                 return string.Empty;
+            }
+        }
+
+        /// <summary>
+        /// M4.6.ε — parse backend-to-agent control signals from a 2xx batch-response body. Fields
+        /// are <b>optional</b>: an empty body or a body without any of these fields is treated as
+        /// a plain <see cref="UploadResult.Ok"/>. Parse failures are logged into the response
+        /// surface as a plain <c>Ok</c> — we never fail an upload over a malformed response body.
+        /// <para>
+        /// Recognised field names (case-insensitive, PascalCase and camelCase both accepted to
+        /// match Legacy <c>IngestEventsResponse</c> and a future M5 batch response):
+        /// <c>deviceBlocked</c> (bool), <c>unblockAt</c> (ISO-8601 UTC), <c>deviceKillSignal</c>
+        /// (bool), <c>adminAction</c> (string), <c>actions</c> (<see cref="ServerAction"/>[]).
+        /// </para>
+        /// </summary>
+        private static async Task<UploadResult> TryReadControlSignalsAsync(HttpResponseMessage response)
+        {
+            string body;
+            try { body = await response.Content.ReadAsStringAsync().ConfigureAwait(false); }
+            catch { return UploadResult.Ok(); }
+
+            if (string.IsNullOrWhiteSpace(body)) return UploadResult.Ok();
+
+            JObject? root;
+            try { root = JObject.Parse(body); }
+            catch { return UploadResult.Ok(); }
+            if (root == null) return UploadResult.Ok();
+
+            var deviceBlocked = TryBool(root, "deviceBlocked", "DeviceBlocked") ?? false;
+            var unblockAt = TryDateTime(root, "unblockAt", "UnblockAt");
+            var deviceKillSignal = TryBool(root, "deviceKillSignal", "DeviceKillSignal") ?? false;
+            var adminAction = TryString(root, "adminAction", "AdminAction");
+            var actions = TryActions(root);
+
+            var carriesSignal = deviceBlocked
+                || unblockAt.HasValue
+                || deviceKillSignal
+                || !string.IsNullOrEmpty(adminAction)
+                || (actions != null && actions.Count > 0);
+
+            return carriesSignal
+                ? UploadResult.OkWithSignals(
+                    deviceBlocked: deviceBlocked,
+                    unblockAt: unblockAt,
+                    deviceKillSignal: deviceKillSignal,
+                    adminAction: string.IsNullOrEmpty(adminAction) ? null : adminAction,
+                    actions: actions)
+                : UploadResult.Ok();
+        }
+
+        private static bool? TryBool(JObject root, params string[] names)
+        {
+            foreach (var n in names)
+            {
+                var tok = root[n];
+                if (tok == null) continue;
+                if (tok.Type == JTokenType.Boolean) return tok.Value<bool>();
+                if (tok.Type == JTokenType.String && bool.TryParse(tok.Value<string>(), out var parsed)) return parsed;
+            }
+            return null;
+        }
+
+        private static string? TryString(JObject root, params string[] names)
+        {
+            foreach (var n in names)
+            {
+                var tok = root[n];
+                if (tok == null) continue;
+                if (tok.Type == JTokenType.String) return tok.Value<string>();
+            }
+            return null;
+        }
+
+        private static DateTime? TryDateTime(JObject root, params string[] names)
+        {
+            foreach (var n in names)
+            {
+                var tok = root[n];
+                if (tok == null) continue;
+                if (tok.Type == JTokenType.Date)
+                {
+                    var v = tok.Value<DateTime>();
+                    return v.Kind == DateTimeKind.Utc ? v : v.ToUniversalTime();
+                }
+                if (tok.Type == JTokenType.String)
+                {
+                    var raw = tok.Value<string>();
+                    if (DateTime.TryParse(raw, null, System.Globalization.DateTimeStyles.RoundtripKind, out var parsed))
+                        return parsed.Kind == DateTimeKind.Utc ? parsed : parsed.ToUniversalTime();
+                }
+            }
+            return null;
+        }
+
+        private static System.Collections.Generic.List<ServerAction>? TryActions(JObject root)
+        {
+            var tok = root["actions"] ?? root["Actions"];
+            if (tok == null || tok.Type != JTokenType.Array) return null;
+
+            try
+            {
+                var list = tok.ToObject<System.Collections.Generic.List<ServerAction>>();
+                return list == null || list.Count == 0 ? null : list;
+            }
+            catch
+            {
+                return null;
             }
         }
 

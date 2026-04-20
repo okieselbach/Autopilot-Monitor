@@ -222,6 +222,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         public TelemetryEventEmitter EventEmitter =>
             _eventEmitter ?? throw new InvalidOperationException("Orchestrator not started.");
 
+        /// <summary>
+        /// Exposed so Program.cs can subscribe to <see cref="TelemetryUploadOrchestrator.ServerResponseReceived"/>
+        /// for M4.6.ε DeviceBlocked / DeviceKillSignal / AdminAction / Actions plumbing.
+        /// </summary>
+        public TelemetryUploadOrchestrator Transport =>
+            _transport ?? throw new InvalidOperationException("Orchestrator not started.");
+
         // ---------------------------------------------------------------- Lifecycle
 
         /// <summary>
