@@ -235,6 +235,39 @@ namespace AutopilotMonitor.DecisionCore.Engine
             return new DecisionStep(newState, transition, effects);
         }
 
+        // ============================================================== diagnostic signals
+        // Plan §4.x M4.4.3 — close the reducer-handler gap for signals that carry useful
+        // telemetry but do NOT influence the state machine. Previously these fell through to
+        // HandleUnhandledSignal, which wrote a DeadEnd transition every time — noise in the
+        // journal. Now they record as neutral taken transitions; full payload/evidence
+        // remains in the SignalLog for Inspector analysis.
+
+        /// <summary>
+        /// Handle <see cref="DecisionSignalKind.DeviceInfoCollected"/>. Diagnostic-only —
+        /// carries hardware inventory in payload, does not drive stage or hypothesis.
+        /// </summary>
+        private DecisionStep HandleDeviceInfoCollectedV1(DecisionState state, DecisionSignal signal) =>
+            RecordDiagnosticObservation(state, signal, nameof(DecisionSignalKind.DeviceInfoCollected));
+
+        /// <summary>
+        /// Handle <see cref="DecisionSignalKind.AutopilotProfileRead"/>. Diagnostic-only —
+        /// carries Autopilot profile registry contents, does not drive stage or hypothesis.
+        /// </summary>
+        private DecisionStep HandleAutopilotProfileReadV1(DecisionState state, DecisionSignal signal) =>
+            RecordDiagnosticObservation(state, signal, nameof(DecisionSignalKind.AutopilotProfileRead));
+
+        private DecisionStep RecordDiagnosticObservation(DecisionState state, DecisionSignal signal, string trigger)
+        {
+            var newState = BumpStepBookkeeping(state, signal);
+            var transition = BuildTakenTransition(
+                before: state,
+                signal: signal,
+                toStage: state.Stage,
+                nextStepIndex: newState.StepIndex,
+                trigger: trigger);
+            return new DecisionStep(newState, transition, Array.Empty<DecisionEffect>());
+        }
+
         /// <summary>
         /// Determine the user-visible enrollment phase implied by an ESP phase-change signal.
         /// Plan §2.3 phase-fact mapping. Populated in M3.1 as Classic handlers come online.

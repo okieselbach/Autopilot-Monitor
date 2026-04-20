@@ -88,7 +88,11 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 (DecisionSignalKind.EspTerminalFailure, 1)                 => HandleEspTerminalFailureV1(state, signal),
                 (DecisionSignalKind.SystemRebootObserved, 1)               => HandleSystemRebootObservedV1(state, signal),
 
-                // ----- Still unwired (AppInstall, DeviceInfo, AutopilotProfileRead — v11.1+) -----
+                // ----- Diagnostic observations (DecisionEngine.Shared.cs) — Plan §4.x M4.4.3 -----
+                (DecisionSignalKind.DeviceInfoCollected, 1)                => HandleDeviceInfoCollectedV1(state, signal),
+                (DecisionSignalKind.AutopilotProfileRead, 1)               => HandleAutopilotProfileReadV1(state, signal),
+
+                // ----- Still unwired (AppInstall — v11.1+) -----
                 _ => HandleUnhandledSignal(state, signal),
             };
         }
