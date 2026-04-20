@@ -9,9 +9,13 @@ using Xunit;
 
 namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
 {
+    [Collection("SerialThreading")]
     public sealed class DeadlineSchedulerTests
     {
-        private const int DefaultWaitMs = 2000;
+        // 5000ms cushion: 2000ms was racy under full-suite parallelism even after adding
+        // [Collection("SerialThreading")] — timer callbacks execute on the shared ThreadPool
+        // and can lag when the pool is saturated by unrelated test classes. Plan §4.x M4.5.c.
+        private const int DefaultWaitMs = 5000;
 
         private static ActiveDeadline Deadline(string name, DateTime dueAt) =>
             new ActiveDeadline(name, dueAt, DecisionSignalKind.DeadlineFired);

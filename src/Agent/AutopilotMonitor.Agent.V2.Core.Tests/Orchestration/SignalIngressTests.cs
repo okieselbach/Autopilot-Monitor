@@ -17,6 +17,7 @@ using Xunit;
 
 namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
 {
+    [Collection("SerialThreading")]
     public sealed class SignalIngressTests
     {
         private static DateTime At => new DateTime(2026, 4, 20, 10, 0, 0, DateTimeKind.Utc);
@@ -56,7 +57,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             public void Dispose() => Tmp.Dispose();
         }
 
-        private static bool WaitFor(Func<bool> condition, int timeoutMs = 2000)
+        // 5000ms cushion: 2000ms was racy under ThreadPool contention from parallel test classes
+        // even with [Collection("SerialThreading")] (timers on the same pool can still lag).
+        // Plan §4.x M4.5.c.
+        private static bool WaitFor(Func<bool> condition, int timeoutMs = 5000)
         {
             return SpinWait.SpinUntil(condition, timeoutMs);
         }
