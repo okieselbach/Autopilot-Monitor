@@ -322,7 +322,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 snapshot: _snapshot,
                 clock: _clock);
 
-            // 8) Processor — owns the initial state + journal + snapshot + quarantine hook.
+            // 8) Processor — owns the initial state + journal + snapshot + quarantine hook +
+            //    M4.6.β terminal-stage hook (fires Terminated event when the engine reaches a
+            //    terminal SessionStage).
             _processor = new DecisionStepProcessor(
                 initialState: initialState,
                 journal: _journal,
@@ -330,7 +332,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 snapshot: _snapshot,
                 quarantineSink: this,
                 logger: _logger,
-                quarantineThreshold: _quarantineThreshold);
+                quarantineThreshold: _quarantineThreshold,
+                onTerminalStageReached: OnDecisionTerminalStage);
 
             // 9) Trace-Ordinal. TODO(M4.4.5.f): seed aus max(SignalLog.LastOrdinal,
             //    Journal.LastStepIndex, Spool.LastAssignedItemId via SessionTraceOrdinal).
@@ -444,6 +447,46 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 stageName: currentStage,
                 terminatedAtUtc: _clock.UtcNow,
                 details: $"Agent exceeded AgentMaxLifetimeMinutes cap ({_agentMaxLifetime?.TotalMinutes:F0}min) without reaching a terminal stage.");
+
+            try { Terminated?.Invoke(this, terminatedArgs); }
+            catch (Exception ex) { _logger.Error("EnrollmentOrchestrator: Terminated handler threw.", ex); }
+        }
+
+        /// <summary>
+        /// M4.6.β — DecisionStepProcessor callback: the engine has transitioned the session
+        /// into a terminal <see cref="SessionStage"/>. Fires the public <see cref="Terminated"/>
+        /// event with <see cref="EnrollmentTerminationReason.DecisionTerminalStage"/> and an
+        /// outcome derived from the stage (Completed/Part2→Succeeded, Failed→Failed,
+        /// WhiteGloveSealed→Succeeded but with <see cref="SessionStageExtensions.IsPauseBeforePart2"/>
+        /// signalled to callers via the stage name — callers decide whether to self-destruct).
+        /// </summary>
+        private void OnDecisionTerminalStage(DecisionState terminalState)
+        {
+            if (Volatile.Read(ref _stopRequested) == 1) return;
+            if (Interlocked.Exchange(ref _terminatedFired, 1) == 1) return;
+
+            // Stop the max-lifetime watchdog — the real terminal arrived before it could trip.
+            try { _maxLifetimeTimer?.Dispose(); _maxLifetimeTimer = null; } catch { }
+
+            var outcome = terminalState.Stage switch
+            {
+                SessionStage.Completed or SessionStage.WhiteGloveCompletedPart2 or SessionStage.WhiteGloveSealed
+                    => EnrollmentTerminationOutcome.Succeeded,
+                SessionStage.Failed => EnrollmentTerminationOutcome.Failed,
+                _ => EnrollmentTerminationOutcome.TimedOut,
+            };
+
+            _logger.Info(
+                $"EnrollmentOrchestrator: decision terminal stage reached (stage={terminalState.Stage}, outcome={outcome}) — firing Terminated(DecisionTerminalStage).");
+
+            var terminatedArgs = new EnrollmentTerminatedEventArgs(
+                reason: EnrollmentTerminationReason.DecisionTerminalStage,
+                outcome: outcome,
+                stageName: terminalState.Stage.ToString(),
+                terminatedAtUtc: _clock.UtcNow,
+                details: terminalState.Stage.IsPauseBeforePart2()
+                    ? "WhiteGlove Part 1 sealed — session will resume on Part 2 post-reboot; self-destruct suppressed."
+                    : null);
 
             try { Terminated?.Invoke(this, terminatedArgs); }
             catch (Exception ex) { _logger.Error("EnrollmentOrchestrator: Terminated handler threw.", ex); }

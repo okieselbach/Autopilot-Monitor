@@ -50,10 +50,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         private readonly IQuarantineSink _quarantineSink;
         private readonly AgentLogger _logger;
         private readonly int _quarantineThreshold;
+        private readonly Action<DecisionState>? _onTerminalStageReached;
 
         private DecisionState _currentState;
         private int _consecutiveJournalFailures;
         private bool _quarantineTriggered;
+        private bool _terminalNotified;
 
         public DecisionStepProcessor(
             DecisionState initialState,
@@ -62,7 +64,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             ISnapshotPersistence snapshot,
             IQuarantineSink quarantineSink,
             AgentLogger logger,
-            int quarantineThreshold = DefaultQuarantineThreshold)
+            int quarantineThreshold = DefaultQuarantineThreshold,
+            Action<DecisionState>? onTerminalStageReached = null)
         {
             if (quarantineThreshold <= 0)
             {
@@ -78,6 +81,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             _quarantineSink = quarantineSink ?? throw new ArgumentNullException(nameof(quarantineSink));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _quarantineThreshold = quarantineThreshold;
+            _onTerminalStageReached = onTerminalStageReached;
+
+            // If recovery loaded a state that already sits on a terminal stage (e.g. a crash
+            // after a success-path step but before Stop()), treat it as already-notified so we
+            // do not re-fire the hook.
+            _terminalNotified = initialState.Stage.IsTerminal();
         }
 
         public DecisionState CurrentState => _currentState;
@@ -164,6 +173,23 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             // 4) State-Forward + Counter-Reset.
             _currentState = step.NewState;
             _consecutiveJournalFailures = 0;
+
+            // 5) Terminal-stage detection (M4.6.β). Fires exactly once per agent run when the
+            //    DecisionEngine transitions the session into a terminal SessionStage — the
+            //    orchestrator turns this into the public EnrollmentTerminated event so peripheral
+            //    consumers (CleanupService, SummaryDialog, DiagnosticsPackageService) can react
+            //    without touching the kernel state machine.
+            if (!_terminalNotified && _currentState.Stage.IsTerminal())
+            {
+                _terminalNotified = true;
+                try { _onTerminalStageReached?.Invoke(_currentState); }
+                catch (Exception ex)
+                {
+                    _logger.Error(
+                        $"DecisionStepProcessor: onTerminalStageReached handler threw for stage {_currentState.Stage}.",
+                        ex);
+                }
+            }
         }
 
         private void TryTriggerQuarantine(string reason)

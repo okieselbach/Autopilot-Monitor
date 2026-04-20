@@ -59,6 +59,15 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         private readonly string _agentVersion;
         private readonly string _stateDirectory;
 
+        private ImeLogHost? _imeLogHost;
+
+        /// <summary>
+        /// Exposes the IME tracker's package-state list to peripheral consumers such as the
+        /// <c>FinalStatusBuilder</c> in M4.6.β. Returns <c>null</c> before
+        /// <see cref="CreateCollectorHosts"/> has been called (Orchestrator start order).
+        /// </summary>
+        public Monitoring.Enrollment.Ime.AppPackageStateList? ImePackageStates => _imeLogHost?.PackageStates;
+
         public DefaultComponentFactory(
             AgentConfiguration agentConfig,
             AgentConfigResponse remoteConfig,
@@ -113,7 +122,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
 
             hosts.Add(new AadJoinHost(logger, ingress, clock));
 
-            hosts.Add(new ImeLogHost(
+            _imeLogHost = new ImeLogHost(
                 sessionId: sessionId,
                 tenantId: tenantId,
                 onEnrollmentEvent: onEnrollmentEvent,
@@ -124,7 +133,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 imeMatchLogPath: _agentConfig.ImeMatchLogPath,
                 imePatterns: _remoteConfig.ImeLogPatterns,
                 stateDirectory: _stateDirectory,
-                whiteGloveSealingPatternIds: whiteGloveSealingPatternIds));
+                whiteGloveSealingPatternIds: whiteGloveSealingPatternIds);
+            hosts.Add(_imeLogHost);
 
             if (collectors.StallProbeEnabled)
             {
@@ -274,6 +284,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             private readonly ImeLogTrackerAdapter _adapter;
             private readonly AgentLogger _logger;
             private int _disposed;
+
+            /// <summary>
+            /// Exposes the tracker's live package-state list for peripheral consumers
+            /// (M4.6.β <c>FinalStatusBuilder</c>).
+            /// </summary>
+            public Monitoring.Enrollment.Ime.AppPackageStateList PackageStates => _tracker.PackageStates;
 
             public ImeLogHost(
                 string sessionId,

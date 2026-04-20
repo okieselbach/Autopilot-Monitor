@@ -4,12 +4,14 @@ using System.Linq;
 using System.Net.Http;
 using System.Reflection;
 using System.Threading;
+using System.Threading.Tasks;
 using AutopilotMonitor.Agent.V2.Core.Configuration;
 using AutopilotMonitor.Agent.V2.Core.Logging;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Transport;
 using AutopilotMonitor.Agent.V2.Core.Orchestration;
 using AutopilotMonitor.Agent.V2.Core.Security;
+using AutopilotMonitor.Agent.V2.Core.Termination;
 using AutopilotMonitor.Agent.V2.Core.Transport.Telemetry;
 using AutopilotMonitor.DecisionCore.Classifiers;
 using AutopilotMonitor.DecisionCore.Engine;
@@ -334,6 +336,14 @@ namespace AutopilotMonitor.Agent.V2
                 ? (TimeSpan?)TimeSpan.FromMinutes(agentConfig.AgentMaxLifetimeMinutes)
                 : null;
 
+            // Diagnostics upload delegate — wraps the production DiagnosticsPackageService.
+            // Instantiated lazily + per-invocation (cheap) so we always pick up current config.
+            var diagnosticsService = new DiagnosticsPackageService(agentConfig, logger, backendApiClient);
+            Func<bool, string, Task<DiagnosticsUploadResult>> uploadDiagnosticsAsync =
+                (succeeded, suffix) => diagnosticsService.CreateAndUploadAsync(succeeded, suffix);
+
+            var agentStartTimeUtc = DateTime.UtcNow;
+
             using (var orchestrator = new EnrollmentOrchestrator(
                 sessionId: agentConfig.SessionId,
                 tenantId: agentConfig.TenantId,
@@ -349,6 +359,56 @@ namespace AutopilotMonitor.Agent.V2
             {
                 using (var shutdown = new ManualResetEventSlim(false))
                 {
+                    // M4.6.β — the peripheral termination sequence (FinalStatus + SummaryDialog
+                    // + diagnostics upload + enrollment-complete.marker + CleanupService) lives
+                    // in Program.cs, not in the kernel. We compose it here and hook it onto the
+                    // orchestrator's typed Terminated event.
+                    var terminationHandler = new EnrollmentTerminationHandler(
+                        configuration: agentConfig,
+                        logger: logger,
+                        stateDirectory: stateSubdir,
+                        agentStartTimeUtc: agentStartTimeUtc,
+                        currentStateAccessor: () => orchestrator.CurrentState,
+                        packageStatesAccessor: () => componentFactory.ImePackageStates,
+                        cleanupServiceFactory: () => new CleanupService(agentConfig, logger),
+                        uploadDiagnosticsAsync: uploadDiagnosticsAsync,
+                        signalShutdown: () => shutdown.Set());
+
+                    // ServerActionDispatcher — ready for M5 backend wiring. For now it has no
+                    // ingest-response consumer (V2 BackendTelemetryUploader's batch endpoint is
+                    // M5 scope). The callbacks are live: RotateConfig refetches remote config;
+                    // RequestDiagnostics triggers the same diagnostics pipeline as enrollment-end;
+                    // TerminateSession routes to the termination handler (reason: server-requested).
+                    var serverActionDispatcher = new ServerActionDispatcher(
+                        configuration: agentConfig,
+                        logger: logger,
+                        rotateConfigAsync: async () =>
+                        {
+                            try { var _ = await remoteConfigService.FetchConfigAsync(); return true; }
+                            catch (Exception ex) { logger.Warning($"ServerAction rotate_config failed: {ex.Message}"); return false; }
+                        },
+                        uploadDiagnosticsAsync: async (suffix) =>
+                            await diagnosticsService.CreateAndUploadAsync(enrollmentSucceeded: false, fileNameSuffix: suffix),
+                        onTerminateRequested: action =>
+                        {
+                            logger.Warning($"ServerAction terminate_session received (ruleId={action?.RuleId}) — invoking termination handler.");
+                            // Synthesise a Terminated event as if the kernel fired it.
+                            terminationHandler.Handle(
+                                sender: null,
+                                args: new EnrollmentTerminatedEventArgs(
+                                    reason: EnrollmentTerminationReason.DecisionTerminalStage,
+                                    outcome: EnrollmentTerminationOutcome.Failed,
+                                    stageName: orchestrator.CurrentState?.Stage.ToString(),
+                                    terminatedAtUtc: DateTime.UtcNow,
+                                    details: $"Server-requested termination: ruleId={action?.RuleId}"));
+                            return Task.CompletedTask;
+                        },
+                        emitEvent: evt => { orchestrator.EventEmitter.Emit(evt); });
+
+                    // Keep the dispatcher alive for the duration of the run. M5 will plug it into
+                    // the BackendTelemetryUploader response path; M4.6.β wires the API contract.
+                    _ = serverActionDispatcher;
+
                     ConsoleCancelEventHandler cancelHandler = (s, e) =>
                     {
                         e.Cancel = true;
@@ -360,15 +420,10 @@ namespace AutopilotMonitor.Agent.V2
                         logger.Info("ProcessExit — initiating graceful shutdown.");
                         shutdown.Set();
                     };
-                    EventHandler<EnrollmentTerminatedEventArgs> terminatedHandler = (s, e) =>
-                    {
-                        logger.Info($"Orchestrator signalled termination (reason={e.Reason}, outcome={e.Outcome}).");
-                        shutdown.Set();
-                    };
 
                     Console.CancelKeyPress += cancelHandler;
                     AppDomain.CurrentDomain.ProcessExit += processExitHandler;
-                    orchestrator.Terminated += terminatedHandler;
+                    orchestrator.Terminated += terminationHandler.Handle;
 
                     try
                     {
@@ -388,7 +443,7 @@ namespace AutopilotMonitor.Agent.V2
                     {
                         Console.CancelKeyPress -= cancelHandler;
                         AppDomain.CurrentDomain.ProcessExit -= processExitHandler;
-                        orchestrator.Terminated -= terminatedHandler;
+                        orchestrator.Terminated -= terminationHandler.Handle;
 
                         try { orchestrator.Stop(); }
                         catch (Exception ex) { logger.Error("Orchestrator stop failed.", ex); }
