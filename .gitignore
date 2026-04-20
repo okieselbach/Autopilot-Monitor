@@ -109,6 +109,7 @@ tmpclaude-*-cwd
 # No individual file ignores needed — the submodule handles everything
 
 # Deployment scripts (local only)
+scripts/Deployment/build_and_upload_debug_agent_build_dev.ps1
 scripts/Deployment/build_and_upload_debug_agent_build.ps1
 scripts/Deployment/build_and_upload_release_agent_build.ps1
 
@@ -130,3 +131,4 @@ tasks/todo.md
 # Azure Table cleanup backups (dry-run exports + delete manifests)
 # Produced by /cleanup-table skill — never commit deletion payloads
 db-backups/
+plans/REFACTOR_AGENT_V2.md
