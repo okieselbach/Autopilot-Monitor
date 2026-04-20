@@ -6,10 +6,8 @@ using AutopilotMonitor.Agent.V2.Core.Logging;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Transport;
 using AutopilotMonitor.Shared.Models;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment;
-using AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Flows;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals;
-using AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Completion;
 
 namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Periodic
 {
@@ -22,7 +20,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Periodic
     {
         private readonly string _agentVersion;
         private readonly NetworkMetrics _networkMetrics;
-        private readonly EventSpool _spool;
 
         // Previous sample for delta calculations
         private TimeSpan _prevCpuTime;
@@ -34,14 +31,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Periodic
             string tenantId,
             Action<EnrollmentEvent> onEventCollected,
             NetworkMetrics networkMetrics,
-            EventSpool spool,
             AgentLogger logger,
             string agentVersion = "unknown",
             int intervalSeconds = 60)
             : base(sessionId, tenantId, onEventCollected, logger, intervalSeconds)
         {
             _networkMetrics = networkMetrics ?? throw new ArgumentNullException(nameof(networkMetrics));
-            _spool = spool;
             _agentVersion = string.IsNullOrWhiteSpace(agentVersion) ? "unknown" : agentVersion;
         }
 
@@ -106,11 +101,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Periodic
             }
 
             // --- Spool queue depth ---
-            if (_spool != null)
-            {
-                try { data["spool_queue_depth"] = _spool.GetCount(); }
-                catch { }
-            }
+            // M4.5.a: removed legacy EventSpool-based queue-depth metric. V2 equivalent
+            // (TelemetrySpool.LastAssignedItemId - LastUploadedItemId) would require Transport
+            // wiring that is out of scope for this collector; deferred to M4.5.b when
+            // DefaultComponentFactory introduces the new telemetry wiring.
 
             // --- Network delta ---
             try

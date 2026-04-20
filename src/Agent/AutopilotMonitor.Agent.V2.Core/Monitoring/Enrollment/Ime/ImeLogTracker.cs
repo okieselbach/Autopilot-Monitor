@@ -11,10 +11,8 @@ using AutopilotMonitor.Agent.V2.Core.Logging;
 using AutopilotMonitor.Shared.Models;
 using Newtonsoft.Json;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment;
-using AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Flows;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals;
-using AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Completion;
 
 namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
 {
@@ -74,9 +72,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
         private CancellationTokenSource _cts;
         private bool _allAppsCompletedFired;
 
-        // State persistence: saves tracker state to disk so agent restart continues
-        // from the exact log position without re-parsing or re-building ignore lists.
-        private readonly ImeTrackerStatePersistence _statePersistence;
+        // M4.5.a: ImeTrackerStatePersistence removed. V2 relies on SignalLog-replay + the
+        // SignalAdapter's fire-once dedup for resume semantics; fresh-start on restart is
+        // intentional. See plan §4.x M4.5 Legacy-Cleanup.
         private bool _stateDirty;
 
         // Standard GUID capture pattern used as {GUID} placeholder in patterns
@@ -150,11 +148,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
             _matchLogPath = matchLogPath;
             _packageStates = new AppPackageStateList(logger);
 
-            // State persistence setup
-            if (!string.IsNullOrEmpty(stateDirectory))
-            {
-                _statePersistence = new ImeTrackerStatePersistence(stateDirectory, logger);
-            }
+            // M4.5.a: state-persistence removed; stateDirectory retained in signature for
+            // backwards-compat with existing callers/tests but intentionally unused.
+            _ = stateDirectory;
 
             if (!string.IsNullOrEmpty(_matchLogPath))
             {
@@ -286,164 +282,27 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
             _pollingTask = null;
         }
 
-        #region State Persistence
+        #region State Persistence (M4.5.a: no-op stubs — legacy ImeTrackerStatePersistence removed)
 
-        /// <summary>
-        /// Loads persisted state from disk. Called on Start() to restore tracker state
-        /// after an agent restart, so parsing continues exactly where it left off.
-        /// </summary>
+        // V2 resume semantics come from SignalLog-replay + SignalAdapter fire-once dedup.
+        // These stubs preserve the call-sites (LoadState / SaveState / DeleteState) across
+        // the polling loop + event handlers so the tracker compiles unchanged outside this
+        // region. See plan §4.x M4.5 Legacy-Cleanup.
+
         private void LoadState()
         {
-            if (_statePersistence == null) return;
-
-            var state = _statePersistence.Load();
-            if (state == null) return;
-
-            // Restore phase tracking
-            _currentPhaseOrder = state.CurrentPhaseOrder;
-            _lastEspPhaseDetected = state.LastEspPhaseDetected;
-            _allAppsCompletedFired = state.AllAppsCompletedFired;
-            _logPhaseIsCurrentPhase = state.LogPhaseIsCurrentPhase;
-
-            // Restore seen app IDs
-            _seenAppIds.Clear();
-            if (state.SeenAppIds != null)
-            {
-                foreach (var id in state.SeenAppIds)
-                    _seenAppIds.Add(id);
-            }
-
-            // Restore ignore list
-            if (state.IgnoreList != null)
-            {
-                foreach (var id in state.IgnoreList)
-                    _packageStates.AddToIgnoreList(id);
-            }
-
-            // Restore current package ID
-            _packageStates.CurrentPackageId = state.CurrentPackageId;
-
-            // Restore package states
-            if (state.Packages != null)
-            {
-                _packageStates.Clear();
-                foreach (var p in state.Packages)
-                {
-                    var pkg = AppPackageState.Restore(
-                        p.Id, p.ListPos, p.Name,
-                        (AppRunAs)p.RunAs, (AppIntent)p.Intent, (AppTargeted)p.Targeted,
-                        p.DependsOn != null ? new HashSet<string>(p.DependsOn) : new HashSet<string>(),
-                        (AppInstallationState)p.InstallationState, p.DownloadingOrInstallingSeen,
-                        p.ProgressPercent, p.BytesDownloaded, p.BytesTotal,
-                        errorPatternId: p.ErrorPatternId, errorDetail: p.ErrorDetail, errorCode: p.ErrorCode,
-                        exitCode: p.ExitCode, hresultFromWin32: p.HResultFromWin32,
-                        doFileSize: p.DoFileSize, doTotalBytesDownloaded: p.DoTotalBytesDownloaded,
-                        doBytesFromPeers: p.DoBytesFromPeers, doPercentPeerCaching: p.DoPercentPeerCaching,
-                        doBytesFromLanPeers: p.DoBytesFromLanPeers, doBytesFromGroupPeers: p.DoBytesFromGroupPeers,
-                        doBytesFromInternetPeers: p.DoBytesFromInternetPeers, doDownloadMode: p.DoDownloadMode,
-                        doDownloadDuration: p.DoDownloadDuration, doBytesFromHttp: p.DoBytesFromHttp,
-                        hasDoTelemetry: p.HasDoTelemetry,
-                        appVersion: p.AppVersion, appType: p.AppType,
-                        attemptNumber: p.AttemptNumber, detectionResult: p.DetectionResult);
-                    _packageStates.Add(pkg);
-                }
-            }
-
-            // Restore file positions
-            if (state.FilePositions != null)
-            {
-                foreach (var kvp in state.FilePositions)
-                {
-                    var fullPath = Path.Combine(_logFolder, kvp.Key);
-                    _positionTracker.RestorePosition(fullPath, kvp.Value.Position, kvp.Value.LastKnownSize);
-                }
-            }
-
-            // Re-activate patterns based on restored phase state
-            ActivatePatterns(_logPhaseIsCurrentPhase, force: true);
-
-            _logger.Info($"ImeLogTracker: state restored - phase: {_lastEspPhaseDetected ?? "(none)"} (order: {_currentPhaseOrder}), " +
-                         $"ignore list: {_packageStates.IgnoreList.Count}, packages: {_packageStates.Count}, " +
-                         $"file positions: {state.FilePositions?.Count ?? 0}");
+            // no-op — fresh start on restart
         }
 
-        /// <summary>
-        /// Persists current tracker state to disk as JSON.
-        /// Called after each polling cycle when state has changed.
-        /// </summary>
         private void SaveState()
         {
-            if (_statePersistence == null) return;
-
-            // Build state DTO
-            var state = new ImeTrackerStateData
-            {
-                CurrentPhaseOrder = _currentPhaseOrder,
-                LastEspPhaseDetected = _lastEspPhaseDetected,
-                AllAppsCompletedFired = _allAppsCompletedFired,
-                LogPhaseIsCurrentPhase = _logPhaseIsCurrentPhase,
-                SeenAppIds = _seenAppIds.ToList(),
-                IgnoreList = _packageStates.IgnoreList.ToList(),
-                CurrentPackageId = _packageStates.CurrentPackageId,
-                Packages = _packageStates.Select(p => new PackageStateData
-                {
-                    Id = p.Id,
-                    ListPos = p.ListPos,
-                    Name = p.Name,
-                    RunAs = (int)p.RunAs,
-                    Intent = (int)p.Intent,
-                    Targeted = (int)p.Targeted,
-                    DependsOn = p.DependsOn?.ToList() ?? new List<string>(),
-                    InstallationState = (int)p.InstallationState,
-                    DownloadingOrInstallingSeen = p.DownloadingOrInstallingSeen,
-                    ProgressPercent = p.ProgressPercent,
-                    BytesDownloaded = p.BytesDownloaded,
-                    BytesTotal = p.BytesTotal,
-                    ErrorPatternId = p.ErrorPatternId,
-                    ErrorDetail = p.ErrorDetail,
-                    ErrorCode = p.ErrorCode,
-                    ExitCode = p.ExitCode,
-                    HResultFromWin32 = p.HResultFromWin32,
-                    DoFileSize = p.DoFileSize,
-                    DoTotalBytesDownloaded = p.DoTotalBytesDownloaded,
-                    DoBytesFromPeers = p.DoBytesFromPeers,
-                    DoPercentPeerCaching = p.DoPercentPeerCaching,
-                    DoBytesFromLanPeers = p.DoBytesFromLanPeers,
-                    DoBytesFromGroupPeers = p.DoBytesFromGroupPeers,
-                    DoBytesFromInternetPeers = p.DoBytesFromInternetPeers,
-                    DoDownloadMode = p.DoDownloadMode,
-                    DoDownloadDuration = p.DoDownloadDuration,
-                    DoBytesFromHttp = p.DoBytesFromHttp,
-                    HasDoTelemetry = p.HasDoTelemetry,
-                    AppVersion = p.AppVersion,
-                    AppType = p.AppType,
-                    AttemptNumber = p.AttemptNumber,
-                    DetectionResult = p.DetectionResult
-                }).ToList(),
-                FilePositions = new Dictionary<string, FilePositionData>()
-            };
-
-            // Store file positions by filename only (log folder is known)
-            foreach (var kvp in _positionTracker.GetAllPositions())
-            {
-                var fileName = Path.GetFileName(kvp.Key);
-                state.FilePositions[fileName] = new FilePositionData
-                {
-                    Position = kvp.Value.Position,
-                    LastKnownSize = kvp.Value.LastKnownSize
-                };
-            }
-
-            _statePersistence.Save(state);
+            // no-op — nothing to persist
         }
 
-        /// <summary>
-        /// Deletes persisted state file. Called on enrollment complete to ensure
-        /// a fresh state on the next enrollment cycle.
-        /// </summary>
+        /// <summary>Kept as public no-op for API compatibility; callers treat it as a hint.</summary>
         public void DeleteState()
         {
-            _statePersistence?.Delete();
+            // no-op
         }
 
         #endregion
