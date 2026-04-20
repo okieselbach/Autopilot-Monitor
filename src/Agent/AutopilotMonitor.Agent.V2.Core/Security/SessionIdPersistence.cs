@@ -20,6 +20,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
     public sealed class SessionIdPersistence
     {
         private readonly string _sessionFilePath;
+        private readonly string _sessionCreatedFilePath;
+        private readonly string _whiteGloveMarkerPath;
         private readonly object _lockObject = new object();
 
         public SessionIdPersistence(string dataDirectory)
@@ -31,11 +33,17 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
                 Directory.CreateDirectory(dataDirectory);
 
             _sessionFilePath = Path.Combine(dataDirectory, "session.id");
+            _sessionCreatedFilePath = Path.Combine(dataDirectory, "session.created");
+            _whiteGloveMarkerPath = Path.Combine(dataDirectory, "whiteglove.complete");
         }
 
         /// <summary>
         /// Returns the persisted SessionId or creates, writes and returns a fresh one.
         /// Thread-safe — concurrent callers see the same SessionId.
+        /// <para>
+        /// Also initialises <c>session.created</c> on first creation (and on recovery when it is
+        /// missing) so the emergency-break watchdog can compare the session's wall-clock age.
+        /// </para>
         /// </summary>
         public string GetOrCreate(AgentLogger logger = null)
         {
@@ -48,6 +56,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
                         var existing = File.ReadAllText(_sessionFilePath).Trim();
                         if (Guid.TryParse(existing, out _))
                         {
+                            if (!File.Exists(_sessionCreatedFilePath))
+                            {
+                                // Recover session.created when session.id exists but the companion
+                                // timestamp was lost (crash between the two writes, upgrade from an
+                                // older SessionIdPersistence without session.created).
+                                SaveSessionCreatedAtInternal(DateTime.UtcNow);
+                                logger?.Info("SessionIdPersistence: initialised missing session.created for existing SessionId.");
+                            }
                             logger?.Debug($"SessionIdPersistence: resumed existing SessionId={existing}.");
                             return existing;
                         }
@@ -61,9 +77,59 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
 
                 var fresh = Guid.NewGuid().ToString();
                 WriteAtomic(fresh, logger);
+                SaveSessionCreatedAtInternal(DateTime.UtcNow);
                 logger?.Info($"SessionIdPersistence: created new SessionId={fresh}.");
                 return fresh;
             }
+        }
+
+        /// <summary>True when a persisted SessionId is present on disk.</summary>
+        public bool SessionExists()
+        {
+            lock (_lockObject) return File.Exists(_sessionFilePath);
+        }
+
+        /// <summary>
+        /// Returns the persisted session creation timestamp (UTC) or <c>null</c> when unavailable /
+        /// unparseable. Used by the M4.6.α emergency-break watchdog.
+        /// </summary>
+        public DateTime? LoadSessionCreatedAt()
+        {
+            lock (_lockObject)
+            {
+                try
+                {
+                    if (!File.Exists(_sessionCreatedFilePath)) return null;
+                    var raw = File.ReadAllText(_sessionCreatedFilePath).Trim();
+                    if (DateTime.TryParse(raw, null, System.Globalization.DateTimeStyles.RoundtripKind, out var parsed))
+                        return parsed.Kind == DateTimeKind.Utc ? parsed : parsed.ToUniversalTime();
+                }
+                catch
+                {
+                    // Fall through — treat corrupt file as missing so the watchdog does not trip on bogus data.
+                }
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Persists the session creation timestamp (UTC). Used by the watchdog to establish a
+        /// known-good baseline if the file is missing on recovery (see <see cref="GetOrCreate"/>).
+        /// </summary>
+        public void SaveSessionCreatedAt(DateTime createdAtUtc)
+        {
+            lock (_lockObject) SaveSessionCreatedAtInternal(createdAtUtc);
+        }
+
+        /// <summary>
+        /// <c>true</c> when a <c>whiteglove.complete</c> marker was persisted by the Part-1 exit path.
+        /// The watchdog treats these sessions as paused (device is powered off between Part 1 and
+        /// Part 2) and does NOT trip the emergency break on their age — the age clock restarts on
+        /// Part-2 resume.
+        /// </summary>
+        public bool IsWhiteGloveResume()
+        {
+            lock (_lockObject) return File.Exists(_whiteGloveMarkerPath);
         }
 
         /// <summary>Deletes the persisted SessionId. Next <see cref="GetOrCreate"/> starts a fresh session.</summary>
@@ -71,15 +137,23 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
         {
             lock (_lockObject)
             {
-                try
-                {
-                    if (File.Exists(_sessionFilePath)) File.Delete(_sessionFilePath);
-                }
-                catch (Exception ex)
-                {
-                    logger?.Warning($"SessionIdPersistence: failed to delete session.id: {ex.Message}");
-                }
+                TryDelete(_sessionFilePath, logger);
+                TryDelete(_sessionCreatedFilePath, logger);
+                TryDelete(_whiteGloveMarkerPath, logger);
             }
+        }
+
+        private static void TryDelete(string path, AgentLogger logger)
+        {
+            try { if (File.Exists(path)) File.Delete(path); }
+            catch (Exception ex) { logger?.Warning($"SessionIdPersistence: failed to delete {Path.GetFileName(path)}: {ex.Message}"); }
+        }
+
+        private void SaveSessionCreatedAtInternal(DateTime createdAtUtc)
+        {
+            if (createdAtUtc.Kind != DateTimeKind.Utc) createdAtUtc = createdAtUtc.ToUniversalTime();
+            try { File.WriteAllText(_sessionCreatedFilePath, createdAtUtc.ToString("O")); }
+            catch { /* best-effort — watchdog will fall back to initialising it on next start */ }
         }
 
         private void WriteAtomic(string sessionId, AgentLogger logger)

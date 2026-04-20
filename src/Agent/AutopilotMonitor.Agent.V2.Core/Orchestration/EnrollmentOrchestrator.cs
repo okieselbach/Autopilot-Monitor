@@ -76,6 +76,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         private readonly int _quarantineThreshold;
         private readonly TimeSpan _drainInterval;
         private readonly TimeSpan _terminalDrainTimeout;
+        private readonly TimeSpan? _agentMaxLifetime;
+
+        // Max-lifetime watchdog (M4.6.α). Timer is armed in Start() when _agentMaxLifetime != null.
+        private System.Threading.Timer? _maxLifetimeTimer;
+        private int _terminatedFired;
 
         // Built in Start()
         private DecisionEngine? _engine;
@@ -131,7 +136,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             int channelCapacity = SignalIngress.DefaultChannelCapacity,
             int quarantineThreshold = DecisionStepProcessor.DefaultQuarantineThreshold,
             TimeSpan? drainInterval = null,
-            TimeSpan? terminalDrainTimeout = null)
+            TimeSpan? terminalDrainTimeout = null,
+            TimeSpan? agentMaxLifetime = null)
         {
             if (string.IsNullOrEmpty(sessionId)) throw new ArgumentException("SessionId is mandatory.", nameof(sessionId));
             if (string.IsNullOrEmpty(tenantId)) throw new ArgumentException("TenantId is mandatory.", nameof(tenantId));
@@ -161,7 +167,26 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             _quarantineThreshold = quarantineThreshold;
             _drainInterval = drainInterval ?? DefaultDrainInterval;
             _terminalDrainTimeout = terminalDrainTimeout ?? DefaultTerminalDrainTimeout;
+
+            if (agentMaxLifetime.HasValue && agentMaxLifetime.Value <= TimeSpan.Zero)
+                throw new ArgumentOutOfRangeException(nameof(agentMaxLifetime), "AgentMaxLifetime must be positive when set.");
+            _agentMaxLifetime = agentMaxLifetime;
         }
+
+        /// <summary>
+        /// Terminal event — fires once when the orchestrator declares the session done. Plan §4.x M4.6.α.
+        /// <para>
+        /// M4.6.α fires only <see cref="EnrollmentTerminationReason.MaxLifetimeExceeded"/>; the
+        /// <see cref="EnrollmentTerminationReason.DecisionTerminalStage"/> path is wired in M4.6.β
+        /// together with <c>CleanupService</c> self-destruct + SummaryDialog launch.
+        /// </para>
+        /// <para>
+        /// Handlers may run on a ThreadPool thread (Timer callback). They must NOT call
+        /// <see cref="Stop"/> directly (re-entrant) — raise a shutdown <see cref="ManualResetEventSlim"/>
+        /// from the handler and let the main thread call <see cref="Stop"/>.
+        /// </para>
+        /// </summary>
+        public event EventHandler<EnrollmentTerminatedEventArgs>? Terminated;
 
         // ---------------------------------------------------------------- Observability
 
@@ -387,7 +412,41 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             _drainCts = new CancellationTokenSource();
             _drainTask = Task.Run(() => DrainLoopAsync(_drainCts.Token));
 
+            // 16) Max-lifetime watchdog (M4.6.α). Fires once after the configured duration when
+            //     no real terminal stage has been reached. Timer is a best-effort System.Threading.Timer
+            //     because VirtualClock-driven delay would not map to an OS-level wall-clock wait.
+            if (_agentMaxLifetime.HasValue)
+            {
+                _maxLifetimeTimer = new System.Threading.Timer(
+                    state: null,
+                    dueTime: _agentMaxLifetime.Value,
+                    period: System.Threading.Timeout.InfiniteTimeSpan,
+                    callback: _ => RaiseMaxLifetimeExceeded());
+                _logger.Info($"EnrollmentOrchestrator: max-lifetime watchdog armed ({_agentMaxLifetime.Value.TotalMinutes:F0}min).");
+            }
+
             _logger.Info("EnrollmentOrchestrator: started.");
+        }
+
+        private void RaiseMaxLifetimeExceeded()
+        {
+            if (Volatile.Read(ref _stopRequested) == 1) return;
+            if (Interlocked.Exchange(ref _terminatedFired, 1) == 1) return;
+
+            _logger.Warning(
+                $"EnrollmentOrchestrator: max-lifetime ({_agentMaxLifetime?.TotalMinutes:F0}min) exceeded — firing Terminated(MaxLifetimeExceeded).");
+
+            var currentStage = _processor?.CurrentState?.Stage.ToString();
+
+            var terminatedArgs = new EnrollmentTerminatedEventArgs(
+                reason: EnrollmentTerminationReason.MaxLifetimeExceeded,
+                outcome: EnrollmentTerminationOutcome.TimedOut,
+                stageName: currentStage,
+                terminatedAtUtc: _clock.UtcNow,
+                details: $"Agent exceeded AgentMaxLifetimeMinutes cap ({_agentMaxLifetime?.TotalMinutes:F0}min) without reaching a terminal stage.");
+
+            try { Terminated?.Invoke(this, terminatedArgs); }
+            catch (Exception ex) { _logger.Error("EnrollmentOrchestrator: Terminated handler threw.", ex); }
         }
 
         /// <summary>
@@ -399,6 +458,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             if (Interlocked.Exchange(ref _stopRequested, 1) == 1) return;
 
             _logger.Info("EnrollmentOrchestrator: stopping.");
+
+            // -1) Max-lifetime watchdog stoppen (M4.6.α). Idempotent — safe even if never armed.
+            try { _maxLifetimeTimer?.Dispose(); _maxLifetimeTimer = null; }
+            catch (Exception ex) { _logger.Warning($"EnrollmentOrchestrator: max-lifetime timer dispose failed: {ex.Message}"); }
 
             // 0) Collector-Hosts stoppen — keine neuen Events / DecisionSignals aus dem Feld.
             if (_collectorHosts != null)

@@ -25,8 +25,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- V2.Core + its own dependencies. Plan §2.16 isolation: NO reference to Agent.Core. -->
+    <!-- V2.Core + V2 exe (for Program.Guards startup helpers, M4.6.α) + dependencies.
+         Plan §2.16 isolation: NO reference to Agent.Core. -->
     <ProjectReference Include="..\AutopilotMonitor.Agent.V2.Core\AutopilotMonitor.Agent.V2.Core.csproj" />
+    <ProjectReference Include="..\AutopilotMonitor.Agent.V2\AutopilotMonitor.Agent.V2.csproj" />
     <ProjectReference Include="..\..\Shared\AutopilotMonitor.DecisionCore\AutopilotMonitor.DecisionCore.csproj" />
     <ProjectReference Include="..\..\Shared\AutopilotMonitor.Shared\AutopilotMonitor.Shared.csproj" />
   </ItemGroup>

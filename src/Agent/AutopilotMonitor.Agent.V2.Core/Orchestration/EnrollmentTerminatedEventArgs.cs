@@ -1,0 +1,77 @@
+#nullable enable
+using System;
+
+namespace AutopilotMonitor.Agent.V2.Core.Orchestration
+{
+    /// <summary>
+    /// Reasons for which <see cref="EnrollmentOrchestrator.Terminated"/> fires. Plan §4.x M4.6.α.
+    /// </summary>
+    public enum EnrollmentTerminationReason
+    {
+        /// <summary>DecisionEngine reached a terminal stage via real signals (success or failure path).</summary>
+        DecisionTerminalStage,
+
+        /// <summary>
+        /// <c>AgentMaxLifetimeMinutes</c> safety watchdog fired — orchestrator has been running
+        /// longer than the configured cap without reaching a terminal stage.
+        /// </summary>
+        MaxLifetimeExceeded,
+    }
+
+    /// <summary>
+    /// Outcome descriptor emitted alongside <see cref="EnrollmentOrchestrator.Terminated"/>.
+    /// <para>
+    /// M4.6.β will consume this to drive <c>CleanupService.ExecuteSelfDestruct</c>,
+    /// <c>SummaryDialog</c> launch and <c>DiagnosticsPackageService</c> upload — the orchestrator
+    /// stays kernel-pure and only declares "we are done, here is the outcome".
+    /// </para>
+    /// </summary>
+    public enum EnrollmentTerminationOutcome
+    {
+        /// <summary>
+        /// Reached a success stage (<c>Completed</c> / <c>WhiteGloveSealed</c> for Part 1 exit).
+        /// </summary>
+        Succeeded,
+
+        /// <summary>Reached an explicit failure stage.</summary>
+        Failed,
+
+        /// <summary>
+        /// Not yet terminal (used when the watchdog fires mid-flight — no classifier verdict,
+        /// stage is still an in-progress state).
+        /// </summary>
+        TimedOut,
+    }
+
+    /// <summary>
+    /// Payload for <see cref="EnrollmentOrchestrator.Terminated"/>. Plan §4.x M4.6.α.
+    /// <para>
+    /// Carries the decision-relevant fields needed by downstream peripheral capabilities
+    /// (M4.6.β: CleanupService + SummaryDialog + DiagnosticsPackageService) without forcing
+    /// them to touch the DecisionEngine state directly — that coupling would leak kernel
+    /// invariants into peripheral code.
+    /// </para>
+    /// </summary>
+    public sealed class EnrollmentTerminatedEventArgs : EventArgs
+    {
+        public EnrollmentTerminationReason Reason { get; }
+        public EnrollmentTerminationOutcome Outcome { get; }
+        public string? StageName { get; }
+        public DateTime TerminatedAtUtc { get; }
+        public string? Details { get; }
+
+        public EnrollmentTerminatedEventArgs(
+            EnrollmentTerminationReason reason,
+            EnrollmentTerminationOutcome outcome,
+            string? stageName,
+            DateTime terminatedAtUtc,
+            string? details = null)
+        {
+            Reason = reason;
+            Outcome = outcome;
+            StageName = stageName;
+            TerminatedAtUtc = terminatedAtUtc;
+            Details = details;
+        }
+    }
+}

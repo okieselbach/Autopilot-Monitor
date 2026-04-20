@@ -6,6 +6,7 @@ using System.Reflection;
 using System.Threading;
 using AutopilotMonitor.Agent.V2.Core.Configuration;
 using AutopilotMonitor.Agent.V2.Core.Logging;
+using AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Transport;
 using AutopilotMonitor.Agent.V2.Core.Orchestration;
 using AutopilotMonitor.Agent.V2.Core.Security;
@@ -13,36 +14,48 @@ using AutopilotMonitor.Agent.V2.Core.Transport.Telemetry;
 using AutopilotMonitor.DecisionCore.Classifiers;
 using AutopilotMonitor.DecisionCore.Engine;
 using AutopilotMonitor.Shared;
+using AutopilotMonitor.Shared.Models;
 
 namespace AutopilotMonitor.Agent.V2
 {
     /// <summary>
-    /// V2-Agent entry point. Plan §4.x M4.5.b.
+    /// V2-Agent entry point. Plan §4.x M4.5.b + M4.6.α.
     /// <para>
-    /// Start sequence:
+    /// Boot sequence (same order as Legacy for feature parity):
     /// </para>
     /// <list type="number">
-    ///   <item>Parse CLI args (<c>--help</c>, <c>--version</c>, <c>--console</c>, <c>--new-session</c>,
-    ///     <c>--api-url</c>, <c>--bootstrap-token</c>, <c>--await-enrollment</c>, <c>--ime-log-path</c>,
-    ///     <c>--ime-match-log</c>)</item>
-    ///   <item>Initialise <see cref="AgentLogger"/> on <c>%ProgramData%\AutopilotMonitor\Logs</c></item>
-    ///   <item>Resolve TenantId via <see cref="TenantIdResolver"/></item>
-    ///   <item>Load/create SessionId via <see cref="SessionIdPersistence"/></item>
-    ///   <item>(Optional) Wait for MDM certificate in await-enrollment mode</item>
-    ///   <item>Build mTLS-<see cref="HttpClient"/> via <see cref="MtlsHttpClientFactory"/></item>
-    ///   <item>Fetch remote config via <see cref="BackendApiClient"/> + <see cref="RemoteConfigService"/></item>
-    ///   <item>Wire <see cref="BackendTelemetryUploader"/> for telemetry batch uploads</item>
-    ///   <item>Construct <see cref="DefaultComponentFactory"/> + <see cref="EnrollmentOrchestrator"/></item>
-    ///   <item><c>orchestrator.Start()</c> and wait for <c>Ctrl+C</c> / <see cref="AppDomain.ProcessExit"/></item>
-    ///   <item><c>orchestrator.Stop()</c>, return 0</item>
+    ///   <item><c>--help</c> / <c>--version</c> short-circuit</item>
+    ///   <item><c>--install</c> forks to <see cref="RunInstallMode"/> and exits</item>
+    ///   <item>Multi-instance guard — single-agent invariant</item>
+    ///   <item>Register <c>ProcessExit</c> → writes <c>clean-exit.marker</c></item>
+    ///   <item>Ensure agent directories exist</item>
+    ///   <item><see cref="SelfUpdater.LogInit"/> + <see cref="SelfUpdater.CleanupPreviousUpdate"/></item>
+    ///   <item>Load cached <c>remote-config.json</c> → <see cref="SelfUpdater.BackendExpectedSha256"/> + <c>AllowAgentDowngrade</c></item>
+    ///   <item><see cref="SelfUpdater.CheckAndApplyUpdateAsync"/> — on success restarts the process; on failure continues with current binary</item>
+    ///   <item><see cref="DetectPreviousExit"/> — reads markers + event log to classify last shutdown</item>
+    ///   <item><see cref="CheckEnrollmentCompleteMarker"/> — ghost-restart detection + cleanup retry</item>
+    ///   <item><see cref="CheckSessionAgeEmergencyBreak"/> — absolute session-age watchdog</item>
+    ///   <item>Resolve TenantId (registry → bootstrap-config.json fallback)</item>
+    ///   <item>Build <see cref="AgentConfiguration"/> (CLI args + persisted bootstrap / await-enrollment config)</item>
+    ///   <item>Get/create SessionId via <see cref="SessionIdPersistence"/></item>
+    ///   <item>(Optional) Wait for MDM certificate in <c>--await-enrollment</c> mode</item>
+    ///   <item>Build <see cref="BackendApiClient"/> + <see cref="RemoteConfigService"/> → fetch config</item>
+    ///   <item><see cref="BootstrapConfigCleanup.TryDeleteIfCertReadyAsync"/> — H-2 mitigation post-cert</item>
+    ///   <item>Build mTLS <see cref="HttpClient"/> → <see cref="BackendTelemetryUploader"/></item>
+    ///   <item>Build <see cref="DefaultComponentFactory"/> + <see cref="EnrollmentOrchestrator"/></item>
+    ///   <item><c>orchestrator.Start()</c> → emit <see cref="VersionCheckEventBuilder"/>-derived event</item>
+    ///   <item>Wait for Ctrl+C / ProcessExit / EnrollmentTerminated</item>
+    ///   <item><c>orchestrator.Stop()</c>, exit 0</item>
     /// </list>
     /// </summary>
-    public static class Program
+    public static partial class Program
     {
         private const string DefaultStateDirectory = @"%ProgramData%\AutopilotMonitor";
         private const string DefaultLogDirectory = @"%ProgramData%\AutopilotMonitor\Logs";
+        private const string DefaultAgentSubdirectory = "Agent";
         private const string DefaultV2StateSubdirectory = "V2";
         private const string DefaultTransportSubdirectory = "V2Transport";
+        private const string CachedRemoteConfigPath = @"%ProgramData%\AutopilotMonitor\Config\remote-config.json";
 
         public static int Main(string[] args)
         {
@@ -58,21 +71,79 @@ namespace AutopilotMonitor.Agent.V2
                 return 0;
             }
 
+            // --install forks to a separate flow that exits when done (never falls through into RunAgent).
+            if (args.Contains("--install"))
+            {
+                return RunInstallMode(args);
+            }
+
             var consoleMode = args.Contains("--console") || Environment.UserInteractive;
+
+            // Multi-instance guard — prevents a second agent process from running alongside one
+            // that was started by the Scheduled Task.
+            if (IsAnotherAgentInstanceRunning())
+            {
+                var msg = "Another agent process is already running. This instance will exit.";
+                if (consoleMode) Console.Error.WriteLine($"ERROR: {msg}");
+                try
+                {
+                    var earlyLogger = new AgentLogger(Environment.ExpandEnvironmentVariables(DefaultLogDirectory));
+                    earlyLogger.Warning(msg);
+                }
+                catch { /* best-effort */ }
+                return 1;
+            }
 
             var dataDirectory = Environment.ExpandEnvironmentVariables(DefaultStateDirectory);
             var logDirectory = Environment.ExpandEnvironmentVariables(DefaultLogDirectory);
 
-            var logger = new AgentLogger(logDirectory) { EnableConsoleOutput = consoleMode };
-            logger.Info($"AutopilotMonitor.Agent.V2 starting (version {GetAgentVersion()}).");
+            try { Directory.CreateDirectory(dataDirectory); } catch { }
+            try { Directory.CreateDirectory(logDirectory); } catch { }
+
+            // Register the clean-exit marker writer BEFORE any risky startup work so an OS
+            // shutdown during self-update still produces a "clean" classification.
+            RegisterCleanExitMarker(dataDirectory);
+
+            // Startup self-update. Legacy parity: cleanup leftover .old files, load cached
+            // backend hash / downgrade policy, then attempt the update. Failures here never
+            // abort startup — we prefer to run the current version than delay.
+            SelfUpdater.LogInit(GetAgentVersion());
+
+            var agentDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) ?? string.Empty;
+            SelfUpdater.CleanupPreviousUpdate(agentDir, msg => { if (consoleMode) Console.Out.WriteLine(msg); });
+
+            var allowAgentDowngrade = LoadCachedSelfUpdateContext();
 
             try
             {
-                return RunAgent(args, logger, dataDirectory, consoleMode);
+                SelfUpdater.CheckAndApplyUpdateAsync(
+                    currentVersion: GetAgentVersion(),
+                    agentDir: agentDir,
+                    consoleMode: consoleMode,
+                    allowDowngrade: allowAgentDowngrade).GetAwaiter().GetResult();
+            }
+            catch (Exception selfUpdateEx)
+            {
+                // SelfUpdater is designed to swallow its own errors; catch anything that still
+                // escapes so startup does not abort on an unexpected failure in the update path.
+                SelfUpdater.Log($"Self-update outer exception: {selfUpdateEx.Message}");
+            }
+
+            // At this point either (a) no update was applied, or (b) update applied but restart
+            // didn't happen — continue startup with the current binary.
+
+            var logger = new AgentLogger(logDirectory) { EnableConsoleOutput = consoleMode };
+            logger.Info($"AutopilotMonitor.Agent.V2 starting (version {GetAgentVersion()}).");
+            logger.Info($"Command line: {FormatArgsForLog(args)}");
+
+            try
+            {
+                return RunAgent(args, logger, dataDirectory, logDirectory, consoleMode);
             }
             catch (Exception ex)
             {
                 logger.Error("V2 agent startup failed.", ex);
+                WriteCrashLog(logDirectory, ex);
                 if (consoleMode) Console.Error.WriteLine($"FATAL: {ex.Message}");
                 return 1;
             }
@@ -80,16 +151,35 @@ namespace AutopilotMonitor.Agent.V2
 
         // ---------------------------------------------------------------- Orchestration
 
-        private static int RunAgent(string[] args, AgentLogger logger, string dataDirectory, bool consoleMode)
+        private static int RunAgent(
+            string[] args,
+            AgentLogger logger,
+            string dataDirectory,
+            string logDirectory,
+            bool consoleMode)
         {
-            if (!Directory.Exists(dataDirectory)) Directory.CreateDirectory(dataDirectory);
+            var stateSubdir = Path.Combine(dataDirectory, DefaultV2StateSubdirectory);
+            var transportDir = Path.Combine(dataDirectory, DefaultTransportSubdirectory);
 
-            var tenantId = TenantIdResolver.ResolveFromEnrollmentRegistry(logger);
-            if (string.IsNullOrEmpty(tenantId))
+            // Previous-exit classification (for the agent_started event + observability).
+            var previousExit = DetectPreviousExit(dataDirectory, logDirectory);
+            if (previousExit.ExitType != "first_run")
             {
-                logger.Error("V2 agent cannot start: TenantId could not be resolved from the enrollment registry. Device is not MDM-enrolled.");
-                return 2;
+                var crashSuffix = previousExit.CrashExceptionType != null ? $" ({previousExit.CrashExceptionType})" : "";
+                logger.Info($"Previous exit: {previousExit.ExitType}{crashSuffix}");
             }
+
+            // Merge persisted bootstrap-config.json + await-enrollment.json into CLI args early.
+            var bootstrapConfig = TryReadBootstrapConfig(dataDirectory, logger);
+            var awaitConfig = TryReadAwaitEnrollmentConfig(dataDirectory, logger);
+
+            var tenantIdFromRegistry = TenantIdResolver.ResolveFromEnrollmentRegistry(logger);
+            var tenantId = !string.IsNullOrEmpty(tenantIdFromRegistry)
+                ? tenantIdFromRegistry
+                : bootstrapConfig?.TenantId;
+
+            // --install time may have written a bootstrap config that holds a tenantId even when
+            // the registry is not yet populated (bootstrap token path). Honour that.
 
             if (args.Contains("--new-session"))
             {
@@ -97,9 +187,32 @@ namespace AutopilotMonitor.Agent.V2
                 logger.Info("--new-session: cleared persisted SessionId.");
             }
 
-            var sessionId = new SessionIdPersistence(dataDirectory).GetOrCreate(logger);
+            var agentConfig = BuildAgentConfiguration(args, tenantId, sessionId: null, bootstrapConfig, awaitConfig);
 
-            var agentConfig = BuildAgentConfiguration(args, tenantId, sessionId);
+            // Build a cleanup-service factory used by guards: instantiated lazily and with the
+            // current agentConfig so command-line overrides (e.g. --no-cleanup) take effect.
+            Func<CleanupService> cleanupServiceFactory = () => new CleanupService(agentConfig, logger);
+
+            if (CheckEnrollmentCompleteMarker(
+                    dataDirectory, stateSubdir,
+                    agentConfig.SelfDestructOnComplete, cleanupServiceFactory, logger, consoleMode))
+            {
+                logger.Info("Enrollment-complete marker handled — agent exiting.");
+                return 0;
+            }
+
+            if (CheckSessionAgeEmergencyBreak(
+                    dataDirectory, stateSubdir,
+                    agentConfig.AbsoluteMaxSessionHours, agentConfig.SelfDestructOnComplete,
+                    cleanupServiceFactory, logger, consoleMode))
+            {
+                logger.Info("Emergency break fired — agent exiting.");
+                return 0;
+            }
+
+            // Session is safe to start — create/recover SessionId now (AFTER guards so a dead
+            // session is not resurrected before the watchdog can kill it).
+            agentConfig.SessionId = new SessionIdPersistence(dataDirectory).GetOrCreate(logger);
 
             if (agentConfig.AwaitEnrollment)
             {
@@ -119,6 +232,23 @@ namespace AutopilotMonitor.Agent.V2
                         return 3;
                     }
                 }
+
+                // Re-resolve TenantId — enrollment typically writes the registry key alongside the cert.
+                if (string.IsNullOrEmpty(agentConfig.TenantId))
+                {
+                    agentConfig.TenantId = TenantIdResolver.ResolveFromEnrollmentRegistry(logger);
+                    if (!string.IsNullOrEmpty(agentConfig.TenantId))
+                        logger.Info($"Await-enrollment: TenantId discovered from registry: {agentConfig.TenantId}");
+                }
+
+                // Await-enrollment is one-shot — remove the persisted config so subsequent restarts proceed normally.
+                DeleteAwaitEnrollmentConfig(dataDirectory, logger);
+            }
+
+            if (string.IsNullOrEmpty(agentConfig.TenantId))
+            {
+                logger.Error("V2 agent cannot start: TenantId not available (registry empty + no bootstrap config).");
+                return 2;
             }
 
             var backendApiClient = new BackendApiClient(
@@ -127,10 +257,29 @@ namespace AutopilotMonitor.Agent.V2
                 logger: logger,
                 agentVersion: GetAgentVersion());
 
-            var remoteConfigService = new RemoteConfigService(backendApiClient, tenantId, logger);
+            var remoteConfigService = new RemoteConfigService(backendApiClient, agentConfig.TenantId, logger);
             var remoteConfig = remoteConfigService.FetchConfigAsync().GetAwaiter().GetResult();
 
             logger.SetLogLevel(agentConfig.LogLevel);
+
+            // Propagate the backend-expected SHA so the runtime hash-mismatch trigger (M4.6.α
+            // continues this wire; actual runtime trigger will be wired via ServerActionDispatcher
+            // in M4.6.β) has the up-to-date integrity hash. Also refresh AllowAgentDowngrade.
+            if (!string.IsNullOrEmpty(remoteConfig.LatestAgentSha256))
+                SelfUpdater.BackendExpectedSha256 = remoteConfig.LatestAgentSha256;
+
+            // H-2 mitigation: delete the persisted bootstrap-config.json once the MDM cert
+            // proves it can authenticate. Non-blocking — any failure leaves the file for retry.
+            try
+            {
+                BootstrapConfigCleanup
+                    .TryDeleteIfCertReadyAsync(agentConfig, logger, GetAgentVersion())
+                    .GetAwaiter().GetResult();
+            }
+            catch (Exception ex)
+            {
+                logger.Debug($"BootstrapConfigCleanup outer exception: {ex.Message}");
+            }
 
             HttpClient mtlsHttpClient;
             BackendTelemetryUploader uploader;
@@ -152,7 +301,7 @@ namespace AutopilotMonitor.Agent.V2
                 uploader = new BackendTelemetryUploader(
                     httpClient: mtlsHttpClient,
                     baseUrl: agentConfig.ApiBaseUrl,
-                    tenantId: tenantId,
+                    tenantId: agentConfig.TenantId,
                     manufacturer: hardware.Manufacturer,
                     model: hardware.Model,
                     serialNumber: hardware.SerialNumber,
@@ -164,9 +313,6 @@ namespace AutopilotMonitor.Agent.V2
                 logger.Error("BackendTelemetryUploader construction failed.", ex);
                 return 5;
             }
-
-            var stateSubdir = Path.Combine(dataDirectory, DefaultV2StateSubdirectory);
-            var transportDir = Path.Combine(dataDirectory, DefaultTransportSubdirectory);
 
             var classifiers = new IClassifier[]
             {
@@ -184,9 +330,13 @@ namespace AutopilotMonitor.Agent.V2
             var whiteGloveSealingPatternIds = (System.Collections.Generic.IReadOnlyCollection<string>)remoteConfig.WhiteGloveSealingPatternIds
                 ?? Array.Empty<string>();
 
+            var agentMaxLifetime = agentConfig.AgentMaxLifetimeMinutes > 0
+                ? (TimeSpan?)TimeSpan.FromMinutes(agentConfig.AgentMaxLifetimeMinutes)
+                : null;
+
             using (var orchestrator = new EnrollmentOrchestrator(
-                sessionId: sessionId,
-                tenantId: tenantId,
+                sessionId: agentConfig.SessionId,
+                tenantId: agentConfig.TenantId,
                 stateDirectory: stateSubdir,
                 transportDirectory: transportDir,
                 clock: SystemClock.Instance,
@@ -194,13 +344,13 @@ namespace AutopilotMonitor.Agent.V2
                 uploader: uploader,
                 classifiers: classifiers,
                 componentFactory: componentFactory,
-                whiteGloveSealingPatternIds: whiteGloveSealingPatternIds))
+                whiteGloveSealingPatternIds: whiteGloveSealingPatternIds,
+                agentMaxLifetime: agentMaxLifetime))
             {
                 using (var shutdown = new ManualResetEventSlim(false))
                 {
                     ConsoleCancelEventHandler cancelHandler = (s, e) =>
                     {
-                        // Prevent the process from terminating immediately — let the orchestrator drain first.
                         e.Cancel = true;
                         logger.Info("Ctrl+C received — initiating graceful shutdown.");
                         shutdown.Set();
@@ -210,18 +360,27 @@ namespace AutopilotMonitor.Agent.V2
                         logger.Info("ProcessExit — initiating graceful shutdown.");
                         shutdown.Set();
                     };
+                    EventHandler<EnrollmentTerminatedEventArgs> terminatedHandler = (s, e) =>
+                    {
+                        logger.Info($"Orchestrator signalled termination (reason={e.Reason}, outcome={e.Outcome}).");
+                        shutdown.Set();
+                    };
 
                     Console.CancelKeyPress += cancelHandler;
                     AppDomain.CurrentDomain.ProcessExit += processExitHandler;
+                    orchestrator.Terminated += terminatedHandler;
 
                     try
                     {
                         orchestrator.Start();
-                        logger.Info($"V2 agent runtime ready (session={sessionId}, tenant={tenantId}).");
+
+                        // Emit the agent_version_check event now that the EventEmitter is alive.
+                        // VersionCheckEventBuilder.TryBuild is a no-op when no markers are present.
+                        EmitVersionCheckEventIfAny(orchestrator, agentConfig, logger);
+
+                        logger.Info($"V2 agent runtime ready (session={agentConfig.SessionId}, tenant={agentConfig.TenantId}).");
                         if (consoleMode)
-                        {
                             Console.Out.WriteLine("AutopilotMonitor.Agent.V2 running. Press Ctrl+C to stop.");
-                        }
 
                         shutdown.Wait();
                     }
@@ -229,6 +388,7 @@ namespace AutopilotMonitor.Agent.V2
                     {
                         Console.CancelKeyPress -= cancelHandler;
                         AppDomain.CurrentDomain.ProcessExit -= processExitHandler;
+                        orchestrator.Terminated -= terminatedHandler;
 
                         try { orchestrator.Stop(); }
                         catch (Exception ex) { logger.Error("Orchestrator stop failed.", ex); }
@@ -243,25 +403,72 @@ namespace AutopilotMonitor.Agent.V2
             return 0;
         }
 
+        private static void EmitVersionCheckEventIfAny(
+            EnrollmentOrchestrator orchestrator,
+            AgentConfiguration agentConfig,
+            AgentLogger logger)
+        {
+            try
+            {
+                var buildResult = VersionCheckEventBuilder.TryBuild(
+                    sessionId: agentConfig.SessionId,
+                    tenantId: agentConfig.TenantId,
+                    agentStartTimeUtc: DateTime.UtcNow);
+
+                if (!string.IsNullOrEmpty(buildResult?.ParseError))
+                    logger.Warning($"VersionCheckEventBuilder parse error: {buildResult.ParseError}");
+
+                if (buildResult?.Event != null)
+                {
+                    orchestrator.EventEmitter.Emit(buildResult.Event);
+                    logger.Info($"agent_version_check emitted (outcome={buildResult.Outcome}).");
+                }
+                else if (buildResult?.Deduped == true)
+                {
+                    logger.Debug($"agent_version_check deduped (outcome={buildResult.Outcome}).");
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.Warning($"VersionCheckEventBuilder emission failed: {ex.Message}");
+            }
+        }
+
         // ---------------------------------------------------------------- Configuration
 
-        private static AgentConfiguration BuildAgentConfiguration(string[] args, string tenantId, string sessionId)
+        private static AgentConfiguration BuildAgentConfiguration(
+            string[] args,
+            string tenantId,
+            string sessionId,
+            BootstrapConfigFile bootstrapConfig,
+            AwaitEnrollmentConfigFile awaitConfig)
         {
             var apiBaseUrl = GetArgValue(args, "--api-url", "--backend-api") ?? Constants.ApiBaseUrl;
             var imeLogPathOverride = GetArgValue(args, "--ime-log-path");
             var imeMatchLogPath = GetArgValue(args, "--ime-match-log");
-            var bootstrapToken = GetArgValue(args, "--bootstrap-token");
-            var awaitEnrollment = args.Contains("--await-enrollment");
+
+            var bootstrapToken = GetArgValue(args, "--bootstrap-token")
+                ?? bootstrapConfig?.BootstrapToken;
+
+            var awaitEnrollment = args.Contains("--await-enrollment") || awaitConfig != null;
             var rebootOnComplete = args.Contains("--reboot-on-complete");
             var disableGeoLocation = args.Contains("--disable-geolocation");
             var keepLogFile = args.Contains("--keep-logfile");
+            var noCleanup = args.Contains("--no-cleanup");
 
             var awaitTimeoutRaw = GetArgValue(args, "--await-enrollment-timeout");
             var awaitTimeoutMinutes = 480;
             if (!string.IsNullOrEmpty(awaitTimeoutRaw) && int.TryParse(awaitTimeoutRaw, out var parsedTimeout))
                 awaitTimeoutMinutes = parsedTimeout;
+            else if (awaitConfig != null)
+                awaitTimeoutMinutes = awaitConfig.TimeoutMinutes;
 
             var useBootstrapTokenAuth = !string.IsNullOrEmpty(bootstrapToken);
+
+            var cliLogLevel = GetArgValue(args, "--log-level");
+            var logLevel = AgentLogLevel.Info;
+            if (!string.IsNullOrEmpty(cliLogLevel) && Enum.TryParse<AgentLogLevel>(cliLogLevel, ignoreCase: true, out var parsedLevel))
+                logLevel = parsedLevel;
 
             return new AgentConfiguration
             {
@@ -272,7 +479,7 @@ namespace AutopilotMonitor.Agent.V2
                 LogDirectory = Environment.ExpandEnvironmentVariables(Constants.LogDirectory),
                 UploadIntervalSeconds = Constants.DefaultUploadIntervalSeconds,
                 MaxBatchSize = Constants.MaxBatchSize,
-                LogLevel = AgentLogLevel.Info,
+                LogLevel = logLevel,
                 UseClientCertAuth = !useBootstrapTokenAuth,
                 BootstrapToken = bootstrapToken,
                 UseBootstrapTokenAuth = useBootstrapTokenAuth,
@@ -283,11 +490,39 @@ namespace AutopilotMonitor.Agent.V2
                 ImeLogPathOverride = imeLogPathOverride,
                 ImeMatchLogPath = imeMatchLogPath,
                 KeepLogFile = keepLogFile,
+                SelfDestructOnComplete = !noCleanup,
                 CommandLineArgs = FormatArgsForLog(args),
             };
         }
 
-        private static string GetArgValue(string[] args, params string[] names)
+        private static bool LoadCachedSelfUpdateContext()
+        {
+            try
+            {
+                var path = Environment.ExpandEnvironmentVariables(CachedRemoteConfigPath);
+                if (!File.Exists(path)) return false;
+
+                var json = File.ReadAllText(path);
+                var cached = Newtonsoft.Json.JsonConvert.DeserializeObject<AgentConfigResponse>(json);
+                if (cached == null) return false;
+
+                if (!string.IsNullOrEmpty(cached.LatestAgentSha256))
+                {
+                    SelfUpdater.BackendExpectedSha256 = cached.LatestAgentSha256;
+                    SelfUpdater.Log(
+                        $"Self-update: loaded backend integrity hash from cached config (sha256={cached.LatestAgentSha256.Substring(0, Math.Min(12, cached.LatestAgentSha256.Length))}...)");
+                }
+
+                return cached.AllowAgentDowngrade;
+            }
+            catch (Exception ex)
+            {
+                SelfUpdater.Log($"Self-update: cached config read failed: {ex.Message}");
+                return false;
+            }
+        }
+
+        internal static string GetArgValue(string[] args, params string[] names)
         {
             if (args == null || args.Length < 2 || names == null) return null;
             for (int i = 0; i < args.Length - 1; i++)
@@ -325,25 +560,38 @@ namespace AutopilotMonitor.Agent.V2
 
         private static void PrintUsage()
         {
-            Console.Out.WriteLine("AutopilotMonitor.Agent.V2 — Autopilot-Monitor V2 agent.");
+            var v = GetAgentVersion();
+            Console.Out.WriteLine($"Autopilot Monitor Agent V2 v{v}");
             Console.Out.WriteLine();
-            Console.Out.WriteLine("Usage:");
-            Console.Out.WriteLine("  AutopilotMonitor.Agent.V2.exe [options]");
+            Console.Out.WriteLine("Usage: AutopilotMonitor.Agent.V2.exe [options]");
             Console.Out.WriteLine();
-            Console.Out.WriteLine("Options:");
-            Console.Out.WriteLine("  --help, -h, -?             Show this message and exit");
-            Console.Out.WriteLine("  --version                  Print version and exit");
-            Console.Out.WriteLine("  --console                  Mirror log output to stdout");
-            Console.Out.WriteLine("  --new-session              Discard any persisted SessionId and create a fresh one");
-            Console.Out.WriteLine("  --api-url <url>            Override backend base URL (alias: --backend-api)");
-            Console.Out.WriteLine("  --bootstrap-token <tok>    Use pre-MDM bootstrap token auth instead of client cert");
-            Console.Out.WriteLine("  --await-enrollment         Wait for MDM certificate before starting");
-            Console.Out.WriteLine("  --await-enrollment-timeout <min>  Await-enrollment timeout (default: 480min)");
-            Console.Out.WriteLine("  --ime-log-path <dir>       Override IME log folder (testing/replay)");
-            Console.Out.WriteLine("  --ime-match-log <path>     Write IME pattern matches to this file");
-            Console.Out.WriteLine("  --reboot-on-complete       Reboot device after successful enrollment");
-            Console.Out.WriteLine("  --disable-geolocation      Disable external IP geo-location lookup");
-            Console.Out.WriteLine("  --keep-logfile             Preserve the agent log file on self-destruct");
+            Console.Out.WriteLine("Modes:");
+            Console.Out.WriteLine("  --install                         Deploy payload, create Scheduled Task, and start it");
+            Console.Out.WriteLine("  --tenant-id <ID>                  Tenant ID for bootstrap-config (used with --install)");
+            Console.Out.WriteLine("  (default)                         Run enrollment monitoring");
+            Console.Out.WriteLine();
+            Console.Out.WriteLine("General options:");
+            Console.Out.WriteLine("  --help, -h, -?                    Show this help message");
+            Console.Out.WriteLine("  --version                         Print version and exit");
+            Console.Out.WriteLine("  --console                         Enable console output (mirrors log to stdout)");
+            Console.Out.WriteLine("  --log-level <LEVEL>               Override log level (Info, Debug, Verbose, Trace)");
+            Console.Out.WriteLine("  --new-session                     Force a new session ID (delete persisted session)");
+            Console.Out.WriteLine("  --keep-logfile                    Preserve log directory after self-destruct cleanup");
+            Console.Out.WriteLine("  --no-cleanup                      Disable self-destruct on enrollment completion");
+            Console.Out.WriteLine("  --reboot-on-complete              Reboot the device after enrollment completes");
+            Console.Out.WriteLine("  --disable-geolocation             Skip geo-location detection");
+            Console.Out.WriteLine();
+            Console.Out.WriteLine("Authentication:");
+            Console.Out.WriteLine("  --bootstrap-token <TOKEN>         Use bootstrap token auth (pre-MDM OOBE phase)");
+            Console.Out.WriteLine();
+            Console.Out.WriteLine("Await-enrollment mode:");
+            Console.Out.WriteLine("  --await-enrollment                Wait for MDM certificate before starting monitoring");
+            Console.Out.WriteLine("  --await-enrollment-timeout <MIN>  Timeout in minutes (default: 480)");
+            Console.Out.WriteLine();
+            Console.Out.WriteLine("Overrides:");
+            Console.Out.WriteLine("  --api-url <URL>                   Override backend API base URL (alias: --backend-api)");
+            Console.Out.WriteLine("  --ime-log-path <PATH>             Override IME logs directory");
+            Console.Out.WriteLine("  --ime-match-log <PATH>            Write matched IME log lines to file (debug)");
         }
 
         private static void PrintVersion()

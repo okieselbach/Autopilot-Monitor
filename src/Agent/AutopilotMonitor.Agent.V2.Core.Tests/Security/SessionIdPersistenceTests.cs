@@ -106,5 +106,109 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Security
 
             Assert.Equal(first, second);
         }
+
+        // --------------------------------------------------------------- M4.6.α additions
+
+        [Fact]
+        public void GetOrCreate_also_writes_session_created_timestamp()
+        {
+            using var tmp = new TempDirectory();
+            var sut = new SessionIdPersistence(tmp.Path);
+
+            sut.GetOrCreate();
+
+            var createdPath = Path.Combine(tmp.Path, "session.created");
+            Assert.True(File.Exists(createdPath));
+            var parsed = sut.LoadSessionCreatedAt();
+            Assert.NotNull(parsed);
+            Assert.Equal(DateTimeKind.Utc, parsed!.Value.Kind);
+        }
+
+        [Fact]
+        public void LoadSessionCreatedAt_returns_null_when_file_missing()
+        {
+            using var tmp = new TempDirectory();
+            Assert.Null(new SessionIdPersistence(tmp.Path).LoadSessionCreatedAt());
+        }
+
+        [Fact]
+        public void LoadSessionCreatedAt_returns_null_when_file_is_corrupt()
+        {
+            using var tmp = new TempDirectory();
+            File.WriteAllText(Path.Combine(tmp.Path, "session.created"), "not-a-date");
+            Assert.Null(new SessionIdPersistence(tmp.Path).LoadSessionCreatedAt());
+        }
+
+        [Fact]
+        public void GetOrCreate_initialises_missing_session_created_on_recovery()
+        {
+            using var tmp = new TempDirectory();
+
+            // Simulate a session.id written by an older persistence without a companion timestamp.
+            var existingId = Guid.NewGuid().ToString();
+            File.WriteAllText(Path.Combine(tmp.Path, "session.id"), existingId);
+
+            var sut = new SessionIdPersistence(tmp.Path);
+            var resumed = sut.GetOrCreate();
+
+            Assert.Equal(existingId, resumed);
+            Assert.True(File.Exists(Path.Combine(tmp.Path, "session.created")));
+            Assert.NotNull(sut.LoadSessionCreatedAt());
+        }
+
+        [Fact]
+        public void SaveSessionCreatedAt_persists_utc_and_roundtrips()
+        {
+            using var tmp = new TempDirectory();
+            var sut = new SessionIdPersistence(tmp.Path);
+
+            var now = new DateTime(2026, 4, 21, 10, 0, 0, DateTimeKind.Utc);
+            sut.SaveSessionCreatedAt(now);
+
+            var loaded = sut.LoadSessionCreatedAt();
+            Assert.Equal(now, loaded);
+        }
+
+        [Fact]
+        public void SessionExists_reflects_session_id_presence()
+        {
+            using var tmp = new TempDirectory();
+            var sut = new SessionIdPersistence(tmp.Path);
+
+            Assert.False(sut.SessionExists());
+
+            sut.GetOrCreate();
+            Assert.True(sut.SessionExists());
+
+            sut.Delete();
+            Assert.False(sut.SessionExists());
+        }
+
+        [Fact]
+        public void IsWhiteGloveResume_returns_true_when_marker_present()
+        {
+            using var tmp = new TempDirectory();
+            var sut = new SessionIdPersistence(tmp.Path);
+
+            Assert.False(sut.IsWhiteGloveResume());
+
+            File.WriteAllText(Path.Combine(tmp.Path, "whiteglove.complete"), "1");
+            Assert.True(sut.IsWhiteGloveResume());
+        }
+
+        [Fact]
+        public void Delete_clears_session_id_created_timestamp_and_whiteglove_marker()
+        {
+            using var tmp = new TempDirectory();
+            var sut = new SessionIdPersistence(tmp.Path);
+            sut.GetOrCreate();
+            File.WriteAllText(Path.Combine(tmp.Path, "whiteglove.complete"), "1");
+
+            sut.Delete();
+
+            Assert.False(File.Exists(Path.Combine(tmp.Path, "session.id")));
+            Assert.False(File.Exists(Path.Combine(tmp.Path, "session.created")));
+            Assert.False(File.Exists(Path.Combine(tmp.Path, "whiteglove.complete")));
+        }
     }
 }
