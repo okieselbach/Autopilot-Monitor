@@ -112,6 +112,14 @@ tmpclaude-*-cwd
 scripts/Deployment/build_and_upload_debug_agent_build.ps1
 scripts/Deployment/build_and_upload_release_agent_build.ps1
 
+# V2 Deployment scripts (tokens + SAS URLs, analog to Legacy) — plan §4 M2
+scripts/Deployment/V2/
+
+# M2 — local raw session fixtures before anonymization (plan §4 M2)
+tests/fixtures/enrollment-sessions-local/*
+!tests/fixtures/enrollment-sessions-local/.gitkeep
+!tests/fixtures/enrollment-sessions-local/README.md
+
 
 .dotnet-home/
 .vscode/

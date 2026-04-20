@@ -1,0 +1,25 @@
+<Project>
+
+  <!--
+    V2 Isolation Guard — Plan §2.16 strict separation rule.
+
+    Enforces at build-time that AutopilotMonitor.Agent.V2.Core never depends on Legacy
+    AutopilotMonitor.Agent.Core or AutopilotMonitor.Agent. Runs BEFORE CoreCompile so
+    a violation fails the build immediately with a clear message.
+
+    Import this file from the V2.Core and V2 executable csproj files.
+  -->
+
+  <Target Name="V2IsolationGuard" BeforeTargets="CoreCompile">
+    <ItemGroup>
+      <_LegacyProjectRefs Include="@(ProjectReference)"
+                         Condition="
+                             $([System.String]::Copy('%(ProjectReference.Identity)').EndsWith('AutopilotMonitor.Agent.Core.csproj'))
+                          or $([System.String]::Copy('%(ProjectReference.Identity)').EndsWith('AutopilotMonitor.Agent.csproj'))" />
+    </ItemGroup>
+    <Error
+      Text="V2 Isolation violated: ProjectReference to Legacy project '%(_LegacyProjectRefs.Identity)' is forbidden (plan §2.16). Remove the reference; copy the needed code into V2.Core instead."
+      Condition="'@(_LegacyProjectRefs)' != ''" />
+  </Target>
+
+</Project>

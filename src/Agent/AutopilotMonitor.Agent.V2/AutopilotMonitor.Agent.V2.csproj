@@ -1,0 +1,65 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <RootNamespace>AutopilotMonitor.Agent.V2</RootNamespace>
+    <AssemblyName>AutopilotMonitor.Agent.V2</AssemblyName>
+
+    <!-- Version Configuration — Plan: 2.0.<buildcounter>, same format as Legacy, own counter file. -->
+    <VersionPrefix>2.0</VersionPrefix>
+
+    <BuildCounterFile>$(MSBuildProjectDirectory)\buildcounter.txt</BuildCounterFile>
+
+    <BuildNumber Condition="'$(BUILD_NUMBER)' != ''">$(BUILD_NUMBER)</BuildNumber>
+
+    <_CounterFromFile Condition="'$(BUILD_NUMBER)' == '' and Exists('$(BuildCounterFile)')">$([System.IO.File]::ReadAllText('$(BuildCounterFile)').Trim())</_CounterFromFile>
+    <_CounterFromFile Condition="'$(BUILD_NUMBER)' == '' and !Exists('$(BuildCounterFile)')">0</_CounterFromFile>
+    <BuildNumber Condition="'$(BUILD_NUMBER)' == ''">$([MSBuild]::Add($(_CounterFromFile), 1))</BuildNumber>
+
+    <Version>$(VersionPrefix).$(BuildNumber)</Version>
+    <AssemblyVersion>$(VersionPrefix).$(BuildNumber)</AssemblyVersion>
+    <FileVersion>$(VersionPrefix).$(BuildNumber)</FileVersion>
+    <InformationalVersion>$(Version)</InformationalVersion>
+
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+  </PropertyGroup>
+
+  <Target Name="PersistBuildCounter" BeforeTargets="BeforeBuild" Condition="'$(BUILD_NUMBER)' == ''">
+    <WriteLinesToFile File="$(BuildCounterFile)" Lines="$(BuildNumber)" Overwrite="true" />
+    <Message Text="V2 Build version: $(Version) (counter persisted)" Importance="high" />
+  </Target>
+
+  <!-- Generate version-v2.json — separate namespace from legacy version.json (plan M2 §2.16). -->
+  <Target Name="GenerateVersionJson" AfterTargets="Build">
+    <WriteLinesToFile
+      File="$(OutputPath)version-v2.json"
+      Lines='{ "version": "$(Version)" }'
+      Overwrite="true" />
+    <Message Text="Generated version-v2.json: $(Version)" Importance="high" />
+  </Target>
+
+  <ItemGroup>
+    <Reference Include="System.Net.Http" />
+  </ItemGroup>
+
+  <!--
+    Plan §2.16 STRICT RULE: references ONLY Shared + DecisionCore + V2.Core.
+    NEVER AutopilotMonitor.Agent.Core or AutopilotMonitor.Agent. Verified by CI grep.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\AutopilotMonitor.Agent.V2.Core\AutopilotMonitor.Agent.V2.Core.csproj" />
+    <ProjectReference Include="..\..\Shared\AutopilotMonitor.Shared\AutopilotMonitor.Shared.csproj" />
+    <ProjectReference Include="..\..\Shared\AutopilotMonitor.DecisionCore\AutopilotMonitor.DecisionCore.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
+  <!-- Plan §2.16 strict separation rule — build-time enforcement. -->
+  <Import Project="..\AutopilotMonitor.Agent.V2.Core\V2Isolation.targets" />
+
+</Project>
