@@ -122,6 +122,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
         public Action<ScriptExecutionState> OnScriptCompleted { get; set; }
 
         /// <summary>
+        /// Fires on every pattern match with the matched <c>PatternId</c>. Plan §4.x M4.4.4.
+        /// Invoked by <c>HandlePatternMatch</c> after <see cref="LastMatchedPatternId"/> is
+        /// set, before action-specific callbacks — callers can read <see cref="LastMatchedPatternId"/>
+        /// / <see cref="LastMatchedLogTimestamp"/> synchronously inside the handler.
+        /// Added to enable the <c>WhiteGloveSealingPatternDetected</c> signal path in
+        /// <c>ImeLogTrackerAdapter</c> without the legacy polling-on-LastMatchedPatternId anti-pattern.
+        /// </summary>
+        public Action<string> OnPatternMatched { get; set; }
+
+        /// <summary>
         /// Access to the tracked package states
         /// </summary>
         public AppPackageStateList PackageStates => _packageStates;

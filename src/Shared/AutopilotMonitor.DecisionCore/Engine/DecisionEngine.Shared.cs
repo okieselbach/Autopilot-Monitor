@@ -10,12 +10,21 @@ namespace AutopilotMonitor.DecisionCore.Engine
     public sealed partial class DecisionEngine
     {
         /// <summary>
-        /// Handle <see cref="DecisionSignalKind.SessionStarted"/>. Plan §2.7.
+        /// Handle <see cref="DecisionSignalKind.SessionStarted"/>. Plan §2.7 / §4.x M4.4.4.
         /// <para>
         /// For a fresh session this is the first signal and the state already equals
         /// <see cref="DecisionState.CreateInitial(string, string)"/>. The handler still runs
         /// through the pipeline so the start is recorded as a journal transition (step 0) —
         /// this anchors the Inspector timeline.
+        /// </para>
+        /// <para>
+        /// Also arms the <see cref="DeadlineNames.ClassifierTick"/> deadline up-front
+        /// (Plan §4.x M4.4 re-trigger-lücke fix): the legacy reactive arming in
+        /// <c>AttachWhiteGloveClassifierEffects</c> only fired on the first WG-relevant
+        /// signal, which meant non-WG or late-WG sessions never re-evaluated the classifier.
+        /// Arming from SessionStarted guarantees a periodic classifier pass; the existing
+        /// <c>hasTick</c> dedup in <c>AttachWhiteGloveClassifierEffects</c> makes the reactive
+        /// arm a no-op when a tick is already present.
         /// </para>
         /// <para>
         /// If the engine sees <c>SessionStarted</c> on a state whose stage is already
@@ -40,11 +49,16 @@ namespace AutopilotMonitor.DecisionCore.Engine
                     Array.Empty<DecisionEffect>());
             }
 
+            // Arm ClassifierTick up-front so the White-Glove classifier re-evaluates
+            // periodically from the very start of the session — Plan §4.x M4.4.4.
+            var classifierTick = BuildClassifierTickDeadline(signal.OccurredAtUtc);
+
             // Stage stays SessionStarted; this transition is the "we saw the start" anchor.
             var newState = state.ToBuilder()
                 .WithStage(SessionStage.SessionStarted)
                 .WithStepIndex(state.StepIndex + 1)
                 .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal)
+                .AddDeadline(classifierTick)
                 .Build();
 
             var transition = BuildTakenTransition(
@@ -54,7 +68,12 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 nextStepIndex: newState.StepIndex,
                 trigger: nameof(DecisionSignalKind.SessionStarted));
 
-            return new DecisionStep(newState, transition, Array.Empty<DecisionEffect>());
+            var effects = new DecisionEffect[]
+            {
+                new DecisionEffect(DecisionEffectKind.ScheduleDeadline, deadline: classifierTick),
+            };
+
+            return new DecisionStep(newState, transition, effects);
         }
 
         /// <summary>

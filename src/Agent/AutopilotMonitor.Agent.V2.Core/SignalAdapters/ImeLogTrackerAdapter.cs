@@ -29,11 +29,11 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
     /// </list>
     /// </para>
     /// <para>
-    /// <b>Nicht Teil von M4.3.4:</b> <c>WhiteGloveSealingPatternDetected</c> — ImeLogTracker
-    /// hat aktuell keinen öffentlichen Pattern-Match-Hook; Re-Mapping via LastMatchedPatternId
-    /// braucht entweder Polling-Adapter oder Modifikation der Tracker-Action-Surface. Dokumentiert
-    /// als M4-Follow-Up; Reducer behandelt es derzeit korrekt auch ohne diesen Signal-Typ (alle
-    /// M3-Szenarien grün).
+    /// <b>WhiteGloveSealingPatternDetected</b> (M4.4.4, Plan §4.x): fired via the newly added
+    /// <c>ImeLogTracker.OnPatternMatched</c> hook. Orchestrator passes the configured set of
+    /// WG-sealing-Pattern-IDs; this adapter fires the signal at most once per session when any
+    /// of those IDs matches. Default empty collection = no emission (backwards-compatible with
+    /// the pre-M4.4.4 M3 behavior).
     /// </para>
     /// </summary>
     internal sealed class ImeLogTrackerAdapter : IDisposable
@@ -41,6 +41,7 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
         private readonly ImeLogTracker _tracker;
         private readonly ISignalIngressSink _ingress;
         private readonly IClock _clock;
+        private readonly HashSet<string> _whiteGloveSealingPatternIds;
         private readonly object _lock = new object();
 
         // Previous action-handlers — restored on Dispose so we don't leave a dead callback
@@ -48,25 +49,33 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
         private readonly Action<string>? _prevOnEspPhaseChanged;
         private readonly Action? _prevOnUserSessionCompleted;
         private readonly Action<AppPackageState, AppInstallationState, AppInstallationState>? _prevOnAppStateChanged;
+        private readonly Action<string>? _prevOnPatternMatched;
 
         // Our own delegate instances — stored once so Dispose can compare by reference.
         private readonly Action<string> _ourOnEspPhaseChanged;
         private readonly Action _ourOnUserSessionCompleted;
         private readonly Action<AppPackageState, AppInstallationState, AppInstallationState> _ourOnAppStateChanged;
+        private readonly Action<string> _ourOnPatternMatched;
 
         // Dedup state.
         private string? _lastEspPhase;
         private bool _userSessionCompletedPosted;
+        private bool _sealingPatternPosted;
         private readonly HashSet<string> _appsAlreadyPostedTerminal = new HashSet<string>(StringComparer.Ordinal);
 
         public ImeLogTrackerAdapter(
             ImeLogTracker tracker,
             ISignalIngressSink ingress,
-            IClock clock)
+            IClock clock,
+            IReadOnlyCollection<string>? whiteGloveSealingPatternIds = null)
         {
             _tracker = tracker ?? throw new ArgumentNullException(nameof(tracker));
             _ingress = ingress ?? throw new ArgumentNullException(nameof(ingress));
             _clock = clock ?? throw new ArgumentNullException(nameof(clock));
+
+            _whiteGloveSealingPatternIds = whiteGloveSealingPatternIds == null
+                ? new HashSet<string>(StringComparer.Ordinal)
+                : new HashSet<string>(whiteGloveSealingPatternIds, StringComparer.Ordinal);
 
             // Chain-preserve: save any previously-wired handlers and invoke them from our
             // dispatcher. Lets the orchestrator co-wire diagnostic callbacks (e.g. logging)
@@ -74,16 +83,19 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
             _prevOnEspPhaseChanged = _tracker.OnEspPhaseChanged;
             _prevOnUserSessionCompleted = _tracker.OnUserSessionCompleted;
             _prevOnAppStateChanged = _tracker.OnAppStateChanged;
+            _prevOnPatternMatched = _tracker.OnPatternMatched;
 
             // Store our delegate instances once — implicit method-group conversions
             // create a new delegate each time, which would break Dispose's reference check.
             _ourOnEspPhaseChanged = OnEspPhaseChanged;
             _ourOnUserSessionCompleted = OnUserSessionCompleted;
             _ourOnAppStateChanged = OnAppStateChanged;
+            _ourOnPatternMatched = OnPatternMatched;
 
             _tracker.OnEspPhaseChanged = _ourOnEspPhaseChanged;
             _tracker.OnUserSessionCompleted = _ourOnUserSessionCompleted;
             _tracker.OnAppStateChanged = _ourOnAppStateChanged;
+            _tracker.OnPatternMatched = _ourOnPatternMatched;
         }
 
         public void Dispose()
@@ -96,6 +108,8 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
                 _tracker.OnUserSessionCompleted = _prevOnUserSessionCompleted;
             if (ReferenceEquals(_tracker.OnAppStateChanged, _ourOnAppStateChanged))
                 _tracker.OnAppStateChanged = _prevOnAppStateChanged;
+            if (ReferenceEquals(_tracker.OnPatternMatched, _ourOnPatternMatched))
+                _tracker.OnPatternMatched = _prevOnPatternMatched;
         }
 
         private void OnEspPhaseChanged(string phase)
@@ -116,10 +130,17 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
             EmitAppState(app, oldState, newState);
         }
 
+        private void OnPatternMatched(string patternId)
+        {
+            _prevOnPatternMatched?.Invoke(patternId);
+            MaybeEmitWhiteGloveSealingPattern(patternId);
+        }
+
         internal void TriggerEspPhaseFromTest(string phase) => EmitEspPhase(phase);
         internal void TriggerUserSessionCompletedFromTest() => EmitUserSessionCompleted();
         internal void TriggerAppStateFromTest(AppPackageState app, AppInstallationState oldState, AppInstallationState newState) =>
             EmitAppState(app, oldState, newState);
+        internal void TriggerPatternMatchedFromTest(string patternId) => MaybeEmitWhiteGloveSealingPattern(patternId);
 
         private void EmitEspPhase(string phase)
         {
@@ -209,6 +230,37 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
                 {
                     ["appId"] = app.Id,
                     ["newState"] = newState.ToString(),
+                });
+        }
+
+        private void MaybeEmitWhiteGloveSealingPattern(string patternId)
+        {
+            if (string.IsNullOrEmpty(patternId)) return;
+            if (_whiteGloveSealingPatternIds.Count == 0) return;   // No configured IDs — no emit.
+            if (!_whiteGloveSealingPatternIds.Contains(patternId)) return;
+
+            lock (_lock)
+            {
+                if (_sealingPatternPosted) return;
+                _sealingPatternPosted = true;
+            }
+
+            _ingress.Post(
+                kind: DecisionSignalKind.WhiteGloveSealingPatternDetected,
+                occurredAtUtc: _clock.UtcNow,
+                sourceOrigin: "ImeLogTracker",
+                evidence: new Evidence(
+                    kind: EvidenceKind.Derived,
+                    identifier: "ime-log-tracker-v1",
+                    summary: $"WG sealing pattern match → {patternId}",
+                    derivationInputs: new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["detectionSource"] = "IME log regex pattern (WG-sealing set)",
+                        [SignalPayloadKeys.ImePatternId] = patternId,
+                    }),
+                payload: new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    [SignalPayloadKeys.ImePatternId] = patternId,
                 });
         }
 

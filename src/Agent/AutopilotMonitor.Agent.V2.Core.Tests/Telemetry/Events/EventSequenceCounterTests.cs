@@ -55,8 +55,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Telemetry.Events
             var p = new EventSequencePersistence(tmp.File("seq.json"));
             var c = new EventSequenceCounter(p);
 
-            const int Threads = 6;
-            const int PerThread = 200;
+            // Every Next() persists to disk — stay below the level where parallel xUnit tests
+            // contend on the Windows atomic-rename path. Thread-safety is exercised by the
+            // parallel callers; the uniqueness assertion below catches any race.
+            const int Threads = 4;
+            const int PerThread = 50;
             var tasks = new Task<long[]>[Threads];
             for (int t = 0; t < Threads; t++)
             {

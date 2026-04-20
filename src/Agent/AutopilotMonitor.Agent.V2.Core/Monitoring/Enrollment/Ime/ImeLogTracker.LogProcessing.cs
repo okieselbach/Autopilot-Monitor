@@ -164,6 +164,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
         {
             LastMatchedPatternId = pattern.PatternId;
             LastMatchedLogTimestamp = entry?.Timestamp;
+
+            // Generic pattern-match hook (M4.4.4). Invoked before action-specific callbacks so
+            // subscribers (e.g. ImeLogTrackerAdapter emitting WhiteGloveSealingPatternDetected)
+            // see the match with LastMatchedPatternId already set. Wrapped to isolate subscriber
+            // exceptions from the action-dispatch that follows.
+            try { OnPatternMatched?.Invoke(pattern.PatternId); }
+            catch (Exception ex) { _logger?.Warning($"OnPatternMatched handler threw: {ex.Message}"); }
+
             try
             {
                 var id = match.Groups["id"]?.Value;

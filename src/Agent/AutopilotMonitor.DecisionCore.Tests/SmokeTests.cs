@@ -89,7 +89,10 @@ namespace AutopilotMonitor.DecisionCore.Tests
             Assert.True(step.Transition.Taken);
             Assert.Equal("SessionStarted", step.Transition.Trigger);
             Assert.Null(step.Transition.DeadEndReason);
-            Assert.Empty(step.Effects);
+            // M4.4.4: SessionStarted arms the ClassifierTick deadline up-front.
+            Assert.Single(step.Effects);
+            Assert.Equal(DecisionEffectKind.ScheduleDeadline, step.Effects[0].Kind);
+            Assert.Equal(DeadlineNames.ClassifierTick, step.Effects[0].Deadline!.Name);
         }
 
         [Fact]

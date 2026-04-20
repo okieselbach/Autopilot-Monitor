@@ -92,18 +92,16 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
         internal void TriggerDeviceSetupCompleteFromTest() => EmitDeviceSetupComplete();
 
         /// <summary>
-        /// Reads <c>HelloOutcome</c> via reflection-free forwarded property if the coordinator
-        /// exposes it. The legacy-copy coordinator forwards via its underlying HelloTracker.
-        /// Falls back to "unknown" if not exposed.
+        /// Reads <c>HelloOutcome</c> from the coordinator's forwarded property
+        /// (<see cref="EspAndHelloTracker.HelloOutcome"/> delegates to the inner
+        /// <c>HelloTracker.HelloOutcome</c>). Plan §4.x M4.4.4. Falls back to
+        /// <c>"unknown"</c> only if the coordinator hasn't resolved Hello yet (race between
+        /// completion event and property read — should not happen in practice, but defensive).
         /// </summary>
-        private string ReadHelloOutcome()
-        {
-            // EspAndHelloTracker does not directly expose HelloOutcome as a property in the
-            // copied surface. For M4.3.5 the coordinator-wiring test simulates the outcome via
-            // the test-trigger; in production M4.4 the orchestrator will forward the outcome
-            // via a different path (e.g., reading the forwarded HelloTracker state).
-            return "unknown";
-        }
+        private string ReadHelloOutcome() => _coordinator.HelloOutcome ?? "unknown";
+
+        /// <summary>Test-only hook to exercise <see cref="ReadHelloOutcome"/> + the full event-handler emit path without driving the inner HelloTracker's live event sources.</summary>
+        internal void TriggerHelloFromCoordinatorPropertyForTest() => EmitHello(ReadHelloOutcome());
 
         private void EmitHello(string? helloOutcome)
         {
