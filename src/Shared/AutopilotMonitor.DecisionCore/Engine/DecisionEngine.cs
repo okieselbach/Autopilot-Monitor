@@ -59,8 +59,17 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 (DecisionSignalKind.SessionStarted, 1)   => HandleSessionStartedV1(state, signal),
                 (DecisionSignalKind.SessionRecovered, 1) => HandleSessionRecoveredV1(state, signal),
                 (DecisionSignalKind.SessionAborted, 1)   => HandleSessionAbortedV1(state, signal),
+                (DecisionSignalKind.DeadlineFired, 1)    => HandleDeadlineFiredV1(state, signal),
 
-                // ----- All other kinds (M3.1+) — fall through to Unhandled for M3.0 scope. -----
+                // ----- Classic UserDriven-v1 (DecisionEngine.Classic.cs) -----
+                (DecisionSignalKind.EspPhaseChanged, 1)          => HandleEspPhaseChangedV1(state, signal),
+                (DecisionSignalKind.EspExiting, 1)               => HandleEspExitingV1(state, signal),
+                (DecisionSignalKind.HelloResolved, 1)            => HandleHelloResolvedV1(state, signal),
+                (DecisionSignalKind.DesktopArrived, 1)           => HandleDesktopArrivedV1(state, signal),
+                (DecisionSignalKind.ImeUserSessionCompleted, 1)  => HandleImeUserSessionCompletedV1(state, signal),
+                (DecisionSignalKind.AadUserJoinedLate, 1)        => HandleAadUserJoinedLateV1(state, signal),
+
+                // ----- Not yet wired (SelfDeploying in M3.2, WhiteGlove in M3.3/M3.4, …) -----
                 _ => HandleUnhandledSignal(state, signal),
             };
         }

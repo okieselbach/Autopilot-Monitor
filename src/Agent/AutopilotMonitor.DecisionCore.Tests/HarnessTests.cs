@@ -87,16 +87,17 @@ namespace AutopilotMonitor.DecisionCore.Tests
         public void Replay_unknownSignalKind_recordsDeadEnd_stateUnchanged()
         {
             // An unhandled signal advances bookkeeping but leaves stage/outcome alone
-            // and records a DeadEndReason — plan §2.5 fail-safe shape for M3.0 non-handlers.
+            // and records a DeadEndReason — plan §2.5 fail-safe shape for non-handlers.
+            // WhiteGloveShellCoreSuccess is unhandled until M3.3.
             var harness = new ReplayHarness(new DecisionEngine());
             var signal = new DecisionSignal(
                 sessionSignalOrdinal: 0,
                 sessionTraceOrdinal: 0,
-                kind: DecisionSignalKind.EspPhaseChanged, // not wired until M3.1
+                kind: DecisionSignalKind.WhiteGloveShellCoreSuccess,
                 kindSchemaVersion: 1,
                 occurredAtUtc: DateTime.UtcNow,
                 sourceOrigin: "harness",
-                evidence: new Evidence(EvidenceKind.Raw, "ESP:test", "test"));
+                evidence: new Evidence(EvidenceKind.Raw, "WG:test", "test"));
 
             var result = harness.Replay("s", "t", new List<DecisionSignal> { signal });
 

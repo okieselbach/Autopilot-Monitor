@@ -57,14 +57,16 @@ namespace AutopilotMonitor.DecisionCore.Tests
         [Fact]
         public void Reduce_unhandledKind_producesDeadEnd_withVersionedReason()
         {
+            // Pick a kind that no sub-milestone has wired yet. WhiteGloveShellCoreSuccess
+            // comes online in M3.3 — update this test then.
             var engine = new DecisionEngine();
             var state = DecisionState.CreateInitial("s", "t");
-            var signal = MakeSignal(DecisionSignalKind.EspPhaseChanged, schemaVersion: 1);
+            var signal = MakeSignal(DecisionSignalKind.WhiteGloveShellCoreSuccess, schemaVersion: 1);
 
             var step = engine.Reduce(state, signal);
 
             Assert.False(step.Transition.Taken);
-            Assert.Equal("unhandled_signal_kind:EspPhaseChanged:v1", step.Transition.DeadEndReason);
+            Assert.Equal("unhandled_signal_kind:WhiteGloveShellCoreSuccess:v1", step.Transition.DeadEndReason);
             Assert.Equal(SessionStage.SessionStarted, step.NewState.Stage);
             Assert.Equal(1, step.NewState.StepIndex);
         }
