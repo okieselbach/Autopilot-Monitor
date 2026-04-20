@@ -33,6 +33,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AutopilotMonitor.Agent.V2.C
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AutopilotMonitor.DecisionCore.Tests", "src\Agent\AutopilotMonitor.DecisionCore.Tests\AutopilotMonitor.DecisionCore.Tests.csproj", "{11B36E5C-B512-4D1E-A76B-E5AD866B033C}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AutopilotMonitor.Agent.V2.Core.Tests", "src\Agent\AutopilotMonitor.Agent.V2.Core.Tests\AutopilotMonitor.Agent.V2.Core.Tests.csproj", "{95A09BF0-4E22-41D9-9B43-8D6ECC2C8AD0}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -175,6 +177,18 @@ Global
 		{11B36E5C-B512-4D1E-A76B-E5AD866B033C}.Release|x64.Build.0 = Release|Any CPU
 		{11B36E5C-B512-4D1E-A76B-E5AD866B033C}.Release|x86.ActiveCfg = Release|Any CPU
 		{11B36E5C-B512-4D1E-A76B-E5AD866B033C}.Release|x86.Build.0 = Release|Any CPU
+		{95A09BF0-4E22-41D9-9B43-8D6ECC2C8AD0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{95A09BF0-4E22-41D9-9B43-8D6ECC2C8AD0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{95A09BF0-4E22-41D9-9B43-8D6ECC2C8AD0}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{95A09BF0-4E22-41D9-9B43-8D6ECC2C8AD0}.Debug|x64.Build.0 = Debug|Any CPU
+		{95A09BF0-4E22-41D9-9B43-8D6ECC2C8AD0}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{95A09BF0-4E22-41D9-9B43-8D6ECC2C8AD0}.Debug|x86.Build.0 = Debug|Any CPU
+		{95A09BF0-4E22-41D9-9B43-8D6ECC2C8AD0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{95A09BF0-4E22-41D9-9B43-8D6ECC2C8AD0}.Release|Any CPU.Build.0 = Release|Any CPU
+		{95A09BF0-4E22-41D9-9B43-8D6ECC2C8AD0}.Release|x64.ActiveCfg = Release|Any CPU
+		{95A09BF0-4E22-41D9-9B43-8D6ECC2C8AD0}.Release|x64.Build.0 = Release|Any CPU
+		{95A09BF0-4E22-41D9-9B43-8D6ECC2C8AD0}.Release|x86.ActiveCfg = Release|Any CPU
+		{95A09BF0-4E22-41D9-9B43-8D6ECC2C8AD0}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -194,5 +208,6 @@ Global
 		{F9DCEFA0-127B-4E3F-BF52-4680DB4CA054} = {096B6098-F141-7114-B090-72D1899D8853}
 		{22CB0E75-793A-4FC9-ADE4-48580BCE6321} = {096B6098-F141-7114-B090-72D1899D8853}
 		{11B36E5C-B512-4D1E-A76B-E5AD866B033C} = {096B6098-F141-7114-B090-72D1899D8853}
+		{95A09BF0-4E22-41D9-9B43-8D6ECC2C8AD0} = {096B6098-F141-7114-B090-72D1899D8853}
 	EndGlobalSection
 EndGlobal
