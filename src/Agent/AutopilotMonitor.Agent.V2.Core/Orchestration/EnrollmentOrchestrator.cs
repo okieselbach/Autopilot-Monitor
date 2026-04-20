@@ -71,6 +71,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         private readonly IBackendTelemetryUploader _uploader;
         private readonly IReadOnlyList<IClassifier> _classifiers;
         private readonly IComponentFactory? _componentFactory;
+        private readonly IReadOnlyCollection<string> _whiteGloveSealingPatternIds;
         private readonly int _channelCapacity;
         private readonly int _quarantineThreshold;
         private readonly TimeSpan _drainInterval;
@@ -122,6 +123,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             IBackendTelemetryUploader uploader,
             IEnumerable<IClassifier> classifiers,
             IComponentFactory? componentFactory = null,
+            IReadOnlyCollection<string>? whiteGloveSealingPatternIds = null,
             int channelCapacity = SignalIngress.DefaultChannelCapacity,
             int quarantineThreshold = DecisionStepProcessor.DefaultQuarantineThreshold,
             TimeSpan? drainInterval = null,
@@ -149,6 +151,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             }
             _classifiers = list;
             _componentFactory = componentFactory;
+            _whiteGloveSealingPatternIds = whiteGloveSealingPatternIds ?? Array.Empty<string>();
 
             _channelCapacity = channelCapacity;
             _quarantineThreshold = quarantineThreshold;
@@ -278,7 +281,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             if (_componentFactory != null)
             {
                 var safeSink = BuildTelemetryEventSink();
-                _collectorHosts = _componentFactory.CreateCollectorHosts(_sessionId, _tenantId, _logger, safeSink);
+                _collectorHosts = _componentFactory.CreateCollectorHosts(
+                    _sessionId, _tenantId, _logger, safeSink, _whiteGloveSealingPatternIds);
                 foreach (var host in _collectorHosts)
                 {
                     try

@@ -54,13 +54,17 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
                     : hostNames;
             }
 
+            public IReadOnlyCollection<string>? CapturedWhiteGloveSealingPatternIds { get; private set; }
+
             public IReadOnlyList<ICollectorHost> CreateCollectorHosts(
                 string sessionId,
                 string tenantId,
                 AgentLogger logger,
-                Action<EnrollmentEvent> onEnrollmentEvent)
+                Action<EnrollmentEvent> onEnrollmentEvent,
+                IReadOnlyCollection<string> whiteGloveSealingPatternIds)
             {
                 CapturedSink = onEnrollmentEvent;
+                CapturedWhiteGloveSealingPatternIds = whiteGloveSealingPatternIds;
                 foreach (var name in HostNames)
                 {
                     Hosts.Add(new FakeCollectorHost(name, onEnrollmentEvent));

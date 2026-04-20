@@ -30,11 +30,17 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         /// <see cref="Telemetry.Events.TelemetryEventEmitter.Emit"/>).
         /// Exceptions im Callback darf die Factory NICHT weiterreichen — der Orchestrator
         /// wrappt das mit einem Exception-Swallow, damit ein Collector-Thread nicht stirbt.
+        /// <para>
+        /// <paramref name="whiteGloveSealingPatternIds"/> wird an den <c>ImeLogTrackerAdapter</c>
+        /// durchgereicht (Sealing-Emission fire-once nur für diese Pattern-IDs). Leer / null
+        /// = Feature off, M3-kompatibel. Plan §4.x M4.4.5.e.
+        /// </para>
         /// </summary>
         IReadOnlyList<ICollectorHost> CreateCollectorHosts(
             string sessionId,
             string tenantId,
             AgentLogger logger,
-            Action<EnrollmentEvent> onEnrollmentEvent);
+            Action<EnrollmentEvent> onEnrollmentEvent,
+            IReadOnlyCollection<string> whiteGloveSealingPatternIds);
     }
 }
