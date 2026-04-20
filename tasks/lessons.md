@@ -6,6 +6,9 @@
 
 <!-- Pattern: What went wrong → What to do instead -->
 
+### META: Keine Behauptung/Entscheidung ohne Evidenz (gilt immer)
+Grep-Matches, Pfad-Namen, Explore-Agent-Reports, Plan-Doc-Einträge sind TRIAGE, nicht Evidenz. Vor jeder Aussage über Code/Daten und vor jeder Delete/Refactor/Classify-Entscheidung: die relevante Stelle tatsächlich gelesen haben. **Im Zweifel: ganze Datei lesen** — eine `Read`-Aktion dauert wenige Sekunden mehr und verhindert falsche Aussagen. Details: [feedback_no_assumption_without_evidence.md](C:/Users/OliverKieselbach/.claude/projects/c--Code-GitHubRepos-Autopilot-Monitor/memory/feedback_no_assumption_without_evidence.md).
+
 ## Code Style
 
 ## Architecture
