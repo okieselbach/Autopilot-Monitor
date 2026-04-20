@@ -109,9 +109,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         private int _stopRequested;
         private int _disposed;
 
-        // Quarantine flag — M4.4.5.f reads this on next start.
+        // Quarantine flag — set mid-run, read on next start.
         private bool _quarantineRequested;
         private string? _quarantineReason;
+
+        // Recovery flags (populated during Start()).
+        private bool _isWhiteGlovePart2Resume;
+        private bool _wasStartupQuarantine;
 
         public EnrollmentOrchestrator(
             string sessionId,
@@ -171,6 +175,20 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         /// <summary>Letzter Quarantine-Reason oder <c>null</c>.</summary>
         public string? QuarantineReason => _quarantineReason;
 
+        /// <summary>
+        /// <c>true</c> wenn der Start mit einem persistierten <c>WhiteGloveSealed</c>-State
+        /// gelaufen ist und die Part-2-Bridge via <c>SessionRecovered</c>-Signal gezündet wurde.
+        /// Plan §2.7 Sonderfall 1.
+        /// </summary>
+        public bool IsWhiteGlovePart2Resume => _isWhiteGlovePart2Resume;
+
+        /// <summary>
+        /// <c>true</c> wenn der Start auf einen korrupten State-Segment traf und
+        /// Snapshot + Log-Segmente nach <c>.quarantine/{ts}/</c> bewegt wurden.
+        /// Plan §2.7 Sonderfall 2.
+        /// </summary>
+        public bool WasStartupQuarantine => _wasStartupQuarantine;
+
         /// <summary>Exposed für Sub-c-Wiring (SignalAdapters + Collector-Callbacks).</summary>
         public ISignalIngressSink IngressSink =>
             (ISignalIngressSink?)_ingress ?? throw new InvalidOperationException("Orchestrator not started.");
@@ -195,22 +213,61 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
 
             EnsureDirectories();
 
-            // 1) Persistenz.
+            // 1) Persistenz. Writer scannen bestehende Files im Ctor (LastOrdinal / LastStepIndex).
+            var snapshotPath = Path.Combine(_stateDirectory, "snapshot.json");
             _signalLog = new SignalLogWriter(Path.Combine(_stateDirectory, "signal-log.jsonl"));
             _journal = new JournalWriter(Path.Combine(_stateDirectory, "journal.jsonl"));
-            _snapshot = new SnapshotPersistence(Path.Combine(_stateDirectory, "snapshot.json"), () => _clock.UtcNow);
+            _snapshot = new SnapshotPersistence(snapshotPath, () => _clock.UtcNow);
             _eventSequencePersistence = new EventSequencePersistence(Path.Combine(_stateDirectory, "event-sequence.json"));
 
-            // 2) Initial state — Recovery-Vorstufe. Sub-f macht Checksum/Replay-Handling rund.
-            var initialState = _snapshot.Load();
-            if (initialState == null)
+            // 2) Recovery (Plan §2.7 Sonderfälle 1+2).
+            var snapshotFileExistsPreLoad = File.Exists(snapshotPath);
+            var loadedState = _snapshot.Load();
+            DecisionState initialState;
+
+            if (loadedState == null && snapshotFileExistsPreLoad)
+            {
+                // Sonderfall 2: Snapshot-File existiert, Load lieferte null → Checksum-Mismatch
+                // oder Deserialize-Failure. Plan §2.7c: Snapshot ist Cache, nicht Wahrheit —
+                // Snapshot + Log-Segmente in Quarantäne, frisch starten.
+                _logger.Error(
+                    "EnrollmentOrchestrator: snapshot present but Load returned null (checksum mismatch or parse error) — quarantining state.");
+                const string reason = "checksum-mismatch-on-startup";
+                _snapshot.Quarantine(reason);
+                SegmentQuarantine.QuarantineAll(_stateDirectory, reason, () => _clock.UtcNow);
+
+                // Writer halten Pfade, nicht Handles — aber ihre in-memory Counter (LastOrdinal,
+                // LastStepIndex) sind jetzt stale gegenüber den entfernten Files. Recreate, damit
+                // Counter bei -1 starten.
+                _signalLog = new SignalLogWriter(Path.Combine(_stateDirectory, "signal-log.jsonl"));
+                _journal = new JournalWriter(Path.Combine(_stateDirectory, "journal.jsonl"));
+                _eventSequencePersistence = new EventSequencePersistence(Path.Combine(_stateDirectory, "event-sequence.json"));
+
+                initialState = DecisionState.CreateInitial(_sessionId, _tenantId);
+                _wasStartupQuarantine = true;
+            }
+            else if (loadedState != null)
+            {
+                initialState = loadedState;
+                _logger.Info(
+                    $"EnrollmentOrchestrator: recovered state from snapshot (stage={loadedState.Stage}, stepIndex={loadedState.StepIndex}).");
+            }
+            else
             {
                 initialState = DecisionState.CreateInitial(_sessionId, _tenantId);
                 _logger.Info($"EnrollmentOrchestrator: fresh initial state for session {_sessionId}.");
             }
-            else
+
+            // Sonderfall 1 Detection: WG Part 1 -> Reboot -> Part 2 Resume.
+            // Self-destruct bleibt AUS (Caller ist zuständig — die Info wird via
+            // IsWhiteGlovePart2Resume exponiert); Session-Recovered-Signal wird gepostet
+            // nachdem Ingress gestartet ist.
+            if (initialState.Stage == SessionStage.WhiteGloveSealed)
             {
-                _logger.Info($"EnrollmentOrchestrator: recovered state from snapshot (stage={initialState.Stage}, stepIndex={initialState.StepIndex}).");
+                _isWhiteGlovePart2Resume = true;
+                _logger.Info(
+                    "EnrollmentOrchestrator: White-Glove Part-1 resume detected — SessionRecovered signal " +
+                    "will be posted after ingress start; self-destruct handling is caller-owned.");
             }
 
             // 3) Telemetry-Transport.
@@ -274,6 +331,34 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
 
             // 13) Ingress-Worker starten (vor Collectors — sonst race-prone).
             _ingress.Start();
+
+            // 13a) Recovery Sonderfall 1: WG Part-1 → Part-2 bridge zünden. Das Signal muss
+            //      nach _ingress.Start laufen, aber VOR Collectors/Adapters — so sieht der
+            //      Reducer-Worker zuerst die Bridge-Transition (WhiteGloveSealed → AwaitingUserSignIn)
+            //      und erst danach kommende Real-Signals.
+            if (_isWhiteGlovePart2Resume)
+            {
+                try
+                {
+                    _ingress.Post(
+                        kind: DecisionSignalKind.SessionRecovered,
+                        occurredAtUtc: _clock.UtcNow,
+                        sourceOrigin: "EnrollmentOrchestrator",
+                        evidence: new Evidence(
+                            kind: EvidenceKind.Synthetic,
+                            identifier: "wg_part1_resume",
+                            summary: "White-Glove Part-1 state recovered from snapshot; Part-2 bridge triggered."),
+                        payload: new Dictionary<string, string>(StringComparer.Ordinal)
+                        {
+                            ["from"] = SessionStage.WhiteGloveSealed.ToString(),
+                            ["to"] = SessionStage.WhiteGloveAwaitingUserSignIn.ToString(),
+                        });
+                }
+                catch (Exception ex)
+                {
+                    _logger.Error("EnrollmentOrchestrator: failed to post SessionRecovered for WG Part-2 resume.", ex);
+                }
+            }
 
             // 14) Collector-Hosts via Factory — onEnrollmentEvent bridged Telemetry-Events
             //     an den zentralen TelemetryEventEmitter. Exception-Swallow damit ein
