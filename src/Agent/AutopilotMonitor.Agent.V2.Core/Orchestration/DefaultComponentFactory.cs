@@ -181,12 +181,67 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 hosts.Add(doHost);
             }
 
+            // M4.6.δ — Gather-rules runtime executor. Runs the backend-defined rules whose
+            // Trigger is "startup" once the agent is up; signal / event / periodic triggers
+            // remain supported inside the executor itself.
+            if (_remoteConfig.GatherRules != null && _remoteConfig.GatherRules.Count > 0)
+            {
+                hosts.Add(new GatherRuleExecutorHost(
+                    sessionId: sessionId,
+                    tenantId: tenantId,
+                    onEnrollmentEvent: onEnrollmentEvent,
+                    logger: logger,
+                    rules: _remoteConfig.GatherRules,
+                    imeLogPathOverride: _agentConfig.ImeLogPathOverride));
+            }
+
             return hosts;
         }
 
         // =====================================================================================
         // Hosts
         // =====================================================================================
+
+        private sealed class GatherRuleExecutorHost : ICollectorHost
+        {
+            public string Name => "GatherRuleExecutor";
+
+            private readonly Monitoring.Telemetry.Gather.GatherRuleExecutor _executor;
+            private readonly System.Collections.Generic.List<AutopilotMonitor.Shared.Models.GatherRule> _rules;
+            private readonly AgentLogger _logger;
+            private int _disposed;
+
+            public GatherRuleExecutorHost(
+                string sessionId,
+                string tenantId,
+                Action<EnrollmentEvent> onEnrollmentEvent,
+                AgentLogger logger,
+                System.Collections.Generic.List<AutopilotMonitor.Shared.Models.GatherRule> rules,
+                string? imeLogPathOverride)
+            {
+                _logger = logger;
+                _rules = rules ?? new System.Collections.Generic.List<AutopilotMonitor.Shared.Models.GatherRule>();
+                _executor = new Monitoring.Telemetry.Gather.GatherRuleExecutor(
+                    sessionId, tenantId, onEnrollmentEvent, logger, imeLogPathOverride);
+            }
+
+            public void Start()
+            {
+                _executor.UpdateRules(_rules);
+                _logger.Info($"GatherRuleExecutorHost: started with {_rules.Count} rule(s).");
+            }
+
+            public void Stop()
+            {
+                // GatherRuleExecutor is IDisposable; no explicit Stop. Rely on Dispose.
+            }
+
+            public void Dispose()
+            {
+                if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
+                try { _executor.Dispose(); } catch { }
+            }
+        }
 
         private sealed class EspAndHelloHost : ICollectorHost
         {

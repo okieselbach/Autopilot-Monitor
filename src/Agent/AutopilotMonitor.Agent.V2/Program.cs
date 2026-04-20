@@ -80,6 +80,19 @@ namespace AutopilotMonitor.Agent.V2
                 return RunInstallMode(args);
             }
 
+            // --run-gather-rules / --run-ime-matching: standalone diagnostic modes (M4.6.δ).
+            // They neither touch the Scheduled Task nor the live agent's spool — safe to run
+            // alongside a normal monitoring agent for troubleshooting.
+            if (args.Contains("--run-gather-rules"))
+            {
+                return RunGatherRulesMode(args);
+            }
+
+            if (args.Contains("--run-ime-matching"))
+            {
+                return RunImeMatchingMode(args);
+            }
+
             var consoleMode = args.Contains("--console") || Environment.UserInteractive;
 
             // Multi-instance guard — prevents a second agent process from running alongside one
@@ -389,6 +402,15 @@ namespace AutopilotMonitor.Agent.V2
             {
                 using (var shutdown = new ManualResetEventSlim(false))
                 {
+                    // M4.6.δ — Analyzer manager. Emits through the live orchestrator's event
+                    // emitter. RunStartup fires after orchestrator.Start; RunShutdown is wired
+                    // into the termination handler so it runs before diagnostics upload.
+                    var analyzerManager = new AgentAnalyzerManager(
+                        configuration: agentConfig,
+                        logger: logger,
+                        emitEvent: evt => { orchestrator.EventEmitter.Emit(evt); },
+                        analyzerConfig: remoteConfig.Analyzers);
+
                     // M4.6.β — the peripheral termination sequence (FinalStatus + SummaryDialog
                     // + diagnostics upload + enrollment-complete.marker + CleanupService) lives
                     // in Program.cs, not in the kernel. We compose it here and hook it onto the
@@ -402,7 +424,8 @@ namespace AutopilotMonitor.Agent.V2
                         packageStatesAccessor: () => componentFactory.ImePackageStates,
                         cleanupServiceFactory: () => new CleanupService(agentConfig, logger),
                         uploadDiagnosticsAsync: uploadDiagnosticsAsync,
-                        signalShutdown: () => shutdown.Set());
+                        signalShutdown: () => shutdown.Set(),
+                        analyzerManager: analyzerManager);
 
                     // ServerActionDispatcher — ready for M5 backend wiring. For now it has no
                     // ingest-response consumer (V2 BackendTelemetryUploader's batch endpoint is
@@ -462,6 +485,11 @@ namespace AutopilotMonitor.Agent.V2
                         // Emit the agent_version_check event now that the EventEmitter is alive.
                         // VersionCheckEventBuilder.TryBuild is a no-op when no markers are present.
                         EmitVersionCheckEventIfAny(orchestrator, agentConfig, logger);
+
+                        // M4.6.δ — fire-and-forget startup analyzers (LocalAdmin / SoftwareInventory /
+                        // IntegrityBypass). Runs on a background task inside AgentAnalyzerManager.
+                        try { analyzerManager.RunStartup(); }
+                        catch (Exception ex) { logger.Warning($"AnalyzerManager.RunStartup threw: {ex.Message}"); }
 
                         // M4.6.γ — fire-and-forget startup probes (geo / timezone / NTP). Runs on
                         // the ThreadPool so a slow network never delays the critical path.

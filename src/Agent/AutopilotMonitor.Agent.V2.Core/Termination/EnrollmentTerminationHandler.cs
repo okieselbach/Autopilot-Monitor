@@ -7,6 +7,7 @@ using AutopilotMonitor.Agent.V2.Core.Logging;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime;
 using AutopilotMonitor.Agent.V2.Core.Orchestration;
+using AutopilotMonitor.Agent.V2.Core.Runtime;
 using AutopilotMonitor.DecisionCore.State;
 using AutopilotMonitor.Shared;
 
@@ -48,6 +49,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
         private readonly Func<bool, string, Task<DiagnosticsUploadResult>> _uploadDiagnosticsAsync;
         private readonly Action _signalShutdown;
         private readonly string _dialogExePathOverride;
+        private readonly AgentAnalyzerManager _analyzerManager;
 
         private int _handled;
 
@@ -61,7 +63,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             Func<CleanupService> cleanupServiceFactory,
             Func<bool, string, Task<DiagnosticsUploadResult>> uploadDiagnosticsAsync,
             Action signalShutdown,
-            string dialogExePathOverride = null)
+            string dialogExePathOverride = null,
+            AgentAnalyzerManager analyzerManager = null)
         {
             _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -73,6 +76,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             _uploadDiagnosticsAsync = uploadDiagnosticsAsync ?? throw new ArgumentNullException(nameof(uploadDiagnosticsAsync));
             _signalShutdown = signalShutdown ?? throw new ArgumentNullException(nameof(signalShutdown));
             _dialogExePathOverride = dialogExePathOverride;
+            _analyzerManager = analyzerManager;
         }
 
         /// <summary>
@@ -88,6 +92,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
                     $"EnrollmentTerminationHandler: handling Terminated (reason={args.Reason}, outcome={args.Outcome}, stage={args.StageName}).");
 
                 var state = TryGetCurrentState();
+
+                // M4.6.δ — shutdown analyzers run BEFORE the dialog / diagnostics upload so
+                // their delta events make it into the final diagnostics ZIP. The
+                // AnalyzerManager is optional (null in tests where analyzers are out-of-scope).
+                RunShutdownAnalyzers(args);
+
                 if (state == null)
                 {
                     _logger.Warning("EnrollmentTerminationHandler: current state unavailable — skipping FinalStatus + SummaryDialog.");
@@ -129,6 +139,23 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             {
                 _logger.Warning($"EnrollmentTerminationHandler: package states accessor threw: {ex.Message}");
                 return null;
+            }
+        }
+
+        private void RunShutdownAnalyzers(EnrollmentTerminatedEventArgs args)
+        {
+            if (_analyzerManager == null) return;
+            try
+            {
+                // WhiteGlove Part 1 exit passes whiteGlovePart=1 so SoftwareInventoryAnalyzer
+                // takes a baseline snapshot rather than computing a pre/post delta (the user
+                // sign-in phase has not run yet; the real delta computes on Part-2 completion).
+                int? wgPart = args.StageName == SessionStage.WhiteGloveSealed.ToString() ? 1 : (int?)null;
+                _analyzerManager.RunShutdown(wgPart);
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"EnrollmentTerminationHandler: analyzer shutdown threw: {ex.Message}");
             }
         }
 
