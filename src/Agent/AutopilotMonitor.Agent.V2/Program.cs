@@ -10,6 +10,7 @@ using AutopilotMonitor.Agent.V2.Core.Logging;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Transport;
 using AutopilotMonitor.Agent.V2.Core.Orchestration;
+using AutopilotMonitor.Agent.V2.Core.Runtime;
 using AutopilotMonitor.Agent.V2.Core.Security;
 using AutopilotMonitor.Agent.V2.Core.Termination;
 using AutopilotMonitor.Agent.V2.Core.Transport.Telemetry;
@@ -259,7 +260,37 @@ namespace AutopilotMonitor.Agent.V2
                 logger: logger,
                 agentVersion: GetAgentVersion());
 
-            var remoteConfigService = new RemoteConfigService(backendApiClient, agentConfig.TenantId, logger);
+            // M4.6.γ — Emergency + Distress reporters. Plumbed into RemoteConfigService so
+            // Config-fetch failures (auth vs network) flow to the correct channel. Also fires
+            // an initial AuthCertificateMissing distress when the MDM cert was expected but
+            // not found (Legacy parity — surfaces pre-MDM-enrollment dead-ends to the backend
+            // via the cert-less distress channel).
+            var hardwareForReporters = HardwareInfo.GetHardwareInfo(logger);
+            var distressReporter = new DistressReporter(
+                baseUrl: agentConfig.ApiBaseUrl,
+                tenantId: agentConfig.TenantId,
+                manufacturer: hardwareForReporters.Manufacturer,
+                model: hardwareForReporters.Model,
+                serialNumber: hardwareForReporters.SerialNumber,
+                agentVersion: GetAgentVersion(),
+                logger: logger);
+
+            var emergencyReporter = new EmergencyReporter(
+                apiClient: backendApiClient,
+                sessionId: agentConfig.SessionId,
+                tenantId: agentConfig.TenantId,
+                agentVersion: GetAgentVersion(),
+                logger: logger);
+
+            if (agentConfig.UseClientCertAuth && backendApiClient.ClientCertificate == null)
+            {
+                _ = distressReporter.TrySendAsync(
+                    DistressErrorType.AuthCertificateMissing,
+                    "MDM certificate not found in LocalMachine or CurrentUser store");
+            }
+
+            var remoteConfigService = new RemoteConfigService(
+                backendApiClient, agentConfig.TenantId, logger, emergencyReporter, distressReporter);
             var remoteConfig = remoteConfigService.FetchConfigAsync().GetAwaiter().GetResult();
 
             logger.SetLogLevel(agentConfig.LogLevel);
@@ -299,14 +330,13 @@ namespace AutopilotMonitor.Agent.V2
 
             try
             {
-                var hardware = HardwareInfo.GetHardwareInfo(logger);
                 uploader = new BackendTelemetryUploader(
                     httpClient: mtlsHttpClient,
                     baseUrl: agentConfig.ApiBaseUrl,
                     tenantId: agentConfig.TenantId,
-                    manufacturer: hardware.Manufacturer,
-                    model: hardware.Model,
-                    serialNumber: hardware.SerialNumber,
+                    manufacturer: hardwareForReporters.Manufacturer,
+                    model: hardwareForReporters.Model,
+                    serialNumber: hardwareForReporters.SerialNumber,
                     bootstrapToken: agentConfig.UseBootstrapTokenAuth ? agentConfig.BootstrapToken : null,
                     agentVersion: GetAgentVersion());
             }
@@ -432,6 +462,22 @@ namespace AutopilotMonitor.Agent.V2
                         // Emit the agent_version_check event now that the EventEmitter is alive.
                         // VersionCheckEventBuilder.TryBuild is a no-op when no markers are present.
                         EmitVersionCheckEventIfAny(orchestrator, agentConfig, logger);
+
+                        // M4.6.γ — fire-and-forget startup probes (geo / timezone / NTP). Runs on
+                        // the ThreadPool so a slow network never delays the critical path.
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                await StartupEnvironmentProbes
+                                    .RunAsync(agentConfig, logger, orchestrator.EventEmitter)
+                                    .ConfigureAwait(false);
+                            }
+                            catch (Exception ex)
+                            {
+                                logger.Warning($"StartupEnvironmentProbes: outer exception: {ex.Message}");
+                            }
+                        });
 
                         logger.Info($"V2 agent runtime ready (session={agentConfig.SessionId}, tenant={agentConfig.TenantId}).");
                         if (consoleMode)

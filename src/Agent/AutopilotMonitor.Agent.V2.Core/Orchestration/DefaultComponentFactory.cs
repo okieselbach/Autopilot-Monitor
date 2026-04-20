@@ -166,6 +166,21 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                     _networkMetrics, _agentVersion, collectors.AgentSelfMetricsIntervalSeconds));
             }
 
+            // M4.6.γ — Delivery-Optimization telemetry. Dormant-by-default: only polls when the
+            // IME log tracker reports an app entering Downloading/Installing (see AppStateChanged
+            // chain below). Needs the IME tracker's PackageStates + OnDoTelemetryReceived hook.
+            if (collectors.EnableDeliveryOptimizationCollector && _imeLogHost != null)
+            {
+                var doHost = new DeliveryOptimizationHost(
+                    sessionId: sessionId,
+                    tenantId: tenantId,
+                    onEnrollmentEvent: onEnrollmentEvent,
+                    logger: logger,
+                    intervalSeconds: collectors.DeliveryOptimizationIntervalSeconds,
+                    imeHost: _imeLogHost);
+                hosts.Add(doHost);
+            }
+
             return hosts;
         }
 
@@ -287,9 +302,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
 
             /// <summary>
             /// Exposes the tracker's live package-state list for peripheral consumers
-            /// (M4.6.β <c>FinalStatusBuilder</c>).
+            /// (M4.6.β <c>FinalStatusBuilder</c>, M4.6.γ <c>DeliveryOptimizationHost</c>).
             /// </summary>
             public Monitoring.Enrollment.Ime.AppPackageStateList PackageStates => _tracker.PackageStates;
+
+            /// <summary>
+            /// Reference to the wrapped IME tracker for co-collector wiring. Used by
+            /// <c>DeliveryOptimizationHost</c> to set <c>OnDoTelemetryReceived</c> and to chain
+            /// <c>OnAppStateChanged</c> for dormant/wake-up transitions.
+            /// </summary>
+            internal Monitoring.Enrollment.Ime.ImeLogTracker Tracker => _tracker;
 
             public ImeLogHost(
                 string sessionId,
@@ -449,6 +471,81 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
 
             public void Start() => _collector.Start();
             public void Stop() => _collector.Stop();
+
+            public void Dispose()
+            {
+                if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
+                try { _collector.Dispose(); } catch { }
+            }
+        }
+
+        private sealed class DeliveryOptimizationHost : ICollectorHost
+        {
+            public string Name => "DeliveryOptimizationCollector";
+
+            private readonly DeliveryOptimizationCollector _collector;
+            private readonly ImeLogHost _imeHost;
+            private readonly AgentLogger _logger;
+            private Action<Monitoring.Enrollment.Ime.AppPackageState, Monitoring.Enrollment.Ime.AppInstallationState, Monitoring.Enrollment.Ime.AppInstallationState>? _prevStateChanged;
+            private int _disposed;
+
+            public DeliveryOptimizationHost(
+                string sessionId,
+                string tenantId,
+                Action<EnrollmentEvent> onEnrollmentEvent,
+                AgentLogger logger,
+                int intervalSeconds,
+                ImeLogHost imeHost)
+            {
+                _imeHost = imeHost;
+                _logger = logger;
+
+                _collector = new DeliveryOptimizationCollector(
+                    sessionId: sessionId,
+                    tenantId: tenantId,
+                    emitEvent: onEnrollmentEvent,
+                    logger: logger,
+                    intervalSeconds: intervalSeconds,
+                    getPackageStates: () => imeHost.PackageStates,
+                    onDoTelemetryReceived: pkg =>
+                    {
+                        try { imeHost.Tracker.OnDoTelemetryReceived?.Invoke(pkg); }
+                        catch (Exception ex) { logger.Warning($"DeliveryOptimizationHost: OnDoTelemetryReceived invocation threw: {ex.Message}"); }
+                    },
+                    logDirectory: Environment.ExpandEnvironmentVariables(Shared.Constants.LogDirectory));
+            }
+
+            public void Start()
+            {
+                // Chain ourselves into the tracker's OnAppStateChanged so the DO collector wakes
+                // up on the first Downloading/Installing transition (Legacy parity). We preserve
+                // any existing handler — the IME adapter's own listener must keep running.
+                _prevStateChanged = _imeHost.Tracker.OnAppStateChanged;
+                _imeHost.Tracker.OnAppStateChanged = (pkg, oldState, newState) =>
+                {
+                    try { _prevStateChanged?.Invoke(pkg, oldState, newState); }
+                    catch (Exception ex) { _logger.Warning($"DeliveryOptimizationHost: previous OnAppStateChanged handler threw: {ex.Message}"); }
+
+                    if (newState >= Monitoring.Enrollment.Ime.AppInstallationState.Downloading &&
+                        newState <= Monitoring.Enrollment.Ime.AppInstallationState.Installing)
+                    {
+                        try { _collector.WakeUp(); }
+                        catch (Exception ex) { _logger.Warning($"DeliveryOptimizationHost: WakeUp threw: {ex.Message}"); }
+                    }
+                };
+
+                _collector.Start();
+                _logger.Info($"DeliveryOptimizationHost: started dormant (interval={_collector}, wakes on Downloading/Installing).");
+            }
+
+            public void Stop()
+            {
+                // Restore the previous handler only if we're still the current one — otherwise
+                // someone else replaced us and owns the slot now.
+                if (object.ReferenceEquals(_imeHost.Tracker.OnAppStateChanged, _imeHost.Tracker.OnAppStateChanged))
+                    _imeHost.Tracker.OnAppStateChanged = _prevStateChanged;
+                _collector.Stop();
+            }
 
             public void Dispose()
             {
