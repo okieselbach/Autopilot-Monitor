@@ -40,6 +40,8 @@ namespace AutopilotMonitor.DecisionCore.State
             SignalFact<string>? helloOutcome,
             SignalFact<bool>? aadJoinedWithUser,
             SignalFact<string>? imeMatchedPatternId,
+            SignalFact<bool>? shellCoreWhiteGloveSuccessSeen,
+            SignalFact<bool>? whiteGloveSealingPatternSeen,
             IReadOnlyList<ActiveDeadline> deadlines,
             long lastAppliedSignalOrdinal,
             int stepIndex,
@@ -74,6 +76,8 @@ namespace AutopilotMonitor.DecisionCore.State
             HelloOutcome = helloOutcome;
             AadJoinedWithUser = aadJoinedWithUser;
             ImeMatchedPatternId = imeMatchedPatternId;
+            ShellCoreWhiteGloveSuccessSeen = shellCoreWhiteGloveSuccessSeen;
+            WhiteGloveSealingPatternSeen = whiteGloveSealingPatternSeen;
             Deadlines = deadlines ?? throw new ArgumentNullException(nameof(deadlines));
             LastAppliedSignalOrdinal = lastAppliedSignalOrdinal;
             StepIndex = stepIndex;
@@ -123,6 +127,12 @@ namespace AutopilotMonitor.DecisionCore.State
 
         public SignalFact<string>? ImeMatchedPatternId { get; }
 
+        /// <summary>True once <see cref="Signals.DecisionSignalKind.WhiteGloveShellCoreSuccess"/> has fired. WG Part-1 indicator.</summary>
+        public SignalFact<bool>? ShellCoreWhiteGloveSuccessSeen { get; }
+
+        /// <summary>True once <see cref="Signals.DecisionSignalKind.WhiteGloveSealingPatternDetected"/> has fired. Signal-correlated WG path.</summary>
+        public SignalFact<bool>? WhiteGloveSealingPatternSeen { get; }
+
         public IReadOnlyList<ActiveDeadline> Deadlines { get; }
 
         public long LastAppliedSignalOrdinal { get; }
@@ -163,6 +173,8 @@ namespace AutopilotMonitor.DecisionCore.State
                 helloOutcome: null,
                 aadJoinedWithUser: null,
                 imeMatchedPatternId: null,
+                shellCoreWhiteGloveSuccessSeen: null,
+                whiteGloveSealingPatternSeen: null,
                 deadlines: Array.Empty<ActiveDeadline>(),
                 lastAppliedSignalOrdinal: -1,
                 stepIndex: 0);

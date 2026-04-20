@@ -1,0 +1,13 @@
+# Scenario: WhiteGlove Part 1 — Signal-correlated (sealing-pattern + ShellCore together)
+# SealingPattern alone scores 40 (Weak). A subsequent ShellCoreWhiteGloveSuccess changes the
+# snapshot so the classifier re-runs (not anti-loop-skipped) and hits the confirmed threshold.
+# Between the two WG signals a ClassifierTick fires with no new facts — proves the tick is
+# safely idempotent under anti-loop.
+# Expected: Stage=WhiteGloveSealed after ShellCore step. Classifier runs twice (SealingPattern
+# then ShellCore); one ClassifierTick is anti-loop-skipped.
+# Plan: §4 M3.3 — WG-Signal-Correlated.
+{"SessionSignalOrdinal":0,"SessionTraceOrdinal":0,"Kind":"SessionStarted","KindSchemaVersion":1,"OccurredAtUtc":"2026-04-22T10:00:00Z","SourceOrigin":"orchestrator","Evidence":{"Kind":"Synthetic","Identifier":"session:wg-signal-correlated:started","Summary":"Session start anchor"}}
+{"SessionSignalOrdinal":1,"SessionTraceOrdinal":1,"Kind":"EspPhaseChanged","KindSchemaVersion":1,"OccurredAtUtc":"2026-04-22T10:01:00Z","SourceOrigin":"EspAndHelloTracker","Evidence":{"Kind":"Derived","Identifier":"esp-phase-detector-v1","Summary":"ESP phase=DeviceSetup","DerivationInputs":{"rawValue":"1"}},"Payload":{"phase":"DeviceSetup"}}
+{"SessionSignalOrdinal":2,"SessionTraceOrdinal":2,"Kind":"WhiteGloveSealingPatternDetected","KindSchemaVersion":1,"OccurredAtUtc":"2026-04-22T10:02:00Z","SourceOrigin":"ImeLogTracker","Evidence":{"Kind":"Derived","Identifier":"whiteglove-sealing-pattern-v1","Summary":"IME WG sealing pattern matched","DerivationInputs":{"patternId":"wg-sealing-v1","imeLogLineHash":"0xabcd"}}}
+{"SessionSignalOrdinal":3,"SessionTraceOrdinal":3,"Kind":"DeadlineFired","KindSchemaVersion":1,"OccurredAtUtc":"2026-04-22T10:02:30Z","SourceOrigin":"DeadlineScheduler","Evidence":{"Kind":"Synthetic","Identifier":"deadline:classifier_tick:fired:1","Summary":"Classifier tick fired (no snapshot change)"},"Payload":{"deadline":"classifier_tick"}}
+{"SessionSignalOrdinal":4,"SessionTraceOrdinal":4,"Kind":"WhiteGloveShellCoreSuccess","KindSchemaVersion":1,"OccurredAtUtc":"2026-04-22T10:05:00Z","SourceOrigin":"ShellCoreTracker","Evidence":{"Kind":"Raw","Identifier":"eventlog:Shell-Core:62407:recordId:201","Summary":"Shell Core white-glove success (Event 62407)","RawPointer":"blob://events/shell-core/201"}}

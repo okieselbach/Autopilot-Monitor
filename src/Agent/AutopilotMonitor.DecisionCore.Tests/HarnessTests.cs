@@ -88,16 +88,16 @@ namespace AutopilotMonitor.DecisionCore.Tests
         {
             // An unhandled signal advances bookkeeping but leaves stage/outcome alone
             // and records a DeadEndReason — plan §2.5 fail-safe shape for non-handlers.
-            // WhiteGloveShellCoreSuccess is unhandled until M3.3.
+            // AppInstallCompleted is scheduled for v11.1; still unhandled in M3.3.
             var harness = new ReplayHarness(new DecisionEngine());
             var signal = new DecisionSignal(
                 sessionSignalOrdinal: 0,
                 sessionTraceOrdinal: 0,
-                kind: DecisionSignalKind.WhiteGloveShellCoreSuccess,
+                kind: DecisionSignalKind.AppInstallCompleted,
                 kindSchemaVersion: 1,
                 occurredAtUtc: DateTime.UtcNow,
                 sourceOrigin: "harness",
-                evidence: new Evidence(EvidenceKind.Raw, "WG:test", "test"));
+                evidence: new Evidence(EvidenceKind.Raw, "App:test", "test"));
 
             var result = harness.Replay("s", "t", new List<DecisionSignal> { signal });
 

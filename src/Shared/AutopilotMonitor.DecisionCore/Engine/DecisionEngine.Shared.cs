@@ -154,6 +154,8 @@ namespace AutopilotMonitor.DecisionCore.Engine
                     return HandleHelloSafetyDeadlineFired(state, signal);
                 case DeadlineNames.DeviceOnlyEspDetection:
                     return HandleDeviceOnlyEspDetectionDeadlineFired(state, signal);
+                case DeadlineNames.ClassifierTick:
+                    return HandleClassifierTickDeadlineFired(state, signal);
                 default:
                     // Deadline name not recognized in this sub-milestone. Cancel it from state
                     // and record a neutral taken transition — M3.3+ adds handlers for

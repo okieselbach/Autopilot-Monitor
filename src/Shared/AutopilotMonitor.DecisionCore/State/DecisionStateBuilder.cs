@@ -38,6 +38,8 @@ namespace AutopilotMonitor.DecisionCore.State
             HelloOutcome = source.HelloOutcome;
             AadJoinedWithUser = source.AadJoinedWithUser;
             ImeMatchedPatternId = source.ImeMatchedPatternId;
+            ShellCoreWhiteGloveSuccessSeen = source.ShellCoreWhiteGloveSuccessSeen;
+            WhiteGloveSealingPatternSeen = source.WhiteGloveSealingPatternSeen;
             Deadlines = new List<ActiveDeadline>(source.Deadlines);
             LastAppliedSignalOrdinal = source.LastAppliedSignalOrdinal;
             StepIndex = source.StepIndex;
@@ -63,6 +65,8 @@ namespace AutopilotMonitor.DecisionCore.State
         public SignalFact<string>? HelloOutcome { get; set; }
         public SignalFact<bool>? AadJoinedWithUser { get; set; }
         public SignalFact<string>? ImeMatchedPatternId { get; set; }
+        public SignalFact<bool>? ShellCoreWhiteGloveSuccessSeen { get; set; }
+        public SignalFact<bool>? WhiteGloveSealingPatternSeen { get; set; }
         public List<ActiveDeadline> Deadlines { get; set; }
         public long LastAppliedSignalOrdinal { get; set; }
         public int StepIndex { get; set; }
@@ -130,6 +134,8 @@ namespace AutopilotMonitor.DecisionCore.State
                 helloOutcome: HelloOutcome,
                 aadJoinedWithUser: AadJoinedWithUser,
                 imeMatchedPatternId: ImeMatchedPatternId,
+                shellCoreWhiteGloveSuccessSeen: ShellCoreWhiteGloveSuccessSeen,
+                whiteGloveSealingPatternSeen: WhiteGloveSealingPatternSeen,
                 deadlines: Deadlines.ToArray(),
                 lastAppliedSignalOrdinal: LastAppliedSignalOrdinal,
                 stepIndex: StepIndex,

@@ -72,7 +72,12 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 // ----- SelfDeploying + Device-Only (DecisionEngine.SelfDeploying.cs) -----
                 (DecisionSignalKind.DeviceSetupProvisioningComplete, 1) => HandleDeviceSetupProvisioningCompleteV1(state, signal),
 
-                // ----- Not yet wired (WhiteGlove in M3.3/M3.4, …) -----
+                // ----- WhiteGlove Part 1 (DecisionEngine.WhiteGlove.cs) -----
+                (DecisionSignalKind.WhiteGloveShellCoreSuccess, 1)         => HandleWhiteGloveShellCoreSuccessV1(state, signal),
+                (DecisionSignalKind.WhiteGloveSealingPatternDetected, 1)   => HandleWhiteGloveSealingPatternDetectedV1(state, signal),
+                (DecisionSignalKind.ClassifierVerdictIssued, 1)            => HandleClassifierVerdictIssuedV1(state, signal),
+
+                // ----- Not yet wired (WhiteGlove Part 2 in M3.4, edge in M3.5) -----
                 _ => HandleUnhandledSignal(state, signal),
             };
         }
