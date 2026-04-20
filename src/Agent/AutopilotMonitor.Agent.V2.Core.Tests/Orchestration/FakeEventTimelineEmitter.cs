@@ -31,9 +31,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             return this;
         }
 
-        public void Emit(IReadOnlyDictionary<string, string>? parameters, DecisionState currentState)
+        public void Emit(IReadOnlyDictionary<string, string>? parameters, DecisionState currentState, DateTime occurredAtUtc)
         {
-            _calls.Add(new EmitCall(parameters, currentState));
+            _calls.Add(new EmitCall(parameters, currentState, occurredAtUtc));
 
             if (_throwScript.Count > 0)
             {
@@ -44,14 +44,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
 
         internal sealed class EmitCall
         {
-            public EmitCall(IReadOnlyDictionary<string, string>? parameters, DecisionState state)
+            public EmitCall(IReadOnlyDictionary<string, string>? parameters, DecisionState state, DateTime occurredAtUtc)
             {
                 Parameters = parameters;
                 State = state;
+                OccurredAtUtc = occurredAtUtc;
             }
 
             public IReadOnlyDictionary<string, string>? Parameters { get; }
             public DecisionState State { get; }
+            public DateTime OccurredAtUtc { get; }
         }
     }
 }
