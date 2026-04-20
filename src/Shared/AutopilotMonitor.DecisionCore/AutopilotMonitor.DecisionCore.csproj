@@ -19,6 +19,14 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Internal helpers (DeviceOnlyReasons etc.) are visible to the test assembly for
+         precise assertions; never exposed to consumers. -->
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>AutopilotMonitor.DecisionCore.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Plan §2.8 — Newtonsoft.Json on both sides (Agent net48 + Backend net8.0) for DecisionCore DTOs. -->
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>

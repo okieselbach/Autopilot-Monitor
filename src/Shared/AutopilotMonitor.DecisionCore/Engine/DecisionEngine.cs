@@ -69,7 +69,10 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 (DecisionSignalKind.ImeUserSessionCompleted, 1)  => HandleImeUserSessionCompletedV1(state, signal),
                 (DecisionSignalKind.AadUserJoinedLate, 1)        => HandleAadUserJoinedLateV1(state, signal),
 
-                // ----- Not yet wired (SelfDeploying in M3.2, WhiteGlove in M3.3/M3.4, …) -----
+                // ----- SelfDeploying + Device-Only (DecisionEngine.SelfDeploying.cs) -----
+                (DecisionSignalKind.DeviceSetupProvisioningComplete, 1) => HandleDeviceSetupProvisioningCompleteV1(state, signal),
+
+                // ----- Not yet wired (WhiteGlove in M3.3/M3.4, …) -----
                 _ => HandleUnhandledSignal(state, signal),
             };
         }

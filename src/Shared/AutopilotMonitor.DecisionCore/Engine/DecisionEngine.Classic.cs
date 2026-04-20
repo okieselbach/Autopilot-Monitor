@@ -68,6 +68,24 @@ namespace AutopilotMonitor.DecisionCore.Engine
                     lastUpdatedUtc: signal.OccurredAtUtc);
             }
 
+            // Device-Only ESP detection (plan §2.7): arm on first DeviceSetup, cancel on AccountSetup.
+            // See DecisionEngine.SelfDeploying.cs for the deadline-fired handler.
+            var effectsList = new List<DecisionEffect>();
+            if (enrollmentPhase == EnrollmentPhase.DeviceSetup &&
+                state.DeviceSetupEnteredUtc == null)
+            {
+                var devOnlyDl = BuildDeviceOnlyEspDetectionDeadline(signal.OccurredAtUtc);
+                builder.AddDeadline(devOnlyDl);
+                effectsList.Add(new DecisionEffect(DecisionEffectKind.ScheduleDeadline, deadline: devOnlyDl));
+            }
+            else if (enrollmentPhase == EnrollmentPhase.AccountSetup)
+            {
+                builder.CancelDeadline(DeadlineNames.DeviceOnlyEspDetection);
+                effectsList.Add(new DecisionEffect(
+                    DecisionEffectKind.CancelDeadline,
+                    cancelDeadlineName: DeadlineNames.DeviceOnlyEspDetection));
+            }
+
             var newState = builder.Build();
 
             var transition = BuildTakenTransition(
@@ -77,7 +95,7 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 nextStepIndex: nextStep,
                 trigger: nameof(DecisionSignalKind.EspPhaseChanged));
 
-            return new DecisionStep(newState, transition, Array.Empty<DecisionEffect>());
+            return new DecisionStep(newState, transition, effectsList.ToArray());
         }
 
         /// <summary>
