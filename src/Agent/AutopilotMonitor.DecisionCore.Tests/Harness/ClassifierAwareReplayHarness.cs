@@ -75,20 +75,15 @@ namespace AutopilotMonitor.DecisionCore.Tests.Harness
                         ?? throw new InvalidOperationException(
                             $"RunClassifier effect for '{effect.ClassifierId}' missing snapshot.");
 
-                    string snapshotHash;
-                    if (snapshot is WhiteGloveSealingSnapshot wgSnap)
+                    var hashable = snapshot as IClassifierSnapshot;
+                    var snapshotHash = hashable?.ComputeInputHash() ?? string.Empty;
+                    var lastVerdictId = LookupLastVerdictId(state, effect.ClassifierId!);
+                    if (!string.IsNullOrEmpty(snapshotHash) &&
+                        !string.IsNullOrEmpty(lastVerdictId) &&
+                        snapshotHash == lastVerdictId)
                     {
-                        snapshotHash = wgSnap.ComputeInputHash();
-                        if (state.WhiteGloveSealing.LastClassifierVerdictId == snapshotHash)
-                        {
-                            Increment(effect.ClassifierId!, "skipped_by_antiloop");
-                            continue;
-                        }
-                    }
-                    else
-                    {
-                        // No per-classifier state tracking yet; run unconditionally.
-                        snapshotHash = string.Empty;
+                        Increment(effect.ClassifierId!, "skipped_by_antiloop");
+                        continue;
                     }
 
                     var verdict = classifier.Classify(snapshot);
@@ -129,6 +124,16 @@ namespace AutopilotMonitor.DecisionCore.Tests.Harness
 
         /// <summary>Run counts per classifier (keys: "run", "skipped_by_antiloop"). For test assertions.</summary>
         public IDictionary<string, int> ClassifierRunStats { get; private set; } = new Dictionary<string, int>();
+
+        private static string? LookupLastVerdictId(DecisionState state, string classifierId)
+        {
+            return classifierId switch
+            {
+                WhiteGloveSealingClassifier.ClassifierId          => state.WhiteGloveSealing.LastClassifierVerdictId,
+                WhiteGlovePart2CompletionClassifier.ClassifierId  => state.WhiteGlovePart2Completion.LastClassifierVerdictId,
+                _ => null,
+            };
+        }
 
         private void Increment(string classifierId, string bucket)
         {

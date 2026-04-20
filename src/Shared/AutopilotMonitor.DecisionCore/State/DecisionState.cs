@@ -42,6 +42,10 @@ namespace AutopilotMonitor.DecisionCore.State
             SignalFact<string>? imeMatchedPatternId,
             SignalFact<bool>? shellCoreWhiteGloveSuccessSeen,
             SignalFact<bool>? whiteGloveSealingPatternSeen,
+            SignalFact<DateTime>? userAadSignInCompleteUtc,
+            SignalFact<DateTime>? helloResolvedPart2Utc,
+            SignalFact<DateTime>? desktopArrivedPart2Utc,
+            SignalFact<DateTime>? accountSetupCompletedPart2Utc,
             IReadOnlyList<ActiveDeadline> deadlines,
             long lastAppliedSignalOrdinal,
             int stepIndex,
@@ -78,6 +82,10 @@ namespace AutopilotMonitor.DecisionCore.State
             ImeMatchedPatternId = imeMatchedPatternId;
             ShellCoreWhiteGloveSuccessSeen = shellCoreWhiteGloveSuccessSeen;
             WhiteGloveSealingPatternSeen = whiteGloveSealingPatternSeen;
+            UserAadSignInCompleteUtc = userAadSignInCompleteUtc;
+            HelloResolvedPart2Utc = helloResolvedPart2Utc;
+            DesktopArrivedPart2Utc = desktopArrivedPart2Utc;
+            AccountSetupCompletedPart2Utc = accountSetupCompletedPart2Utc;
             Deadlines = deadlines ?? throw new ArgumentNullException(nameof(deadlines));
             LastAppliedSignalOrdinal = lastAppliedSignalOrdinal;
             StepIndex = stepIndex;
@@ -133,6 +141,12 @@ namespace AutopilotMonitor.DecisionCore.State
         /// <summary>True once <see cref="Signals.DecisionSignalKind.WhiteGloveSealingPatternDetected"/> has fired. Signal-correlated WG path.</summary>
         public SignalFact<bool>? WhiteGloveSealingPatternSeen { get; }
 
+        // --- WhiteGlove Part 2 (post-reboot user sign-in) facts ---
+        public SignalFact<DateTime>? UserAadSignInCompleteUtc { get; }
+        public SignalFact<DateTime>? HelloResolvedPart2Utc { get; }
+        public SignalFact<DateTime>? DesktopArrivedPart2Utc { get; }
+        public SignalFact<DateTime>? AccountSetupCompletedPart2Utc { get; }
+
         public IReadOnlyList<ActiveDeadline> Deadlines { get; }
 
         public long LastAppliedSignalOrdinal { get; }
@@ -175,6 +189,10 @@ namespace AutopilotMonitor.DecisionCore.State
                 imeMatchedPatternId: null,
                 shellCoreWhiteGloveSuccessSeen: null,
                 whiteGloveSealingPatternSeen: null,
+                userAadSignInCompleteUtc: null,
+                helloResolvedPart2Utc: null,
+                desktopArrivedPart2Utc: null,
+                accountSetupCompletedPart2Utc: null,
                 deadlines: Array.Empty<ActiveDeadline>(),
                 lastAppliedSignalOrdinal: -1,
                 stepIndex: 0);

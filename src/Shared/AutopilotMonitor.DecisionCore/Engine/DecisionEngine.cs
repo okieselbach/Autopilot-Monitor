@@ -77,7 +77,13 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 (DecisionSignalKind.WhiteGloveSealingPatternDetected, 1)   => HandleWhiteGloveSealingPatternDetectedV1(state, signal),
                 (DecisionSignalKind.ClassifierVerdictIssued, 1)            => HandleClassifierVerdictIssuedV1(state, signal),
 
-                // ----- Not yet wired (WhiteGlove Part 2 in M3.4, edge in M3.5) -----
+                // ----- WhiteGlove Part 2 (DecisionEngine.WhiteGlovePart2.cs) -----
+                (DecisionSignalKind.UserAadSignInComplete, 1)              => HandleUserAadSignInCompleteV1(state, signal),
+                (DecisionSignalKind.HelloResolvedPart2, 1)                 => HandleHelloResolvedPart2V1(state, signal),
+                (DecisionSignalKind.DesktopArrivedPart2, 1)                => HandleDesktopArrivedPart2V1(state, signal),
+                (DecisionSignalKind.AccountSetupCompletedPart2, 1)         => HandleAccountSetupCompletedPart2V1(state, signal),
+
+                // ----- Not yet wired (edge in M3.5) -----
                 _ => HandleUnhandledSignal(state, signal),
             };
         }

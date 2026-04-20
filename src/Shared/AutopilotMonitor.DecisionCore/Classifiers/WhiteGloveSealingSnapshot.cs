@@ -13,7 +13,7 @@ namespace AutopilotMonitor.DecisionCore.Classifiers
     /// would cause unnecessary re-runs on the anti-loop guard.
     /// </para>
     /// </summary>
-    public sealed class WhiteGloveSealingSnapshot
+    public sealed class WhiteGloveSealingSnapshot : IClassifierSnapshot
     {
         public WhiteGloveSealingSnapshot(
             bool shellCoreWhiteGloveSuccessSeen,

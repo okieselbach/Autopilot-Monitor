@@ -40,6 +40,10 @@ namespace AutopilotMonitor.DecisionCore.State
             ImeMatchedPatternId = source.ImeMatchedPatternId;
             ShellCoreWhiteGloveSuccessSeen = source.ShellCoreWhiteGloveSuccessSeen;
             WhiteGloveSealingPatternSeen = source.WhiteGloveSealingPatternSeen;
+            UserAadSignInCompleteUtc = source.UserAadSignInCompleteUtc;
+            HelloResolvedPart2Utc = source.HelloResolvedPart2Utc;
+            DesktopArrivedPart2Utc = source.DesktopArrivedPart2Utc;
+            AccountSetupCompletedPart2Utc = source.AccountSetupCompletedPart2Utc;
             Deadlines = new List<ActiveDeadline>(source.Deadlines);
             LastAppliedSignalOrdinal = source.LastAppliedSignalOrdinal;
             StepIndex = source.StepIndex;
@@ -67,6 +71,10 @@ namespace AutopilotMonitor.DecisionCore.State
         public SignalFact<string>? ImeMatchedPatternId { get; set; }
         public SignalFact<bool>? ShellCoreWhiteGloveSuccessSeen { get; set; }
         public SignalFact<bool>? WhiteGloveSealingPatternSeen { get; set; }
+        public SignalFact<DateTime>? UserAadSignInCompleteUtc { get; set; }
+        public SignalFact<DateTime>? HelloResolvedPart2Utc { get; set; }
+        public SignalFact<DateTime>? DesktopArrivedPart2Utc { get; set; }
+        public SignalFact<DateTime>? AccountSetupCompletedPart2Utc { get; set; }
         public List<ActiveDeadline> Deadlines { get; set; }
         public long LastAppliedSignalOrdinal { get; set; }
         public int StepIndex { get; set; }
@@ -136,6 +144,10 @@ namespace AutopilotMonitor.DecisionCore.State
                 imeMatchedPatternId: ImeMatchedPatternId,
                 shellCoreWhiteGloveSuccessSeen: ShellCoreWhiteGloveSuccessSeen,
                 whiteGloveSealingPatternSeen: WhiteGloveSealingPatternSeen,
+                userAadSignInCompleteUtc: UserAadSignInCompleteUtc,
+                helloResolvedPart2Utc: HelloResolvedPart2Utc,
+                desktopArrivedPart2Utc: DesktopArrivedPart2Utc,
+                accountSetupCompletedPart2Utc: AccountSetupCompletedPart2Utc,
                 deadlines: Deadlines.ToArray(),
                 lastAppliedSignalOrdinal: LastAppliedSignalOrdinal,
                 stepIndex: StepIndex,

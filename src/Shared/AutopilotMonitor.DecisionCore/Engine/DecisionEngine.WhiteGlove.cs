@@ -97,7 +97,12 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 .WithStepIndex(nextStep)
                 .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal);
 
-            // Only the sealing classifier is wired in M3.3 — M3.4 adds Part 2.
+            // M3.4 Part-2 classifier runs through its own applier.
+            if (classifier == WhiteGlovePart2CompletionClassifier.ClassifierId)
+            {
+                return ApplyWhiteGlovePart2Verdict(state, signal, level, score, reason, inputHash);
+            }
+
             if (classifier == WhiteGloveSealingClassifier.ClassifierId)
             {
                 builder.WhiteGloveSealing = state.WhiteGloveSealing.With(
