@@ -139,6 +139,12 @@ namespace AutopilotMonitor.Shared
             public const string ReseedFromGitHub         = "/api/rules/reseed-from-github";
             public const string ValidateBootstrapCode    = "/api/bootstrap/validate/{code}";
 
+            // V2 Agent generic telemetry transport (Plan §2.7a).
+            // Backend routes per TelemetryItem.Kind to Events / Signals / DecisionTransitions tables.
+            // Single endpoint for Event + Signal + DecisionTransition batch ingest; replaces the
+            // per-type IngestEvents path once the Legacy Agent is decommissioned (v11.1+).
+            public const string TelemetryBatch           = "/api/telemetry/batch";
+
             // MCP/Agent API search endpoints
             public const string SearchSessions          = "/api/search/sessions";
             public const string SearchSessionsByEvent   = "/api/search/sessions-by-event";
