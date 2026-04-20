@@ -8,6 +8,7 @@ using AutopilotMonitor.Agent.V2.Core.Tests.Harness;
 using AutopilotMonitor.Agent.V2.Core.Tests.Transport;
 using AutopilotMonitor.Agent.V2.Core.Transport.Telemetry;
 using AutopilotMonitor.DecisionCore.Classifiers;
+using AutopilotMonitor.DecisionCore.Engine;
 using AutopilotMonitor.Shared.Models;
 using Xunit;
 
@@ -56,15 +57,22 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
 
             public IReadOnlyCollection<string>? CapturedWhiteGloveSealingPatternIds { get; private set; }
 
+            public ISignalIngressSink? CapturedIngress { get; private set; }
+            public IClock? CapturedClock { get; private set; }
+
             public IReadOnlyList<ICollectorHost> CreateCollectorHosts(
                 string sessionId,
                 string tenantId,
                 AgentLogger logger,
                 Action<EnrollmentEvent> onEnrollmentEvent,
-                IReadOnlyCollection<string> whiteGloveSealingPatternIds)
+                IReadOnlyCollection<string> whiteGloveSealingPatternIds,
+                ISignalIngressSink ingress,
+                IClock clock)
             {
                 CapturedSink = onEnrollmentEvent;
                 CapturedWhiteGloveSealingPatternIds = whiteGloveSealingPatternIds;
+                CapturedIngress = ingress;
+                CapturedClock = clock;
                 foreach (var name in HostNames)
                 {
                     Hosts.Add(new FakeCollectorHost(name, onEnrollmentEvent));

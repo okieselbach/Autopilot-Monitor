@@ -6,6 +6,7 @@ using AutopilotMonitor.Agent.V2.Core.Orchestration;
 using AutopilotMonitor.Agent.V2.Core.Tests.Harness;
 using AutopilotMonitor.Agent.V2.Core.Tests.Transport;
 using AutopilotMonitor.DecisionCore.Classifiers;
+using AutopilotMonitor.DecisionCore.Engine;
 using AutopilotMonitor.Shared.Models;
 using Xunit;
 
@@ -24,7 +25,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
                 string tenantId,
                 AgentLogger logger,
                 Action<EnrollmentEvent> onEnrollmentEvent,
-                IReadOnlyCollection<string> whiteGloveSealingPatternIds)
+                IReadOnlyCollection<string> whiteGloveSealingPatternIds,
+                ISignalIngressSink ingress,
+                IClock clock)
             {
                 CapturedPatternIds = whiteGloveSealingPatternIds;
                 return Array.Empty<ICollectorHost>();

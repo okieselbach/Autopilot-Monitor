@@ -367,7 +367,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             {
                 var safeSink = BuildTelemetryEventSink();
                 _collectorHosts = _componentFactory.CreateCollectorHosts(
-                    _sessionId, _tenantId, _logger, safeSink, _whiteGloveSealingPatternIds);
+                    _sessionId, _tenantId, _logger, safeSink, _whiteGloveSealingPatternIds,
+                    ingress: _ingress, clock: _clock);
                 foreach (var host in _collectorHosts)
                 {
                     try
