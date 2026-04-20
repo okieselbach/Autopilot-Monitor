@@ -132,6 +132,13 @@ namespace AutopilotMonitor.DecisionCore.State
         public string SchemaVersion { get; }
 
         /// <summary>
+        /// Produce a mutable builder pre-populated with this state's values.
+        /// Reducer handlers call <c>state.ToBuilder().WithStage(...).Build()</c> to
+        /// express immutable "copy with changes" ergonomically (plan §2.3 / L.3).
+        /// </summary>
+        public DecisionStateBuilder ToBuilder() => new DecisionStateBuilder(this);
+
+        /// <summary>
         /// Construct the initial non-terminal state for a new session.
         /// Used by the reducer's <c>SessionStarted</c> handler in M3.
         /// </summary>

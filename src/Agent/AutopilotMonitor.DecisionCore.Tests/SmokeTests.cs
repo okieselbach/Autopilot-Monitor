@@ -67,8 +67,10 @@ namespace AutopilotMonitor.DecisionCore.Tests
         }
 
         [Fact]
-        public void DecisionEngine_Reduce_M1Stub_throwsNotImplemented()
+        public void DecisionEngine_Reduce_SessionStarted_advancesStep()
         {
+            // M3.0: Reduce is no longer a stub; SessionStarted handler advances StepIndex
+            // and records a taken transition.
             var engine = new DecisionEngine();
             var state = DecisionState.CreateInitial("s", "t");
             var signal = new DecisionSignal(
@@ -80,7 +82,14 @@ namespace AutopilotMonitor.DecisionCore.Tests
                 sourceOrigin: "test",
                 evidence: new Evidence(EvidenceKind.Synthetic, "session:started", "test"));
 
-            Assert.Throws<NotImplementedException>(() => engine.Reduce(state, signal));
+            var step = engine.Reduce(state, signal);
+
+            Assert.Equal(1, step.NewState.StepIndex);
+            Assert.Equal(0, step.NewState.LastAppliedSignalOrdinal);
+            Assert.True(step.Transition.Taken);
+            Assert.Equal("SessionStarted", step.Transition.Trigger);
+            Assert.Null(step.Transition.DeadEndReason);
+            Assert.Empty(step.Effects);
         }
 
         [Fact]

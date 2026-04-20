@@ -62,11 +62,8 @@ namespace AutopilotMonitor.DecisionCore.Tests
         }
 
         [Fact]
-        public void Replay_nonEmptyStream_M2Stub_throwsViaReducer()
+        public void Replay_singleSessionStartedSignal_recordsOneTakenTransition()
         {
-            // M1 stub: DecisionEngine.Reduce throws NotImplementedException.
-            // The harness should surface that faithfully — no silent swallowing.
-            // M3 replaces this test's expectation with real terminal-stage assertions.
             var harness = new ReplayHarness(new DecisionEngine());
             var signal = new DecisionSignal(
                 sessionSignalOrdinal: 0,
@@ -77,8 +74,36 @@ namespace AutopilotMonitor.DecisionCore.Tests
                 sourceOrigin: "harness",
                 evidence: new Evidence(EvidenceKind.Synthetic, "session:started", "init"));
 
-            Assert.Throws<NotImplementedException>(() =>
-                harness.Replay("s", "t", new List<DecisionSignal> { signal }));
+            var result = harness.Replay("s", "t", new List<DecisionSignal> { signal });
+
+            Assert.Single(result.Transitions);
+            Assert.True(result.Transitions[0].Taken);
+            Assert.Equal(SessionStage.SessionStarted, result.FinalState.Stage);
+            Assert.Equal(1, result.FinalState.StepIndex);
+            Assert.Equal(0, result.FinalState.LastAppliedSignalOrdinal);
+        }
+
+        [Fact]
+        public void Replay_unknownSignalKind_recordsDeadEnd_stateUnchanged()
+        {
+            // An unhandled signal advances bookkeeping but leaves stage/outcome alone
+            // and records a DeadEndReason — plan §2.5 fail-safe shape for M3.0 non-handlers.
+            var harness = new ReplayHarness(new DecisionEngine());
+            var signal = new DecisionSignal(
+                sessionSignalOrdinal: 0,
+                sessionTraceOrdinal: 0,
+                kind: DecisionSignalKind.EspPhaseChanged, // not wired until M3.1
+                kindSchemaVersion: 1,
+                occurredAtUtc: DateTime.UtcNow,
+                sourceOrigin: "harness",
+                evidence: new Evidence(EvidenceKind.Raw, "ESP:test", "test"));
+
+            var result = harness.Replay("s", "t", new List<DecisionSignal> { signal });
+
+            var t = Assert.Single(result.Transitions);
+            Assert.False(t.Taken);
+            Assert.StartsWith("unhandled_signal_kind", t.DeadEndReason);
+            Assert.Equal(SessionStage.SessionStarted, result.FinalState.Stage);
         }
     }
 }
