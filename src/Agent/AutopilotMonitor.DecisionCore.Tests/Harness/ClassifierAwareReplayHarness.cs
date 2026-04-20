@@ -77,7 +77,7 @@ namespace AutopilotMonitor.DecisionCore.Tests.Harness
 
                     var hashable = snapshot as IClassifierSnapshot;
                     var snapshotHash = hashable?.ComputeInputHash() ?? string.Empty;
-                    var lastVerdictId = LookupLastVerdictId(state, effect.ClassifierId!);
+                    var lastVerdictId = ClassifierVerdictLookup.LookupLastVerdictId(state, effect.ClassifierId!);
                     if (!string.IsNullOrEmpty(snapshotHash) &&
                         !string.IsNullOrEmpty(lastVerdictId) &&
                         snapshotHash == lastVerdictId)
@@ -124,16 +124,6 @@ namespace AutopilotMonitor.DecisionCore.Tests.Harness
 
         /// <summary>Run counts per classifier (keys: "run", "skipped_by_antiloop"). For test assertions.</summary>
         public IDictionary<string, int> ClassifierRunStats { get; private set; } = new Dictionary<string, int>();
-
-        private static string? LookupLastVerdictId(DecisionState state, string classifierId)
-        {
-            return classifierId switch
-            {
-                WhiteGloveSealingClassifier.ClassifierId          => state.WhiteGloveSealing.LastClassifierVerdictId,
-                WhiteGlovePart2CompletionClassifier.ClassifierId  => state.WhiteGlovePart2Completion.LastClassifierVerdictId,
-                _ => null,
-            };
-        }
 
         private void Increment(string classifierId, string bucket)
         {
