@@ -343,6 +343,12 @@ namespace AutopilotMonitor.Shared
             // Lightweight index of sessions that have events (for orphan detection)
             public const string EventSessionIndex = "EventSessionIndex";
 
+            // V2 Decision Engine primary tables (Plan §M5).
+            // SignalLog (input-truth) and Journal (decision-truth) projected to the backend for
+            // the Inspector + Reducer-Verifier. Both partitioned by {TenantId}_{SessionId}.
+            public const string Signals             = "Signals";
+            public const string DecisionTransitions = "DecisionTransitions";
+
             /// <summary>
             /// Returns all table names for initialization
             /// </summary>
@@ -384,7 +390,9 @@ namespace AutopilotMonitor.Shared
                 OpsEvents,
                 ImeVersionHistory,
                 RuleStats,
-                EventSessionIndex
+                EventSessionIndex,
+                Signals,
+                DecisionTransitions
             };
         }
     }

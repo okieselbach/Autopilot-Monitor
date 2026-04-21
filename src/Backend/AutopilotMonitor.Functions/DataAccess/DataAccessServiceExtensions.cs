@@ -36,6 +36,10 @@ namespace AutopilotMonitor.Functions.DataAccess
             services.AddSingleton<IUserUsageRepository, TableUserUsageRepository>();
             services.AddSingleton<IDistressReportRepository, TableDistressReportRepository>();
             services.AddSingleton<IOpsEventRepository, TableOpsEventRepository>();
+
+            // V2 Decision Engine repositories (Plan §M5).
+            services.AddSingleton<ISignalRepository, TableSignalRepository>();
+            services.AddSingleton<IDecisionTransitionRepository, TableDecisionTransitionRepository>();
             return services;
         }
 
