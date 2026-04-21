@@ -21,5 +21,13 @@ namespace AutopilotMonitor.Shared.DataAccess
         /// Upserts a batch of signal records. Returns the number of rows committed.
         /// </summary>
         Task<int> StoreBatchAsync(IReadOnlyList<SignalRecord> records, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Reads up to <paramref name="maxResults"/> signal records for a single session,
+        /// ordered by <see cref="SignalRecord.SessionSignalOrdinal"/> ascending. Used by the
+        /// Inspector read endpoint (<c>GET /api/sessions/{id}/signals</c>, Plan §M5).
+        /// </summary>
+        Task<List<SignalRecord>> QueryBySessionAsync(
+            string tenantId, string sessionId, int maxResults = 1000, CancellationToken cancellationToken = default);
     }
 }

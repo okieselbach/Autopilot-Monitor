@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Azure;
 using Azure.Data.Tables;
 using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Functions.Services;
@@ -70,6 +71,54 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
             }
 
             return committed;
+        }
+
+        public async Task<List<SignalRecord>> QueryBySessionAsync(
+            string tenantId, string sessionId, int maxResults = 1000, CancellationToken cancellationToken = default)
+        {
+            SecurityValidator.EnsureValidGuid(tenantId, "TenantId");
+            SecurityValidator.EnsureValidGuid(sessionId, "SessionId");
+
+            var table = _storage.GetTableClient(Constants.TableNames.Signals);
+            var pk = BuildPartitionKey(tenantId, sessionId);
+
+            var results = new List<SignalRecord>(capacity: Math.Min(maxResults, 128));
+            var pages = table.QueryAsync<TableEntity>(
+                filter: $"PartitionKey eq '{pk}'",
+                maxPerPage: Math.Min(maxResults, 1000),
+                cancellationToken: cancellationToken);
+
+            await foreach (var entity in pages.ConfigureAwait(false))
+            {
+                if (results.Count >= maxResults) break;
+                results.Add(FromEntity(entity));
+            }
+
+            // RowKey is D19(SessionSignalOrdinal) — Azure Tables returns PK-scoped rows in RowKey
+            // lex order which matches numeric ordinal order (that's the whole point of the padding).
+            // Explicit sort is redundant but cheap; keeps the invariant under a test.
+            results.Sort((a, b) => a.SessionSignalOrdinal.CompareTo(b.SessionSignalOrdinal));
+            return results;
+        }
+
+        /// <summary>
+        /// Projects an Azure <see cref="TableEntity"/> back into a <see cref="SignalRecord"/>,
+        /// reassembling chunked <c>PayloadJson</c> if present. Internal for mapping tests.
+        /// </summary>
+        internal static SignalRecord FromEntity(TableEntity entity)
+        {
+            return new SignalRecord
+            {
+                TenantId             = entity.GetString("TenantId") ?? string.Empty,
+                SessionId            = entity.GetString("SessionId") ?? string.Empty,
+                SessionSignalOrdinal = entity.GetInt64("SessionSignalOrdinal") ?? 0,
+                SessionTraceOrdinal  = entity.GetInt64("SessionTraceOrdinal") ?? 0,
+                Kind                 = entity.GetString("Kind") ?? string.Empty,
+                KindSchemaVersion    = entity.GetInt32("KindSchemaVersion") ?? 0,
+                OccurredAtUtc        = entity.GetDateTime("OccurredAtUtc") ?? default,
+                SourceOrigin         = entity.GetString("SourceOrigin") ?? string.Empty,
+                PayloadJson          = TableStorageChunking.ReassembleProperty(entity, "PayloadJson") ?? string.Empty,
+            };
         }
 
         /// <summary>

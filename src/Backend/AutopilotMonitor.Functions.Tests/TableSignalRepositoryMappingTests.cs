@@ -114,4 +114,61 @@ public class TableSignalRepositoryMappingTests
 
         Assert.Equal(string.Empty, entity.GetString("PayloadJson"));
     }
+
+    // ============================================================ Reverse mapping (read path)
+
+    [Fact]
+    public void FromEntity_round_trips_a_small_payload()
+    {
+        var original = new SignalRecord
+        {
+            TenantId             = TenantId,
+            SessionId            = SessionId,
+            SessionSignalOrdinal = 42,
+            SessionTraceOrdinal  = 117,
+            Kind                 = "EspExiting",
+            KindSchemaVersion    = 2,
+            OccurredAtUtc        = new DateTime(2026, 4, 21, 10, 0, 0, DateTimeKind.Utc),
+            SourceOrigin         = "EspAndHelloTrackerAdapter",
+            PayloadJson          = "{\"kind\":\"EspExiting\",\"evidence\":{\"kind\":\"Raw\"}}",
+        };
+
+        var entity = TableSignalRepository.ToEntity(original);
+        var restored = TableSignalRepository.FromEntity(entity);
+
+        Assert.Equal(original.TenantId, restored.TenantId);
+        Assert.Equal(original.SessionId, restored.SessionId);
+        Assert.Equal(original.SessionSignalOrdinal, restored.SessionSignalOrdinal);
+        Assert.Equal(original.SessionTraceOrdinal, restored.SessionTraceOrdinal);
+        Assert.Equal(original.Kind, restored.Kind);
+        Assert.Equal(original.KindSchemaVersion, restored.KindSchemaVersion);
+        Assert.Equal(original.OccurredAtUtc, restored.OccurredAtUtc.ToUniversalTime());
+        Assert.Equal(original.SourceOrigin, restored.SourceOrigin);
+        Assert.Equal(original.PayloadJson, restored.PayloadJson);
+    }
+
+    [Fact]
+    public void FromEntity_reassembles_chunked_PayloadJson()
+    {
+        // Same-sized chunking behaviour we wrote — verifies the read path undoes it.
+        var oversized = new string('x', 75_000);
+        var original = new SignalRecord
+        {
+            TenantId             = TenantId,
+            SessionId            = SessionId,
+            SessionSignalOrdinal = 1,
+            SessionTraceOrdinal  = 1,
+            Kind                 = "EspPhaseChanged",
+            KindSchemaVersion    = 1,
+            OccurredAtUtc        = DateTime.UtcNow,
+            SourceOrigin         = "t",
+            PayloadJson          = oversized,
+        };
+
+        var entity = TableSignalRepository.ToEntity(original);
+        var restored = TableSignalRepository.FromEntity(entity);
+
+        Assert.Equal(75_000, restored.PayloadJson.Length);
+        Assert.Equal(oversized, restored.PayloadJson);
+    }
 }
