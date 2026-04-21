@@ -203,6 +203,7 @@ public static class EndpointAccessPolicyCatalog
         new("GET",    "metrics/mcp-usage/me",                  EndpointPolicy.AuthenticatedUser),
 
         // ── GlobalAdminOnly ────────────────────────────────────────────
+        new("GET",    "sessions/{sessionId}/reducer-verification", EndpointPolicy.GlobalAdminOnly),
         new("GET",    "global/raw/sessions",                  EndpointPolicy.GlobalAdminOnly),
         new("GET",    "global/raw/events",                    EndpointPolicy.GlobalAdminOnly),
         new("GET",    "global/raw/events/search",              EndpointPolicy.GlobalAdminOnly),
