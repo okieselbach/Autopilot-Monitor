@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -97,6 +98,33 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
             }
 
             results.Sort((a, b) => a.StepIndex.CompareTo(b.StepIndex));
+            return results;
+        }
+
+        public async Task<List<DecisionTransitionRecord>> QueryByTimestampAtOrAfterAsync(
+            DateTime cutoffUtc, int maxResults = 50_000, CancellationToken cancellationToken = default)
+        {
+            var table = _storage.GetTableClient(Constants.TableNames.DecisionTransitions);
+            var filter = $"Timestamp ge datetime'{cutoffUtc.ToUniversalTime():yyyy-MM-ddTHH:mm:ss.fffffffZ}'";
+
+            var results = new List<DecisionTransitionRecord>(capacity: 128);
+            var pages = table.QueryAsync<TableEntity>(
+                filter: filter,
+                maxPerPage: 1000,
+                cancellationToken: cancellationToken);
+
+            await foreach (var entity in pages.ConfigureAwait(false))
+            {
+                if (results.Count >= maxResults)
+                {
+                    _logger.LogWarning(
+                        "DecisionTransitions: time-range query reached maxResults cap {Cap} at cutoff {Cutoff:o} — narrow window or bump cap",
+                        maxResults, cutoffUtc);
+                    break;
+                }
+                results.Add(FromEntity(entity));
+            }
+
             return results;
         }
 

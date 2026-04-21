@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -98,6 +99,35 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
             // lex order which matches numeric ordinal order (that's the whole point of the padding).
             // Explicit sort is redundant but cheap; keeps the invariant under a test.
             results.Sort((a, b) => a.SessionSignalOrdinal.CompareTo(b.SessionSignalOrdinal));
+            return results;
+        }
+
+        public async Task<List<SignalRecord>> QueryByTimestampAtOrAfterAsync(
+            DateTime cutoffUtc, int maxResults = 50_000, CancellationToken cancellationToken = default)
+        {
+            var table = _storage.GetTableClient(Constants.TableNames.Signals);
+            // Timestamp is the Azure Tables system-managed server-side property. Filter shape
+            // follows OData datetime literal format.
+            var filter = $"Timestamp ge datetime'{cutoffUtc.ToUniversalTime():yyyy-MM-ddTHH:mm:ss.fffffffZ}'";
+
+            var results = new List<SignalRecord>(capacity: 128);
+            var pages = table.QueryAsync<TableEntity>(
+                filter: filter,
+                maxPerPage: 1000,
+                cancellationToken: cancellationToken);
+
+            await foreach (var entity in pages.ConfigureAwait(false))
+            {
+                if (results.Count >= maxResults)
+                {
+                    _logger.LogWarning(
+                        "Signals: time-range query reached maxResults cap {Cap} at cutoff {Cutoff:o} — narrow window or bump cap",
+                        maxResults, cutoffUtc);
+                    break;
+                }
+                results.Add(FromEntity(entity));
+            }
+
             return results;
         }
 
