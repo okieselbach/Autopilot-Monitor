@@ -75,6 +75,99 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Program
                 $"Expected hard_kill or reboot_kill, got {summary.ExitType}.");
         }
 
+        // ================================================================= CheckEnrollmentCompleteMarker
+
+        [Fact]
+        public void CheckEnrollmentCompleteMarker_returns_false_on_first_run_after_install_when_session_exists()
+        {
+            // Regression guard for the first-run-after-install bug: Program.cs must create the
+            // SessionId BEFORE invoking this guard, so a fresh install (Deployed registry marker
+            // written by --install, no prior session) does not get misdiagnosed as a ghost
+            // restart and trigger self-destruct before FetchConfigAsync.
+            using var tmp = new TempDirectory();
+            var logger = NewLogger(tmp.Path);
+            new SessionIdPersistence(tmp.Path).GetOrCreate(logger);
+            var stateDir = Path.Combine(tmp.Path, "State");
+            var factoryCalls = 0;
+
+            var shouldExit = AutopilotMonitor.Agent.V2.Program.CheckEnrollmentCompleteMarker(
+                dataDirectory: tmp.Path,
+                stateDirectory: stateDir,
+                selfDestructOnComplete: true, // worst case — cleanup armed
+                cleanupServiceFactory: () =>
+                {
+                    factoryCalls++;
+                    throw new InvalidOperationException(
+                        "test-harness: cleanup factory must not be invoked in this scenario");
+                },
+                logger: logger,
+                consoleMode: false);
+
+            Assert.False(shouldExit);
+            Assert.Equal(0, factoryCalls);
+        }
+
+        [Fact]
+        public void CheckEnrollmentCompleteMarker_returns_true_without_firing_cleanup_when_marker_present_and_no_selfdestruct()
+        {
+            // Remote config said "don't self-destruct": agent must exit cleanly but leave the
+            // ProgramData directory intact for post-mortem inspection.
+            using var tmp = new TempDirectory();
+            var logger = NewLogger(tmp.Path);
+            new SessionIdPersistence(tmp.Path).GetOrCreate(logger);
+            var stateDir = Path.Combine(tmp.Path, "State");
+            Directory.CreateDirectory(stateDir);
+            File.WriteAllText(Path.Combine(stateDir, "enrollment-complete.marker"), "previous completion");
+            var factoryCalls = 0;
+
+            var shouldExit = AutopilotMonitor.Agent.V2.Program.CheckEnrollmentCompleteMarker(
+                dataDirectory: tmp.Path,
+                stateDirectory: stateDir,
+                selfDestructOnComplete: false,
+                cleanupServiceFactory: () =>
+                {
+                    factoryCalls++;
+                    throw new InvalidOperationException(
+                        "test-harness: cleanup factory must not be invoked in this scenario");
+                },
+                logger: logger,
+                consoleMode: false);
+
+            Assert.True(shouldExit);
+            Assert.Equal(0, factoryCalls);
+        }
+
+        [Fact]
+        public void CheckEnrollmentCompleteMarker_fires_cleanup_retry_when_marker_present_and_selfdestruct_armed()
+        {
+            // Scheduled-task-survived-self-destruct retry path. CleanupService actually spawns a
+            // PowerShell cleanup script — we throw from the factory so the real side-effect does
+            // not fire; TryRetryCleanup swallows the exception and logs a warning.
+            using var tmp = new TempDirectory();
+            var logger = NewLogger(tmp.Path);
+            new SessionIdPersistence(tmp.Path).GetOrCreate(logger);
+            var stateDir = Path.Combine(tmp.Path, "State");
+            Directory.CreateDirectory(stateDir);
+            File.WriteAllText(Path.Combine(stateDir, "enrollment-complete.marker"), "previous completion");
+            var factoryCalls = 0;
+
+            var shouldExit = AutopilotMonitor.Agent.V2.Program.CheckEnrollmentCompleteMarker(
+                dataDirectory: tmp.Path,
+                stateDirectory: stateDir,
+                selfDestructOnComplete: true,
+                cleanupServiceFactory: () =>
+                {
+                    factoryCalls++;
+                    throw new InvalidOperationException(
+                        "test-harness: must not spawn real PowerShell cleanup in unit tests");
+                },
+                logger: logger,
+                consoleMode: false);
+
+            Assert.True(shouldExit);
+            Assert.Equal(1, factoryCalls);
+        }
+
         // ================================================================= Emergency break
 
         [Fact]

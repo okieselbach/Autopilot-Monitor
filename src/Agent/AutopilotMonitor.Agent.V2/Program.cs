@@ -36,11 +36,11 @@ namespace AutopilotMonitor.Agent.V2
     ///   <item>Load cached <c>remote-config.json</c> → <see cref="SelfUpdater.BackendExpectedSha256"/> + <c>AllowAgentDowngrade</c></item>
     ///   <item><see cref="SelfUpdater.CheckAndApplyUpdateAsync"/> — on success restarts the process; on failure continues with current binary</item>
     ///   <item><see cref="DetectPreviousExit"/> — reads markers + event log to classify last shutdown</item>
-    ///   <item><see cref="CheckEnrollmentCompleteMarker"/> — ghost-restart detection + cleanup retry</item>
-    ///   <item><see cref="CheckSessionAgeEmergencyBreak"/> — absolute session-age watchdog</item>
     ///   <item>Resolve TenantId (registry → bootstrap-config.json fallback)</item>
     ///   <item>Build <see cref="AgentConfiguration"/> (CLI args + persisted bootstrap / await-enrollment config)</item>
-    ///   <item>Get/create SessionId via <see cref="SessionIdPersistence"/></item>
+    ///   <item>Get/create SessionId via <see cref="SessionIdPersistence"/> — <b>before</b> the guards, matching Legacy boot order. The ghost-restart guard keys on <c>session.id</c> absence to detect "self-destruct ran but Scheduled Task survived"; creating the session after the guard would misdiagnose every first-run-after-install as a ghost restart and trigger self-destruct before the remote-config fetch.</item>
+    ///   <item><see cref="CheckEnrollmentCompleteMarker"/> — ghost-restart detection + cleanup retry</item>
+    ///   <item><see cref="CheckSessionAgeEmergencyBreak"/> — absolute session-age watchdog</item>
     ///   <item>(Optional) Wait for MDM certificate in <c>--await-enrollment</c> mode</item>
     ///   <item>Build <see cref="BackendApiClient"/> + <see cref="RemoteConfigService"/> → fetch config</item>
     ///   <item><see cref="BootstrapConfigCleanup.TryDeleteIfCertReadyAsync"/> — H-2 mitigation post-cert</item>
@@ -197,13 +197,21 @@ namespace AutopilotMonitor.Agent.V2
             // --install time may have written a bootstrap config that holds a tenantId even when
             // the registry is not yet populated (bootstrap token path). Honour that.
 
+            var agentConfig = BuildAgentConfiguration(args, tenantId, sessionId: null, bootstrapConfig, awaitConfig);
+
+            // Create/recover SessionId BEFORE the startup guards. Legacy-parity boot order —
+            // the ghost-restart guard below keys on session.id absence to detect
+            // "self-destruct ran but Scheduled Task survived". Creating the session after the
+            // guard would misdiagnose every first-run-after-install (Deployed registry marker
+            // set by --install, no session.id yet) as a ghost restart and trigger
+            // ExecuteSelfDestruct before the remote-config fetch, deleting the ProgramData
+            // directory on every fresh deployment.
             if (args.Contains("--new-session"))
             {
                 new SessionIdPersistence(dataDirectory).Delete(logger);
                 logger.Info("--new-session: cleared persisted SessionId.");
             }
-
-            var agentConfig = BuildAgentConfiguration(args, tenantId, sessionId: null, bootstrapConfig, awaitConfig);
+            agentConfig.SessionId = new SessionIdPersistence(dataDirectory).GetOrCreate(logger);
 
             // Build a cleanup-service factory used by guards: instantiated lazily and with the
             // current agentConfig so command-line overrides (e.g. --no-cleanup) take effect.
@@ -225,10 +233,6 @@ namespace AutopilotMonitor.Agent.V2
                 logger.Info("Emergency break fired — agent exiting.");
                 return 0;
             }
-
-            // Session is safe to start — create/recover SessionId now (AFTER guards so a dead
-            // session is not resurrected before the watchdog can kill it).
-            agentConfig.SessionId = new SessionIdPersistence(dataDirectory).GetOrCreate(logger);
 
             if (agentConfig.AwaitEnrollment)
             {
