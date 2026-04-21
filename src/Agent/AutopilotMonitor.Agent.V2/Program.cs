@@ -452,13 +452,19 @@ namespace AutopilotMonitor.Agent.V2
                                 agentConfig.SelfDestructOnComplete = true;
                             }
 
-                            logger.Warning($"ServerAction terminate_session received (ruleId={action?.RuleId}, reason={action?.Reason}) — invoking termination handler.");
+                            // Codex Finding 2: forward adminOutcome from the ServerAction params so
+                            // a portal Mark-Succeeded really lands as Succeeded locally (was
+                            // hard-coded to Failed before, masquerading every admin override as an
+                            // error in SummaryDialog + firing spurious diagnostics uploads).
+                            var mappedOutcome = MapAdminOutcome(action?.Params);
+
+                            logger.Warning($"ServerAction terminate_session received (ruleId={action?.RuleId}, reason={action?.Reason}, outcome={mappedOutcome}) — invoking termination handler.");
                             // Synthesise a Terminated event as if the kernel fired it.
                             terminationHandler.Handle(
                                 sender: null,
                                 args: new EnrollmentTerminatedEventArgs(
                                     reason: EnrollmentTerminationReason.DecisionTerminalStage,
-                                    outcome: EnrollmentTerminationOutcome.Failed,
+                                    outcome: mappedOutcome,
                                     stageName: orchestrator.CurrentState?.Stage.ToString(),
                                     terminatedAtUtc: DateTime.UtcNow,
                                     details: $"Server-requested termination: ruleId={action?.RuleId}, reason={action?.Reason}"));
