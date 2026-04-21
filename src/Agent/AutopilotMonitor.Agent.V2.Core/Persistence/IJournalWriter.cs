@@ -33,5 +33,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Persistence
         /// Höchster bisher erfolgreich appendeter <c>StepIndex</c>; -1 bei leerem Journal.
         /// </summary>
         int LastStepIndex { get; }
+
+        /// <summary>
+        /// Höchster in irgendeiner persisted Transition vorkommender <c>SessionTraceOrdinal</c>;
+        /// -1 bei leerem Journal. Analog <c>ISignalLogWriter.LastTraceOrdinal</c> — wird vom
+        /// Orchestrator für das Seeding von <c>SessionTraceOrdinalProvider</c> auf Recovery
+        /// verwendet.
+        /// </summary>
+        long LastTraceOrdinal { get; }
     }
 }

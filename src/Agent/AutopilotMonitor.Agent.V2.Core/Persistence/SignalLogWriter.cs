@@ -17,6 +17,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Persistence
         private readonly string _path;
         private readonly object _lock = new object();
         private long _lastOrdinal = -1;
+        private long _lastTraceOrdinal = -1;
 
         public SignalLogWriter(string path)
         {
@@ -33,7 +34,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Persistence
                 Directory.CreateDirectory(dir);
             }
 
-            _lastOrdinal = ScanHighestOrdinal();
+            ScanRecoveryState();
         }
 
         public long LastOrdinal
@@ -43,6 +44,17 @@ namespace AutopilotMonitor.Agent.V2.Core.Persistence
                 lock (_lock)
                 {
                     return _lastOrdinal;
+                }
+            }
+        }
+
+        public long LastTraceOrdinal
+        {
+            get
+            {
+                lock (_lock)
+                {
+                    return _lastTraceOrdinal;
                 }
             }
         }
@@ -77,6 +89,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Persistence
                 }
 
                 _lastOrdinal = signal.SessionSignalOrdinal;
+                if (signal.SessionTraceOrdinal > _lastTraceOrdinal)
+                {
+                    _lastTraceOrdinal = signal.SessionTraceOrdinal;
+                }
             }
         }
 
@@ -114,20 +130,30 @@ namespace AutopilotMonitor.Agent.V2.Core.Persistence
             }
         }
 
-        private long ScanHighestOrdinal()
+        /// <summary>
+        /// Single-pass scan that populates both <c>_lastOrdinal</c> and <c>_lastTraceOrdinal</c>
+        /// from the persisted JSONL. Stops at the first unparsable line (recovery §2.7).
+        /// </summary>
+        private void ScanRecoveryState()
         {
-            if (!File.Exists(_path)) return -1;
+            _lastOrdinal = -1;
+            _lastTraceOrdinal = -1;
 
-            long highest = -1;
+            if (!File.Exists(_path)) return;
+
             foreach (var line in File.ReadAllLines(_path, Encoding.UTF8))
             {
                 if (string.IsNullOrWhiteSpace(line)) continue;
                 try
                 {
                     var sig = SignalSerializer.Deserialize(line);
-                    if (sig.SessionSignalOrdinal > highest)
+                    if (sig.SessionSignalOrdinal > _lastOrdinal)
                     {
-                        highest = sig.SessionSignalOrdinal;
+                        _lastOrdinal = sig.SessionSignalOrdinal;
+                    }
+                    if (sig.SessionTraceOrdinal > _lastTraceOrdinal)
+                    {
+                        _lastTraceOrdinal = sig.SessionTraceOrdinal;
                     }
                 }
                 catch
@@ -136,7 +162,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Persistence
                     break;
                 }
             }
-            return highest;
         }
     }
 }

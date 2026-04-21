@@ -125,5 +125,51 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Persistence
 
             Assert.True(File.Exists(nested));
         }
+
+        // ============================================================ LastTraceOrdinal (recovery-seed for SessionTraceOrdinalProvider)
+
+        [Fact]
+        public void LastTraceOrdinal_empty_log_is_minus_one()
+        {
+            using var tmp = new TempDirectory();
+            var writer = new SignalLogWriter(tmp.File("signal-log.jsonl"));
+
+            Assert.Equal(-1, writer.LastTraceOrdinal);
+        }
+
+        [Fact]
+        public void LastTraceOrdinal_tracks_max_across_appends_not_last_one()
+        {
+            // Trace ordinals may arrive out of step with SessionSignalOrdinal if multiple producers
+            // compete for the provider (e.g. a classifier verdict stamped with trace=42 interleaved
+            // with a raw signal at trace=40 — the raw keeps a lower signal-ordinal but the max trace
+            // has already advanced).
+            using var tmp = new TempDirectory();
+            var writer = new SignalLogWriter(tmp.File("signal-log.jsonl"));
+
+            writer.Append(TestSignals.Raw(ordinal: 0, traceOrdinal: 10));
+            writer.Append(TestSignals.Raw(ordinal: 1, traceOrdinal: 42));
+            writer.Append(TestSignals.Raw(ordinal: 2, traceOrdinal: 25));   // lower than prior max — must NOT lower max
+
+            Assert.Equal(42, writer.LastTraceOrdinal);
+        }
+
+        [Fact]
+        public void LastTraceOrdinal_survives_restart_by_rescanning_persisted_log()
+        {
+            // Core of the recovery seed: a fresh writer on an existing log must reconstruct the
+            // max trace ordinal from disk — otherwise SessionTraceOrdinalProvider would start at
+            // -1 and the first post-recovery signal would duplicate a previously-persisted trace.
+            using var tmp = new TempDirectory();
+            var log = tmp.File("signal-log.jsonl");
+
+            var w1 = new SignalLogWriter(log);
+            w1.Append(TestSignals.Raw(ordinal: 0, traceOrdinal: 7));
+            w1.Append(TestSignals.Raw(ordinal: 1, traceOrdinal: 99));
+            w1.Append(TestSignals.Raw(ordinal: 2, traceOrdinal: 50));
+
+            var w2 = new SignalLogWriter(log);
+            Assert.Equal(99, w2.LastTraceOrdinal);
+        }
     }
 }

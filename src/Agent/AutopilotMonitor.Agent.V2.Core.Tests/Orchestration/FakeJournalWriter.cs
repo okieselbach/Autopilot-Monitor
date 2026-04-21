@@ -19,6 +19,19 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
         public int AppendCallCount => _appended.Count + _failedAppends;
         public int LastStepIndex => _appended.Count == 0 ? -1 : _appended[_appended.Count - 1].StepIndex;
 
+        public long LastTraceOrdinal
+        {
+            get
+            {
+                long max = -1;
+                foreach (var t in _appended)
+                {
+                    if (t.SessionTraceOrdinal > max) max = t.SessionTraceOrdinal;
+                }
+                return max;
+            }
+        }
+
         public FakeJournalWriter ScriptThrow(Exception ex, int count = 1)
         {
             for (int i = 0; i < count; i++) _appendScript.Enqueue(ex);

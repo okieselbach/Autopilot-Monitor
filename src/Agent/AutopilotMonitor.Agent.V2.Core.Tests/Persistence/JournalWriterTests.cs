@@ -11,11 +11,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Persistence
 {
     public sealed class JournalWriterTests
     {
-        private static DecisionTransition Step(int index, long signalRef = 0, SessionStage from = SessionStage.SessionStarted, SessionStage to = SessionStage.AwaitingEspPhaseChange)
+        private static DecisionTransition Step(int index, long signalRef = 0, SessionStage from = SessionStage.SessionStarted, SessionStage to = SessionStage.AwaitingEspPhaseChange, long? traceOrdinal = null)
         {
             return new DecisionTransition(
                 stepIndex: index,
-                sessionTraceOrdinal: index,
+                sessionTraceOrdinal: traceOrdinal ?? index,
                 signalOrdinalRef: signalRef,
                 occurredAtUtc: new DateTime(2026, 4, 20, 10, 0, 0, DateTimeKind.Utc).AddSeconds(index),
                 trigger: "TestTrigger",
@@ -134,6 +134,48 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Persistence
             var reread = new JournalWriter(path);
             Assert.Equal(1, reread.LastStepIndex);
             Assert.Equal(2, reread.ReadAll().Count);
+        }
+
+        // ============================================================ LastTraceOrdinal (recovery-seed for SessionTraceOrdinalProvider)
+
+        [Fact]
+        public void LastTraceOrdinal_empty_journal_is_minus_one()
+        {
+            using var tmp = new TempDirectory();
+            var w = new JournalWriter(tmp.File("journal.jsonl"));
+
+            Assert.Equal(-1, w.LastTraceOrdinal);
+        }
+
+        [Fact]
+        public void LastTraceOrdinal_tracks_max_across_appends_not_last_one()
+        {
+            // Recovery invariant: the seed for SessionTraceOrdinalProvider must be the true maximum
+            // across all persisted transitions, even if later steps happen to carry a smaller trace
+            // (e.g. because they were synthesised from an earlier classifier tick).
+            using var tmp = new TempDirectory();
+            var w = new JournalWriter(tmp.File("journal.jsonl"));
+
+            w.Append(Step(index: 0, traceOrdinal: 5));
+            w.Append(Step(index: 1, traceOrdinal: 99));
+            w.Append(Step(index: 2, traceOrdinal: 60));   // smaller than prior max — must NOT lower
+
+            Assert.Equal(99, w.LastTraceOrdinal);
+        }
+
+        [Fact]
+        public void LastTraceOrdinal_survives_restart_by_rescanning_persisted_journal()
+        {
+            using var tmp = new TempDirectory();
+            var path = tmp.File("journal.jsonl");
+
+            var w1 = new JournalWriter(path);
+            w1.Append(Step(index: 0, traceOrdinal: 3));
+            w1.Append(Step(index: 1, traceOrdinal: 77));
+            w1.Append(Step(index: 2, traceOrdinal: 12));
+
+            var w2 = new JournalWriter(path);
+            Assert.Equal(77, w2.LastTraceOrdinal);
         }
     }
 }

@@ -17,6 +17,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Persistence
         private readonly string _path;
         private readonly object _lock = new object();
         private int _lastStepIndex = -1;
+        private long _lastTraceOrdinal = -1;
 
         public JournalWriter(string path)
         {
@@ -33,7 +34,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Persistence
                 Directory.CreateDirectory(dir);
             }
 
-            _lastStepIndex = ScanHighestStepIndex();
+            ScanRecoveryState();
         }
 
         public int LastStepIndex
@@ -43,6 +44,17 @@ namespace AutopilotMonitor.Agent.V2.Core.Persistence
                 lock (_lock)
                 {
                     return _lastStepIndex;
+                }
+            }
+        }
+
+        public long LastTraceOrdinal
+        {
+            get
+            {
+                lock (_lock)
+                {
+                    return _lastTraceOrdinal;
                 }
             }
         }
@@ -75,6 +87,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Persistence
                 }
 
                 _lastStepIndex = transition.StepIndex;
+                if (transition.SessionTraceOrdinal > _lastTraceOrdinal)
+                {
+                    _lastTraceOrdinal = transition.SessionTraceOrdinal;
+                }
             }
         }
 
@@ -104,20 +120,31 @@ namespace AutopilotMonitor.Agent.V2.Core.Persistence
             }
         }
 
-        private int ScanHighestStepIndex()
+        /// <summary>
+        /// Single-pass scan that populates both <c>_lastStepIndex</c> and
+        /// <c>_lastTraceOrdinal</c> from the persisted JSONL. Stops at the first unparsable
+        /// line (recovery §2.7).
+        /// </summary>
+        private void ScanRecoveryState()
         {
-            if (!File.Exists(_path)) return -1;
+            _lastStepIndex = -1;
+            _lastTraceOrdinal = -1;
 
-            int highest = -1;
+            if (!File.Exists(_path)) return;
+
             foreach (var line in File.ReadAllLines(_path, Encoding.UTF8))
             {
                 if (string.IsNullOrWhiteSpace(line)) continue;
                 try
                 {
                     var t = TransitionSerializer.Deserialize(line);
-                    if (t.StepIndex > highest)
+                    if (t.StepIndex > _lastStepIndex)
                     {
-                        highest = t.StepIndex;
+                        _lastStepIndex = t.StepIndex;
+                    }
+                    if (t.SessionTraceOrdinal > _lastTraceOrdinal)
+                    {
+                        _lastTraceOrdinal = t.SessionTraceOrdinal;
                     }
                 }
                 catch
@@ -125,7 +152,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Persistence
                     break;
                 }
             }
-            return highest;
         }
     }
 }

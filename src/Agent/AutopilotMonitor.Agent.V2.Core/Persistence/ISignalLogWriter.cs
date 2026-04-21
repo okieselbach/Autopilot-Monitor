@@ -37,5 +37,18 @@ namespace AutopilotMonitor.Agent.V2.Core.Persistence
         /// Höchster bisher erfolgreich appendete <c>SessionSignalOrdinal</c>; -1 bei leerem Log.
         /// </summary>
         long LastOrdinal { get; }
+
+        /// <summary>
+        /// Höchster in irgendeinem persisted Signal vorkommender <c>SessionTraceOrdinal</c>; -1 bei
+        /// leerem Log. Wird von <c>EnrollmentOrchestrator</c> zum Seed des
+        /// <c>SessionTraceOrdinalProvider</c> auf Recovery benutzt — zusammen mit
+        /// <c>IJournalWriter.LastTraceOrdinal</c> und <c>TelemetrySpool.LastAssignedItemId</c>.
+        /// <para>
+        /// Unterschied zu <see cref="LastOrdinal"/>: SessionSignalOrdinal ist der
+        /// Signal-spezifische Monotone-Counter, SessionTraceOrdinal der session-weite
+        /// Korrelations-Counter (Event + Signal + Transition teilen sich eine Nummerierung).
+        /// </para>
+        /// </summary>
+        long LastTraceOrdinal { get; }
     }
 }

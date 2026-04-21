@@ -36,7 +36,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
     ///   <item>LazyIngressSinkRelay (für die EffectRunner-↔-SignalIngress-Zirkel-Dep)</item>
     ///   <item>EffectRunner (sink = Relay)</item>
     ///   <item>DecisionStepProcessor (initial state)</item>
-    ///   <item>SessionTraceOrdinalProvider (TODO M4.4.5.f: seed aus persisted max)</item>
+    ///   <item>SessionTraceOrdinalProvider (seeded from max across SignalLog + Journal + Spool)</item>
     ///   <item>SignalIngress — Relay.Target = ingress</item>
     ///   <item>Scheduler.Fired → Ingress.Post-Bridge subscriben</item>
     ///   <item><c>signalIngress.Start()</c> — Worker-Thread läuft</item>
@@ -349,9 +349,19 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 onTerminalStageReached: OnDecisionTerminalStage,
                 transitionEmitter: _transitionEmitter);
 
-            // 9) Trace-Ordinal. TODO(M4.4.5.f): seed aus max(SignalLog.LastOrdinal,
-            //    Journal.LastStepIndex, Spool.LastAssignedItemId via SessionTraceOrdinal).
-            _traceCounter = new SessionTraceOrdinalProvider();
+            // 9) Trace-Ordinal. Recovery-seed = max(SignalLog, Journal, Spool) so restart after a
+            //    crash never re-uses a SessionTraceOrdinal already persisted by a prior session.
+            //    Every signal + transition goes through the Spool in M5+, but we still consult all
+            //    three sources because:
+            //      - SignalLog may contain signals whose spool-enqueue later failed (emit swallows
+            //        transport exceptions per SignalIngress.cs §2.7c).
+            //      - Journal likewise for transitions with failed spool-enqueue.
+            //      - Spool.LastAssignedItemId is the single-source-of-truth for everything that
+            //        reached the transport (including Events that bypass the provider entirely).
+            var traceSeed = System.Math.Max(
+                System.Math.Max(_signalLog.LastTraceOrdinal, _journal.LastTraceOrdinal),
+                _spool.LastAssignedItemId);
+            _traceCounter = new SessionTraceOrdinalProvider(seedLastAssigned: traceSeed);
 
             // 10) DecisionEngine + SignalIngress.
             _engine = new DecisionEngine();
