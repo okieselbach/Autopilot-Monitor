@@ -120,12 +120,28 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                     req, tenantIdHeader, serialNumberHeader, agentVersionHeader);
                 if (killResponse != null) return AsOutput(killResponse);
 
-                // Parse request body (already gzip-decompressed by middleware if Content-Encoding: gzip).
+                // Defense in depth: cap decompressed body size before buffering it all into
+                // memory + deserialising. Mirrors the legacy /api/agent/ingest NDJSON guard
+                // using the same tenant-config knob. Request body here is already gzip-
+                // decompressed by UseRequestDecompression — so the cap is on the actual JSON
+                // bytes we'll feed to the parser.
+                var tenantConfig = await _configService.GetConfigurationAsync(tenantIdHeader);
+                var maxPayloadBytes = (tenantConfig?.MaxNdjsonPayloadSizeMB ?? 5) * 1024 * 1024;
+
+                var (exceeded, body) = await ReadBodyWithSizeCapAsync(req.Body, maxPayloadBytes);
+                if (exceeded)
+                {
+                    _logger.LogWarning(
+                        "IngestTelemetry: payload exceeds {Max}MB cap for tenant {Tenant}",
+                        maxPayloadBytes / (1024 * 1024), tenantIdHeader);
+                    return AsOutput(await WriteErrorAsync(
+                        req, HttpStatusCode.RequestEntityTooLarge,
+                        $"Payload exceeds {maxPayloadBytes / (1024 * 1024)} MB cap"));
+                }
+
                 List<TelemetryItemDto>? items;
                 try
                 {
-                    using var reader = new StreamReader(req.Body);
-                    var body = await reader.ReadToEndAsync();
                     items = JsonConvert.DeserializeObject<List<TelemetryItemDto>>(body);
                 }
                 catch (JsonException ex)
@@ -384,6 +400,28 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             public string? AdminAction;
             public List<ServerAction>? PendingActions;
             public SignalRMessageAction[] SignalRMessages = Array.Empty<SignalRMessageAction>();
+        }
+
+        /// <summary>
+        /// Reads a stream into a string with a strict byte cap. Returns <c>(true, "")</c> as
+        /// soon as the cap would be exceeded — the stream isn't fully drained, which bounds
+        /// memory use even for a malicious sender. Matches the legacy NDJSON parser's guard
+        /// semantics (strict greater-than, so a payload equal to the cap is accepted).
+        /// </summary>
+        internal static async Task<(bool exceeded, string body)> ReadBodyWithSizeCapAsync(
+            Stream source, int maxBytes)
+        {
+            using var buffered = new MemoryStream();
+            var buffer = new byte[8192];
+            int read;
+            long total = 0;
+            while ((read = await source.ReadAsync(buffer, 0, buffer.Length)) > 0)
+            {
+                total += read;
+                if (total > maxBytes) return (true, string.Empty);
+                await buffered.WriteAsync(buffer, 0, read);
+            }
+            return (false, System.Text.Encoding.UTF8.GetString(buffered.ToArray()));
         }
 
         /// <summary>
