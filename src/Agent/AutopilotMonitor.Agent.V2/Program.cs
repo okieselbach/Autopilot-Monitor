@@ -306,8 +306,18 @@ namespace AutopilotMonitor.Agent.V2
                     "MDM certificate not found in LocalMachine or CurrentUser store");
             }
 
+            // Central observer for consecutive 401/403 responses. Initialised with the CLI/bootstrap
+            // defaults on AgentConfiguration; UpdateLimits is called after RemoteConfigMerger.Merge
+            // so tenant-policy overrides take effect. ThresholdExceeded is wired below, once the
+            // shutdown signal is available, to trigger a clean agent exit when the limit is hit.
+            var authFailureTracker = new AuthFailureTracker(
+                maxFailures: agentConfig.MaxAuthFailures,
+                timeoutMinutes: agentConfig.AuthFailureTimeoutMinutes,
+                clock: SystemClock.Instance,
+                logger: logger);
+
             var remoteConfigService = new RemoteConfigService(
-                backendApiClient, agentConfig.TenantId, logger, emergencyReporter, distressReporter);
+                backendApiClient, agentConfig.TenantId, logger, emergencyReporter, distressReporter, authFailureTracker);
             var remoteConfig = remoteConfigService.FetchConfigAsync().GetAwaiter().GetResult();
 
             // Project remote tenant-controlled knobs onto the runtime AgentConfiguration so that
@@ -316,6 +326,9 @@ namespace AutopilotMonitor.Agent.V2
             // actually respect the tenant admin settings. CLI flags stay authoritative over remote.
             RemoteConfigMerger.Merge(agentConfig, remoteConfig, args);
 
+            // Refresh tracker ceilings with the tenant-specific values we just merged in.
+            authFailureTracker.UpdateLimits(agentConfig.MaxAuthFailures, agentConfig.AuthFailureTimeoutMinutes);
+
             logger.SetLogLevel(agentConfig.LogLevel);
 
             // Propagate the backend-expected SHA so the runtime hash-mismatch trigger (M4.6.α
@@ -323,6 +336,18 @@ namespace AutopilotMonitor.Agent.V2
             // in M4.6.β) has the up-to-date integrity hash. Also refresh AllowAgentDowngrade.
             if (!string.IsNullOrEmpty(remoteConfig.LatestAgentSha256))
                 SelfUpdater.BackendExpectedSha256 = remoteConfig.LatestAgentSha256;
+
+            // Post-config binary-integrity check: verify the running EXE's SHA-256 against the
+            // value advertised by the backend. Mismatch does not terminate (SelfUpdater's own
+            // hash-based trigger covers the "wrong EXE" case at next startup) — we just emit an
+            // IntegrityCheckFailed error report so operators see the drift.
+            var integrityResult = BinaryIntegrityVerifier.Check(remoteConfig.LatestAgentExeSha256, logger);
+            if (integrityResult.IsMismatch)
+            {
+                _ = emergencyReporter.TrySendAsync(
+                    AgentErrorType.IntegrityCheckFailed,
+                    $"Running exe SHA-256 differs from backend-advertised hash. actual={integrityResult.ActualSha256}, expected={integrityResult.ExpectedSha256}");
+            }
 
             // H-2 mitigation: delete the persisted bootstrap-config.json once the MDM cert
             // proves it can authenticate. Non-blocking — any failure leaves the file for retry.
@@ -361,7 +386,8 @@ namespace AutopilotMonitor.Agent.V2
                     model: hardwareForReporters.Model,
                     serialNumber: hardwareForReporters.SerialNumber,
                     bootstrapToken: agentConfig.UseBootstrapTokenAuth ? agentConfig.BootstrapToken : null,
-                    agentVersion: GetAgentVersion());
+                    agentVersion: GetAgentVersion(),
+                    authFailureTracker: authFailureTracker);
             }
             catch (Exception ex)
             {
@@ -498,6 +524,16 @@ namespace AutopilotMonitor.Agent.V2
                     AppDomain.CurrentDomain.ProcessExit += processExitHandler;
                     orchestrator.Terminated += terminationHandler.Handle;
 
+                    // Auth-failure watchdog: when MaxAuthFailures / AuthFailureTimeoutMinutes
+                    // is exceeded the agent must shut down cleanly instead of hammering a
+                    // backend that has definitely said no. Event fires at most once.
+                    EventHandler<AuthFailureThresholdEventArgs> authThresholdHandler = (s, e) =>
+                    {
+                        logger.Error($"Auth-failure threshold exceeded ({e.Reason}) — initiating shutdown.");
+                        shutdown.Set();
+                    };
+                    authFailureTracker.ThresholdExceeded += authThresholdHandler;
+
                     try
                     {
                         orchestrator.Start();
@@ -550,6 +586,7 @@ namespace AutopilotMonitor.Agent.V2
                         Console.CancelKeyPress -= cancelHandler;
                         AppDomain.CurrentDomain.ProcessExit -= processExitHandler;
                         orchestrator.Terminated -= terminationHandler.Handle;
+                        authFailureTracker.ThresholdExceeded -= authThresholdHandler;
 
                         try { orchestrator.Stop(); }
                         catch (Exception ex) { logger.Error("Orchestrator stop failed.", ex); }
