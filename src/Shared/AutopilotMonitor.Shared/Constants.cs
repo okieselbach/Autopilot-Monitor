@@ -139,6 +139,13 @@ namespace AutopilotMonitor.Shared
             public const string ReseedFromGitHub         = "/api/rules/reseed-from-github";
             public const string ValidateBootstrapCode    = "/api/bootstrap/validate/{code}";
 
+            // V2 Agent generic telemetry transport (Plan §2.7a).
+            // Sibling of IngestEvents under /api/agent/* — same Agent-writes namespace, heterogeneous
+            // TelemetryItem[] payload (Event + Signal + DecisionTransition). Backend routes per
+            // TelemetryItem.Kind to Events / Signals / DecisionTransitions tables. Replaces the
+            // per-type IngestEvents path once the Legacy Agent is decommissioned (v11.1+).
+            public const string IngestTelemetry          = "/api/agent/telemetry";
+
             // MCP/Agent API search endpoints
             public const string SearchSessions          = "/api/search/sessions";
             public const string SearchSessionsByEvent   = "/api/search/sessions-by-event";
@@ -336,6 +343,22 @@ namespace AutopilotMonitor.Shared
             // Lightweight index of sessions that have events (for orphan detection)
             public const string EventSessionIndex = "EventSessionIndex";
 
+            // V2 Decision Engine primary tables (Plan §M5).
+            // SignalLog (input-truth) and Journal (decision-truth) projected to the backend for
+            // the Inspector + Reducer-Verifier. Both partitioned by {TenantId}_{SessionId}.
+            public const string Signals             = "Signals";
+            public const string DecisionTransitions = "DecisionTransitions";
+
+            // V2 Decision Engine index tables (Plan §2.8 query matrix + §M5.d). Secondary
+            // projections written asynchronously via the `telemetry-index-reconcile` queue
+            // after the primary Signals / DecisionTransitions row has committed. Eventual
+            // consistency; a 2h timer re-indexes the last 4h as a safety-net on queue failures.
+            public const string SessionsByTerminal          = "SessionsByTerminal";
+            public const string SessionsByStage             = "SessionsByStage";
+            public const string DeadEndsByReason            = "DeadEndsByReason";
+            public const string ClassifierVerdictsByIdLevel = "ClassifierVerdictsByIdLevel";
+            public const string SignalsByKind               = "SignalsByKind";
+
             /// <summary>
             /// Returns all table names for initialization
             /// </summary>
@@ -377,8 +400,30 @@ namespace AutopilotMonitor.Shared
                 OpsEvents,
                 ImeVersionHistory,
                 RuleStats,
-                EventSessionIndex
+                EventSessionIndex,
+                Signals,
+                DecisionTransitions,
+                SessionsByTerminal,
+                SessionsByStage,
+                DeadEndsByReason,
+                ClassifierVerdictsByIdLevel,
+                SignalsByKind
             };
+        }
+
+        /// <summary>
+        /// Azure Storage Queue names. Queues feed async fan-out / reconciliation paths
+        /// that would otherwise block the hot ingest loop.
+        /// </summary>
+        public static class QueueNames
+        {
+            /// <summary>
+            /// V2 Decision Engine index-table fan-out (Plan §2.8, §M5.d). One message per
+            /// committed primary row (Signal or DecisionTransition); consumer writes the
+            /// 0–3 applicable index rows. Eventual consistency; the 2h reconcile timer is
+            /// the safety net on queue failures.
+            /// </summary>
+            public const string TelemetryIndexReconcile = "telemetry-index-reconcile";
         }
     }
 }

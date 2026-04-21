@@ -30,9 +30,13 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
-        /// Gets global admin configuration (uses cache with 5-minute TTL)
+        /// Gets global admin configuration (uses cache with 5-minute TTL).
+        /// <para>
+        /// Virtual so it can be mocked via Moq in consumer tests that need controlled
+        /// flag values (e.g. <c>IndexReconcileTimer</c> flag-gate tests).
+        /// </para>
         /// </summary>
-        public async Task<AdminConfiguration> GetConfigurationAsync()
+        public virtual async Task<AdminConfiguration> GetConfigurationAsync()
         {
             if (_cache.TryGetValue(CacheKey, out AdminConfiguration? cachedConfig) && cachedConfig != null)
             {

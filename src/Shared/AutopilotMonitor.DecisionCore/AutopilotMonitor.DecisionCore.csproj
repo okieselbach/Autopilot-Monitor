@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AssemblyVersion>2.0.0.0</AssemblyVersion>
+    <FileVersion>2.0.0.0</FileVersion>
+    <Description>
+      Decision Core shared reducer library for Autopilot-Monitor Agent v2.0.
+      Consumed by Agent (net48) and Backend (net8.0). Pure, dependency-minimal.
+      AssemblyVersion is the ReducerVersion source (plan §2.10).
+    </Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AutopilotMonitor.Shared\AutopilotMonitor.Shared.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Internal helpers (DeviceOnlyReasons etc.) are visible to the test assembly for
+         precise assertions; never exposed to consumers. -->
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>AutopilotMonitor.DecisionCore.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Plan §2.8 — Newtonsoft.Json on both sides (Agent net48 + Backend net8.0) for DecisionCore DTOs. -->
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,114 @@
+using System.Net;
+using AutopilotMonitor.DecisionCore.Engine;
+using AutopilotMonitor.Functions.Helpers;
+using AutopilotMonitor.Functions.Services;
+using AutopilotMonitor.Shared.DataAccess;
+using Microsoft.Azure.Functions.Worker;
+using Microsoft.Azure.Functions.Worker.Http;
+using Microsoft.Extensions.Logging;
+
+namespace AutopilotMonitor.Functions.Functions.Sessions
+{
+    /// <summary>
+    /// <c>GET /api/sessions/{sessionId}/reducer-verification</c> — admin/ops endpoint that
+    /// runs structural verification on a session's persisted SignalLog + DecisionTransitions
+    /// journal (Plan §M5). Not tenant-exposed: gated by <c>GlobalAdminOnly</c> in the
+    /// <c>EndpointAccessPolicyCatalog</c>.
+    /// <para>
+    /// <b>Why structural only (not full engine replay)?</b> A full replay requires deserialising
+    /// the polymorphic <c>DecisionSignal.Evidence</c> from <c>SignalRecord.PayloadJson</c>,
+    /// which is a non-trivial refactor beyond the scope of this commit. The structural checks
+    /// catch the realistic release-gate failure modes (corruption, ReducerVersion drift, orphan
+    /// references) and give ops a usable tool today; a dedicated follow-up can add engine
+    /// replay once the Evidence deserialisation contract is pinned down.
+    /// </para>
+    /// </summary>
+    public class GetSessionReducerVerificationFunction
+    {
+        /// <summary>Hard caps — match the other M5 read endpoints.</summary>
+        internal const int MaxSignalsToLoad = 5000;
+        internal const int MaxTransitionsToLoad = 5000;
+
+        private readonly ILogger<GetSessionReducerVerificationFunction> _logger;
+        private readonly ISignalRepository _signalRepo;
+        private readonly IDecisionTransitionRepository _transitionRepo;
+        private readonly ISessionRepository _sessionRepo;
+
+        public GetSessionReducerVerificationFunction(
+            ILogger<GetSessionReducerVerificationFunction> logger,
+            ISignalRepository signalRepo,
+            IDecisionTransitionRepository transitionRepo,
+            ISessionRepository sessionRepo)
+        {
+            _logger = logger;
+            _signalRepo = signalRepo;
+            _transitionRepo = transitionRepo;
+            _sessionRepo = sessionRepo;
+        }
+
+        [Function("GetSessionReducerVerification")]
+        public async Task<HttpResponseData> Run(
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "sessions/{sessionId}/reducer-verification")] HttpRequestData req,
+            string sessionId)
+        {
+            if (string.IsNullOrWhiteSpace(sessionId))
+            {
+                var badRequest = req.CreateResponse(HttpStatusCode.BadRequest);
+                await badRequest.WriteAsJsonAsync(new { success = false, message = "SessionId is required" });
+                return badRequest;
+            }
+
+            var sessionPrefix = $"[Session: {sessionId.Substring(0, Math.Min(8, sessionId.Length))}]";
+            _logger.LogInformation("{Prefix} GetSessionReducerVerification", sessionPrefix);
+
+            try
+            {
+                var requestCtx = req.GetRequestContext();
+                var tenantIdForLoad = requestCtx.TargetTenantId;
+
+                var signals = await _signalRepo.QueryBySessionAsync(
+                    tenantIdForLoad, sessionId, MaxSignalsToLoad);
+                var transitions = await _transitionRepo.QueryBySessionAsync(
+                    tenantIdForLoad, sessionId, MaxTransitionsToLoad);
+
+                // Global Admin cross-tenant fallback — same pattern as the other session
+                // detail read endpoints. Resolve via SessionsIndex when the effective tenant
+                // has no data. (GlobalAdminOnly gate means we don't need to check IsGlobalAdmin
+                // again, but the SessionsIndex lookup is still the cleanest way to find the
+                // actual tenant for a loose sessionId.)
+                if (signals.Count == 0 && transitions.Count == 0)
+                {
+                    var resolvedTenantId = await _sessionRepo.FindSessionTenantIdAsync(sessionId);
+                    if (resolvedTenantId != null &&
+                        !string.Equals(resolvedTenantId, tenantIdForLoad, StringComparison.OrdinalIgnoreCase))
+                    {
+                        signals = await _signalRepo.QueryBySessionAsync(
+                            resolvedTenantId, sessionId, MaxSignalsToLoad);
+                        transitions = await _transitionRepo.QueryBySessionAsync(
+                            resolvedTenantId, sessionId, MaxTransitionsToLoad);
+                        tenantIdForLoad = resolvedTenantId;
+                    }
+                }
+
+                // Read the live reducer's version via a transient DecisionEngine instance.
+                // The engine has no heavy construction cost (no DI, no state) so this is
+                // cheaper than threading a singleton through.
+                var currentReducerVersion = new DecisionEngine().ReducerVersion;
+
+                var report = ReducerVerifier.Verify(
+                    tenantIdForLoad, sessionId, signals, transitions, currentReducerVersion);
+
+                return await req.OkAsync(new
+                {
+                    success = true,
+                    truncated = signals.Count >= MaxSignalsToLoad || transitions.Count >= MaxTransitionsToLoad,
+                    report,
+                });
+            }
+            catch (Exception ex)
+            {
+                return await req.InternalServerErrorAsync(_logger, ex, $"Reducer verification for session '{sessionId}'");
+            }
+        }
+    }
+}

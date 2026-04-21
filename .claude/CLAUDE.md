@@ -51,6 +51,8 @@ You are operating within a constrained context window and strict system prompts.
 - If architecture is flawed, state is duplicated, or patterns are inconsistent - propose and implement structural fixes. Ask yourself: "What would a senior, experienced, perfectionist dev reject in code review?" Fix all of it.
 
 
+Codex will review your output once you are done!
+
 
 ## Task Management
 

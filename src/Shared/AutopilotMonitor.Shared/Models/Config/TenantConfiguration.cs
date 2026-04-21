@@ -149,9 +149,11 @@ namespace AutopilotMonitor.Shared.Models
         // ===== PAYLOAD SETTINGS =====
 
         /// <summary>
-        /// Maximum decompressed NDJSON payload size in MB
-        /// Protects against memory exhaustion and denial-of-service attacks
-        /// Default: 5 MB
+        /// Maximum decompressed ingest-batch payload size in MB. Applies to both the legacy
+        /// NDJSON path (<c>/api/agent/ingest</c>) and the V2 JSON-array path
+        /// (<c>/api/agent/telemetry</c>) — same DoS/memory-exhaustion protection, different
+        /// wire shapes. The property name is historical; scope is shape-agnostic. Default: 5 MB.
+        /// Table-only setting (not editable via the tenant-config public API).
         /// </summary>
         public int MaxNdjsonPayloadSizeMB { get; set; } = 5;
 

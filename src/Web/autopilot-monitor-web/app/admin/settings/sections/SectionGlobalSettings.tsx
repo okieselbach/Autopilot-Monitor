@@ -12,6 +12,7 @@ export function SectionGlobalSettings() {
     collectorIdleTimeoutMinutes, setCollectorIdleTimeoutMinutes,
     allowAgentDowngrade, setAllowAgentDowngrade,
     modernDeploymentHarmlessEventIds, setModernDeploymentHarmlessEventIds,
+    enableIndexDualWrite, setEnableIndexDualWrite,
     handleSaveAdminConfig, handleResetAdminConfig,
   } = useAdminConfig();
 
@@ -32,6 +33,8 @@ export function SectionGlobalSettings() {
         setAllowAgentDowngrade={setAllowAgentDowngrade}
         modernDeploymentHarmlessEventIds={modernDeploymentHarmlessEventIds}
         setModernDeploymentHarmlessEventIds={setModernDeploymentHarmlessEventIds}
+        enableIndexDualWrite={enableIndexDualWrite}
+        setEnableIndexDualWrite={setEnableIndexDualWrite}
         onSave={handleSaveAdminConfig}
         onReset={handleResetAdminConfig}
       />

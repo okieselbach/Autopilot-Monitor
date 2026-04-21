@@ -1,0 +1,10 @@
+# Scenario: SelfDeploying-v1 Happy (SkipUserStatusPage)
+# Device-level ESP only, no AccountSetup phase, no Hello, no Desktop.
+# Terminal signal is DeviceSetupProvisioningComplete.
+# Expected: Stage=Completed, Outcome=EnrollmentComplete,
+#           DeviceOnlyDeployment=Confirmed(reason=device_only) (no user-presence facts),
+#           EnrollmentType=Strong(selfdeploying_provisioning_complete).
+# Plan: §4 M3.2 canonical SelfDeploying scenario.
+{"SessionSignalOrdinal":0,"SessionTraceOrdinal":0,"Kind":"SessionStarted","KindSchemaVersion":1,"OccurredAtUtc":"2026-04-21T09:00:00Z","SourceOrigin":"orchestrator","Evidence":{"Kind":"Synthetic","Identifier":"session:selfdeploying-happy:started","Summary":"Session start anchor"}}
+{"SessionSignalOrdinal":1,"SessionTraceOrdinal":1,"Kind":"EspPhaseChanged","KindSchemaVersion":1,"OccurredAtUtc":"2026-04-21T09:01:00Z","SourceOrigin":"EspAndHelloTracker","Evidence":{"Kind":"Derived","Identifier":"esp-phase-detector-v1","Summary":"ESP phase=DeviceSetup (SkipUserStatusPage)","DerivationInputs":{"rawValue":"1","skipUserStatusPage":"true"}},"Payload":{"phase":"DeviceSetup"}}
+{"SessionSignalOrdinal":2,"SessionTraceOrdinal":2,"Kind":"DeviceSetupProvisioningComplete","KindSchemaVersion":1,"OccurredAtUtc":"2026-04-21T09:03:00Z","SourceOrigin":"ProvisioningStatusTracker","Evidence":{"Kind":"Derived","Identifier":"provisioning-status-tracker-v1","Summary":"Device setup provisioning complete","DerivationInputs":{"registryKey":"HKLM\\...Provisioning\\Status","rawValue":"Complete"}}}

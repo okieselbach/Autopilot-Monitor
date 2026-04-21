@@ -105,6 +105,7 @@ public static class EndpointAccessPolicyCatalog
         // ── DeviceOrBootstrapAuth ───────────────────────────────────────
         new("POST",   "agent/register-session",    EndpointPolicy.DeviceOrBootstrapAuth),
         new("POST",   "agent/ingest",              EndpointPolicy.DeviceOrBootstrapAuth),
+        new("POST",   "agent/telemetry",           EndpointPolicy.DeviceOrBootstrapAuth),
         new("GET",    "agent/config",              EndpointPolicy.DeviceOrBootstrapAuth),
         new("POST",   "agent/upload-url",          EndpointPolicy.DeviceOrBootstrapAuth),
         new("POST",   "agent/error",               EndpointPolicy.DeviceOrBootstrapAuth),
@@ -138,6 +139,8 @@ public static class EndpointAccessPolicyCatalog
         new("GET",    "sessions",                  EndpointPolicy.MemberRead),
         new("GET",    "sessions/{sessionId}",      EndpointPolicy.MemberRead, TenantScoping.QueryParam),
         new("GET",    "sessions/{sessionId}/events", EndpointPolicy.MemberRead, TenantScoping.QueryParam),
+        new("GET",    "sessions/{sessionId}/signals", EndpointPolicy.MemberRead, TenantScoping.QueryParam),
+        new("GET",    "sessions/{sessionId}/decision-graph", EndpointPolicy.MemberRead, TenantScoping.QueryParam),
         new("GET",    "sessions/{sessionId}/analysis", EndpointPolicy.MemberRead, TenantScoping.QueryParam),
         new("GET",    "sessions/{sessionId}/vulnerability-report", EndpointPolicy.MemberRead, TenantScoping.QueryParam),
         new("GET",    "metrics/app",               EndpointPolicy.MemberRead),
@@ -200,6 +203,7 @@ public static class EndpointAccessPolicyCatalog
         new("GET",    "metrics/mcp-usage/me",                  EndpointPolicy.AuthenticatedUser),
 
         // ── GlobalAdminOnly ────────────────────────────────────────────
+        new("GET",    "sessions/{sessionId}/reducer-verification", EndpointPolicy.GlobalAdminOnly),
         new("GET",    "global/raw/sessions",                  EndpointPolicy.GlobalAdminOnly),
         new("GET",    "global/raw/events",                    EndpointPolicy.GlobalAdminOnly),
         new("GET",    "global/raw/events/search",              EndpointPolicy.GlobalAdminOnly),

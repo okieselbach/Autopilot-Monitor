@@ -141,7 +141,7 @@ namespace AutopilotMonitor.Functions.Functions.Config
             var response = req.CreateResponse(HttpStatusCode.OK);
             await response.WriteAsJsonAsync(new AgentConfigResponse
             {
-                ConfigVersion = 25, // IntegrityBypassAnalyzer flag
+                ConfigVersion = 26, // WhiteGloveSealingPatternIds wired from AdminConfiguration
                 UploadIntervalSeconds = 10,
                 SelfDestructOnComplete = tenantConfig.SelfDestructOnComplete ?? true,
                 KeepLogFile = tenantConfig.KeepLogFile ?? false,
@@ -176,7 +176,8 @@ namespace AutopilotMonitor.Functions.Functions.Config
                 SendTraceEvents = tenantConfig.SendTraceEvents,
                 UnrestrictedMode = tenantConfig.UnrestrictedModeEnabled && tenantConfig.UnrestrictedMode,
                 GatherRules = gatherRules,
-                ImeLogPatterns = imeLogPatterns
+                ImeLogPatterns = imeLogPatterns,
+                WhiteGloveSealingPatternIds = adminConfig.GetWhiteGloveSealingPatternIds(),
             });
 
             return response;

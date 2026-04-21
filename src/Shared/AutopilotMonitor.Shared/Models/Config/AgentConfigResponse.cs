@@ -54,6 +54,18 @@ namespace AutopilotMonitor.Shared.Models
         public List<ImeLogPattern> ImeLogPatterns { get; set; } = new List<ImeLogPattern>();
 
         /// <summary>
+        /// Pattern-IDs (aus <see cref="ImeLogPatterns"/>), deren Match vom V2-Agent als
+        /// <c>WhiteGloveSealingPatternDetected</c>-DecisionSignal re-emittiert wird
+        /// (zusätzlich zum normalen <c>ime_pattern_match</c>-Event). Plan §4.x M4.4.4 / M4.4.5.e.
+        /// <para>
+        /// Default <c>null</c>/leer = Feature off (M3-kompatibel, kein Regressions-Risiko).
+        /// Nur Pattern-IDs in dieser Liste werden als Sealing-Signal gewertet — alle anderen
+        /// IME-Pattern-Matches laufen den normalen Event-Pfad.
+        /// </para>
+        /// </summary>
+        public List<string> WhiteGloveSealingPatternIds { get; set; } = new List<string>();
+
+        /// <summary>
         /// Maximum consecutive authentication failures (401/403) before the agent shuts down.
         /// Prevents endless retry traffic when the device is not authorized.
         /// 0 = disabled (retry forever). Default: 5.

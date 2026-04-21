@@ -1,0 +1,12 @@
+# Scenario: Classifier Anti-Loop — same snapshot produces a single verdict
+# SealingPattern fires once (snapshot A -> classifier runs -> Weak). Two subsequent
+# ClassifierTick deadlines fire without any intervening fact change — the harness must
+# skip both (anti-loop via InputHash match). End state WhiteGloveSealing=Weak.
+# Expected: ClassifierRunStats["whiteglove-sealing:run"] == 1,
+#           ClassifierRunStats["whiteglove-sealing:skipped_by_antiloop"] == 2.
+# Plan: §4 M3.3 — Classifier-Anti-Loop / §2.4 InputHash dedup.
+{"SessionSignalOrdinal":0,"SessionTraceOrdinal":0,"Kind":"SessionStarted","KindSchemaVersion":1,"OccurredAtUtc":"2026-04-22T12:00:00Z","SourceOrigin":"orchestrator","Evidence":{"Kind":"Synthetic","Identifier":"session:wg-antiloop:started","Summary":"Session start anchor"}}
+{"SessionSignalOrdinal":1,"SessionTraceOrdinal":1,"Kind":"EspPhaseChanged","KindSchemaVersion":1,"OccurredAtUtc":"2026-04-22T12:01:00Z","SourceOrigin":"EspAndHelloTracker","Evidence":{"Kind":"Derived","Identifier":"esp-phase-detector-v1","Summary":"ESP phase=DeviceSetup","DerivationInputs":{"rawValue":"1"}},"Payload":{"phase":"DeviceSetup"}}
+{"SessionSignalOrdinal":2,"SessionTraceOrdinal":2,"Kind":"WhiteGloveSealingPatternDetected","KindSchemaVersion":1,"OccurredAtUtc":"2026-04-22T12:02:00Z","SourceOrigin":"ImeLogTracker","Evidence":{"Kind":"Derived","Identifier":"whiteglove-sealing-pattern-v1","Summary":"IME WG sealing pattern matched","DerivationInputs":{"patternId":"wg-sealing-v1"}}}
+{"SessionSignalOrdinal":3,"SessionTraceOrdinal":3,"Kind":"DeadlineFired","KindSchemaVersion":1,"OccurredAtUtc":"2026-04-22T12:02:30Z","SourceOrigin":"DeadlineScheduler","Evidence":{"Kind":"Synthetic","Identifier":"deadline:classifier_tick:fired:1","Summary":"Classifier tick 1 — same snapshot"},"Payload":{"deadline":"classifier_tick"}}
+{"SessionSignalOrdinal":4,"SessionTraceOrdinal":4,"Kind":"DeadlineFired","KindSchemaVersion":1,"OccurredAtUtc":"2026-04-22T12:03:00Z","SourceOrigin":"DeadlineScheduler","Evidence":{"Kind":"Synthetic","Identifier":"deadline:classifier_tick:fired:2","Summary":"Classifier tick 2 — same snapshot"},"Payload":{"deadline":"classifier_tick"}}

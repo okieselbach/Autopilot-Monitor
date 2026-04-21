@@ -161,6 +161,17 @@ builder.Services.AddSingleton<BlobStorageService>();
 builder.Services.AddSingleton<SessionReportService>();
 builder.Services.AddSingleton<BootstrapSessionService>();
 
+// V2 Decision Engine index-table dual-write producer (Plan §2.8, §M5.d). Gated by
+// AdminConfiguration.EnableIndexDualWrite (default false) inside the implementation.
+builder.Services.AddSingleton<
+    AutopilotMonitor.Shared.DataAccess.IIndexReconcileProducer,
+    AutopilotMonitor.Functions.Services.Indexing.AzureQueueIndexReconcileProducer>();
+
+// V2 Decision Engine index-table reconcile consumer (Plan §M5.d.3). Plain class, not
+// interface-abstracted — Cosmos swap would reshape around IIndexTableRepository, not here.
+builder.Services.AddSingleton<
+    AutopilotMonitor.Functions.Services.Indexing.IndexReconcileHandler>();
+
 // Programmatic SignalR push for background tasks (rule engine, vulnerability correlation)
 builder.Services.AddSingleton<SignalRNotificationService>();
 
@@ -175,6 +186,7 @@ builder.Services.AddSingleton<AutopilotMonitor.Functions.Services.Vulnerability.
 
 // Register agent Function classes so bootstrap wrappers can inject them for code reuse
 builder.Services.AddSingleton<IngestEventsFunction>();
+builder.Services.AddSingleton<EventIngestProcessor>();
 builder.Services.AddSingleton<RegisterSessionFunction>();
 builder.Services.AddSingleton<GetAgentConfigFunction>();
 builder.Services.AddSingleton<ReportAgentErrorFunction>();

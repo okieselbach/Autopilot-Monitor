@@ -1,0 +1,125 @@
+using System;
+using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
+using AutopilotMonitor.Agent.V2.Core.Logging;
+using AutopilotMonitor.Agent.V2.Core.Orchestration;
+using AutopilotMonitor.Agent.V2.Core.Security;
+using AutopilotMonitor.Agent.V2.Core.Tests.Harness;
+using Xunit;
+
+namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
+{
+    public sealed class MtlsHttpClientFactoryTests
+    {
+        private sealed class FakeCertificateResolver : ICertificateResolver
+        {
+            private readonly X509Certificate2? _cert;
+            public int CallCount { get; private set; }
+
+            public FakeCertificateResolver(X509Certificate2? cert) => _cert = cert;
+
+            public X509Certificate2? FindClientCertificate(AgentLogger logger)
+            {
+                CallCount++;
+                return _cert;
+            }
+        }
+
+        /// <summary>
+        /// Creates an in-memory self-signed cert so the factory has something real to attach
+        /// without touching the Windows cert store. <see cref="CertificateRequest"/> is
+        /// available on net48 (4.7.2+).
+        /// </summary>
+        private static X509Certificate2 CreateSelfSignedCert()
+        {
+            using (var rsa = RSA.Create(2048))
+            {
+                var req = new CertificateRequest(
+                    "CN=apmon-v2-test",
+                    rsa,
+                    HashAlgorithmName.SHA256,
+                    RSASignaturePadding.Pkcs1);
+
+                return req.CreateSelfSigned(
+                    DateTimeOffset.UtcNow.AddDays(-1),
+                    DateTimeOffset.UtcNow.AddDays(1));
+            }
+        }
+
+        [Fact]
+        public void CreateHandler_attaches_cert_and_enables_decompression()
+        {
+            using var tmp = new TempDirectory();
+            var logger = new AgentLogger(tmp.Path, AgentLogLevel.Info);
+            using var cert = CreateSelfSignedCert();
+            var resolver = new FakeCertificateResolver(cert);
+
+            using var handler = MtlsHttpClientFactory.CreateHandler(resolver, logger);
+
+            Assert.Equal(1, resolver.CallCount);
+            Assert.Equal(
+                DecompressionMethods.GZip | DecompressionMethods.Deflate,
+                handler.AutomaticDecompression);
+            Assert.Single(handler.ClientCertificates);
+            Assert.Equal(cert.Thumbprint, ((X509Certificate2)handler.ClientCertificates[0]).Thumbprint);
+        }
+
+        [Fact]
+        public void Create_returns_client_with_default_timeout()
+        {
+            using var tmp = new TempDirectory();
+            var logger = new AgentLogger(tmp.Path, AgentLogLevel.Info);
+            using var cert = CreateSelfSignedCert();
+            var resolver = new FakeCertificateResolver(cert);
+
+            using var client = MtlsHttpClientFactory.Create(resolver, logger);
+
+            Assert.NotNull(client);
+            Assert.Equal(MtlsHttpClientFactory.DefaultTimeout, client.Timeout);
+        }
+
+        [Fact]
+        public void Create_respects_custom_timeout()
+        {
+            using var tmp = new TempDirectory();
+            var logger = new AgentLogger(tmp.Path, AgentLogLevel.Info);
+            using var cert = CreateSelfSignedCert();
+            var resolver = new FakeCertificateResolver(cert);
+
+            using var client = MtlsHttpClientFactory.Create(resolver, logger, TimeSpan.FromSeconds(5));
+
+            Assert.Equal(TimeSpan.FromSeconds(5), client.Timeout);
+        }
+
+        [Fact]
+        public void CreateHandler_throws_when_resolver_returns_null()
+        {
+            using var tmp = new TempDirectory();
+            var logger = new AgentLogger(tmp.Path, AgentLogLevel.Info);
+            var resolver = new FakeCertificateResolver(null);
+
+            var ex = Assert.Throws<InvalidOperationException>(
+                () => MtlsHttpClientFactory.CreateHandler(resolver, logger));
+
+            Assert.Contains("no MDM client certificate found", ex.Message);
+            Assert.Equal(1, resolver.CallCount);
+        }
+
+        [Fact]
+        public void Create_rejects_null_dependencies()
+        {
+            using var tmp = new TempDirectory();
+            var logger = new AgentLogger(tmp.Path, AgentLogLevel.Info);
+            using var cert = CreateSelfSignedCert();
+
+            Assert.Throws<ArgumentNullException>(
+                () => MtlsHttpClientFactory.Create(null!, logger));
+
+            Assert.Throws<ArgumentNullException>(
+                () => MtlsHttpClientFactory.Create(new FakeCertificateResolver(cert), null!));
+        }
+    }
+}

@@ -1,0 +1,11 @@
+# Scenario: SelfDeploying Device-Only with ESP-Exit-Unknown
+# DeviceSetup phase arrives, but no AccountSetup follows within the 5-minute
+# DeviceOnlyEspDetection window — the deadline fires and classifies the session
+# as DeviceOnly. Terminal comes via DeviceSetupProvisioningComplete afterwards.
+# Expected: Stage=Completed, Outcome=EnrollmentComplete,
+#           DeviceOnlyDeployment=Confirmed/Strong progression, no user-presence facts.
+# Plan: §4 M3.2 — "SelfDeploying-v1 mit ESP-Exit-Unknown -> Device-Only-ESP-Timer -> Complete".
+{"SessionSignalOrdinal":0,"SessionTraceOrdinal":0,"Kind":"SessionStarted","KindSchemaVersion":1,"OccurredAtUtc":"2026-04-21T10:00:00Z","SourceOrigin":"orchestrator","Evidence":{"Kind":"Synthetic","Identifier":"session:device-only:started","Summary":"Session start anchor"}}
+{"SessionSignalOrdinal":1,"SessionTraceOrdinal":1,"Kind":"EspPhaseChanged","KindSchemaVersion":1,"OccurredAtUtc":"2026-04-21T10:01:00Z","SourceOrigin":"EspAndHelloTracker","Evidence":{"Kind":"Derived","Identifier":"esp-phase-detector-v1","Summary":"ESP phase=DeviceSetup","DerivationInputs":{"rawValue":"1"}},"Payload":{"phase":"DeviceSetup"}}
+{"SessionSignalOrdinal":2,"SessionTraceOrdinal":2,"Kind":"DeadlineFired","KindSchemaVersion":1,"OccurredAtUtc":"2026-04-21T10:06:00Z","SourceOrigin":"DeadlineScheduler","Evidence":{"Kind":"Synthetic","Identifier":"deadline:device_only_esp_detection:fired","Summary":"Device-only ESP detection window elapsed without AccountSetup"},"Payload":{"deadline":"device_only_esp_detection"}}
+{"SessionSignalOrdinal":3,"SessionTraceOrdinal":3,"Kind":"DeviceSetupProvisioningComplete","KindSchemaVersion":1,"OccurredAtUtc":"2026-04-21T10:08:00Z","SourceOrigin":"ProvisioningStatusTracker","Evidence":{"Kind":"Derived","Identifier":"provisioning-status-tracker-v1","Summary":"Device setup provisioning complete","DerivationInputs":{"registryKey":"HKLM\\...Provisioning\\Status","rawValue":"Complete"}}}

@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      V2-Agent-Core test project. Plan §4 M4 gates.
+      TargetFramework must be net48 to reference the net48-only V2.Core library.
+    -->
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="System.Net.Http" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- V2.Core + V2 exe (for Program.Guards startup helpers, M4.6.α) + dependencies.
+         Plan §2.16 isolation: NO reference to Agent.Core. -->
+    <ProjectReference Include="..\AutopilotMonitor.Agent.V2.Core\AutopilotMonitor.Agent.V2.Core.csproj" />
+    <ProjectReference Include="..\AutopilotMonitor.Agent.V2\AutopilotMonitor.Agent.V2.csproj" />
+    <ProjectReference Include="..\..\Shared\AutopilotMonitor.DecisionCore\AutopilotMonitor.DecisionCore.csproj" />
+    <ProjectReference Include="..\..\Shared\AutopilotMonitor.Shared\AutopilotMonitor.Shared.csproj" />
+  </ItemGroup>
+
+</Project>

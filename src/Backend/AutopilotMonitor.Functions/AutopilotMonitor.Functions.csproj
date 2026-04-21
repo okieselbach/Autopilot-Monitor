@@ -18,9 +18,11 @@
     <PackageReference Include="Microsoft.Azure.Functions.Worker.Extensions.SignalRService" Version="2.0.1" />
     <PackageReference Include="Microsoft.Azure.SignalR.Management" Version="1.29.0" />
     <PackageReference Include="Microsoft.Azure.Functions.Worker.Extensions.Timer" Version="4.3.1" />
+    <PackageReference Include="Microsoft.Azure.Functions.Worker.Extensions.Storage.Queues" Version="5.5.4" />
     <PackageReference Include="Microsoft.Azure.Functions.Worker.Sdk" Version="2.0.7" />
     <PackageReference Include="Azure.Data.Tables" Version="12.9.1" />
     <PackageReference Include="Azure.Storage.Blobs" Version="12.22.2" />
+    <PackageReference Include="Azure.Storage.Queues" Version="12.23.0" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     <PackageReference Include="Microsoft.Identity.Web" Version="4.3.0" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.11" />
@@ -30,6 +32,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\Shared\AutopilotMonitor.Shared\AutopilotMonitor.Shared.csproj" />
+    <ProjectReference Include="..\..\Shared\AutopilotMonitor.DecisionCore\AutopilotMonitor.DecisionCore.csproj" />
   </ItemGroup>
 
   <ItemGroup>
