@@ -349,6 +349,16 @@ namespace AutopilotMonitor.Shared
             public const string Signals             = "Signals";
             public const string DecisionTransitions = "DecisionTransitions";
 
+            // V2 Decision Engine index tables (Plan §2.8 query matrix + §M5.d). Secondary
+            // projections written asynchronously via the `telemetry-index-reconcile` queue
+            // after the primary Signals / DecisionTransitions row has committed. Eventual
+            // consistency; a 2h timer re-indexes the last 4h as a safety-net on queue failures.
+            public const string SessionsByTerminal          = "SessionsByTerminal";
+            public const string SessionsByStage             = "SessionsByStage";
+            public const string DeadEndsByReason            = "DeadEndsByReason";
+            public const string ClassifierVerdictsByIdLevel = "ClassifierVerdictsByIdLevel";
+            public const string SignalsByKind               = "SignalsByKind";
+
             /// <summary>
             /// Returns all table names for initialization
             /// </summary>
@@ -392,7 +402,12 @@ namespace AutopilotMonitor.Shared
                 RuleStats,
                 EventSessionIndex,
                 Signals,
-                DecisionTransitions
+                DecisionTransitions,
+                SessionsByTerminal,
+                SessionsByStage,
+                DeadEndsByReason,
+                ClassifierVerdictsByIdLevel,
+                SignalsByKind
             };
         }
     }
