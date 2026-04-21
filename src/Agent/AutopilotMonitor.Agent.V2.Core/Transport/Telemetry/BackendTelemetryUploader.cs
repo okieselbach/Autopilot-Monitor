@@ -9,6 +9,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using AutopilotMonitor.Agent.V2.Core.Security;
 using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.Models;
 using Newtonsoft.Json;
@@ -46,6 +47,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
         private readonly string? _serialNumber;
         private readonly string? _bootstrapToken;
         private readonly string? _agentVersion;
+        private readonly AuthFailureTracker? _authFailureTracker;
 
         public BackendTelemetryUploader(
             HttpClient httpClient,
@@ -55,7 +57,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
             string? model = null,
             string? serialNumber = null,
             string? bootstrapToken = null,
-            string? agentVersion = null)
+            string? agentVersion = null,
+            AuthFailureTracker? authFailureTracker = null)
         {
             _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
             if (string.IsNullOrEmpty(baseUrl)) throw new ArgumentException("BaseUrl is mandatory.", nameof(baseUrl));
@@ -68,6 +71,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
             _serialNumber = serialNumber;
             _bootstrapToken = bootstrapToken;
             _agentVersion = agentVersion;
+            _authFailureTracker = authFailureTracker;
         }
 
         public async Task<UploadResult> UploadBatchAsync(
@@ -124,12 +128,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
             }
         }
 
-        private static async Task<UploadResult> MapResponseAsync(HttpResponseMessage response)
+        private async Task<UploadResult> MapResponseAsync(HttpResponseMessage response)
         {
             var statusCode = (int)response.StatusCode;
 
             if (response.IsSuccessStatusCode)
             {
+                // Auth was accepted — reset the consecutive-failure counter so a transient
+                // backend hiccup does not eventually shut the agent down.
+                _authFailureTracker?.RecordSuccess();
+
                 // M4.6.ε — parse backend-to-agent control signals from the 2xx response body.
                 // Body is best-effort JSON; anything unparseable degrades cleanly to plain Ok().
                 return await TryReadControlSignalsAsync(response).ConfigureAwait(false);
@@ -142,6 +150,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
             {
                 case HttpStatusCode.Unauthorized:       // 401
                 case HttpStatusCode.Forbidden:          // 403
+                    // Feed the central tracker so the agent can shut down after MaxAuthFailures
+                    // instead of retrying a permanently-revoked certificate forever.
+                    _authFailureTracker?.RecordFailure(statusCode, "agent/telemetry");
                     return UploadResult.Permanent($"unauthorized: {shortReason}");
 
                 case HttpStatusCode.RequestTimeout:     // 408

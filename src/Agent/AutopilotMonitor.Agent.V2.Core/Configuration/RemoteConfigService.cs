@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Transport;
 using AutopilotMonitor.Agent.V2.Core.Logging;
+using AutopilotMonitor.Agent.V2.Core.Security;
 using AutopilotMonitor.Shared.Models;
 using Newtonsoft.Json;
 
@@ -21,6 +22,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Configuration
         private readonly string _cacheFilePath;
         private readonly EmergencyReporter _emergencyReporter;
         private readonly DistressReporter _distressReporter;
+        private readonly AuthFailureTracker _authFailureTracker;
 
         private AgentConfigResponse _currentConfig;
         private readonly object _configLock = new object();
@@ -39,13 +41,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Configuration
             }
         }
 
-        public RemoteConfigService(BackendApiClient apiClient, string tenantId, AgentLogger logger, EmergencyReporter emergencyReporter = null, DistressReporter distressReporter = null)
+        public RemoteConfigService(BackendApiClient apiClient, string tenantId, AgentLogger logger, EmergencyReporter emergencyReporter = null, DistressReporter distressReporter = null, AuthFailureTracker authFailureTracker = null)
         {
             _apiClient = apiClient ?? throw new ArgumentNullException(nameof(apiClient));
             _tenantId = tenantId ?? throw new ArgumentNullException(nameof(tenantId));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _emergencyReporter = emergencyReporter;
             _distressReporter = distressReporter;
+            _authFailureTracker = authFailureTracker;
 
             var cacheDir = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor\Config");
             _cacheFilePath = Path.Combine(cacheDir, "remote-config.json");
@@ -70,6 +73,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Configuration
                     LogCollectorSettings(config.Collectors);
                     SetConfig(config);
                     CacheConfig(config);
+                    _authFailureTracker?.RecordSuccess();
                     return config;
                 }
 
@@ -87,6 +91,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Configuration
                         ex.Message,
                         httpStatusCode: ex.StatusCode);
                 }
+
+                // Feed the central auth-failure tracker so the agent can shut down cleanly
+                // after MaxAuthFailures / AuthFailureTimeoutMinutes is exceeded, instead of
+                // hammering the backend forever when the device certificate is revoked.
+                _authFailureTracker?.RecordFailure(ex.StatusCode, "agent/config");
             }
             catch (Exception ex)
             {
