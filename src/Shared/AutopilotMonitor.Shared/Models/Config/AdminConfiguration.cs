@@ -307,6 +307,41 @@ namespace AutopilotMonitor.Shared.Models
             }
         }
 
+        // ===== WHITEGLOVE SEALING PATTERN IDS (Plan §M5, M4.4.4 / M4.4.5.e) =====
+
+        /// <summary>
+        /// JSON-serialized list of <see cref="ImeLogPattern"/> IDs whose match is re-emitted by
+        /// the V2 agent as a <c>WhiteGloveSealingPatternDetected</c> DecisionSignal (in addition
+        /// to the normal <c>ime_pattern_match</c> event). Example: <c>"[\"wg-seal-1\",\"wg-seal-2\"]"</c>.
+        /// <para>
+        /// Default null/empty = feature off (M3-compatible, no regression risk). Only IDs in
+        /// this list count as sealing signals; other IME pattern matches follow the regular
+        /// event path. Global-only — no per-tenant override (plan §M5 M4.4.5.e decision).
+        /// </para>
+        /// </summary>
+        public string WhiteGloveSealingPatternIdsJson { get; set; } = default!;
+
+        /// <summary>
+        /// Returns the deserialized list of WhiteGlove sealing pattern IDs. Falls back to an
+        /// empty list for null/empty/invalid JSON so the feature stays off by default
+        /// (M3-compatible).
+        /// </summary>
+        public List<string> GetWhiteGloveSealingPatternIds()
+        {
+            if (string.IsNullOrWhiteSpace(WhiteGloveSealingPatternIdsJson))
+                return new List<string>();
+            try
+            {
+                return JsonSerializer.Deserialize<List<string>>(WhiteGloveSealingPatternIdsJson,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+                    ?? new List<string>();
+            }
+            catch
+            {
+                return new List<string>();
+            }
+        }
+
         /// <summary>
         /// Whether vulnerability correlation is globally enabled.
         /// When false, agents still collect inventory but backend skips correlation.
