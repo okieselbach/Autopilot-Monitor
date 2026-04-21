@@ -140,6 +140,7 @@ public static class EndpointAccessPolicyCatalog
         new("GET",    "sessions/{sessionId}",      EndpointPolicy.MemberRead, TenantScoping.QueryParam),
         new("GET",    "sessions/{sessionId}/events", EndpointPolicy.MemberRead, TenantScoping.QueryParam),
         new("GET",    "sessions/{sessionId}/signals", EndpointPolicy.MemberRead, TenantScoping.QueryParam),
+        new("GET",    "sessions/{sessionId}/decision-graph", EndpointPolicy.MemberRead, TenantScoping.QueryParam),
         new("GET",    "sessions/{sessionId}/analysis", EndpointPolicy.MemberRead, TenantScoping.QueryParam),
         new("GET",    "sessions/{sessionId}/vulnerability-report", EndpointPolicy.MemberRead, TenantScoping.QueryParam),
         new("GET",    "metrics/app",               EndpointPolicy.MemberRead),

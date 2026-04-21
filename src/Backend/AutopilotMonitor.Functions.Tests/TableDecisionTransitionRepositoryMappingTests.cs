@@ -124,4 +124,77 @@ public class TableDecisionTransitionRepositoryMappingTests
         Assert.Equal("3", entity.GetString("PayloadJson_ChunkCount"));
         Assert.False(entity.ContainsKey("PayloadJson"));
     }
+
+    // ============================================================ Reverse mapping (read path)
+
+    [Fact]
+    public void FromEntity_round_trips_all_typed_columns()
+    {
+        var original = new DecisionTransitionRecord
+        {
+            TenantId                    = TenantId,
+            SessionId                   = SessionId,
+            StepIndex                   = 7,
+            SessionTraceOrdinal         = 117,
+            SignalOrdinalRef            = 42,
+            OccurredAtUtc               = new DateTime(2026, 4, 21, 10, 0, 0, DateTimeKind.Utc),
+            Trigger                     = "EspExiting",
+            FromStage                   = "EspInProgress",
+            ToStage                     = "WhiteGloveSealed",
+            Taken                       = true,
+            DeadEndReason               = null,
+            ReducerVersion              = "1.0.0",
+            IsTerminal                  = true,
+            ClassifierVerdictId         = "whiteglove-sealing",
+            ClassifierHypothesisLevel   = "Strong",
+            PayloadJson                 = "{\"foo\":\"bar\"}",
+        };
+
+        var entity = TableDecisionTransitionRepository.ToEntity(original);
+        var restored = TableDecisionTransitionRepository.FromEntity(entity);
+
+        Assert.Equal(original.TenantId, restored.TenantId);
+        Assert.Equal(original.SessionId, restored.SessionId);
+        Assert.Equal(original.StepIndex, restored.StepIndex);
+        Assert.Equal(original.SessionTraceOrdinal, restored.SessionTraceOrdinal);
+        Assert.Equal(original.SignalOrdinalRef, restored.SignalOrdinalRef);
+        Assert.Equal(original.OccurredAtUtc, restored.OccurredAtUtc.ToUniversalTime());
+        Assert.Equal(original.Trigger, restored.Trigger);
+        Assert.Equal(original.FromStage, restored.FromStage);
+        Assert.Equal(original.ToStage, restored.ToStage);
+        Assert.Equal(original.Taken, restored.Taken);
+        Assert.Equal(original.DeadEndReason, restored.DeadEndReason);
+        Assert.Equal(original.ReducerVersion, restored.ReducerVersion);
+        Assert.Equal(original.IsTerminal, restored.IsTerminal);
+        Assert.Equal(original.ClassifierVerdictId, restored.ClassifierVerdictId);
+        Assert.Equal(original.ClassifierHypothesisLevel, restored.ClassifierHypothesisLevel);
+        Assert.Equal(original.PayloadJson, restored.PayloadJson);
+    }
+
+    [Fact]
+    public void FromEntity_reassembles_chunked_PayloadJson()
+    {
+        var oversized = new string('y', 75_000);
+        var original = new DecisionTransitionRecord
+        {
+            TenantId            = TenantId,
+            SessionId           = SessionId,
+            StepIndex           = 1,
+            SessionTraceOrdinal = 1,
+            SignalOrdinalRef    = 1,
+            OccurredAtUtc       = DateTime.UtcNow,
+            Trigger             = "t",
+            FromStage           = "F",
+            ToStage             = "T",
+            Taken               = true,
+            ReducerVersion      = "1.0.0",
+            PayloadJson         = oversized,
+        };
+
+        var entity = TableDecisionTransitionRepository.ToEntity(original);
+        var restored = TableDecisionTransitionRepository.FromEntity(entity);
+
+        Assert.Equal(75_000, restored.PayloadJson.Length);
+        Assert.Equal(oversized, restored.PayloadJson);
+    }
 }

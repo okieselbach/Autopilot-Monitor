@@ -75,6 +75,58 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
             return committed;
         }
 
+        public async Task<List<DecisionTransitionRecord>> QueryBySessionAsync(
+            string tenantId, string sessionId, int maxResults = 1000, CancellationToken cancellationToken = default)
+        {
+            SecurityValidator.EnsureValidGuid(tenantId, "TenantId");
+            SecurityValidator.EnsureValidGuid(sessionId, "SessionId");
+
+            var table = _storage.GetTableClient(Constants.TableNames.DecisionTransitions);
+            var pk = BuildPartitionKey(tenantId, sessionId);
+
+            var results = new List<DecisionTransitionRecord>(capacity: Math.Min(maxResults, 128));
+            var pages = table.QueryAsync<TableEntity>(
+                filter: $"PartitionKey eq '{pk}'",
+                maxPerPage: Math.Min(maxResults, 1000),
+                cancellationToken: cancellationToken);
+
+            await foreach (var entity in pages.ConfigureAwait(false))
+            {
+                if (results.Count >= maxResults) break;
+                results.Add(FromEntity(entity));
+            }
+
+            results.Sort((a, b) => a.StepIndex.CompareTo(b.StepIndex));
+            return results;
+        }
+
+        /// <summary>
+        /// Projects an Azure <see cref="TableEntity"/> back into a <see cref="DecisionTransitionRecord"/>,
+        /// reassembling chunked <c>PayloadJson</c> if present. Internal for mapping tests.
+        /// </summary>
+        internal static DecisionTransitionRecord FromEntity(TableEntity entity)
+        {
+            return new DecisionTransitionRecord
+            {
+                TenantId                  = entity.GetString("TenantId") ?? string.Empty,
+                SessionId                 = entity.GetString("SessionId") ?? string.Empty,
+                StepIndex                 = entity.GetInt32("StepIndex") ?? 0,
+                SessionTraceOrdinal       = entity.GetInt64("SessionTraceOrdinal") ?? 0,
+                SignalOrdinalRef          = entity.GetInt64("SignalOrdinalRef") ?? 0,
+                OccurredAtUtc             = entity.GetDateTime("OccurredAtUtc") ?? default,
+                Trigger                   = entity.GetString("Trigger") ?? string.Empty,
+                FromStage                 = entity.GetString("FromStage") ?? string.Empty,
+                ToStage                   = entity.GetString("ToStage") ?? string.Empty,
+                Taken                     = entity.GetBoolean("Taken") ?? false,
+                DeadEndReason             = entity.GetString("DeadEndReason"),
+                ReducerVersion            = entity.GetString("ReducerVersion") ?? string.Empty,
+                IsTerminal                = entity.GetBoolean("IsTerminal") ?? false,
+                ClassifierVerdictId       = entity.GetString("ClassifierVerdictId"),
+                ClassifierHypothesisLevel = entity.GetString("ClassifierHypothesisLevel"),
+                PayloadJson               = TableStorageChunking.ReassembleProperty(entity, "PayloadJson") ?? string.Empty,
+            };
+        }
+
         /// <summary>
         /// Projects a <see cref="DecisionTransitionRecord"/> onto its Azure <see cref="TableEntity"/>
         /// shape. Keys: PK = <c>{TenantId}_{SessionId}</c>, RK = <c>{StepIndex:D10}</c>.
