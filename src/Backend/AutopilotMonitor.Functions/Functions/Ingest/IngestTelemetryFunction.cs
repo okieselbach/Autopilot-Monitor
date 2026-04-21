@@ -5,6 +5,7 @@ using AutopilotMonitor.Functions.Services;
 using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Azure.Functions.Worker;
+using Microsoft.Azure.Functions.Worker.Extensions.SignalRService;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
@@ -19,7 +20,10 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
     /// <para>
     /// <b>Routing by <see cref="TelemetryItemDto.Kind"/>:</b>
     /// <list type="bullet">
-    ///   <item><c>Event</c> → <see cref="ISessionRepository.StoreEventsBatchAsync"/> (storage only in this build — full event pipeline sharing with /api/agent/ingest is tracked as M5.b.2).</item>
+    ///   <item><c>Event</c> → <see cref="EventIngestProcessor"/> (full pipeline parity with
+    ///   /api/agent/ingest: rule engine, app-install aggregation, SignalR, vulnerability
+    ///   correlation, webhooks, SLA breach, AdminAction detection, ServerAction delivery).
+    ///   The processor is a deliberate copy of the legacy pipeline — see M5.b.2 rationale.</item>
     ///   <item><c>Signal</c> → <see cref="ISignalRepository.StoreBatchAsync"/></item>
     ///   <item><c>DecisionTransition</c> → <see cref="IDecisionTransitionRepository.StoreBatchAsync"/></item>
     /// </list>
@@ -37,6 +41,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
         private readonly ISessionRepository _sessionRepo;
         private readonly ISignalRepository _signalRepo;
         private readonly IDecisionTransitionRepository _transitionRepo;
+        private readonly EventIngestProcessor _eventProcessor;
         private readonly TenantConfigurationService _configService;
         private readonly RateLimitService _rateLimitService;
         private readonly AutopilotDeviceValidator _autopilotDeviceValidator;
@@ -51,6 +56,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             ISessionRepository sessionRepo,
             ISignalRepository signalRepo,
             IDecisionTransitionRepository transitionRepo,
+            EventIngestProcessor eventProcessor,
             TenantConfigurationService configService,
             RateLimitService rateLimitService,
             AutopilotDeviceValidator autopilotDeviceValidator,
@@ -64,6 +70,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             _sessionRepo = sessionRepo;
             _signalRepo = signalRepo;
             _transitionRepo = transitionRepo;
+            _eventProcessor = eventProcessor;
             _configService = configService;
             _rateLimitService = rateLimitService;
             _autopilotDeviceValidator = autopilotDeviceValidator;
@@ -75,7 +82,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
         }
 
         [Function("IngestTelemetry")]
-        public async Task<HttpResponseData> Run(
+        public async Task<IngestEventsOutput> Run(
             [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "agent/telemetry")] HttpRequestData req)
         {
             try
@@ -86,7 +93,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
 
                 if (string.IsNullOrEmpty(tenantIdHeader))
                 {
-                    return await WriteErrorAsync(req, HttpStatusCode.BadRequest, "X-Tenant-Id header is required");
+                    return AsOutput(await WriteErrorAsync(req, HttpStatusCode.BadRequest, "X-Tenant-Id header is required"));
                 }
 
                 var (validation, errorResponse) = await req.ValidateSecurityAsync(
@@ -99,7 +106,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                     bootstrapSessionService: _bootstrapSessionService,
                     deviceAssociationValidator: _deviceAssociationValidator);
 
-                if (errorResponse != null) return errorResponse;
+                if (errorResponse != null) return AsOutput(errorResponse);
 
                 // Device + version kill-switches: short-circuit before parsing the body.
                 var serialNumberHeader = req.Headers.Contains("X-Device-SerialNumber")
@@ -111,7 +118,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
 
                 var killResponse = await CheckKillSwitchesAsync(
                     req, tenantIdHeader, serialNumberHeader, agentVersionHeader);
-                if (killResponse != null) return killResponse;
+                if (killResponse != null) return AsOutput(killResponse);
 
                 // Parse request body (already gzip-decompressed by middleware if Content-Encoding: gzip).
                 List<TelemetryItemDto>? items;
@@ -124,19 +131,19 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                 catch (JsonException ex)
                 {
                     _logger.LogWarning(ex, "IngestTelemetry: malformed JSON body");
-                    return await WriteErrorAsync(req, HttpStatusCode.BadRequest, "Malformed JSON body");
+                    return AsOutput(await WriteErrorAsync(req, HttpStatusCode.BadRequest, "Malformed JSON body"));
                 }
 
                 if (items == null || items.Count == 0)
                 {
-                    return await WriteErrorAsync(req, HttpStatusCode.BadRequest, "No telemetry items provided");
+                    return AsOutput(await WriteErrorAsync(req, HttpStatusCode.BadRequest, "No telemetry items provided"));
                 }
 
                 // Extract tenant+session from the first item's PartitionKey for body-vs-header tenant check
                 // and for AdminAction / ServerAction lookups. All items in a batch belong to one session.
                 if (!TryParsePartitionKey(items[0].PartitionKey, out var bodyTenantId, out var sessionId))
                 {
-                    return await WriteErrorAsync(req, HttpStatusCode.BadRequest, "Malformed PartitionKey");
+                    return AsOutput(await WriteErrorAsync(req, HttpStatusCode.BadRequest, "Malformed PartitionKey"));
                 }
 
                 if (!string.Equals(bodyTenantId, tenantIdHeader, StringComparison.OrdinalIgnoreCase))
@@ -144,40 +151,49 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                     _logger.LogWarning(
                         "IngestTelemetry: TenantId mismatch — header={Header}, body={Body}",
                         tenantIdHeader, bodyTenantId);
-                    return await WriteErrorAsync(req, HttpStatusCode.Forbidden, "TenantId mismatch between header and payload");
+                    return AsOutput(await WriteErrorAsync(req, HttpStatusCode.Forbidden, "TenantId mismatch between header and payload"));
                 }
 
-                // Partition by Kind and persist.
-                var (eventCount, signalCount, transitionCount, unknownCount) =
-                    await PersistItemsAsync(items, bodyTenantId, sessionId);
+                // Partition + persist. Events are routed through EventIngestProcessor which runs the
+                // full pipeline (rule engine / app-install aggregation / SignalR / webhooks / ...);
+                // Signal + Transition go straight to their repositories.
+                var outcome = await PersistItemsAsync(items, bodyTenantId, sessionId, validation);
 
                 _logger.LogInformation(
                     "IngestTelemetry: tenant={Tenant} session={Session} events={E} signals={S} transitions={T} unknown={U}",
-                    bodyTenantId, sessionId, eventCount, signalCount, transitionCount, unknownCount);
-
-                // Populate server→agent control signals (same services as /api/agent/ingest for parity).
-                var adminAction = await TryReadAdminActionAsync(bodyTenantId, sessionId);
-                var pendingActions = await _sessionRepo.FetchAndClearPendingActionsAsync(bodyTenantId, sessionId);
+                    bodyTenantId, sessionId, outcome.EventCount, outcome.SignalCount, outcome.TransitionCount, outcome.UnknownCount);
 
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(new IngestEventsResponse
                 {
                     Success = true,
                     EventsReceived = items.Count,
-                    EventsProcessed = eventCount + signalCount + transitionCount,
-                    Message = $"Stored {eventCount} events, {signalCount} signals, {transitionCount} transitions",
+                    EventsProcessed = outcome.EventCount + outcome.SignalCount + outcome.TransitionCount,
+                    Message = $"Stored {outcome.EventCount} events, {outcome.SignalCount} signals, {outcome.TransitionCount} transitions",
                     ProcessedAt = DateTime.UtcNow,
-                    AdminAction = adminAction,
-                    Actions = pendingActions.Count > 0 ? pendingActions : null,
+                    AdminAction = outcome.AdminAction,
+                    Actions = outcome.PendingActions,
                 });
-                return response;
+
+                return new IngestEventsOutput
+                {
+                    HttpResponse = response,
+                    SignalRMessages = outcome.SignalRMessages,
+                };
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "IngestTelemetry: unhandled exception");
-                return await WriteErrorAsync(req, HttpStatusCode.InternalServerError, "Internal server error");
+                return AsOutput(await WriteErrorAsync(req, HttpStatusCode.InternalServerError, "Internal server error"));
             }
         }
+
+        private static IngestEventsOutput AsOutput(HttpResponseData response)
+            => new IngestEventsOutput
+            {
+                HttpResponse = response,
+                SignalRMessages = Array.Empty<SignalRMessageAction>(),
+            };
 
         /// <summary>
         /// Runs device-serial and agent-version kill-switch checks. Returns a 200 response with
@@ -242,17 +258,18 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             return response;
         }
 
-        private async Task<string?> TryReadAdminActionAsync(string tenantId, string sessionId)
-        {
-            var session = await _sessionRepo.GetSessionAsync(tenantId, sessionId);
-            if (session == null) return null;
-            if (session.Status == SessionStatus.Succeeded) return "Succeeded";
-            if (session.Status == SessionStatus.Failed)    return "Failed";
-            return null;
-        }
-
-        private async Task<(int eventCount, int signalCount, int transitionCount, int unknownCount)>
-            PersistItemsAsync(IReadOnlyList<TelemetryItemDto> items, string tenantId, string sessionId)
+        /// <summary>
+        /// Partitions the incoming batch by <see cref="TelemetryItemDto.Kind"/> and persists each
+        /// kind through its destination path. Events go through <see cref="EventIngestProcessor"/>
+        /// for full pipeline parity with legacy /api/agent/ingest; Signals + Transitions land
+        /// directly in their new primary tables. The returned <see cref="IngestOutcome"/> carries
+        /// both the per-kind counts and the control-signal / SignalR payload for the response.
+        /// </summary>
+        private async Task<IngestOutcome> PersistItemsAsync(
+            IReadOnlyList<TelemetryItemDto> items,
+            string tenantId,
+            string sessionId,
+            SecurityValidationResult validation)
         {
             var events      = new List<EnrollmentEvent>();
             var signals     = new List<SignalRecord>();
@@ -282,29 +299,91 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                 }
             }
 
-            // Stamp authoritative TenantId/SessionId + ReceivedAt on events (same policy as legacy — never trust per-event agent values).
-            var receivedAt = DateTime.UtcNow;
-            foreach (var e in events)
-            {
-                e.TenantId = tenantId;
-                e.SessionId = sessionId;
-                e.ReceivedAt = receivedAt;
-            }
-
-            var eventCount = 0;
-            if (events.Count > 0)
-            {
-                var stored = await _sessionRepo.StoreEventsBatchAsync(events);
-                eventCount = stored.Count;
-                // NOTE: rule engine, app-install aggregation, SignalR notification, vulnerability
-                // correlation NOT invoked here. Legacy /api/agent/ingest still owns that pipeline —
-                // sharing lands in M5.b.2 via an extracted EventIngestProcessor service.
-            }
-
+            // Signals + Transitions write directly; they don't feed into the event pipeline.
             var signalCount     = await _signalRepo.StoreBatchAsync(signals);
             var transitionCount = await _transitionRepo.StoreBatchAsync(transitions);
 
-            return (eventCount, signalCount, transitionCount, unknown);
+            int eventCount;
+            string? adminAction;
+            List<ServerAction>? pendingActions;
+            SignalRMessageAction[] signalRMessages;
+
+            if (events.Count > 0)
+            {
+                // Full legacy-parity pipeline (rule engine, app-install aggregation, SignalR,
+                // vulnerability correlation, webhooks, SLA breach, AdminAction detection,
+                // ServerAction delivery). See EventIngestProcessor for the M5.b.2 copy-rationale.
+                var eventRequest = new IngestEventsRequest
+                {
+                    SessionId = sessionId,
+                    TenantId  = tenantId,
+                    Events    = events,
+                };
+                var processed = await _eventProcessor.ProcessEventsAsync(eventRequest, validation);
+
+                eventCount      = processed.EventsProcessed;
+                adminAction     = processed.AdminAction;
+                pendingActions  = processed.PendingActions;
+                signalRMessages = processed.SignalRMessages;
+            }
+            else
+            {
+                // Signal/Transition-only batch: no events means no event pipeline. We still honour
+                // the control-signal contract (AdminAction + pending ServerActions) because the
+                // agent reads them from every 2xx response regardless of which items it sent.
+                eventCount = 0;
+                var (aa, pa) = await ReadControlSignalsAsync(tenantId, sessionId);
+                adminAction     = aa;
+                pendingActions  = pa;
+                signalRMessages = Array.Empty<SignalRMessageAction>();
+            }
+
+            return new IngestOutcome
+            {
+                EventCount      = eventCount,
+                SignalCount     = signalCount,
+                TransitionCount = transitionCount,
+                UnknownCount    = unknown,
+                AdminAction     = adminAction,
+                PendingActions  = pendingActions,
+                SignalRMessages = signalRMessages,
+            };
+        }
+
+        /// <summary>
+        /// Fetches <c>AdminAction</c> (session marked terminal out-of-band) and pending
+        /// <c>ServerAction</c>s for Signal/Transition-only batches (no <see cref="EventIngestProcessor"/>
+        /// invocation). Mirror of the legacy inline logic.
+        /// </summary>
+        private async Task<(string? adminAction, List<ServerAction>? pendingActions)>
+            ReadControlSignalsAsync(string tenantId, string sessionId)
+        {
+            var session = await _sessionRepo.GetSessionAsync(tenantId, sessionId);
+            if (session == null) return (null, null);
+
+            string? adminAction = null;
+            if (session.Status == SessionStatus.Succeeded) adminAction = "Succeeded";
+            else if (session.Status == SessionStatus.Failed) adminAction = "Failed";
+
+            List<ServerAction>? pendingActions = null;
+            if (!string.IsNullOrEmpty(session.PendingActionsJson))
+            {
+                var fetched = await _sessionRepo.FetchAndClearPendingActionsAsync(tenantId, sessionId);
+                if (fetched.Count > 0) pendingActions = fetched;
+            }
+
+            return (adminAction, pendingActions);
+        }
+
+        private sealed class IngestOutcome
+        {
+            public int EventCount;
+            public int SignalCount;
+            public int TransitionCount;
+            public int UnknownCount;
+            public string? AdminAction;
+            public List<ServerAction>? PendingActions;
+            public SignalRMessageAction[] SignalRMessages = Array.Empty<SignalRMessageAction>();
         }
 
         /// <summary>

@@ -175,6 +175,7 @@ builder.Services.AddSingleton<AutopilotMonitor.Functions.Services.Vulnerability.
 
 // Register agent Function classes so bootstrap wrappers can inject them for code reuse
 builder.Services.AddSingleton<IngestEventsFunction>();
+builder.Services.AddSingleton<EventIngestProcessor>();
 builder.Services.AddSingleton<RegisterSessionFunction>();
 builder.Services.AddSingleton<GetAgentConfigFunction>();
 builder.Services.AddSingleton<ReportAgentErrorFunction>();
