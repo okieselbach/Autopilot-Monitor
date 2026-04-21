@@ -310,6 +310,12 @@ namespace AutopilotMonitor.Agent.V2
                 backendApiClient, agentConfig.TenantId, logger, emergencyReporter, distressReporter);
             var remoteConfig = remoteConfigService.FetchConfigAsync().GetAwaiter().GetResult();
 
+            // Project remote tenant-controlled knobs onto the runtime AgentConfiguration so that
+            // downstream consumers (CleanupService, SummaryDialogLauncher, StartupEnvironmentProbes,
+            // DiagnosticsPackageService, EnrollmentTerminationHandler, the logger, the watchdog)
+            // actually respect the tenant admin settings. CLI flags stay authoritative over remote.
+            RemoteConfigMerger.Merge(agentConfig, remoteConfig, args);
+
             logger.SetLogLevel(agentConfig.LogLevel);
 
             // Propagate the backend-expected SHA so the runtime hash-mismatch trigger (M4.6.α
@@ -476,14 +482,6 @@ namespace AutopilotMonitor.Agent.V2
                         },
                         emitEvent: evt => { orchestrator.EventEmitter.Emit(evt); });
 
-                    // M4.6.ε — BackendTelemetryUploader response-plumbing. The orchestrator parses
-                    // DeviceBlocked / DeviceKillSignal / AdminAction / Actions out of the 2xx
-                    // response body (see BackendTelemetryUploader.TryReadControlSignalsAsync) and
-                    // raises ServerResponseReceived. We translate those into ServerActions and
-                    // dispatch. Legacy parity with IngestEventsResponse synthesis in
-                    // EventUploadOrchestrator.OnEventsUploaded().
-                    WireTelemetryServerResponse(orchestrator, serverActionDispatcher, logger);
-
                     ConsoleCancelEventHandler cancelHandler = (s, e) =>
                     {
                         e.Cancel = true;
@@ -503,6 +501,18 @@ namespace AutopilotMonitor.Agent.V2
                     try
                     {
                         orchestrator.Start();
+
+                        // M4.6.ε — BackendTelemetryUploader response-plumbing. The orchestrator parses
+                        // DeviceBlocked / DeviceKillSignal / AdminAction / Actions out of the 2xx
+                        // response body (see BackendTelemetryUploader.TryReadControlSignalsAsync) and
+                        // raises ServerResponseReceived. We translate those into ServerActions and
+                        // dispatch. Legacy parity with IngestEventsResponse synthesis in
+                        // EventUploadOrchestrator.OnEventsUploaded().
+                        //
+                        // MUST be wired AFTER Start() — orchestrator.Transport throws
+                        // InvalidOperationException before Start() because the
+                        // TelemetryUploadOrchestrator is constructed inside Start() at step 311.
+                        WireTelemetryServerResponse(orchestrator, serverActionDispatcher, logger);
 
                         // Emit the agent_version_check event now that the EventEmitter is alive.
                         // VersionCheckEventBuilder.TryBuild is a no-op when no markers are present.

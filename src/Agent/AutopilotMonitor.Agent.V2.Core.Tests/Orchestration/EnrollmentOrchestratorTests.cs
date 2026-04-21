@@ -94,6 +94,19 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             Assert.Throws<InvalidOperationException>(() => sut.CurrentState);
             Assert.Throws<InvalidOperationException>(() => sut.IngressSink);
             Assert.Throws<InvalidOperationException>(() => sut.EventEmitter);
+            // Regression guard: Program.WireTelemetryServerResponse must run AFTER Start().
+            // Touching Transport pre-Start threw InvalidOperationException and crashed the agent
+            // on every VM after the first-run-ghost-detect fix let it reach this far.
+            Assert.Throws<InvalidOperationException>(() => sut.Transport);
+        }
+
+        [Fact]
+        public void Transport_is_available_after_start()
+        {
+            using var rig = new Rig();
+            var sut = rig.Build();
+            sut.Start();
+            Assert.NotNull(sut.Transport);
         }
 
         // ========================================================================= Start
