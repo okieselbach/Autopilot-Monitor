@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.IO.Compression;
 using System.Net;
 using System.Net.Http;
 using System.Text;
@@ -48,12 +50,27 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Transport
             cancellationToken.ThrowIfCancellationRequested();
 
             string? body = null;
+            byte[]? rawBody = null;
             if (request.Content != null)
             {
-                body = await request.Content.ReadAsStringAsync().ConfigureAwait(false);
+                rawBody = await request.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
+                var isGzipped = System.Linq.Enumerable.Contains(
+                    request.Content.Headers.ContentEncoding, "gzip", StringComparer.OrdinalIgnoreCase);
+                if (isGzipped && rawBody.Length > 0)
+                {
+                    using var input = new MemoryStream(rawBody);
+                    using var gzip = new GZipStream(input, CompressionMode.Decompress);
+                    using var output = new MemoryStream();
+                    gzip.CopyTo(output);
+                    body = Encoding.UTF8.GetString(output.ToArray());
+                }
+                else
+                {
+                    body = Encoding.UTF8.GetString(rawBody);
+                }
             }
 
-            _captured.Add(new CapturedRequest(request, body));
+            _captured.Add(new CapturedRequest(request, body, rawBody));
 
             if (_script.Count == 0)
             {
@@ -65,7 +82,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Transport
 
         internal sealed class CapturedRequest
         {
-            public CapturedRequest(HttpRequestMessage request, string? body)
+            public CapturedRequest(HttpRequestMessage request, string? body, byte[]? rawBody = null)
             {
                 Method = request.Method;
                 RequestUri = request.RequestUri;
@@ -82,12 +99,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Transport
                     }
                 }
                 Body = body;
+                RawBody = rawBody;
             }
 
             public HttpMethod Method { get; }
             public Uri? RequestUri { get; }
             public Dictionary<string, string[]> Headers { get; }
             public string? Body { get; }
+            public byte[]? RawBody { get; }
 
             public bool TryGetHeader(string name, out string value)
             {

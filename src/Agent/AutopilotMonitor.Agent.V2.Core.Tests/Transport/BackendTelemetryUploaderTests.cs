@@ -101,7 +101,48 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Transport
             Assert.True(req.TryGetHeader("Content-Type", out var ct));
             Assert.StartsWith("application/json", ct);
 
+            Assert.True(req.TryGetHeader("Content-Encoding", out var ce));
+            Assert.Equal("gzip", ce);
+
             Assert.False(req.Headers.ContainsKey("X-Bootstrap-Token"));
+        }
+
+        // ============================================================ Compression (bandwidth)
+
+        [Fact]
+        public async Task Body_is_gzip_compressed_on_the_wire()
+        {
+            using var rig = new Rig();
+            rig.Handler.QueueStatus(HttpStatusCode.OK);
+
+            // Moderately-sized batch so compression does real work (20 items).
+            var batch = new List<TelemetryItem>();
+            for (long i = 1; i <= 20; i++) batch.Add(NewEventItem(i));
+
+            await rig.Sut.UploadBatchAsync(batch, CancellationToken.None);
+
+            var req = rig.Handler.Captured[0];
+
+            // Content-Encoding header advertises gzip to the backend.
+            Assert.True(req.TryGetHeader("Content-Encoding", out var ce));
+            Assert.Equal("gzip", ce);
+
+            // Wire bytes begin with the gzip magic number (1F 8B).
+            Assert.NotNull(req.RawBody);
+            Assert.True(req.RawBody!.Length >= 2);
+            Assert.Equal(0x1F, req.RawBody[0]);
+            Assert.Equal(0x8B, req.RawBody[1]);
+
+            // Decompressed payload is still the expected JSON array (RecordingHandler
+            // transparently decompresses into Body for assertions).
+            var parsed = JArray.Parse(req.Body!);
+            Assert.Equal(20, parsed.Count);
+
+            // Compression is actually smaller than plain JSON for a batch of this size.
+            var plainSize = System.Text.Encoding.UTF8.GetByteCount(req.Body!);
+            Assert.True(
+                req.RawBody.Length < plainSize,
+                $"gzip body ({req.RawBody.Length} B) should be smaller than plain JSON ({plainSize} B).");
         }
 
         [Fact]

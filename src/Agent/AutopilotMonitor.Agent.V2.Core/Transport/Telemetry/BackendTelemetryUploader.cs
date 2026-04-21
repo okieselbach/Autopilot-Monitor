@@ -1,6 +1,8 @@
 #nullable enable
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.IO.Compression;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -78,11 +80,18 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
             // empty page (possible in race conditions after a concurrent drain succeeded).
             if (items.Count == 0) return UploadResult.Ok();
 
+            // Bandwidth: the agent ships on low-bandwidth links (tethered 4G, remote OOBE),
+            // so the body is gzip-compressed on the wire. ~70 % reduction for JSON-heavy
+            // telemetry batches (matches legacy IngestEventsAsync). Response-side gzip is
+            // handled transparently by HttpClientHandler.AutomaticDecompression in
+            // MtlsHttpClientFactory — we only need to compress outbound here.
             var body = SerializeBatch(items);
+            var compressedBody = CompressWithGzip(body);
             using (var request = new HttpRequestMessage(HttpMethod.Post, _endpointUrl))
             {
-                request.Content = new StringContent(body, Encoding.UTF8);
+                request.Content = new ByteArrayContent(compressedBody);
                 request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+                request.Content.Headers.ContentEncoding.Add("gzip");
                 AddSecurityHeaders(request);
 
                 HttpResponseMessage response;
@@ -274,6 +283,19 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
             // Backend routes by string "Event"/"Signal"/"DecisionTransition". Wire-format
             // matches Plan §4.x M5 contract (PascalCase, StringEnum, ISO-8601 UTC).
             return JsonConvert.SerializeObject(items, Formatting.None);
+        }
+
+        private static byte[] CompressWithGzip(string text)
+        {
+            var bytes = Encoding.UTF8.GetBytes(text);
+            using (var output = new MemoryStream())
+            {
+                using (var gzip = new GZipStream(output, CompressionMode.Compress))
+                {
+                    gzip.Write(bytes, 0, bytes.Length);
+                }
+                return output.ToArray();
+            }
         }
 
         private void AddSecurityHeaders(HttpRequestMessage request)
