@@ -410,5 +410,20 @@ namespace AutopilotMonitor.Shared
                 SignalsByKind
             };
         }
+
+        /// <summary>
+        /// Azure Storage Queue names. Queues feed async fan-out / reconciliation paths
+        /// that would otherwise block the hot ingest loop.
+        /// </summary>
+        public static class QueueNames
+        {
+            /// <summary>
+            /// V2 Decision Engine index-table fan-out (Plan §2.8, §M5.d). One message per
+            /// committed primary row (Signal or DecisionTransition); consumer writes the
+            /// 0–3 applicable index rows. Eventual consistency; the 2h reconcile timer is
+            /// the safety net on queue failures.
+            /// </summary>
+            public const string TelemetryIndexReconcile = "telemetry-index-reconcile";
+        }
     }
 }

@@ -161,6 +161,12 @@ builder.Services.AddSingleton<BlobStorageService>();
 builder.Services.AddSingleton<SessionReportService>();
 builder.Services.AddSingleton<BootstrapSessionService>();
 
+// V2 Decision Engine index-table dual-write producer (Plan §2.8, §M5.d). Gated by
+// AdminConfiguration.EnableIndexDualWrite (default false) inside the implementation.
+builder.Services.AddSingleton<
+    AutopilotMonitor.Shared.DataAccess.IIndexReconcileProducer,
+    AutopilotMonitor.Functions.Services.Indexing.AzureQueueIndexReconcileProducer>();
+
 // Programmatic SignalR push for background tasks (rule engine, vulnerability correlation)
 builder.Services.AddSingleton<SignalRNotificationService>();
 

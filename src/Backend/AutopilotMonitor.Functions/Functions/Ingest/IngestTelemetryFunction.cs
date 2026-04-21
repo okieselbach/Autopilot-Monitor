@@ -2,6 +2,7 @@ using System.IO;
 using System.Net;
 using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Functions.Services;
+using AutopilotMonitor.Functions.Services.Indexing;
 using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Azure.Functions.Worker;
@@ -41,6 +42,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
         private readonly ISessionRepository _sessionRepo;
         private readonly ISignalRepository _signalRepo;
         private readonly IDecisionTransitionRepository _transitionRepo;
+        private readonly IIndexReconcileProducer _indexReconcileProducer;
         private readonly EventIngestProcessor _eventProcessor;
         private readonly TenantConfigurationService _configService;
         private readonly RateLimitService _rateLimitService;
@@ -56,6 +58,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             ISessionRepository sessionRepo,
             ISignalRepository signalRepo,
             IDecisionTransitionRepository transitionRepo,
+            IIndexReconcileProducer indexReconcileProducer,
             EventIngestProcessor eventProcessor,
             TenantConfigurationService configService,
             RateLimitService rateLimitService,
@@ -70,6 +73,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             _sessionRepo = sessionRepo;
             _signalRepo = signalRepo;
             _transitionRepo = transitionRepo;
+            _indexReconcileProducer = indexReconcileProducer;
             _eventProcessor = eventProcessor;
             _configService = configService;
             _rateLimitService = rateLimitService;
@@ -318,6 +322,16 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             // Signals + Transitions write directly; they don't feed into the event pipeline.
             var signalCount     = await _signalRepo.StoreBatchAsync(signals);
             var transitionCount = await _transitionRepo.StoreBatchAsync(transitions);
+
+            // M5.d.2: after the primary commit, fan out one envelope per row onto the
+            // telemetry-index-reconcile queue for the index-table writer (M5.d.3).
+            // The producer is feature-flag-gated (AdminConfiguration.EnableIndexDualWrite,
+            // default off) and never rethrows — see IIndexReconcileProducer contract.
+            if (signals.Count > 0 || transitions.Count > 0)
+            {
+                var envelopes = IndexReconcileEnvelopeFactory.BuildBatch(signals, transitions);
+                await _indexReconcileProducer.EnqueueBatchAsync(envelopes);
+            }
 
             int eventCount;
             string? adminAction;

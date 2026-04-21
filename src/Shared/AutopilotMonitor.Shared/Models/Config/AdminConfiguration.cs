@@ -350,6 +350,16 @@ namespace AutopilotMonitor.Shared.Models
         public bool VulnerabilityCorrelationEnabled { get; set; } = true;
 
         /// <summary>
+        /// Feature flag for V2 Decision Engine index-table dual-write (Plan §M5.d).
+        /// When true, <c>IngestTelemetryFunction</c> enqueues <c>telemetry-index-reconcile</c>
+        /// envelopes after committing each primary <c>Signals</c> / <c>DecisionTransitions</c>
+        /// row; a queue-triggered handler (M5.d.3) then writes the 0–3 applicable index rows.
+        /// Default: false — enables controlled rollout. The 2h reconcile timer (M5.d.4) is
+        /// the safety-net for queue failures even once the flag is on.
+        /// </summary>
+        public bool EnableIndexDualWrite { get; set; } = false;
+
+        /// <summary>
         /// Last successful vulnerability data sync timestamp (UTC ISO 8601).
         /// Updated by VulnerabilityDataSyncFunction.
         /// </summary>
