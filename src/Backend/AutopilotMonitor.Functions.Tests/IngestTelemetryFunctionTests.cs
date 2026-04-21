@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text;
 using AutopilotMonitor.Functions.Functions.Ingest;
+using AutopilotMonitor.Shared.Models;
 
 namespace AutopilotMonitor.Functions.Tests;
 
@@ -94,5 +95,84 @@ public class IngestTelemetryFunctionTests
 
         Assert.False(exceeded);
         Assert.Equal(string.Empty, body);
+    }
+
+    // ============================================================ Batch PartitionKey uniformity
+
+    private static TelemetryItemDto Item(string partitionKey)
+        => new TelemetryItemDto
+        {
+            Kind                = "Signal",
+            PartitionKey        = partitionKey,
+            RowKey              = "0000000001",
+            TelemetryItemId     = 1,
+            PayloadJson         = "{}",
+            EnqueuedAtUtc       = DateTime.UtcNow,
+        };
+
+    [Fact]
+    public void FindMismatchingPartitionKey_returns_false_for_empty_batch()
+    {
+        var result = IngestTelemetryFunction.FindMismatchingPartitionKey(
+            new List<TelemetryItemDto>(), out var idx, out var value);
+
+        Assert.False(result);
+        Assert.Equal(-1, idx);
+        Assert.Null(value);
+    }
+
+    [Fact]
+    public void FindMismatchingPartitionKey_returns_false_for_single_item_batch()
+    {
+        var result = IngestTelemetryFunction.FindMismatchingPartitionKey(
+            new[] { Item($"{TenantId}_{SessionId}") }, out var idx, out var value);
+
+        Assert.False(result);
+        Assert.Equal(-1, idx);
+        Assert.Null(value);
+    }
+
+    [Fact]
+    public void FindMismatchingPartitionKey_returns_false_when_all_items_share_PartitionKey()
+    {
+        var pk = $"{TenantId}_{SessionId}";
+        var items = new[] { Item(pk), Item(pk), Item(pk) };
+
+        var result = IngestTelemetryFunction.FindMismatchingPartitionKey(items, out var idx, out var value);
+
+        Assert.False(result);
+        Assert.Equal(-1, idx);
+        Assert.Null(value);
+    }
+
+    [Fact]
+    public void FindMismatchingPartitionKey_returns_index_and_value_on_mismatch()
+    {
+        // Session-mismatch in the middle of the batch — what a misbehaving client could send.
+        var first  = $"{TenantId}_{SessionId}";
+        var second = $"{TenantId}_c3d4e5f6-a7b8-9012-cdef-123456789012"; // same tenant, different session
+        var items  = new[] { Item(first), Item(first), Item(second) };
+
+        var result = IngestTelemetryFunction.FindMismatchingPartitionKey(items, out var idx, out var value);
+
+        Assert.True(result);
+        Assert.Equal(2, idx);
+        Assert.Equal(second, value);
+    }
+
+    [Fact]
+    public void FindMismatchingPartitionKey_is_case_sensitive()
+    {
+        // PartitionKeys are GUIDs — matching is ordinal. A lowercase/uppercase-swapped second
+        // item is treated as a different partition (safe-by-default; the agent emits lowercase).
+        var first  = $"{TenantId}_{SessionId}";
+        var second = first.ToUpperInvariant();
+        var items  = new[] { Item(first), Item(second) };
+
+        var result = IngestTelemetryFunction.FindMismatchingPartitionKey(items, out var idx, out var value);
+
+        Assert.True(result);
+        Assert.Equal(1, idx);
+        Assert.Equal(second, value);
     }
 }

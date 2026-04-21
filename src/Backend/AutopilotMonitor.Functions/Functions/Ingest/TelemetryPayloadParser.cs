@@ -1,3 +1,4 @@
+using System;
 using AutopilotMonitor.Shared.Models;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -46,7 +47,11 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             try { root = JObject.Parse(item.PayloadJson!); }
             catch (JsonException) { return null; }
 
-            var ordinal = (long?)root["SessionSignalOrdinal"] ?? 0L;
+            // SessionSignalOrdinal is the RowKey driver — a missing value would silently default
+            // to 0 and clobber a legitimate ordinal-0 row on UpsertReplace. Require explicit
+            // presence; 0 itself is a valid value the caller may intentionally send.
+            if (!TryGetLong(root, "SessionSignalOrdinal", out var ordinal)) return null;
+
             var traceOrdinal = (long?)root["SessionTraceOrdinal"] ?? item!.SessionTraceOrdinal ?? 0L;
             var kind = (string?)root["Kind"] ?? string.Empty;
             var schemaVersion = (int?)root["KindSchemaVersion"] ?? 0;
@@ -80,7 +85,10 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             try { root = JObject.Parse(item.PayloadJson!); }
             catch (JsonException) { return null; }
 
-            var stepIndex      = (int?)root["StepIndex"] ?? 0;
+            // StepIndex is the RowKey driver — same defense as SessionSignalOrdinal above.
+            // A missing StepIndex must not silently default to 0 and clobber the real step-0 row.
+            if (!TryGetInt(root, "StepIndex", out var stepIndex)) return null;
+
             var traceOrdinal   = (long?)root["SessionTraceOrdinal"] ?? item!.SessionTraceOrdinal ?? 0L;
             var signalOrdinal  = (long?)root["SignalOrdinalRef"] ?? 0L;
             var occurredAt     = (DateTime?)root["OccurredAtUtc"] ?? item!.EnqueuedAtUtc;
@@ -141,6 +149,49 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                 default:
                     return false;
             }
+        }
+
+        /// <summary>
+        /// Reads a property that MUST be present on the envelope. Distinguishes "missing key"
+        /// (returns false) from "present with value 0" (returns true, value=0). Used for
+        /// RowKey-driving fields where a silent default would cause row collisions.
+        /// </summary>
+        private static bool TryGetLong(JObject root, string key, out long value)
+        {
+            if (root.TryGetValue(key, StringComparison.Ordinal, out var token)
+                && token.Type != JTokenType.Null
+                && token.Type != JTokenType.Undefined)
+            {
+                try
+                {
+                    value = token.Value<long>();
+                    return true;
+                }
+                catch (System.FormatException) { }
+                catch (System.OverflowException) { }
+                catch (System.InvalidCastException) { }
+            }
+            value = 0;
+            return false;
+        }
+
+        private static bool TryGetInt(JObject root, string key, out int value)
+        {
+            if (root.TryGetValue(key, StringComparison.Ordinal, out var token)
+                && token.Type != JTokenType.Null
+                && token.Type != JTokenType.Undefined)
+            {
+                try
+                {
+                    value = token.Value<int>();
+                    return true;
+                }
+                catch (System.FormatException) { }
+                catch (System.OverflowException) { }
+                catch (System.InvalidCastException) { }
+            }
+            value = 0;
+            return false;
         }
     }
 }

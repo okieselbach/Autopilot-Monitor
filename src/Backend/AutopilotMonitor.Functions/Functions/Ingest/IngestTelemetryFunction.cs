@@ -160,7 +160,9 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                 }
 
                 // Extract tenant+session from the first item's PartitionKey for body-vs-header tenant check
-                // and for AdminAction / ServerAction lookups. All items in a batch belong to one session.
+                // and for AdminAction / ServerAction lookups. All items in a batch must belong to one
+                // session — anything else is a client bug and gets the whole batch rejected (see
+                // the uniformity check below).
                 if (!TryParsePartitionKey(items[0].PartitionKey, out var bodyTenantId, out var sessionId))
                 {
                     return AsOutput(await WriteErrorAsync(req, HttpStatusCode.BadRequest, "Malformed PartitionKey"));
@@ -172,6 +174,20 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                         "IngestTelemetry: TenantId mismatch — header={Header}, body={Body}",
                         tenantIdHeader, bodyTenantId);
                     return AsOutput(await WriteErrorAsync(req, HttpStatusCode.Forbidden, "TenantId mismatch between header and payload"));
+                }
+
+                // Defense-in-depth: every item must carry the same PartitionKey as the first. Without
+                // this check a mixed-session batch would stamp every item with session A's identity
+                // inside PersistItemsAsync, silently relocating session B's signals/transitions into
+                // session A's primary rows.
+                if (FindMismatchingPartitionKey(items, out var mismatchIndex, out var mismatchedValue))
+                {
+                    _logger.LogWarning(
+                        "IngestTelemetry: PartitionKey mismatch at item[{Index}] — expected={Expected}, got={Got}",
+                        mismatchIndex, items[0].PartitionKey, mismatchedValue);
+                    return AsOutput(await WriteErrorAsync(
+                        req, HttpStatusCode.BadRequest,
+                        "All telemetry items in a batch must share the same PartitionKey"));
                 }
 
                 // Partition + persist. Events are routed through EventIngestProcessor which runs the
@@ -436,6 +452,34 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                 await buffered.WriteAsync(buffer, 0, read);
             }
             return (false, System.Text.Encoding.UTF8.GetString(buffered.ToArray()));
+        }
+
+        /// <summary>
+        /// Scans the batch for any item whose <see cref="TelemetryItemDto.PartitionKey"/> differs
+        /// from the first item's. Returns true + the offending index/value on mismatch; false if
+        /// every item shares the same PartitionKey (or the batch has &lt; 2 items). Pure so the
+        /// guard can be unit-tested without a live HTTP trigger.
+        /// </summary>
+        internal static bool FindMismatchingPartitionKey(
+            IReadOnlyList<TelemetryItemDto> items,
+            out int mismatchIndex,
+            out string? mismatchedValue)
+        {
+            mismatchIndex = -1;
+            mismatchedValue = null;
+            if (items is null || items.Count < 2) return false;
+
+            var expected = items[0].PartitionKey;
+            for (var i = 1; i < items.Count; i++)
+            {
+                if (!string.Equals(items[i].PartitionKey, expected, StringComparison.Ordinal))
+                {
+                    mismatchIndex = i;
+                    mismatchedValue = items[i].PartitionKey;
+                    return true;
+                }
+            }
+            return false;
         }
 
         /// <summary>

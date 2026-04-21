@@ -126,6 +126,30 @@ public class TelemetryPayloadParserTests
         Assert.Equal(99L, rec!.SessionTraceOrdinal);
     }
 
+    [Theory]
+    [InlineData("{\"Kind\":\"SessionStarted\"}")]                                       // key absent
+    [InlineData("{\"SessionSignalOrdinal\":null,\"Kind\":\"SessionStarted\"}")]         // key present but null
+    public void ParseSignal_drops_item_when_SessionSignalOrdinal_is_missing_or_null(string payload)
+    {
+        // A missing ordinal would silently default to 0 → collide with a legitimate ordinal-0
+        // row on UpsertReplace. The parser must reject it so the caller loop drops the item.
+        var rec = TelemetryPayloadParser.ParseSignal(Dto("Signal", payload), TenantId, SessionId);
+        Assert.Null(rec);
+    }
+
+    [Fact]
+    public void ParseSignal_accepts_explicit_ordinal_zero()
+    {
+        // 0 is a legal value (the agent seeds ordinals from 0 on a fresh SignalLog). Only
+        // absent/null is rejected — an explicit 0 must round-trip.
+        var payload = "{\"SessionSignalOrdinal\":0,\"Kind\":\"SessionStarted\"}";
+
+        var rec = TelemetryPayloadParser.ParseSignal(Dto("Signal", payload), TenantId, SessionId);
+
+        Assert.NotNull(rec);
+        Assert.Equal(0L, rec!.SessionSignalOrdinal);
+    }
+
     // ============================================================ DecisionTransition
 
     [Fact]
@@ -171,6 +195,33 @@ public class TelemetryPayloadParserTests
             Assert.NotNull(rec);
             Assert.True(rec!.IsTerminal, $"Expected {stage} to be terminal");
         }
+    }
+
+    [Theory]
+    [InlineData("{\"SessionTraceOrdinal\":1,\"ToStage\":\"EspInProgress\"}")]                       // key absent
+    [InlineData("{\"StepIndex\":null,\"SessionTraceOrdinal\":1,\"ToStage\":\"EspInProgress\"}")]   // key present but null
+    public void ParseTransition_drops_item_when_StepIndex_is_missing_or_null(string payload)
+    {
+        // Same defense as ParseSignal: a missing StepIndex would default to 0 → collide with the
+        // legitimate step-0 row on UpsertReplace.
+        var rec = TelemetryPayloadParser.ParseTransition(Dto("DecisionTransition", payload), TenantId, SessionId);
+        Assert.Null(rec);
+    }
+
+    [Fact]
+    public void ParseTransition_accepts_explicit_stepIndex_zero()
+    {
+        // Step indices start at 0 (the first reducer call produces StepIndex=0). An explicit 0
+        // must not be confused with a missing key.
+        var payload =
+            "{\"StepIndex\":0,\"SessionTraceOrdinal\":1,\"SignalOrdinalRef\":1," +
+            "\"Trigger\":\"t\",\"FromStage\":\"Pending\",\"ToStage\":\"EspInProgress\",\"Taken\":true," +
+            "\"ReducerVersion\":\"1.0.0\",\"OccurredAtUtc\":\"2026-04-21T10:00:00Z\"}";
+
+        var rec = TelemetryPayloadParser.ParseTransition(Dto("DecisionTransition", payload), TenantId, SessionId);
+
+        Assert.NotNull(rec);
+        Assert.Equal(0, rec!.StepIndex);
     }
 
     [Fact]
