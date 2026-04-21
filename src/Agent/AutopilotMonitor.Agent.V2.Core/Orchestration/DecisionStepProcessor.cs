@@ -3,6 +3,7 @@ using System;
 using System.Threading;
 using AutopilotMonitor.Agent.V2.Core.Logging;
 using AutopilotMonitor.Agent.V2.Core.Persistence;
+using AutopilotMonitor.Agent.V2.Core.Telemetry.Transitions;
 using AutopilotMonitor.DecisionCore.Engine;
 using AutopilotMonitor.DecisionCore.Signals;
 using AutopilotMonitor.DecisionCore.State;
@@ -51,6 +52,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         private readonly AgentLogger _logger;
         private readonly int _quarantineThreshold;
         private readonly Action<DecisionState>? _onTerminalStageReached;
+        private readonly TelemetryTransitionEmitter? _transitionEmitter;
 
         private DecisionState _currentState;
         private int _consecutiveJournalFailures;
@@ -65,7 +67,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             IQuarantineSink quarantineSink,
             AgentLogger logger,
             int quarantineThreshold = DefaultQuarantineThreshold,
-            Action<DecisionState>? onTerminalStageReached = null)
+            Action<DecisionState>? onTerminalStageReached = null,
+            TelemetryTransitionEmitter? transitionEmitter = null)
         {
             if (quarantineThreshold <= 0)
             {
@@ -82,6 +85,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _quarantineThreshold = quarantineThreshold;
             _onTerminalStageReached = onTerminalStageReached;
+            _transitionEmitter = transitionEmitter;
 
             // If recovery loaded a state that already sits on a terminal stage (e.g. a crash
             // after a success-path step but before Stop()), treat it as already-notified so we
@@ -121,6 +125,15 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 }
 
                 throw;
+            }
+
+            // 1a) Project the transition onto the telemetry transport for backend upload. Journal
+            // is authoritative (§2.7c / L.1); a transport enqueue failure here must NOT abort the
+            // step — the local journal already committed and effects below must still run.
+            if (_transitionEmitter != null)
+            {
+                try { _transitionEmitter.Emit(step.Transition); }
+                catch { /* best-effort upload; local state already consistent */ }
             }
 
             // 2) EffectRunner — Async-Methode vom Ingress-Worker-Thread sync ausführen.

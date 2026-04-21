@@ -7,6 +7,8 @@ using System.Threading.Tasks;
 using AutopilotMonitor.Agent.V2.Core.Logging;
 using AutopilotMonitor.Agent.V2.Core.Persistence;
 using AutopilotMonitor.Agent.V2.Core.Telemetry.Events;
+using AutopilotMonitor.Agent.V2.Core.Telemetry.Signals;
+using AutopilotMonitor.Agent.V2.Core.Telemetry.Transitions;
 using AutopilotMonitor.Agent.V2.Core.Transport.Telemetry;
 using AutopilotMonitor.DecisionCore.Classifiers;
 using AutopilotMonitor.DecisionCore.Engine;
@@ -92,6 +94,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         private TelemetrySpool? _spool;
         private TelemetryUploadOrchestrator? _transport;
         private TelemetryEventEmitter? _eventEmitter;
+        private TelemetrySignalEmitter? _signalEmitter;
+        private TelemetryTransitionEmitter? _transitionEmitter;
         private EventTimelineEmitter? _timelineEmitter;
         private BackPressureEventObserver? _backPressureObserver;
         private DeadlineScheduler? _scheduler;
@@ -309,6 +313,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             // 4) Event-Emitter-Kette.
             _eventSequenceCounter = new EventSequenceCounter(_eventSequencePersistence);
             _eventEmitter = new TelemetryEventEmitter(_transport, _eventSequenceCounter, _sessionId, _tenantId);
+            _signalEmitter = new TelemetrySignalEmitter(_transport, _sessionId, _tenantId);
+            _transitionEmitter = new TelemetryTransitionEmitter(_transport, _sessionId, _tenantId);
             _timelineEmitter = new EventTimelineEmitter(_eventEmitter);
             _backPressureObserver = new BackPressureEventObserver(_eventEmitter, _clock);
 
@@ -340,7 +346,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 quarantineSink: this,
                 logger: _logger,
                 quarantineThreshold: _quarantineThreshold,
-                onTerminalStageReached: OnDecisionTerminalStage);
+                onTerminalStageReached: OnDecisionTerminalStage,
+                transitionEmitter: _transitionEmitter);
 
             // 9) Trace-Ordinal. TODO(M4.4.5.f): seed aus max(SignalLog.LastOrdinal,
             //    Journal.LastStepIndex, Spool.LastAssignedItemId via SessionTraceOrdinal).
@@ -355,6 +362,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 processor: _processor,
                 clock: _clock,
                 backPressureObserver: _backPressureObserver,
+                signalEmitter: _signalEmitter,
                 channelCapacity: _channelCapacity);
 
             // 11) Relay auf den echten Ingress umbiegen.

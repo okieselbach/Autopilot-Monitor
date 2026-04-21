@@ -4,6 +4,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading;
 using AutopilotMonitor.Agent.V2.Core.Persistence;
+using AutopilotMonitor.Agent.V2.Core.Telemetry.Signals;
 using AutopilotMonitor.DecisionCore.Engine;
 using AutopilotMonitor.DecisionCore.Signals;
 
@@ -43,6 +44,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         private readonly ISessionTraceOrdinalProvider _traceCounter;
         private readonly IDecisionStepProcessor _processor;
         private readonly IBackPressureObserver? _observer;
+        private readonly TelemetrySignalEmitter? _signalEmitter;
         private readonly IClock _clock;
         private readonly TimeSpan _backPressureThrottle;
         private readonly int _channelCapacity;
@@ -65,6 +67,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             IDecisionStepProcessor processor,
             IClock clock,
             IBackPressureObserver? backPressureObserver = null,
+            TelemetrySignalEmitter? signalEmitter = null,
             int channelCapacity = DefaultChannelCapacity,
             TimeSpan? backPressureThrottle = null)
         {
@@ -79,6 +82,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             _processor = processor ?? throw new ArgumentNullException(nameof(processor));
             _clock = clock ?? throw new ArgumentNullException(nameof(clock));
             _observer = backPressureObserver;
+            _signalEmitter = signalEmitter;
             _channelCapacity = channelCapacity;
             _backPressureThrottle = backPressureThrottle ?? DefaultBackPressureThrottle;
 
@@ -290,6 +294,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             }
 
             _nextSignalOrdinal = signalOrdinal + 1;
+
+            // Project the signal onto the telemetry transport for backend upload. Local
+            // SignalLog is authoritative (§2.7c / L.1); a transport enqueue failure must NOT
+            // break the ingress worker. Spool overflow / serialization faults get swallowed
+            // here so the reducer path below still runs on the just-committed local signal.
+            if (_signalEmitter != null)
+            {
+                try { _signalEmitter.Emit(signal); }
+                catch { /* best-effort upload; local state already consistent */ }
+            }
 
             var state = _processor.CurrentState;
             // IDecisionEngine.Reduce ist fail-safe (DecisionEngine.cs:39-47): wirft nicht.
