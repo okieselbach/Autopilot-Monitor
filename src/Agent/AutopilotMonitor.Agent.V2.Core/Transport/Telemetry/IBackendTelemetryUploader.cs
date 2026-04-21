@@ -8,7 +8,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
     /// <summary>
     /// Abstraction über den Backend-Aufruf zur Batch-Telemetry-Übertragung. Plan §2.7a.
     /// <para>
-    /// Produktionsimplementierung in <c>BackendApiClient</c> (ruft <c>POST /api/telemetry/batch</c>).
+    /// Produktionsimplementierung in <c>BackendTelemetryUploader</c> (ruft <c>POST /api/agent/telemetry</c>).
     /// Tests verwenden einen Fake-Uploader — der Orchestrator ist HTTP-agnostisch.
     /// </para>
     /// </summary>

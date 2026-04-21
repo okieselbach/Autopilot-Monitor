@@ -19,7 +19,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
     /// <summary>
     /// Produktions-<see cref="IBackendTelemetryUploader"/>. Plan §2.7a / §4.x M4.4.2.
     /// <para>
-    /// HTTP-Skelett gegen <c>POST /api/telemetry/batch</c>. Sendet einen Batch von
+    /// HTTP-Skelett gegen <c>POST /api/agent/telemetry</c>. Sendet einen Batch von
     /// <see cref="TelemetryItem"/>s als JSON-Array; Backend routet pro Item nach
     /// <see cref="TelemetryItemKind"/> in die Ziel-Tabelle (Events / Signals /
     /// DecisionTransitions) und dedupliziert via (<c>PartitionKey</c>, <c>RowKey</c>).
@@ -61,7 +61,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
             if (string.IsNullOrEmpty(baseUrl)) throw new ArgumentException("BaseUrl is mandatory.", nameof(baseUrl));
             if (string.IsNullOrEmpty(tenantId)) throw new ArgumentException("TenantId is mandatory.", nameof(tenantId));
 
-            _endpointUrl = baseUrl.TrimEnd('/') + Constants.ApiEndpoints.TelemetryBatch;
+            _endpointUrl = baseUrl.TrimEnd('/') + Constants.ApiEndpoints.IngestTelemetry;
             _tenantId = tenantId;
             _manufacturer = manufacturer;
             _model = model;

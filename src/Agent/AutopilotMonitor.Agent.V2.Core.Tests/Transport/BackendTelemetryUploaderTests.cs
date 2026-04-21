@@ -13,7 +13,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Transport
     public sealed class BackendTelemetryUploaderTests
     {
         private const string BaseUrl = "https://backend.test";
-        private const string ExpectedEndpoint = "https://backend.test/api/telemetry/batch";
+        private const string ExpectedEndpoint = "https://backend.test/api/agent/telemetry";
         private static readonly DateTime At = new DateTime(2026, 4, 20, 10, 0, 0, DateTimeKind.Utc);
 
         private static TelemetryItem NewEventItem(long id, string sessionId = "S1", string tenantId = "T1") =>
