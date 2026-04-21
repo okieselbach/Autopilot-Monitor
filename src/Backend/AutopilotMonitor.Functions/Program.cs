@@ -167,6 +167,11 @@ builder.Services.AddSingleton<
     AutopilotMonitor.Shared.DataAccess.IIndexReconcileProducer,
     AutopilotMonitor.Functions.Services.Indexing.AzureQueueIndexReconcileProducer>();
 
+// V2 Decision Engine index-table reconcile consumer (Plan §M5.d.3). Plain class, not
+// interface-abstracted — Cosmos swap would reshape around IIndexTableRepository, not here.
+builder.Services.AddSingleton<
+    AutopilotMonitor.Functions.Services.Indexing.IndexReconcileHandler>();
+
 // Programmatic SignalR push for background tasks (rule engine, vulnerability correlation)
 builder.Services.AddSingleton<SignalRNotificationService>();
 
