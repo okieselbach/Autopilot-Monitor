@@ -105,6 +105,7 @@ public static class EndpointAccessPolicyCatalog
         // ── DeviceOrBootstrapAuth ───────────────────────────────────────
         new("POST",   "agent/register-session",    EndpointPolicy.DeviceOrBootstrapAuth),
         new("POST",   "agent/ingest",              EndpointPolicy.DeviceOrBootstrapAuth),
+        new("POST",   "agent/telemetry",           EndpointPolicy.DeviceOrBootstrapAuth),
         new("GET",    "agent/config",              EndpointPolicy.DeviceOrBootstrapAuth),
         new("POST",   "agent/upload-url",          EndpointPolicy.DeviceOrBootstrapAuth),
         new("POST",   "agent/error",               EndpointPolicy.DeviceOrBootstrapAuth),
