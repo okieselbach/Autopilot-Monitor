@@ -13,11 +13,13 @@ using Newtonsoft.Json.Linq;
 namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
 {
     /// <summary>
-    /// Fast self-update at agent startup: checks version.json in blob storage,
-    /// downloads the ZIP if newer, swaps files (rename-trick for locked binaries),
+    /// Fast self-update at agent startup: checks version-v2.json in blob storage,
+    /// downloads the V2 ZIP if newer, swaps files (rename-trick for locked binaries),
     /// and restarts via PowerShell Wait-Process.
     ///
     /// Design priority: speed over update — better to run the old version than delay startup.
+    /// V2 uses its own manifest (version-v2.json) + ZIP (AutopilotMonitor-Agent-V2.zip) to
+    /// stay isolated from the legacy V1 release line.
     /// </summary>
     static class SelfUpdater
     {
@@ -82,7 +84,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
         /// <summary>
         /// Optional: backend-provided SHA-256 hash of the latest agent ZIP.
         /// Set from the last AgentConfigResponse before calling CheckAndApplyUpdateAsync.
-        /// Takes priority over the hash in version.json (separate trust channel).
+        /// Takes priority over the hash in version-v2.json (separate trust channel).
         /// </summary>
         public static string BackendExpectedSha256 { get; set; }
 
@@ -107,7 +109,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
         /// <param name="allowDowngrade">
         /// When false (default), a latest version strictly lower than <paramref name="currentVersion"/>
         /// is rejected even when <paramref name="forceUpdate"/> is true — prevents the production
-        /// <c>version.json</c> from silently overwriting a higher-versioned dev/pre-release agent via
+        /// <c>version-v2.json</c> from silently overwriting a higher-versioned dev/pre-release agent via
         /// the runtime hash-mismatch path. Set to true only for controlled rollback scenarios.
         /// </param>
         public static async Task CheckAndApplyUpdateAsync(
@@ -134,7 +136,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
 
             try
             {
-                // Step 1: Fetch version.json (1s timeout)
+                // Step 1: Fetch version-v2.json (2.5s timeout)
                 var versionSw = Stopwatch.StartNew();
                 string manifestSha256;
                 (latestVersion, manifestSha256) = await GetLatestVersionAsync(log);
@@ -144,7 +146,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
                 if (latestVersion == null)
                 {
                     if (isStartupTrigger)
-                        WriteSkipMarker("version_check_failed", currentVersion, null, "version.json fetch failed or timed out", log);
+                        WriteSkipMarker("version_check_failed", currentVersion, null, "version-v2.json fetch failed or timed out", log);
                     return; // Could not determine latest version — continue with current
                 }
 
@@ -211,7 +213,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
                 }
                 try { zipSizeBytes = new FileInfo(zipPath).Length; } catch { /* best-effort */ }
 
-                // Step 3b: Verify SHA-256 integrity (backend hash has priority over version.json hash)
+                // Step 3b: Verify SHA-256 integrity (backend hash has priority over version-v2.json hash)
                 string expectedSha256;
                 if (!string.IsNullOrEmpty(BackendExpectedSha256))
                 {
@@ -221,7 +223,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
                 else if (!string.IsNullOrEmpty(manifestSha256))
                 {
                     expectedSha256 = manifestSha256;
-                    log("Self-update: using version.json hash for integrity verification (blob storage)");
+                    log("Self-update: using version-v2.json hash for integrity verification (blob storage)");
                 }
                 else
                 {
@@ -313,14 +315,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
         }
 
         /// <summary>
-        /// Fetches version.json from blob storage and returns the version string and optional SHA-256 hash.
+        /// Fetches version-v2.json from blob storage and returns the version string and optional SHA-256 hash.
         /// Returns (null, null) if the check fails or times out.
         /// </summary>
         private static async Task<(string version, string sha256)> GetLatestVersionAsync(Action<string> log)
         {
             try
             {
-                var versionUrl = $"{Constants.AgentBlobBaseUrl}/{Constants.AgentVersionFileName}";
+                var versionUrl = $"{Constants.AgentBlobBaseUrl}/{Constants.AgentVersionFileNameV2}";
 
                 using (var handler = new HttpClientHandler())
                 using (var client = new HttpClient(handler) { Timeout = TimeSpan.FromMilliseconds(VersionCheckTimeoutMs) })
@@ -331,13 +333,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
 
                     if (string.IsNullOrWhiteSpace(version))
                     {
-                        log("Self-update: version.json has no 'version' field");
+                        log("Self-update: version-v2.json has no 'version' field");
                         return (null, null);
                     }
 
                     var sha256 = obj["sha256"]?.ToString();
                     if (!string.IsNullOrWhiteSpace(sha256))
-                        log($"Self-update: version.json has SHA-256 hash for integrity verification");
+                        log($"Self-update: version-v2.json has SHA-256 hash for integrity verification");
 
                     return (version.Trim(), sha256?.Trim());
                 }
@@ -349,7 +351,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
             }
             catch (HttpRequestException ex) when (ex.Message.Contains("404"))
             {
-                log("Self-update: version.json not found (404) — skipping update");
+                log("Self-update: version-v2.json not found (404) — skipping update");
                 return (null, null);
             }
             catch (Exception ex)
@@ -447,7 +449,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
         {
             try
             {
-                var zipUrl = $"{Constants.AgentBlobBaseUrl}/{Constants.AgentZipFileName}";
+                var zipUrl = $"{Constants.AgentBlobBaseUrl}/{Constants.AgentZipFileNameV2}";
 
                 // Clean up any previous download
                 if (File.Exists(zipPath))
@@ -664,7 +666,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
 
         /// <summary>
         /// Writes a small JSON marker so the next agent startup can emit an agent_version_check event
-        /// with outcome=skipped (or check_failed if the version.json fetch itself failed). Only called
+        /// with outcome=skipped (or check_failed if the version-v2.json fetch itself failed). Only called
         /// on the startup trigger path (runtime-triggered failures are logged normally because the full
         /// logger is already up). Best-effort — never throws.
         /// </summary>

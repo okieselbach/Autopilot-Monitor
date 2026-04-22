@@ -82,14 +82,26 @@ namespace AutopilotMonitor.Shared
         public const string AgentBlobBaseUrl = "https://autopilotmonitor.blob.core.windows.net/agent";
 
         /// <summary>
-        /// Version manifest filename in blob storage (JSON: { "version": "1.0.350" })
+        /// Version manifest filename in blob storage (JSON: { "version": "1.0.350" }) — Legacy V1 agent only.
         /// </summary>
         public const string AgentVersionFileName = "version.json";
 
         /// <summary>
-        /// Agent ZIP filename in blob storage
+        /// Agent ZIP filename in blob storage — Legacy V1 agent only.
         /// </summary>
         public const string AgentZipFileName = "AutopilotMonitor-Agent.zip";
+
+        /// <summary>
+        /// V2 version manifest filename — separate release line from V1 to prevent
+        /// the V2 agent from being downgrade-blocked against V1 versions.
+        /// Matches what the V2 bootstrapper downloads (Install-AutopilotMonitor-v2.ps1).
+        /// </summary>
+        public const string AgentVersionFileNameV2 = "version-v2.json";
+
+        /// <summary>
+        /// V2 agent ZIP filename — paired with <see cref="AgentVersionFileNameV2"/>.
+        /// </summary>
+        public const string AgentZipFileNameV2 = "AutopilotMonitor-Agent-V2.zip";
 
         /// <summary>
         /// Staging directory for self-update extraction
