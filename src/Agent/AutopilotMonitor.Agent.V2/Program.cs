@@ -58,8 +58,8 @@ namespace AutopilotMonitor.Agent.V2
         private const string DefaultStateDirectory = @"%ProgramData%\AutopilotMonitor";
         private const string DefaultLogDirectory = @"%ProgramData%\AutopilotMonitor\Logs";
         private const string DefaultAgentSubdirectory = "Agent";
-        private const string DefaultV2StateSubdirectory = "V2";
-        private const string DefaultTransportSubdirectory = "V2Transport";
+        private const string DefaultStateSubdirectory = "State";
+        private const string DefaultSpoolSubdirectory = "Spool";
         private const string CachedRemoteConfigPath = @"%ProgramData%\AutopilotMonitor\Config\remote-config.json";
 
         public static int Main(string[] args)
@@ -176,8 +176,8 @@ namespace AutopilotMonitor.Agent.V2
             string logDirectory,
             bool consoleMode)
         {
-            var stateSubdir = Path.Combine(dataDirectory, DefaultV2StateSubdirectory);
-            var transportDir = Path.Combine(dataDirectory, DefaultTransportSubdirectory);
+            var stateSubdir = Path.Combine(dataDirectory, DefaultStateSubdirectory);
+            var transportDir = Path.Combine(dataDirectory, DefaultSpoolSubdirectory);
 
             // Previous-exit classification (for the agent_started event + observability).
             var previousExit = DetectPreviousExit(dataDirectory, logDirectory);
